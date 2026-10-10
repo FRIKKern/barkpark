@@ -201,11 +201,12 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     |> Enum.uniq_by(& &1.raw)
   end
 
-  # The «kilde» stamp: "Kilde" (one ref) / "Kilder" (several), then each ref.
+  # The «kilde» stamp: "Source" (one ref) / "Sources" (several), then each ref,
+  # in the render's language (nb: Kilde / Kilder — task-c5c0f4fa42848256).
   defp kilde_html([]), do: ""
 
   defp kilde_html(refs) do
-    word = if length(refs) > 1, do: "Kilder", else: "Kilde"
+    word = if length(refs) > 1, do: Chrome.t("Sources"), else: Chrome.t("Source")
 
     spans =
       Enum.map_join(refs, "", fn r ->
@@ -1462,7 +1463,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   defp kilde_email_html([], _sk), do: ""
 
   defp kilde_email_html(refs, sk) do
-    word = if length(refs) > 1, do: "Kilder", else: "Kilde"
+    word = if length(refs) > 1, do: Chrome.t("Sources"), else: Chrome.t("Source")
 
     labels =
       Enum.map_join(refs, " · ", fn r ->

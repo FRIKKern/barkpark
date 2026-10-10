@@ -806,6 +806,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "paper-links",
       "roadmap",
       "route",
+      "stat",
       "status-legend",
       "task-board",
       "task-detail",

@@ -114,9 +114,9 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     singular = DataViz.stat_email_html(item)
     plural = DataViz.stats_email_html(block)
 
-    assert singular =~ "Kilde: paper:denom-fixture"
+    assert singular =~ "Source: paper:denom-fixture"
     assert singular =~ "Completed blocks."
-    assert length(String.split(plural, "Kilde: paper:denom-fixture")) == 2
+    assert length(String.split(plural, "Source: paper:denom-fixture")) == 2
     assert :erlang.term_to_binary({item, block}) == before
   end
 
@@ -134,7 +134,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
         ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1">71 <span style="font-size:12px;font-weight:400;color:#55635e">blocks</span></div>| <>
         ~s|<div style="font-size:12px;color:#55635e;margin-top:2px">Completed</div>| <>
         ~s|<div style="font-size:12px;color:#15211d;margin-top:4px">Completed blocks.</div>| <>
-        ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;margin-top:8px">Kilde: paper:denom-fixture</div></div>|
+        ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#55635e;margin-top:8px">Source: paper:denom-fixture</div></div>|
 
     assert DataViz.stat_email_html(block) == expected
     plural = DataViz.stats_email_html(%{"items" => [block]})
@@ -846,7 +846,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
 
     assert html =~ ~s|<span class="bp-stat__unit">USD</span>|
     assert html =~ ~s|class="bp-stat__body"|
-    assert html =~ ~s|<span class="bp-kilde__word">Kilde</span>|
+    assert html =~ ~s|<span class="bp-kilde__word">Source</span>|
     assert html =~ "commit:591fdcd"
 
     bare = DataViz.stat_html(%{"type" => "stat", "value" => "42"})
@@ -874,7 +874,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
 
     # one footer, cells never stamp their own
     assert 1 == html |> String.split(~s|class="bp-kilde"|) |> length() |> Kernel.-(1)
-    assert html =~ ~s|<span class="bp-kilde__word">Kilder</span>|
+    assert html =~ ~s|<span class="bp-kilde__word">Sources</span>|
     assert html =~ "paper:scaffy-benchmark"
     assert html =~ "commit:591fdcd"
     # default deduped: two default-backed cells → one ref
@@ -906,7 +906,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     assert html =~ ~s|<span class="bp-duel__delta">−30 %</span>|
     assert html =~ ~s|<td class="bp-duel__val bp-duel__val--a">1 478</td>|
     assert html =~ ~s|<span class="bp-duel__unit">tok</span>|
-    assert html =~ ~s|<span class="bp-kilde__word">Kilde</span>|
+    assert html =~ ~s|<span class="bp-kilde__word">Source</span>|
     assert html =~ "commit:591fdcd"
   end
 
@@ -1001,7 +1001,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     # nodes in authored order
     assert :binary.match(html, "jan–sep 2025") < :binary.match(html, "i dag")
     # kilde: default (datum node 1) + url ref (datum node 3); narrative node 2 owes nothing
-    assert html =~ ~s|<span class="bp-kilde__word">Kilder</span>|
+    assert html =~ ~s|<span class="bp-kilde__word">Sources</span>|
     assert html =~ "paper:scaffy-benchmark"
     assert html =~ ~s|<a href="https://jarl.no/prosjekter/scaffy">jarl.no/prosjekter/scaffy</a>|
   end
@@ -1062,5 +1062,31 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     %{"kind" => "_raw", "html" => email} = Compose.compose_block(b, :email)
     refute email =~ ~s(class="bp-)
     assert email =~ "border-top"
+  end
+
+  # task-c5c0f4fa42848256: the source stamp printed Norwegian in every language.
+  # English says Source/Sources; an nb-NO render says Kilde/Kilder, in the HTML
+  # and the email leg alike.
+  test "the source stamp follows the render's language" do
+    one = %{"type" => "stat", "value" => "1", "source" => "commit:591fdcd53"}
+    two = %{"type" => "stats", "items" => [one, %{one | "source" => "paper:denom-fixture"}]}
+    nb = %{style: :article, locale: "nb-NO"}
+
+    en_one = Barkpark.PortableDoc.Render.render_block(one, %{style: :article})
+    assert en_one =~ ~s|<span class="bp-kilde__word">Source</span>|
+    refute en_one =~ "Kilde"
+
+    assert Barkpark.PortableDoc.Render.render_block(two, %{style: :article}) =~
+             ~s|<span class="bp-kilde__word">Sources</span>|
+
+    assert Barkpark.PortableDoc.Render.render_block(one, nb) =~
+             ~s|<span class="bp-kilde__word">Kilde</span>|
+
+    assert Barkpark.PortableDoc.Render.render_block(two, nb) =~
+             ~s|<span class="bp-kilde__word">Kilder</span>|
+
+    email = Barkpark.PortableDoc.Render.render_block(one, %{style: :email, locale: "nb-NO"})
+    assert email =~ "Kilde: commit:591fdcd"
+    refute Barkpark.PortableDoc.Render.render_block(one, %{style: :email}) =~ "Kilde"
   end
 end
