@@ -59,6 +59,16 @@
         "default": "./dist/portable-doc.cjs"
       }
     },
+    "./field-blocks": {
+      "import": {
+        "types": "./dist/field-blocks.d.mts",
+        "default": "./dist/field-blocks.mjs"
+      },
+      "require": {
+        "types": "./dist/field-blocks.d.ts",
+        "default": "./dist/field-blocks.cjs"
+      }
+    },
     "./paper-surface.css": "./dist/paper-surface.css",
     "./package.json": "./package.json"
   },

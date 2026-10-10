@@ -73,6 +73,9 @@ export default defineConfig({
     client: 'src/client.ts',
     'portable-text': 'src/portable-text.ts',
     'portable-doc': 'src/portable-doc.ts',
+    // The opt-in schema field block emitters (task-7375ba22758155fa): their own
+    // entry so the core renderer chunks never carry them.
+    'field-blocks': 'src/field-blocks.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,

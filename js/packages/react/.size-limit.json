@@ -39,5 +39,11 @@
   "path": "dist/portable-doc.mjs",
   "limit": "22.58 KB",
   "gzip": true
+ },
+ {
+  "name": "Field blocks subpath — 2026-10-10 (task-7375ba22758155fa): the OPT-IN schema field block emitters (@barkpark/react/field-blocks), passed via <PortableDoc blocks={fieldBlocks}>; 1593 B, 107 B headroom; the core entries above do not carry them and their limits are unchanged",
+  "path": "dist/field-blocks.mjs",
+  "limit": "1.7 KB",
+  "gzip": true
  }
 ]

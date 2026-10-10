@@ -99,39 +99,64 @@ export const PROSE_GOLDEN: Record<string, string> = {
  * state, NOT reading-flow body prose, so `toPlainText` deliberately omits them.
  */
 export const TEXTLESS_SKIP: Record<string, string> = {
-  'pre-gate-badge': 'reader-synthesised provenance chrome (#17199) — minted by PreGateRegister.annotate/3, never authored and never stored, so its one-line label is surface furniture rather than reading-flow prose (same textless family as byline/eyebrow chrome)',
+  // ── schema field blocks (task-7375ba22758155fa) — a labelled datum row of a
+  // document's structured field, not reading-flow prose ─────────────────────
+  'field-string':
+    'schema field datum — a labelled value row of a structured field, not reading-flow prose',
+  'field-slug': 'schema field datum — a URL slug value row, not prose',
+  'field-text':
+    'schema field datum — a labelled value row of a structured field, not reading-flow prose',
+  'field-boolean': 'schema field datum — a Yes/No value row, chrome not prose',
+  'field-select': 'schema field datum — the chosen option of a select, not prose',
+  'field-datetime': 'schema field datum — a timestamp value row, not prose',
+  'field-number': 'schema field datum — a number + unit value row, not prose',
+  'field-color': 'schema field datum — a colour swatch + hex value, not prose',
+  'field-reference': 'schema field datum — a referenced document id/title, not prose',
+  'field-image': 'schema field datum — an image preview, no text',
+  composite: 'schema field datum — sub-field name/value rows of a structured object, not prose',
+  arrayOf: 'schema field datum — the list items of a structured array field, not prose',
+  codelist: 'schema field datum — a code-list code or its label, not prose',
+  localizedText: 'schema field datum — per-language value rows of a localized field, not prose',
+  'pre-gate-badge':
+    'reader-synthesised provenance chrome (#17199) — minted by PreGateRegister.annotate/3, never authored and never stored, so its one-line label is surface furniture rather than reading-flow prose (same textless family as byline/eyebrow chrome)',
   // scaffy:add-block-type CodeTabs MARK:plaintext-skip-code-tabs
-  'code-tabs': 'per-language code snippets behind a tab switcher — chrome/UI, no reading-flow prose (same textless family as code/terminal)',
+  'code-tabs':
+    'per-language code snippets behind a tab switcher — chrome/UI, no reading-flow prose (same textless family as code/terminal)',
   // scaffy:add-block-type ApiEndpoint MARK:plaintext-skip-api-endpoint
-  'api-endpoint': 'structured endpoint card — method/path/params table, no reading-flow prose (same textless family as table/sheet)',
+  'api-endpoint':
+    'structured endpoint card — method/path/params table, no reading-flow prose (same textless family as table/sheet)',
   // scaffy:add-block-type Video MARK:plaintext-skip-video
-  'video': 'media embed — a native <video> file, no reading-flow prose (same textless family as image/asciicast)',
+  video:
+    'media embed — a native <video> file, no reading-flow prose (same textless family as image/asciicast)',
   // scaffy:add-block-type CriteriaProgress MARK:plaintext-skip-criteria-progress
-  'criteria-progress': 'attrs-derived met/total rollup (labels + numeric fractions) — no reading-flow prose, same textless family as bar-chart/chart/heatmap',
+  'criteria-progress':
+    'attrs-derived met/total rollup (labels + numeric fractions) — no reading-flow prose, same textless family as bar-chart/chart/heatmap',
   // scaffy:add-block-type BarChart MARK:plaintext-skip-bar-chart
-  'bar-chart': 'attrs-derived categorical counts (labels + numeric values) — no reading-flow prose, same textless family as chart/heatmap',
+  'bar-chart':
+    'attrs-derived categorical counts (labels + numeric values) — no reading-flow prose, same textless family as chart/heatmap',
   // scaffy:add-block-type Expandable MARK:plaintext-skip-expandable
   // (expandable moved to PROSE_GOLDEN — jarl-dogfood silent-drop sweep: its
   // summary + nested blocks ARE reading-flow prose; the marker stays for scaffy.)
   // scaffy:add-block-type Toc MARK:plaintext-skip-toc
-  'toc': 'navigation apparatus — its items are anchors DUPLICATING heading text already extracted from the headings themselves; including it would double every heading in excerpts/search',
+  toc: 'navigation apparatus — its items are anchors DUPLICATING heading text already extracted from the headings themselves; including it would double every heading in excerpts/search',
   // ── structural / interactive ──────────────────────────────────────────────
   divider: 'structural rule — a decorative separator, carries no text',
-  action:
-    'interactive CTA control — its `label` is button chrome, not reading-flow prose',
+  action: 'interactive CTA control — its `label` is button chrome, not reading-flow prose',
   // ── media ─────────────────────────────────────────────────────────────────
   image: 'media embed — `alt` is accessibility metadata, not body prose',
   asciicast: 'media embed (terminal recording) — `caption` is a media label',
   diagram: 'media/diagram (mermaid) — `source` is diagram DSL, `caption` a viz label',
   // ── data-viz ────────────────────────────────────────────────────────────────
   chart: 'data-viz — numeric series + axis labels; `caption` is a viz label',
-  route: 'data-viz sport track — the polyline is coordinate data, sport/distance/caption are viz chrome, same textless family as chart/heatmap',
+  route:
+    'data-viz sport track — the polyline is coordinate data, sport/distance/caption are viz chrome, same textless family as chart/heatmap',
   heatmap: 'data-viz — a numeric cell matrix, no prose',
   stat: 'data-viz metric — `label`/`value` are viz chrome, not prose',
   'stat-grid': 'data-viz metric grid — label/value chrome',
   stats: 'data-viz metric grid (alias of stat-grid) — label/value chrome',
   duel: 'data-viz two-arm comparison (jarl figure family) — legend/value/delta chrome, not prose',
-  lineage: 'data-viz dated nodes (jarl figure family) — overline/value chrome; node bodies are figure captions, not reading flow',
+  lineage:
+    'data-viz dated nodes (jarl figure family) — overline/value chrome; node bodies are figure captions, not reading flow',
   'status-legend': 'data-viz legend — generated glyph/name/meaning chrome, no content',
   pipeline: 'data-viz flow diagram — node titles are diagram labels',
   stage: 'data-viz flow node — kind/title/detail are diagram labels',
@@ -144,7 +169,8 @@ export const TEXTLESS_SKIP: Record<string, string> = {
   'chat-todo': 'chat-transcript todo widget — live agent-todo state',
   'chat-tool-diff': 'chat-transcript tool-call widget — a code diff payload, not prose',
   // ── interactive chat cards (D35) — read-only VISUAL of an envelope-driven ask ─
-  'chat-approval': 'interactive chat card — tool-name/summary + status badge, an approval-ask control',
+  'chat-approval':
+    'interactive chat card — tool-name/summary + status badge, an approval-ask control',
   'chat-question': 'interactive chat card — AskUserQuestion prompts + option chips, a form control',
   'chat-plan': 'interactive chat card — plan title/preview + status badge, a plan-approval control',
   // ── data-viz meter ──────────────────────────────────────────────────────────
