@@ -11,7 +11,8 @@ defmodule Barkpark.Media.SharedOnlySentinelScopeTest do
   Its two documented mirrors were NOT:
 
     * `Barkpark.Plugins.Media.Assets.scope_asset_workspace/3` — reached from
-      `Media.asset_docs_for_files/3` at `v1/media_controller.ex:34`,
+      `Media.asset_docs_for_files/3` (via `Media.resolve_asset_docs/3` in
+      `V1.MediaController.search/2`),
       `v1/media_collections_controller.ex:57,123` and
       `federated_search_controller.ex`'s `surface_payload/3` media clause, each
       passing `scope_opts(conn)` verbatim.
