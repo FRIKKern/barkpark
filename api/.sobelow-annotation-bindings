@@ -126,7 +126,6 @@ lib/barkpark/studio_chat/provider/claude.ex	read_stderr_tail
 lib/barkpark/studio_chat/provider/claude.ex	rewrite_mcp_config
 lib/barkpark/studio_chat/provider/claude.ex	write_mcp_config
 lib/barkpark/studio_chat/runtime.ex	registered_provider_ready
-lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
 lib/barkpark/sync/pusher.ex	reason_atom
 lib/barkpark/tasks/queue_gate.ex	fetch
