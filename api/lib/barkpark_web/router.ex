@@ -2129,6 +2129,38 @@ defmodule BarkparkWeb.Router do
     end
   end
 
+  # ── Bare workspace URL → its Studio (task-5e0c5c2533936e77) ─────────────
+  # `/w/:workspace_slug` answered a plain 404. It now runs the SAME admission
+  # as every Studio URL in that workspace, `:scoped_browser` minus
+  # `ResolveProject` (there is no project segment to resolve): a member gets a
+  # 302 to the workspace's default project/dataset Studio; a signed-in
+  # non-member and an unknown slug get ResolveWorkspace's one refusal page,
+  # byte-identical for both; a signed-out browser goes to sign-in with this
+  # URL as return_to. Kept beside its scope, below every line-keyed Sobelow
+  # baseline row, and a mirror of :scoped_browser — change both together.
+  pipeline :workspace_browser do
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
+
+    plug(BarkparkWeb.Plugs.BrowserCsp)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: :studio_demo)
+  end
+
+  scope "/w/:workspace_slug", BarkparkWeb do
+    pipe_through(:workspace_browser)
+
+    get("/", StudioRedirectController, :workspace)
+  end
+
   # ── Old scoped Studio form → /d/ canonical 302 ───────────────────────────
   # Back-compat for the pre-/d/ canonical `/w/:ws/p/:proj/studio/:dataset`.
   # Pure URL rewrite (every segment is already in the URL — no session
