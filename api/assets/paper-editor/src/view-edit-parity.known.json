@@ -84,20 +84,6 @@
    "text": "✓",
    "axis": "lineHeight",
    "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "terminal",
-   "text": "Build pipeline output",
-   "axis": "textRendering",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "terminal",
-   "text": "Press ctrl-c to stop the run",
-   "axis": "textRendering",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
   }
  ]
 }
