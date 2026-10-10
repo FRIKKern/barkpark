@@ -47,17 +47,30 @@ defmodule BarkparkWeb.EndpointDrainTest do
     end
   end
 
-  defp start_bandit(port, shutdown_timeout, sleep_ms) do
-    Supervisor.start_link(
-      [
-        {Bandit,
-         plug: {SlowPlug, sleep_ms: sleep_ms},
-         port: port,
-         startup_log: false,
-         thousand_island_options: [shutdown_timeout: shutdown_timeout]}
-      ],
-      strategy: :one_for_one
-    )
+  # `port: 0` asks the OS for any free ephemeral port instead of a hand-picked
+  # one: a fixed range collided with another test's own Bandit instance in CI
+  # (`:eacces` starting the listener — measured on a real run, not guessed),
+  # and a free-port race is exactly what port 0 exists to avoid. The actual
+  # bound port comes back from ThousandIsland.listener_info/1 on the Bandit
+  # child Supervisor.start_link/2 returns among its children.
+  defp start_bandit(shutdown_timeout, sleep_ms) do
+    {:ok, sup} =
+      Supervisor.start_link(
+        [
+          {Bandit,
+           plug: {SlowPlug, sleep_ms: sleep_ms},
+           port: 0,
+           startup_log: false,
+           thousand_island_options: [shutdown_timeout: shutdown_timeout]}
+        ],
+        strategy: :one_for_one
+      )
+
+    # Bandit's own child_spec id is `{Bandit, make_ref()}`, not the bare atom
+    # — and this supervisor starts exactly one child, so take it by position.
+    [{_id, bandit_pid, _type, _modules}] = Supervisor.which_children(sup)
+    {:ok, {_address, port}} = ThousandIsland.listener_info(bandit_pid)
+    {:ok, sup, port}
   end
 
   # curl, not :httpc/Req: a bare GenServer client here would need its own
@@ -78,8 +91,7 @@ defmodule BarkparkWeb.EndpointDrainTest do
   end
 
   test "a request in flight survives a graceful stop within the drain bound" do
-    port = (14_900 + :erlang.unique_integer([:positive, :monotonic])) |> rem(500)
-    {:ok, sup} = start_bandit(port, 5_000, 1_500)
+    {:ok, sup, port} = start_bandit(5_000, 1_500)
     on_exit(fn -> if Process.alive?(sup), do: Supervisor.stop(sup) end)
 
     test_pid = self()
@@ -102,11 +114,10 @@ defmodule BarkparkWeb.EndpointDrainTest do
   end
 
   test "a request that outlives the drain bound is cut, not served stale" do
-    port = (15_400 + :erlang.unique_integer([:positive, :monotonic])) |> rem(500)
     # The bound (800ms) is deliberately SHORTER than the plug's own sleep
     # (3s): the stop must not wait past its own bound no matter how long the
     # handler still has to run.
-    {:ok, sup} = start_bandit(port, 800, 3_000)
+    {:ok, sup, port} = start_bandit(800, 3_000)
     on_exit(fn -> if Process.alive?(sup), do: Supervisor.stop(sup) end)
 
     test_pid = self()
