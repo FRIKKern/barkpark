@@ -231,7 +231,14 @@ defmodule Barkpark.Structure do
     # never-hide invariant demands — a precompute type (the twin's
     # catalogueRow / frontpageResolved) is written by a worker, never edited,
     # and only confuses an editor. The documents stay readable everywhere else.
-    hidden_types = hidden_type_set(schemas)
+    # DISPLAY only: the `gating: :none` resolution tree keeps the type, so its
+    # list and `/studio/<type>/<id>` still open from a direct URL (the #1851
+    # never-unreachable guarantee; task-9df0043eb4ecf3cc).
+    hidden_types =
+      if Keyword.get(opts, :gating, :enabled) == :none,
+        do: MapSet.new(),
+        else: hidden_type_set(schemas)
+
     curated_types = MapSet.union(curated_types, hidden_types)
 
     # `build_generic_types_group/3` sits right before Settings: it and
