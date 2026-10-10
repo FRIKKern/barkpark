@@ -1561,9 +1561,10 @@
 
       this._inspectorBody.innerHTML =
         preview +
-        '<h3 class="bp-ae-inspector-title">' +
+        // h2: the page's h1 is the library; nothing sits between (axe heading-order).
+        '<h2 class="bp-ae-inspector-title">' +
         esc(doc.title || fi.originalName || doc._id) +
-        "</h3>" +
+        "</h2>" +
         '<div class="bp-ae-inspector-status">' +
         this._procBadge(payload.bp_processing_status) +
         this._statusBadge(this._t(doc.visibility || payload.bp_visibility || "public"), "visibility") +
@@ -1829,9 +1830,9 @@
         '<div class="bp-ae-collection-icon">' +
         (col.kind === "virtual" ? "⚡" : "📁") +
         "</div>" +
-        '<h3 class="bp-ae-inspector-title">' +
+        '<h2 class="bp-ae-inspector-title">' +
         esc(col.title || col.id) +
-        "</h3>" +
+        "</h2>" +
         '<div class="bp-ae-inspector-status">' +
         this._statusBadge(kindLabel, "visibility") +
         this._statusBadge(countLabel, "muted") +

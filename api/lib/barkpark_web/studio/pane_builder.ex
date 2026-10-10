@@ -502,7 +502,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             _ -> nil
           end
 
-        desk_groups = schema_desk_groups(schema)
+        # A content plugin's desk filters read in the Studio language
+        # (PluginSchemaCopy); names and filters are data and stay.
+        desk_groups =
+          schema_desk_groups(schema && BarkparkWeb.Studio.PluginSchemaCopy.localize(schema))
+
         active_desk = Keyword.get(opts, :desk)
         active_group = find_desk_group(desk_groups, active_desk)
 

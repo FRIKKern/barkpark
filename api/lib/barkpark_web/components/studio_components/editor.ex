@@ -826,7 +826,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     phx-value-group={grp["name"]}
                     role="tab"
                     aria-selected={to_string(@nav_group == grp["name"])}
-                    aria-controls="editor-form"
+                    aria-controls="editor-tabpanel"
                     tabindex={if tab_stop_group(@editor_schema, @nav_group) == grp["name"], do: "0", else: "-1"}
                     title={grp["title"]}
                     aria-label={grp["title"]}
@@ -844,14 +844,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   — a draft with no keystroke, and before Forms.coerce_params a
                   corrupt one. Autosave already persists each change within its
                   500 ms debounce, so recovery has nothing to restore. --%>
-            <form
+            <%!-- The group tabs' panel is this wrapper, not the form: ARIA
+                  does not allow role="tabpanel" on a <form> (axe
+                  aria-allowed-role). --%>
+            <div
               :if={@nav_view == nil}
+              id="editor-tabpanel"
+              role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
+              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
+            >
+            <form
               phx-submit="save"
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
-              role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
-              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
             >
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
@@ -900,6 +906,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 ><%= ngettext("%{count} warning — publishing is still allowed", "%{count} warnings — publishing is still allowed", warning_count) %></span>
               </div>
             </form>
+            </div>
           <% end %>
         </div>
         <BarkparkWeb.Components.OnixPreview.content_preview
