@@ -3,7 +3,7 @@
 // Run: node src/canvas/__inline_object_vocabulary.test.mjs
 import assert from "node:assert/strict";
 import { parseVocabulary, allowedInlineTypes, docVocabularyViolation, inlineObjectFor, slashItemsForVocabulary } from "./vocabulary.js";
-import { fieldRequired, controlKind, refusalField } from "./inline-object.js";
+import { fieldRequired, controlKind, refusalField, dialogPosition } from "./inline-object.js";
 
 const vocab = parseVocabulary({
   styles: ["normal"],
@@ -50,5 +50,13 @@ const fields = [{ name: "text" }, { name: "tone" }];
 assert.equal(refusalField("paragraph/content/1/tone: must be one of positive", fields), "tone");
 assert.equal(refusalField("inline badge is not in this field's vocabulary", fields), null);
 assert.equal(refusalField("paragraph/content/1/size: Required", fields), null);
+
+// The dialog flips above an anchor near the bottom and stays inside the viewport.
+const VIEW = { width: 1200, height: 900 };
+const SIZE = { width: 300, height: 220 };
+assert.deepEqual(dialogPosition({ top: 100, bottom: 120, left: 40 }, SIZE, VIEW), { top: 126, left: 40 }, "below when it fits");
+assert.deepEqual(dialogPosition({ top: 830, bottom: 850, left: 40 }, SIZE, VIEW), { top: 604, left: 40 }, "flips above near the bottom");
+assert.deepEqual(dialogPosition({ top: 100, bottom: 850, left: 1100 }, SIZE, VIEW), { top: 672, left: 892 }, "clamped when neither side fits, and from the right edge");
+assert.deepEqual(dialogPosition({ top: 10, bottom: 20, left: -50 }, SIZE, VIEW), { top: 26, left: 8 }, "left margin");
 
 console.log("PASS inline_object_vocabulary: parse, offer, veto, controls and refusal paths");
