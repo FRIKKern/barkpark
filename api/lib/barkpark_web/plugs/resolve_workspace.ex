@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         |> refuse_if_archived()
 
       _ ->
-        halt_envelope(conn, unknown_workspace(slug))
+        refuse(conn, opts, unknown_workspace(slug))
     end
   end
 
@@ -227,10 +227,10 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       # An API token with no seat here: name the workspace and the remedy
       # (task-7d4d405e0ee4bcbf). Same 403 / `forbidden` / `not_a_member`.
       decision == {:error, :not_a_member} and match?(%ApiToken{}, token) ->
-        halt_envelope(conn, {:error, {:token_not_a_member, workspace.slug}})
+        refuse(conn, opts, {:error, {:token_not_a_member, workspace.slug}})
 
       true ->
-        halt_envelope(conn, {:error, refusal_envelope(decision)})
+        refuse(conn, opts, {:error, refusal_envelope(decision)})
     end
   end
 
@@ -334,6 +334,110 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       %{id: id} -> id == workspace.id
       _ -> false
     end
+  end
+
+  # task-a0fcffbe8799abe5 — dispatch EVERY refusal this plug produces
+  # (unknown workspace, not-a-member, missing-capability, a token with no
+  # seat) through ONE door, so a signed-in browser visiting a Studio URL
+  # never sees the raw `{"error":{...}}` envelope.
+  #
+  # ONLY on the Studio browser pipelines (keyed on `allow_anonymous_default:
+  # :studio_demo` — the same flag `:scoped_browser` and `:shared_studio_browser`
+  # already pass; the paper reader's `:shared_paper_browser` passes `true`
+  # instead and is untouched), ONLY for an HTML request (`:accepts, ["html"]`
+  # runs before this plug on both of those pipelines), and ONLY for a
+  # SIGNED-IN user — an anonymous visitor keeps its existing behaviour
+  # (the Default-workspace demo allowance, or the :studio_demo redirect to
+  # `/login`, or the bare envelope on a non-Default anonymous request; none
+  # of those are the bug this task fixes).
+  #
+  # EVERY reason renders the SAME generic page (NO EXISTENCE LEAK, owner
+  # ruling): a workspace that does not exist and one the caller may not
+  # enter must be indistinguishable to this caller, so the page never names
+  # the workspace or the refusal reason — only the API envelope still
+  # carries that detail, for a caller who already knows to parse it.
+  defp refuse(conn, opts, reason) do
+    if studio_html_refusal?(conn, opts),
+      do: halt_studio_refusal_page(conn),
+      else: halt_envelope(conn, reason)
+  end
+
+  defp studio_html_refusal?(conn, opts) do
+    Keyword.get(opts, :allow_anonymous_default) == :studio_demo and
+      Phoenix.Controller.get_format(conn) == "html" and
+      not is_nil(conn.assigns[:current_user])
+  end
+
+  defp halt_studio_refusal_page(conn) do
+    conn
+    |> put_status(403)
+    |> Phoenix.Controller.html(studio_refusal_page())
+    |> halt()
+  end
+
+  # Self-contained, no layout, no external assets — the SAME visual
+  # convention `BarkparkWeb.ErrorHTML` uses for a plug-level page with
+  # nothing rendered yet to lay it out inside. Every interpolated value here
+  # is a static string; nothing from the request (workspace slug, refusal
+  # reason) ever reaches this page, which is the point. A PLAIN string, not
+  # `Phoenix.HTML.raw/1` — that marker is for EEx template interpolation
+  # context; `Phoenix.Controller.html/2` takes a plain binary body directly
+  # and raises on the `{:safe, _}` tuple `raw/1` would have produced here.
+  defp studio_refusal_page do
+    """
+    <!DOCTYPE html>
+    <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Studio · Not a member</title>
+        <style>
+          :root {
+            --err-bg: #0f1115;
+            --err-fg: #e6e6e6;
+            --err-muted: #9aa0a6;
+            --err-accent: #5b8def;
+          }
+          body {
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            background: var(--err-bg);
+            color: var(--err-fg);
+            display: flex;
+            min-height: 100vh;
+            margin: 0;
+            align-items: center;
+            justify-content: center;
+          }
+          main { text-align: center; padding: 2rem; max-width: 28rem; }
+          h1 { font-size: 1.75rem; margin: 0 0 0.75rem; font-weight: 700; letter-spacing: -0.01em; }
+          p { color: var(--err-muted); margin: 0 0 1.5rem; line-height: 1.5; }
+          .actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+          a.btn {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            text-decoration: none;
+            font-weight: 600;
+          }
+          a.btn-primary { background: var(--err-accent); color: #fff; }
+          a.btn-secondary { background: transparent; color: var(--err-fg); border: 1px solid var(--err-muted); }
+        </style>
+      </head>
+      <body>
+        <main>
+          <h1>You're not a member of this workspace</h1>
+          <p>
+            You're signed in, but this account doesn't have access here.
+            Go to one of your own workspaces, or sign in as someone else.
+          </p>
+          <div class="actions">
+            <a class="btn btn-primary" href="/">Go to your workspace</a>
+            <a class="btn btn-secondary" href="/login">Sign in as someone else</a>
+          </div>
+        </main>
+      </body>
+    </html>
+    """
   end
 
   defp halt_envelope(conn, reason) do
