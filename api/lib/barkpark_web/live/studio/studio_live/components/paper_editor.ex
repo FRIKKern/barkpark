@@ -636,14 +636,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # The known server tokens read in the Studio language; any other server text
   # is still echoed verbatim. The hooks recognise the translated calm token as
   # transient through the same `:paper_hooks` map (task-e8a5c972b7720591).
-  defp save_status_label("Auto-saved"), do: gettext("✓ Auto-saved")
-  defp save_status_label("Save failed"), do: gettext("Save failed")
-  defp save_status_label("Saved"), do: gettext("Saved")
-  defp save_status_label("Save cancelled"), do: gettext("Save cancelled")
-  defp save_status_label("Read-only"), do: gettext("Read-only")
-  defp save_status_label("Updated by another user"), do: gettext("Updated by another user")
-  defp save_status_label(status) when is_binary(status), do: status
-  defp save_status_label(_), do: ""
+  defp save_status_label(status), do: BarkparkWeb.Studio.SaveStatus.label(status)
 
   # The `+ Add block` menu, grouped by optgroup so the (long) list of creatable
   # portable-doc block types stays scannable. Each value resolves to

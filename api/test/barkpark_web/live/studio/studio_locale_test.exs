@@ -371,6 +371,25 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     end
   end
 
+  # task-42df0e13a6a35ff3: the Classic editor's save region read "Saved" in an
+  # nb-NO workspace; the paper footer already translated the same tokens.
+  test "the nb-NO classic editor's save status is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+
+    html = render_hook(view, "autosave", %{"doc" => %{"title" => "Over My Dead Body"}})
+
+    assert html =~ ~s(class="save-status" role="status" aria-live="polite">Lagret<)
+    refute html =~ ~s(aria-live="polite">Saved<)
+  end
+
+  test "the save status echoes a server text it has no word for" do
+    Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+      assert BarkparkWeb.Studio.SaveStatus.label("Saved") == "Lagret"
+      assert BarkparkWeb.Studio.SaveStatus.label("Halted by plugin X") == "Halted by plugin X"
+      assert BarkparkWeb.Studio.SaveStatus.label(nil) == ""
+    end)
+  end
+
   # task-d4c382b7aa8ad9ef: the document panel beside a paper stayed English in
   # an nb-NO workspace, around a half-translated Studio.
   test "the nb-NO document panel is Norwegian", %{conn: conn, ws: ws, proj: proj} do
