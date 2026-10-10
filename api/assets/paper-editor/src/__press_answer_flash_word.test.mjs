@@ -39,6 +39,7 @@ const bodies = {
   _paDropPending: ["keepFade", method("_paDropPending", "keepFade")],
   _paRelease: ["text", method("_paRelease", "text")],
   _paSettleWord: ["p", method("_paSettleWord", "p")],
+  _paT: ["text, vars", method("_paT", "text, vars")],
   _paSettle: ["p", method("_paSettle", "p")],
   _paTick: ["p", method("_paTick", "p")],
   _paNativeDisclosureOnly: ["target, action", method("_paNativeDisclosureOnly", "target, action")],

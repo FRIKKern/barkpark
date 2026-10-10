@@ -443,7 +443,7 @@ msgstr "Endre"
 msgid "Close"
 msgstr "Lukk"
 
-#: lib/barkpark_web/live/studio/media_live.ex:85
+#: lib/barkpark_web/live/studio/media_live.ex:92
 #: lib/barkpark_web/studio_locale.ex:119
 #, elixir-autogen, elixir-format
 msgid "Media library"
@@ -8354,17 +8354,17 @@ msgstr "Rediger tomt avsnitt"
 msgid "Select hidden divider"
 msgstr "Velg skjult skillelinje"
 
-#: lib/barkpark_web/live/studio/media_live.ex:143
+#: lib/barkpark_web/live/studio/media_live.ex:144
 #, elixir-autogen, elixir-format
 msgid "Admin access required to publish this scope's media."
 msgstr "Du trenger administratortilgang for å publisere mediene i dette området."
 
-#: lib/barkpark_web/live/studio/media_live.ex:162
+#: lib/barkpark_web/live/studio/media_live.ex:163
 #, elixir-autogen, elixir-format
 msgid "Could not publish this scope's media."
 msgstr "Kunne ikke publisere mediene i dette området."
 
-#: lib/barkpark_web/live/studio/media_live.ex:147
+#: lib/barkpark_web/live/studio/media_live.ex:148
 #, elixir-autogen, elixir-format
 msgid "No resolved scope to publish."
 msgstr "Fant ikke noe område å publisere."
@@ -8379,17 +8379,17 @@ msgstr "Offentlig betyr lesbar innenfor delingen i dette området, ikke for hele
 msgid "Public — within this scope's sharing"
 msgstr "Offentlig — innenfor delingen i dette området"
 
-#: lib/barkpark_web/live/studio/media_live.ex:108
+#: lib/barkpark_web/live/studio/media_live.ex:109
 #, elixir-autogen, elixir-format
 msgid "Publish this scope's media"
 msgstr "Publiser mediene i dette området"
 
-#: lib/barkpark_web/live/studio/media_live.ex:97
+#: lib/barkpark_web/live/studio/media_live.ex:98
 #, elixir-autogen, elixir-format
 msgid "Scope %{scope}: %{state}"
 msgstr "Område %{scope}: %{state}"
 
-#: lib/barkpark_web/live/studio/media_live.ex:157
+#: lib/barkpark_web/live/studio/media_live.ex:158
 #, elixir-autogen, elixir-format
 msgid "This scope's media is published — the :media share is live."
 msgstr "Mediene i dette området er publisert — :media-delingen er aktiv."
@@ -11321,3 +11321,58 @@ msgstr "Kilder"
 #, elixir-autogen, elixir-format
 msgid "Asset details"
 msgstr "Fildetaljer"
+
+#: lib/barkpark_web/components/studio_components/nav.ex:902
+#, elixir-autogen, elixir-format
+msgid "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+msgstr "Ingen svar fra serveren etter 8 sekunder. Den kan være treg, eller trykket kom kanskje ikke fram."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:889
+#, elixir-autogen, elixir-format
+msgid "Opened “%{name}”."
+msgstr "Åpnet «%{name}»."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:890
+#, elixir-autogen, elixir-format
+msgid "Opened."
+msgstr "Åpnet."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:893
+#, elixir-autogen, elixir-format
+msgid "Opening “%{name}”…"
+msgstr "Åpner «%{name}» …"
+
+#: lib/barkpark_web/components/studio_components/nav.ex:894
+#, elixir-autogen, elixir-format
+msgid "Opening…"
+msgstr "Åpner …"
+
+#: lib/barkpark_web/components/studio_components/nav.ex:891
+#, elixir-autogen, elixir-format
+msgid "Selected “%{name}”."
+msgstr "Valgt «%{name}»."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:892
+#, elixir-autogen, elixir-format
+msgid "Selected."
+msgstr "Valgt."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:900
+#, elixir-autogen, elixir-format
+msgid "Still working on your last press — that one was not sent."
+msgstr "Jobber fortsatt med forrige trykk — dette ble ikke sendt."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:896
+#, elixir-autogen, elixir-format
+msgid "That press did not reach the server — press it again."
+msgstr "Trykket nådde ikke serveren — trykk på nytt."
+
+#: lib/barkpark_web/components/studio_components/nav.ex:897
+#, elixir-autogen, elixir-format
+msgid "Working on “%{name}”…"
+msgstr "Jobber med «%{name}» …"
+
+#: lib/barkpark_web/components/studio_components/nav.ex:898
+#, elixir-autogen, elixir-format
+msgid "Working…"
+msgstr "Jobber …"

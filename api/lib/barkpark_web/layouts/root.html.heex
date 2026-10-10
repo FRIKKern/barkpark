@@ -5840,6 +5840,16 @@
     // host this, is on `#studio-panes` and StudioLive's desk is the only route
     // that has one.
     Hooks.PressAnswer = {
+      // The answer's words in the Studio's language (task-24a481a493ad60d7): the
+      // bar carries them as data-press-strings, keyed by the English, with
+      // %{name} filled from vars. A bar without the map speaks English.
+      _paT(text, vars) {
+        let map = {};
+        try { map = JSON.parse((this.el && this.el.dataset.pressStrings) || "{}"); } catch (_e) {}
+        let out = typeof map[text] === "string" ? map[text] : text;
+        if (vars) out = out.replace(/%\{(\w+)\}/g, (slot, k) => (k in vars ? String(vars[k]) : slot));
+        return out;
+      },
       // ── THE PRESS ANSWER (spd-w19 / charter D263) ────────────────────────
       //
       // WHY IT IS ITS OWN HOOK, AND WHY THAT IS A CORRECTION. The only press
@@ -6124,9 +6134,9 @@
           return (n.textContent || "").replace(/\s+/g, " ").trim();
         }).join(" | ");
         if (flash && flash !== (p.flash || "")) return flash.length > 80 ? flash.slice(0, 79) + "…" : flash;
-        if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
-        if (this._paCurrentSig(p.root) !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
-        if (this._paPressedChanged(p.pressed, p.root)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (location.href !== p.url) return p.name ? this._paT("Opened “%{name}”.", { name: p.name }) : this._paT("Opened.");
+        if (this._paCurrentSig(p.root) !== p.sig) return p.name ? this._paT("Selected “%{name}”.", { name: p.name }) : this._paT("Selected.");
+        if (this._paPressedChanged(p.pressed, p.root)) return p.name ? this._paT("Selected “%{name}”.", { name: p.name }) : this._paT("Selected.");
         return null;
       },
 
@@ -6249,7 +6259,7 @@
         if (to.href === location.href) { this._paRelease(""); return; }
         // Present tense on purpose: the navigation is IN FLIGHT. "Opened" is
         // reserved for a URL that has already moved.
-        this._paRelease(name ? "Opening “" + name + "”…" : "Opening…");
+        this._paRelease(name ? this._paT("Opening “%{name}”…", { name }) : this._paT("Opening…"));
       },
 
       _paOnPress(ev) {
@@ -6275,7 +6285,7 @@
           // "type":"click" frames on the socket). Say so, and do NOT stamp a
           // second pending or restart the ceiling — the FIRST press is still
           // the one in flight, and its settle owns the region.
-          this._paSay("Still working on your last press — that one was not sent.");
+          this._paSay(this._paT("Still working on your last press — that one was not sent."));
           return;
         }
 
@@ -6318,7 +6328,7 @@
         // Within this same task, so the words are on screen at the next paint —
         // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
         // faster (the root-cause slice is filed separately).
-        this._paSay(p.name ? "Working on “" + p.name + "”…" : "Working…");
+        this._paSay(p.name ? this._paT("Working on “%{name}”…", { name: p.name }) : this._paT("Working…"));
 
         this._paProbe = window.setTimeout(() => {
           this._paProbe = 0;
@@ -6354,7 +6364,7 @@
                 p.sawRef = true;
                 return;
               }
-              this._paRelease("That press did not reach the server — press it again.");
+              this._paRelease(this._paT("That press did not reach the server — press it again."));
             }, this._PA_WITNESS_GRACE);
             return;
           }
@@ -6365,7 +6375,7 @@
             this._paRelease("");
             return;
           }
-          this._paRelease("That press did not reach the server — press it again.");
+          this._paRelease(this._paT("That press did not reach the server — press it again."));
         }, this._PA_PROBE);
 
         this._paPoll = window.setInterval(() => this._paTick(p), this._PA_POLL);
@@ -6377,7 +6387,7 @@
           // purpose: it fires on a slow-but-alive server too, and this hook
           // cannot tell that from a press that never arrived.
           this._paRelease(
-            "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+            this._paT("No answer from the server after 8 seconds. It may be slow, or the press may not have arrived.")
           );
         }, this._PA_CEILING);
       },
@@ -7138,7 +7148,11 @@
       ev.stopImmediatePropagation();
       var region = document.getElementById("bp-press-answer");
       if (!region || !blocked.closest("#studio-panes, .studio-bar")) return;
-      var say = "Still working on your last press — that one was not sent.";
+      // The Studio bar carries the press answer's words in the Studio language
+      // (task-24a481a493ad60d7); English when it has none.
+      var words = {};
+      try { words = JSON.parse(((document.getElementById("studio-bar") || {}).dataset || {}).pressStrings || "{}"); } catch (_e) {}
+      var say = words["Still working on your last press — that one was not sent."] || "Still working on your last press — that one was not sent.";
       if (region.textContent !== say) region.textContent = say;
     }, true);
     // BP-INFLIGHT-GUARD-END
