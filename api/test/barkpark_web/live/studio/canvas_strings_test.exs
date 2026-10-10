@@ -89,10 +89,16 @@ defmodule BarkparkWeb.Studio.CanvasStringsTest do
     assert nb["Number"] == "Tall"
     assert nb["numeric value"] == "tallverdi"
 
+    # task-8e96278fc4ee7097: the canvas paints the reader's markup (a collapsed
+    # callout's tone summary), so it carries the renderer's words as well.
+    assert nb["Warning"] == "Advarsel"
+    assert nb["Yes"] == "Ja"
+
     Gettext.put_locale(BarkparkWeb.Gettext, "en")
     en = Jason.decode!(StudioLocale.component_strings(:paper_canvas))
     assert en["Add a block below"] == "Add a block below"
     assert en["Insert %{block}"] == "Insert %{block}"
+    assert en["Warning"] == "Warning"
   end
 
   test "an nb-NO paper's canvas run host carries the Norwegian strings", %{

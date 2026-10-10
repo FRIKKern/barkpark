@@ -113,7 +113,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
   test "nb-NO: the renderer's own words come out Norwegian, and the same inputs without :locale stay English" do
     fx = decode_locale!(@api_dir, "nb-NO")
 
-    for word <- ~w(Ja Nei UTKAST) ++ ["åpen", "pågår", "Kriterier · 1/2"] do
+    for word <- ~w(Ja Nei UTKAST Advarsel) ++ ["åpen", "pågår", "Kriterier · 1/2"] do
       assert fx["expectedHtml"] =~ word, "nb golden lacks #{inspect(word)}"
     end
 
@@ -123,7 +123,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
         &Barkpark.PortableDoc.Render.render_block(&1, %{style: :article})
       )
 
-    for word <- ~w(Yes No DRAFT) ++ ["open", "Criteria · 1/2"] do
+    for word <- ~w(Yes No DRAFT Warning) ++ ["open", "Criteria · 1/2"] do
       assert english =~ word, "default render lacks #{inspect(word)}"
     end
 
@@ -140,7 +140,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     fx = decode_locale!(@api_dir, "nb-NO")
 
     # Words that are the same in both languages.
-    same = ~w(Papers)
+    same = ~w(Info Papers Total)
 
     untranslated =
       for {en, nb} <- fx["strings"], en == nb, en not in same, do: en

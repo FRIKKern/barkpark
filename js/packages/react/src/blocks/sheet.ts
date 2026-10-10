@@ -10,8 +10,9 @@
 // default-alignment class, URL-cell anchors, and the truncation note.
 
 import { type Block, escapeHtml, safeUrl, isMap } from '../inline'
+import type { RenderCtx } from './chrome'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 const MERGE_AREA_CAP = 10_000
 
@@ -159,7 +160,7 @@ function cellHtml(cell: string): string {
   return escapeHtml(cell)
 }
 
-const sheet: Emit = (b) => {
+const sheet: Emit = (b, ctx) => {
   const snap = isMap(b.snapshot) ? b.snapshot : {}
   const head = Array.isArray(snap.head) ? snap.head.map(toStr) : []
   const body = Array.isArray(snap.rows)
@@ -198,7 +199,7 @@ const sheet: Emit = (b) => {
 
   const note =
     snap.truncated === true
-      ? `<p class="bp-sheet-note">${escapeHtml(`Sheet truncated — showing the first ${body.length} rows`)}</p>`
+      ? `<p class="bp-sheet-note">${escapeHtml(ctx.t('Sheet truncated — showing the first %{n} rows', { n: body.length }))}</p>`
       : ''
 
   return table + note

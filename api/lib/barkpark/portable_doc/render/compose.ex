@@ -13,7 +13,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   `Render.Walk.render_body/3`. Output is byte-identical to the pre-split engine.
   """
 
-  alias Barkpark.PortableDoc.Render.{Figures, Forms, Inline, SectionLayout, Util, Walk}
+  alias Barkpark.PortableDoc.Render.{Chrome, Figures, Forms, Inline, SectionLayout, Util, Walk}
 
   import Inline, only: [compose_inline_children: 1, to_pd_node_from_inline_child: 1]
 
@@ -963,7 +963,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do: field_row(b, field_value_text(b), style)
 
   def compose_block(%{"type" => "field-boolean"} = b, style) do
-    field_row(b, if(Map.get(b, "value") == true, do: "Yes", else: "No"), style)
+    field_row(
+      b,
+      if(Map.get(b, "value") == true, do: Chrome.t("Yes"), else: Chrome.t("No")),
+      style
+    )
   end
 
   def compose_block(%{"type" => "field-select"} = b, style) do
@@ -1060,7 +1064,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     value =
       if src == "" do
-        ~s|<span class="bp-field__none">No image</span>|
+        ~s|<span class="bp-field__none">#{Chrome.t("No image")}</span>|
       else
         alt = b |> Map.get("label", "") |> stringish()
 
@@ -1075,7 +1079,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     value_node =
       if src == "" do
-        %{"kind" => "PdText", "children" => ["No image"]}
+        %{"kind" => "PdText", "children" => [Chrome.t("No image")]}
       else
         %{"kind" => "PdImage", "src" => src, "alt" => stringish(Map.get(b, "label", ""))}
       end
@@ -2302,7 +2306,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     live =
       if Map.get(block, "live") in [true, "true", "live"],
-        do: ~s|<span class="bp-term__live">live</span>|,
+        do: ~s|<span class="bp-term__live">#{Chrome.t("live")}</span>|,
         else: ""
 
     %{
@@ -2821,8 +2825,8 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp composite_scalar(nil), do: "—"
   defp composite_scalar(v) when is_binary(v), do: v
   defp composite_scalar(v) when is_number(v), do: to_string(v)
-  defp composite_scalar(true), do: "Yes"
-  defp composite_scalar(false), do: "No"
+  defp composite_scalar(true), do: Chrome.t("Yes")
+  defp composite_scalar(false), do: Chrome.t("No")
 
   defp composite_scalar(v) when is_list(v) do
     v |> Enum.map_join(", ", &composite_scalar/1)
@@ -3173,7 +3177,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       cards_html: cards_html,
       empty?: cards_html == "",
       layout: layout,
-      title: title || "Explore the work",
+      title: title || Chrome.t("Explore the work"),
       title_source: title_source,
       title_default?: is_nil(title),
       description: description,
@@ -3320,7 +3324,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         else: ""
 
     description = paper_link_description(ref.description)
-    live_label = if ref.live, do: "Live edition", else: "Edition"
+    live_label = if ref.live, do: Chrome.t("Live edition"), else: Chrome.t("Edition")
     meta = [live_label, ref.meta] |> Enum.reject(&is_nil/1) |> Enum.join(" · ")
 
     card =
@@ -3357,12 +3361,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_link_card_presentation(ref, _style, "timeline") do
     href = "/papers/" <> ref.slug
-    eyebrow = ref.eyebrow || "Edition"
+    eyebrow = ref.eyebrow || Chrome.t("Edition")
     eyebrow_style = paper_link_eyebrow_style("timeline")
     description = paper_link_description(ref.description)
 
     status =
-      [if(ref.live, do: "Live edition", else: "Edition"), ref.updated_at]
+      [if(ref.live, do: Chrome.t("Live edition"), else: Chrome.t("Edition")), ref.updated_at]
       |> Enum.reject(&is_nil/1)
       |> Enum.join(" · ")
 
@@ -3463,7 +3467,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   defp paper_link_reason(nil), do: ""
 
   defp paper_link_reason(reason) do
-    ~s|<span style="#{paper_link_reason_style()}"><strong>Why it matters:</strong> #{Util.escape_html(reason)}</span>|
+    ~s|<span style="#{paper_link_reason_style()}"><strong>#{Chrome.t("Why it matters:")}</strong> #{Util.escape_html(reason)}</span>|
   end
 
   defp normalized_copy(nil), do: nil
@@ -3476,7 +3480,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   end
 
   defp paper_link_metadata(ref) do
-    [ref.event_type, ref.rev && "rev #{ref.rev}", ref.updated_at]
+    [ref.event_type, ref.rev && Chrome.t("rev %{n}", n: ref.rev), ref.updated_at]
     |> Enum.reject(&is_nil/1)
     |> Enum.map(&to_string/1)
     |> Enum.reject(&(&1 == ""))

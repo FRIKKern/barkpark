@@ -1002,7 +1002,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # lvw-t10). Dangling never gets the control: drift is uncomputable there.
   defp valueref_accept_control("drift", target, field, fallback, pal) do
     if Map.get(pal, :valueref_accept, false) do
-      ~s(<button type="button" class="bp-valueref-accept" phx-click="valueref-accept-baseline" phx-value-target="#{escape_html(target)}" phx-value-field="#{escape_html(field)}" phx-value-fallback="#{escape_html(fallback)}" title="Accept new baseline: update the pinned literal to the current value">accept</button>)
+      ~s(<button type="button" class="bp-valueref-accept" phx-click="valueref-accept-baseline" phx-value-target="#{escape_html(target)}" phx-value-field="#{escape_html(field)}" phx-value-fallback="#{escape_html(fallback)}" title="#{escape_attr(Chrome.t("Accept new baseline: update the pinned literal to the current value"))}">#{escape_html(Chrome.t("accept"))}</button>)
     else
       ""
     end
@@ -1084,10 +1084,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         ~s(<div class="bp-master-ref">#{html}</div>)
 
       :pending ->
-        ~s(<div class="bp-master-ref bp-master-ref--pending">Linked master</div>)
+        ~s(<div class="bp-master-ref bp-master-ref--pending">#{Chrome.t("Linked master")}</div>)
 
       :unavailable ->
-        ~s(<div class="bp-master-ref bp-master-ref--unavailable">Master unavailable</div>)
+        ~s(<div class="bp-master-ref bp-master-ref--unavailable">#{Chrome.t("Master unavailable")}</div>)
     end
   end
 
@@ -1097,10 +1097,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         ~s(<div class="bp-master-ref">#{html}</div>)
 
       :pending ->
-        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted}">Linked master</div>)
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted}">#{Chrome.t("Linked master")}</div>)
 
       :unavailable ->
-        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">Master unavailable</div>)
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">#{Chrome.t("Master unavailable")}</div>)
     end
   end
 
@@ -1616,7 +1616,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp sheet_truncation_note(n, shown, %{style: :article}) do
     if Map.get(n, "truncated") do
       ~s(<p class="bp-sheet-note">) <>
-        escape_html("Sheet truncated — showing the first #{shown} rows") <> "</p>"
+        escape_html(Chrome.t("Sheet truncated — showing the first %{n} rows", n: shown)) <> "</p>"
     else
       ""
     end
@@ -1625,7 +1625,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   defp sheet_truncation_note(n, shown, pal) do
     if Map.get(n, "truncated") do
       ~s(<p style="margin:6px 0 0;font-size:0.8rem;color:#{pal.muted}">) <>
-        escape_html("Sheet truncated — showing the first #{shown} rows") <> "</p>"
+        escape_html(Chrome.t("Sheet truncated — showing the first %{n} rows", n: shown)) <> "</p>"
     else
       ""
     end
@@ -1915,8 +1915,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   defp callout_summary(n) do
     case Map.get(n, "title") do
-      nil -> tone_label(Map.get(n, "tone"))
-      "" -> tone_label(Map.get(n, "tone"))
+      nil -> Chrome.t(tone_label(Map.get(n, "tone")))
+      "" -> Chrome.t(tone_label(Map.get(n, "tone")))
       title -> title
     end
   end
@@ -1981,11 +1981,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     inner = render_children(Map.get(n, "children", []), width, pal)
     checked = Map.get(n, "checked") == true
     checked_attr = if checked, do: " checked", else: ""
-    label = if checked, do: "Done", else: "To do"
+    label = if checked, do: Chrome.t("Done"), else: Chrome.t("To do")
 
     box =
       ~s(<input type="checkbox" class="bp-checklist__box" disabled#{checked_attr} ) <>
-        ~s(aria-label="#{label}">)
+        ~s(aria-label="#{escape_attr(label)}">)
 
     ~s(<li class="bp-checklist__item" data-checked="#{checked}">) <>
       box <> ~s(<span class="bp-checklist__body">) <> inner <> "</span></li>"

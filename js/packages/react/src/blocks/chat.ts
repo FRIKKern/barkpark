@@ -9,9 +9,10 @@
 // the shape classify (ChatToolRenderer.classify), and the todo glyph — no engine
 // is reinvented, so the two surfaces fold at the same row.
 
+import type { RenderCtx } from './chrome'
 import { type Block, escapeHtml, str, asList, isMap } from '../inline'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 /* ── the LCS line diff (Papers.TextDiff.diff_lines) ────────────────────────── */
 

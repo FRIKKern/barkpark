@@ -620,11 +620,11 @@ function calloutToneClass(tone: unknown): string {
   return CALLOUT_TONES.includes(slug) ? slug : 'info'
 }
 
-function toneLabel(tone: unknown): string {
-  return capitalize(calloutToneClass(tone))
+function toneLabel(tone: unknown, ctx: RenderCtx): string {
+  return ctx.t(capitalize(calloutToneClass(tone)))
 }
 
-const callout: Emit = (b) => {
+const callout: Emit = (b, ctx) => {
   const toneMod = calloutToneClass(b.tone)
   // The callout body slot flattens to ONE PdText wrapping the composed inline
   // children — walk.ex renders it as a bare `<span>`.
@@ -633,7 +633,7 @@ const callout: Emit = (b) => {
   if (b.collapsible === true) {
     const open = b.collapsed === true ? '' : ' open'
     const title = str(b.title)
-    const summary = escapeHtml(title !== '' ? title : toneLabel(b.tone))
+    const summary = escapeHtml(title !== '' ? title : toneLabel(b.tone, ctx))
     return (
       `<details${open} class="bp-callout bp-callout--${toneMod}">` +
       `<summary class="bp-callout__summary">${summary}</summary>` +
@@ -908,16 +908,16 @@ function normalizedCopy(copy: string): string {
   return copy.trim().replace(/\.+$/, '').toLowerCase()
 }
 
-function paperLinkCard(ref: PaperLinkRef): string {
+function paperLinkCard(ref: PaperLinkRef, ctx: RenderCtx): string {
   const description =
     ref.description === ''
       ? ''
       : `<span style="display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55">${escapeHtml(ref.description)}</span>`
   const reason =
     ref.reason !== '' && normalizedCopy(ref.reason) !== normalizedCopy(ref.description)
-      ? `<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>Why it matters:</strong> ${escapeHtml(ref.reason)}</span>`
+      ? `<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>${ctx.t('Why it matters:')}</strong> ${escapeHtml(ref.reason)}</span>`
       : ''
-  const metadataParts = [ref.eventType, ref.rev === '' ? '' : `rev ${ref.rev}`, ref.updatedAt].filter(Boolean)
+  const metadataParts = [ref.eventType, ref.rev === '' ? '' : ctx.t('rev %{n}', { n: ref.rev }), ref.updatedAt].filter(Boolean)
   const metadata =
     metadataParts.length === 0
       ? ''
@@ -933,17 +933,17 @@ function paperLinkCard(ref: PaperLinkRef): string {
   )
 }
 
-const paperLinks: Emit = (b) => {
+const paperLinks: Emit = (b, ctx) => {
   const resolved = isMap(b._paper_links) ? b._paper_links : {}
   const reasons = isMap(b.reasons) ? b.reasons : {}
   const cards = asList(b.refs)
     .map((ref) => paperLinkRef(ref, resolved, reasons))
     .filter((ref): ref is PaperLinkRef => ref !== undefined)
-    .map(paperLinkCard)
+    .map((ref) => paperLinkCard(ref, ctx))
     .join('')
   if (cards === '') return ''
 
-  const title = nonblank(b.title) || 'Explore the work'
+  const title = nonblank(b.title) || ctx.t('Explore the work')
   const description = nonblank(b.description)
   const intro =
     description === ''
@@ -1096,7 +1096,7 @@ const terminal: Emit = (b, ctx) => {
   const body = renderBlocks(kids, ctx)
   const live =
     b.live === true || b.live === 'true' || b.live === 'live'
-      ? `<span class="bp-term__live">live</span>`
+      ? `<span class="bp-term__live">${ctx.t('live')}</span>`
       : ''
   const foot = footer === '' ? '' : `<div class="bp-term__foot">${escapeHtml(footer)}</div>`
   return (

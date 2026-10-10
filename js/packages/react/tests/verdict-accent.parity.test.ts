@@ -30,11 +30,11 @@ const callout = coreEmitters.callout
 
 const emitStat = (block: unknown) => {
   if (!stat) throw new Error('missing stat emitter')
-  return stat(block as never)
+  return stat(block as never, EN)
 }
 const emitStats = (block: unknown) => {
   if (!stats) throw new Error('missing stats emitter')
-  return stats(block as never)
+  return stats(block as never, EN)
 }
 const emitCallout = (block: unknown) => {
   if (!callout) throw new Error('missing callout emitter')

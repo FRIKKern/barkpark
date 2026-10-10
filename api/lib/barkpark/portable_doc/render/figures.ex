@@ -12,6 +12,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_attr: 1, escape_html: 1, safe_url: 1]
+  alias Barkpark.PortableDoc.Render.Chrome
 
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
 
@@ -262,7 +263,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       end
 
     ~s(<figure style="margin:16px 0">) <>
-      ~s(<a href="#{safe_url(src)}">Terminal recording</a>) <>
+      ~s(<a href="#{safe_url(src)}">#{escape_html(Chrome.t("Terminal recording"))}</a>) <>
       cap <>
       "</figure>"
   end
@@ -302,7 +303,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
 
     ~s(<figure style="margin:16px 0">) <>
       poster_img <>
-      ~s(<a href="#{safe_url(src)}">Watch the video</a>) <>
+      ~s(<a href="#{safe_url(src)}">#{escape_html(Chrome.t("Watch the video"))}</a>) <>
       "</figure>"
   end
 end

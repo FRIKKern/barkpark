@@ -26,6 +26,8 @@ defmodule Barkpark.PortableDoc.Render.Chrome do
       "Recommendation: " => gettext("Recommendation: "),
       "Yes" => pgettext("answer", "Yes"),
       "No" => pgettext("answer", "No"),
+      # field rows
+      "No image" => gettext("No image"),
       # tasks, task detail, task board, roadmap
       "No tasks yet." => gettext("No tasks yet."),
       "tasks unavailable — the Tasks plugin is not loaded" =>
@@ -53,7 +55,46 @@ defmodule Barkpark.PortableDoc.Render.Chrome do
       "No roadmap items." => gettext("No roadmap items."),
       "No schedule to place these items on." => gettext("No schedule to place these items on."),
       "not scheduled" => gettext("not scheduled"),
+      # field rows, composites, terminal, paper links
+      "live" => gettext("live"),
+      "Explore the work" => gettext("Explore the work"),
+      "Why it matters:" => gettext("Why it matters:"),
+      "rev %{n}" => gettext("rev %{n}", n: "%{n}"),
+      "Live edition" => gettext("Live edition"),
+      "Edition" => gettext("Edition"),
+      # callout tone fallbacks, checklist boxes, master refs, inline chips, sheets
+      "Info" => gettext("Info"),
+      "Success" => gettext("Success"),
+      "Warning" => gettext("Warning"),
+      "Danger" => gettext("Danger"),
+      "Neutral" => gettext("Neutral"),
+      "Loss" => gettext("Loss"),
+      "Peace" => gettext("Peace"),
+      "Done" => gettext("Done"),
+      "To do" => gettext("To do"),
+      "Linked master" => gettext("Linked master"),
+      "Master unavailable" => gettext("Master unavailable"),
       "criteria unavailable" => gettext("criteria unavailable"),
+      "Accept new baseline: update the pinned literal to the current value" =>
+        gettext("Accept new baseline: update the pinned literal to the current value"),
+      "accept" => gettext("accept"),
+      # equations, media links (email), data viz
+      "equation — no tex source" => gettext("equation — no tex source"),
+      "Terminal recording" => gettext("Terminal recording"),
+      "Watch the video" => gettext("Watch the video"),
+      "%{kind} — no data" => gettext("%{kind} — no data", kind: "%{kind}"),
+      "less" => gettext("less"),
+      "more" => gettext("more"),
+      "series %{n}" => gettext("series %{n}", n: "%{n}"),
+      "now %{value}" => gettext("now %{value}", value: "%{value}"),
+      "(none)" => gettext("(none)"),
+      "Total" => gettext("Total"),
+      "route track" => gettext("route track"),
+      "Open the paper to see the live chart." => gettext("Open the paper to see the live chart."),
+      "Open the paper to see the live progress." =>
+        gettext("Open the paper to see the live progress."),
+      "Sheet truncated — showing the first %{n} rows" =>
+        gettext("Sheet truncated — showing the first %{n} rows", n: "%{n}"),
       # task status vocabulary (design/status-manifest.json labels)
       "open" => pgettext("task status", "open"),
       "ready" => pgettext("task status", "ready"),

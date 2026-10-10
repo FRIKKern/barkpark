@@ -422,7 +422,11 @@ defmodule BarkparkWeb.StudioLocale do
   # canvas run's host (task-addade22d350314a). `%{name}` slots are filled
   # client-side, so they pass through verbatim here.
   def component_strings(:paper_canvas) do
-    Jason.encode!(%{
+    # The canvas paints the reader's own markup (a callout's tone summary, a
+    # form's Yes/No), so it carries the renderer's words too, under the same
+    # English keys (task-8e96278fc4ee7097). The canvas's own words win a clash.
+    Barkpark.PortableDoc.Render.Chrome.strings()
+    |> Map.merge(%{
       "+ footer" => gettext("+ footer"),
       "2-track grid · 2 cards" => gettext("2-track grid · 2 cards"),
       "7 blocks · kicker → TOC" => gettext("7 blocks · kicker → TOC"),
@@ -718,6 +722,7 @@ defmodule BarkparkWeb.StudioLocale do
       "Write the introduction…" => gettext("Write the introduction…"),
       "Write the quote…" => gettext("Write the quote…")
     })
+    |> Jason.encode!()
   end
 
   # The Studio graph pane (bp-graph.js), keyed by the English it falls back to.

@@ -15,6 +15,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { chatEmitters } from '../src/blocks/chat'
+import { EN } from '../src/blocks/chrome'
 
 const emitToolDiff = chatEmitters['chat-tool-diff']!
 
@@ -41,7 +42,7 @@ describe('chat-tool-diff fold — drawable-only budget (charter D40)', () => {
         file_path: 'lib/barkpark/budget.ex',
         edits: [hunk('reactalpha', 8), hunk('reactbravo', 8), hunk('reactcharlie', 8)],
       },
-    })
+    }, EN)
 
     expect(html).toContain('… +4 more lines')
     expect(html).not.toContain('+6 more lines')
@@ -65,7 +66,7 @@ describe('chat-tool-diff fold — drawable-only budget (charter D40)', () => {
         file_path: 'lib/barkpark/edge.ex',
         edits: [hunk('edgehead', 20), hunk('edgetail', 4)],
       },
-    })
+    }, EN)
 
     expect(html).toContain('… +4 more lines')
     const { summary, tail } = splitAtSummary(html)
@@ -82,7 +83,7 @@ describe('chat-tool-diff fold — drawable-only budget (charter D40)', () => {
         file_path: 'lib/barkpark/flat.ex',
         edits: [hunk('flata', 10), hunk('flatb', 10)],
       },
-    })
+    }, EN)
 
     expect(html).not.toContain('more lines')
     expect(html).not.toContain('<details>')
