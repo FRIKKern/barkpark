@@ -67,6 +67,8 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.ScopeResolver
+  alias BarkparkWeb.StudioLocale
 
   def init(opts), do: opts
 
@@ -368,76 +370,46 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       not is_nil(conn.assigns[:current_user])
   end
 
+  # Rendered through Phoenix's view/template pipeline (`put_view` + `render`),
+  # NOT a direct `Phoenix.Controller.html/2` call — see
+  # `BarkparkWeb.StudioRefusalHTML`'s moduledoc for why (Sobelow's XSS.HTML
+  # flags any non-literal body passed to `html/2` regardless of escaping).
   defp halt_studio_refusal_page(conn) do
+    locale = refusal_locale(conn)
+    Gettext.put_locale(BarkparkWeb.Gettext, locale)
+
     conn
     |> put_status(403)
-    |> Phoenix.Controller.html(studio_refusal_page())
+    # Self-contained, no app shell — both Studio browser pipelines
+    # (`:scoped_browser`, `:shared_studio_browser`) `put_root_layout` to the
+    # app chrome (theme script, fonts, the real `<html lang>`), which would
+    # otherwise wrap this page and make its own `lang`/`<title>` dead: the
+    # mutation-proof of `refusal_locale/1` caught exactly this — the broken
+    # locale read "en" but the assertion read it off the SHELL's `<html>`,
+    # not this page's, and passed for the wrong reason until this was added.
+    |> Phoenix.Controller.put_root_layout(false)
+    |> Phoenix.Controller.put_layout(false)
+    |> Phoenix.Controller.put_view(BarkparkWeb.StudioRefusalHTML)
+    |> Phoenix.Controller.render("refusal.html", [])
     |> halt()
   end
 
-  # Self-contained, no layout, no external assets — the SAME visual
-  # convention `BarkparkWeb.ErrorHTML` uses for a plug-level page with
-  # nothing rendered yet to lay it out inside. Every interpolated value here
-  # is a static string; nothing from the request (workspace slug, refusal
-  # reason) ever reaches this page, which is the point. A PLAIN string, not
-  # `Phoenix.HTML.raw/1` — that marker is for EEx template interpolation
-  # context; `Phoenix.Controller.html/2` takes a plain binary body directly
-  # and raises on the `{:safe, _}` tuple `raw/1` would have produced here.
-  defp studio_refusal_page do
-    """
-    <!DOCTYPE html>
-    <html lang="en">
-      <head>
-        <meta charset="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Studio · Not a member</title>
-        <style>
-          :root {
-            --err-bg: #0f1115;
-            --err-fg: #e6e6e6;
-            --err-muted: #9aa0a6;
-            --err-accent: #5b8def;
-          }
-          body {
-            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-            background: var(--err-bg);
-            color: var(--err-fg);
-            display: flex;
-            min-height: 100vh;
-            margin: 0;
-            align-items: center;
-            justify-content: center;
-          }
-          main { text-align: center; padding: 2rem; max-width: 28rem; }
-          h1 { font-size: 1.75rem; margin: 0 0 0.75rem; font-weight: 700; letter-spacing: -0.01em; }
-          p { color: var(--err-muted); margin: 0 0 1.5rem; line-height: 1.5; }
-          .actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
-          a.btn {
-            display: inline-block;
-            padding: 0.5rem 1rem;
-            border-radius: 0.375rem;
-            text-decoration: none;
-            font-weight: 600;
-          }
-          a.btn-primary { background: var(--err-accent); color: #fff; }
-          a.btn-secondary { background: transparent; color: var(--err-fg); border: 1px solid var(--err-muted); }
-        </style>
-      </head>
-      <body>
-        <main>
-          <h1>You're not a member of this workspace</h1>
-          <p>
-            You're signed in, but this account doesn't have access here.
-            Go to one of your own workspaces, or sign in as someone else.
-          </p>
-          <div class="actions">
-            <a class="btn btn-primary" href="/">Go to your workspace</a>
-            <a class="btn btn-secondary" href="/login">Sign in as someone else</a>
-          </div>
-        </main>
-      </body>
-    </html>
-    """
+  # The refusal page's locale comes from the VIEWER, never the target
+  # workspace — using the target's `settings["locale"]` (the way the login
+  # page's `put_locale_for/1` does for a return_to it hasn't verified yet)
+  # would make the page itself leak whether that workspace exists: a real
+  # nb-NO workspace renders Norwegian, an unknown slug falls back to the
+  # platform default, and the difference IS the leak this page is built to
+  # not have. `ScopeResolver.resolve_scope/2` is the same lookup
+  # `StudioRedirectController.scoped_studio_target/2` uses for "go to your
+  # workspace" — the signed-in caller's OWN resolved workspace, independent
+  # of whatever URL they followed here. No resolvable workspace (a user with
+  # no membership anywhere) reads as the platform default, same as `nil`.
+  defp refusal_locale(conn) do
+    case ScopeResolver.resolve_scope(conn, ScopeResolver.principal(conn)) do
+      {:ok, workspace, _project} -> StudioLocale.resolve(workspace)
+      :error -> StudioLocale.resolve(nil)
+    end
   end
 
   defp halt_envelope(conn, reason) do

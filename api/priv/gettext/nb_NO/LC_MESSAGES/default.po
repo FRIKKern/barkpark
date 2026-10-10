@@ -10887,3 +10887,28 @@ msgstr "Ingen treff for «%{query}»"
 #, elixir-autogen, elixir-format
 msgid "numeric value"
 msgstr "tallverdi"
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:45
+#, elixir-autogen, elixir-format
+msgid "Go to your workspace"
+msgstr "Gå til arbeidsområdet ditt"
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:46
+#, elixir-autogen, elixir-format
+msgid "Sign in as someone else"
+msgstr "Logg inn som en annen"
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:39
+#, elixir-autogen, elixir-format
+msgid "Studio · Not a member"
+msgstr "Studio · Ikke medlem"
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:40
+#, elixir-autogen, elixir-format
+msgid "You're not a member of this workspace"
+msgstr "Du er ikke medlem av dette arbeidsområdet"
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:42
+#, elixir-autogen, elixir-format
+msgid "You're signed in, but this account doesn't have access here. Go to one of your own workspaces, or sign in as someone else."
+msgstr "Du er logget inn, men denne kontoen har ikke tilgang her. Gå til et av dine egne arbeidsområder, eller logg inn som en annen."

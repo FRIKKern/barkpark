@@ -10887,3 +10887,28 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "numeric value"
 msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:45
+#, elixir-autogen, elixir-format
+msgid "Go to your workspace"
+msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:46
+#, elixir-autogen, elixir-format
+msgid "Sign in as someone else"
+msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:39
+#, elixir-autogen, elixir-format
+msgid "Studio · Not a member"
+msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:40
+#, elixir-autogen, elixir-format
+msgid "You're not a member of this workspace"
+msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex:42
+#, elixir-autogen, elixir-format
+msgid "You're signed in, but this account doesn't have access here. Go to one of your own workspaces, or sign in as someone else."
+msgstr ""

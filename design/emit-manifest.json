@@ -10,6 +10,7 @@
     "api/lib/barkpark_web/layouts/bulldocs.html.heex#/papers reader skin": "f6cac4b097c4fc37a998c0f34193eedbbdb2b2a67f84892c74fa898e9a1ca1dc",
     "api/lib/barkpark_web/layouts/root.html.heex#Studio": "215665f368d6eac65798638f54c2cb8104a242492186bbc11c9f5d4d85fc77a4",
     "api/lib/barkpark_web/layouts/sheets.html.heex#/sheets reader": "114d6051da4bcfd6bfcab5c24e792dc24091df0c3379755669a95da1a740e461",
+    "api/lib/barkpark_web/plugs/studio_refusal_html.ex#studio refusal page (studio_refusal_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",
     "api/lib/barkpark_web/studio/tokens_gen.ex#Elixir Studio categorical tokens": "6e0823043f4b24abb043e8434f23aafa56cf1e60c11a54d16050a3e3428039c0",
     "api/priv/static/assets/bp-graph.js#bp-graph palette (1/4)": "50af139633f57cbf0ec9670f0dc2d37ca7e681d46764974f1014a042ba168a22",
     "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts#mobile status vocabulary": "55b5be377acdae12c6ada4b2cc925c0cb261cb7992398803637cfd4b7c90f64a",

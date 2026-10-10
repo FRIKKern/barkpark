@@ -2535,6 +2535,12 @@ function sessionAuthBlock(themes = loadThemes()) {
 // switch). De-literalized WITHOUT becoming theme-aware: a single fixed-dark
 // :root carrying color.errorPage (bg/fg/muted, single values). Indented 10
 // spaces to sit inside the heredoc <style>.
+//
+// Shared verbatim by `studio_refusal_html.ex` (task-47ab98b3226672ef) — the
+// Studio membership-refusal page is the SAME self-contained, always-dark
+// card family as the 404/500 page (no layout, no theme switch), so it reuses
+// this exact builder + the same color.errorPage token rather than inventing
+// a second palette for one more error-shaped page.
 function errorPageBlock() {
   const e = tokens.color.errorPage;
   const ind = "          ";
@@ -3253,6 +3259,7 @@ export const ARTIFACTS = [
   { name: "Elixir Studio categorical tokens", path: "api/lib/barkpark_web/studio/tokens_gen.ex", kind: "elixir", build: studioTokensGen },
   { name: "login (session_html)", path: "api/lib/barkpark_web/controllers/session_html.ex", kind: "css", build: sessionAuthBlock },
   { name: "error page (error_html)", path: "api/lib/barkpark_web/controllers/error_html.ex", kind: "css", build: errorPageBlock },
+  { name: "studio refusal page (studio_refusal_html)", path: "api/lib/barkpark_web/plugs/studio_refusal_html.ex", kind: "css", build: errorPageBlock },
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
   { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },
