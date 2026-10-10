@@ -54,14 +54,28 @@ export function objectBlockFor(vocab, name) {
   return vocab.objects.find((o) => o.name === name) || null;
 }
 
-// An object block's label: its first declared string field that holds text, else
-// the readers' inline object rule (text, title, label, name, value, `[type]`).
-export function objectBlockLabel(kind, block) {
-  for (const f of (kind && kind.fields) || []) {
-    const v = f && block ? block[f.name] : undefined;
-    if (typeof v === "string" && v.trim() !== "") return v;
+// An object block's at-rest preview (task-65fb83593b2d1c29): the kind title plus
+// one field value, "Callout · warning" — the same text on screen and as its
+// accessible name, so two blocks of one kind can be told apart. The value is
+// the first TEXT field (type `text`) that holds text, else the first other
+// field holding a scalar (a select's code, a number, Yes/No); a block whose
+// fields are all empty shows the title alone, never a blank chip.
+export function objectBlockValue(kind, block) {
+  const fields = ((kind && kind.fields) || []).filter((f) => f && typeof f.name === "string");
+  const shown = (v) =>
+    typeof v === "string" ? v.trim() : typeof v === "number" && Number.isFinite(v) ? String(v) : typeof v === "boolean" ? t(v ? "Yes" : "No") : "";
+  const text = fields.find((f) => f.type === "text" && shown(block && block[f.name]) !== "");
+  if (text) return shown(block[text.name]);
+  for (const f of fields) {
+    const v = shown(block && block[f.name]);
+    if (v !== "") return v;
   }
-  return inlineOpaqueLabel({ type: kind ? kind.name : "", ...block });
+  return "";
+}
+
+export function objectBlockPreview(kind, block) {
+  const value = objectBlockValue(kind, block);
+  return value === "" ? kind.title : `${kind.title} · ${value}`;
 }
 
 // A dialog only edits fields it can name.
@@ -572,7 +586,7 @@ export function inlineObjects(host) {
                 if (!kind || !editableKind(kind).fields.length) continue;
                 decos.push(Decoration.node(pos, pos + node.nodeSize, {
                   role: "group",
-                  "aria-label": `${kind.title}: ${objectBlockLabel(kind, node.attrs.bpBlock || {})}`,
+                  "aria-label": objectBlockPreview(kind, node.attrs.bpBlock || {}),
                   "data-object-editable": "true",
                 }));
               }

@@ -23,6 +23,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { readerPaintClass } from "./embed-node.js";
+import { objectBlockFor, objectBlockPreview } from "./inline-object.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -92,7 +93,7 @@ export const Opaque = Node.create({
   // A read-only chip node-view (NO edit surface). The whole block rides on bpBlock;
   // PM never reads/writes inside this view.
   addNodeView() {
-    return ({ node, editor }) => {
+    return ({ node, editor, view }) => {
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || block.type || "block";
       if (bpType === "note") return readonlyNoteView(node, editor);
@@ -105,7 +106,7 @@ export const Opaque = Node.create({
 
       const chip = document.createElement("span");
       chip.className = "bp-canvas-readonly-chip";
-      chip.textContent = opaqueChipLabel(bpType);
+      chip.textContent = opaqueChipLabel(bpType, block, view && view.dom);
       dom.appendChild(chip);
 
       return {
@@ -115,7 +116,7 @@ export const Opaque = Node.create({
           const b = (updated.attrs && updated.attrs.bpBlock) || {};
           const t = (updated.attrs && updated.attrs.bpType) || b.type || "block";
           if (t === "note") return false;
-          chip.textContent = opaqueChipLabel(t);
+          chip.textContent = opaqueChipLabel(t, b, dom);
           return true;
         },
         stopEvent: () => true,
@@ -126,7 +127,14 @@ export const Opaque = Node.create({
 });
 
 // A calm read-only label for a carried block (e.g. "section", "composite", "codelist").
-function opaqueChipLabel(bpType) {
+// A custom object block the field DECLARES shows its preview instead — the kind
+// title plus a field value, "Callout · warning" (task-65fb83593b2d1c29) — read
+// off the host canvas's vocabulary.
+function opaqueChipLabel(bpType, block, el) {
+  const host = el && typeof el.closest === "function" ? el.closest("bp-paper-canvas") : null;
+  const vocab = host && typeof host.inlineObjectVocabulary === "function" ? host.inlineObjectVocabulary() : null;
+  const kind = objectBlockFor(vocab, bpType);
+  if (kind && Array.isArray(kind.fields) && kind.fields.length) return objectBlockPreview(kind, block || {});
   return bpType ? `↪ ${bpType}` : "↪ block";
 }
 
