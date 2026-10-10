@@ -886,6 +886,21 @@ defmodule Barkpark.Content.Errors do
        when is_binary(message) and is_map(details),
        do: %{code: "invalid_filter", message: message, status: 400, details: details}
 
+  # A filter param the data query API cannot read at all (task-341a5d9e63ffdcc3):
+  # a broken bracket spelling (`?filter[[=x` decodes to a top-level "filter[["
+  # key nothing reads) or a blank/bracketed field. It used to run unfiltered and
+  # answer every document. Same registered "invalid_filter" code; `param` is the
+  # caller's own spelling, so echoing it reveals nothing they did not send.
+  defp build({:error, {:malformed_filter_param, param}}) when is_binary(param),
+    do: %{
+      code: "invalid_filter",
+      message:
+        "malformed filter parameter #{inspect(param)}; use filter[field][op]=value, " <>
+          "filter=field<op>value, or a repeated filter[]=field<op>value",
+      status: 400,
+      details: %{param: param}
+    }
+
   # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
   # string parser (LegacyController.parse_legacy_filter/1). A non-empty string
   # that doesn't split into a field=value pair (e.g. "price>10") used to fall
