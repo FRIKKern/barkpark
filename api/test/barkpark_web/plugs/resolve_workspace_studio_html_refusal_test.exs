@@ -84,6 +84,41 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspaceStudioHtmlRefusalTest do
     assert get_resp_header(conn, "content-type") |> Enum.any?(&(&1 =~ "text/html"))
   end
 
+  test "the page renders in the CALLER's own workspace locale (nb-NO), never the target's",
+       %{conn: conn} do
+    n = System.unique_integer([:positive])
+
+    # The caller's OWN workspace carries the nb-NO locale — the refusal page
+    # must speak it. The locale comes from the VIEWER (ScopeResolver's
+    # ordinary first-membership fallback), never from the TARGET workspace
+    # below, which stays plain English/unconfigured: using the target's
+    # locale would itself be an existence leak (a real nb-NO workspace would
+    # render Norwegian, an unknown slug would fall back to English, and that
+    # difference IS the leak).
+    {:ok, home} =
+      Tenancy.create_workspace(%{
+        slug: "rw-home-nb-#{n}",
+        name: "Home #{n}",
+        settings: %{"locale" => "nb-NO"}
+      })
+
+    {:ok, _} = Tenancy.create_project(home, %{slug: "default", name: "Default"})
+
+    {:ok, other} = Tenancy.create_workspace(%{slug: "rw-other-nb-#{n}", name: "Other #{n}"})
+    {:ok, _} = Tenancy.create_project(other, %{slug: "default", name: "Default"})
+
+    {conn, user} = signed_in_conn(conn, "nb-caller-#{n}@example.com")
+    {:ok, _} = TenancyAuth.create_membership(home.id, user.id, "member", "user")
+
+    conn = get(conn, studio_path(other.slug))
+
+    assert conn.status == 403
+    assert get_resp_header(conn, "content-type") |> Enum.any?(&(&1 =~ "text/html"))
+    assert conn.resp_body =~ "lang=\"nb-NO\""
+    assert conn.resp_body =~ "Du er ikke medlem av dette arbeidsområdet"
+    refute conn.resp_body =~ "You're not a member"
+  end
+
   test "a signed-in MEMBER still enters (control)", %{conn: conn} do
     n = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "rw-member-ws-#{n}", name: "WS #{n}"})
