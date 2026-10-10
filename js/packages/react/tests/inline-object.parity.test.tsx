@@ -51,9 +51,8 @@ describe('inline object text contract (shared fixture)', () => {
     })
 
     it(`renderInline: ${c.name}`, () => {
-      const want = c.text
-        ? `<span class="bp-inline-object" data-inline-type="${escapeHtml(String(c.node.type))}">${escapeHtml(c.text)}</span>`
-        : ''
+      // A textless node keeps an empty marked span: never dropped silently.
+      const want = `<span class="bp-inline-object" data-inline-type="${escapeHtml(String(c.node.type))}">${escapeHtml(c.text)}</span>`
       expect(renderInline(c.node as never)).toBe(want)
     })
   }

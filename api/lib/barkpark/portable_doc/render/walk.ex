@@ -1173,8 +1173,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # Inline object (PdInlineObject — a childless inline node with no built-in
   # renderer, e.g. a schema's `blocks.inline` type). A renderer registered
   # under the palette's `:inline_objects` gets the stored node and returns
-  # HTML; otherwise the node's text shows in a span, and a node without text
-  # renders nothing. Same markup on every style; @barkpark/react emits the
+  # HTML; otherwise the node's text shows in a span (empty when it has none). Same markup on every style; @barkpark/react emits the
   # same span (inline-object-text.json locks the text).
   #
   # A registered renderer that raises or returns a non-string falls back to the
@@ -1196,8 +1195,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     _ -> nil
   end
 
-  defp inline_object_span(_type, ""), do: ""
-
+  # A node without text still leaves its marked span, so it is never dropped
+  # silently: the reader sees nothing, the HTML still names the type.
   defp inline_object_span(type, text) do
     ~s(<span class="bp-inline-object" data-inline-type="#{escape_html(type)}">) <>
       escape_html(text) <> "</span>"

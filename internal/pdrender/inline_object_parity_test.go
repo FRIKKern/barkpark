@@ -60,14 +60,13 @@ func TestInlineObjectRendersItsTextInProse(t *testing.T) {
 	ir := InlineRenderer{theme: DarkTheme()}
 	for _, c := range loadInlineObjectFixture(t) {
 		got := ir.Inline([]any{c.Node}, RenderCtx{})
-		if c.Text == "" {
-			if strings.TrimSpace(got) != "" {
-				t.Errorf("a textless node rendered %q for %q", got, c.Name)
-			}
-			continue
+		want := c.Text
+		if want == "" {
+			// Never dropped silently: a textless node shows its type name.
+			want = "[" + attrStr(c.Node, "type") + "]"
 		}
-		if !strings.Contains(got, c.Text) {
-			t.Errorf("inline object text missing for %q: got %q", c.Name, got)
+		if !strings.Contains(got, want) {
+			t.Errorf("inline object text missing for %q: got %q, want %q", c.Name, got, want)
 		}
 	}
 }

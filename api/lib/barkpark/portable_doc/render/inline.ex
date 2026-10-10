@@ -312,8 +312,8 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # (task-85fee859cf3bfef6): a schema's `blocks.inline` type, stored flat as
   # `{type, ...fields}`. It composes to a `PdInlineObject` carrying the node,
   # so the walker can hand it to a renderer the caller registered under
-  # `:inline_objects`, and otherwise shows `inline_object_text/1` in a span.
-  # A node with no text-carrying key still renders nothing.
+  # `:inline_objects`, and otherwise shows `inline_object_text/1` in a span
+  # (an empty one when the node has no text-carrying key).
   def compose_inline(%{"type" => type} = n, inside_link) do
     case Map.get(n, "children") do
       children when is_list(children) and children != [] ->

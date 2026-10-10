@@ -213,7 +213,7 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 	default:
 		// Unknown inline type → render its children if any. A childless one is
 		// an inline object (a schema's `blocks.inline` type, task-85fee859cf3bfef6):
-		// show its text, else nothing. Twins: inline.ex PdInlineObject and
+		// show its text, else its type name. Twins: inline.ex PdInlineObject and
 		// inline.tsx's default branch.
 		if _, ok := n["children"]; ok {
 			return ir.children(n, ctx, insideLink)
@@ -224,6 +224,11 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		}
 		if text := inlineObjectText(n); text != "" {
 			return ir.theme.Body.Render(sanitizeText(text))
+		}
+		// No text: show the type name dimmed, so the node is never dropped
+		// silently (the HTML engines emit an empty marked span).
+		if t := attrStr(n, "type"); t != "" {
+			return ir.theme.Dim.Render("[" + sanitizeText(t) + "]")
 		}
 		return ""
 	}

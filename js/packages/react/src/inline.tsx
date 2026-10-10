@@ -583,7 +583,7 @@ export function renderInline(node: Inline): string {
     default: {
       // Unknown inline → degrade to its children when present. A childless one
       // is an inline object (a schema's `blocks.inline` type): a registered
-      // renderer draws it, else its text shows in a span, else nothing. Twin of
+      // renderer draws it, else its text shows in a span. Twin of
       // inline.ex PdInlineObject + walk.ex inline_object/2.
       const kids = asList(node.children)
       // A block-shaped node (`content` key) is not an inline object.
@@ -600,10 +600,8 @@ export function renderInline(node: Inline): string {
           /* fall through */
         }
       }
-      const text = inlineObjectText(node)
-      return text
-        ? `<span class="bp-inline-object" data-inline-type="${escapeHtml(type)}">${escapeHtml(text)}</span>`
-        : ''
+      // Empty span when the node has no text: never dropped silently.
+      return `<span class="bp-inline-object" data-inline-type="${escapeHtml(type)}">${escapeHtml(inlineObjectText(node))}</span>`
     }
   }
 }

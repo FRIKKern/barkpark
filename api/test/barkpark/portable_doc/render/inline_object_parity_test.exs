@@ -44,7 +44,9 @@ defmodule Barkpark.PortableDoc.Render.InlineObjectParityTest do
     end
   end
 
-  test "a node with text renders the span; one without renders nothing", %{cases: cases} do
+  test "every node renders its span; a textless one an empty span, never nothing", %{
+    cases: cases
+  } do
     for %{"name" => name, "node" => node, "text" => text} <- cases do
       html = render(para(node))
 
@@ -52,11 +54,7 @@ defmodule Barkpark.PortableDoc.Render.InlineObjectParityTest do
         ~s(<span class="bp-inline-object" data-inline-type="#{node["type"]}">) <>
           Render.escape_html(text) <> "</span>"
 
-      if text == "" do
-        refute html =~ "bp-inline-object", "a textless node rendered a span for: #{name}"
-      else
-        assert html =~ span, "missing span for #{name}: #{html}"
-      end
+      assert html =~ span, "missing span for #{name}: #{html}"
     end
   end
 
