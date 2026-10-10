@@ -132,7 +132,7 @@ defmodule BarkparkWeb.ListenController do
     # the census above is the evidence. The change is a strict widening — the
     # {:ok, _} path is behaviourally identical.
     conn =
-      case chunk(conn, "event: welcome\ndata: {\"type\":\"welcome\"}\n\n") do
+      case chunk(conn, welcome_frame(dataset, workspace_id, lf)) do
         {:ok, c} -> c
         _ -> conn
       end
@@ -203,11 +203,34 @@ defmodule BarkparkWeb.ListenController do
   """
   defdelegate replay_since(dataset, since, workspace_id \\ nil, opts \\ []), to: EventLog
 
+  @doc """
+  Transport-thin delegate to `Barkpark.Content.EventLog.head_event_id/3` —
+  same seam convention as `replay_since/4` above.
+  """
+  defdelegate head_event_id(dataset, workspace_id \\ nil, opts \\ []), to: EventLog
+
   # The project half of the replay query (owner ruling #50).
   defp replay_opts(%ListenFilter{project_id: project_id}) when is_binary(project_id),
     do: [project_id: project_id]
 
   defp replay_opts(_lf), do: []
+
+  # task-399143cf7ac6b952. `since` isn't known yet at welcome-frame time (and
+  # wouldn't help: this id must be the HEAD of the backlog FOR THIS SCOPE, not
+  # whatever Last-Event-ID an already-reconnecting client happened to send).
+  # Scoped with the SAME workspace_id + replay_opts(lf) the later `since`
+  # replay call uses, so a reconnect with this id replays EXACTLY what was
+  # written after it — never more (no scope mismatch), never less (no
+  # fabricated id when nothing exists to anchor to: head_event_id/3 returns
+  # nil for an empty backlog, and the welcome frame is emitted exactly as
+  # before in that case — a frame no SSE client would read an id: line from
+  # either way).
+  defp welcome_frame(dataset, workspace_id, lf) do
+    case head_event_id(dataset, workspace_id, replay_opts(lf)) do
+      nil -> "event: welcome\ndata: {\"type\":\"welcome\"}\n\n"
+      id -> "id: #{id}\nevent: welcome\ndata: {\"type\":\"welcome\"}\n\n"
+    end
+  end
 
   # The project this stream is narrowed to: the scope's resolved project, but
   # only when the URL itself named one (`/w/:ws/p/:proj/...`).

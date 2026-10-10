@@ -17,6 +17,20 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   """
   use ExUnit.Case, async: false
 
+  # task-399143cf7ac6b952 made `listen/2` query the Repo for the welcome
+  # frame's head event id (EventLog.head_event_id/3), where it previously
+  # built a pure string literal — this file's own moduledoc claim of "no DB"
+  # is no longer true of the code path under test, only of these tests'
+  # OWN setup (no DataCase, no fixtures). `async: false` keeps using plain
+  # ExUnit.Case; :shared sandbox mode gives the listener process spawned
+  # below (and the forwarder it spawns) the SAME connection the test checked
+  # out, without an explicit `Sandbox.allow/3` at every spawn site.
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+    :ok
+  end
+
   # WHY THESE ASSERTIONS CARRY AN EXPLICIT 2_000 ms BUDGET.
   #
   # Three `assert_receive`s in this file are STARTUP-GATED: each waits on a
