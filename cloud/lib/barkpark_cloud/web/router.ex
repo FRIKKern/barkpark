@@ -1040,7 +1040,8 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   ## POST /v1/auth/device/inspect {user_code} (require_user)
-  ##   → 200 {client_name, ip_address, user_agent, expires_at} — for the confirm screen
+  ##   → 200 {client_name, ip_address, user_agent, expires_at, team_id} — for the confirm
+  ##     screen; ip_address + user_agent are omitted for a non-member of a team-bound login
   ##   → 404 {error: "expired_or_invalid"}
   ##   → 429 {error: "rate_limited"} — shares the approve:<user_id> budget: inspect
   ##     answers "is this user_code valid?", so an unmetered inspect would be the
@@ -1060,13 +1061,22 @@ defmodule BarkparkCloud.Web.Router do
         :ok ->
           case DeviceAuth.inspect(conn.body_params["user_code"] || "") do
             {:ok, row} ->
-              json(conn, 200, %{
+              body = %{
                 client_name: row.client_name,
-                ip_address: row.ip_address,
-                user_agent: row.user_agent,
                 expires_at: row.expires_at,
                 team_id: row.requested_team_id
-              })
+              }
+
+              # Who is asking (IP, user agent) goes only to someone who could
+              # approve: anyone for an unbound login, a member of the bound
+              # team otherwise. A non-member still gets the screen, so the
+              # Deny safety valve keeps working (task-c9560d84f704705d).
+              body =
+                if DeviceAuth.may_see_requester?(row, user.id),
+                  do: Map.merge(body, %{ip_address: row.ip_address, user_agent: row.user_agent}),
+                  else: body
+
+              json(conn, 200, body)
 
             {:error, :expired_or_invalid} ->
               json(conn, 404, %{error: "expired_or_invalid"})
@@ -1103,7 +1113,8 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  ## POST /v1/auth/device/deny {user_code} (require_user) → 200 {ok: true} (idempotent)
+  ## POST /v1/auth/device/deny {user_code} (require_user) → 200 {ok: true} (idempotent;
+  ##   deletes only a PENDING request — an approved login cannot be taken back)
   post "/v1/auth/device/deny" do
     conn = Auth.require_user(conn, [])
 
