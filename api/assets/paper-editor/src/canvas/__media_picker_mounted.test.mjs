@@ -97,6 +97,9 @@ const fetchMock = async (url, options = {}) => {
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
 
+// The shared dialog focus manager the browser's trap() comes from; every
+// layout that loads the browser loads it first.
+await import("../../../../priv/static/assets/bp-modal-focus.js");
 await import("../../../../priv/static/assets/bp-asset-browser.js");
 await import("../../../../priv/static/assets/bp-media-picker.js");
 const { BpPaperCanvas } = await import("./index.js");

@@ -19,7 +19,7 @@ window.fetch = async (url) => ({
     String(url).includes("/collections") ? { result: { collections: [] } } : { result: { hits: [], total: 0, facets: {} } },
 });
 window.requestAnimationFrame = (fn) => setTimeout(fn, 0);
-for (const file of ["bp-search-intel.js", "bp-asset-explorer.js"]) {
+for (const file of ["bp-modal-focus.js", "bp-search-intel.js", "bp-asset-explorer.js"]) {
   window.eval(readFileSync(new URL(`../../../priv/static/assets/${file}`, import.meta.url), "utf8"));
 }
 
