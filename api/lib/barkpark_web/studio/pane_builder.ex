@@ -461,6 +461,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
           type_title: schema && schema.title,
+          author_creatable: author_creatable?(schema),
           role: :list,
           priority: :active,
           desk_groups: [],
@@ -540,6 +541,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
           type_title: schema && schema.title,
+          author_creatable: author_creatable?(schema),
           role: :list,
           priority: :active,
           desk_groups: desk_groups,
@@ -1379,6 +1381,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         []
     end)
   end
+
+  @doc """
+  False when the type's desk block declares `"authorCreatable": false`: its
+  documents are written by something other than an author (a form's public
+  intake, say), so Studio offers no "New" for it. Render-only — the write
+  path still answers a create with its own refusal.
+  """
+  def author_creatable?(%{desk: %{"authorCreatable" => false}}), do: false
+  def author_creatable?(_schema), do: true
 
   defp schema_desk_groups(nil), do: []
 

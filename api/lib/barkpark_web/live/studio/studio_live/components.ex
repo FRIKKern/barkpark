@@ -1497,6 +1497,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <%!-- Icon-only: without an explicit label its accessible name
                     is the empty string, so AT announces a nameless button. --%>
               <button
+                :if={pane[:author_creatable] != false}
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
@@ -1633,6 +1634,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       document glyph in dev/prod, a RAISE in :test. --%>
                 <:icon><.icon name={Icons.drawable_name(pane[:icon], "file")} size={32} /></:icon>
                 <button
+                  :if={pane[:author_creatable] != false}
                   class="btn btn-primary btn-sm"
                   phx-click="new-document"
                   phx-value-type={pane.type_name}
