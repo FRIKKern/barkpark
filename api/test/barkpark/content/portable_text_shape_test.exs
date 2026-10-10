@@ -232,6 +232,21 @@ defmodule Barkpark.Content.PortableTextShapeTest do
       assert [%{"children" => [_, @chip, _]}] = PortableText.from_html(tampered, [@post11])
     end
 
+    test "a chip whose text breaks out of the attribute renders inert" do
+      chip = %{
+        "_type" => "chip",
+        "_key" => "k3",
+        "text" => "\"><script>alert(1)</script>'",
+        "tone" => "x"
+      }
+
+      block = %{@post11 | "children" => [chip]}
+      html = PortableText.to_html([block])
+
+      refute html =~ "<script"
+      assert [%{"children" => [^chip]}] = PortableText.from_html(html, [block])
+    end
+
     test "a forged object whose _key is not stored comes back as text, never an object" do
       forged = %{"_type" => "script", "_key" => "nope", "text" => "Injected"}
       attr = Phoenix.HTML.html_escape(Jason.encode!(forged)) |> Phoenix.HTML.safe_to_string()

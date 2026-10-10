@@ -455,7 +455,7 @@ defmodule Barkpark.Content.PortableText do
 
     Enum.map_join(children, fn
       %{"_type" => type} = object when is_binary(type) and type != "span" ->
-        ~s(<span data-pt-object="#{escape(Jason.encode!(object))}" contenteditable="false">) <>
+        ~s(<span data-pt-object="#{attr_escape(Jason.encode!(object))}" contenteditable="false">) <>
           escape(object_label(object)) <> "</span>"
 
       %{"text" => text} = span when is_binary(text) ->
@@ -503,6 +503,10 @@ defmodule Barkpark.Content.PortableText do
   end
 
   defp wrap(_mark, acc, _defs), do: acc
+
+  # An attribute value (the object's JSON) through Phoenix.HTML's escaper, which
+  # also escapes `'`; `decode/1` reads every entity it emits back.
+  defp attr_escape(text), do: text |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
 
   defp escape(text) do
     text
