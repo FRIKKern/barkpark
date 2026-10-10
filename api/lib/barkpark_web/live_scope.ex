@@ -319,7 +319,7 @@ defmodule BarkparkWeb.LiveScope do
     do: attach_readonly_gate(socket, "This workspace is shared read-only")
 
   # Grant write-containment (airdrop-grants ag-enforcement). `scope_to_grants`
-  # narrows READS only — Studio write handlers do not gate on :write. Three
+  # narrows READS only, so a grant socket's writes are narrowed here. Three
   # dispositions for a grant-admitted socket, decided ONCE here per workspace:
   #
   #   * NO write-capable grant in this workspace → read-only: the deny-by-default
@@ -349,6 +349,12 @@ defmodule BarkparkWeb.LiveScope do
     end
   end
 
+  # A `:member` socket is admitted on `:read` alone. Its WRITE tier is not
+  # decided here: `BarkparkWeb.Studio.Caps.attach/1` (armed in StudioLive's
+  # mount) refuses every `:write`/`:admin` event unless the seat's actions
+  # allow it, and the debounced handle_info doors ask the same
+  # `Caps.write_capable?/2`. A read-only custom role is refused there
+  # (`read_only_seat_write_gate_test.exs`, task-409b3ba56ca96471).
   defp maybe_attach_readonly_gate(socket, _grade), do: socket
 
   # True when `ctx` holds at least one ACTIVE grant conferring :write SOMEWHERE
