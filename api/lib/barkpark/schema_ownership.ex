@@ -98,6 +98,8 @@ defmodule Barkpark.SchemaOwnership do
     "barkpark_bind_document_revision()",
     "barkpark_revision_immutable()",
     "bp_documents_public_search_vector_trg()",
+    # Norwegian search fold (task-1429eb7cfc6217ea), read by DocumentsRetriever.
+    "bp_fold(text)",
     "bp_public_search_vector(text,text,uuid,text,jsonb)",
     "bp_schema_public_search_reindex_trg()",
     "bp_search_field_restricted(jsonb)",

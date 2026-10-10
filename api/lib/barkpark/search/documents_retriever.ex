@@ -627,6 +627,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
             [d],
             ^ts_match(index, term) or
               ilike(d.title, ^pattern) or
+              ^folded_title_match(term) or
               ^slug_match(index, pattern)
           )
 
@@ -717,6 +718,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           [d],
           ^ts_match(index, term) or
             ilike(d.title, ^pattern) or
+            ^folded_title_match(term) or
             ^slug_match(index, pattern) or
             fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold)
         )
@@ -981,6 +983,18 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # A field with no explicit weight defaults to 1 (still ranks, just unweighted).
   defp field_weight(nil), do: 1.0
   defp field_weight(_), do: 0.0
+
+  # task-1429eb7cfc6217ea — the Norwegian fold on BOTH sides: `bp_fold` on the
+  # stored title, `Fold.fold/1` on the query, one rule (fold_test.exs pins the
+  # two equal). "aerlig" finds "Ærlig", "okonomi"/"oekonomi" find "økonomi",
+  # "arsrapport"/"aarsrapport" find "årsrapport". An extra OR arm in the same
+  # filter scan as the title ILIKE beside it (see the D49 note in
+  # include_dynamic/5: no index serves this disjunction), so it only ADDS
+  # matches; the exact spelling still matches every arm it matched before.
+  defp folded_title_match(term) do
+    pattern = like_pattern(Barkpark.Search.Fold.fold(term))
+    dynamic([d], fragment("bp_fold(?) LIKE ?", d.title, ^pattern))
+  end
 
   def like_pattern(term) do
     escaped =
