@@ -1585,6 +1585,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               aria-label={gettext("Clear search")}
               data-test-id="desk-search-clear"
             ><.icon name="x" size={14} /></button>
+            <%!-- The one live region for the search, present from mount: a
+                  region that arrives already holding its text is often not
+                  read, which is how "no match" went silent
+                  (task-b78dddf5135d8bbf). Every state's message lands here;
+                  the visible notices below are not live regions. The id keeps
+                  the DOM patch updating this node in place when the clear
+                  button appears before it; matched by position, it was
+                  replaced. --%>
+            <div
+              id="desk-search-status"
+              class="sr-only"
+              role="status"
+              data-test-id="desk-search-count"
+            ><%= desk_search_status(@desk_search, @desk_search_hits)
+            %></div>
           </div>
 
           <div
@@ -1592,21 +1607,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             class="pane-body"
             data-test-id="desk-search-results"
           >
-            <%!-- The two notices below announce themselves; a list of hits did
-                  not, so a screen reader heard nothing after typing. One region,
-                  present for the whole search, so its text change is announced
-                  (task-0ad7fed4370a5978). --%>
-            <div class="sr-only" role="status" data-test-id="desk-search-count"><%=
-              if String.length(String.trim(@desk_search)) >= 2 and @desk_search_hits != [],
-                do: ngettext("1 result", "%{count} results", length(@desk_search_hits))
-            %></div>
             <%= if String.length(String.trim(@desk_search)) < 2 do %>
-              <div class="bp-pane-notice" role="status" data-test-id="desk-search-too-short">
+              <div class="bp-pane-notice" data-test-id="desk-search-too-short">
                 <%= gettext("Type at least 2 characters") %>
               </div>
             <% else %>
               <%= if @desk_search_hits == [] do %>
-                <div class="bp-pane-notice" role="status" data-test-id="desk-search-empty">
+                <div class="bp-pane-notice" data-test-id="desk-search-empty">
                   <%= gettext("No documents match “%{query}”", query: String.trim(@desk_search)) %>
                 </div>
               <% else %>
@@ -2566,4 +2573,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   end
 
   defp blank_body?(_not_a_string), do: true
+
+  # What the desk search's status region says for the current query: nothing
+  # before a search, then the same message the pane shows (task-b78dddf5135d8bbf).
+  defp desk_search_status(query, hits) do
+    query = String.trim(query || "")
+
+    cond do
+      query == "" -> ""
+      String.length(query) < 2 -> gettext("Type at least 2 characters")
+      hits == [] -> gettext("No documents match “%{query}”", query: query)
+      true -> ngettext("1 result", "%{count} results", length(hits))
+    end
+  end
 end
