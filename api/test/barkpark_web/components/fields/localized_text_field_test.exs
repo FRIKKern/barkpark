@@ -131,6 +131,34 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextFieldTest do
       assert html =~ ~s(data-format="rich")
     end
 
+    # task-05710d91d03d7fc9: a rich row's label points at the hidden input, so
+    # the editor body had no name (axe aria-input-field-name on Media
+    # "Caption"). Each rich row's editor is named "<field> (<lang>)".
+    test "each rich row's editor is named by the field title and its language" do
+      html =
+        render_component(&LocalizedTextField.localized_text_field/1, %{
+          field: localized_field(format: :rich, languages: ["nob", "eng"]),
+          value: %{"nob" => "Hei"}
+        })
+
+      assert html =~ ~r/<bp-rich-text-editor[^>]*data-label="Title \(nob\)"/
+      assert html =~ ~r/<bp-rich-text-editor[^>]*data-label="Title \(eng\)"/
+    end
+
+    test "the primary-missing label suffix reads in the Studio language" do
+      render = fn ->
+        render_component(&LocalizedTextField.localized_text_field/1, %{
+          field: localized_field(),
+          value: %{"eng" => "Hello"}
+        })
+      end
+
+      assert render.() =~ "(primary, missing)"
+      nb = Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", render)
+      assert nb =~ "(primær, mangler)"
+      refute nb =~ "(primary, missing)"
+    end
+
     test "per-language errors render inline" do
       html =
         render_component(&LocalizedTextField.localized_text_field/1, %{
