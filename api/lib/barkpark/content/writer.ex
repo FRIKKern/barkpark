@@ -337,6 +337,7 @@ defmodule Barkpark.Content.Writer do
     # createOrReplace / createIfNotExists / replace) funnel through this one
     # function, so both gates cover the family rather than one instance.
     with :ok <- refuse_bare_id(attrs, :create),
+         :ok <- refuse_versions_id(attrs),
          :ok <- refuse_orphan_top_level_keys(attrs),
          :ok <- refuse_colliding_status(attrs) do
       do_create_document_from_attrs(type, attrs, dataset, opts)
@@ -2100,6 +2101,43 @@ defmodule Barkpark.Content.Writer do
   # Malformed op payloads (a non-map `setIfMissing`, say) are ignored rather
   # than fatal everywhere else in this path; keep that.
   def refuse_bare_id(_attrs, _door), do: :ok
+
+  # task-078175e759f71b73 — Sanity's Content Releases id convention,
+  # `versions.<releaseId>.<documentId>`, has no analog here: there is no
+  # release/version-set entity to resolve it against. `DraftId.draft_id/1`
+  # would otherwise prepend "drafts." onto the WHOLE string unmodified,
+  # storing `drafts.versions.r1.post-02` as an ordinary document — an
+  # address nobody asked for and nothing resolves back to the release or
+  # the real document id. Checked on the RAW caller-supplied id (before
+  # `DraftId.draft_id/1` prefixes it) and after stripping any `drafts.`
+  # prefix the caller already sent, so `versions.r1.post-02` and
+  # `drafts.versions.r1.post-02` are refused identically. Named-code error
+  # (not the generic `unknown_fields` shape `refuse_bare_id` above uses):
+  # see `Errors.build/1`'s `versions_id_not_supported` clause.
+  @doc false
+  def refuse_versions_id(attrs) do
+    # Checked BEFORE `from_envelope/2` runs (that call sits inside
+    # `do_create_document_from_attrs/4`, after every gate in the `with`
+    # chain `admitted_create_document/4` runs first) — so a caller's
+    # Sanity-style `"_id"` has not been promoted to `"doc_id"` yet. Read
+    # both, `doc_id` first, matching `from_envelope/2`'s own precedence for
+    # the shape it is about to apply.
+    id =
+      Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) ||
+        Map.get(attrs, "_id") || Map.get(attrs, :_id)
+
+    case id do
+      id when is_binary(id) ->
+        if String.starts_with?(DraftId.published_id(id), "versions.") do
+          {:error, {:versions_id_not_supported, id}}
+        else
+          :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   # Same `validation_failed` / `unknown_fields` envelope the orphan-key refusal
   # uses, so a machine consumer keys on one field for both routing refusals.

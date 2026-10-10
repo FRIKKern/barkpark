@@ -200,6 +200,7 @@
                   "unsupported_if_match_for_batch",
                   "unsupported_media_type",
                   "validation_failed",
+                  "versions_id_not_supported",
                   "webhook_not_found",
                   "workspace_archived",
                   "workspace_required",

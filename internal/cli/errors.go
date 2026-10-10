@@ -107,12 +107,17 @@ var codeExit = map[string]int{
 	// unknown ops instead of silently returning every row (#570).
 	"invalid_filter":    exitUsage,
 	"validation_failed": exitValidation,
-	"invalid_paper":     exitValidation,
-	"malformed_op":      exitValidation,
-	"invalid_op":        exitValidation,
-	"block_not_found":   exitValidation,
-	"type_mismatch":     exitValidation,
-	"duplicate_id":      exitValidation,
+	// A versions.<release>.<id> write refused at the create-family door
+	// (task-078175e759f71b73) — malformed input, same bucket as
+	// validation_failed: there is no release/version-set entity here to
+	// resolve the id against, so the fix is the caller's, not a retry.
+	"versions_id_not_supported": exitValidation,
+	"invalid_paper":             exitValidation,
+	"malformed_op":              exitValidation,
+	"invalid_op":                exitValidation,
+	"block_not_found":           exitValidation,
+	"type_mismatch":             exitValidation,
+	"duplicate_id":              exitValidation,
 	// Blob-push refusals from the media put_blob route (the sidecar channel
 	// `bp cloud workspace import --with-blobs` writes to). Both are 422s emitted
 	// BEFORE any byte touches disk — a traversal/malformed relative path, and an

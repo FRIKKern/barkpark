@@ -39,6 +39,8 @@ defmodule Barkpark.Content.Errors do
       "A single If-Match header can't fence a multi-op batch — drop the header and put an ifRevisionID (or ifMatch) inside each mutation instead.",
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
+    "versions_id_not_supported" =>
+      "This server has no release/version-set entity to resolve a versions.<release>.<id> address against — write the document under its plain id instead (drop the versions.<release>. prefix).",
     "duplicate_of" =>
       "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document — or, if this publish REPLACES it, declare content.supersedes with that id and republish.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
@@ -913,6 +915,23 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, :conflict}),
     do: %{code: "conflict", message: "document already exists", status: 409}
+
+  # task-078175e759f71b73 — Sanity's Content Releases id convention,
+  # `versions.<release>.<id>`, has no analog here: there is no release/
+  # version-set entity to resolve it against. `DraftId.draft_id/1` would
+  # otherwise prepend "drafts." onto the WHOLE string unmodified, storing
+  # `drafts.versions.<release>.<id>` as an ordinary document — an address
+  # nobody asked for and nothing resolves back to the release or the real
+  # document id. Refused at the door instead (`Writer.refuse_versions_id/1`).
+  defp build({:error, {:versions_id_not_supported, raw_id}}),
+    do: %{
+      code: "versions_id_not_supported",
+      message:
+        "document id #{inspect(raw_id)} uses Sanity's Content Releases convention " <>
+          "(versions.<release>.<id>), which this server does not support",
+      status: 422,
+      details: %{id: raw_id}
+    }
 
   # Claim-first idempotency: a concurrent request already holds a fresh claim on
   # this Idempotency-Key. 409 so the client retries (Stripe-style) — the handler
