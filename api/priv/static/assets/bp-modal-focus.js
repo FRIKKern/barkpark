@@ -23,12 +23,73 @@
     },
     true
   );
+  var FOCUSABLE =
+    'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+
+  function focusables(container) {
+    return Array.from(container.querySelectorAll(FOCUSABLE)).filter(function (el) {
+      return !el.hidden && !el.closest("[hidden]");
+    });
+  }
+
+  // Keep Tab and Shift+Tab inside `container`; focus that escaped comes back in.
+  function wrapTab(container, e) {
+    var list = focusables(container);
+    if (!list.length) return;
+    var first = list[0];
+    var last = list[list.length - 1];
+    var active = document.activeElement;
+    if (!container.contains(active)) {
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  // Where focus goes back to: the focused element, unless the dialog (or a
+  // parent hook) already moved focus inside, then the last outside focus.
+  function openerOf(container) {
+    var a = document.activeElement;
+    var dialog = container.closest('[aria-modal="true"]') || container;
+    if (a && dialog.contains(a)) return lastOutside;
+    return a && a !== document.body && a !== document.documentElement ? a : null;
+  }
+
   window.BarkparkModalFocus = {
+    // For a dialog that is NOT a LiveView hook (a custom element's own modal):
+    // call on open; Escape anywhere runs `onEscape`, Tab stays inside, and the
+    // returned release() (call it on every close) gives focus back to the
+    // opener, else to `fallback`. Same rules as the hook below.
+    trap(container, opts) {
+      opts = opts || {};
+      var opener = openerOf(container);
+      var onKey = function (e) {
+        if (e.key === "Escape" && typeof opts.onEscape === "function") {
+          e.preventDefault();
+          e.stopPropagation();
+          opts.onEscape();
+        } else if (e.key === "Tab") {
+          wrapTab(container, e);
+        }
+      };
+      document.addEventListener("keydown", onKey, true);
+      var released = false;
+      return function release() {
+        if (released) return;
+        released = true;
+        document.removeEventListener("keydown", onKey, true);
+        var back =
+          opener && opener.isConnected && !(opener.closest && opener.closest("[inert]")) ? opener : opts.fallback;
+        if (back && back.isConnected && typeof back.focus === "function") back.focus();
+      };
+    },
     mounted() {
-      const a = document.activeElement;
-      const dialog = this.el.closest('[aria-modal="true"]') || this.el;
-      const inside = a && dialog.contains(a);
-      this._returnTo = inside ? lastOutside : a && a !== document.body ? a : null;
+      this._returnTo = openerOf(this.el);
       this._returnId = this._returnTo && this._returnTo.id;
       // A trigger with no id is re-found by what it does and says: its
       // phx-click and its aria-label (a restore re-renders the editor header,
@@ -37,22 +98,7 @@
       this._returnLabel = this._returnTo && this._returnTo.getAttribute("aria-label");
       this._focusIn();
       this._onKey = (e) => {
-        if (e.key !== "Tab") return;
-        const list = this._focusables();
-        if (!list.length) return;
-        const first = list[0];
-        const last = list[list.length - 1];
-        const active = document.activeElement;
-        if (!this.el.contains(active)) {
-          e.preventDefault();
-          (e.shiftKey ? last : first).focus();
-        } else if (e.shiftKey && active === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && active === last) {
-          e.preventDefault();
-          first.focus();
-        }
+        if (e.key === "Tab") wrapTab(this.el, e);
       };
       document.addEventListener("keydown", this._onKey, true);
     },
@@ -80,11 +126,7 @@
       if (target) target.focus();
     },
     _focusables() {
-      return Array.from(
-        this.el.querySelectorAll(
-          'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
-        )
-      ).filter((el) => !el.closest("[hidden]"));
+      return focusables(this.el);
     }
   };
 })();

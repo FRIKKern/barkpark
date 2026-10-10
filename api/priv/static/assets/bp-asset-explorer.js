@@ -416,30 +416,6 @@
           if (e.key === "Enter") this._submitCollectionModal();
         });
       }
-      // The dialog is aria-modal: Escape closes it from any of its controls,
-      // and Tab / Shift+Tab cycle inside it (task-3713c75065d471d4).
-      if (this._modalEl) {
-        this._modalEl.addEventListener("keydown", (e) => {
-          if (e.key === "Escape") {
-            e.preventDefault();
-            this._closeCollectionModal();
-            return;
-          }
-          if (e.key !== "Tab") return;
-          const stops = [...this._modalEl.querySelectorAll("input, button")].filter((el) => !el.disabled);
-          if (!stops.length) return;
-          const first = stops[0];
-          const last = stops[stops.length - 1];
-          const active = this._modalEl.ownerDocument.activeElement;
-          if (e.shiftKey && active === first) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && active === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        });
-      }
 
       if (this._loadMoreEl) {
         this._loadMoreEl.addEventListener("click", () => this._loadAssets(true));
@@ -1986,9 +1962,18 @@
 
     _openCollectionModal() {
       if (!this._modalEl || !this._modalInput) return;
-      // Focus goes back where it came from when the dialog closes.
-      this._modalOpener = this.ownerDocument.activeElement;
       this._modalInput.value = this._t("New folder");
+      // The shared dialog focus manager (bp-modal-focus.js): Escape from any
+      // control closes, Tab stays inside, and closing gives focus back to
+      // the opener (task-3713c75065d471d4; one copy since the dialog sweep).
+      const mf = window.BarkparkModalFocus;
+      this._releaseModal =
+        mf && typeof mf.trap === "function"
+          ? mf.trap(this._modalEl, {
+              onEscape: () => this._closeCollectionModal(),
+              fallback: this.querySelector(".bp-ae-new-collection")
+            })
+          : null;
       this._modalEl.hidden = false;
       requestAnimationFrame(() => {
         this._modalInput.focus();
@@ -1999,12 +1984,9 @@
     _closeCollectionModal() {
       if (!this._modalEl || this._modalEl.hidden) return;
       this._modalEl.hidden = true;
-      const back =
-        this._modalOpener && this._modalOpener.isConnected
-          ? this._modalOpener
-          : this.querySelector(".bp-ae-new-collection");
-      this._modalOpener = null;
-      if (back && typeof back.focus === "function") back.focus();
+      const release = this._releaseModal;
+      this._releaseModal = null;
+      if (release) release();
     }
 
     _submitCollectionModal() {
