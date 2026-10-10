@@ -11826,3 +11826,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Unknown function or name"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Row / column"
+msgstr ""

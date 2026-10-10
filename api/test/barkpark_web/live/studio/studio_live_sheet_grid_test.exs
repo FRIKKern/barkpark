@@ -2595,6 +2595,15 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render(nb_view) =~ "Deling på null"
   end
 
+  # The corner header was an empty <th> (axe empty-table-header).
+  test "the corner header names the row-number column", %{conn: conn} do
+    create_sheet!("sg-corner", one_tab(%{}))
+    {view, _target, _} = open!(conn, "sg-corner")
+
+    assert render(view) =~
+             ~r/class="sheet-corner"[^>]*>\s*<span class="sr-only">Row \/ column<\/span>/
+  end
+
   defp status_of(view, tries \\ 50) do
     html = view |> element(~s([data-test-id="sheet-status"])) |> render()
 

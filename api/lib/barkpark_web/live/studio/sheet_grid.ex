@@ -4047,7 +4047,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       </colgroup>
       <thead>
         <tr aria-rowindex="1">
-          <th class="sheet-corner" aria-colindex="1"></th>
+          <%!-- The corner header names the row-number column (axe empty-table-header). --%>
+          <th class="sheet-corner" aria-colindex="1"><span class="sr-only"><%= gettext("Row / column") %></span></th>
           <th
             :for={c <- 1..@cols}
             class="sheet-colhead"

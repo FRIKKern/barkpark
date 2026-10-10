@@ -11826,3 +11826,8 @@ msgstr "Resultatet har ikke plass i cellene ved siden av"
 #, elixir-autogen, elixir-format
 msgid "Unknown function or name"
 msgstr "Ukjent funksjon eller navn"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Row / column"
+msgstr "Rad/kolonne"
