@@ -107,7 +107,12 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                              # a `warnings[].code` on member-add's 201 SUCCESS
                              # (MemberController, owner ruling #7 reclaim), never
                              # an error envelope
-                             "account_reclaimed"
+                             "account_reclaimed",
+                             # a `warnings[].code` on schema apply's 201/200
+                             # SUCCESS (SchemaController, task-415c5c02fad8a3c7:
+                             # a key Barkpark never reads), never an error
+                             # envelope
+                             "schema_unknown_key"
                            ])
 
   defp emitted_codes do
