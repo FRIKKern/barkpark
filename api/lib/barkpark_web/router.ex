@@ -2603,6 +2603,8 @@ defmodule BarkparkWeb.Router do
 
     get("/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/revision/:dataset/:id", HistoryController, :show)
+    # Scheduled publishes, read half (task-8e88b5539acafdae).
+    get("/schedules/:dataset", ScheduleController, :index)
   end
 
   # ── Flat analytics — token-required AND grant-folded (task-633d94b5a598c0f7)
@@ -2775,6 +2777,10 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token, :flat_within_quota, :require_write])
 
     post("/revision/:dataset/:id/restore", HistoryController, :restore)
+    # Scheduled publishes, write half (task-8e88b5539acafdae): scheduling and
+    # cancelling are writes; the publish itself runs later AS the scheduler.
+    post("/schedules/:dataset", ScheduleController, :create)
+    delete("/schedules/:dataset/:schedule_id", ScheduleController, :delete)
   end
 
   # ── Mutations — token + idempotency dedup ──────────────────────────────
@@ -3607,6 +3613,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+    get("/v1/data/schedules/:dataset", ScheduleController, :index)
     # Paper masters, member-token read half (task-2dc7b441443f3aaf) — the
     # masters an author may insert into paper :slug. Writes (save/insert/
     # pin/detach) ride the scoped-mutate pipeline below.
@@ -3639,6 +3646,8 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :require_token, :flat_within_quota, :require_write])
 
     post("/v1/data/revision/:dataset/:id/restore", HistoryController, :restore)
+    post("/v1/data/schedules/:dataset", ScheduleController, :create)
+    delete("/v1/data/schedules/:dataset/:schedule_id", ScheduleController, :delete)
   end
 
   # Scoped mutations — the :scoped_mutate pipeline carries the member write-gate

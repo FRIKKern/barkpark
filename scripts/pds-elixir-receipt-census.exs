@@ -1211,6 +1211,10 @@ defmodule PDS.Census do
     {:post, "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    # task-8e88b5539acafdae — schedule/cancel answer the stored row read back
+    # (`%{schedule: …}`), never an `ok: true` literal.
+    {:post, "/v1/data/schedules/:dataset", "BarkparkWeb.ScheduleController", :create, :status_only_receipt},
+    {:delete, "/v1/data/schedules/:dataset/:schedule_id", "BarkparkWeb.ScheduleController", :delete, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -1288,6 +1292,8 @@ defmodule PDS.Census do
     # also never an `ok: true` literal this lens keys on).
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/data/presence/:dataset/leave", "BarkparkWeb.PresenceController", :leave, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset", "BarkparkWeb.ScheduleController", :create, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset/:schedule_id", "BarkparkWeb.ScheduleController", :delete, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
@@ -1393,6 +1399,8 @@ defmodule PDS.Census do
   # carries this warning in a comment directly above its own `def`. Find them with
   #   grep -rn 'ANCHORED DELETE/REVOKE ROW' api/lib/barkpark_web/controllers
   @exclusion_anchors %{
+    {:delete, "/v1/data/schedules/:dataset/:schedule_id", "BarkparkWeb.ScheduleController", :delete} => {"BarkparkWeb.ScheduleController.delete/2", 1, "19567740"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset/:schedule_id", "BarkparkWeb.ScheduleController", :delete} => {"BarkparkWeb.ScheduleController.delete/2", 1, "19567740"},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create} => {"BarkparkWeb.MemberController.create/2", 1, "92306071"},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update} => {"BarkparkWeb.MemberController.update/2", 1, "98799982"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "59503441"},

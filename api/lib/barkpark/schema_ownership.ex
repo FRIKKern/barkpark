@@ -50,7 +50,7 @@ defmodule Barkpark.SchemaOwnership do
     oidc_connections org_domains organizations paper_access_log paper_events
     plugin_doc_state plugin_settings plugin_settings_audit preview_links preview_token_jti projects
     pulse_counters pulse_events pulse_meters revisions role_permissions roles
-    saml_assertion_replays saml_connections schema_definitions schema_migrations
+    saml_assertion_replays saml_connections scheduled_publishes schema_definitions schema_migrations
     scim_groups scim_tokens search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms secrets
     secrets_audit share_links shares social_identities social_providers
