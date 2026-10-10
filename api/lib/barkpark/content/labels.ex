@@ -212,20 +212,52 @@ defmodule Barkpark.Content.Labels do
   def paper_render_opts(dataset, _style, scope),
     do: render_opts(dataset, scope) |> Map.put(:style, :article) |> put_locale(scope)
 
+  @workspace_locale_key :barkpark_render_workspace_locale
+
   # The renderer's chrome words (task-8e96278fc4ee7097) follow the paper's
   # workspace locale, so the persisted body_html a reader is served speaks the
   # workspace's language. A row with no workspace scope is the Default
   # workspace's. The locale is a render INPUT, not a resolver: it rides the same
   # opts every persisted render (write path, rehydrate sweep, backfills) shares.
+  #
+  # The lookup is memoised on the PROCESS (one request, one LiveView): a surface
+  # that already loaded the workspace — the reader sets the page language from
+  # it via `StudioLocale.put/1` — seeds the memo through
+  # `remember_workspace_locale/2`, so the render costs no extra query
+  # (ReaderQueryBaselineTest pins the reader's statement budget).
   defp put_locale(opts, scope) do
-    workspace =
+    key =
       case Keyword.get(scope, :workspace_id) do
-        ws when is_binary(ws) and ws != "" -> Barkpark.Tenancy.get_workspace_by_id(ws)
-        _ -> Barkpark.Tenancy.get_default_workspace()
+        ws when is_binary(ws) and ws != "" -> ws
+        _ -> :default
       end
 
-    Map.put(opts, :locale, Barkpark.Tenancy.workspace_locale(workspace))
+    locale =
+      case Process.get({@workspace_locale_key, key}) do
+        locale when is_binary(locale) ->
+          locale
+
+        _ ->
+          workspace =
+            if key == :default,
+              do: Barkpark.Tenancy.get_default_workspace(),
+              else: Barkpark.Tenancy.get_workspace_by_id(key)
+
+          locale = Barkpark.Tenancy.workspace_locale(workspace)
+          Process.put({@workspace_locale_key, key}, locale)
+          locale
+      end
+
+    Map.put(opts, :locale, locale)
   end
+
+  @doc false
+  # Seed the per-process locale memo for a workspace the caller already loaded.
+  def remember_workspace_locale(workspace_id, locale)
+      when is_binary(workspace_id) and is_binary(locale),
+      do: Process.put({@workspace_locale_key, workspace_id}, locale)
+
+  def remember_workspace_locale(_workspace_id, _locale), do: :ok
 
   @doc false
   # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs

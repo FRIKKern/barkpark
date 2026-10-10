@@ -56,6 +56,16 @@ defmodule BarkparkWeb.StudioLocale do
   def put(workspace) do
     locale = resolve(workspace)
     Gettext.put_locale(BarkparkWeb.Gettext, locale)
+
+    # The renderer's words follow this workspace too; hand it the locale we
+    # already loaded so its render opts cost no second workspace query.
+    with %Tenancy.Workspace{id: id} <- workspace,
+         do:
+           Barkpark.Content.Labels.remember_workspace_locale(
+             id,
+             Tenancy.workspace_locale(workspace)
+           )
+
     locale
   end
 
