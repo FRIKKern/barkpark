@@ -153,6 +153,8 @@ defmodule Barkpark.Media.Delivery.Search do
     |> scope_media_to_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
     |> maybe_filter_sha1(Keyword.get(opts, :sha1))
+    |> maybe_filter_mime_list(Keyword.get(opts, :mime_types))
+    |> maybe_exclude_types(Keyword.get(opts, :exclude_types))
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
     |> maybe_filter_text(dataset, opts)
@@ -1184,6 +1186,33 @@ defmodule Barkpark.Media.Delivery.Search do
     do: where(query, [m], m.sha1 == ^sha1)
 
   defp maybe_filter_sha1(query, _), do: query
+
+  # task-774f99d9dd029e24 — `mime=a/b,c/*`: any exact type or `type/*` family.
+  # Entries arrive validated (MediaController), so `*` only ever ends a family.
+  defp maybe_filter_mime_list(query, [_ | _] = entries) do
+    {families, exact} = Enum.split_with(entries, &String.ends_with?(&1, "/*"))
+
+    prefixes =
+      Enum.map(families, &(&1 |> String.trim_trailing("*") |> escape_like() |> Kernel.<>("%")))
+
+    where(
+      query,
+      [m],
+      fragment("lower(?)", m.mime_type) in ^exact or
+        fragment("lower(?) LIKE ANY(?)", m.mime_type, ^prefixes)
+    )
+  end
+
+  defp maybe_filter_mime_list(query, _), do: query
+
+  # `exclude_type=image,video`: drop these top-level types. A row with no mime
+  # type is kept (it is not an image).
+  defp maybe_exclude_types(query, [_ | _] = types) do
+    prefixes = Enum.map(types, &(escape_like(&1) <> "/%"))
+    where(query, [m], not fragment("coalesce(lower(?), '') LIKE ANY(?)", m.mime_type, ^prefixes))
+  end
+
+  defp maybe_exclude_types(query, _), do: query
 
   defp maybe_filter_mime(query, nil), do: query
   defp maybe_filter_mime(query, ""), do: query

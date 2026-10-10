@@ -303,6 +303,13 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def index(conn, %{"dataset" => dataset} = params) do
+    case media_type_filters(params) do
+      {:ok, type_opts} -> do_index(conn, dataset, params, type_opts)
+      {:error, message} -> bad_request(conn, message)
+    end
+  end
+
+  defp do_index(conn, dataset, params, type_opts) do
     t0 = System.monotonic_time(:microsecond)
 
     opts =
@@ -321,7 +328,7 @@ defmodule BarkparkWeb.V1.MediaController do
         # task-b6e57c37f6928344 — exact content-hash lookup, so a client can
         # skip the transfer. Same scope as every other filter on this list.
         sha1: sha1_param(params["sha1"])
-      ] ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
+      ] ++ type_opts ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
 
     {files, total} = Media.query_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
@@ -886,6 +893,62 @@ defmodule BarkparkWeb.V1.MediaController do
   # MediaSearchParams / BulldocsIngestController.
   defp blank_to_nil(v) when is_binary(v) and v != "", do: v
   defp blank_to_nil(_), do: nil
+
+  # task-774f99d9dd029e24 — the file picker's two filters, both server-side so
+  # they paginate and count like every other filter on this list:
+  #   * `mime=application/pdf,text/*` — any of these exact types or `type/*`
+  #     families;
+  #   * `exclude_type=image` (or `image,video`) — drop these top-level types.
+  # Each entry is validated; a bad one is a 400 that names it, never a silent
+  # drop that would widen the list.
+  @max_type_filter_entries 20
+  @mime_entry ~r{\A[a-z0-9][a-z0-9!#$&^_.+-]*/(\*|[a-z0-9][a-z0-9!#$&^_.+-]*)\z}
+  @top_type ~r{\A[a-z0-9][a-z0-9!#$&^_.+-]*\z}
+
+  defp media_type_filters(params) do
+    with {:ok, mimes} <- type_list(params["mime"], "mime", @mime_entry, "type/subtype or type/*"),
+         {:ok, excluded} <-
+           type_list(
+             params["exclude_type"],
+             "exclude_type",
+             @top_type,
+             "a top-level type such as image"
+           ) do
+      {:ok, [mime_types: mimes, exclude_types: excluded]}
+    end
+  end
+
+  defp type_list(nil, _name, _re, _want), do: {:ok, nil}
+  defp type_list("", _name, _re, _want), do: {:ok, nil}
+
+  defp type_list(raw, name, re, want) when is_binary(raw) do
+    entries = raw |> String.split(",") |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+
+    cond do
+      length(entries) > @max_type_filter_entries ->
+        {:error,
+         "#{name} takes at most #{@max_type_filter_entries} entries, got #{length(entries)}"}
+
+      bad = Enum.find(entries, &(not Regex.match?(re, &1))) ->
+        {:error, "#{name} entry #{inspect(bad)} is not #{want}"}
+
+      true ->
+        {:ok, Enum.uniq(entries)}
+    end
+  end
+
+  defp type_list(_raw, name, _re, want), do: {:error, "#{name} must be a comma list of #{want}"}
+
+  defp bad_request(conn, message) do
+    env =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, message)
+
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: Map.delete(env, :status)})
+  end
 
   # Lower-cased, so an upper-case hex digest still matches. A present but
   # malformed value is kept, never dropped: it matches nothing, so a typo

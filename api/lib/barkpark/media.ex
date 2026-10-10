@@ -505,6 +505,8 @@ defmodule Barkpark.Media do
         :offset,
         :sha1,
         :mime_type,
+        :mime_types,
+        :exclude_types,
         :kind,
         :q,
         :status,
