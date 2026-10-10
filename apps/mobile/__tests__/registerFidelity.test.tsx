@@ -181,12 +181,27 @@ const REGISTER_BLIND: Record<string, Reason> = {
   diff: 'mono-apparatus',
   filetree: 'mono-apparatus',
 
-  // ── label / row chrome (16)
+  // ── label / row chrome (29)
   action: 'label-chrome',
   // field-number (B085): a labelled numeric definition row — label + value
   // chrome with no prose measure to carry, the `stat` precedent
   // (pbw-fix-field-number-react).
   'field-number': 'label-chrome',
+  // The schema field blocks (task-7375ba22758155fa): the same labelled datum
+  // row as field-number, every string on a fixed scale.sm chrome rung.
+  'field-string': 'label-chrome',
+  'field-slug': 'label-chrome',
+  'field-text': 'label-chrome',
+  'field-boolean': 'label-chrome',
+  'field-select': 'label-chrome',
+  'field-datetime': 'label-chrome',
+  'field-color': 'label-chrome',
+  'field-reference': 'label-chrome',
+  'field-image': 'label-chrome',
+  composite: 'label-chrome',
+  arrayOf: 'label-chrome',
+  codelist: 'label-chrome',
+  localizedText: 'label-chrome',
   byline: 'label-chrome',
   eyebrow: 'label-chrome',
   // The reader-synthesised pre-gate badge (#17199): a one-line caps micro mark
@@ -407,7 +422,8 @@ describe('arm 3 — the register fingerprint (D50 REGISTER_BLIND)', () => {
     // register. It cannot rot from the outside.
     // 43 → 44: field-number's label-chrome ruling (pbw-fix-field-number-react).
     // 44 → 45: pre-gate-badge's label-chrome ruling (docgates-s27, #17199).
-    expect(Object.keys(REGISTER_BLIND)).toHaveLength(45)
+    // 45 → 58: the 13 schema field blocks' label-chrome ruling (task-7375ba22758155fa).
+    expect(Object.keys(REGISTER_BLIND)).toHaveLength(58)
     // Derived from the map, never a second copy of the literal above: the
     // partition must be total, with no type both blind and sensitive.
     const sensitive = Object.keys(BLOCK_RENDERERS).filter((t) => REGISTER_BLIND[t] === undefined)

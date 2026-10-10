@@ -11,18 +11,17 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Modeled on `Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity` as a SIBLING
   (pure `build/1` → byte-equal N-mirror write → freshness lock), NOT an extension:
   that task freezes a HAND-DERIVED structural projection for 13 component types;
-  this one freezes the REAL `:article` HTML emission for the 65 blog-grammar types
+  this one freezes the REAL `:article` HTML emission for the 79 in-scope types
   plus a parser-derived DOM-shape the JS Layer-2 comparator reads.
 
-  ## The 65 in-scope types (charter D7)
+  ## The 79 in-scope types (charter D7, widened)
 
-  `compose.ex` dispatches 63 distinct block types (incl. the 3 interactive chat
-  cards from #3514 — chat-approval/chat-question/chat-plan — and gauge-list from
-  #3670). The 15 schema-field/embed types
-  (`field-{string,slug,text,boolean,select,datetime,color,reference,image,number}`,
-  `composite`, `arrayOf`, `codelist`, `localizedText`, `embed`) are OUT — they have
-  zero web-fork seed, are schema-editor renderers not blog grammar, and are never
-  named in the wish. The remaining in-scope types ARE the kitchen-sink array. BOTH members of
+  Every type `compose.ex` dispatches except `embed` and `master-ref`, which
+  resolve server side at read time. Charter D7 first cut the 14 schema field
+  blocks (`field-{string,slug,text,boolean,select,datetime,color,reference,image,number}`,
+  `composite`, `arrayOf`, `codelist`, `localizedText`) as schema-editor renderers;
+  task-7375ba22758155fa brought them back when @barkpark/react gained their
+  emitters. The in-scope types ARE the kitchen-sink array. BOTH members of
   the 3 alias pairs are present so the harness exercises alias dispatch:
   `questionnaire`/`form`, `stat-grid`/`stats`, `task-list`/`tasks`. `quiz` (a
   LiveView plugin, no Pd-tree block) and `onix` (separate XML) are NOT compose.ex
@@ -73,7 +72,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   alias Barkpark.PortableDoc.Render
 
-  # ── the 65 in-scope authored inputs ───────────────────────────────────────────
+  # ── the 79 in-scope authored inputs ───────────────────────────────────────────
   #
   # ONE realistic block per in-scope type. Every string is whitespace-clean so the
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
@@ -782,19 +781,69 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         }
       ]
     },
-    "status-legend" => %{"type" => "status-legend"}
+    "status-legend" => %{"type" => "status-legend"},
+    # Schema field blocks (task-7375ba22758155fa): the read-only definition rows
+    # @barkpark/react now renders too. `embed` and `master-ref` stay excluded.
+    "field-string" => %{"type" => "field-string", "label" => "Title", "value" => "Field notes"},
+    "field-slug" => %{"type" => "field-slug", "label" => "Slug", "value" => "field-notes"},
+    "field-text" => %{"type" => "field-text", "label" => "Summary", "value" => "Short and plain."},
+    "field-boolean" => %{"type" => "field-boolean", "label" => "Featured", "value" => true},
+    "field-select" => %{
+      "type" => "field-select",
+      "label" => "Status",
+      "value" => "live",
+      "options" => [
+        %{"value" => "draft", "label" => "Draft"},
+        %{"value" => "live", "label" => "Live"}
+      ]
+    },
+    "field-datetime" => %{
+      "type" => "field-datetime",
+      "label" => "Publish at",
+      "value" => "2026-10-10T09:30"
+    },
+    "field-number" => %{
+      "type" => "field-number",
+      "label" => "Weight",
+      "value" => 2.5,
+      "unit" => "kg"
+    },
+    "field-color" => %{"type" => "field-color", "label" => "Accent", "value" => "#1e5347"},
+    "field-reference" => %{
+      "type" => "field-reference",
+      "label" => "Author",
+      "value" => "author-ada"
+    },
+    "field-image" => %{
+      "type" => "field-image",
+      "label" => "Cover",
+      "value" => "https://example.com/cover.jpg"
+    },
+    "composite" => %{
+      "type" => "composite",
+      "label" => "SEO",
+      "fields" => [
+        %{"name" => "title", "title" => "Meta title"},
+        %{"name" => "index"}
+      ],
+      "value" => %{"title" => "Field notes", "index" => true}
+    },
+    "arrayOf" => %{"type" => "arrayOf", "label" => "Tags", "value" => ["alpha", "beta"]},
+    "codelist" => %{"type" => "codelist", "label" => "Language", "value" => "nob"},
+    "localizedText" => %{
+      "type" => "localizedText",
+      "label" => "Tagline",
+      "languages" => ["nob", "eng"],
+      "value" => %{"nob" => "Hei", "eng" => "Hello"}
+    }
   }
 
-  # The 15 schema-field/embed types cut by charter D7 — the ONE lever a later wave
-  # edits to pull the field-* set back into scope — plus `master-ref`
-  # (task-59f078a2fd248698): a linked master instance resolves server side at
-  # read time, like `embed`, and the JS renderer emits nothing for it. Kept here as the executable
-  # counterpart of the bash guard's `excluded` list (asserted equal in the test).
-  @excluded ~w(
-    field-string field-slug field-text field-boolean field-select field-datetime
-    field-color field-reference field-image field-number composite arrayOf codelist localizedText embed
-    master-ref
-  )
+  # The types that resolve server side at read time and have no JS emitter:
+  # `embed` (transclusion) and `master-ref` (task-59f078a2fd248698, a linked
+  # master instance). The 14 schema field blocks charter D7 cut were pulled back
+  # in by task-7375ba22758155fa. Kept here as the executable counterpart of the
+  # bash guard's `excluded` list (asserted equal in the test).
+  @excluded ~w(embed master-ref)
 
   # The 3 alias pairs — BOTH members are in-scope so alias dispatch is exercised.
   @alias_pairs [{"questionnaire", "form"}, {"stat-grid", "stats"}, {"task-list", "tasks"}]
@@ -804,7 +853,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # in-scope types whose output changes with `:locale` (one member per alias
   # pair) plus a title-less collapsible callout (the tone-name fallback). It is
   # named `*.locale-golden.json`, not `*.golden.json`, so the per-type census
-  # (65 types, one fixture each) is untouched.
+  # (79 types, one fixture each) is untouched.
   @locale_goldens %{
     "nb-NO" => [
       "form",
@@ -837,13 +886,13 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "The two mirror DIRECTORIES the fixtures are written into (also read by the freshness test)."
   def mirror_dirs, do: [@api_dir, @js_dir]
 
-  @doc "The excluded (out-of-scope) type set — charter D7's 14 schema-field/embed types."
+  @doc "The excluded (out-of-scope) type set: the resolver-context types `embed` and `master-ref`."
   def excluded, do: @excluded
 
   @doc "The 3 alias pairs whose BOTH members are in-scope."
   def alias_pairs, do: @alias_pairs
 
-  @doc "The 65 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
+  @doc "The 79 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
   def types, do: @inputs |> Map.keys() |> Enum.sort()
 
   @doc "The authored input block for a type slug."
