@@ -3523,7 +3523,12 @@
       border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
     }
     .profile-colors { display: flex; gap: 8px; flex-wrap: wrap; }
-    .profile-color-option { cursor: pointer; }
+    .profile-color-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .profile-color-fieldset > legend { padding: 0; }
+    .profile-color-option { position: relative; cursor: pointer; }
+    .profile-color-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .profile-color-input:checked + .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
+    .profile-color-input:focus-visible + .profile-color-swatch { outline: 2px solid var(--ring); outline-offset: 2px; }
     .profile-color-option.selected .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
     .profile-color-swatch {
       display: block; width: 28px; height: 28px; border-radius: 50%;
