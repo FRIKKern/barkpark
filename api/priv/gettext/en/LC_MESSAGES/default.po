@@ -443,7 +443,7 @@ msgstr ""
 msgid "Close"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:85
+#: lib/barkpark_web/live/studio/media_live.ex:92
 #: lib/barkpark_web/studio_locale.ex:119
 #, elixir-autogen, elixir-format
 msgid "Media library"
@@ -8354,17 +8354,17 @@ msgstr ""
 msgid "Select hidden divider"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:143
+#: lib/barkpark_web/live/studio/media_live.ex:144
 #, elixir-autogen, elixir-format
 msgid "Admin access required to publish this scope's media."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:162
+#: lib/barkpark_web/live/studio/media_live.ex:163
 #, elixir-autogen, elixir-format
 msgid "Could not publish this scope's media."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:147
+#: lib/barkpark_web/live/studio/media_live.ex:148
 #, elixir-autogen, elixir-format
 msgid "No resolved scope to publish."
 msgstr ""
@@ -8379,17 +8379,17 @@ msgstr ""
 msgid "Public — within this scope's sharing"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:108
+#: lib/barkpark_web/live/studio/media_live.ex:109
 #, elixir-autogen, elixir-format
 msgid "Publish this scope's media"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:97
+#: lib/barkpark_web/live/studio/media_live.ex:98
 #, elixir-autogen, elixir-format
 msgid "Scope %{scope}: %{state}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/media_live.ex:157
+#: lib/barkpark_web/live/studio/media_live.ex:158
 #, elixir-autogen, elixir-format
 msgid "This scope's media is published — the :media share is live."
 msgstr ""
@@ -11320,4 +11320,59 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:252
 #, elixir-autogen, elixir-format
 msgid "Asset details"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:902
+#, elixir-autogen, elixir-format
+msgid "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:889
+#, elixir-autogen, elixir-format
+msgid "Opened “%{name}”."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:890
+#, elixir-autogen, elixir-format
+msgid "Opened."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:893
+#, elixir-autogen, elixir-format
+msgid "Opening “%{name}”…"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:894
+#, elixir-autogen, elixir-format
+msgid "Opening…"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:891
+#, elixir-autogen, elixir-format
+msgid "Selected “%{name}”."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:892
+#, elixir-autogen, elixir-format
+msgid "Selected."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:900
+#, elixir-autogen, elixir-format
+msgid "Still working on your last press — that one was not sent."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:896
+#, elixir-autogen, elixir-format
+msgid "That press did not reach the server — press it again."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:897
+#, elixir-autogen, elixir-format
+msgid "Working on “%{name}”…"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:898
+#, elixir-autogen, elixir-format
+msgid "Working…"
 msgstr ""

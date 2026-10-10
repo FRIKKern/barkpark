@@ -832,12 +832,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "sending a message renders the user bubble and goes to working", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hei Claude"})
       assert html =~ "hei Claude"
-      assert html =~ "working"
+      # The chat's own status, not the page: the Studio bar's press-answer words
+      # (data-press-strings, task-24a481a493ad60d7) carry "Working…" on every page.
+      assert html =~ ~r/data-chat-status="(working|thinking)"/
     end
 
     test "an empty message is ignored", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "   "})
-      refute html =~ "working"
+      refute html =~ ~r/data-chat-status="(working|thinking)"/
     end
 
     # Server-owned runtime (wave 4, charter D28): tabs are VIEWERS. A second
@@ -7168,7 +7170,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # This is the phase-1 render (the handle_event reply) — the words + the
       # working status are here INSTANTLY, before any subprocess work.
       assert html =~ "did you get this"
-      assert html =~ "working"
+      assert html =~ ~r/data-chat-status="(working|thinking)"/
       assert html =~ ~s(data-role="user")
     end
 

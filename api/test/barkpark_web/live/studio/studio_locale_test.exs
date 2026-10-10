@@ -176,6 +176,32 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     assert Enum.count(nested) == 0, "a landmark nests inside a pane column"
   end
 
+  # task-24a481a493ad60d7: the press answer (the live region that tells a screen
+  # reader what a press did) spoke English; the bar now carries its words.
+  test "the Studio bar carries the press answer's words in the workspace's language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    press_strings = fn html ->
+      [json] =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#studio-bar")
+        |> LazyHTML.attribute("data-press-strings")
+
+      Jason.decode!(json)
+    end
+
+    {:ok, _view, nb} = live(conn, desk(ws, proj))
+    assert press_strings.(nb)["Opened “%{name}”."] == "Åpnet «%{name}»."
+    assert press_strings.(nb)["Opening…"] == "Åpner …"
+
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {:ok, _view, en} = live(conn, desk(default_ws, default_proj))
+    assert press_strings.(en)["Opened “%{name}”."] == "Opened “%{name}”."
+  end
+
   test "the default workspace keeps the English top bar", %{conn: conn} do
     {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
     {:ok, _view, html} = live(conn, desk(default_ws, default_proj))

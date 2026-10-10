@@ -103,6 +103,10 @@ const chromeAnchor = new Function("ev", "t", chromeAnchorHelper[1]);
 const settleHelper = layout.match(/_paSettleWord\(p\) \{([\s\S]*?)\n      \},/);
 assert.ok(settleHelper, "the watchdog settle classifier must remain present");
 const settleWord = new Function("p", settleHelper[1]);
+// The answer's words in the Studio language ride _paT (task-24a481a493ad60d7).
+const tHelper = layout.match(/_paT\(text, vars\) \{([\s\S]*?)\n      \},/);
+assert.ok(tHelper, "the press answer's word lookup must remain present");
+const paT = new Function("text", "vars", tHelper[1]);
 
 // THE SETTLE ITSELF, extracted rather than mirrored (task-ce909110bce2fddf).
 // A hand-written copy of this branch in the transition fixture below is how
@@ -117,6 +121,7 @@ const hook = {
   _paPressedWitness: pressedWitness,
   _paPressedChanged: pressedChanged,
   _paScopeFor: scopeFor,
+  _paT: paT,
 };
 const betaMode = document.querySelector('[data-test-id="editor-mode-beta"]');
 const betaPressed = hook._paPressedWitness(betaMode);
@@ -263,6 +268,7 @@ const transitionHook = {
   _paScopeFor: scopeFor,
   _paOnChromeAnchor: chromeAnchor,
   _paSettleWord: settleWord,
+  _paT: paT,
   _paSay(text) {
     transitionMessages.push(text);
     transitionDocument.getElementById("bp-press-answer").textContent = text;
@@ -367,6 +373,7 @@ const chromeHook = {
   _paScopeFor: scopeFor,
   _paOnChromeAnchor: chromeAnchor,
   _paName(el) { return el.getAttribute("aria-label") || null; },
+  _paT: paT,
   _paSay(text) { said.push(text); },
   _paRelease(text) { this._paPending = null; this._paSay(text || ""); },
 };
@@ -490,6 +497,7 @@ function teardownFixture(fade) {
     { pretendToBeVisual: true, url: "http://localhost/w/default/studio" },
   );
   const hook = {
+    _paT: paT,
     el: tdom.window.document.getElementById("studio-panes"),
     _PA_FADE: fade,
     _raf: 0,
@@ -642,6 +650,7 @@ function settleFixture(currentSig, pressedMoved) {
     _paPending: null,
     _paFadeT: 0,
     _paSettleWord: settleWord,
+  _paT: paT,
     _paSettle: settle,
     _paCurrentSig() { return currentSig; },
     _paPressedChanged() { return pressedMoved; },

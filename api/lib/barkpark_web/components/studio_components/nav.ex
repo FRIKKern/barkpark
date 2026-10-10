@@ -855,7 +855,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   def studio_topbar(assigns) do
     ~H"""
-    <div class="studio-bar" id="studio-bar" phx-hook="PressAnswer">
+    <div class="studio-bar" id="studio-bar" phx-hook="PressAnswer" data-press-strings={press_answer_strings()}>
       <%= render_slot(@brand) %>
       <%= render_slot(@tabs) %>
       <%= for a <- @actions do %><%= render_slot(a) %><% end %>
@@ -880,5 +880,28 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       <%= render_slot(@inner_block) %>
     </div>
     """
+  end
+
+  # The press answer's words in the Studio's language (task-24a481a493ad60d7),
+  # keyed by the English the PressAnswer hook falls back to.
+  defp press_answer_strings do
+    Jason.encode!(%{
+      "Opened “%{name}”." => gettext("Opened “%{name}”.", name: "%{name}"),
+      "Opened." => gettext("Opened."),
+      "Selected “%{name}”." => gettext("Selected “%{name}”.", name: "%{name}"),
+      "Selected." => gettext("Selected."),
+      "Opening “%{name}”…" => gettext("Opening “%{name}”…", name: "%{name}"),
+      "Opening…" => gettext("Opening…"),
+      "That press did not reach the server — press it again." =>
+        gettext("That press did not reach the server — press it again."),
+      "Working on “%{name}”…" => gettext("Working on “%{name}”…", name: "%{name}"),
+      "Working…" => gettext("Working…"),
+      "Still working on your last press — that one was not sent." =>
+        gettext("Still working on your last press — that one was not sent."),
+      "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived." =>
+        gettext(
+          "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+        )
+    })
   end
 end
