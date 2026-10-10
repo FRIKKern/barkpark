@@ -240,10 +240,25 @@ defmodule Barkpark.Content.Writer do
   #   form_endpoint   — Forms plugin's sibling type, same Contract module,
   #                      same no-schema shape; exempted defensively even
   #                      though no direct create/upsert call site was found
+  #   ticket          — Tickets plugin (Plugins.Tickets.Thread) — found not
+  #                      by the manual grep above but by
+  #                      `SystemTypeExemptionCoverageTest`'s mechanical
+  #                      re-derivation of it, the day this list shipped —
+  #                      priv/plugins/tickets/ has no schemas/ directory
+  #                      at all, so this one would have refused every
+  #                      ticket create/reply on an enforcing dataset
   #
   # A NEW entry here needs the same grep first — this list is the record of
-  # that audit, not a guess.
-  @system_types ~w(tag task listener form_submission form_endpoint)
+  # that audit, not a guess. `system_types/0` below exposes it to
+  # `SystemTypeExemptionCoverageTest`, which re-runs that same grep as a
+  # mechanical census on every test run — a list is a SNAPSHOT, and that
+  # test is what keeps a newly-introduced schemaless write from silently
+  # falling outside it again (it is also what caught `ticket` above).
+  @system_types ~w(tag task listener form_submission form_endpoint ticket)
+
+  @doc false
+  @spec system_types() :: [String.t()]
+  def system_types, do: @system_types
 
   defp do_check_document_schema(type, _attrs, _dataset, _enforce?) when type in @system_types,
     do: :ok

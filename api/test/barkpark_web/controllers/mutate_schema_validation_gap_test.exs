@@ -490,7 +490,7 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
     # is even read, so an arbitrary/empty attrs map is a valid probe for
     # every member of the list.
     test "every @system_types entry short-circuits to :ok regardless of content, in BOTH modes" do
-      for type <- ~w(tag task listener form_submission form_endpoint) do
+      for type <- ~w(tag task listener form_submission form_endpoint ticket) do
         assert Content.Writer.check_document_schema(type, %{}, @advise_dataset) == :ok,
                "#{type}: expected :ok under ADVISE"
 
