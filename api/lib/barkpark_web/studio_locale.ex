@@ -249,6 +249,7 @@ defmodule BarkparkWeb.StudioLocale do
       "Search assets" => gettext("Search assets"),
       "Search: %{value}" => gettext("Search: %{value}", value: "%{value}"),
       "Select an asset or collection" => gettext("Select an asset or collection"),
+      "Asset details" => gettext("Asset details"),
       "Share link" => gettext("Share link"),
       "Share link created" => gettext("Share link created"),
       "Share link failed" => gettext("Share link failed"),

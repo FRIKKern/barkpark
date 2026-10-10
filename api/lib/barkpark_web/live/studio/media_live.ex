@@ -81,8 +81,18 @@ defmodule BarkparkWeb.Studio.MediaLive do
   def render(assigns) do
     ~H"""
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-      <div id="media-visibility-notice" style="padding: 0.75rem 1rem; font-size: 0.8125rem;">
-        <strong>{MediaVisibilityCopy.translate(@visibility_notice.label)}</strong>
+      <%!-- A named region, so the visibility notice sits inside a landmark. --%>
+      <section
+        id="media-visibility-notice"
+        aria-labelledby="media-visibility-notice-label"
+        style="padding: 0.75rem 1rem; font-size: 0.8125rem;"
+      >
+        <%!-- The page's one heading, for heading navigation (task-0374792cb435a2e3);
+              inside the region, so no content sits outside a landmark. --%>
+        <h1 class="sr-only">{gettext("Media library")}</h1>
+        <strong id="media-visibility-notice-label">
+          {MediaVisibilityCopy.translate(@visibility_notice.label)}
+        </strong>
         <p style="margin: 0.25rem 0;">{MediaVisibilityCopy.translate(@visibility_notice.copy)}</p>
         <p style="margin: 0.25rem 0;">
           {gettext("Scope %{scope}: %{state}",
@@ -98,7 +108,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
         >
           {gettext("Publish this scope's media")}
         </button>
-      </div>
+      </section>
       <div
         id="media-explorer-host"
         class="bp-ae-host"
