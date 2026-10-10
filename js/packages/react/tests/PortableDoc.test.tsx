@@ -716,7 +716,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).toContain('<span style="font-style:italic">em</span>')
     expect(html).toContain('<code>c</code>')
     expect(html).toContain(
-      '<a href="https://ex.com" style="color:var(--paper-accent, #1e5347)">link</a>',
+      '<a href="https://ex.com">link</a>',
     )
     // bare text carries no wrapping span
     expect(html).toContain('plain</p>')

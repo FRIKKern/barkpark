@@ -287,10 +287,8 @@ export function draftHtml(r: Record<string, unknown>, ctx: RenderCtx): string {
  * unmarked text leaf emits BARE escaped text — no wrapping span (walk.ex renders
  * a string child through `escape_html` with no element). */
 
-// Article link colour — the evergreen `--paper-accent`, with the captured
-// paperEmail brand hex as the stylesheet-less fallback (Palettes.article_palette
-// link_color = `var(--paper-accent, #1e5347)`).
-const LINK_STYLE = 'color:var(--paper-accent, #1e5347)'
+// Article links carry no inline style: the `.bp-paper-surface a` rule owns their
+// colour, a THEME value (walk.ex link/3, task-10ca9c3597695db7).
 
 function markName(m: unknown): string {
   if (typeof m === 'string') return m
@@ -343,7 +341,7 @@ function applyMarks(escaped: string, marks: unknown[]): string {
         break
       case 'link': {
         const href = markAttr(m, 'href')
-        acc = `<a href="${safeUrl(href)}" style="${LINK_STYLE}">${acc}</a>`
+        acc = `<a href="${safeUrl(href)}">${acc}</a>`
         bare = false
         break
       }
@@ -555,7 +553,7 @@ export function renderInline(node: Inline): string {
       // `<code>` body stays escaped plain text exactly as the `value` path.
       return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
-      return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlineChildren(node.children)}</a>`
+      return `<a href="${safeUrl(str(node.href))}">${renderInlineChildren(node.children)}</a>`
     case 'wikilink': {
       const target = escapeHtml(str(node.target))
       const alias = str(node.alias)
