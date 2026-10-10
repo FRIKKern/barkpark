@@ -175,6 +175,69 @@ defmodule Barkpark.Content.ValidationFindingsTest do
     assert Enum.find(findings, &(&1.path == "/plain/nob")).code == :text_not_string
   end
 
+  # ── v2: localizedText rules (task-63ce1db795a67a04) ──────────────────────
+  # The field's own pattern/min/max run against EVERY locale's text, each at
+  # /field/<lang>; required means at least one locale holds text, reported
+  # once at /field. Before, the clause checked shape only and every rule
+  # was silently skipped on both passes.
+
+  @localized_rules_schema %{
+    "name" => "post",
+    "fields" => [
+      %{
+        "name" => "code",
+        "type" => "localizedText",
+        "languages" => ["nob", "eng"],
+        "validation" => %{"required" => true, "pattern" => "^[a-z]+$", "min" => 2, "max" => 5}
+      },
+      %{
+        "name" => "teaser",
+        "type" => "localizedText",
+        "languages" => ["nob", "eng"],
+        "validation" => [%{"max" => 3, "level" => "warning"}]
+      }
+    ]
+  }
+
+  defp loc_errors(content),
+    do: Validation.check_findings(content, "t", @localized_rules_schema).errors
+
+  test "v2: localizedText pattern/min/max apply to each locale, path names the locale" do
+    findings = loc_errors(%{"code" => %{"nob" => "ok", "eng" => "BAD"}})
+    assert [%{path: "/code/eng", code: :pattern_mismatch}] = findings
+
+    findings = loc_errors(%{"code" => %{"nob" => "x", "eng" => "toolong"}})
+    assert Enum.find(findings, &(&1.path == "/code/nob")).code == :string_too_short
+    assert Enum.find(findings, &(&1.path == "/code/eng")).code == :string_too_long
+
+    assert loc_errors(%{"code" => %{"nob" => "hei", "eng" => "hi"}}) == []
+  end
+
+  test "v2: localizedText required wants text in at least one locale" do
+    assert [%{path: "/code", code: :required}] = loc_errors(%{"code" => %{}})
+    assert [%{path: "/code", code: :required}] = loc_errors(%{"code" => %{"nob" => ""}})
+    assert [%{path: "/code", code: :required}] = loc_errors(%{})
+    # One filled locale satisfies it; the empty sibling is not a finding.
+    assert loc_errors(%{"code" => %{"nob" => "hei", "eng" => ""}}) == []
+  end
+
+  test "v2: a warning-level localizedText rule warns per locale and never errors" do
+    content = %{"code" => %{"nob" => "hei"}, "teaser" => %{"nob" => "lang", "eng" => "ok"}}
+
+    %{errors: errors, warnings: warnings} =
+      Validation.check_findings(content, "t", @localized_rules_schema)
+
+    assert errors == []
+    assert [%{path: "/teaser/nob", code: :string_too_long}] = warnings
+  end
+
+  test "v2: localizedText rule findings reach the validate/3 error tree" do
+    assert {:error, %{"code" => msgs}} =
+             Validation.validate(%{"code" => %{"eng" => "BAD"}}, nil, @localized_rules_schema)
+
+    assert Enum.any?(msgs, &String.contains?(&1, "/code/eng"))
+  end
+
   # ── v2: image / file structured shapes ────────────────────────────────────
 
   @image_schema %{
