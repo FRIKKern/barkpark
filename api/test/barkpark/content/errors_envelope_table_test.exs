@@ -170,6 +170,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"forbidden_field", {:error, {:forbidden_field, "secret"}}, "forbidden_field", 422,
        [:details]},
       {"conflict", {:error, :conflict}, "conflict", 409, []},
+      {"versions_id_not_supported", {:error, {:versions_id_not_supported, "versions.r1.post-02"}},
+       "versions_id_not_supported", 422, [:details]},
       {"idempotency_key_in_use", {:error, :idempotency_key_in_use}, "idempotency_key_in_use", 409,
        []},
       # THE VETO — deterministic, 409, and it must NOT move when the outage arm
