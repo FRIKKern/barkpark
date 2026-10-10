@@ -240,7 +240,17 @@ function rootFor(meta) {
 }
 function hidden(el) {
   const cs = getComputedStyle(el);
-  return cs.display === "none" || cs.visibility === "hidden";
+  if (cs.display === "none" || cs.visibility === "hidden") return true;
+  // The content of a CLOSED <details> (everything but its <summary>) is not
+  // rendered at all, yet its own computed display stays what CSS says: a
+  // settings form behind "Configure questions" paints nothing at rest and must
+  // not be measured against the reader's text (task-ea3c30b496f03906).
+  const closed = el.closest("details:not([open])");
+  if (closed) {
+    const summary = closed.querySelector(":scope > summary");
+    if (!summary || !summary.contains(el)) return true;
+  }
+  return false;
 }
 function effBg(el) {
   for (let e = el; e; e = e.parentElement) {
@@ -309,6 +319,19 @@ function ownersFor(root) {
   return out;
 }
 function measure() {
+  // CONTROL on hidden() (task-ea3c30b496f03906): a control inside a CLOSED
+  // <details> is not painted, one in its <summary> or in an OPEN <details> is.
+  // A wrong answer fails the whole run instead of quietly dropping owners.
+  const probe = document.createElement("div");
+  probe.innerHTML = '<details><summary><input id="hc-s" value="s"></summary><input id="hc-c" value="c"></details>' +
+    '<details open><summary>x</summary><input id="hc-o" value="o"></details>';
+  document.body.appendChild(probe);
+  const control = { closed: hidden(probe.querySelector("#hc-c")), summary: hidden(probe.querySelector("#hc-s")), open: hidden(probe.querySelector("#hc-o")) };
+  probe.remove();
+  if (!control.closed || control.summary || control.open) {
+    document.getElementById("parity-status").textContent = "BP_PARITY_ERROR=hidden() control failed " + JSON.stringify(control);
+    return;
+  }
   const cases = {};
   for (const meta of FIXTURE_META) {
     const root = rootFor(meta);
