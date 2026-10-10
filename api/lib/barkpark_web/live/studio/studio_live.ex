@@ -768,9 +768,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
     else
       # Plugin words first: the listed catalog leaves out a plugin's SHARED
       # schema row outside the Default workspace, so `paper` read "paper" in
-      # every picker there (task-f1b5f9e279951791).
+      # every picker there (task-f1b5f9e279951791). Only for types a
+      # registered plugin owns: with no plugins the shell names none of them
+      # (plugin_free_boot_test).
+      owned = registered_plugin_types()
+
       plugin_words =
-        Map.new(PaneBuilder.plugin_type_word_types(), &{&1, PaneBuilder.type_word(&1)})
+        for type <- PaneBuilder.plugin_type_word_types(),
+            MapSet.member?(owned, type),
+            into: %{},
+            do: {type, PaneBuilder.type_word(type)}
 
       labels =
         dataset
@@ -784,5 +791,16 @@ defmodule BarkparkWeb.Studio.StudioLive do
     end
   rescue
     _ -> socket
+  end
+
+  # Every document type a registered plugin owns (`owned_schema_types/0`).
+  defp registered_plugin_types do
+    for %{module: module} <- Barkpark.Plugins.Registry.all(),
+        Code.ensure_loaded?(module),
+        function_exported?(module, :owned_schema_types, 0),
+        type <- List.wrap(module.owned_schema_types()),
+        is_binary(type),
+        into: MapSet.new(),
+        do: type
   end
 end
