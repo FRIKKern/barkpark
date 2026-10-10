@@ -560,6 +560,30 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  Every listed blob's linked `mediaAsset` document, resolved in batches
+  (task-55a32a11405d5e9b). First by the request's scope (`opts`, as
+  `asset_docs_for_files/3`), then — for blobs that found none — by each blob's
+  OWN workspace/project, one query per distinct scope. That second step is the
+  set form of the per-hit fallback `AssetResponse.render/3` used to run for
+  every hit without a doc. Render with `asset_doc_resolved: true` so an absent
+  entry is taken as final.
+  """
+  @spec resolve_asset_docs([MediaFile.t()], String.t(), keyword()) :: %{
+          String.t() => struct()
+        }
+  def resolve_asset_docs(files, dataset, opts \\ [])
+      when is_list(files) and is_binary(dataset) and is_list(opts) do
+    found = asset_docs_for_files(files, dataset, opts)
+
+    files
+    |> Enum.reject(&Map.has_key?(found, &1.id))
+    |> Enum.group_by(&MediaFile.scope_opts/1, & &1.id)
+    |> Enum.reduce(found, fn {scope, ids}, acc ->
+      Map.merge(Assets.find_by_media_file_ids(ids, dataset, scope), acc)
+    end)
+  end
+
+  @doc """
   Linked `mediaAsset` document for a blob row, if any.
 
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); threaded
