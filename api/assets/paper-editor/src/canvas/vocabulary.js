@@ -264,8 +264,12 @@ export function slashItemsForVocabulary(items, vocab) {
   if (!vocab) return items;
   const types = allowedBlockTypes(vocab);
   const quoteAs = quoteTypeFor(vocab);
+  // A declared object block wins over a same-named built-in (task-5bc7771edf30199a):
+  // the built-in row is dropped and the declared one offered in its place.
+  const declared = new Set((vocab.objects || []).map((o) => o.name));
   const kept = (items || [])
-    .filter((it) => it && !it.compound && (types.has(it.type) || (it.type === "blockquote" && quoteAs === "pullquote")))
+    .filter((it) => it && !it.compound && !declared.has(it.type))
+    .filter((it) => types.has(it.type) || (it.type === "blockquote" && quoteAs === "pullquote"))
     // The Quote row stays a Quote row; the pick makes the block the field admits.
     .map((it) => (it.type === "blockquote" && quoteAs === "pullquote" ? { ...it, quoteAs } : it));
   const offered = new Set(kept.map((it) => it.type));

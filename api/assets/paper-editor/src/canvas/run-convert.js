@@ -776,6 +776,25 @@ export function runToTiptap(blocks) {
   return { type: "doc", content: (blocks || []).map(blockToNode) };
 }
 
+// Declared object block names that WIN over a same-named canvas-native type
+// (task-5bc7771edf30199a). A field that declares `blocks.of: [{name:"callout",
+// fields:[…]}]` means ITS callout (Sanity's `{tone, text}`), not the canvas's
+// built-in: such a block projects as a bpOpaque carry, edited through the field
+// dialog (inline-object.js), never through the built-in node. Scoped to ONE
+// synchronous call by withObjectOverrides, so two canvases with different
+// vocabularies on one page never see each other's set.
+let OBJECT_OVERRIDES = null;
+
+export function withObjectOverrides(names, fn) {
+  const prev = OBJECT_OVERRIDES;
+  OBJECT_OVERRIDES = names && names.size ? names : null;
+  try {
+    return fn();
+  } finally {
+    OBJECT_OVERRIDES = prev;
+  }
+}
+
 // blockToNode(block) → ONE ProseMirror node. The per-block dispatch runToTiptap maps
 // over its block list — factored out so a CONTAINER (section) can recurse it over its
 // nested children (sectionBlockToNode). The container branch is checked BEFORE the
@@ -784,6 +803,10 @@ function blockToNode(block) {
   {
     const bpId = block && block.id;
     const bpType = block && block.type;
+
+    if (OBJECT_OVERRIDES && OBJECT_OVERRIDES.has(bpType)) {
+      return { type: "bpOpaque", attrs: { bpId, bpType, bpBlock: deepClone(block) } };
+    }
 
     if (isProseType(bpType)) {
       // Lift the single prose node convert.js produced and merge our stamp into

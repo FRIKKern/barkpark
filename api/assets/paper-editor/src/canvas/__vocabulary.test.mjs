@@ -149,12 +149,14 @@ check("the slash menu offers a declared object block, once, as an object row", (
     { type: "callout", label: "Callout" },
   ];
   const offered = slashItemsForVocabulary(items, v);
-  // callout has a canvas item already, so it is kept as that item, not doubled
+  // callout is ALSO a canvas built-in, but the declaration wins
+  // (task-5bc7771edf30199a): the built-in row is dropped and the declared one
+  // offered once, as an object row, so the pick opens its field dialog.
   assert.deepEqual(offered.map((i) => i.type), ["paragraph", "callout", "factBox"]);
   const row = offered.find((i) => i.type === "factBox");
   assert.equal(row.object, true);
   assert.equal(row.label, "Faktaboks");
-  assert.equal(offered.find((i) => i.type === "callout").object, undefined);
+  assert.equal(offered.find((i) => i.type === "callout").object, true);
 });
 
 // task-071f8c843336d12e: a field's blockquote STYLE is the pullquote block.
