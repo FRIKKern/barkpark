@@ -76,7 +76,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0,8).join(" | ")}`);
   }
 }
-const EXPECTED = 7;
+const EXPECTED = 8;
 
 const dialog = () => document.querySelector(".bp-inline-object-dialog");
 const field = (name) => dialog().querySelector(`[data-field="${name}"]`);
@@ -179,6 +179,31 @@ try {
     dom.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true }));
     assert.ok(dialog());
     key(dialog(), "Escape");
+  });
+
+  await check("near the viewport's bottom the dialog flips above its anchor and keeps Save on screen", () => {
+    window.innerHeight = 900;
+    window.innerWidth = 1200;
+    const dom = editor.view.nodeDOM(fb().pos);
+    const realDom = dom.getBoundingClientRect;
+    const realEl = window.HTMLElement.prototype.getBoundingClientRect;
+    dom.getBoundingClientRect = () => ({ top: 830, bottom: 850, left: 40, right: 640, width: 600, height: 20 });
+    window.HTMLElement.prototype.getBoundingClientRect = function () {
+      return this.classList && this.classList.contains("bp-inline-object-dialog")
+        ? { top: 0, bottom: 220, left: 0, right: 300, width: 300, height: 220 }
+        : realEl.call(this);
+    };
+    try {
+      select(fb().pos);
+      key(editor.view.dom, "Enter");
+      const top = parseFloat(dialog().style.top);
+      assert.equal(top, 604, `flipped above the anchor (top ${dialog().style.top})`);
+      assert.ok(top + 220 <= 900 - 8, "its bottom (Save, Cancel) is inside the viewport");
+      key(dialog(), "Escape");
+    } finally {
+      dom.getBoundingClientRect = realDom;
+      window.HTMLElement.prototype.getBoundingClientRect = realEl;
+    }
   });
 
   await check("a server refusal reopens the dialog with the reason on the field it names", async () => {

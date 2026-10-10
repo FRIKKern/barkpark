@@ -134,6 +134,19 @@ function sameJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// Where the dialog sits: 6px below its anchor, or 6px above it when it would
+// run past the viewport's bottom and fits above; then clamped inside the
+// viewport with an 8px margin on every side, so Save and Cancel stay on screen.
+export function dialogPosition(anchor, size, viewport, margin = 8, gap = 6) {
+  const h = size.height || 0;
+  const w = size.width || 0;
+  let top = anchor.bottom + gap;
+  if (top + h > viewport.height - margin && anchor.top - gap - h >= margin) top = anchor.top - gap - h;
+  top = Math.min(Math.max(top, margin), Math.max(margin, viewport.height - margin - h));
+  const left = Math.min(Math.max(anchor.left, margin), Math.max(margin, viewport.width - margin - w));
+  return { top: Math.round(top), left: Math.round(left) };
+}
+
 // ── the dialog ─────────────────────────────────────────────────────────────
 
 export class InlineObjectDialog {
@@ -236,13 +249,21 @@ export class InlineObjectDialog {
       if (!(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement)) e.preventDefault();
     });
     el.addEventListener("keydown", this._onKey);
-    if (anchorRect) {
-      el.style.position = "fixed";
-      el.style.left = `${Math.max(8, Math.round(anchorRect.left))}px`;
-      el.style.top = `${Math.round(anchorRect.bottom + 6)}px`;
-    }
     doc.body.append(el);
     this._el = el;
+    if (anchorRect) {
+      // Measured once it is in the document, so it can flip and clamp.
+      const box = el.getBoundingClientRect();
+      const view = doc.defaultView || window;
+      const { top, left } = dialogPosition(
+        anchorRect,
+        { width: box.width, height: box.height },
+        { width: view.innerWidth, height: view.innerHeight },
+      );
+      el.style.position = "fixed";
+      el.style.left = `${left}px`;
+      el.style.top = `${top}px`;
+    }
   }
 
   _row(field, id) {
