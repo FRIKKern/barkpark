@@ -49,13 +49,92 @@ defmodule BarkparkWeb.ErrorJSONTest do
     assert %{error: env} =
              BarkparkWeb.ErrorJSON.render("500.json", %{
                kind: :error,
-               reason: %DBConnection.ConnectionError{message: "tcp recv: closed"},
+               reason: %Ecto.Query.CastError{message: "cannot cast \"s3cret\" to :binary_id"},
                stack: []
+             })
+
+    assert env.code == "internal_error"
+    assert env.message == "unknown error (Ecto.Query.CastError)"
+    refute env.message =~ "s3cret"
+  end
+
+  # ── A refused or lost DB connection is TYPED (task-f8233616de3513d4) ──────
+  #
+  # Under pool shedding it raises from plugs before any controller runs, and
+  # used to answer `internal_error`. It is the transient 503 the controller
+  # arms already give: `storage_unavailable` / `connection_unavailable`.
+
+  defp conn_fault(method) do
+    BarkparkWeb.ErrorJSON.render("503.json", %{
+      kind: :error,
+      reason:
+        DBConnection.ConnectionError.exception(
+          "connection not available and request was dropped from queue after 50ms s3cret",
+          :queue_timeout
+        ),
+      stack: [],
+      conn: Plug.Test.conn(method, "/v1/data/mutate/production")
+    })
+  end
+
+  test "a DB connection fault on a WRITE answers storage_unavailable with the write hint" do
+    assert %{error: env} = conn_fault(:post)
+    assert env.code == "storage_unavailable"
+    assert env.reason == "connection_unavailable"
+    assert env.hint =~ "CHECK WHETHER IT LANDED"
+    assert env.message == "the database connection was refused or lost while serving this request"
+    refute env.message =~ "s3cret"
+    refute env.message =~ "queue"
+  end
+
+  test "a DB connection fault on a READ answers storage_unavailable with the read hint" do
+    assert %{error: env} = conn_fault(:get)
+    assert env.code == "storage_unavailable"
+    assert env.reason == "connection_unavailable"
+    assert env.hint =~ "CHANGED nothing"
+  end
+
+  test "a DB connection fault with no conn in scope still types (the write hint, the safe one)" do
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("503.json", %{
+               kind: :error,
+               reason: DBConnection.ConnectionError.exception("dropped", :queue_timeout),
+               stack: []
+             })
+
+    assert env.code == "storage_unavailable"
+    assert env.hint =~ "CHECK WHETHER IT LANDED"
+  end
+
+  # CONTROL: only the SHED is typed. A lost connection that is not a queue drop
+  # keeps HTTP 500 (`BarkparkWeb.PoolOverload.status/1`), so its body keeps the
+  # 500 code — a typed 503 code on a 500 would be one code at two statuses.
+  test "CONTROL — a non-shed connection fault (HTTP 500) keeps internal_error" do
+    error = DBConnection.ConnectionError.exception("tcp recv: closed")
+    assert BarkparkWeb.PoolOverload.status(error) == 500
+
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :error,
+               reason: error,
+               stack: [],
+               conn: Plug.Test.conn(:post, "/v1/data/mutate/production")
              })
 
     assert env.code == "internal_error"
     assert env.message == "unknown error (DBConnection.ConnectionError)"
     refute env.message =~ "tcp"
+  end
+
+  test "an EXIT from the pool is not typed: only the raised ConnectionError is" do
+    assert %{error: env} =
+             BarkparkWeb.ErrorJSON.render("500.json", %{
+               kind: :exit,
+               reason: {:timeout, {DBConnection.Holder, :checkout, []}},
+               stack: []
+             })
+
+    assert env.code == "internal_error"
   end
 
   test "speaks an allowlisted exit head atom and never its payload" do
