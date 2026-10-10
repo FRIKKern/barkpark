@@ -55,6 +55,7 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
     "lib/barkpark_web/channels/user_socket.ex",
     "lib/barkpark_web/controllers/app_token_controller.ex",
     "lib/barkpark_web/controllers/pulse_controller.ex",
+    "lib/barkpark_web/live_meter.ex",
     "lib/barkpark_web/plugs/auth_write_rate_limit.ex",
     "lib/barkpark_web/plugs/rate_limit.ex",
     "lib/barkpark_web/plugs/ticket_rate_limit.ex"
@@ -141,9 +142,10 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
     # it into Accounts.reauthenticate/2 for every re-check door); the
     # per-account TOTP attempt budget in Accounts the twelfth
     # (task-4d52cfb35cbb0b08); UserNotifier's per-recipient auth-mail budget
-    # the thirteenth (task-7943350f12d1d5e1).
-    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 13,
-           "expected the 13 call sites the row names, found #{inspect(counts)}"
+    # the thirteenth (task-7943350f12d1d5e1); the /live socket meter
+    # (BarkparkWeb.LiveMeter, anonymous-metering Gate B) the fourteenth.
+    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 14,
+           "expected the 14 call sites the row names, found #{inspect(counts)}"
   end
 
   test "POSITIVE CONTROL: the scanner catches a call site that bypasses the helper" do

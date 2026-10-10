@@ -306,7 +306,9 @@ defmodule BarkparkWeb.Router.Plugins do
       # plugin wants on ITS reader (e.g. `BarkparkWeb.PaperViewer` on the
       # paper reader). It is passed through to the per-route live_session, so
       # it can never leak onto a sibling route or into the shared buckets.
-      on_mount = Keyword.get(opts, :on_mount, [])
+      # `BarkparkWeb.LiveMeter` rides FIRST on every one of them (charter D4
+      # Gate B): the socket half of the `:browser` meter, shadow-only.
+      on_mount = [{BarkparkWeb.LiveMeter, :public} | List.wrap(Keyword.get(opts, :on_mount, []))]
 
       quote do
         live_session unquote(session_name),
