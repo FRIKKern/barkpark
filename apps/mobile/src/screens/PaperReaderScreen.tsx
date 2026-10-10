@@ -22,6 +22,7 @@ import {
 } from 'react-native'
 
 import { makeInstanceClient, type InstanceConnection } from '../api/instance'
+import { localeKey, useWorkspaceLocale } from '../api/workspace'
 import {
   classifyPaperFailure,
   fetchPaper,
@@ -110,9 +111,11 @@ export function PaperReaderScreen({
 
   // serverBase resolves root-relative media srcs (/media/files/…) against the
   // connected instance — the dominant live image shape (review F2).
+  // locale: the renderer's own words (Source/Kilde) follow the workspace.
+  const locale = useWorkspaceLocale(client, localeKey(connection))
   const ctx: BlockCtx = useMemo(
-    () => ({ theme, serverBase: connection.projectUrl }),
-    [theme, connection.projectUrl],
+    () => ({ theme, serverBase: connection.projectUrl, locale }),
+    [theme, connection.projectUrl, locale],
   )
 
   const header = (

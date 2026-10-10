@@ -29,6 +29,9 @@ export interface BlockCtx extends InlineCtx {
   serverBase?: string
   /** Defaults to 'paper'. */
   register?: BlockRegister
+  /** The workspace's language (BCP-47, e.g. 'nb-NO'): the renderer's own words
+   * follow it through `chromeWord` (./chrome). Absent means English. */
+  locale?: string
 }
 
 /** One block renderer. Exported so the chat.tsx sibling types its own six
