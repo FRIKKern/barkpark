@@ -11518,3 +11518,218 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "required"
 msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Metadata"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Rights"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Media file ID"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "File info"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "URL"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "MIME type"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Size (bytes)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Original filename"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Width"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Height"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Asset kind"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Processing status"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "CDN status"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "External processing"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Job ID"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Last callback"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Delivery visibility"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Checked out by"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Checked out at"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Primary collection"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Role"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Focal point"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "X"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Y"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Related assets"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Relation"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Target asset"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Copyright holder"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "License"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Usage notes"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Watermark profile"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Core"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Sharing"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Collection kind"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Virtual filter"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Tags (comma-separated)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Search text"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "MIME prefix"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Parent collection"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Cover asset"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Sort order"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Token"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Expires at"
+msgstr ""

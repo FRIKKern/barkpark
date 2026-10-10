@@ -11518,3 +11518,218 @@ msgstr "Rediger %{name}"
 #, elixir-autogen, elixir-format
 msgid "required"
 msgstr "påkrevd"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Metadata"
+msgstr "Metadata"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Rights"
+msgstr "Rettigheter"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Media file ID"
+msgstr "Mediefil-ID"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "File info"
+msgstr "Filinformasjon"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "URL"
+msgstr "URL"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "MIME type"
+msgstr "MIME-type"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Size (bytes)"
+msgstr "Størrelse (byte)"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Original filename"
+msgstr "Opprinnelig filnavn"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Width"
+msgstr "Bredde"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Height"
+msgstr "Høyde"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Asset kind"
+msgstr "Filtype"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Processing status"
+msgstr "Behandlingsstatus"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "CDN status"
+msgstr "CDN-status"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "External processing"
+msgstr "Ekstern behandling"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Job ID"
+msgstr "Jobb-ID"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Last callback"
+msgstr "Siste tilbakemelding"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Delivery visibility"
+msgstr "Synlighet ved levering"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Checked out by"
+msgstr "Sjekket ut av"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Checked out at"
+msgstr "Sjekket ut"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Primary collection"
+msgstr "Hovedsamling"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Role"
+msgstr "Rolle"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Focal point"
+msgstr "Fokuspunkt"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "X"
+msgstr "X"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Y"
+msgstr "Y"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Related assets"
+msgstr "Relaterte filer"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Relation"
+msgstr "Relasjon"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Target asset"
+msgstr "Målfil"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Copyright holder"
+msgstr "Rettighetshaver"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "License"
+msgstr "Lisens"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Usage notes"
+msgstr "Bruksmerknader"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Watermark profile"
+msgstr "Vannmerkeprofil"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Core"
+msgstr "Grunnleggende"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Sharing"
+msgstr "Deling"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Collection kind"
+msgstr "Samlingstype"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Virtual filter"
+msgstr "Virtuelt filter"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Tags (comma-separated)"
+msgstr "Etiketter (kommaseparert)"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Search text"
+msgstr "Søketekst"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "MIME prefix"
+msgstr "MIME-prefiks"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Parent collection"
+msgstr "Overordnet samling"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Cover asset"
+msgstr "Omslagsfil"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Sort order"
+msgstr "Sorteringsrekkefølge"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Token"
+msgstr "Token"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Expires at"
+msgstr "Utløper"
