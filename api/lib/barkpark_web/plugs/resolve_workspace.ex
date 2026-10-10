@@ -186,6 +186,19 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         do: grant_read_ctx(user, desk_scope(conn, workspace))
 
     cond do
+      # task-ce99fd602a697010 — `:member_user` is the ONE positive signal that
+      # a USER principal (a login session, cookie or bearer, no API token) was
+      # admitted here by MEMBERSHIP. The read gates that ask "is this caller
+      # authenticated?" (`QueryController.authed?/1`, `AnonPerspective`) used to
+      # look for an API token only, so a seated member reading with their login
+      # session was treated as anonymous: private types answered 404 and the
+      # perspective was pinned to published. Never set on the anonymous-default,
+      # grant or share admits below — only here, where membership decided.
+      member? and is_nil(token) and not is_nil(user) ->
+        conn
+        |> assign(:current_workspace, workspace)
+        |> assign(:member_user, true)
+
       member? ->
         assign(conn, :current_workspace, workspace)
 

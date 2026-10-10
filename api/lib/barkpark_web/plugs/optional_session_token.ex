@@ -107,10 +107,28 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
     # User principal the downstream gates (ResolveWorkspace, LiveScope) accept
     # via Tenancy.Auth.authorize/3. Soft like the token arm: invalid/absent
     # passes through anonymous. A token, when present, keeps precedence.
+    #
+    # task-ce99fd602a697010 — a LOGIN token sent as `Authorization: Bearer`.
+    # `/v1/auth/login` answers `token` = a user-session token, the same value
+    # it puts in the `user_session` cookie, and `RequireUserSession` /
+    # `OptionalUserSession` accept it as a bearer. This plug only ever tried a
+    # bearer as an API token (`verify/1`), so the cookie reached the scoped data
+    # API (#22180) and the identical token as a bearer answered 401 under
+    # `strict_on_presented`. A bearer that is not an API token is now tried as
+    # a login session; it wins over the cookie (a bearer is the caller's
+    # explicit choice), and like every bearer it is CSRF-exempt — it is not an
+    # ambient credential. Membership is still decided downstream, per request,
+    # by ResolveWorkspace, so a login session reaches exactly the workspaces
+    # its user is seated in NOW.
     conn =
-      case user_from_session(conn) do
-        %Barkpark.Accounts.User{} = user -> assign(conn, :current_user, user)
-        _ -> conn
+      case (is_nil(bearer_token) && user_from_bearer(conn)) || user_from_session(conn) do
+        {%Barkpark.Accounts.User{} = user, session} ->
+          conn
+          |> assign(:current_user, user)
+          |> assign(:current_user_session, session)
+
+        _ ->
+          conn
       end
 
     # task-2366a212d58a1700 — the ONE row of the precedence table this
@@ -131,14 +149,22 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
 
   defp user_from_session(conn) do
     case get_session(conn, "user_session") do
-      raw when is_binary(raw) and raw != "" ->
-        case Barkpark.Accounts.verify_user_session(String.trim(raw)) do
-          {%Barkpark.Accounts.User{} = user, _session} -> user
-          _ -> nil
-        end
+      raw when is_binary(raw) and raw != "" -> verify_user_session(raw)
+      _ -> nil
+    end
+  end
 
-      _ ->
-        nil
+  defp user_from_bearer(conn) do
+    case get_req_header(conn, "authorization") do
+      ["Bearer " <> raw] -> verify_user_session(raw)
+      _ -> nil
+    end
+  end
+
+  defp verify_user_session(raw) do
+    case Barkpark.Accounts.verify_user_session(String.trim(raw)) do
+      {%Barkpark.Accounts.User{}, _session} = found -> found
+      _ -> nil
     end
   end
 

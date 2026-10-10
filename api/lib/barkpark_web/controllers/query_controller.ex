@@ -1670,9 +1670,14 @@ defmodule BarkparkWeb.QueryController do
   # ONE definition of the tier: `Plugs.PublicRead.public_read_token?/1` is public
   # on purpose (its own comment: "a second copy in the controller is exactly how
   # a clamp and its downstream filter drift apart"). Never re-derive it here.
+  # A token (not the public-read tier), OR a login session that
+  # `ResolveWorkspace` admitted by MEMBERSHIP (`:member_user`,
+  # task-ce99fd602a697010) — a seated member reads as themselves, cookie or
+  # bearer, exactly as their own API token would.
   defp authed?(conn) do
-    not is_nil(conn.assigns[:api_token]) and
-      not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)
+    (not is_nil(conn.assigns[:api_token]) and
+       not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)) or
+      conn.assigns[:member_user] == true
   end
 
   # Perspective resolution + the anon/public-read pin live in ONE place —
