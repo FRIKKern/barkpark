@@ -659,7 +659,7 @@ defmodule BarkparkWeb.Studio.Caps do
     end
   end
 
-  defp gate(event, _params, socket) do
+  defp gate(event, params, socket) do
     case classify(event) do
       tier when tier in [:none, :read] ->
         {:cont, socket}
@@ -675,10 +675,10 @@ defmodule BarkparkWeb.Studio.Caps do
       #     intentionally-open anonymous public-demo posture (an anonymous
       #     non-demo socket never reaches a write event un-restricted).
       :write ->
-        if write_capable?(socket.assigns, derive(socket)) do
-          {:cont, socket}
-        else
-          {:halt, deny(socket)}
+        cond do
+          write_capable?(socket.assigns, derive(socket)) -> {:cont, socket}
+          reader_write_allowed?(event, params, socket.assigns) -> {:cont, socket}
+          true -> {:halt, deny(socket)}
         end
 
       # :admin and :deny (default) both require admin, enforced on ALL sockets.
@@ -693,6 +693,81 @@ defmodule BarkparkWeb.Studio.Caps do
 
   defp deny(socket),
     do: put_flash(socket, :error, "You don't have access to do that.")
+
+  @doc """
+  The READ-seat exception to the `:write` tier (task-97702b326b8bfd6d): a
+  seat that may read but not write may still make the writes a schema opens
+  to readers (`readerWrites`), decided by `Barkpark.Content.ReaderWrites`, the
+  same rules the mutate API applies. Only for a member socket carrying a
+  principal; a share, grant or principal-less socket never gets it.
+
+  `autosave` and `save` are edits of the open document (the fields that
+  change), `publish` publishes its draft. Every other write event stays
+  refused for a read seat.
+  """
+  @spec reader_write_allowed?(String.t(), map(), map()) :: boolean
+  def reader_write_allowed?(event, params, assigns)
+      when event in ~w(autosave save publish) and is_map(assigns) do
+    with false <- readonly_posture?(assigns),
+         false <- restricted?(assigns),
+         true <- has_principal?(assigns),
+         type when is_binary(type) <- Map.get(assigns, :editor_type),
+         %{doc_id: doc_id} when is_binary(doc_id) <- Map.get(assigns, :editor_doc),
+         dataset when is_binary(dataset) <- Map.get(assigns, :dataset),
+         %{id: ws_id} when is_binary(ws_id) <- Map.get(assigns, :current_workspace) do
+      ctx = Barkpark.Content.CallerContext.from_conn(%{assigns: assigns})
+
+      opts = [
+        workspace_id: ws_id,
+        project_id: assigns |> Map.get(:current_project) |> project_id()
+      ]
+
+      case event do
+        "publish" ->
+          Barkpark.Content.ReaderWrites.studio_publish_allowed?(ctx, type, doc_id, dataset, opts)
+
+        _edit ->
+          Barkpark.Content.ReaderWrites.studio_patch_allowed?(
+            ctx,
+            type,
+            doc_id,
+            edited_fields(event, params, assigns),
+            dataset,
+            opts
+          )
+      end
+    else
+      _ -> false
+    end
+  end
+
+  def reader_write_allowed?(_event, _params, _assigns), do: false
+
+  defp project_id(%{id: id}) when is_binary(id), do: id
+  defp project_id(_), do: nil
+
+  # The top-level fields an edit event changes against the open form. A
+  # value the form already holds is not a change; anything not a plain map
+  # counts every key it names.
+  defp edited_fields("autosave", %{"doc" => doc}, assigns) when is_map(doc),
+    do: changed_keys(doc, Map.get(assigns, :editor_form) || %{})
+
+  defp edited_fields("save", _params, assigns) do
+    form = Map.get(assigns, :editor_form) || %{}
+    stored = stored_form(Map.get(assigns, :editor_doc))
+    changed_keys(form, stored)
+  end
+
+  defp edited_fields(_event, _params, _assigns), do: ["*"]
+
+  defp stored_form(%{content: content, title: title}) when is_map(content),
+    do: Map.put(content, "title", title)
+
+  defp stored_form(_doc), do: %{}
+
+  defp changed_keys(new, old) do
+    for {k, v} <- new, Map.get(old, k) != v, do: k
+  end
 
   @doc """
   THE `:admin` AFFORDANCE PREDICATE — the ONE function a render site asks

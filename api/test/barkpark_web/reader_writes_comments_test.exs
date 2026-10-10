@@ -12,6 +12,8 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Phoenix.LiveViewTest
+
   alias Barkpark.{Auth, Content, TenancyFixtures}
 
   @dataset "production"
@@ -260,5 +262,66 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
              )
 
     assert Keyword.has_key?(cs.errors, :reader_writes)
+  end
+
+  describe "LiveView Studio agrees with the API (Caps gate)" do
+    defp studio(raw, type, id) do
+      conn = Plug.Test.init_test_session(scoped_conn(), %{"api_token" => raw})
+      {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{type}/#{id}"))
+      view
+    end
+
+    defp draft(id), do: Content.get_document("drafts." <> id, @comment, @dataset)
+
+    test "another viewer resolves in Studio, cannot rewrite the body", %{viewer1: v1, viewer2: v2} do
+      id = new_id()
+      assert json_response(add_comment(v1, id, "original"), 200)
+      view = studio(v2, @comment, id)
+
+      render_change(view, "autosave", %{"doc" => %{"message" => "rewritten"}})
+      assert {:error, :not_found} = draft(id)
+
+      render_change(view, "autosave", %{"doc" => %{"state" => "resolved"}})
+      assert {:ok, d} = draft(id)
+      assert d.content["state"] == "resolved"
+      assert d.content["message"] == "original"
+
+      render_click(view, "publish")
+      assert published(id).content["state"] == "resolved"
+      assert published(id).content["message"] == "original"
+    end
+
+    test "the creator edits its own body in Studio", %{viewer1: v1} do
+      id = new_id()
+      assert json_response(add_comment(v1, id, "mine"), 200)
+      view = studio(v1, @comment, id)
+
+      render_change(view, "autosave", %{"doc" => %{"message" => "edited"}})
+      assert {:ok, d} = draft(id)
+      assert d.content["message"] == "edited"
+    end
+
+    test "a viewer still cannot edit an unflagged type in Studio", %{viewer1: v1, writer: w} do
+      post_id = "rw-post-#{System.unique_integer([:positive])}"
+
+      assert json_response(
+               mutate(w, [%{"create" => %{"_id" => post_id, "_type" => "post", "title" => "x"}}]),
+               200
+             )
+
+      view = studio(v1, "post", post_id)
+      render_change(view, "autosave", %{"doc" => %{"title" => "y"}})
+      assert {:ok, d} = Content.get_document("drafts." <> post_id, "post", @dataset)
+      assert d.title == "x"
+    end
+
+    test "Caps.classify keeps delete refused for a viewer on a comment", %{viewer1: v1} do
+      id = new_id()
+      assert json_response(add_comment(v1, id, "mine"), 200)
+      view = studio(v1, @comment, id)
+
+      render_click(view, "confirm-delete")
+      assert published(id).content["message"] == "mine"
+    end
   end
 end

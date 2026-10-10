@@ -106,6 +106,83 @@ defmodule Barkpark.Content.ReaderWrites do
   defp check_kind(kind, _body, _dataset, _opts, _ctx, _touched),
     do: {:error, "a read seat may not #{kind}"}
 
+  # ── The LiveView twin ──────────────────────────────────────────────────────
+  #
+  # The Studio writes through events, not mutation batches, so it asks the
+  # SAME rules in event shape. `BarkparkWeb.Studio.Caps` consults these for a
+  # read seat only (a write seat never gets here), so LiveView and the API
+  # agree on what a reader may write.
+
+  @doc """
+  May this read seat EDIT `doc_id` of `type` by changing `changed` (top-level
+  field names)? True when the type declares `readerWrites` and either every
+  changed field is in `patchFields`, or the server recorded this caller as the
+  document's creator.
+  """
+  @spec studio_patch_allowed?(
+          CallerContext.t() | nil,
+          term(),
+          term(),
+          [String.t()],
+          String.t(),
+          keyword()
+        ) ::
+          boolean()
+  def studio_patch_allowed?(ctx, type, doc_id, changed, dataset, opts)
+      when is_binary(type) and is_binary(doc_id) and is_list(changed) do
+    case reader_writes(type, dataset, opts) do
+      {:ok, rw} ->
+        changed -- (rw["patchFields"] || []) == [] or creator?(ctx, doc_id, type, dataset, opts)
+
+      _ ->
+        false
+    end
+  end
+
+  def studio_patch_allowed?(_ctx, _type, _doc_id, _changed, _dataset, _opts), do: false
+
+  @doc """
+  May this read seat PUBLISH the draft of `doc_id`? Only what it may write:
+  the draft differs from the published row in `patchFields` alone, or it is
+  the creator (for a never-published document, `create` must be allowed too).
+  """
+  @spec studio_publish_allowed?(CallerContext.t() | nil, term(), term(), String.t(), keyword()) ::
+          boolean()
+  def studio_publish_allowed?(ctx, type, doc_id, dataset, opts)
+      when is_binary(type) and is_binary(doc_id) do
+    pid = DraftId.published_id(doc_id)
+    scope = Keyword.take(opts, [:workspace_id, :project_id])
+
+    with {:ok, rw} <- reader_writes(type, dataset, opts),
+         {:ok, draft} <- Content.get_document(DraftId.draft_id(pid), type, dataset, scope) do
+      case Content.get_document(pid, type, dataset, scope) do
+        {:ok, published} ->
+          changed = changed_fields(published, draft)
+
+          changed -- (rw["patchFields"] || []) == [] or
+            creator?(ctx, pid, type, dataset, opts)
+
+        _ ->
+          rw["create"] == true and creator?(ctx, pid, type, dataset, opts)
+      end
+    else
+      _ -> false
+    end
+  end
+
+  def studio_publish_allowed?(_ctx, _type, _doc_id, _dataset, _opts), do: false
+
+  # Top-level fields whose stored value differs between two rows (the title
+  # column counts as the field "title").
+  defp changed_fields(a, b) do
+    ca = Map.put(a.content || %{}, "title", a.title)
+    cb = Map.put(b.content || %{}, "title", b.title)
+
+    (Map.keys(ca) ++ Map.keys(cb))
+    |> Enum.uniq()
+    |> Enum.reject(&(Map.get(ca, &1) == Map.get(cb, &1)))
+  end
+
   # The type's grant, or a refusal. An unflagged type grants nothing.
   defp reader_writes(type, dataset, opts) when is_binary(type) do
     case Content.resolve_schema(type, dataset, Keyword.take(opts, [:workspace_id, :project_id])) do
