@@ -1960,9 +1960,9 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-variant-numeric: tabular-nums; white-space: nowrap;
       }
       .bp-pip { background: var(--muted-surface); color: var(--muted-text); font-weight: 600; }
-      .bp-pip[data-priority="0"] { background: var(--danger-soft); color: var(--danger); }
+      .bp-pip[data-priority="0"] { background: var(--danger-soft); color: var(--danger-text); }
       .bp-pip[data-priority="1"] { background: var(--warn-soft); color: var(--warn-text); }
-      .bp-goal { background: var(--info-soft); color: var(--info); }
+      .bp-goal { background: var(--info-soft); color: var(--info-text); }
       .bp-goal::before { content: "↳ "; opacity: 0.7; }
       .bp-label { background: var(--muted-surface); color: var(--muted-text); }
       .bp-label--more { opacity: 0.75; }
@@ -2030,7 +2030,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-variant-numeric: tabular-nums; white-space: nowrap;
         background: var(--muted-surface); color: var(--muted-text);
       }
-      .bp-sub--all-done { color: var(--ok); background: var(--ok-soft); }
+      .bp-sub--all-done { color: var(--ok-text); background: var(--ok-soft); }
       /* Family cards (wave 16): fewer, LARGER cards — the family's mini-tree
          lives inside the root's card, so nothing renders twice. */
       .bp-fam {
@@ -2102,7 +2102,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         font-size: 10px; font-weight: 700;
       }
       .bp-phone-state.is-flight {
-        color: var(--info); background: var(--info-soft);
+        color: var(--info-text); background: var(--info-soft);
         padding: 1px 7px; border-radius: 999px;
       }
       .bp-phone-head .bp-age { margin-left: auto; padding-left: 0; }
@@ -2219,11 +2219,11 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         white-space: nowrap;
       }
       .bp-check.is-met {
-        color: var(--ok); background: var(--ok-soft);
+        color: var(--ok-text); background: var(--ok-soft);
         border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
       }
       .bp-check.is-next {
-        color: var(--info); background: var(--info-soft);
+        color: var(--info-text); background: var(--info-soft);
         border-color: color-mix(in srgb, var(--info) 50%, var(--border));
         animation: bp-crit-pulse 2s ease-in-out infinite;
       }
@@ -2300,7 +2300,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         padding: 4px 10px; border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
         border-radius: 7px;
       }
-      .bp-peek-paper:hover { background: var(--info-soft); }
+      .bp-peek-paper:hover { background: var(--info-soft); color: var(--info-text); }
 
       /* Honest window note — the done ledger shows the newest slice; the full
          count never silently disappears. */

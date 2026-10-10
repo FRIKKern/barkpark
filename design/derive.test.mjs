@@ -689,29 +689,40 @@ test("media picker broken-image notice clears AA 4.5 at its painted opacity, eve
   }
 });
 
-test("primary-text clears AA 4.5 on the primary-soft tint, every theme × mode (ruling on task-f6a066642fcac678)", () => {
+test("every text-on-tint voice clears AA 4.5 on its own soft tint, every theme × mode (rulings on task-f6a066642fcac678, task-399a8a237f339eb1)", () => {
   const soft = JSON.parse(readFileSync(new URL("./tokens.json", import.meta.url), "utf8")).color._convention.softAlpha;
   const q = (rgb) => rgb.map((c) => Math.round(c * 255) / 255);
+  const VOICES = { "ok-text": "status.ok", "warn-text": "status.warn", "danger-text": "status.danger", "info-text": "status.info", "primary-text": "primary" };
   for (const { name, theme } of ALL_THEMES) {
     const { values, misses } = derive(theme);
-    assert.deepEqual(misses.filter((m) => /primary-text/.test(m.slot)), [], `${name}: primary-text walk reported a miss`);
-    for (const mode of ["light", "dark"]) {
-      const fill = parseColor(values[`primary.${mode}`]);
-      const ground = parseColor(values[`bg.${mode}`]);
-      const tint = q(fill.map((c, i) => c * soft[mode] + ground[i] * (1 - soft[mode])));
-      const ratio = contrast(q(parseColor(values[`onTint.primary-text.${mode}`])), tint);
-      assert.ok(ratio >= 4.5, `${name} ${mode}: --primary-text on --primary-soft = ${ratio.toFixed(3)} < 4.5`);
+    assert.deepEqual(misses.filter((m) => /-text\./.test(m.slot)), [], `${name}: a text-on-tint walk reported a miss`);
+    for (const [voice, fillSlot] of Object.entries(VOICES)) {
+      for (const mode of ["light", "dark"]) {
+        for (const g of ["bg", "muted-surface"]) {
+          const fill = parseColor(values[`${fillSlot}.${mode}`]);
+          const ground = parseColor(values[`${g}.${mode}`]);
+          const tint = q(fill.map((c, i) => c * soft[mode] + ground[i] * (1 - soft[mode])));
+          const ratio = contrast(q(parseColor(values[`onTint.${voice}.${mode}`])), tint);
+          assert.ok(ratio >= 4.5, `${name} ${mode}: --${voice} on its tint over --${g} = ${ratio.toFixed(3)} < 4.5`);
+        }
+      }
     }
   }
 });
 
-test("no Studio rule paints var(--primary) text on a primary tint (it takes --primary-text)", () => {
-  // Swept by shape across the Studio layout AND the hand-authored stylesheets
-  // under api/priv/static (task-f6a066642fcac678). A rule whose background is
-  // --primary-soft or an hsl(var(--primary-hsl) / a) tint and whose text is
-  // var(--primary) reads below AA in light.
+test("no Studio rule paints a status or primary fill as text on its own tint (it takes the -text voice)", () => {
+  // Swept by shape across the Studio layout, the hand-authored stylesheets under
+  // api/priv/static, and every LiveView/plugin that inlines a <style> block.
+  const FAMILIES = {
+    primary: ["primary"], ok: ["ok", "success"], warn: ["warn", "warning"],
+    danger: ["danger", "destructive"], info: ["info"],
+  };
+  const libRoot = new URL("../api/lib/", import.meta.url);
+  const exFiles = readdirSync(libRoot, { recursive: true })
+    .filter((f) => /\.(ex|heex)$/.test(f))
+    .map((f) => new URL(f, libRoot));
   const files = [
-    new URL("../api/lib/barkpark_web/layouts/root.html.heex", import.meta.url),
+    ...exFiles,
     ...readdirSync(new URL("../api/priv/static/assets/", import.meta.url))
       .filter((f) => f.endsWith(".css") && !/\.min\.|bundle/.test(f))
       .map((f) => new URL(`../api/priv/static/assets/${f}`, import.meta.url)),
@@ -719,11 +730,15 @@ test("no Studio rule paints var(--primary) text on a primary tint (it takes --pr
   const offenders = [];
   for (const url of files) {
     const css = readFileSync(url, "utf8");
+    if (!/-soft|-hsl\)/.test(css)) continue;
     for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
       const body = m[2];
-      const tinted = /background(?:-color)?\s*:\s*(?:var\(--primary-soft|hsl\(var\(--primary-hsl\)\s*\/)/.test(body);
-      const primaryText = /(?<![-\w])color\s*:\s*var\(--primary\)/.test(body);
-      if (tinted && primaryText) offenders.push(`${url.pathname.split("/").pop()}: ${m[1].trim().slice(-60)}`);
+      for (const names of Object.values(FAMILIES)) {
+        const alt = names.join("|");
+        const tinted = new RegExp(`background(?:-color)?\\s*:\\s*(?:var\\(--(?:${alt})-soft|hsl\\(var\\(--(?:${alt})-hsl\\)\\s*\\/)`).test(body);
+        const fillText = new RegExp(`(?<![-\\w])color\\s*:\\s*var\\(--(?:${alt})\\)`).test(body);
+        if (tinted && fillText) offenders.push(`${url.pathname.split("/").pop()}: ${m[1].trim().slice(-60)}`);
+      }
     }
   }
   assert.deepEqual(offenders, []);

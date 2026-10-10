@@ -69,7 +69,10 @@ for (const role of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) {
 
 // --- text-on-tint voices: warn-text (Studio-only, task-98bc0a831eecc140) -------
 const onTint = color.onTint || {};
-for (const role of ["warn-text", "primary-text"]) {
+// The voices are read from the tokens themselves (not a second hand list beside
+// emit.mjs ON_TINT): every key of color.onTint but its _note.
+const ON_TINT_VOICES = Object.keys(onTint).filter((k) => !k.startsWith("_"));
+for (const role of ON_TINT_VOICES) {
   ok(onTint[role] != null, `color.onTint.${role} is required (status text on its own -soft tint, Studio-only)`);
   hslPair(onTint[role], `color.onTint.${role}`);
 }
@@ -88,19 +91,28 @@ for (const role of ["warn-text", "primary-text"]) {
   }
 }
 
-// primary-text is the brand primary as TEXT on --primary-soft (ruling on
-// task-f6a066642fcac678): AA on the composited tint (primary at softAlpha over
-// bg), both modes. The fill read 4.06 there in light.
+// Every text-on-tint voice is AA on its own composited tint (fill at softAlpha
+// over bg), both modes (rulings on task-f6a066642fcac678, task-399a8a237f339eb1).
 {
   const soft = (color._convention && color._convention.softAlpha) || {};
-  for (const m of ["light", "dark"]) {
-    const ground = parseColor(color.bg && color.bg[m]);
-    const fill = parseColor(color.primary[m]);
-    const a = Number(soft[m]);
-    const tint = fill.map((c, i) => c * a + ground[i] * (1 - a));
-    const ratio = contrast(onTint["primary-text"][m], tint);
-    ok(ratio >= 4.5,
-      `color.onTint.primary-text.${m} must clear AA 4.5 on the primary tint (softAlpha ${a} over bg.${m}); got ${ratio.toFixed(2)}`);
+  // A voice names its fill: primary-text -> color.primary, <role>-text -> color.status.<role>.
+  const fillOf = (voice) => (voice === "primary-text" ? color.primary : color.status[voice.replace(/-text$/, "")]);
+  for (const voice of ON_TINT_VOICES) {
+    const fillPair = fillOf(voice);
+    ok(fillPair, `color.onTint.${voice} names no fill (expected primary-text or a status role)`);
+    if (!fillPair) continue;
+    for (const m of ["light", "dark"]) {
+      // On the page (bg) and on panels (muted-surface) — a chip sits on both.
+      for (const g of ["bg", "muted-surface"]) {
+        const ground = parseColor(color[g] && color[g][m]);
+        const fill = parseColor(fillPair[m]);
+        const a = Number(soft[m]);
+        const tint = fill.map((c, i) => c * a + ground[i] * (1 - a));
+        const ratio = contrast(onTint[voice][m], tint);
+        ok(ratio >= 4.5,
+          `color.onTint.${voice}.${m} must clear AA 4.5 on its tint (softAlpha ${a} over ${g}.${m}); got ${ratio.toFixed(2)}`);
+      }
+    }
   }
 }
 
