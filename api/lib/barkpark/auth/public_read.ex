@@ -99,6 +99,12 @@ defmodule Barkpark.Auth.PublicRead do
 
   defp token_file_path, do: System.get_env("PUBLIC_READ_TOKEN_FILE") || @token_file_default
 
+  # The path is OPERATOR configuration, never request data: the
+  # PUBLIC_READ_TOKEN_FILE env var or the fixed /opt/barkpark default, and in
+  # tests a `:token_file` opt. No request path reaches `rotate/1` (its callers
+  # are the cron worker and a mix task), so there is no traversal to steer.
+  # The same File.write/chmod ran unflagged in the mix task this was lifted from.
+  # sobelow_skip ["Traversal.FileModule"]
   defp write_token_file(path, raw) do
     case File.write(path, raw <> "\n") do
       :ok ->
