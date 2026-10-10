@@ -353,20 +353,21 @@ kek_previous_entries =
 # BARKPARK_KEK's contract (base64 of exactly 32 raw bytes), and record the
 # verdict so `Barkpark.Status` can surface it on /status.json.
 #
-# WHY THIS ONLY WARNS AND DOES NOT REFUSE THE BOOT. Refusing is the stronger,
-# more correct behaviour and it WAS implemented on this branch — see commit
-# cb3bb6d58 in this branch's history for the raise block. It is deliberately
-# NOT shipped: api/** auto-deploys on merge, and a refusal would brick the
-# boot of a production box whose live BARKPARK_KEK_PREVIOUS value nobody could
-# read first. The refusal is deferred to task-ef0c59e4fd3fc985, which is
-# blocked on the owner reading that live value.
+# THE BOOT REFUSES on a malformed entry (task-ef0c59e4fd3fc985), under exactly
+# the contract the primary BARKPARK_KEK already refuses on. This was deferred
+# from shb-bl-kek-previous-rotation because api/** auto-deploys on merge and a
+# refusal bricks the boot of any box whose live value is malformed; it merges
+# only after the owner confirmed every live box's value decodes to 32 bytes
+# (the public /status.json `kek_previous` component reads `operational` with no
+# detail on a box whose audit is checked and clean).
 #
 # SCOPE DECISION (previously unstated): the audit runs ONLY when a primary
 # BARKPARK_KEK is set. With no primary KEK this file never configures
 # `previous_keys` at all, so the entries are not merely discarded — they are
 # never consumed by anything, and a "discarded" verdict about them would be
 # false. That state is recorded as `checked: false`, which is DISTINCT from
-# "checked and clean" so a reader can never mistake one for the other.
+# "checked and clean" so a reader can never mistake one for the other. It does
+# NOT refuse: entries nothing consumes cannot lose ciphertext.
 kek_previous_audit =
   if System.get_env("BARKPARK_KEK") do
     malformed_positions =
@@ -386,26 +387,27 @@ kek_previous_audit =
     %{checked: false, discarded: 0, positions: []}
   end
 
-config :barkpark, Barkpark.Crypto.LocalKek, kek_previous_audit: kek_previous_audit
-
-# `Logger.warning`, NOT `Logger.info`: runtime.exs is evaluated BEFORE the
-# Logger application starts, so the `:logger` primary level is still the Erlang
-# default `:notice`. A `Logger.info` line here produces NO OUTPUT AT ALL —
-# proved by control run — which would be a fix that ships the exact silence the
-# defect was filed for. The positions are named; the ENTRIES NEVER ARE (key
-# material). /status.json carries the same verdict for anyone who does not read
-# boot logs — see `Barkpark.Status.kek_previous_component/0`.
+# The refusal names the 1-based POSITIONS; it NEVER echoes an entry (key
+# material). It raises before the audit is recorded, so a box that boots always
+# carries `discarded: 0` — /status.json's `kek_previous` component keeps
+# reporting the verdict (and still reports a MISSING audit as degraded).
 if kek_previous_audit.discarded > 0 do
-  Logger.warning("""
-  BARKPARK_KEK_PREVIOUS: #{kek_previous_audit.discarded} entr#{if kek_previous_audit.discarded == 1, do: "y is", else: "ies are"} NOT the base64 encoding of exactly 32 raw bytes, \
-  at 1-based position#{if kek_previous_audit.discarded == 1, do: "", else: "s"} #{Enum.join(kek_previous_audit.positions, ", ")}.
+  n = kek_previous_audit.discarded
+  positions = Enum.join(kek_previous_audit.positions, ", ")
 
-  Barkpark.Crypto.LocalKek will DISCARD #{if kek_previous_audit.discarded == 1, do: "it", else: "them"} silently, so every blob sealed under \
-  that KEK stays permanently undecryptable and `DataKeys.rewrap_all/0` cannot complete the rotation. \
-  Fix or remove the named position(s) and restart; clear BARKPARK_KEK_PREVIOUS entirely once rewrap_all/0 has run. \
-  This line never echoes the entry itself. The same verdict is published on /status.json as the `kek_previous` component.
-  """)
+  raise """
+  BARKPARK_KEK_PREVIOUS: #{n} entr#{if n == 1, do: "y is", else: "ies are"} NOT the base64 encoding of exactly 32 raw bytes, \
+  at 1-based position#{if n == 1, do: "", else: "s"} #{positions}.
+
+  BARKPARK_KEK_PREVIOUS is a comma-separated list of PRIOR BARKPARK_KEK values (oldest last) that \
+  `DataKeys.rewrap_all/0` uses to complete a KEK rotation. Barkpark.Crypto.LocalKek would discard \
+  #{if n == 1, do: "it", else: "them"} silently, leaving every blob sealed under that KEK permanently undecryptable. \
+  Fix or remove the named position(s) and boot again; clear BARKPARK_KEK_PREVIOUS entirely once rewrap_all/0 has run. \
+  This message never echoes the entry itself.
+  """
 end
+
+config :barkpark, Barkpark.Crypto.LocalKek, kek_previous_audit: kek_previous_audit
 
 # Master KEK for envelope encryption (core auth/secrets, Phase 0). The dev/test
 # default lives in config/config.exs; here we OVERRIDE from BARKPARK_KEK and
