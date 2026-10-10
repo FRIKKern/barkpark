@@ -126,10 +126,47 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = Door.admit(fn -> do_apply_mutations(mutations, dataset, opts) end)
+        result = Door.admit(fn -> apply_with_stale_retry(mutations, dataset, opts) end)
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )
+  end
+
+  # task-f25c61a3a3c2cb9d — a write that loses a race to a concurrent writer of
+  # the SAME row (a createOrReplace of X while a publish of X moves the draft)
+  # raised Ecto.StaleEntryError out of the transaction, and the caller got 409
+  # `internal_error` "unknown error (Ecto.StaleEntryError)": 43 of 100 in a
+  # real two-process race. The row moved under us, so the whole batch runs ONCE
+  # more after a short jitter: it re-reads every row, so a createOrReplace
+  # writes over what is there now (last write wins, its contract). The first
+  # attempt's transaction rolled back and its deferred broadcasts were cleared
+  # in do_apply_mutations/3's rescue; its queued advisories are put back here
+  # so they are not reported twice. A second loss answers a typed
+  # `rev_mismatch` (409, "document was modified by another writer"), never
+  # `internal_error`.
+  defp apply_with_stale_retry(mutations, dataset, opts) do
+    warnings = Barkpark.Content.Warnings.snapshot()
+
+    try do
+      do_apply_mutations(mutations, dataset, opts)
+    rescue
+      e in Ecto.StaleEntryError ->
+        require Logger
+
+        Logger.warning(
+          "[Mutations] stale row under a concurrent writer " <>
+            "(#{Exception.message(e) |> String.split("\n") |> hd()}); retrying the batch once"
+        )
+
+        Barkpark.Content.Warnings.restore(warnings)
+        Process.sleep(5 + :rand.uniform(20))
+
+        try do
+          do_apply_mutations(mutations, dataset, opts)
+        rescue
+          Ecto.StaleEntryError -> {:error, :rev_mismatch}
+        end
+    end
   end
 
   defp do_apply_mutations(mutations, dataset, opts) do
