@@ -4428,6 +4428,34 @@
           wc.setRemoteSelections(Array.isArray(payload?.list) ? payload.list : []);
         });
 
+        // A wikilink's Open on the hover card (task-387501f9ce96c335): the
+        // canvas asks the host first (`bp-canvas-open-link`, cancelable) and
+        // has nowhere to send a wikilink itself. Open the linked paper in this
+        // Studio through the backlink route; a link typed by hand carries only
+        // its title, so look that up first. A plain link keeps the canvas's
+        // own new-window open.
+        this._onOpenLink = (e) => {
+          const detail = e.detail || {};
+          if (detail.kind !== "wikilink") return;
+          e.preventDefault();
+          const open = (slug) => this.pushEvent("open-backlink", { slug, type: "paper" });
+          if (detail.docId) {
+            open(detail.docId);
+            return;
+          }
+          const target = typeof detail.target === "string" ? detail.target.trim() : "";
+          if (!target) return;
+          Promise.resolve(this.pushEvent("paper-wikilink-search", { query: target }))
+            .then((reply) => {
+              const hit = (Array.isArray(reply?.results) ? reply.results : []).find((result) =>
+                typeof result?.title === "string" &&
+                result.title.toLowerCase() === target.toLowerCase());
+              if (hit?.id) open(hit.id);
+            })
+            .catch(() => {});
+        };
+        this.el.addEventListener("bp-canvas-open-link", this._onOpenLink);
+
         // After an Add-block / Ingress-ghost write the server names the new
         // block: an empty paragraph is collapsed at rest, so the caret must land
         // in it or the author sees nothing and types into the void. Every run's
@@ -4576,6 +4604,7 @@
           this.el.removeEventListener("bp-canvas-selection", this._onCanvasSelection);
         }
         clearTimeout(this._selectionTimer);
+        if (this._onOpenLink) this.el.removeEventListener("bp-canvas-open-link", this._onOpenLink);
         this._saveBridgeDestroyed = true;
         this._opsReconnectRetryRequested = false;
         this._retryQueuedOpsAfterReconnect = null;

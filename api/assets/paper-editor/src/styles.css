@@ -935,6 +935,15 @@ article code[style*="background:#f3f4f6"] {
  * even though it lives outside any .bp-paper-surface ancestor. */
 
 /* Pre-paint / no-theme fallback — warm light defaults. */
+/* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
+   (task-387501f9ce96c335): the accent colour, underlined so it is not told
+   apart by colour alone. Its hover card's Open goes to the linked paper. */
+.bp-paper-editor span[data-wikilink] {
+  color: var(--paper-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .bp-wikilink-menu {
   --paper-bg:           #fbfaf6;
   --paper-ink:          #1f1a14;

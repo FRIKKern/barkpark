@@ -1757,6 +1757,9 @@
       color: var(--paper-accent); border-color: var(--paper-accent);
     }
 
+    /* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
+       (mirrored in styles.css for embedders). */
+    .bp-paper-editor span[data-wikilink] { color: var(--paper-accent); text-decoration: underline; text-underline-offset: 2px; }
     /* The link hover card (canvas/link-preview.js): the bubble's chrome, laid out as a small card
        under the hovered link — title (or host), address, an excerpt for a wikilink, Open / Edit. */
     .bp-link-preview {
