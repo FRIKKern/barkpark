@@ -79,6 +79,8 @@ import {
   hasOverlappingOps,
   opsRebaseSafe,
   pendingUploadIndexes,
+
+  withObjectOverrides,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
@@ -1221,7 +1223,7 @@ class BpPaperCanvas extends HTMLElement {
         Terminal,
         TerminalAtom,
       ],
-      content: runToTiptap(this._blocks),
+      content: this._rt(this._blocks),
       editorProps: {
         // The editable root is ProseMirror's role=textbox: name it, or a screen
         // reader lands in an unnamed "edit text" (axe aria-input-field-name,
@@ -1817,8 +1819,8 @@ class BpPaperCanvas extends HTMLElement {
     }
     const nextBlocks = docToBlocks(nextDoc, reusedAt.size ? { reuse: (i) => reusedAt.get(i)?.block } : {});
     const stableDoc = reusedAt.size
-      ? { type: "doc", content: nextBlocks.map((block, i) => reusedAt.has(i) ? reusedAt.get(i).node : runToTiptap([block]).content[0]) }
-      : runToTiptap(nextBlocks);
+      ? { type: "doc", content: nextBlocks.map((block, i) => reusedAt.has(i) ? reusedAt.get(i).node : this._rt([block]).content[0]) }
+      : this._rt(nextBlocks);
 
     // runToOps mints ids for null-id nodes. Materialize those ids in the live
     // document before another edit can diff, otherwise each cumulative diff
@@ -1842,7 +1844,7 @@ class BpPaperCanvas extends HTMLElement {
     // round-trip kept one top-level node per live node (otherwise nothing is held).
     const aligned = (nextDoc.content || []).length === (stableDoc.content || []).length;
     const opsDoc = held.size && aligned ? { ...stableDoc, content: (stableDoc.content || []).filter((_, i) => !held.has(i)) } : stableDoc;
-    const ops = runToOps(diffBaseline, opsDoc, { preserveNewIds: true, unchangedIds });
+    const ops = this._ro(diffBaseline, opsDoc, { preserveNewIds: true, unchangedIds });
     if (!ops || !ops.length) {
       // Nothing to save: the edits since the last batch cancelled out (typed,
       // then undone inside one debounce). Say so. The page's exit guard marked
@@ -1962,7 +1964,7 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
     const draftBase = inflight ? inflight.afterBlocks : (this._debounceBaselineBlocks || this._blocks);
-    const draft = runToOps(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+    const draft = this._ro(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
     if (!draft.length) return true;
     // Behind an in-flight batch the run's shape was already checked above; the
     // draft only must not touch what the other writer changed.
@@ -2057,6 +2059,31 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   // ── inline objects (./inline-object.js) ───────────────────────────────────
+  // Declared object block names that win over a same-named built-in
+  // (task-5bc7771edf30199a), cached per data-vocabulary string. Every
+  // run-convert projection this canvas makes runs inside them (_rt/_ro/_re).
+  _objectOverrides() {
+    const raw = this.getAttribute("data-vocabulary") || "";
+    if (this._overridesFor !== raw) {
+      this._overridesFor = raw;
+      const vocab = parseVocabulary(raw);
+      this._overrides = new Set(((vocab && vocab.objects) || []).map((o) => o.name));
+    }
+    return this._overrides;
+  }
+
+  _rt(blocks) {
+    return withObjectOverrides(this._objectOverrides(), () => runToTiptap(blocks));
+  }
+
+  _ro(...args) {
+    return withObjectOverrides(this._objectOverrides(), () => runToOps(...args));
+  }
+
+  _re(...args) {
+    return withObjectOverrides(this._objectOverrides(), () => reconcileServerEcho(...args));
+  }
+
   inlineObjectVocabulary() {
     return parseVocabulary(this.getAttribute("data-vocabulary"));
   }
@@ -2598,7 +2625,7 @@ class BpPaperCanvas extends HTMLElement {
       // block (or a paragraph) instead of vetoing the whole paste.
       const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
       if (vocab) ({ blocks, dropped } = fitBlocksToVocabulary(blocks, vocab));
-      nodes = runToTiptap(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
+      nodes = this._rt(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
     } catch (_e) {
       return false;
     }
@@ -2689,7 +2716,7 @@ class BpPaperCanvas extends HTMLElement {
     const schema = this._editor.schema;
     // Fresh nodes: an id the paste carried (copied from this or another paper)
     // must not collide with a block the doc already holds.
-    const nodes = runToTiptap(fit.blocks).content.map((json) =>
+    const nodes = this._rt(fit.blocks).content.map((json) =>
       schema.nodeFromJSON({ ...json, attrs: { ...(json.attrs || {}), bpId: null } }));
     return { slice: Slice.maxOpen(Fragment.from(nodes)), dropped: leftOut.concat(fit.dropped) };
   }
@@ -3226,7 +3253,7 @@ class BpPaperCanvas extends HTMLElement {
       return true;
     }
     const block = canvasDefaultBlock("divider");
-    const node = runToTiptap([block]).content[0];
+    const node = this._rt([block]).content[0];
     const { state, view } = this._editor;
     const start = $from.before(1);
     const end = $from.after(1);
@@ -3286,7 +3313,7 @@ class BpPaperCanvas extends HTMLElement {
     block.tone = tone;
     block.collapsible = true;
     block.collapsed = collapsed;
-    const node = runToTiptap([block]).content[0];
+    const node = this._rt([block]).content[0];
 
     // REPLACE the whole current block (the just-typed `> [!type] ` paragraph) with
     // the callout node. selectParentNode targets the textblock; replaceSelectionWith
@@ -3825,7 +3852,7 @@ class BpPaperCanvas extends HTMLElement {
         );
         // ONE projection of L1, used for BOTH the editor content and the emitted diff,
         // so the rich editor and the ops it sends are derived from the exact same doc.
-        const L1Doc = runToTiptap(L1);
+        const L1Doc = this._rt(L1);
 
         // (1) Apply L1 to the editor WITHOUT auto-emit (setContent second arg = false).
         // The rich editor now shows L1; onUpdate does NOT fire, so _emitOps never runs
@@ -3972,9 +3999,9 @@ class BpPaperCanvas extends HTMLElement {
     // edited beyond it. Recognize that snapshot as our own and advance only the
     // confirmed baseline; replacing the live doc here would erase the newer edit.
     if (this._inflightOps) {
-      const exactInflightEcho = reconcileServerEcho(
+      const exactInflightEcho = this._re(
         next,
-        runToTiptap(this._inflightOps.afterBlocks).content || [],
+        this._rt(this._inflightOps.afterBlocks).content || [],
       ).ownEcho;
       const foreignOwnRequest = coordinatorOwnMode && echoRequestId != null &&
         this._inflightOps.requestId != null && echoRequestId !== this._inflightOps.requestId;
@@ -3993,7 +4020,7 @@ class BpPaperCanvas extends HTMLElement {
     const awaitingIndex = this._awaitingOwnEchoes.findIndex((entry) =>
       !(coordinatorOwnMode && echoRequestId != null && entry.requestId != null &&
         echoRequestId !== entry.requestId) &&
-      reconcileServerEcho(next, runToTiptap(entry.blocks).content || []).ownEcho
+      this._re(next, this._rt(entry.blocks).content || []).ownEcho
     );
     if (awaitingIndex !== -1) {
       this._awaitingOwnEchoes.splice(0, awaitingIndex + 1);
@@ -4032,7 +4059,7 @@ class BpPaperCanvas extends HTMLElement {
     // against the same shape the emit path diffs (phantom nested attrs / split
     // dedup), exactly as runToOps was tested against.
     const liveContent = normalizeCanvasDoc(this._editor.getJSON()).content || [];
-    const { ownEcho, idWrites } = reconcileServerEcho(next, liveContent);
+    const { ownEcho, idWrites } = this._re(next, liveContent);
 
     // A genuinely external echo cannot safely replace local content while one
     // or more emitted snapshots are still awaiting confirmation. Defer it; a
@@ -4206,7 +4233,7 @@ class BpPaperCanvas extends HTMLElement {
   _applyExternalContent(blocks) {
     if (!this._editor) return;
     const { state } = this._editor;
-    const next = state.schema.nodeFromJSON(runToTiptap(blocks));
+    const next = state.schema.nodeFromJSON(this._rt(blocks));
     const previousIds = [];
     const nextIds = [];
     state.doc.forEach((node) => previousIds.push(node.attrs.bpId));
@@ -4276,7 +4303,7 @@ class BpPaperCanvas extends HTMLElement {
     const caret = this._captureCaret();
     this._editor
       .chain()
-      .setContent(runToTiptap(blocks), { emitUpdate: false })
+      .setContent(this._rt(blocks), { emitUpdate: false })
       .command(({ tr }) => {
         tr.setMeta("addToHistory", false);
         return true;
@@ -4556,7 +4583,7 @@ class BpPaperCanvas extends HTMLElement {
         // the empty pre-seed doc and ProseMirror threw (doc needs a block).
         this._editor
           .chain()
-          .setContent(runToTiptap(this._blocks), { emitUpdate: false })
+          .setContent(this._rt(this._blocks), { emitUpdate: false })
           .command(({ tr }) => {
             tr.setMeta("addToHistory", false);
             return true;
