@@ -33,8 +33,9 @@
 # 7bc83e643 the two agree exactly — 80 types, empty set difference in BOTH
 # directions — and they agree on all four of #18166's fixtures and on compose.ex
 # at e671915ea^, where `table_col_types/2` still used the literal-pattern form.
-# 80 types minus the 15 EXCLUDED = 65 = EXPECTED_COUNT, which the golden-fixture
-# directory independently corroborates at 65 files.
+# At that commit, 80 types minus the 15 then-EXCLUDED = 65. Today (task-7375ba22758155fa):
+# 81 types minus the 2 EXCLUDED = 79 = EXPECTED_COUNT, which the golden-fixture
+# directory independently corroborates at 79 files.
 #
 # `bash scripts/pd-parity-completeness.sh --selftest` runs the controls on the
 # instrument (a green on the real file proves nothing when the instrument IS the
@@ -69,7 +70,10 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # (c438d1215) added the reader-synthesised `pre-gate-badge` clause to compose.ex
 # without its golden, which red this guard on main from 2026-09-09. Derivation:
 # the DISPATCHED census below minus EXCLUDED, measured at 65 on this commit.
-EXPECTED_COUNT=65
+# 2026-10-10 (task-7375ba22758155fa): 65 -> 79. The 14 schema field blocks
+# (field-*, composite, arrayOf, codelist, localizedText) left EXCLUDED when
+# @barkpark/react gained their emitters; embed and master-ref stay out.
+EXPECTED_COUNT=79
 
 # ── THE EXTRACTOR ────────────────────────────────────────────────────────────
 # Reads ONLY `def compose_block/2,3` clause heads. The awk program tracks quote
@@ -200,10 +204,11 @@ legacy_dispatched_types() {
   } | sort -u
 }
 
-# The 15 excluded types (charter D7), plus `master-ref` (task-59f078a2fd248698:
-# a linked master instance resolves server side at read time, like `embed`). Space-padded so a `case` glob matches whole
-# words only. This is the ONE lever a later wave edits to pull the field-* set in.
-EXCLUDED=" field-string field-slug field-text field-boolean field-select field-datetime field-color field-reference field-image field-number composite arrayOf codelist localizedText embed master-ref "
+# The excluded types: `embed` and `master-ref` (task-59f078a2fd248698), which
+# resolve server side at read time. The 14 schema field blocks charter D7 cut
+# came back in with task-7375ba22758155fa. Space-padded so a `case` glob matches
+# whole words only.
+EXCLUDED=" embed master-ref "
 
 # ── --selftest: CONTROLS ON THE INSTRUMENT ───────────────────────────────────
 # This guard's whole failure mode is a census that answers confidently about a

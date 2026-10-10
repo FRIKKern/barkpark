@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 //
-// `form` / `questionnaire` / `field-number` block emitters — the JS twin of
-// forms.ex at style=:article. Render-only: one `<fieldset>` per question,
-// semantic controls per the grill.js input types, no `<script>`/action/method.
+// `form` / `questionnaire` block emitters — the JS twin of forms.ex at
+// style=:article. Render-only: one `<fieldset>` per question, semantic
+// controls per the grill.js input types, no `<script>`/action/method.
 // `questionnaire` is a pure alias of `form`, differentiated only by the
-// container class. `field-number` (B085) is the labelled numeric definition
-// row (compose.ex field_number_text twin) — see its section below.
+// container class. `field-number` moved to fields.ts with the other schema
+// field rows (task-7375ba22758155fa).
 
 import { type Block, escapeHtml, escapeAttr, str, asList, isMap } from '../inline'
 import type { RenderCtx } from './chrome'
@@ -43,11 +43,21 @@ function radioGroup(id: string, labels: Choice[]): string {
 function controlHtml(type: string, id: string, q: Record<string, unknown>, ctx: RenderCtx): string {
   switch (type) {
     case 'yesno':
-      return radioGroup(id, [['Yes', ctx.t('Yes')], ['No', ctx.t('No')]])
+      return radioGroup(id, [
+        ['Yes', ctx.t('Yes')],
+        ['No', ctx.t('No')],
+      ])
     case 'single':
-      return radioGroup(id, asList(q.options).map((o) => str(o)))
+      return radioGroup(
+        id,
+        asList(q.options).map((o) => str(o)),
+      )
     case 'multi':
-      return choiceGroup(id, asList(q.options).map((o) => str(o)), 'checkbox')
+      return choiceGroup(
+        id,
+        asList(q.options).map((o) => str(o)),
+        'checkbox',
+      )
     case 'scale': {
       const scale = isMap(q.scale) ? q.scale : {}
       const min = scaleBound(scale.min, 1)
@@ -94,7 +104,9 @@ function questionHtml(q: unknown, ctx: RenderCtx): string {
 const form: Emit = (b, ctx) => {
   const kind = str(b.kind) || 'grill'
   const kindClass = kind === 'questionnaire' ? 'bp-form-questionnaire' : 'bp-form-grill'
-  const questions = asList(b.questions).map((q) => questionHtml(q, ctx)).join('')
+  const questions = asList(b.questions)
+    .map((q) => questionHtml(q, ctx))
+    .join('')
   return `<section class="bp-form ${kindClass}">${questions}</section>`
 }
 
@@ -102,34 +114,7 @@ const form: Emit = (b, ctx) => {
 const questionnaire: Emit = (b, ctx) =>
   form({ ...b, type: 'form', kind: b.kind ?? 'questionnaire' } as Block, ctx)
 
-// ── field-number (B085) — the JS twin of compose.ex field_number_text/1 and
-// pdrender fieldNumberRenderer (internal/pdrender/fields.go). A labelled
-// definition row in the article bp-field grid: dim mono label beside the
-// formatted `value` plus an optional trailing `unit`. An absent or
-// uncoercible value renders the honest "—" empty state (the field-reference
-// precedent) with NO unit suffix. `min`/`max`/`step` are Edit-mode control
-// bounds — never read here.
-
-// The article definition row compose.ex field_row_article/2 emits — byte-shape
-// parity with the Elixir renderer's bp-field grid (gui-premium w2). Value
-// coercion mirrors field_number_value/1: numbers pass through; a string must
-// parse as a FULL decimal (Float.parse with an empty rest) — partial parses
-// and garbage fall to NaN, and every non-finite value (including a regex-passing
-// overflow like "1e999") renders the "—" empty state with no unit suffix.
-// Integer values and whole floats drop the decimal point; fractions keep the
-// shortest round-trip decimal — String(n) is JS's Float.to_string twin.
-// (Kept deliberately compact: this emitter rides the size-limit budget.)
-const fieldNumber: Emit = (b) => {
-  const v = b.value
-  const t = typeof v === 'string' ? v.trim() : ''
-  const n = typeof v === 'number' ? v : /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t) ? Number(t) : NaN
-  const unit = str(b.unit).trim()
-  const text = Number.isFinite(n) ? String(n) + (unit && ' ' + unit) : '—'
-  return `<div class="bp-field"><span class="bp-field__l">${escapeHtml(str(b.label))}</span><div class="bp-field__v"><span>${escapeHtml(text)}</span></div></div>`
-}
-
 export const formsEmitters: Record<string, Emit> = {
   form,
   questionnaire,
-  'field-number': fieldNumber,
 }

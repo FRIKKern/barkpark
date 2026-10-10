@@ -15,7 +15,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
       between the surface copies).
     * SCOPE — the array is exactly the in-scope census (`EXPECTED_COUNT` in
       scripts/pd-parity-completeness.sh — do not hand-count here): both members
-      of all 3 alias pairs present, none of the 15 excluded, no `quiz`/`onix`.
+      of all 3 alias pairs present, none of the excluded, no `quiz`/`onix`.
 
   Regenerate with `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity` whenever
   this reds, then re-run `bash scripts/pd-parity-completeness.sh`.
@@ -49,7 +49,8 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type Tabs MARK:parity-count-test-tabs
     # jdf-bl-historiene-renderer-reconciliation: +duel +lineage
     # docgates-s27: +pre-gate-badge (#17199's compose.ex clause, goldenless until now)
-    assert length(GenPdParity.types()) == 65
+    # task-7375ba22758155fa: +14 schema field blocks (65 -> 79)
+    assert length(GenPdParity.types()) == 79
   end
 
   test "both members of all 3 alias pairs are present" do
@@ -59,7 +60,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     end
   end
 
-  test "none of the 15 excluded types (nor quiz/onix) are in the array" do
+  test "none of the excluded types (nor quiz/onix) are in the array" do
     for t <- GenPdParity.excluded() ++ ["quiz", "onix"] do
       refute t in GenPdParity.types(), "#{t} must not be in the kitchen-sink array"
     end
