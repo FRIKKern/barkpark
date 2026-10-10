@@ -18,7 +18,15 @@ import type { RenderCtx } from './blocks/chrome'
 
 export type { EmbedHtml } from './blocks/embed'
 
-/** The `embed` emitter for the `blocks` option, resolving targets from `embeds`. */
+/**
+ * The `embed` emitter for the `blocks` option, resolving targets from `embeds`.
+ *
+ * TRUST CONTRACT: the HTML in `embeds` is CALLER-TRUSTED and injected verbatim,
+ * the same contract as the Elixir renderer's `:embeds` palette. It comes ONLY
+ * from this map: nothing in the document (the block's own fields included) is
+ * ever read as HTML, so an embed block carrying markup still renders the inert
+ * `↪ target` placeholder. Fill the map only with HTML you rendered or trust.
+ */
 export function embedBlocks(embeds?: EmbedHtml): NonNullable<RenderCtx['blocks']> {
   return { embed: embedEmitter(embeds) } as NonNullable<RenderCtx['blocks']>
 }

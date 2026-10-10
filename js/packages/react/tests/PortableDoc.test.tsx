@@ -1386,6 +1386,22 @@ describe('embed (opt-in @barkpark/react/embed)', () => {
     )
   })
 
+  it("HTML carried by the document itself is never injected — only the caller's map is", () => {
+    const forged = {
+      type: 'embed',
+      target: 'Field notes',
+      html: '<b>forged</b>',
+      content: '<script>alert(1)</script>',
+      embeds: { 'Field notes': '<b>forged</b>' },
+    } as Block
+    for (const blocks of [embedBlocks(), embedBlocks({ Other: '<p>x</p>' })]) {
+      const html = renderPortableDocument([forged], { blocks })
+      expect(html).toBe(
+        '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes">↪ Field notes</section>',
+      )
+    }
+  })
+
   it('escapes the target and never resolves an inherited key', () => {
     const hostile = { type: 'embed', target: '"><script>x</script>' } as Block
     const html = renderPortableDocument([hostile], { blocks: embedBlocks({}) })

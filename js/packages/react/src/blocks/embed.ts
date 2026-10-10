@@ -14,6 +14,8 @@ import { type Block, escapeHtml } from '../inline'
 /** Pre-rendered transclusion HTML, keyed by the embed block's raw `target`. */
 export type EmbedHtml = Record<string, string>
 
+/** Caller-trusted HTML comes only from `embeds`; the block contributes its
+ * `target` and nothing else (see embed.ts embedBlocks). */
 export function embedEmitter(embeds?: EmbedHtml): (b: Block) => string {
   return (b) => {
     const raw =
