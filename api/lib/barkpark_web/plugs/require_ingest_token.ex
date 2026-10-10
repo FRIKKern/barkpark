@@ -54,8 +54,11 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
           conn
         else
           case admin_token(presented) do
-            %ApiToken{} = token -> assign(conn, :api_token, token)
-            nil -> reject(conn)
+            %ApiToken{} = token ->
+              conn |> assign(:api_token, token) |> refuse_draft_only_write(token)
+
+            nil ->
+              reject(conn)
           end
         end
 
@@ -94,6 +97,28 @@ defmodule BarkparkWeb.Plugs.RequireIngestToken do
   # The hint is ROUTE-DERIVED (task-57081836b628df35): this route takes the
   # ingest shared secret OR an admin api token, which is not what the
   # code-keyed "unauthorized" default could ever say for all eleven emitters.
+  # Ingest writes papers and sessions, kinds with no draft layer: every write
+  # changes the live row. A token in a draft-only seat (`contributor`,
+  # task-348a4fbe24feede6) is refused every ingest WRITE. Its workspace is not
+  # known yet (the body names it), so a draft-only seat anywhere refuses.
+  # Reads (GET) on this pipeline are unchanged.
+  defp refuse_draft_only_write(%Plug.Conn{method: "GET"} = conn, _token), do: conn
+
+  defp refuse_draft_only_write(conn, token) do
+    ctx = Barkpark.Content.CallerContext.from_token(token)
+
+    if Barkpark.Tenancy.Auth.publish_refused?(ctx, nil) do
+      env = Barkpark.Content.Errors.to_envelope({:error, :publish_not_permitted}, conn)
+
+      conn
+      |> put_status(env.status)
+      |> Phoenix.Controller.json(%{error: Map.delete(env, :status)})
+      |> halt()
+    else
+      conn
+    end
+  end
+
   defp reject(conn) do
     BarkparkWeb.ErrorResponse.emit_custom(
       conn,

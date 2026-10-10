@@ -876,6 +876,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         # A REFUTED fifth: plugin exceptions cannot reach `do_action` — `Hooks.fire`
         # coerces a raising `before_*` hook to `:ok`.
 
+        # A contributor seat (task-348a4fbe24feede6): the server refuses the
+        # publish-side change, and the flash says why and who can do it.
+        {:error, :publish_not_permitted} ->
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             gettext(
+               "Your role can edit drafts but cannot publish, unpublish or delete published documents. Ask a workspace admin."
+             )
+           )}
+
         # 1. TOCTOU. `Content.get_document` found no draft
         # (`lifecycle.ex:96-97`) — another tab discarded it, or published it out
         # from under this one.

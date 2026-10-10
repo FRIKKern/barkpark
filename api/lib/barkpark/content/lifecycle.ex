@@ -80,11 +80,22 @@ defmodule Barkpark.Content.Lifecycle do
   `opts` accepts `:source` and `:user_id` for lifecycle-hook context.
   Fires `:before_publish` (halt-capable) and `:after_publish` (async).
   """
-  def publish_document(published_doc_id, type, dataset, opts \\ []),
-    do:
+  def publish_document(published_doc_id, type, dataset, opts \\ []) do
+    with :ok <- ensure_may_publish(opts) do
       span_write(:publish, opts, fn ->
         do_publish_document(published_doc_id, type, dataset, opts)
       end)
+    end
+  end
+
+  # THE DRAFT-ONLY SEAT GATE (owner decision 2026-10-10, task-348a4fbe24feede6).
+  # A `contributor` seat writes drafts and may not change the published row:
+  # publish, unpublish, and delete of a document that has a published version
+  # all ask here. Every door (mutate batch, bp CLI, Studio buttons, a task's
+  # published-first patch, a scheduled publish) reaches these functions with
+  # the caller's context in `opts`, so the refusal holds for each of them. A
+  # call with no caller context (an internal job) is unchanged.
+  defp ensure_may_publish(opts), do: Barkpark.Content.LiveWriteGate.check_seat(opts)
 
   defp do_publish_document(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)
@@ -885,11 +896,13 @@ defmodule Barkpark.Content.Lifecycle do
   `opts` accepts `:source` and `:user_id`. Fires `:before_unpublish`
   (halt-capable) and `:after_unpublish` (async).
   """
-  def unpublish_document(published_doc_id, type, dataset, opts \\ []),
-    do:
+  def unpublish_document(published_doc_id, type, dataset, opts \\ []) do
+    with :ok <- ensure_may_publish(opts) do
       span_write(:unpublish, opts, fn ->
         do_unpublish_document(published_doc_id, type, dataset, opts)
       end)
+    end
+  end
 
   defp do_unpublish_document(published_doc_id, type, dataset, opts) do
     pid = DraftId.published_id(published_doc_id)
@@ -1100,78 +1113,91 @@ defmodule Barkpark.Content.Lifecycle do
       |> Enum.filter(&match?({:ok, _}, &1))
       |> Enum.map(fn {:ok, doc} -> doc end)
 
+    published? = Enum.any?(existing, &(&1.doc_id == pid))
+
     case existing do
       [] ->
         {:error, :not_found}
 
-      [target | _] = docs ->
-        ctx = WriteScope.build_ctx(opts)
+      # Deleting a document that has a published version takes it off the
+      # published side, so a draft-only seat is refused here as it is on
+      # unpublish. A draft-only document stays deletable.
+      [_ | _] when published? and pid != did ->
+        with :ok <- ensure_may_publish(opts),
+             do: delete_existing(existing, type, dataset, opts)
 
-        payload = %{
-          event: :before_delete,
-          doc: target,
-          dataset: dataset,
-          prev_doc: target,
-          ctx: ctx
-        }
+      [_ | _] ->
+        delete_existing(existing, type, dataset, opts)
+    end
+  end
 
-        case Barkpark.Plugins.Hooks.fire(:before_delete, payload) do
-          {:halt, reason} ->
-            {:error, {:halted, reason}}
+  defp delete_existing([target | _] = docs, type, dataset, opts) do
+    ctx = WriteScope.build_ctx(opts)
 
-          :ok ->
-            # [event-atomicity, unpublish/delete/discard] Same boundary as the
-            # publish path (acrc-publish-atomicity-txn-boundary): the row change and
-            # its `mutation_events` row land or fail TOGETHER. Before this wrap the
-            # write COMMITTED and only then did `tap_broadcast` insert the event, so a
-            # fault there left the change with no event — no webhook, no SSE frame,
-            # no cache revalidation — and a 500 on a write that had happened.
-            result =
-              Broadcast.write_atomically(fn ->
-                txn =
-                  Repo.transaction(fn ->
-                    # Each variant is fenced against ITS OWN read rev — a concurrent
-                    # write to either row aborts the whole delete with a rev_mismatch
-                    # (412) rather than dropping a row the caller no longer intends.
-                    results = Enum.map(docs, &fenced_delete/1)
+    payload = %{
+      event: :before_delete,
+      doc: target,
+      dataset: dataset,
+      prev_doc: target,
+      ctx: ctx
+    }
 
-                    # A rev_mismatch means a variant was concurrently edited — delete
-                    # must not report success while a live row remains, so roll back.
-                    case Enum.find(results, &match?({:error, {:rev_mismatch, _}}, &1)) do
-                      {:error, {:rev_mismatch, _} = reason} ->
-                        Repo.rollback(reason)
+    case Barkpark.Plugins.Hooks.fire(:before_delete, payload) do
+      {:halt, reason} ->
+        {:error, {:halted, reason}}
 
-                      nil ->
-                        # A :not_found on ONE variant while the other deleted is
-                        # overall success (the rows are gone). Only if EVERY delete
-                        # was :not_found was the doc already fully gone → :not_found.
-                        case Enum.find(results, &(&1 == :ok)) do
-                          nil -> Repo.rollback(:not_found)
-                          :ok -> {{:ok, target}, target.rev}
-                        end
+      :ok ->
+        # [event-atomicity, unpublish/delete/discard] Same boundary as the
+        # publish path (acrc-publish-atomicity-txn-boundary): the row change and
+        # its `mutation_events` row land or fail TOGETHER. Before this wrap the
+        # write COMMITTED and only then did `tap_broadcast` insert the event, so a
+        # fault there left the change with no event — no webhook, no SSE frame,
+        # no cache revalidation — and a 500 on a write that had happened.
+        result =
+          Broadcast.write_atomically(fn ->
+            txn =
+              Repo.transaction(fn ->
+                # Each variant is fenced against ITS OWN read rev — a concurrent
+                # write to either row aborts the whole delete with a rev_mismatch
+                # (412) rather than dropping a row the caller no longer intends.
+                results = Enum.map(docs, &fenced_delete/1)
+
+                # A rev_mismatch means a variant was concurrently edited — delete
+                # must not report success while a live row remains, so roll back.
+                case Enum.find(results, &match?({:error, {:rev_mismatch, _}}, &1)) do
+                  {:error, {:rev_mismatch, _} = reason} ->
+                    Repo.rollback(reason)
+
+                  nil ->
+                    # A :not_found on ONE variant while the other deleted is
+                    # overall success (the rows are gone). Only if EVERY delete
+                    # was :not_found was the doc already fully gone → :not_found.
+                    case Enum.find(results, &(&1 == :ok)) do
+                      nil -> Repo.rollback(:not_found)
+                      :ok -> {{:ok, target}, target.rev}
                     end
-                  end)
-
-                case txn do
-                  {:ok, {ok, prev_rev}} ->
-                    Broadcast.tap_broadcast(
-                      ok,
-                      dataset,
-                      type,
-                      "delete",
-                      prev_rev,
-                      Keyword.get(opts, :source, :api),
-                      Keyword.get(opts, :user_id),
-                      caller_context: Keyword.get(opts, :caller_context)
-                    )
-
-                  {:error, reason} ->
-                    {:error, reason}
                 end
               end)
 
-            WriteScope.fire_after(result, :after_delete, payload)
-        end
+            case txn do
+              {:ok, {ok, prev_rev}} ->
+                Broadcast.tap_broadcast(
+                  ok,
+                  dataset,
+                  type,
+                  "delete",
+                  prev_rev,
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id),
+                  caller_context: Keyword.get(opts, :caller_context)
+                )
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+          end)
+
+        WriteScope.fire_after(result, :after_delete, payload)
     end
   end
 

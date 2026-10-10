@@ -536,6 +536,19 @@ defmodule Barkpark.Content.Errors do
         "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
     }
 
+  # A draft-only seat (`contributor`, task-348a4fbe24feede6) asked to change
+  # the published row: publish, unpublish, or delete a published document.
+  # `Tenancy.Auth.publish_refused?/2` decides it in `Content.Lifecycle`.
+  defp build({:error, :publish_not_permitted}),
+    do: %{
+      code: "forbidden",
+      message: "this seat can write drafts but cannot publish",
+      status: 403,
+      reason: "publish_not_permitted",
+      hint:
+        "A contributor seat edits drafts only. Publishing, unpublishing and deleting a published document need a member, admin or owner seat. Ask a workspace admin to publish the draft or to change your role. `GET /v1/auth/token` shows the seat (`seat.can.publish`)."
+    }
+
   # A dataset-BOUND token (minted with an explicit `dataset`) presented on a
   # request for another dataset (task-4418b517649a58ce). `code` and status match
   # the two arms above; `reason` names the remedy, which is neither a seat nor
