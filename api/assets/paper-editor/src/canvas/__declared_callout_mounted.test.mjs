@@ -7,7 +7,10 @@
 //     fields, tone limited to the declared options;
 //   * the slash menu offers the declared callout, not the built-in one, and the
 //     pick opens the dialog;
-//   * a canvas with no such declaration keeps the built-in callout unchanged.
+//   * a canvas with no such declaration keeps the built-in callout unchanged;
+//   * the command palette's "Insert Callout" follows the same rule
+//     (task-441e0c1cc08acc5e): the declared callout through the field dialog,
+//     inserted AFTER a block with content, or the built-in with no declaration.
 // Run: node src/canvas/__declared_callout_mounted.test.mjs
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -71,7 +74,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0, 4).join(" | ")}`);
   }
 }
-const EXPECTED = 6;
+const EXPECTED = 8;
 
 const dialog = () => document.querySelector(".bp-inline-object-dialog");
 function key(el, name, extra = {}) {
@@ -133,6 +136,30 @@ try {
     key(dialog(), "Escape");
   });
 
+  const paletteCallout = (canvas) => {
+    canvas._openPalette();
+    const cmd = canvas._palette._baseItems.find((c) => c.id === "insert-callout");
+    assert.ok(cmd, "the palette lists Insert Callout");
+    canvas._choosePaletteCommand(cmd);
+  };
+
+  await check("the palette's Insert Callout opens the field dialog and inserts the declared callout after the caret's block", () => {
+    const intro = topNodes(editor).find((n) => n.node.textContent === "Intro.");
+    editor.commands.setTextSelection(intro.pos + 1);
+    const before = topNodes(editor).length;
+    paletteCallout(declared);
+    assert.ok(dialog(), "the field dialog opened");
+    dialog().querySelector('[data-field="tone"]').value = "warning";
+    dialog().querySelector('[data-field="text"]').value = "From the palette.";
+    dialog().querySelector("form").dispatchEvent(new Event("submit", { cancelable: true }));
+    const nodes = topNodes(editor);
+    assert.equal(nodes.length, before + 1, "inserted, nothing replaced");
+    const added = nodes.find((n) => n.node.type.name === "bpOpaque" && n.node.attrs.bpBlock.text === "From the palette.");
+    assert.ok(added, "a declared callout carry");
+    assert.deepEqual(added.node.attrs.bpBlock, { type: "callout", tone: "warning", text: "From the palette." });
+    assert.equal(nodes.filter((n) => n.node.type.name === "callout").length, 0, "no built-in callout node");
+  });
+
   declared.remove();
   const builtin = await mount(null);
   const bEditor = builtin._editor;
@@ -148,6 +175,14 @@ try {
     bEditor.view.dispatch(bEditor.state.tr.setSelection(NodeSelection.create(bEditor.state.doc, at)));
     key(bEditor.view.dom, "Enter");
     assert.equal(dialog(), null);
+  });
+
+  await check("with no declaration the palette's Insert Callout inserts the built-in callout", () => {
+    bEditor.commands.setTextSelection(bEditor.state.doc.content.size - 1);
+    const before = topNodes(bEditor).filter((n) => n.node.type.name === "callout").length;
+    paletteCallout(builtin);
+    assert.equal(dialog(), null, "no field dialog");
+    assert.equal(topNodes(bEditor).filter((n) => n.node.type.name === "callout").length, before + 1);
   });
 
   await check("two canvases do not share the override (the scope ends with each call)", async () => {
