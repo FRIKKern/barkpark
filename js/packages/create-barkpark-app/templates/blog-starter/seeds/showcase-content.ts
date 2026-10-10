@@ -746,6 +746,10 @@ export const showcaseContent: Block[] = [
   {
     "body": "Hver blokk består sine egne mekaniske porter.",
     "denom": "118",
+    "dots": {
+      "of": 10,
+      "on": 2
+    },
     "label": "Blocks covered",
     "max": 118,
     "source": "commit:591fdcd53",
@@ -767,6 +771,10 @@ export const showcaseContent: Block[] = [
         "value": "42"
       },
       {
+        "dots": {
+          "of": 5,
+          "on": 3
+        },
         "label": "Renderers",
         "source": "task:jdf-bl-historiene",
         "value": "3"
