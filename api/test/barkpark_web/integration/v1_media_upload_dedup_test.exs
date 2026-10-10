@@ -65,7 +65,7 @@ defmodule BarkparkWeb.Integration.V1MediaUploadDedupTest do
     first = json_response(upload(conn, bytes), 201)
     refute Map.has_key?(first, "existing")
 
-    resp = upload(build_conn(), bytes)
+    resp = upload(scoped_conn(), bytes)
     second = json_response(resp, 200)
 
     assert second["existing"] == true
@@ -74,7 +74,7 @@ defmodule BarkparkWeb.Integration.V1MediaUploadDedupTest do
     assert rows_with(sha1(bytes)) == 1, "a second media_files row was stored for the same bytes"
 
     # Different bytes are a new file.
-    other = json_response(upload(build_conn(), unique_bytes()), 201)
+    other = json_response(upload(scoped_conn(), unique_bytes()), 201)
     refute other["result"]["id"] == first["result"]["id"]
   end
 
@@ -122,7 +122,7 @@ defmodule BarkparkWeb.Integration.V1MediaUploadDedupTest do
     id = json_response(upload(conn, bytes), 201)["result"]["id"]
 
     list = fn sha ->
-      build_conn() |> authed() |> get(~p"/v1/media/production?sha1=#{sha}") |> json_response(200)
+      scoped_conn() |> authed() |> get(~p"/v1/media/production?sha1=#{sha}") |> json_response(200)
     end
 
     hit = list.(sha1(bytes))
