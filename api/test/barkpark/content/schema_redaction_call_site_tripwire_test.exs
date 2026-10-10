@@ -96,6 +96,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "unscoped arm only (document carries no scope), edge write path",
     "barkpark/content/encryption.ex:schema_for_write" =>
       "unscoped arm only (no stamped scope), WRITE-path cipher",
+    "barkpark/content/writer.ex:do_check_document_schema" =>
+      "server-side schema validation at the write chokepoint (task-3c085ff3fc199ba7) " <>
+        "-- the schema drives field-rule checks only and is never rendered to a " <>
+        "caller; the response carries validation findings/errors, never the schema",
     "barkpark/content/papers.ex:doc_scoped_schema" =>
       "unscoped arm only (document carries no scope), block synthesis",
     "barkpark/content/writer.ex:validate_document_findings" =>

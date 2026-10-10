@@ -107,30 +107,38 @@ defmodule Barkpark.Content.Writer do
     scope = Keyword.take(opts, [:workspace_id, :project_id])
 
     case Content.get_schema(type, dataset, scope) do
-      {:ok, schema} ->
-        # task-292d6677b94916ef — the ERROR-level `validate/3` call alone
-        # decided `:ok` vs `:error` and, on `:ok`, returned immediately
-        # WITHOUT ever reading `check_findings/3`'s `warnings` half — so a
-        # document whose ONLY violated rule is `"level": "warning"` (an array
-        # max/min, or any other rule the schema marks advisory-only) produced
-        # zero findings at ALL, errors or warnings, and
-        # `do_check_document_schema/4`'s `{:ok, _content} -> :ok` branch never
-        # called `emit_schema_advisories/4`. `warning_findings` now rides on
-        # BOTH outcomes so the caller can advise on them regardless of
-        # whether the write also has an error-level problem.
-        %{errors: error_findings, warnings: warning_findings} =
-          Barkpark.Content.Validation.check_findings(content, title, schema)
+      {:ok, schema} -> findings_for_schema(schema, title, content)
+      _ -> {:ok, content, []}
+    end
+  end
 
-        case Barkpark.Content.Validation.validate(content, title, schema) do
-          {:ok, content} ->
-            {:ok, content, warning_findings}
+  # The "a schema was found" half of `validate_document_findings/5`, pulled
+  # out so `do_check_document_schema/4` (task-3c085ff3fc199ba7) can run the
+  # SAME validation after its OWN `Content.get_schema` call, instead of
+  # paying for a second one by calling the public function above — which
+  # would ALSO hide which outcome ("schema found, content valid" vs "no
+  # schema at all") produced an empty findings list, the distinction this
+  # task's unknown_type advisory needs.
+  defp findings_for_schema(schema, title, content) do
+    # task-292d6677b94916ef — the ERROR-level `validate/3` call alone
+    # decided `:ok` vs `:error` and, on `:ok`, returned immediately
+    # WITHOUT ever reading `check_findings/3`'s `warnings` half — so a
+    # document whose ONLY violated rule is `"level": "warning"` (an array
+    # max/min, or any other rule the schema marks advisory-only) produced
+    # zero findings at ALL, errors or warnings, and
+    # `do_check_document_schema/4`'s `{:ok, _content} -> :ok` branch never
+    # called `emit_schema_advisories/4`. `warning_findings` now rides on
+    # BOTH outcomes so the caller can advise on them regardless of
+    # whether the write also has an error-level problem.
+    %{errors: error_findings, warnings: warning_findings} =
+      Barkpark.Content.Validation.check_findings(content, title, schema)
 
-          {:error, errors} ->
-            {:error, errors, error_findings, warning_findings}
-        end
+    case Barkpark.Content.Validation.validate(content, title, schema) do
+      {:ok, content} ->
+        {:ok, content, warning_findings}
 
-      _ ->
-        {:ok, content, []}
+      {:error, errors} ->
+        {:error, errors, error_findings, warning_findings}
     end
   end
 
@@ -166,9 +174,18 @@ defmodule Barkpark.Content.Writer do
       `code`/`params` per finding. Nothing is written: this runs BEFORE the
       changeset on every branch that calls it.
 
-  A type with no schema, a schema with no validation rules, and content that
-  satisfies its schema all return `:ok` having queued nothing — the advisory
-  and the refusal fire only on content that breaks a DECLARED rule.
+  A schema with no validation rules, and content that satisfies its schema,
+  both return `:ok` having queued nothing — the advisory and the refusal
+  fire only on content that breaks a DECLARED rule.
+
+  A type with NO SCHEMA AT ALL (task-3c085ff3fc199ba7 — sanity.imageAsset,
+  sanity.previewUrlSecret, any Sanity-internal or just-not-yet-modeled type)
+  is NOT silent either: it gets the same ADVISE/ENFORCE treatment under the
+  finding code `unknown_type` (the same code `Validation`'s own richText
+  block-member check already uses for an unknown block `_type`), naming the
+  type and the dataset. Before this, such a write landed forever with no
+  signal at all — the exact silent-acceptance gap task-41a740fd6701ec28
+  closed for a DECLARED rule, left open for a type with no declaration.
   """
   @spec check_document_schema(String.t(), map(), String.t()) ::
           :ok
@@ -204,32 +221,119 @@ defmodule Barkpark.Content.Writer do
 
   defp stamped_scope(_attrs), do: []
 
+  # System-internal types BARKPARK ITSELF writes with no declared schema, by
+  # design — this check exists for a STRANGER's undeclared type
+  # (sanity.imageAsset, sanity.previewUrlSecret), never the platform's own
+  # bookkeeping rows. Found by grepping every create_document/
+  # upsert_document call site for a literal or module-attribute type with
+  # no matching `priv/plugins/*/schemas/*.json` entry (task-3c085ff3fc199ba7
+  # safety pass, 2026-10-10):
+  #
+  #   tag             — Studio's label/tag registry (TagRegistry,
+  #                      studio_live/shared/paper.ex register_label/4)
+  #   task            — Barkpark's OWN task ledger (Barkpark.Tasks) — `bp
+  #                      task` itself would refuse EVERY write on an
+  #                      enforcing dataset without this exemption
+  #   listener        — fleet listener tracking (Barkpark.Tasks.Fleet)
+  #   form_submission — Forms plugin intake (Plugins.Forms.Contract,
+  #                      Plugins.Forms.Intake.create/2)
+  #   form_endpoint   — Forms plugin's sibling type, same Contract module,
+  #                      same no-schema shape; exempted defensively even
+  #                      though no direct create/upsert call site was found
+  #   ticket          — Tickets plugin (Plugins.Tickets.Thread) — found not
+  #                      by the manual grep above but by
+  #                      `SystemTypeExemptionCoverageTest`'s mechanical
+  #                      re-derivation of it, the day this list shipped —
+  #                      priv/plugins/tickets/ has no schemas/ directory
+  #                      at all, so this one would have refused every
+  #                      ticket create/reply on an enforcing dataset
+  #
+  # A NEW entry here needs the same grep first — this list is the record of
+  # that audit, not a guess. `system_types/0` below exposes it to
+  # `SystemTypeExemptionCoverageTest`, which re-runs that same grep as a
+  # mechanical census on every test run — a list is a SNAPSHOT, and that
+  # test is what keeps a newly-introduced schemaless write from silently
+  # falling outside it again (it is also what caught `ticket` above).
+  @system_types ~w(tag task listener form_submission form_endpoint ticket)
+
+  @doc false
+  @spec system_types() :: [String.t()]
+  def system_types, do: @system_types
+
+  defp do_check_document_schema(type, _attrs, _dataset, _enforce?) when type in @system_types,
+    do: :ok
+
   defp do_check_document_schema(type, attrs, dataset, enforce?) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     title = Map.get(attrs, "title") || Map.get(attrs, :title)
+    scope = stamped_scope(attrs)
 
-    case validate_document_findings(type, title, content, dataset, stamped_scope(attrs)) do
-      {:ok, _content, warning_findings} ->
-        # task-292d6677b94916ef — a write with NO error-level violation used to
-        # stop here with nothing emitted; a warning-level-only violation (an
-        # array max/min, or any other rule the schema marks advisory) was lost.
-        emit_warning_advisories(type, attrs, warning_findings)
-        :ok
+    # task-3c085ff3fc199ba7 — `Content.get_schema/3` read ONCE here (not via
+    # `validate_document_findings/5`, which would hide "no schema at all"
+    # behind the same `{:ok, content, []}` an existing-but-satisfied schema
+    # also returns, and would cost a SECOND read to tell them apart). A type
+    # Barkpark has never declared a schema for (sanity.imageAsset,
+    # sanity.previewUrlSecret, any other Sanity-internal or just-not-yet-
+    # modeled type) used to write silently forever — no advisory, nothing to
+    # enforce against, ever. It now gets the same ADVISE/ENFORCE treatment
+    # every other schema violation already has, under the finding code
+    # `unknown_type` (the SAME code `Validation`'s own richText block-member
+    # check already uses for the analogous "unknown block _type" case).
+    case Content.get_schema(type, dataset, scope) do
+      {:ok, schema} ->
+        dispatch_schema_outcome(
+          type,
+          attrs,
+          findings_for_schema(schema, title, content),
+          enforce?
+        )
 
-      {:error, errors, findings, warning_findings} ->
-        emit_warning_advisories(type, attrs, warning_findings)
-
-        if is_map(errors) and map_size(errors) > 0 do
-          if enforce? do
-            {:error, {:schema_validation_failed, errors, findings}}
-          else
-            emit_schema_advisories(type, attrs, errors, findings)
-            :ok
-          end
-        else
-          :ok
-        end
+      _ ->
+        dispatch_schema_outcome(type, attrs, unknown_type_outcome(type, dataset), enforce?)
     end
+  end
+
+  defp dispatch_schema_outcome(type, attrs, {:ok, _content, warning_findings}, _enforce?) do
+    # task-292d6677b94916ef — a write with NO error-level violation used to
+    # stop here with nothing emitted; a warning-level-only violation (an
+    # array max/min, or any other rule the schema marks advisory) was lost.
+    emit_warning_advisories(type, attrs, warning_findings)
+    :ok
+  end
+
+  defp dispatch_schema_outcome(
+         type,
+         attrs,
+         {:error, errors, findings, warning_findings},
+         enforce?
+       ) do
+    emit_warning_advisories(type, attrs, warning_findings)
+
+    if is_map(errors) and map_size(errors) > 0 do
+      if enforce? do
+        {:error, {:schema_validation_failed, errors, findings}}
+      else
+        emit_schema_advisories(type, attrs, errors, findings)
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  # A type with no declared schema in this dataset — same `{:error, errors,
+  # findings, warning_findings}` shape `findings_for_schema/3` produces for
+  # an ordinary schema violation, so `dispatch_schema_outcome/4` above
+  # ADVISEs or ENFORCEs it through the exact same door, no new dispatch
+  # logic. The finding's path is the field-grouping convention
+  # `top_level_field/1` reads (`"/" <> name`): there is no field to name, so
+  # it names the document's own `_type`.
+  defp unknown_type_outcome(type, dataset) do
+    message =
+      "unknown type #{inspect(type)} — no schema is declared for it in dataset #{inspect(dataset)}"
+
+    finding = %{path: "/_type", message: message, code: :unknown_type, params: %{type_name: type}}
+    {:error, %{"_type" => [message]}, [finding], []}
   end
 
   # One advisory per offending FIELD, each naming the field and every rule it

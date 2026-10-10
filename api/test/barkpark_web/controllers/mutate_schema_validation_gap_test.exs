@@ -330,6 +330,45 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
       assert {:ok, doc} = read_back(ctx.type, ctx.enforce_dataset, doc_id)
       assert doc.content["slug"] == "good-slug"
     end
+
+    # task-3c085ff3fc199ba7 — the ENFORCE half of the unknown_type advisory
+    # above: a type with no schema at all, in a dataset opted into
+    # enforcement, is refused rather than advised, same as any other schema
+    # violation on that dataset.
+    test "a type with NO SCHEMA AT ALL is refused 422 AND the document does not exist",
+         ctx do
+      type = "msvenf_noschema_#{System.unique_integer([:positive])}"
+      doc_id = "msvenf-noschema-#{System.unique_integer([:positive])}"
+
+      assert {:error, _} = Content.get_schema(type, ctx.enforce_dataset)
+
+      resp =
+        create(ctx, type, ctx.enforce_dataset, doc_id, %{"content" => %{"anything" => "here"}})
+
+      assert resp.status == 422
+      body = json_response(resp, 422)
+      assert body["error"]["code"] == "validation_failed"
+      assert get_in(body, ["error", "details", "_type"])
+
+      findings = get_in(body, ["error", "findings"]) || []
+      assert [%{"code" => "unknown_type", "path" => "/_type"}] = findings
+
+      refute match?({:ok, _}, read_back(type, ctx.enforce_dataset, doc_id)),
+             "the refused document must not exist"
+    end
+
+    # task-3c085ff3fc199ba7 safety pass: a system-internal type must not
+    # newly get the unknown_type advisory/refusal. Proven on the dataset
+    # that's opted into enforcement, the strictest arm.
+    test "a system-internal type with no schema still lands 200 under enforcement (tag, HTTP)",
+         ctx do
+      doc_id = "msvenf-sys-tag-#{System.unique_integer([:positive])}"
+      resp = create(ctx, "tag", ctx.enforce_dataset, doc_id, %{"content" => %{"title" => "x"}})
+
+      assert resp.status == 200
+      refute Map.has_key?(json_response(resp, 200), "warnings")
+      assert {:ok, _doc} = read_back("tag", ctx.enforce_dataset, doc_id)
+    end
   end
 
   describe "THE VALIDATOR ITSELF — unchanged by the mount, still the same verdicts" do
@@ -394,7 +433,17 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
       assert doc.content["slug"] == "good-slug"
     end
 
-    test "a type with NO SCHEMA AT ALL: same status, same bytes, no advisory", ctx do
+    # task-3c085ff3fc199ba7 CHANGED THIS CONTRACT ON PURPOSE: a type with no
+    # declared schema used to write silently forever (sanity.imageAsset,
+    # sanity.previewUrlSecret, any Sanity-internal or just-not-yet-modeled
+    # type) — the exact gap this test used to pin as "byte-unchanged". It now
+    # gets the SAME unknown_type advisory every other schema violation
+    # already has (same code `Validation`'s richText block-member check
+    # already uses for an unknown block `_type`); the write still LANDS
+    # (same status, same stored bytes — ADVISE never blocks) and still has
+    # no SCHEMA rule to violate, so this is the one remaining assertion this
+    # describe block's name is about.
+    test "a type with NO SCHEMA AT ALL: same status, same bytes, now ADVISES unknown_type", ctx do
       type = "msvgap_noschema_#{System.unique_integer([:positive])}"
       doc_id = "msvgap-noschema-#{System.unique_integer([:positive])}"
 
@@ -406,11 +455,54 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
         })
 
       assert resp.status == 200
-      assert schema_warnings(json_response(resp, 200)) == []
+
+      assert [warning] = schema_warnings(json_response(resp, 200))
+      assert warning["severity"] == "warning"
+      assert warning["message"] =~ type
+      assert [%{"code" => "unknown_type", "path" => "/_type"}] = warning["findings"]
 
       assert {:ok, doc} = read_back(type, @advise_dataset, doc_id)
       assert doc.content["anything"] == "at all"
       assert doc.content["slug"] == "NOT A SLUG 42"
+    end
+
+    # task-3c085ff3fc199ba7 safety pass — the ADVISE-mode twin of the
+    # ENFORCE-mode system-type test above: no advisory noise on an
+    # ordinary write of one of Barkpark's own bookkeeping types either.
+    test "a system-internal type with no schema gets no unknown_type advisory (tag, HTTP)",
+         ctx do
+      doc_id = "msvgap-sys-tag-#{System.unique_integer([:positive])}"
+      resp = create(ctx, "tag", @advise_dataset, doc_id, %{"content" => %{"title" => "x"}})
+
+      assert resp.status == 200
+      assert schema_warnings(json_response(resp, 200)) == []
+    end
+
+    # task-3c085ff3fc199ba7 safety pass — the REST of @system_types
+    # (task/listener/form_submission/form_endpoint) each carry their OWN
+    # structural validation UNRELATED to Content.Validation (Barkpark.Tasks'
+    # required kind/lifecycle_status; the Forms plugin's Contract.validate/2
+    # hook), which would 422 a generic test payload for reasons that have
+    # nothing to do with unknown_type — so proven directly against the unit
+    # under test (Writer.check_document_schema/3) instead of through the
+    # full HTTP door and every OTHER hook that door also runs. The
+    # exemption clause short-circuits on `type` alone, before any content
+    # is even read, so an arbitrary/empty attrs map is a valid probe for
+    # every member of the list.
+    test "every @system_types entry short-circuits to :ok regardless of content, in BOTH modes" do
+      for type <- ~w(tag task listener form_submission form_endpoint ticket) do
+        assert Content.Writer.check_document_schema(type, %{}, @advise_dataset) == :ok,
+               "#{type}: expected :ok under ADVISE"
+
+        enforce_dataset = "msvsys_enf_#{type}_#{System.unique_integer([:positive])}"
+        previous = Application.get_env(:barkpark, Validation, [])
+        Application.put_env(:barkpark, Validation, enforce_datasets: [enforce_dataset])
+
+        assert Content.Writer.check_document_schema(type, %{}, enforce_dataset) == :ok,
+               "#{type}: expected :ok under ENFORCE"
+
+        Application.put_env(:barkpark, Validation, previous)
+      end
     end
 
     test "a schema with NO VALIDATION RULES: same status, same bytes, no advisory", ctx do
