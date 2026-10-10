@@ -566,10 +566,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       |> assign(:last_result, last_result)
 
     ~H"""
-    <h1 class="sr-only">{gettext("API")}</h1>
     <.pane_layout id="api-tester-panes">
       <.pane_column title="API">
         <div class="pane-body">
+          <%!-- Inside the first region, not before the layout: there it sat in
+                no landmark (axe region). --%>
+          <h1 class="sr-only">{gettext("API")}</h1>
             <%= for category <- @categories do %>
               <% collapsed = MapSet.member?(@collapsed_categories, category) %>
               <.pane_section_header
@@ -598,7 +600,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
         </.pane_column>
 
-        <.pane_column title={docs_column_title(@endpoint)} marker_class="api-col-docs">
+        <.pane_column title={docs_column_title(@endpoint)} marker_class="api-col-docs" landmark="main">
           <:header_actions>
             <%= if @endpoint && @endpoint.kind == :endpoint do %>
               <span class={"badge #{auth_badge_class(@endpoint.auth)}"}><%= @endpoint.auth %></span>
