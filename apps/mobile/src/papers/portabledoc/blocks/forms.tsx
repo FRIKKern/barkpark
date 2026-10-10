@@ -35,7 +35,8 @@ import type { ReactNode } from 'react'
 import { Text, View } from 'react-native'
 
 import { scale } from '../../../ui/typography'
-import { asList, isMap, str } from '../model'
+import { chromeWord } from '../chrome'
+import { asList, isMap, str, type Block } from '../model'
 import type { BlockCtx, Render } from '../register'
 
 /** react forms.ts scaleBound: an integer number, or a base-10 parse of a
@@ -218,8 +219,124 @@ const fieldNumber: Render = (b, ctx, key) => (
   </View>
 )
 
+/* ── schema field blocks (task-7375ba22758155fa) — the mobile leg of
+ * compose.ex's field rows and react fields.ts ──────────────────────────────
+ *
+ * The same labelled definition row as field-number: dim label, then the
+ * value as plain chrome text (no prose measure, so register-blind like
+ * field-number). Empty values read "—". field-reference / codelist show a
+ * server-stashed `_ref_title` / `_code_label` when present. field-color draws
+ * its swatch only for a strict hex literal; field-image names its URL rather
+ * than fetching a preview inside a definition row. */
+
+/** composite_scalar/1: a sub-value as one display string (maps in key order). */
+function fieldScalar(v: unknown, ctx: BlockCtx): string {
+  if (v === null || v === undefined) return '—'
+  if (typeof v === 'boolean') return chromeWord(ctx.locale, v ? 'Yes' : 'No')
+  if (Array.isArray(v)) return v.map((x) => fieldScalar(x, ctx)).join(', ')
+  if (isMap(v)) {
+    return Object.keys(v)
+      .sort()
+      .map((k) => `${k}: ${fieldScalar(v[k], ctx)}`)
+      .join(', ')
+  }
+  return typeof v === 'number' ? String(v) : str(v)
+}
+
+const fieldRow = (b: Block, ctx: BlockCtx, key: number, value: ReactNode): ReactNode => (
+  <View key={key} style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginVertical: 4 }}>
+    <Text style={{ ...scale.sm, color: ctx.theme.textMuted }}>{str(b.label)}</Text>
+    {value}
+  </View>
+)
+
+const fieldText = (b: Block, ctx: BlockCtx, key: number, text: string): ReactNode =>
+  fieldRow(b, ctx, key, <Text style={{ ...scale.sm, color: ctx.theme.text }}>{text.trim() ? text : '—'}</Text>)
+
+/** Sub-rows (composite subfields, localizedText languages): `label: value`. */
+const fieldSubs = (b: Block, ctx: BlockCtx, key: number, pairs: Array<[unknown, unknown]>): ReactNode => (
+  <View key={key} style={{ marginVertical: 4, gap: 2 }}>
+    <Text style={{ ...scale.sm, color: ctx.theme.textMuted }}>{str(b.label)}</Text>
+    {pairs.map(([label, k], i) => (
+      <Text key={i} style={{ ...scale.sm, color: ctx.theme.text }}>
+        {`${str(label)}: ${fieldScalar(isMap(b.value) ? b.value[str(k)] : undefined, ctx)}`}
+      </Text>
+    ))}
+  </View>
+)
+
+const plainField: Render = (b, ctx, key) => fieldText(b, ctx, key, str(b.value))
+
+/** A resolver-stashed display, else the stored datum, else "—". */
+const shownField = (b: Block, stash: string): string => (str(b.value) === '' ? '—' : str(b[stash]) || str(b.value))
+
+const fieldRenderers: Record<string, Render> = {
+  // Three distinct functions, not one shared reference: the registry's alias
+  // tripwire (charter D31) reads a shared function as a type alias.
+  'field-string': (b, ctx, key) => plainField(b, ctx, key),
+  'field-slug': (b, ctx, key) => plainField(b, ctx, key),
+  'field-text': (b, ctx, key) => plainField(b, ctx, key),
+  'field-boolean': (b, ctx, key) => fieldText(b, ctx, key, chromeWord(ctx.locale, b.value === true ? 'Yes' : 'No')),
+  'field-select': (b, ctx, key) => {
+    const hit = asList(b.options).find((o) => isMap(o) && o.value === b.value)
+    return fieldText(b, ctx, key, isMap(hit) ? str('label' in hit ? hit.label : hit.value) : str(b.value))
+  },
+  'field-datetime': (b, ctx, key) => fieldText(b, ctx, key, str(b.value).replace(/T/g, ' ')),
+  'field-color': (b, ctx, key) => {
+    const hex = str(b.value)
+    if (hex === '') return fieldText(b, ctx, key, '')
+    const safe = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : 'transparent'
+    return fieldRow(
+      b,
+      ctx,
+      key,
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+        <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: safe }} />
+        <Text style={{ ...scale.sm, color: ctx.theme.text, fontFamily: 'monospace' }}>{hex}</Text>
+      </View>,
+    )
+  },
+  'field-reference': (b, ctx, key) => fieldText(b, ctx, key, shownField(b, '_ref_title')),
+  'field-image': (b, ctx, key) => {
+    const v = str(b.value).trim()
+    let src = v
+    if (v.startsWith('{')) {
+      try {
+        const u = (JSON.parse(v) as { url?: unknown }).url
+        if (typeof u === 'string' && u) src = u
+      } catch {
+        /* not JSON: the string itself */
+      }
+    }
+    return fieldText(b, ctx, key, src || chromeWord(ctx.locale, 'No image'))
+  },
+  composite: (b, ctx, key) =>
+    fieldSubs(
+      b,
+      ctx,
+      key,
+      asList(b.fields).map((f) => {
+        const name = isMap(f) ? f.name : ''
+        return [isMap(f) && f.title != null && f.title !== false ? f.title : name, name]
+      }),
+    ),
+  arrayOf: (b, ctx, key) => {
+    const els = b.value == null ? [] : Array.isArray(b.value) ? b.value : [b.value]
+    return fieldText(b, ctx, key, els.map((e, i) => `${i + 1}. ${fieldScalar(e, ctx)}`).join('\n'))
+  },
+  codelist: (b, ctx, key) => fieldText(b, ctx, key, shownField(b, '_code_label')),
+  localizedText: (b, ctx, key) =>
+    fieldSubs(
+      b,
+      ctx,
+      key,
+      asList(b.languages).map((l) => [l, l]),
+    ),
+}
+
 export const formsRenderers: Record<string, Render> = {
   form,
   questionnaire,
   'field-number': fieldNumber,
+  ...fieldRenderers,
 }
