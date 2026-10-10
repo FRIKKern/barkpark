@@ -10598,6 +10598,11 @@ msgstr ""
 msgid "no translation available"
 msgstr ""
 
+#: lib/barkpark_web/components/fields/localized_text_field.ex
+#, elixir-autogen, elixir-format
+msgid "(primary, missing)"
+msgstr ""
+
 #: lib/barkpark_web/components/fields/localized_text_field.ex:101
 #, elixir-autogen, elixir-format
 msgid "primary translation `%{primary}` missing — using fallback `%{using}`"
