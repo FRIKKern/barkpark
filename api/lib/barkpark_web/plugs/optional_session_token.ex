@@ -120,12 +120,18 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
     # ambient credential. Membership is still decided downstream, per request,
     # by ResolveWorkspace, so a login session reaches exactly the workspaces
     # its user is seated in NOW.
+    #
+    # `:current_user_via` records WHICH door admitted the user (task-a89ef18ee88ba6a0):
+    # `:bearer` or `:cookie`. CSRF guards the cookie only, and a downstream hard
+    # gate (`RequireBearerOrSessionToken`'s account arm) cannot tell the two
+    # apart from `:current_user` alone.
     conn =
-      case (is_nil(bearer_token) && user_from_bearer(conn)) || user_from_session(conn) do
-        {%Barkpark.Accounts.User{} = user, session} ->
+      case user_with_source(conn, bearer_token) do
+        {%Barkpark.Accounts.User{} = user, session, via} ->
           conn
           |> assign(:current_user, user)
           |> assign(:current_user_session, session)
+          |> assign(:current_user_via, via)
 
         _ ->
           conn
@@ -146,6 +152,16 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
       conn
     end
   end
+
+  # Same precedence as before the source was recorded: a login-session bearer
+  # (tried only when the bearer is not an API token), else the cookie.
+  defp user_with_source(conn, bearer_token) do
+    from_bearer = if is_nil(bearer_token), do: tag(user_from_bearer(conn), :bearer)
+    from_bearer || tag(user_from_session(conn), :cookie)
+  end
+
+  defp tag({user, session}, via), do: {user, session, via}
+  defp tag(_, _via), do: nil
 
   defp user_from_session(conn) do
     case get_session(conn, "user_session") do

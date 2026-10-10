@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
-Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`;
+Bearer API tokens (`Authorization: Bearer`) backed by `api_tokens`;
 LiveViews read `session["api_token_session"]`
 (or `session["api_token"]`) via `on_mount`.
 
@@ -11,7 +11,7 @@ LiveViews read `session["api_token_session"]`
 ## Tenancy — token ↔ workspace
 
 The principal is the API token; each binds to one **workspace** (tenancy boundary;
-hierarchy: `docs/api-v1.md` §1a) by two facts that must agree:
+`docs/api-v1.md` §1a) by two facts that must agree:
 
 - `api_tokens.workspace_id` — the workspace the token belongs to.
 - a `workspace_memberships` row — the principal is a member of it.
@@ -20,8 +20,7 @@ Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
 **before** any permission check: slug unresolved → `404 not_found`; resolved but
 no `workspace_memberships` row for the token → `403 forbidden`, reason
-`not_a_member`, naming the workspace (`bp whoami` lists seats); member → on to
-permission checks. Flat paths (`/v1/data/:dataset/*`, …) resolve to the `"Default"` scope.
+`not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`, …) resolve to `"Default"`.
 
 Mutate needs `write` after tenancy (else `403`). Minted with an explicit
 `dataset` (`dataset_bound`), a token gets `403 dataset_not_bound` elsewhere;
@@ -33,7 +32,7 @@ unbound, `dataset` binds nothing.
 |---|---|---|
 | `read` | Reads on private datasets / schemas | `…/v1/data/query/*` `/media` |
 | `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
-| `public-read` | Anonymous-equivalent GET-only reads | Membership, `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
+| `public-read` | Anonymous-equivalent GET-only reads | `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
 | `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
 | `admin` | The above + plugin-settings reveal/audit + schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
@@ -44,8 +43,8 @@ unbound, `dataset` binds nothing.
 ### Hierarchy — permission ⟂ membership
 
 `admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
-`ops` ⊃ `read`+`write`; `:ops` stays separate so Bokbasen operators never see the
-encrypted `client_secret`) and confers **no membership anywhere**.
+`ops` ⊃ `read`+`write`; `:ops` is separate so Bokbasen operators never see
+`client_secret`) and confers **no membership anywhere**.
 
 Three tiers (seat rule since ruling #2, 2026-10-03):
 `RequireAdmin`: `admin` permission, plus admin authority in the token's
@@ -54,12 +53,11 @@ machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
 `permissions` AND the seat role (and a PAT owner's role) allow the action. `workspace_admin?/2`: the membership ROLE alone.
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
-per-workspace off `current_workspace` — which `AssignDefaultScope` stamps as
-*Default*, so every tenant's admin gets a `200` against the wrong tenant. The mirror (gate on membership, act instance-wide) is the
-same defect. A flat admin route pins the
-GLOBAL tier explicitly (`SecretController.resolve_scope/1` → `:global`, never
-the assign); acting per-workspace needs a slug-resolving route proving
-`workspace_admin?/2`.
+per-workspace off `current_workspace` (`AssignDefaultScope` stamps *Default*):
+every tenant's admin gets a `200` on the wrong tenant. The mirror (gate on
+membership, act instance-wide) is the same defect. A flat admin route pins the
+GLOBAL tier (`SecretController.resolve_scope/1` → `:global`, never the assign);
+acting per-workspace needs a slug-resolving route proving `workspace_admin?/2`.
 
 `admin` must never enter the hardcoded `chat` literal: `RequireChatAccess`
 resolves it to `:global`, stamping `owner_workspace_id = NULL`
@@ -75,6 +73,8 @@ caller has flat `admin` AND an admin seat, gets at most its own set; seated,
 audited `token_minted`. `bp token create --permissions read,write,admin`.
 `bp token rotate` refuses Cloud's credential (label `barkpark cloud admin`)
 without `--force`.
+Self-mint caps a member's PAT at `["read"]`, a MINTING policy: the seat
+writes ([sessions](auth-user-sessions.md#sessions)).
 
 ## LiveView `on_mount` hooks
 

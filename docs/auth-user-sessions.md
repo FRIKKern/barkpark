@@ -58,6 +58,13 @@ workspace_required` listing them.
   `is_nil(expires_at) or expires_at > now` — the only expiry check on the read
   path.
 - **Liveness.** `last_used_at` is refreshed on every successful verify.
+- **A bearer too.** The `/v1/auth/login` token works as `Authorization: Bearer`
+  on the data API. `x-requested-with` (CSRF) guards the session COOKIE only;
+  `OptionalSessionToken` records `:current_user_via` so the hard gate can tell.
+  `GET /v1/auth/token` answers a session bearer with `kind: "session"` and every
+  seat (`can.read/write/publish/admin`, `publish` = `write`). A member seat
+  writes, as in LiveView Studio; a member's self-minted PAT stays `["read"]`
+  (`Auth.max_pat_permissions_for_role/1`, a minting policy).
 - **Kill switch.** `revoked_at` is set by `revoke_user_session_token/1`
   (single logout) and `revoke_all_user_sessions/1` (sign-out-everywhere).
 
