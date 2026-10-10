@@ -22,7 +22,7 @@ defmodule BarkparkWeb.MutateController do
       Warnings.reset()
       warn_unknown_keys(conn.body_params)
 
-      case Content.apply_mutations(mutations, dataset, opts) do
+      case reader_checked(conn, mutations, dataset, opts) do
         {:ok, {tx_id, results}} ->
           body = %{transactionId: tx_id, results: results}
           body = if dry_run, do: Map.put(body, :dryRun, true), else: body
@@ -58,6 +58,18 @@ defmodule BarkparkWeb.MutateController do
 
   def mutate(conn, _params) do
     respond_with_error(conn, :malformed)
+  end
+
+  # A READ seat reached here through RequireWritePermission's reader arm: the
+  # whole batch must be writes its schemas open to readers, checked before
+  # anything is written (task-97702b326b8bfd6d). Everyone else is unchanged.
+  defp reader_checked(conn, mutations, dataset, opts) do
+    if conn.assigns[BarkparkWeb.Plugs.RequireWritePermission.reader_assign()] == true do
+      with :ok <- Barkpark.Content.ReaderWrites.check_batch(mutations, dataset, opts),
+           do: Content.apply_mutations(mutations, dataset, opts)
+    else
+      Content.apply_mutations(mutations, dataset, opts)
+    end
   end
 
   # `dryRun` — body field or query param (Phoenix merges both into params).

@@ -907,7 +907,12 @@ defmodule Barkpark.Content.Schema do
       layout: schema.layout || [],
       prefill: schema.prefill || %{}
     }
+    |> put_reader_writes(schema.reader_writes)
   end
+
+  # Echoed only when set, so every schema without it serializes as before.
+  defp put_reader_writes(map, rw) when is_map(rw), do: Map.put(map, :readerWrites, rw)
+  defp put_reader_writes(map, _rw), do: map
 
   @doc """
   List every schema in a dataset in SDK envelope shape, plus a

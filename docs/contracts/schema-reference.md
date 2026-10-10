@@ -1,11 +1,11 @@
 <!-- doc-tier: agent | canonical-for: schema-field-reference | budget: 2400tok -->
 # Schema reference
 
-Every key a schema may declare when you `POST /v1/schemas/:dataset` (or `bp schema apply`), what each field `type` means, and what the server checks. Derived from the code, not from fixtures. The four nested v2 types, stored value shapes and `flat_mode` are detailed in [schema-v2.md](schema-v2.md).
+Every key a schema may declare when you `POST /v1/schemas/:dataset` (or `bp schema apply`), what each field `type` means, and what the server checks. The four nested v2 types, stored value shapes and `flat_mode` are detailed in [schema-v2.md](schema-v2.md).
 
 ## The schema object
 
-`name` and `title` are required. Beside them the changeset stores these keys and silently drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`; an `object` schema is a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), `list_preview`, `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`.
+`name` and `title` are required. Beside them the changeset stores these keys and silently drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), `list_preview`, `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`).
 
 A top-level `validations` list is read by `parse/2` but not cast, so it is not stored.
 
