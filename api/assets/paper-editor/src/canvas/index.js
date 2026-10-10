@@ -3501,7 +3501,17 @@ class BpPaperCanvas extends HTMLElement {
   // makes (field dialog first), never the canvas built-in of that name.
   _insertDeclaredObject(type) {
     const insert = (values) => this._insertObjectBlock(type, values, { keepLine: true });
-    if (!openObjectBlockInsert(this, this._editor, type, insert)) insert(undefined);
+    if (!openObjectBlockInsert(this, this._editor, type, insert)) {
+      insert(undefined);
+      return true;
+    }
+    // The palette refocused the editor before running this command, and TipTap's
+    // focus() takes the caret back on the next animation frame — after the dialog
+    // focused its first field. Take it back to the dialog (task-040407b85629d22b).
+    const dialog = this.inlineObjectDialog();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
+    }
     return true;
   }
 

@@ -184,9 +184,14 @@ export class InlineObjectDialog {
     this._onClose = onClose;
     this._build(anchorRect);
     if (error && error.message) this.showError(error.field || null, error.message);
-    const first = this._el.querySelector("[data-field]:not([disabled]), button");
-    if (first) first.focus();
+    this.focusFirst();
     return this._el;
+  }
+
+  // Focus the first field (or the first button when every field is disabled).
+  focusFirst() {
+    const first = this._el && this._el.querySelector("[data-field]:not([disabled]), button");
+    if (first) first.focus();
   }
 
   close(notify = true) {

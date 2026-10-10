@@ -10,7 +10,9 @@
 //   * a canvas with no such declaration keeps the built-in callout unchanged;
 //   * the command palette's "Insert Callout" follows the same rule
 //     (task-441e0c1cc08acc5e): the declared callout through the field dialog,
-//     inserted AFTER a block with content, or the built-in with no declaration.
+//     inserted AFTER a block with content, or the built-in with no declaration;
+//   * that palette-opened dialog takes focus, and Escape closes it and returns
+//     focus to the editor (task-040407b85629d22b).
 // Run: node src/canvas/__declared_callout_mounted.test.mjs
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -74,7 +76,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0, 4).join(" | ")}`);
   }
 }
-const EXPECTED = 8;
+const EXPECTED = 9;
 
 const dialog = () => document.querySelector(".bp-inline-object-dialog");
 function key(el, name, extra = {}) {
@@ -160,6 +162,30 @@ try {
     assert.equal(nodes.filter((n) => n.node.type.name === "callout").length, 0, "no built-in callout node");
   });
 
+  await check("the palette-opened dialog takes focus, and Escape closes it and returns focus to the editor", async () => {
+    const intro = topNodes(editor).find((n) => n.node.textContent === "Intro.");
+    editor.commands.setTextSelection(intro.pos + 1);
+    declared._openPalette();
+    await tick(50);
+    // In a browser the palette's filter input holds focus when a command is picked
+    // (jsdom leaves it on the editor); the editor's refocus starts from there.
+    declared._palette._input.focus();
+    assert.equal(document.activeElement, declared._palette._input, "precondition: the palette input holds focus");
+    const cmd = declared._palette._baseItems.find((c) => c.id === "insert-callout");
+    declared._choosePaletteCommand(cmd);
+    // Past the editor's deferred refocus (one animation frame).
+    await tick(80);
+    assert.ok(dialog(), "the field dialog opened");
+    assert.ok(dialog().contains(document.activeElement),
+      `focus is outside the dialog: ${document.activeElement && document.activeElement.className}`);
+    key(document.activeElement, "Escape");
+    await tick(80);
+    assert.equal(dialog(), null, "Escape closed the dialog");
+    assert.ok(editor.view.dom.contains(document.activeElement), `focus did not return to the editor: ${document.activeElement && document.activeElement.className}`);
+  });
+
+  // A red above leaves the dialog open; it must not leak into the next checks.
+  if (dialog()) declared.inlineObjectDialog().close(false);
   declared.remove();
   const builtin = await mount(null);
   const bEditor = builtin._editor;
