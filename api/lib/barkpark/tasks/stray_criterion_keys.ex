@@ -149,10 +149,6 @@ defmodule Barkpark.Tasks.StrayCriterionKeys do
   change, so the brief's criteria mirror stays true. Idempotent: a clean row
   plans `:clean` and is not written. Returns the number of rows changed.
   """
-  defp iso(%DateTime{} = t), do: DateTime.to_iso8601(t)
-  defp iso(%NaiveDateTime{} = t), do: NaiveDateTime.to_iso8601(t) <> "Z"
-  defp iso(_), do: "migration"
-
   @spec migrate(module()) :: non_neg_integer()
   def migrate(repo) do
     declared = Validation.criterion_keys()
@@ -196,4 +192,8 @@ defmodule Barkpark.Tasks.StrayCriterionKeys do
       end
     end)
   end
+
+  defp iso(%DateTime{} = t), do: DateTime.to_iso8601(t)
+  defp iso(%NaiveDateTime{} = t), do: NaiveDateTime.to_iso8601(t) <> "Z"
+  defp iso(_), do: "migration"
 end
