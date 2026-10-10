@@ -2339,6 +2339,25 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert render_submit(target, "find-next", %{"q" => "=sum"}) =~ "Match 1 of 1"
   end
 
+  # task-3e4466ab621e25fe: Ctrl+F (find-open) showed the bar but left focus on
+  # <body>. The input now focuses itself as find-open mounts it.
+  test "opening find moves focus into the find input", %{conn: conn} do
+    create_sheet!("sg-find-focus", one_tab(%{"A1" => %{"v" => "x"}}))
+    {view, target, _html} = open!(conn, "sg-find-focus")
+
+    refute has_element?(view, ~s([data-test-id="sheet-find-input"]))
+    render_hook(target, "find-open", %{})
+
+    input = view |> element(~s([data-test-id="sheet-find-input"])) |> render()
+    assert input =~ "phx-mounted"
+    assert input =~ "focus"
+
+    # Closing it hands focus back to the grid once the patch lands.
+    render_hook(target, "find-close", %{})
+    assert_push_event(view, "bp:sheet-focus-grid", %{id: "sheet-grid-sg-find-focus-grid"})
+    refute has_element?(view, ~s([data-test-id="sheet-find-input"]))
+  end
+
   test "find with no match announces politely and highlights nothing", %{conn: conn} do
     create_sheet!("sg-find-none", one_tab(%{"A1" => %{"v" => "hello"}}))
     {view, target, _html} = open!(conn, "sg-find-none")

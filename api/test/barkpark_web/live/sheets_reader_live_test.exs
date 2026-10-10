@@ -891,6 +891,16 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
       {:ok, _view, html} = live(conn, "/sheets/rdr-find-ui")
       assert html =~ ~s(data-test-id="sheet-find")
       assert html =~ ~s(data-test-id="sheet-find-input")
+
+      # task-3e4466ab621e25fe: the always-shown bar never steals focus on
+      # load; only find-open (Ctrl+F in the editor) focuses the input.
+      [input] =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="sheet-find-input"]))
+        |> Enum.to_list()
+
+      assert LazyHTML.attribute(input, "phx-mounted") == []
     end
 
     test "find jumps to an off-page match and highlights it, no session", %{conn: conn} do

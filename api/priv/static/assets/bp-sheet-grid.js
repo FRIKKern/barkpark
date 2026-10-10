@@ -159,6 +159,11 @@
       // first form control inside it gets focus once the patch lands.
       if (typeof this.handleEvent === "function") {
         this.handleEvent("bp:sheet-focus-first", (payload) => this._focusFirstIn(payload && payload.id));
+        // Find closed (Escape / ×): the grid takes focus back once the patch has
+        // landed (task-3e4466ab621e25fe) — a focus() before the patch was lost.
+        this.handleEvent("bp:sheet-focus-grid", (payload) => {
+          if (payload && payload.id === this.el.id && this.el.focus) this.el.focus({ preventScroll: true });
+        });
       }
       // Function autocomplete: the server stamps the whole function vocabulary
       // on this element (data-fns), space-joined. _fn holds the live dropdown

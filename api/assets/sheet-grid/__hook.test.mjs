@@ -1294,6 +1294,28 @@ check("bp:sheet-focus-first focuses the dialog's first FORM control, not its Clo
   assert.deepEqual(focused, ["op"]);
 });
 
+// task-3e4466ab621e25fe: closing find (Escape / ×) dropped focus on <body>; the
+// server now pushes bp:sheet-focus-grid and the hook focuses ITS grid once the
+// patch has landed — and ignores an event meant for another sheet's grid.
+check("bp:sheet-focus-grid focuses this hook's grid, and only this one", () => {
+  sandbox.window._listeners = {};
+  const handlers = {};
+  const hook = Object.create(sandbox.window.BarkparkSheetGrid);
+  const root = fakeEl(null);
+  hook.el = fakeEl(root);
+  hook.el.id = "sg-a-grid";
+  let focused = 0;
+  hook.el.focus = () => { focused += 1; };
+  hook.pushEventTo = () => {};
+  hook.handleEvent = (name, fn) => { handlers[name] = fn; };
+  hook.mounted();
+  assert.equal(typeof handlers["bp:sheet-focus-grid"], "function", "the hook listens for bp:sheet-focus-grid");
+  handlers["bp:sheet-focus-grid"]({ id: "sg-b-grid" });
+  assert.equal(focused, 0, "another sheet's grid id is ignored");
+  handlers["bp:sheet-focus-grid"]({ id: "sg-a-grid" });
+  assert.equal(focused, 1, "its own grid takes focus");
+});
+
 // Regression guard: the SAME keys with an in-grid target still behave exactly
 // as before — the scope guard only rejects out-of-grid targets.
 check("grid Enter still edit-starts, Tab still navs, Space still seeds (scope-guard regression pin)", () => {
