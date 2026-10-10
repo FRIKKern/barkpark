@@ -114,6 +114,13 @@ defmodule BarkparkWeb.SchemaNamedTypeApplyTest do
       "blocks" => %{
         "of" => ["image", %{"name" => "cta", "fields" => [%{"name" => "u", "type" => "strng"}]}]
       }
+    },
+    "richText blocks.inline object field" => %{
+      "name" => "body",
+      "type" => "richText",
+      "blocks" => %{
+        "inline" => [%{"name" => "chip", "fields" => [%{"name" => "text", "type" => "strng"}]}]
+      }
     }
   }
 

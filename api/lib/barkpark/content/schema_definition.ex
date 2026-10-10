@@ -1177,8 +1177,12 @@ defmodule Barkpark.Content.SchemaDefinition do
   defp v2_shape?(%Field{type: "file", fields: [_ | _]}), do: true
   # A richText vocabulary declaring custom object blocks (`blocks.of` entries
   # shaped `{name, fields}`) has block fields the v2 walker checks.
-  defp v2_shape?(%Field{type: "richText", raw: %{"blocks" => %{"of" => of}}}) when is_list(of),
-    do: Enum.any?(of, &is_map/1)
+  # Inline object types (`blocks.inline`, task-85fee859cf3bfef6) likewise: the
+  # v2 walker checks their fields and refuses undeclared inline types.
+  defp v2_shape?(%Field{type: "richText", raw: %{"blocks" => %{} = blocks} = raw}) do
+    (is_list(blocks["of"]) and Enum.any?(blocks["of"], &is_map/1)) or
+      Barkpark.PortableDoc.FieldVocabulary.declares_inline?(raw)
+  end
 
   defp v2_shape?(%Field{type: "image", raw: %{"options" => %{"hotspot" => true}}}), do: true
   defp v2_shape?(_), do: false

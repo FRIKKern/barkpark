@@ -23,7 +23,7 @@ defmodule Barkpark.Content.SchemaUnknownKeysTest do
     assert paths(attrs) == ["/singelton", "/fields/0/requred", "/fields/1/validation/requird"]
   end
 
-  test "nested positions: composite fields, rule lists, arrayOf of map and list, image fields, blocks.of" do
+  test "nested positions: composite fields, rule lists, arrayOf of map and list, image fields, blocks.of, blocks.inline" do
     attrs = %{
       "name" => "post",
       "title" => "Post",
@@ -56,6 +56,10 @@ defmodule Barkpark.Content.SchemaUnknownKeysTest do
             "of" => [
               "image",
               %{"name" => "cta", "fields" => [%{"name" => "u", "type" => "url", "y" => 1}]}
+            ],
+            "inline" => [
+              "mention",
+              %{"name" => "chip", "fields" => [%{"name" => "t", "type" => "string", "z" => 1}]}
             ]
           }
         }
@@ -68,7 +72,8 @@ defmodule Barkpark.Content.SchemaUnknownKeysTest do
              "/fields/2/of/titel",
              "/fields/3/of/0/fieldz",
              "/fields/4/fields/0/x",
-             "/fields/5/blocks/of/1/fields/0/y"
+             "/fields/5/blocks/of/1/fields/0/y",
+             "/fields/5/blocks/inline/1/fields/0/z"
            ]
   end
 
