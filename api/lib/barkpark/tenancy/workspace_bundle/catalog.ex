@@ -732,6 +732,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     search_surface_config search_synonyms task_edges workspaces
   )
 
+  # `scheduled_publishes` (task-8e88b5539acafdae) is DENIED here: each row is a
+  # pending job that will publish AS a named principal (a user or token id of
+  # THIS instance). Copied into a dev bundle it would name principals that do
+  # not exist there; the job also lives in `oban_jobs`, which never travels. In
+  # the full-fidelity profile it rides E1 like `api_tokens`, because that
+  # profile restores the same principals.
   @dev_deny ~w(
     access_grants api_tokens audit_events audit_export_sinks
     chat_execution_events chat_execution_leases chat_runtime_usage_receipts
