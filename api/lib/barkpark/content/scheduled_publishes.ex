@@ -33,8 +33,6 @@ defmodule Barkpark.Content.ScheduledPublishes do
   import Ecto.Query
 
   alias Barkpark.Repo
-  alias Barkpark.Accounts.User
-  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.{Broadcast, CallerContext, DraftId, ScheduledPublish, Scope}
   alias Barkpark.Content.Workers.ScheduledPublishWorker
@@ -177,37 +175,38 @@ defmodule Barkpark.Content.ScheduledPublishes do
   # A share-edit visitor or an anonymous caller has no identity to run as.
   defp scheduling_principal(_ctx), do: {:error, :forbidden}
 
-  # The scheduler, loaded fresh. Every refusal names what changed, and the
-  # draft is left alone.
+  # The scheduler, loaded fresh, as a CallerContext. Every refusal names what
+  # changed, and the draft is left alone. The rows are read here without the
+  # account and token modules (content stays below auth in the module graph);
+  # the decision itself is `Tenancy.Auth.authorize/3` on the context, the same
+  # seat rule a live request gets.
   defp acting_context(%ScheduledPublish{principal_type: "user"} = row) do
-    case Repo.get(User, row.principal_id) do
-      %User{} = user ->
-        with :ok <- may_write(user, row.workspace_id) do
-          {:ok,
-           CallerContext.from_user(user.id,
-             roles: List.wrap(role(user, row.workspace_id)),
-             load_grants: false
-           )}
-        end
+    if user_exists?(row.principal_id) do
+      ctx =
+        CallerContext.from_user(row.principal_id,
+          roles: List.wrap(user_role(row.principal_id, row.workspace_id)),
+          load_grants: false
+        )
 
-      nil ->
-        {:refused, "the person who scheduled it no longer exists"}
+      with :ok <- may_write(ctx, row.workspace_id), do: {:ok, ctx}
+    else
+      {:refused, "the person who scheduled it no longer exists"}
     end
   end
 
   defp acting_context(%ScheduledPublish{principal_type: "api_token"} = row) do
-    with %ApiToken{} = token <- Repo.get(ApiToken, row.principal_id),
-         true <- Barkpark.Auth.token_live?(token),
-         :ok <- may_write(token, row.workspace_id) do
-      {:ok, CallerContext.from_token(token, workspace_id: row.workspace_id)}
-    else
-      {:refused, _} = refused -> refused
-      _ -> {:refused, "the token that scheduled it is revoked or expired"}
+    case live_token(row.principal_id) do
+      %{} = token ->
+        ctx = CallerContext.from_token(token, workspace_id: row.workspace_id)
+        with :ok <- may_write(ctx, row.workspace_id), do: {:ok, ctx}
+
+      nil ->
+        {:refused, "the token that scheduled it is revoked or expired"}
     end
   end
 
-  defp may_write(principal, workspace_id) when is_binary(workspace_id) do
-    case TenancyAuth.authorize(principal, workspace_id, :write) do
+  defp may_write(ctx, workspace_id) when is_binary(workspace_id) do
+    case TenancyAuth.authorize(ctx, workspace_id, :write) do
       :ok -> :ok
       {:error, _} -> {:refused, "the scheduler no longer has write access to this workspace"}
     end
@@ -215,18 +214,39 @@ defmodule Barkpark.Content.ScheduledPublishes do
 
   # A shared-layer document (no workspace): a token still needs write
   # permission; a user has no seat to lose there.
-  defp may_write(%ApiToken{} = token, nil) do
-    if TenancyAuth.permits?(token, :write),
+  defp may_write(%CallerContext{principal_type: :api_token, roles: perms}, nil) do
+    if Enum.any?(~w(write admin), &(&1 in perms)),
       do: :ok,
       else: {:refused, "the scheduler no longer has write access"}
   end
 
-  defp may_write(_principal, nil), do: :ok
+  defp may_write(_ctx, nil), do: :ok
 
-  defp role(user, workspace_id) when is_binary(workspace_id),
-    do: TenancyAuth.membership_role(user, workspace_id)
+  defp user_exists?(user_id),
+    do: Repo.exists?(from u in "users", where: u.id == type(^user_id, :binary_id))
 
-  defp role(_user, _workspace_id), do: nil
+  defp user_role(user_id, workspace_id) when is_binary(workspace_id),
+    do: TenancyAuth.membership_role(user_id, workspace_id, :user)
+
+  defp user_role(_user_id, _workspace_id), do: nil
+
+  # The same liveness predicate as `Barkpark.Auth.token_live?/1`: an `api`
+  # key, not revoked, not expired.
+  defp live_token(token_id) do
+    now = DateTime.utc_now()
+
+    Repo.one(
+      from t in "api_tokens",
+        where:
+          t.id == type(^token_id, :binary_id) and t.kind == "api" and is_nil(t.revoked_at) and
+            (is_nil(t.expires_at) or t.expires_at > ^now),
+        select: %{
+          id: type(t.id, :binary_id),
+          permissions: t.permissions,
+          owner_user_id: type(t.owner_user_id, :binary_id)
+        }
+    )
+  end
 
   # ── Validation ─────────────────────────────────────────────────────────────
 
