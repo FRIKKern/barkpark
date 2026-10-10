@@ -19,10 +19,11 @@
 // api/test/support/fixtures/table-col-types.json; tests/table-typed-cols.test.ts
 // reads that file rather than re-typing it.
 
+import type { RenderCtx } from './chrome'
 import { type Block, asList, isMap, renderCell } from '../inline'
 import { sparkSvg } from './dataviz'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 // num and delta share the right-align modifier; spark takes its own.
 const COL_MOD: Record<string, string> = { num: '--num', delta: '--num', spark: '--spark' }

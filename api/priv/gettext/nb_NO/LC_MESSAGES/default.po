@@ -92,7 +92,7 @@ msgstr "Lukk referanse: %{title}"
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3175
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3444
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:319
-#: lib/barkpark_web/studio_locale.ex:505
+#: lib/barkpark_web/studio_locale.ex:509
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr "Slett"
@@ -116,7 +116,7 @@ msgid "Discard draft"
 msgstr "Forkast utkast"
 
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:235
-#: lib/barkpark_web/studio_locale.ex:514
+#: lib/barkpark_web/studio_locale.ex:518
 #, elixir-autogen, elixir-format
 msgid "Duplicate"
 msgstr "Dupliser"
@@ -129,7 +129,7 @@ msgstr "Dupliser"
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3443
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:206
-#: lib/barkpark_web/studio_locale.ex:515
+#: lib/barkpark_web/studio_locale.ex:519
 #, elixir-autogen, elixir-format
 msgid "Edit"
 msgstr "Rediger"
@@ -171,7 +171,7 @@ msgstr "Historikk"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4646
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:511
 #: lib/barkpark_web/studio_locale.ex:318
-#: lib/barkpark_web/studio_locale.ex:603
+#: lib/barkpark_web/studio_locale.ex:607
 #, elixir-autogen, elixir-format
 msgid "Move down"
 msgstr "Flytt ned"
@@ -192,7 +192,7 @@ msgstr "Flytt ned"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4643
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:510
 #: lib/barkpark_web/studio_locale.ex:319
-#: lib/barkpark_web/studio_locale.ex:604
+#: lib/barkpark_web/studio_locale.ex:608
 #, elixir-autogen, elixir-format
 msgid "Move up"
 msgstr "Flytt opp"
@@ -331,7 +331,7 @@ msgstr "Avpubliser"
 #: lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:22
 #: lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex:26
 #: lib/barkpark_web/live/studio/studio_live/shared.ex:2596
-#: lib/barkpark_web/studio_locale.ex:776
+#: lib/barkpark_web/studio_locale.ex:781
 #, elixir-autogen, elixir-format
 msgid "Untitled"
 msgstr "Uten tittel"
@@ -363,7 +363,7 @@ msgstr "men tilgangsgranten din dekker det ikke"
 
 #: lib/barkpark_web/studio/pane_builder.ex:1032
 #: lib/barkpark_web/studio_locale.ex:181
-#: lib/barkpark_web/studio_locale.ex:747
+#: lib/barkpark_web/studio_locale.ex:752
 #, elixir-autogen, elixir-format
 msgid "document"
 msgstr "dokument"
@@ -419,7 +419,7 @@ msgstr "du ba om"
 msgid "Browse library"
 msgstr "Bla i mediebiblioteket"
 
-#: lib/barkpark_web/studio_locale.ex:789
+#: lib/barkpark_web/studio_locale.ex:794
 #, elixir-autogen, elixir-format
 msgid "Change"
 msgstr "Endre"
@@ -453,7 +453,7 @@ msgstr "Mediebibliotek"
 msgid "No image selected — drop a file, or click to upload"
 msgstr "Ingen bilde valgt — slipp en fil her, eller klikk for å laste opp"
 
-#: lib/barkpark_web/studio_locale.ex:792
+#: lib/barkpark_web/studio_locale.ex:797
 #, elixir-autogen, elixir-format
 msgid "No matches"
 msgstr "Ingen treff"
@@ -461,9 +461,9 @@ msgstr "Ingen treff"
 #: lib/barkpark_web/components/studio_components/modals.ex:213
 #: lib/barkpark_web/live/studio/paper_field_block.ex:193
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:512
-#: lib/barkpark_web/studio_locale.ex:648
-#: lib/barkpark_web/studio_locale.ex:767
-#: lib/barkpark_web/studio_locale.ex:791
+#: lib/barkpark_web/studio_locale.ex:652
+#: lib/barkpark_web/studio_locale.ex:772
+#: lib/barkpark_web/studio_locale.ex:796
 #, elixir-autogen, elixir-format
 msgid "Remove"
 msgstr "Fjern"
@@ -478,7 +478,7 @@ msgstr "Fjern bilde"
 msgid "Right-click for image options"
 msgstr "Høyreklikk for bildevalg"
 
-#: lib/barkpark_web/studio_locale.ex:796
+#: lib/barkpark_web/studio_locale.ex:801
 #, elixir-autogen, elixir-format
 msgid "Search %{types}…"
 msgstr "Søk i %{types}…"
@@ -495,12 +495,12 @@ msgid "Upload file"
 msgstr "Last opp fil"
 
 #: lib/barkpark_web/studio_locale.ex:117
-#: lib/barkpark_web/studio_locale.ex:706
+#: lib/barkpark_web/studio_locale.ex:710
 #, elixir-autogen, elixir-format
 msgid "Uploading…"
 msgstr "Laster opp…"
 
-#: lib/barkpark_web/studio_locale.ex:797
+#: lib/barkpark_web/studio_locale.ex:802
 #, elixir-autogen, elixir-format
 msgid "documents"
 msgstr "dokumenter"
@@ -509,7 +509,7 @@ msgstr "dokumenter"
 #: lib/barkpark_web/components/studio_components/panes.ex:641
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2370
 #: lib/barkpark_web/studio_locale.ex:140
-#: lib/barkpark_web/studio_locale.ex:793
+#: lib/barkpark_web/studio_locale.ex:798
 #, elixir-autogen, elixir-format
 msgid "draft"
 msgstr "utkast"
@@ -529,8 +529,8 @@ msgstr "Beskriv bildet for dem som ikke kan se det"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3773
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4612
 #: lib/barkpark_web/studio/plugin_schema_copy.ex:27
-#: lib/barkpark_web/studio_locale.ex:693
-#: lib/barkpark_web/studio_locale.ex:777
+#: lib/barkpark_web/studio_locale.ex:697
+#: lib/barkpark_web/studio_locale.ex:782
 #, elixir-autogen, elixir-format
 msgid "Title"
 msgstr "Tittel"
@@ -542,7 +542,7 @@ msgstr "Tittel"
 msgid "Upload"
 msgstr "Last opp"
 
-#: lib/barkpark_web/studio_locale.ex:824
+#: lib/barkpark_web/studio_locale.ex:829
 #, elixir-autogen, elixir-format
 msgid "Does not match required format"
 msgstr "Har ikke riktig format"
@@ -552,28 +552,28 @@ msgstr "Har ikke riktig format"
 msgid "Fix validation errors before publishing"
 msgstr "Rett valideringsfeilene før du publiserer"
 
-#: lib/barkpark_web/studio_locale.ex:835
+#: lib/barkpark_web/studio_locale.ex:840
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min}"
 msgstr "Må være minst %{min}"
 
-#: lib/barkpark_web/studio_locale.ex:829
+#: lib/barkpark_web/studio_locale.ex:834
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min} characters"
 msgstr "Må være minst %{min} tegn"
 
-#: lib/barkpark_web/studio_locale.ex:838
+#: lib/barkpark_web/studio_locale.ex:843
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max}"
 msgstr "Kan være høyst %{max}"
 
-#: lib/barkpark_web/studio_locale.ex:832
+#: lib/barkpark_web/studio_locale.ex:837
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max} characters"
 msgstr "Kan være høyst %{max} tegn"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3436
-#: lib/barkpark_web/studio_locale.ex:821
+#: lib/barkpark_web/studio_locale.ex:826
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr "Påkrevd"
@@ -837,14 +837,14 @@ msgstr "Midtstill"
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3382
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3382
-#: lib/barkpark_web/studio_locale.ex:449
+#: lib/barkpark_web/studio_locale.ex:453
 #, elixir-autogen, elixir-format
 msgid "Align left"
 msgstr "Venstrejuster"
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3384
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3384
-#: lib/barkpark_web/studio_locale.ex:450
+#: lib/barkpark_web/studio_locale.ex:454
 #, elixir-autogen, elixir-format
 msgid "Align right"
 msgstr "Høyrejuster"
@@ -1448,7 +1448,7 @@ msgstr "Del opp sammenslåtte celler i markeringen"
 #: lib/barkpark_web/live/bulldocs_live.ex:1740
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3194
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
-#: lib/barkpark_web/studio_locale.ex:713
+#: lib/barkpark_web/studio_locale.ex:717
 #, elixir-autogen, elixir-format
 msgid "View"
 msgstr "Visning"
@@ -1464,13 +1464,13 @@ msgid "contains “%{value}”"
 msgstr "inneholder «%{value}»"
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3380
-#: lib/barkpark_web/studio_locale.ex:458
+#: lib/barkpark_web/studio_locale.ex:462
 #, elixir-autogen, elixir-format
 msgid "Bold"
 msgstr "Fet"
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3381
-#: lib/barkpark_web/studio_locale.ex:563
+#: lib/barkpark_web/studio_locale.ex:567
 #, elixir-autogen, elixir-format
 msgid "Italic"
 msgstr "Kursiv"
@@ -1523,7 +1523,7 @@ msgstr "USD ($)"
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2222
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2309
 #: lib/barkpark_web/studio_locale.ex:160
-#: lib/barkpark_web/studio_locale.ex:790
+#: lib/barkpark_web/studio_locale.ex:795
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr "Avbryt"
@@ -1621,7 +1621,7 @@ msgstr "Rettigheter"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:1090
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:714
-#: lib/barkpark_web/studio_locale.ex:496
+#: lib/barkpark_web/studio_locale.ex:500
 #, elixir-autogen, elixir-format
 msgid "Color"
 msgstr "Farge"
@@ -1698,6 +1698,7 @@ msgstr "Dokumenter"
 msgid "Document history"
 msgstr "Dokumenthistorikk"
 
+#: lib/barkpark/portable_doc/render/chrome.ex:73
 #: lib/barkpark_web/components/studio_components/modals.ex:429
 #, elixir-autogen, elixir-format
 msgid "Done"
@@ -1833,7 +1834,7 @@ msgstr "nov."
 msgid "Oct"
 msgstr "okt."
 
-#: lib/barkpark/portable_doc/render/chrome.ex:43
+#: lib/barkpark/portable_doc/render/chrome.ex:45
 #: lib/barkpark_web/components/studio_components/modals.ex:739
 #: lib/barkpark_web/studio/structure_copy.ex:25
 #, elixir-autogen, elixir-format
@@ -2346,7 +2347,7 @@ msgstr "Delt verdi"
 #: lib/barkpark_web/live/studio/studio_live/components.ex:947
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:709
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3932
-#: lib/barkpark_web/studio_locale.ex:663
+#: lib/barkpark_web/studio_locale.ex:667
 #, elixir-autogen, elixir-format
 msgid "Slug"
 msgstr "Slug"
@@ -2445,7 +2446,7 @@ msgstr[0] "er referert fra %{count} dokument. Avpublisering vil etterlate den re
 msgstr[1] "er referert fra %{count} dokumenter. Avpublisering vil etterlate de referansene uten mål:"
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1043
-#: lib/barkpark_web/studio_locale.ex:565
+#: lib/barkpark_web/studio_locale.ex:569
 #, elixir-autogen, elixir-format
 msgid "label"
 msgstr "etikett"
@@ -2803,7 +2804,7 @@ msgid "%{count} assets match"
 msgstr "%{count} filer passer"
 
 #: lib/barkpark_web/studio_locale.ex:144
-#: lib/barkpark_web/studio_locale.ex:806
+#: lib/barkpark_web/studio_locale.ex:811
 #, elixir-autogen, elixir-format
 msgid "%{count} searches"
 msgstr "%{count} søk"
@@ -2979,7 +2980,7 @@ msgid "Folder collections hold curated sets of assets."
 msgstr "Mappesamlinger holder utvalgte sett med filer."
 
 #: lib/barkpark_web/studio_locale.ex:192
-#: lib/barkpark_web/studio_locale.ex:537
+#: lib/barkpark_web/studio_locale.ex:541
 #, elixir-autogen, elixir-format
 msgid "Format"
 msgstr "Format"
@@ -3020,15 +3021,15 @@ msgid "Library"
 msgstr "Bibliotek"
 
 #: lib/barkpark_web/studio_locale.ex:201
-#: lib/barkpark_web/studio_locale.ex:579
-#: lib/barkpark_web/studio_locale.ex:765
+#: lib/barkpark_web/studio_locale.ex:583
+#: lib/barkpark_web/studio_locale.ex:770
 #, elixir-autogen, elixir-format
 msgid "Link"
 msgstr "Lenke"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:659
 #: lib/barkpark_web/studio_locale.ex:202
-#: lib/barkpark_web/studio_locale.ex:584
+#: lib/barkpark_web/studio_locale.ex:588
 #, elixir-autogen, elixir-format
 msgid "List"
 msgstr "Liste"
@@ -3091,7 +3092,7 @@ msgid "No folders yet — click + to create one."
 msgstr "Ingen mapper ennå — klikk + for å opprette en."
 
 #: lib/barkpark_web/studio_locale.ex:221
-#: lib/barkpark_web/studio_locale.ex:804
+#: lib/barkpark_web/studio_locale.ex:809
 #, elixir-autogen, elixir-format
 msgid "No matches before"
 msgstr "Ga ingen treff før"
@@ -3117,7 +3118,7 @@ msgid "Other"
 msgstr "Annet"
 
 #: lib/barkpark_web/studio_locale.ex:227
-#: lib/barkpark_web/studio_locale.ex:803
+#: lib/barkpark_web/studio_locale.ex:808
 #, elixir-autogen, elixir-format
 msgid "Popular"
 msgstr "Populære"
@@ -3133,7 +3134,7 @@ msgid "Public share link"
 msgstr "Offentlig delingslenke"
 
 #: lib/barkpark_web/studio_locale.ex:235
-#: lib/barkpark_web/studio_locale.ex:802
+#: lib/barkpark_web/studio_locale.ex:807
 #, elixir-autogen, elixir-format
 msgid "Recent"
 msgstr "Nylige"
@@ -3306,7 +3307,7 @@ msgstr "Bruk Avgrens, eller fjern filtre for å utvide"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:722
 #: lib/barkpark_web/studio_locale.ex:283
-#: lib/barkpark_web/studio_locale.ex:709
+#: lib/barkpark_web/studio_locale.ex:713
 #, elixir-autogen, elixir-format
 msgid "Video"
 msgstr "Video"
@@ -3380,7 +3381,7 @@ msgid "API endpoint"
 msgstr "API-endepunkt"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:678
-#: lib/barkpark_web/studio_locale.ex:430
+#: lib/barkpark_web/studio_locale.ex:434
 #, elixir-autogen, elixir-format
 msgid "Action"
 msgstr "Handling"
@@ -3391,7 +3392,7 @@ msgid "Action destination"
 msgstr "Mål for handlingen"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3158
-#: lib/barkpark_web/studio_locale.ex:436
+#: lib/barkpark_web/studio_locale.ex:440
 #, elixir-autogen, elixir-format
 msgid "Action label"
 msgstr "Tekst på handlingen"
@@ -3490,7 +3491,7 @@ msgid "Add heading"
 msgstr "Legg til overskrift"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4179
-#: lib/barkpark_web/studio_locale.ex:447
+#: lib/barkpark_web/studio_locale.ex:451
 #, elixir-autogen, elixir-format
 msgid "Add option"
 msgstr "Legg til alternativ"
@@ -3572,13 +3573,13 @@ msgid "Answer type"
 msgstr "Svartype"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:728
-#: lib/barkpark_web/studio_locale.ex:452
+#: lib/barkpark_web/studio_locale.ex:456
 #, elixir-autogen, elixir-format
 msgid "Array of"
 msgstr "Liste av"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:669
-#: lib/barkpark_web/studio_locale.ex:453
+#: lib/barkpark_web/studio_locale.ex:457
 #, elixir-autogen, elixir-format
 msgid "Article chrome"
 msgstr "Artikkelramme"
@@ -3623,7 +3624,7 @@ msgid "Bar chart"
 msgstr "Stolpediagram"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:706
-#: lib/barkpark_web/studio_locale.ex:455
+#: lib/barkpark_web/studio_locale.ex:459
 #, elixir-autogen, elixir-format
 msgid "Basic fields"
 msgstr "Enkle felt"
@@ -3639,13 +3640,13 @@ msgid "Blockquote"
 msgstr "Sitat"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:711
-#: lib/barkpark_web/studio_locale.ex:459
+#: lib/barkpark_web/studio_locale.ex:463
 #, elixir-autogen, elixir-format
 msgid "Boolean"
 msgstr "Ja/nei"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2724
-#: lib/barkpark_web/studio_locale.ex:464
+#: lib/barkpark_web/studio_locale.ex:468
 #, elixir-autogen, elixir-format
 msgid "Button label"
 msgstr "Knappetekst"
@@ -3656,20 +3657,20 @@ msgid "By line — separate names with ·"
 msgstr "Byline – skill navn med ·"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:672
-#: lib/barkpark_web/studio_locale.ex:465
+#: lib/barkpark_web/studio_locale.ex:469
 #, elixir-autogen, elixir-format
 msgid "Byline"
 msgstr "Byline"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:660
-#: lib/barkpark_web/studio_locale.ex:467
+#: lib/barkpark_web/studio_locale.ex:471
 #, elixir-autogen, elixir-format
 msgid "Callout"
 msgstr "Merknadsboks"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3309
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3366
-#: lib/barkpark_web/studio_locale.ex:481
+#: lib/barkpark_web/studio_locale.ex:485
 #, elixir-autogen, elixir-format
 msgid "Caption"
 msgstr "Bildetekst"
@@ -3685,21 +3686,21 @@ msgid "Caption file"
 msgstr "Tekstfil"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:679
-#: lib/barkpark_web/studio_locale.ex:483
+#: lib/barkpark_web/studio_locale.ex:487
 #, elixir-autogen, elixir-format
 msgid "Card"
 msgstr "Kort"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1804
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1810
-#: lib/barkpark_web/studio_locale.ex:484
+#: lib/barkpark_web/studio_locale.ex:488
 #, elixir-autogen, elixir-format
 msgid "Card action label"
 msgstr "Tekst på kortets handling"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1761
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1762
-#: lib/barkpark_web/studio_locale.ex:485
+#: lib/barkpark_web/studio_locale.ex:489
 #, elixir-autogen, elixir-format
 msgid "Card title"
 msgstr "Korttittel"
@@ -3716,13 +3717,13 @@ msgstr "Klassisk"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:661
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:505
-#: lib/barkpark_web/studio_locale.ex:492
+#: lib/barkpark_web/studio_locale.ex:496
 #, elixir-autogen, elixir-format
 msgid "Code"
 msgstr "Kode"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:729
-#: lib/barkpark_web/studio_locale.ex:494
+#: lib/barkpark_web/studio_locale.ex:498
 #, elixir-autogen, elixir-format
 msgid "Code list"
 msgstr "Kodeliste"
@@ -3733,13 +3734,13 @@ msgid "Code tabs"
 msgstr "Kodefaner"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:726
-#: lib/barkpark_web/studio_locale.ex:497
+#: lib/barkpark_web/studio_locale.ex:501
 #, elixir-autogen, elixir-format
 msgid "Columns"
 msgstr "Kolonner"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:727
-#: lib/barkpark_web/studio_locale.ex:499
+#: lib/barkpark_web/studio_locale.ex:503
 #, elixir-autogen, elixir-format
 msgid "Composite"
 msgstr "Sammensatt"
@@ -3845,7 +3846,7 @@ msgid "Criteria progress"
 msgstr "Kriteriefremdrift"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:713
-#: lib/barkpark_web/studio_locale.ex:504
+#: lib/barkpark_web/studio_locale.ex:508
 #, elixir-autogen, elixir-format
 msgid "Date & time"
 msgstr "Dato og tid"
@@ -3888,7 +3889,7 @@ msgid "Detail"
 msgstr "Detalj"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:684
-#: lib/barkpark_web/studio_locale.ex:506
+#: lib/barkpark_web/studio_locale.ex:510
 #, elixir-autogen, elixir-format
 msgid "Diagram"
 msgstr "Diagram"
@@ -3909,7 +3910,7 @@ msgid "Distance"
 msgstr "Distanse"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:663
-#: lib/barkpark_web/studio_locale.ex:511
+#: lib/barkpark_web/studio_locale.ex:515
 #, elixir-autogen, elixir-format
 msgid "Divider"
 msgstr "Skillelinje"
@@ -3942,7 +3943,7 @@ msgid "Duplicate authored identities must be repaired before editing; original c
 msgstr "Dupliserte identiteter må repareres før redigering; det opprinnelige innholdet er bevart."
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3156
-#: lib/barkpark_web/studio_locale.ex:516
+#: lib/barkpark_web/studio_locale.ex:520
 #, elixir-autogen, elixir-format
 msgid "Edit action label"
 msgstr "Rediger handlingsteksten"
@@ -4058,7 +4059,7 @@ msgid "Encoded polyline"
 msgstr "Kodet polylinje"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:686
-#: lib/barkpark_web/studio_locale.ex:524
+#: lib/barkpark_web/studio_locale.ex:528
 #, elixir-autogen, elixir-format
 msgid "Equation"
 msgstr "Ligning"
@@ -4075,7 +4076,7 @@ msgstr "Tittel på utvidbar seksjon"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:671
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3996
-#: lib/barkpark_web/studio_locale.ex:528
+#: lib/barkpark_web/studio_locale.ex:532
 #, elixir-autogen, elixir-format
 msgid "Eyebrow"
 msgstr "Stikktittel"
@@ -4096,7 +4097,7 @@ msgid "Featured reference"
 msgstr "Fremhevet referanse"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:685
-#: lib/barkpark_web/studio_locale.ex:530
+#: lib/barkpark_web/studio_locale.ex:534
 #, elixir-autogen, elixir-format
 msgid "Figure"
 msgstr "Figur"
@@ -4118,7 +4119,7 @@ msgid "First line"
 msgstr "Første linje"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:697
-#: lib/barkpark_web/studio_locale.ex:535
+#: lib/barkpark_web/studio_locale.ex:539
 #, elixir-autogen, elixir-format
 msgid "Footnotes"
 msgstr "Fotnoter"
@@ -4141,7 +4142,7 @@ msgstr "Grupper etter"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:658
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3897
-#: lib/barkpark_web/studio_locale.ex:542
+#: lib/barkpark_web/studio_locale.ex:546
 #, elixir-autogen, elixir-format
 msgid "Heading"
 msgstr "Overskrift"
@@ -4149,7 +4150,7 @@ msgstr "Overskrift"
 #: lib/barkpark_web/components/draft_diff.ex:195
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:719
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4997
-#: lib/barkpark_web/studio_locale.ex:554
+#: lib/barkpark_web/studio_locale.ex:558
 #, elixir-autogen, elixir-format
 msgid "Image"
 msgstr "Bilde"
@@ -4162,7 +4163,7 @@ msgid "Image options"
 msgstr "Bildevalg"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:673
-#: lib/barkpark_web/studio_locale.ex:556
+#: lib/barkpark_web/studio_locale.ex:560
 #, elixir-autogen, elixir-format
 msgid "Ingress"
 msgstr "Ingress"
@@ -4192,7 +4193,7 @@ msgstr "Etikett"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4939
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:59
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:504
-#: lib/barkpark_web/studio_locale.ex:569
+#: lib/barkpark_web/studio_locale.ex:573
 #, elixir-autogen, elixir-format
 msgid "Language"
 msgstr "Språk"
@@ -4254,7 +4255,7 @@ msgid "Loading live tasks…"
 msgstr "Laster oppgaver …"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:730
-#: lib/barkpark_web/studio_locale.ex:587
+#: lib/barkpark_web/studio_locale.ex:591
 #, elixir-autogen, elixir-format
 msgid "Localized text"
 msgstr "Lokalisert tekst"
@@ -4276,7 +4277,7 @@ msgid "Locked content must be removed before this column."
 msgstr "Låst innhold må fjernes før denne kolonnen."
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:710
-#: lib/barkpark_web/studio_locale.ex:588
+#: lib/barkpark_web/studio_locale.ex:592
 #, elixir-autogen, elixir-format
 msgid "Long text"
 msgstr "Lang tekst"
@@ -4290,13 +4291,13 @@ msgstr "Spill av i løkke"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4621
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4692
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4816
-#: lib/barkpark_web/studio_locale.ex:597
+#: lib/barkpark_web/studio_locale.ex:601
 #, elixir-autogen, elixir-format
 msgid "Maximum"
 msgstr "Maksimum"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:717
-#: lib/barkpark_web/studio_locale.ex:598
+#: lib/barkpark_web/studio_locale.ex:602
 #, elixir-autogen, elixir-format
 msgid "Media & reference"
 msgstr "Media og referanser"
@@ -4328,7 +4329,7 @@ msgstr "Metode"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4185
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4812
-#: lib/barkpark_web/studio_locale.ex:601
+#: lib/barkpark_web/studio_locale.ex:605
 #, elixir-autogen, elixir-format
 msgid "Minimum"
 msgstr "Minimum"
@@ -4363,7 +4364,7 @@ msgstr "Flytt denne blokken opp"
 msgid "Multiple choice"
 msgstr "Flervalg"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:33
+#: lib/barkpark/portable_doc/render/chrome.ex:35
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1285
 #, elixir-autogen, elixir-format
 msgid "No matching tasks."
@@ -4377,7 +4378,7 @@ msgstr "Ingen"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:683
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4638
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
-#: lib/barkpark_web/studio_locale.ex:616
+#: lib/barkpark_web/studio_locale.ex:620
 #, elixir-autogen, elixir-format
 msgid "Note"
 msgstr "Notat"
@@ -4389,7 +4390,7 @@ msgid "Nothing to show yet."
 msgstr "Ingenting å vise ennå."
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:715
-#: lib/barkpark_web/studio_locale.ex:631
+#: lib/barkpark_web/studio_locale.ex:635
 #, elixir-autogen, elixir-format
 msgid "Number"
 msgstr "Tall"
@@ -4455,7 +4456,7 @@ msgid "Paper links"
 msgstr "Artikkellenker"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:657
-#: lib/barkpark_web/studio_locale.ex:630
+#: lib/barkpark_web/studio_locale.ex:634
 #, elixir-autogen, elixir-format
 msgid "Paragraph"
 msgstr "Avsnitt"
@@ -4467,7 +4468,7 @@ msgstr "Avsnitt"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1087
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1176
 #: lib/barkpark_web/studio_locale.ex:321
-#: lib/barkpark_web/studio_locale.ex:634
+#: lib/barkpark_web/studio_locale.ex:638
 #, elixir-autogen, elixir-format
 msgid "Part of the document template"
 msgstr "Del av dokumentmalen"
@@ -4523,7 +4524,7 @@ msgid "Properties"
 msgstr "Egenskaper"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:674
-#: lib/barkpark_web/studio_locale.ex:644
+#: lib/barkpark_web/studio_locale.ex:648
 #, elixir-autogen, elixir-format
 msgid "Pullquote"
 msgstr "Uthevet sitat"
@@ -4585,7 +4586,7 @@ msgid "Redo content change"
 msgstr "Gjør om innholdsendringen"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:720
-#: lib/barkpark_web/studio_locale.ex:646
+#: lib/barkpark_web/studio_locale.ex:650
 #, elixir-autogen, elixir-format
 msgid "Reference"
 msgstr "Referanse"
@@ -4721,7 +4722,7 @@ msgid "Row data has a legacy shape; title, mode and maximum remain editable. Ori
 msgstr "Raddataene har en eldre form; tittel, modus og maksimum kan fortsatt redigeres. De opprinnelige radene er bevart."
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1130
-#: lib/barkpark_web/studio_locale.ex:656
+#: lib/barkpark_web/studio_locale.ex:660
 #, elixir-autogen, elixir-format
 msgid "Save as master"
 msgstr "Lagre som mal"
@@ -4742,7 +4743,7 @@ msgid "Scale"
 msgstr "Skala"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:664
-#: lib/barkpark_web/studio_locale.ex:659
+#: lib/barkpark_web/studio_locale.ex:663
 #, elixir-autogen, elixir-format
 msgid "Section"
 msgstr "Seksjon"
@@ -4755,7 +4756,7 @@ msgid "Section title"
 msgstr "Seksjonstittel"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:712
-#: lib/barkpark_web/studio_locale.ex:660
+#: lib/barkpark_web/studio_locale.ex:664
 #, elixir-autogen, elixir-format
 msgid "Select"
 msgstr "Nedtrekksliste"
@@ -4798,7 +4799,7 @@ msgid "Sport"
 msgstr "Sport"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:682
-#: lib/barkpark_web/studio_locale.ex:666
+#: lib/barkpark_web/studio_locale.ex:670
 #, elixir-autogen, elixir-format
 msgid "Stage"
 msgstr "Scene"
@@ -4815,7 +4816,7 @@ msgid "Stage title"
 msgstr "Scenetittel"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4820
-#: lib/barkpark_web/studio_locale.ex:670
+#: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
 msgid "Step"
 msgstr "Steg"
@@ -4836,7 +4837,7 @@ msgid "Step title"
 msgstr "Trinntittel"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:666
-#: lib/barkpark_web/studio_locale.ex:671
+#: lib/barkpark_web/studio_locale.ex:675
 #, elixir-autogen, elixir-format
 msgid "Steps"
 msgstr "Trinn"
@@ -4847,19 +4848,19 @@ msgid "Sticky in article view"
 msgstr "Fast i artikkelvisning"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:708
-#: lib/barkpark_web/studio_locale.ex:674
+#: lib/barkpark_web/studio_locale.ex:678
 #, elixir-autogen, elixir-format
 msgid "String"
 msgstr "Tekst"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:724
-#: lib/barkpark_web/studio_locale.ex:675
+#: lib/barkpark_web/studio_locale.ex:679
 #, elixir-autogen, elixir-format
 msgid "Structured"
 msgstr "Strukturert"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4584
-#: lib/barkpark_web/studio_locale.ex:677
+#: lib/barkpark_web/studio_locale.ex:681
 #, elixir-autogen, elixir-format
 msgid "Summary"
 msgstr "Sammendrag"
@@ -4871,7 +4872,7 @@ msgid "Tab %{n}"
 msgstr "Fane %{n}"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:680
-#: lib/barkpark_web/studio_locale.ex:679
+#: lib/barkpark_web/studio_locale.ex:683
 #, elixir-autogen, elixir-format
 msgid "Table"
 msgstr "Tabell"
@@ -4882,7 +4883,7 @@ msgid "Table of contents"
 msgstr "Innholdsfortegnelse"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:667
-#: lib/barkpark_web/studio_locale.ex:682
+#: lib/barkpark_web/studio_locale.ex:686
 #, elixir-autogen, elixir-format
 msgid "Tabs"
 msgstr "Faner"
@@ -4898,7 +4899,7 @@ msgid "Technical"
 msgstr "Teknisk"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:681
-#: lib/barkpark_web/studio_locale.ex:687
+#: lib/barkpark_web/studio_locale.ex:691
 #, elixir-autogen, elixir-format
 msgid "Terminal"
 msgstr "Terminal"
@@ -4919,7 +4920,7 @@ msgstr "Terminaltittel"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3508
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5344
 #: lib/barkpark_web/studio_locale.ex:362
-#: lib/barkpark_web/studio_locale.ex:690
+#: lib/barkpark_web/studio_locale.ex:694
 #, elixir-autogen, elixir-format
 msgid "Text"
 msgstr "Tekst"
@@ -5000,6 +5001,7 @@ msgstr "Tittel (valgfri)"
 msgid "Tone"
 msgstr "Tone"
 
+#: lib/barkpark/portable_doc/render/chrome.ex:91
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3590
 #, elixir-autogen, elixir-format
 msgid "Total"
@@ -5007,7 +5009,7 @@ msgstr "Totalt"
 
 #: lib/barkpark_web/live/studio/api_tester_live/components.ex:19
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3428
-#: lib/barkpark_web/studio_locale.ex:778
+#: lib/barkpark_web/studio_locale.ex:783
 #, elixir-autogen, elixir-format
 msgid "Type"
 msgstr "Type"
@@ -5028,7 +5030,7 @@ msgid "Undo content change"
 msgstr "Angre innholdsendringen"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4824
-#: lib/barkpark_web/studio_locale.ex:704
+#: lib/barkpark_web/studio_locale.ex:708
 #, elixir-autogen, elixir-format
 msgid "Unit"
 msgstr "Enhet"
@@ -5061,11 +5063,12 @@ msgid "Visible depth"
 msgstr "Synlig dybde"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
-#: lib/barkpark_web/studio_locale.ex:714
+#: lib/barkpark_web/studio_locale.ex:718
 #, elixir-autogen, elixir-format
 msgid "Visual"
 msgstr "Visuelt"
 
+#: lib/barkpark/portable_doc/render/chrome.ex:61
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2221
 #, elixir-autogen, elixir-format
 msgid "Why it matters:"
@@ -5206,927 +5209,929 @@ msgstr "en annen redaktør"
 msgid "you"
 msgstr "deg"
 
-#: lib/barkpark_web/studio_locale.ex:426
+#: lib/barkpark_web/studio_locale.ex:430
 #, elixir-autogen, elixir-format
 msgid "+ footer"
 msgstr "+ bunntekst"
 
-#: lib/barkpark_web/studio_locale.ex:427
+#: lib/barkpark_web/studio_locale.ex:431
 #, elixir-autogen, elixir-format
 msgid "2-track grid · 2 cards"
 msgstr "rutenett med 2 spor · 2 kort"
 
-#: lib/barkpark_web/studio_locale.ex:428
+#: lib/barkpark_web/studio_locale.ex:432
 #, elixir-autogen, elixir-format
 msgid "7 blocks · kicker → TOC"
 msgstr "7 blokker · stikktittel → innholdsfortegnelse"
 
-#: lib/barkpark_web/studio_locale.ex:442
+#: lib/barkpark_web/studio_locale.ex:446
 #, elixir-autogen, elixir-format
 msgid "Add a block below"
 msgstr "Legg til en blokk under"
 
-#: lib/barkpark_web/studio_locale.ex:443
+#: lib/barkpark_web/studio_locale.ex:447
 #, elixir-autogen, elixir-format
 msgid "Add a block below (click)"
 msgstr "Legg til en blokk under (klikk)"
 
-#: lib/barkpark_web/studio_locale.ex:444
+#: lib/barkpark_web/studio_locale.ex:448
 #, elixir-autogen, elixir-format
 msgid "Add a kicker…"
 msgstr "Legg til en stikktittel …"
 
 #: lib/barkpark_web/studio_locale.ex:111
-#: lib/barkpark_web/studio_locale.ex:445
+#: lib/barkpark_web/studio_locale.ex:449
 #, elixir-autogen, elixir-format
 msgid "Add an image"
 msgstr "Legg til et bilde"
 
-#: lib/barkpark_web/studio_locale.ex:446
+#: lib/barkpark_web/studio_locale.ex:450
 #, elixir-autogen, elixir-format
 msgid "Add names, separated by · …"
 msgstr "Legg til navn, skilt med · …"
 
-#: lib/barkpark_web/studio_locale.ex:448
+#: lib/barkpark_web/studio_locale.ex:452
 #, elixir-autogen, elixir-format
 msgid "Align centre"
 msgstr "Midtstill"
 
-#: lib/barkpark_web/studio_locale.ex:451
+#: lib/barkpark_web/studio_locale.ex:455
 #, elixir-autogen, elixir-format
 msgid "Annotated figure"
 msgstr "Kommentert figur"
 
-#: lib/barkpark_web/studio_locale.ex:456
+#: lib/barkpark_web/studio_locale.ex:460
 #, elixir-autogen, elixir-format
 msgid "Block"
 msgstr "Blokk"
 
-#: lib/barkpark_web/studio_locale.ex:457
+#: lib/barkpark_web/studio_locale.ex:461
 #, elixir-autogen, elixir-format
 msgid "Block options"
 msgstr "Blokkvalg"
 
-#: lib/barkpark_web/studio_locale.ex:460
+#: lib/barkpark_web/studio_locale.ex:464
 #, elixir-autogen, elixir-format
 msgid "Bullet list"
 msgstr "Punktliste"
 
-#: lib/barkpark_web/studio_locale.ex:461
+#: lib/barkpark_web/studio_locale.ex:465
 #, elixir-autogen, elixir-format
 msgid "Bulleted list"
 msgstr "Punktliste"
 
-#: lib/barkpark_web/studio_locale.ex:463
+#: lib/barkpark_web/studio_locale.ex:467
 #, elixir-autogen, elixir-format
 msgid "Button"
 msgstr "Knapp"
 
-#: lib/barkpark_web/studio_locale.ex:468
+#: lib/barkpark_web/studio_locale.ex:472
 #, elixir-autogen, elixir-format
 msgid "Callout title"
 msgstr "Tittel på merknaden"
 
-#: lib/barkpark_web/studio_locale.ex:486
+#: lib/barkpark_web/studio_locale.ex:490
 #, elixir-autogen, elixir-format
 msgid "Change image"
 msgstr "Bytt bilde"
 
-#: lib/barkpark_web/studio_locale.ex:488
+#: lib/barkpark_web/studio_locale.ex:492
 #, elixir-autogen, elixir-format
 msgid "Checklist"
 msgstr "Sjekkliste"
 
-#: lib/barkpark_web/studio_locale.ex:489
+#: lib/barkpark_web/studio_locale.ex:493
 #, elixir-autogen, elixir-format
 msgid "Clear formatting"
 msgstr "Fjern formatering"
 
-#: lib/barkpark_web/studio_locale.ex:491
+#: lib/barkpark_web/studio_locale.ex:495
 #, elixir-autogen, elixir-format
 msgid "Click, or press Enter, to choose from the media library"
 msgstr "Klikk eller trykk Enter for å velge fra mediebiblioteket"
 
-#: lib/barkpark_web/studio_locale.ex:498
+#: lib/barkpark_web/studio_locale.ex:502
 #, elixir-autogen, elixir-format
 msgid "Command palette filter"
 msgstr "Filter for kommandopaletten"
 
-#: lib/barkpark_web/studio_locale.ex:500
+#: lib/barkpark_web/studio_locale.ex:504
 #, elixir-autogen, elixir-format
 msgid "Configure table"
 msgstr "Konfigurer tabellen"
 
-#: lib/barkpark_web/studio_locale.ex:502
+#: lib/barkpark_web/studio_locale.ex:506
 #, elixir-autogen, elixir-format
 msgid "Contents"
 msgstr "Innhold"
 
-#: lib/barkpark_web/studio_locale.ex:508
+#: lib/barkpark_web/studio_locale.ex:512
 #, elixir-autogen, elixir-format
 msgid "Diagram caption"
 msgstr "Bildetekst for diagram"
 
-#: lib/barkpark_web/studio_locale.ex:510
+#: lib/barkpark_web/studio_locale.ex:514
 #, elixir-autogen, elixir-format
 msgid "Display (own line)"
 msgstr "Visning (egen linje)"
 
-#: lib/barkpark_web/studio_locale.ex:512
+#: lib/barkpark_web/studio_locale.ex:516
 #, elixir-autogen, elixir-format
 msgid "Drag to move · click for options"
 msgstr "Dra for å flytte · klikk for valg"
 
-#: lib/barkpark_web/studio_locale.ex:513
+#: lib/barkpark_web/studio_locale.ex:517
 #, elixir-autogen, elixir-format
 msgid "Drag to resize the column"
 msgstr "Dra for å endre kolonnebredden"
 
-#: lib/barkpark_web/studio_locale.ex:526
+#: lib/barkpark_web/studio_locale.ex:530
 #, elixir-autogen, elixir-format
 msgid "EXPECTED"
 msgstr "FORVENTET"
 
-#: lib/barkpark_web/studio_locale.ex:517
+#: lib/barkpark_web/studio_locale.ex:521
 #, elixir-autogen, elixir-format
 msgid "Edit diagram"
 msgstr "Rediger diagram"
 
-#: lib/barkpark_web/studio_locale.ex:521
+#: lib/barkpark_web/studio_locale.ex:525
 #, elixir-autogen, elixir-format
 msgid "Emoji"
 msgstr "Emoji"
 
-#: lib/barkpark_web/studio_locale.ex:523
+#: lib/barkpark_web/studio_locale.ex:527
 #, elixir-autogen, elixir-format
 msgid "Entries (indent two spaces per level; `text | anchor`)"
 msgstr "Oppføringer (rykk inn to mellomrom per nivå; `tekst | anker`)"
 
-#: lib/barkpark_web/studio_locale.ex:529
+#: lib/barkpark_web/studio_locale.ex:533
 #, elixir-autogen, elixir-format
 msgid "Field label"
 msgstr "Feltnavn"
 
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:58
-#: lib/barkpark_web/studio_locale.ex:532
+#: lib/barkpark_web/studio_locale.ex:536
 #, elixir-autogen, elixir-format
 msgid "File"
 msgstr "Fil"
 
-#: lib/barkpark_web/studio_locale.ex:538
+#: lib/barkpark_web/studio_locale.ex:542
 #, elixir-autogen, elixir-format
 msgid "Format %{mark}"
 msgstr "Formater: %{mark}"
 
-#: lib/barkpark_web/studio_locale.ex:540
+#: lib/barkpark_web/studio_locale.ex:544
 #, elixir-autogen, elixir-format
 msgid "Grid of cards"
 msgstr "Rutenett med kort"
 
-#: lib/barkpark_web/studio_locale.ex:543
+#: lib/barkpark_web/studio_locale.ex:547
 #, elixir-autogen, elixir-format
 msgid "Heading %{level}"
 msgstr "Overskrift %{level}"
 
-#: lib/barkpark_web/studio_locale.ex:544
+#: lib/barkpark_web/studio_locale.ex:548
 #, elixir-autogen, elixir-format
 msgid "Heading 1"
 msgstr "Overskrift 1"
 
-#: lib/barkpark_web/studio_locale.ex:545
+#: lib/barkpark_web/studio_locale.ex:549
 #, elixir-autogen, elixir-format
 msgid "Heading 2"
 msgstr "Overskrift 2"
 
-#: lib/barkpark_web/studio_locale.ex:546
+#: lib/barkpark_web/studio_locale.ex:550
 #, elixir-autogen, elixir-format
 msgid "Heading 3"
 msgstr "Overskrift 3"
 
-#: lib/barkpark_web/studio_locale.ex:547
+#: lib/barkpark_web/studio_locale.ex:551
 #, elixir-autogen, elixir-format
 msgid "Heading 4"
 msgstr "Overskrift 4"
 
-#: lib/barkpark_web/studio_locale.ex:548
+#: lib/barkpark_web/studio_locale.ex:552
 #, elixir-autogen, elixir-format
 msgid "Heading 5"
 msgstr "Overskrift 5"
 
-#: lib/barkpark_web/studio_locale.ex:549
+#: lib/barkpark_web/studio_locale.ex:553
 #, elixir-autogen, elixir-format
 msgid "Heading 6"
 msgstr "Overskrift 6"
 
-#: lib/barkpark_web/studio_locale.ex:551
+#: lib/barkpark_web/studio_locale.ex:555
 #, elixir-autogen, elixir-format
 msgid "Highlight"
 msgstr "Utheving"
 
-#: lib/barkpark_web/studio_locale.ex:555
+#: lib/barkpark_web/studio_locale.ex:559
 #, elixir-autogen, elixir-format
 msgid "Image field"
 msgstr "Bildefelt"
 
-#: lib/barkpark_web/studio_locale.ex:557
+#: lib/barkpark_web/studio_locale.ex:561
 #, elixir-autogen, elixir-format
 msgid "Inline code"
 msgstr "Innebygd kode"
 
-#: lib/barkpark_web/studio_locale.ex:559
+#: lib/barkpark_web/studio_locale.ex:563
 #, elixir-autogen, elixir-format
 msgid "Insert"
 msgstr "Sett inn"
 
-#: lib/barkpark_web/studio_locale.ex:560
+#: lib/barkpark_web/studio_locale.ex:564
 #, elixir-autogen, elixir-format
 msgid "Insert %{block}"
 msgstr "Sett inn: %{block}"
 
-#: lib/barkpark_web/studio_locale.ex:561
+#: lib/barkpark_web/studio_locale.ex:565
 #, elixir-autogen, elixir-format
 msgid "Insert block"
 msgstr "Sett inn blokk"
 
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:63
-#: lib/barkpark_web/studio_locale.ex:572
-#: lib/barkpark_web/studio_locale.ex:736
+#: lib/barkpark_web/studio_locale.ex:576
+#: lib/barkpark_web/studio_locale.ex:741
 #, elixir-autogen, elixir-format
 msgid "Legend"
 msgstr "Forklaring"
 
-#: lib/barkpark_web/studio_locale.ex:583
+#: lib/barkpark_web/studio_locale.ex:587
 #, elixir-autogen, elixir-format
 msgid "Link URL"
 msgstr "Lenkeadresse"
 
-#: lib/barkpark_web/studio_locale.ex:581
+#: lib/barkpark_web/studio_locale.ex:585
 #, elixir-autogen, elixir-format
 msgid "Link preview"
 msgstr "Lenkeforhåndsvisning"
 
-#: lib/barkpark_web/studio_locale.ex:582
+#: lib/barkpark_web/studio_locale.ex:586
 #, elixir-autogen, elixir-format
 msgid "Link to page"
 msgstr "Lenke til side"
 
-#: lib/barkpark_web/studio_locale.ex:586
+#: lib/barkpark_web/studio_locale.ex:590
 #, elixir-autogen, elixir-format
 msgid "Live dashboard section"
 msgstr "Direkte dashbordseksjon"
 
-#: lib/barkpark_web/studio_locale.ex:589
+#: lib/barkpark_web/studio_locale.ex:593
 #, elixir-autogen, elixir-format
 msgid "Loop"
 msgstr "Gjenta"
 
-#: lib/barkpark_web/studio_locale.ex:590
+#: lib/barkpark_web/studio_locale.ex:594
 #, elixir-autogen, elixir-format
 msgid "Markdown source"
 msgstr "Markdown-kilde"
 
-#: lib/barkpark_web/studio_locale.ex:592
+#: lib/barkpark_web/studio_locale.ex:596
 #, elixir-autogen, elixir-format
 msgid "Markdown source is unavailable inside a Figure because it could create extra blocks."
 msgstr "Markdown-kilde er ikke tilgjengelig i en figur, fordi den kan lage ekstra blokker."
 
-#: lib/barkpark_web/studio_locale.ex:595
+#: lib/barkpark_web/studio_locale.ex:599
 #, elixir-autogen, elixir-format
 msgid "Masters"
 msgstr "Maler"
 
-#: lib/barkpark_web/studio_locale.ex:596
+#: lib/barkpark_web/studio_locale.ex:600
 #, elixir-autogen, elixir-format
 msgid "Masthead"
 msgstr "Topptekst"
 
-#: lib/barkpark_web/studio_locale.ex:599
+#: lib/barkpark_web/studio_locale.ex:603
 #, elixir-autogen, elixir-format
 msgid "Mermaid diagram"
 msgstr "Mermaid-diagram"
 
-#: lib/barkpark_web/studio_locale.ex:600
+#: lib/barkpark_web/studio_locale.ex:604
 #, elixir-autogen, elixir-format
 msgid "Mermaid source"
 msgstr "Mermaid-kilde"
 
-#: lib/barkpark_web/studio_locale.ex:609
+#: lib/barkpark_web/studio_locale.ex:613
 #, elixir-autogen, elixir-format
 msgid "No blocks match"
 msgstr "Ingen blokker passer"
 
-#: lib/barkpark_web/studio_locale.ex:610
+#: lib/barkpark_web/studio_locale.ex:614
 #, elixir-autogen, elixir-format
 msgid "No commands match"
 msgstr "Ingen kommandoer passer"
 
-#: lib/barkpark_web/studio_locale.ex:612
+#: lib/barkpark_web/studio_locale.ex:616
 #, elixir-autogen, elixir-format
 msgid "No image yet — paste or drop a picture, or enter a URL below"
 msgstr "Ingen bilde ennå — lim inn eller slipp et bilde, eller skriv en adresse under"
 
-#: lib/barkpark_web/studio_locale.ex:613
+#: lib/barkpark_web/studio_locale.ex:617
 #, elixir-autogen, elixir-format
 msgid "No matching pages"
 msgstr "Ingen sider passer"
 
-#: lib/barkpark_web/studio_locale.ex:615
+#: lib/barkpark_web/studio_locale.ex:619
 #, elixir-autogen, elixir-format
 msgid "No video yet — paste a video url below"
 msgstr "Ingen video ennå — lim inn en videoadresse under"
 
-#: lib/barkpark_web/studio_locale.ex:617
+#: lib/barkpark_web/studio_locale.ex:621
 #, elixir-autogen, elixir-format
 msgid "Notes, one per line"
 msgstr "Notater, ett per linje"
 
-#: lib/barkpark_web/studio_locale.ex:618
+#: lib/barkpark_web/studio_locale.ex:622
 #, elixir-autogen, elixir-format
 msgid "Numbered"
 msgstr "Nummerert"
 
-#: lib/barkpark_web/studio_locale.ex:619
+#: lib/barkpark_web/studio_locale.ex:623
 #, elixir-autogen, elixir-format
 msgid "Numbered list"
 msgstr "Nummerert liste"
 
-#: lib/barkpark_web/studio_locale.ex:623
+#: lib/barkpark_web/studio_locale.ex:627
 #, elixir-autogen, elixir-format
 msgid "One footnote per line"
 msgstr "Én fotnote per linje"
 
-#: lib/barkpark_web/studio_locale.ex:624
+#: lib/barkpark_web/studio_locale.ex:628
 #, elixir-autogen, elixir-format
 msgid "Open"
 msgstr "Åpne"
 
-#: lib/barkpark_web/studio_locale.ex:627
+#: lib/barkpark_web/studio_locale.ex:631
 #, elixir-autogen, elixir-format
 msgid "Ordered list"
 msgstr "Nummerert liste"
 
-#: lib/barkpark_web/studio_locale.ex:635
+#: lib/barkpark_web/studio_locale.ex:639
 #, elixir-autogen, elixir-format
 msgid "Paste link, ↵ to apply"
 msgstr "Lim inn lenke, ↵ for å bruke"
 
-#: lib/barkpark_web/studio_locale.ex:640
+#: lib/barkpark_web/studio_locale.ex:644
 #, elixir-autogen, elixir-format
 msgid "Poster url"
 msgstr "Adresse til forsidebilde"
 
-#: lib/barkpark_web/studio_locale.ex:642
+#: lib/barkpark_web/studio_locale.ex:646
 #, elixir-autogen, elixir-format
 msgid "Presets"
 msgstr "Ferdigoppsett"
 
-#: lib/barkpark_web/studio_locale.ex:643
+#: lib/barkpark_web/studio_locale.ex:647
 #, elixir-autogen, elixir-format
 msgid "Primary"
 msgstr "Primær"
 
-#: lib/barkpark_web/studio_locale.ex:645
+#: lib/barkpark_web/studio_locale.ex:649
 #, elixir-autogen, elixir-format
 msgid "Quote"
 msgstr "Sitat"
 
-#: lib/barkpark_web/studio_locale.ex:654
+#: lib/barkpark_web/studio_locale.ex:658
 #, elixir-autogen, elixir-format
 msgid "Run command"
 msgstr "Kjør kommando"
 
-#: lib/barkpark_web/studio_locale.ex:655
+#: lib/barkpark_web/studio_locale.ex:659
 #, elixir-autogen, elixir-format
 msgid "Runbook step"
 msgstr "Trinn i driftsrutine"
 
-#: lib/barkpark_web/studio_locale.ex:657
+#: lib/barkpark_web/studio_locale.ex:661
 #, elixir-autogen, elixir-format
 msgid "Searching…"
 msgstr "Søker …"
 
-#: lib/barkpark_web/studio_locale.ex:658
+#: lib/barkpark_web/studio_locale.ex:662
 #, elixir-autogen, elixir-format
 msgid "Secondary"
 msgstr "Sekundær"
 
-#: lib/barkpark_web/studio_locale.ex:661
+#: lib/barkpark_web/studio_locale.ex:665
 #, elixir-autogen, elixir-format
 msgid "Sheet"
 msgstr "Regneark"
 
-#: lib/barkpark_web/studio_locale.ex:667
+#: lib/barkpark_web/studio_locale.ex:671
 #, elixir-autogen, elixir-format
 msgid "Start typing, or press / for blocks…"
 msgstr "Begynn å skrive, eller trykk / for blokker …"
 
-#: lib/barkpark_web/studio_locale.ex:668
+#: lib/barkpark_web/studio_locale.ex:672
 #, elixir-autogen, elixir-format
 msgid "Starters"
 msgstr "Startpakker"
 
-#: lib/barkpark_web/studio_locale.ex:673
+#: lib/barkpark_web/studio_locale.ex:677
 #, elixir-autogen, elixir-format
 msgid "Strikethrough"
 msgstr "Gjennomstreking"
 
-#: lib/barkpark_web/studio_locale.ex:676
+#: lib/barkpark_web/studio_locale.ex:680
 #, elixir-autogen, elixir-format
 msgid "Subscript (Ctrl+,)"
 msgstr "Senket skrift (Ctrl+,)"
 
-#: lib/barkpark_web/studio_locale.ex:678
+#: lib/barkpark_web/studio_locale.ex:682
 #, elixir-autogen, elixir-format
 msgid "Superscript (Ctrl+.)"
 msgstr "Hevet skrift (Ctrl+.)"
 
-#: lib/barkpark_web/studio_locale.ex:680
+#: lib/barkpark_web/studio_locale.ex:684
 #, elixir-autogen, elixir-format
 msgid "Table columns"
 msgstr "Tabellkolonner"
 
-#: lib/barkpark_web/studio_locale.ex:681
+#: lib/barkpark_web/studio_locale.ex:685
 #, elixir-autogen, elixir-format
 msgid "Table rows"
 msgstr "Tabellrader"
 
-#: lib/barkpark_web/studio_locale.ex:683
+#: lib/barkpark_web/studio_locale.ex:687
 #, elixir-autogen, elixir-format
 msgid "Task list"
 msgstr "Oppgaveliste"
 
-#: lib/barkpark_web/studio_locale.ex:685
+#: lib/barkpark_web/studio_locale.ex:689
 #, elixir-autogen, elixir-format
 msgid "Task list title"
 msgstr "Tittel på oppgavelisten"
 
-#: lib/barkpark_web/studio_locale.ex:688
+#: lib/barkpark_web/studio_locale.ex:692
 #, elixir-autogen, elixir-format
 msgid "TeX"
 msgstr "TeX"
 
-#: lib/barkpark_web/studio_locale.ex:689
+#: lib/barkpark_web/studio_locale.ex:693
 #, elixir-autogen, elixir-format
 msgid "TeX math"
 msgstr "TeX-matematikk"
 
-#: lib/barkpark_web/studio_locale.ex:696
+#: lib/barkpark_web/studio_locale.ex:700
 #, elixir-autogen, elixir-format
 msgid "Toggle"
 msgstr "Utvidbar"
 
-#: lib/barkpark_web/studio_locale.ex:697
+#: lib/barkpark_web/studio_locale.ex:701
 #, elixir-autogen, elixir-format
 msgid "Toggle Markdown source"
 msgstr "Slå Markdown-kilde av/på"
 
-#: lib/barkpark_web/studio_locale.ex:700
+#: lib/barkpark_web/studio_locale.ex:704
 #, elixir-autogen, elixir-format
 msgid "Turn into"
 msgstr "Gjør om til"
 
-#: lib/barkpark_web/studio_locale.ex:701
+#: lib/barkpark_web/studio_locale.ex:705
 #, elixir-autogen, elixir-format
 msgid "Turn into %{block}"
 msgstr "Gjør om til: %{block}"
 
-#: lib/barkpark_web/studio_locale.ex:702
+#: lib/barkpark_web/studio_locale.ex:706
 #, elixir-autogen, elixir-format
 msgid "Type a command…"
 msgstr "Skriv en kommando …"
 
-#: lib/barkpark_web/studio_locale.ex:703
+#: lib/barkpark_web/studio_locale.ex:707
 #, elixir-autogen, elixir-format
 msgid "Underline"
 msgstr "Understreking"
 
-#: lib/barkpark_web/studio_locale.ex:711
+#: lib/barkpark_web/studio_locale.ex:715
 #, elixir-autogen, elixir-format
 msgid "Video url"
 msgstr "Videoadresse"
 
-#: lib/barkpark_web/studio_locale.ex:716
+#: lib/barkpark_web/studio_locale.ex:720
 #, elixir-autogen, elixir-format
 msgid "Wikilink"
 msgstr "Wikilenke"
 
-#: lib/barkpark_web/studio_locale.ex:717
+#: lib/barkpark_web/studio_locale.ex:721
 #, elixir-autogen, elixir-format
 msgid "Write the highlighted quote…"
 msgstr "Skriv det uthevede sitatet …"
 
-#: lib/barkpark_web/studio_locale.ex:718
+#: lib/barkpark_web/studio_locale.ex:722
 #, elixir-autogen, elixir-format
 msgid "Write the introduction…"
 msgstr "Skriv innledningen …"
 
-#: lib/barkpark_web/studio_locale.ex:719
+#: lib/barkpark_web/studio_locale.ex:723
 #, elixir-autogen, elixir-format
 msgid "Write the quote…"
 msgstr "Skriv sitatet …"
 
-#: lib/barkpark_web/studio_locale.ex:429
+#: lib/barkpark_web/studio_locale.ex:433
 #, elixir-autogen, elixir-format
 msgid "a quoted passage"
 msgstr "et sitert avsnitt"
 
-#: lib/barkpark_web/studio_locale.ex:434
+#: lib/barkpark_web/studio_locale.ex:438
 #, elixir-autogen, elixir-format
 msgid "action href"
 msgstr "handlingslenke"
 
-#: lib/barkpark_web/studio_locale.ex:435
+#: lib/barkpark_web/studio_locale.ex:439
 #, elixir-autogen, elixir-format
 msgid "action label"
 msgstr "handlingstekst"
 
-#: lib/barkpark_web/studio_locale.ex:454
+#: lib/barkpark_web/studio_locale.ex:458
 #, elixir-autogen, elixir-format
 msgid "author / credit line"
 msgstr "forfatter / kreditering"
 
-#: lib/barkpark_web/studio_locale.ex:462
+#: lib/barkpark_web/studio_locale.ex:466
 #, elixir-autogen, elixir-format
 msgid "bulleted or ordered"
 msgstr "punktliste eller nummerert"
 
-#: lib/barkpark_web/studio_locale.ex:466
+#: lib/barkpark_web/studio_locale.ex:470
 #, elixir-autogen, elixir-format
 msgid "call-to-action button"
 msgstr "handlingsknapp"
 
-#: lib/barkpark_web/studio_locale.ex:480
+#: lib/barkpark_web/studio_locale.ex:484
 #, elixir-autogen, elixir-format
 msgid "caption"
 msgstr "bildetekst"
 
-#: lib/barkpark_web/studio_locale.ex:482
+#: lib/barkpark_web/studio_locale.ex:486
 #, elixir-autogen, elixir-format
 msgid "captioned block"
 msgstr "blokk med bildetekst"
 
-#: lib/barkpark_web/studio_locale.ex:487
+#: lib/barkpark_web/studio_locale.ex:491
 #, elixir-autogen, elixir-format
 msgid "chart · regions, refline, callout"
 msgstr "diagram · områder, referanselinje, merknad"
 
-#: lib/barkpark_web/studio_locale.ex:493
+#: lib/barkpark_web/studio_locale.ex:497
 #, elixir-autogen, elixir-format
 msgid "code language"
 msgstr "kodespråk"
 
-#: lib/barkpark_web/studio_locale.ex:495
+#: lib/barkpark_web/studio_locale.ex:499
 #, elixir-autogen, elixir-format
 msgid "collapsible details"
 msgstr "sammenleggbare detaljer"
 
-#: lib/barkpark_web/studio_locale.ex:501
+#: lib/barkpark_web/studio_locale.ex:505
 #, elixir-autogen, elixir-format
 msgid "console frame"
 msgstr "konsollramme"
 
-#: lib/barkpark_web/studio_locale.ex:503
+#: lib/barkpark_web/studio_locale.ex:507
 #, elixir-autogen, elixir-format
 msgid "contents — no entries yet"
 msgstr "innhold — ingen oppføringer ennå"
 
-#: lib/barkpark_web/studio_locale.ex:507
+#: lib/barkpark_web/studio_locale.ex:511
 #, elixir-autogen, elixir-format
 msgid "diagram caption"
 msgstr "bildetekst for diagram"
 
-#: lib/barkpark_web/studio_locale.ex:509
+#: lib/barkpark_web/studio_locale.ex:513
 #, elixir-autogen, elixir-format
 msgid "dismiss"
 msgstr "lukk"
 
-#: lib/barkpark_web/studio_locale.ex:520
+#: lib/barkpark_web/studio_locale.ex:524
 #, elixir-autogen, elixir-format
 msgid "embed a spreadsheet"
 msgstr "bygg inn et regneark"
 
-#: lib/barkpark_web/studio_locale.ex:525
+#: lib/barkpark/portable_doc/render/chrome.ex:82
+#: lib/barkpark_web/studio_locale.ex:529
 #, elixir-autogen, elixir-format
 msgid "equation — no tex source"
 msgstr "ligning — ingen TeX-kilde"
 
-#: lib/barkpark_web/studio_locale.ex:527
+#: lib/barkpark_web/studio_locale.ex:531
 #, elixir-autogen, elixir-format
 msgid "expected"
 msgstr "forventet"
 
-#: lib/barkpark_web/studio_locale.ex:531
+#: lib/barkpark_web/studio_locale.ex:535
 #, elixir-autogen, elixir-format
 msgid "figure caption"
 msgstr "figurtekst"
 
-#: lib/barkpark_web/studio_locale.ex:533
+#: lib/barkpark_web/studio_locale.ex:537
 #, elixir-autogen, elixir-format
 msgid "filter (e.g. proj:x)"
 msgstr "filter (f.eks. proj:x)"
 
-#: lib/barkpark_web/studio_locale.ex:534
+#: lib/barkpark_web/studio_locale.ex:538
 #, elixir-autogen, elixir-format
 msgid "footer"
 msgstr "bunntekst"
 
-#: lib/barkpark_web/studio_locale.ex:536
+#: lib/barkpark_web/studio_locale.ex:540
 #, elixir-autogen, elixir-format
 msgid "footnotes — none yet"
 msgstr "fotnoter — ingen ennå"
 
-#: lib/barkpark_web/studio_locale.ex:539
+#: lib/barkpark_web/studio_locale.ex:543
 #, elixir-autogen, elixir-format
 msgid "grid"
 msgstr "rutenett"
 
-#: lib/barkpark_web/studio_locale.ex:541
+#: lib/barkpark_web/studio_locale.ex:545
 #, elixir-autogen, elixir-format
 msgid "h1 — section title"
 msgstr "h1 — seksjonstittel"
 
-#: lib/barkpark_web/studio_locale.ex:550
+#: lib/barkpark_web/studio_locale.ex:554
 #, elixir-autogen, elixir-format
 msgid "hex swatch value"
 msgstr "fargeverdi (hex)"
 
-#: lib/barkpark_web/studio_locale.ex:552
+#: lib/barkpark_web/studio_locale.ex:556
 #, elixir-autogen, elixir-format
 msgid "highlighted quote"
 msgstr "uthevet sitat"
 
-#: lib/barkpark_web/studio_locale.ex:553
+#: lib/barkpark_web/studio_locale.ex:557
 #, elixir-autogen, elixir-format
 msgid "horizontal rule"
 msgstr "vannrett linje"
 
-#: lib/barkpark_web/studio_locale.ex:558
+#: lib/barkpark_web/studio_locale.ex:562
 #, elixir-autogen, elixir-format
 msgid "insert"
 msgstr "sett inn"
 
-#: lib/barkpark_web/studio_locale.ex:562
+#: lib/barkpark_web/studio_locale.ex:566
 #, elixir-autogen, elixir-format
 msgid "insert link"
 msgstr "sett inn lenke"
 
-#: lib/barkpark_web/studio_locale.ex:564
+#: lib/barkpark_web/studio_locale.ex:568
 #, elixir-autogen, elixir-format
 msgid "kicker over the title"
 msgstr "stikktittel over tittelen"
 
-#: lib/barkpark_web/studio_locale.ex:566
+#: lib/barkpark_web/studio_locale.ex:570
 #, elixir-autogen, elixir-format
 msgid "labelled annotation"
 msgstr "merket kommentar"
 
-#: lib/barkpark_web/studio_locale.ex:567
+#: lib/barkpark_web/studio_locale.ex:571
 #, elixir-autogen, elixir-format
 msgid "labelled panels"
 msgstr "paneler med etiketter"
 
-#: lib/barkpark_web/studio_locale.ex:568
+#: lib/barkpark_web/studio_locale.ex:572
 #, elixir-autogen, elixir-format
 msgid "lang"
 msgstr "språk"
 
-#: lib/barkpark_web/studio_locale.ex:570
+#: lib/barkpark_web/studio_locale.ex:574
 #, elixir-autogen, elixir-format
 msgid "language"
 msgstr "språk"
 
-#: lib/barkpark_web/studio_locale.ex:571
+#: lib/barkpark_web/studio_locale.ex:575
 #, elixir-autogen, elixir-format
 msgid "lead paragraph"
 msgstr "innledningsavsnitt"
 
-#: lib/barkpark_web/studio_locale.ex:573
+#: lib/barkpark_web/studio_locale.ex:577
 #, elixir-autogen, elixir-format
 msgid "legend"
 msgstr "forklaring"
 
-#: lib/barkpark_web/studio_locale.ex:574
+#: lib/barkpark_web/studio_locale.ex:578
 #, elixir-autogen, elixir-format
 msgid "level 2 heading"
 msgstr "overskrift på nivå 2"
 
-#: lib/barkpark_web/studio_locale.ex:575
+#: lib/barkpark_web/studio_locale.ex:579
 #, elixir-autogen, elixir-format
 msgid "level 3 heading"
 msgstr "overskrift på nivå 3"
 
-#: lib/barkpark_web/studio_locale.ex:576
+#: lib/barkpark_web/studio_locale.ex:580
 #, elixir-autogen, elixir-format
 msgid "level 4 heading"
 msgstr "overskrift på nivå 4"
 
-#: lib/barkpark_web/studio_locale.ex:577
+#: lib/barkpark_web/studio_locale.ex:581
 #, elixir-autogen, elixir-format
 msgid "level 5 heading"
 msgstr "overskrift på nivå 5"
 
-#: lib/barkpark_web/studio_locale.ex:578
+#: lib/barkpark_web/studio_locale.ex:582
 #, elixir-autogen, elixir-format
 msgid "level 6 heading"
 msgstr "overskrift på nivå 6"
 
-#: lib/barkpark_web/studio_locale.ex:580
+#: lib/barkpark_web/studio_locale.ex:584
 #, elixir-autogen, elixir-format
 msgid "link another document"
 msgstr "lenk til et annet dokument"
 
-#: lib/barkpark_web/studio_locale.ex:585
+#: lib/barkpark/portable_doc/render/chrome.ex:59
+#: lib/barkpark_web/studio_locale.ex:589
 #, elixir-autogen, elixir-format
 msgid "live"
 msgstr "direkte"
 
-#: lib/barkpark_web/studio_locale.ex:602
+#: lib/barkpark_web/studio_locale.ex:606
 #, elixir-autogen, elixir-format
 msgid "monospace block"
 msgstr "blokk med fast bredde"
 
-#: lib/barkpark_web/studio_locale.ex:605
+#: lib/barkpark_web/studio_locale.ex:609
 #, elixir-autogen, elixir-format
 msgid "multi-column layout"
 msgstr "oppsett med flere kolonner"
 
-#: lib/barkpark_web/studio_locale.ex:606
+#: lib/barkpark_web/studio_locale.ex:610
 #, elixir-autogen, elixir-format
 msgid "multi-language string"
 msgstr "tekst på flere språk"
 
-#: lib/barkpark_web/studio_locale.ex:607
+#: lib/barkpark_web/studio_locale.ex:611
 #, elixir-autogen, elixir-format
 msgid "multi-line value"
 msgstr "verdi over flere linjer"
 
-#: lib/barkpark_web/studio_locale.ex:608
+#: lib/barkpark_web/studio_locale.ex:612
 #, elixir-autogen, elixir-format
 msgid "navigate"
 msgstr "naviger"
 
-#: lib/barkpark_web/studio_locale.ex:620
+#: lib/barkpark_web/studio_locale.ex:624
 #, elixir-autogen, elixir-format
 msgid "numbered notes"
 msgstr "nummererte notater"
 
-#: lib/barkpark_web/studio_locale.ex:621
+#: lib/barkpark_web/studio_locale.ex:625
 #, elixir-autogen, elixir-format
 msgid "numbered steps with bodies"
 msgstr "nummererte trinn med innhold"
 
-#: lib/barkpark_web/studio_locale.ex:622
+#: lib/barkpark_web/studio_locale.ex:626
 #, elixir-autogen, elixir-format
 msgid "object of subfields"
 msgstr "objekt med underfelt"
 
-#: lib/barkpark_web/studio_locale.ex:628
+#: lib/barkpark_web/studio_locale.ex:632
 #, elixir-autogen, elixir-format
 msgid "outline of entries"
 msgstr "oversikt over oppføringer"
 
-#: lib/barkpark_web/studio_locale.ex:629
+#: lib/barkpark_web/studio_locale.ex:633
 #, elixir-autogen, elixir-format
 msgid "page title size"
 msgstr "størrelse som sidetittel"
 
-#: lib/barkpark_web/studio_locale.ex:636
+#: lib/barkpark_web/studio_locale.ex:640
 #, elixir-autogen, elixir-format
 msgid "pick one option"
 msgstr "velg ett alternativ"
 
-#: lib/barkpark_web/studio_locale.ex:637
+#: lib/barkpark_web/studio_locale.ex:641
 #, elixir-autogen, elixir-format
 msgid "picture from a url"
 msgstr "bilde fra en adresse"
 
-#: lib/barkpark_web/studio_locale.ex:638
+#: lib/barkpark_web/studio_locale.ex:642
 #, elixir-autogen, elixir-format
 msgid "pipeline stage node"
 msgstr "steg i en prosess"
 
-#: lib/barkpark_web/studio_locale.ex:639
+#: lib/barkpark_web/studio_locale.ex:643
 #, elixir-autogen, elixir-format
 msgid "plain body text"
 msgstr "vanlig brødtekst"
 
-#: lib/barkpark_web/studio_locale.ex:641
+#: lib/barkpark_web/studio_locale.ex:645
 #, elixir-autogen, elixir-format
 msgid "poster url (optional)"
 msgstr "adresse til forsidebilde (valgfritt)"
 
-#: lib/barkpark_web/studio_locale.ex:647
+#: lib/barkpark_web/studio_locale.ex:651
 #, elixir-autogen, elixir-format
 msgid "registry-backed enum"
 msgstr "kodeverk fra registeret"
 
-#: lib/barkpark_web/studio_locale.ex:650
+#: lib/barkpark_web/studio_locale.ex:654
 #, elixir-autogen, elixir-format
 msgid "repeating list"
 msgstr "gjentakende liste"
 
-#: lib/barkpark_web/studio_locale.ex:651
+#: lib/barkpark_web/studio_locale.ex:655
 #, elixir-autogen, elixir-format
 msgid "rows and columns"
 msgstr "rader og kolonner"
 
-#: lib/barkpark_web/studio_locale.ex:652
+#: lib/barkpark_web/studio_locale.ex:656
 #, elixir-autogen, elixir-format
 msgid "ruled group"
 msgstr "gruppe med linje"
 
-#: lib/barkpark_web/studio_locale.ex:653
+#: lib/barkpark_web/studio_locale.ex:657
 #, elixir-autogen, elixir-format
 msgid "run"
 msgstr "kjør"
 
-#: lib/barkpark_web/studio_locale.ex:662
+#: lib/barkpark_web/studio_locale.ex:666
 #, elixir-autogen, elixir-format
 msgid "single-line value"
 msgstr "verdi på én linje"
 
-#: lib/barkpark_web/studio_locale.ex:664
+#: lib/barkpark_web/studio_locale.ex:668
 #, elixir-autogen, elixir-format
 msgid "source"
 msgstr "kilde"
 
-#: lib/barkpark_web/studio_locale.ex:665
+#: lib/barkpark_web/studio_locale.ex:669
 #, elixir-autogen, elixir-format
 msgid "stack"
 msgstr "stabel"
 
-#: lib/barkpark_web/studio_locale.ex:669
+#: lib/barkpark_web/studio_locale.ex:673
 #, elixir-autogen, elixir-format
 msgid "stat queries · chart · task board"
 msgstr "statistikkspørringer · diagram · oppgavetavle"
 
-#: lib/barkpark_web/studio_locale.ex:672
+#: lib/barkpark_web/studio_locale.ex:676
 #, elixir-autogen, elixir-format
 msgid "steps · terminal · rollback callout"
 msgstr "trinn · terminal · merknad om tilbakerulling"
 
-#: lib/barkpark_web/studio_locale.ex:684
+#: lib/barkpark_web/studio_locale.ex:688
 #, elixir-autogen, elixir-format
 msgid "task list query filter"
 msgstr "spørrefilter for oppgavelisten"
 
-#: lib/barkpark_web/studio_locale.ex:686
+#: lib/barkpark_web/studio_locale.ex:690
 #, elixir-autogen, elixir-format
 msgid "task list title"
 msgstr "tittel på oppgavelisten"
 
-#: lib/barkpark_web/studio_locale.ex:691
+#: lib/barkpark_web/studio_locale.ex:695
 #, elixir-autogen, elixir-format
 msgid "timestamp value"
 msgstr "tidspunkt"
 
 #: lib/barkpark_web/studio_locale.ex:406
-#: lib/barkpark_web/studio_locale.ex:692
+#: lib/barkpark_web/studio_locale.ex:696
 #, elixir-autogen, elixir-format
 msgid "title"
 msgstr "tittel"
 
-#: lib/barkpark_web/studio_locale.ex:694
+#: lib/barkpark_web/studio_locale.ex:698
 #, elixir-autogen, elixir-format
 msgid "titled content tile"
 msgstr "innholdsflis med tittel"
 
-#: lib/barkpark_web/studio_locale.ex:695
+#: lib/barkpark_web/studio_locale.ex:699
 #, elixir-autogen, elixir-format
 msgid "to-do items"
 msgstr "gjøremål"
 
-#: lib/barkpark_web/studio_locale.ex:698
+#: lib/barkpark_web/studio_locale.ex:702
 #, elixir-autogen, elixir-format
 msgid "toggle summary"
 msgstr "sammendrag for utvidbar blokk"
 
-#: lib/barkpark_web/studio_locale.ex:699
+#: lib/barkpark_web/studio_locale.ex:703
 #, elixir-autogen, elixir-format
 msgid "true / false toggle"
 msgstr "ja/nei-bryter"
 
-#: lib/barkpark_web/studio_locale.ex:705
+#: lib/barkpark_web/studio_locale.ex:709
 #, elixir-autogen, elixir-format
 msgid "upload or url"
 msgstr "last opp eller adresse"
 
-#: lib/barkpark_web/studio_locale.ex:707
+#: lib/barkpark_web/studio_locale.ex:711
 #, elixir-autogen, elixir-format
 msgid "url-safe key"
 msgstr "nøkkel trygg for adresser"
 
-#: lib/barkpark_web/studio_locale.ex:710
+#: lib/barkpark_web/studio_locale.ex:714
 #, elixir-autogen, elixir-format
 msgid "video from a url"
 msgstr "video fra en adresse"
 
-#: lib/barkpark_web/studio_locale.ex:712
+#: lib/barkpark_web/studio_locale.ex:716
 #, elixir-autogen, elixir-format
 msgid "video url"
 msgstr "videoadresse"
 
-#: lib/barkpark_web/studio_locale.ex:715
+#: lib/barkpark_web/studio_locale.ex:719
 #, elixir-autogen, elixir-format
 msgid "warn or info card"
 msgstr "advarsel- eller infokort"
@@ -6220,32 +6225,32 @@ msgstr "chat"
 msgid "Disabled in this workspace — enabled in %{workspace}"
 msgstr "Slått av i dette arbeidsområdet — slått på i %{workspace}"
 
-#: lib/barkpark_web/studio_locale.ex:518
+#: lib/barkpark_web/studio_locale.ex:522
 #, elixir-autogen, elixir-format
 msgid "Edit number"
 msgstr "Rediger tall"
 
-#: lib/barkpark_web/studio_locale.ex:519
+#: lib/barkpark_web/studio_locale.ex:523
 #, elixir-autogen, elixir-format
 msgid "Edit options"
 msgstr "Rediger alternativer"
 
-#: lib/barkpark_web/studio_locale.ex:625
+#: lib/barkpark_web/studio_locale.ex:629
 #, elixir-autogen, elixir-format
 msgid "Option %{n} label"
 msgstr "Alternativ %{n} etikett"
 
-#: lib/barkpark_web/studio_locale.ex:626
+#: lib/barkpark_web/studio_locale.ex:630
 #, elixir-autogen, elixir-format
 msgid "Option %{n} value"
 msgstr "Alternativ %{n} verdi"
 
-#: lib/barkpark_web/studio_locale.ex:649
+#: lib/barkpark_web/studio_locale.ex:653
 #, elixir-autogen, elixir-format
 msgid "Remove option %{n}"
 msgstr "Fjern alternativ %{n}"
 
-#: lib/barkpark_web/studio_locale.ex:708
+#: lib/barkpark_web/studio_locale.ex:712
 #, elixir-autogen, elixir-format
 msgid "value"
 msgstr "verdi"
@@ -8328,22 +8333,22 @@ msgstr "Klikk på bildet for å velge fokuspunktet"
 msgid "Drop a file, click to upload, or browse the library"
 msgstr "Slipp en fil, klikk for å laste opp, eller bla i biblioteket"
 
-#: lib/barkpark_web/studio_locale.ex:438
+#: lib/barkpark_web/studio_locale.ex:442
 #, elixir-autogen, elixir-format
 msgid "%{label} (first of %{count} hidden blocks)"
 msgstr "%{label} (første av %{count} skjulte blokker)"
 
-#: lib/barkpark_web/studio_locale.ex:431
+#: lib/barkpark_web/studio_locale.ex:435
 #, elixir-autogen, elixir-format
 msgid "Edit empty ingress"
 msgstr "Rediger tom ingress"
 
-#: lib/barkpark_web/studio_locale.ex:432
+#: lib/barkpark_web/studio_locale.ex:436
 #, elixir-autogen, elixir-format
 msgid "Edit empty paragraph"
 msgstr "Rediger tomt avsnitt"
 
-#: lib/barkpark_web/studio_locale.ex:433
+#: lib/barkpark_web/studio_locale.ex:437
 #, elixir-autogen, elixir-format
 msgid "Select hidden divider"
 msgstr "Velg skjult skillelinje"
@@ -8919,30 +8924,30 @@ msgstr "…Resten"
 msgid "More actions"
 msgstr "Flere handlinger"
 
-#: lib/barkpark_web/studio_locale.ex:808
+#: lib/barkpark_web/studio_locale.ex:813
 #, elixir-autogen, elixir-format
 msgid "%{count} docs"
 msgstr "%{count} dokumenter"
 
-#: lib/barkpark_web/studio_locale.ex:801
+#: lib/barkpark_web/studio_locale.ex:806
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "%{count} results"
 msgstr "%{count} treff"
 
-#: lib/barkpark_web/studio_locale.ex:807
+#: lib/barkpark_web/studio_locale.ex:812
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "1 doc"
 msgstr "1 dokument"
 
-#: lib/barkpark_web/studio_locale.ex:800
+#: lib/barkpark_web/studio_locale.ex:805
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "1 result"
 msgstr "1 treff"
 
-#: lib/barkpark_web/studio_locale.ex:805
+#: lib/barkpark_web/studio_locale.ex:810
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "1 search"
@@ -9620,168 +9625,168 @@ msgstr "Alle endringer er lagret · %{time}"
 msgid "Save failed — retrying"
 msgstr "Lagring mislyktes — prøver igjen"
 
-#: lib/barkpark_web/studio_locale.ex:782
+#: lib/barkpark_web/studio_locale.ex:787
 #, elixir-autogen, elixir-format
 msgid "Blurb"
 msgstr "Omtale"
 
-#: lib/barkpark_web/studio_locale.ex:763
+#: lib/barkpark_web/studio_locale.ex:768
 #, elixir-autogen, elixir-format
 msgid "Bold (mod+B)"
 msgstr "Fet (Cmd/Ctrl+B)"
 
-#: lib/barkpark_web/studio_locale.ex:745
+#: lib/barkpark_web/studio_locale.ex:750
 #, elixir-autogen, elixir-format
 msgid "Broken reference: %{id}"
 msgstr "Brutt referanse: %{id}"
 
-#: lib/barkpark_web/studio_locale.ex:744
+#: lib/barkpark_web/studio_locale.ex:749
 #, elixir-autogen, elixir-format
 msgid "Broken reference: %{id} via %{via}"
 msgstr "Brutt referanse: %{id} via %{via}"
 
-#: lib/barkpark_web/studio_locale.ex:780
+#: lib/barkpark_web/studio_locale.ex:785
 #, elixir-autogen, elixir-format
 msgid "Contributors"
 msgstr "Bidragsytere"
 
-#: lib/barkpark_web/studio_locale.ex:775
+#: lib/barkpark_web/studio_locale.ex:780
 #, elixir-autogen, elixir-format
 msgid "Could not parse document JSON"
 msgstr "Kunne ikke lese dokumentets JSON"
 
-#: lib/barkpark_web/studio_locale.ex:729
+#: lib/barkpark_web/studio_locale.ex:734
 #, elixir-autogen, elixir-format
 msgid "Couldn't load graph data"
 msgstr "Kunne ikke laste grafdata"
 
-#: lib/barkpark_web/studio_locale.ex:779
+#: lib/barkpark_web/studio_locale.ex:784
 #, elixir-autogen, elixir-format
 msgid "Document ID"
 msgstr "Dokument-ID"
 
-#: lib/barkpark_web/studio_locale.ex:727
+#: lib/barkpark_web/studio_locale.ex:732
 #, elixir-autogen, elixir-format
 msgid "Document blast-radius graph. Press Tab to enter, arrow keys to traverse."
 msgstr "Graf over hva dokumentet påvirker. Trykk Tab for å gå inn, piltastene for å gå rundt."
 
-#: lib/barkpark_web/studio_locale.ex:728
+#: lib/barkpark_web/studio_locale.ex:733
 #, elixir-autogen, elixir-format
 msgid "Document graph"
 msgstr "Dokumentgraf"
 
-#: lib/barkpark_web/studio_locale.ex:733
+#: lib/barkpark_web/studio_locale.ex:738
 #, elixir-autogen, elixir-format
 msgid "Fit to view"
 msgstr "Tilpass visningen"
 
-#: lib/barkpark_web/studio_locale.ex:738
+#: lib/barkpark_web/studio_locale.ex:743
 #, elixir-autogen, elixir-format
 msgid "Flow"
 msgstr "Flyt"
 
-#: lib/barkpark_web/studio_locale.ex:753
+#: lib/barkpark_web/studio_locale.ex:758
 #, elixir-autogen, elixir-format
 msgid "Focused: %{title}. Connected to: %{names}."
 msgstr "I fokus: %{title}. Koblet til: %{names}."
 
-#: lib/barkpark_web/studio_locale.ex:737
+#: lib/barkpark_web/studio_locale.ex:742
 #, elixir-autogen, elixir-format
 msgid "Full color"
 msgstr "Full farge"
 
-#: lib/barkpark_web/studio_locale.ex:783
+#: lib/barkpark_web/studio_locale.ex:788
 #, elixir-autogen, elixir-format
 msgid "Full content (JSON)"
 msgstr "Hele innholdet (JSON)"
 
-#: lib/barkpark_web/studio_locale.ex:781
+#: lib/barkpark_web/studio_locale.ex:786
 #, elixir-autogen, elixir-format
 msgid "Identifiers"
 msgstr "Identifikatorer"
 
-#: lib/barkpark_web/studio_locale.ex:764
+#: lib/barkpark_web/studio_locale.ex:769
 #, elixir-autogen, elixir-format
 msgid "Italic (mod+I)"
 msgstr "Kursiv (Cmd/Ctrl+I)"
 
-#: lib/barkpark_web/studio_locale.ex:730
+#: lib/barkpark_web/studio_locale.ex:735
 #, elixir-autogen, elixir-format
 msgid "No connections yet"
 msgstr "Ingen koblinger ennå"
 
-#: lib/barkpark_web/studio_locale.ex:774
+#: lib/barkpark_web/studio_locale.ex:779
 #, elixir-autogen, elixir-format
 msgid "No document selected"
 msgstr "Ingen dokument valgt"
 
-#: lib/barkpark_web/studio_locale.ex:734
+#: lib/barkpark_web/studio_locale.ex:739
 #, elixir-autogen, elixir-format
 msgid "Reset view"
 msgstr "Tilbakestill visningen"
 
-#: lib/barkpark_web/studio_locale.ex:740
+#: lib/barkpark_web/studio_locale.ex:745
 #, elixir-autogen, elixir-format
 msgid "Search the graph"
 msgstr "Søk i grafen"
 
-#: lib/barkpark_web/studio_locale.ex:739
+#: lib/barkpark_web/studio_locale.ex:744
 #, elixir-autogen, elixir-format
 msgid "Search…"
 msgstr "Søk …"
 
-#: lib/barkpark_web/studio_locale.ex:766
+#: lib/barkpark_web/studio_locale.ex:771
 #, elixir-autogen, elixir-format
 msgid "Set"
 msgstr "Bruk"
 
-#: lib/barkpark_web/studio_locale.ex:746
+#: lib/barkpark_web/studio_locale.ex:751
 #, elixir-autogen, elixir-format
 msgid "Status: %{status}"
 msgstr "Status: %{status}"
 
-#: lib/barkpark_web/studio_locale.ex:735
+#: lib/barkpark_web/studio_locale.ex:740
 #, elixir-autogen, elixir-format
 msgid "Types"
 msgstr "Typer"
 
-#: lib/barkpark_web/studio_locale.ex:731
+#: lib/barkpark_web/studio_locale.ex:736
 #, elixir-autogen, elixir-format
 msgid "Zoom in"
 msgstr "Zoom inn"
 
-#: lib/barkpark_web/studio_locale.ex:732
+#: lib/barkpark_web/studio_locale.ex:737
 #, elixir-autogen, elixir-format
 msgid "Zoom out"
 msgstr "Zoom ut"
 
-#: lib/barkpark_web/studio_locale.ex:748
+#: lib/barkpark_web/studio_locale.ex:753
 #, elixir-autogen, elixir-format
 msgid "active"
 msgstr "aktiv"
 
-#: lib/barkpark_web/studio_locale.ex:749
+#: lib/barkpark_web/studio_locale.ex:754
 #, elixir-autogen, elixir-format
 msgid "broken ref"
 msgstr "brutt ref."
 
-#: lib/barkpark_web/studio_locale.ex:750
+#: lib/barkpark_web/studio_locale.ex:755
 #, elixir-autogen, elixir-format
 msgid "broken reference"
 msgstr "brutt referanse"
 
-#: lib/barkpark_web/studio_locale.ex:751
+#: lib/barkpark_web/studio_locale.ex:756
 #, elixir-autogen, elixir-format
 msgid "via %{via}"
 msgstr "via %{via}"
 
-#: lib/barkpark_web/studio_locale.ex:742
+#: lib/barkpark_web/studio_locale.ex:747
 #, elixir-autogen, elixir-format
 msgctxt "graph"
 msgid "%{count} connections"
 msgstr "%{count} koblinger"
 
-#: lib/barkpark_web/studio_locale.ex:741
+#: lib/barkpark_web/studio_locale.ex:746
 #, elixir-autogen, elixir-format
 msgctxt "graph"
 msgid "1 connection"
@@ -10829,7 +10834,7 @@ msgstr "Sendt inn"
 msgid "Answers"
 msgstr "Svar"
 
-#: lib/barkpark_web/studio_locale.ex:633
+#: lib/barkpark_web/studio_locale.ex:637
 #, elixir-autogen, elixir-format
 msgid "Paper text"
 msgstr "Artikkeltekst"
@@ -10889,7 +10894,7 @@ msgstr "Treff %{n} av %{count} for «%{query}»"
 msgid "No matches for \"%{query}\""
 msgstr "Ingen treff for «%{query}»"
 
-#: lib/barkpark_web/studio_locale.ex:632
+#: lib/barkpark_web/studio_locale.ex:636
 #, elixir-autogen, elixir-format
 msgid "numeric value"
 msgstr "tallverdi"
@@ -10919,42 +10924,42 @@ msgstr "Du er ikke medlem av dette arbeidsområdet"
 msgid "You're signed in, but this account doesn't have access here. Go to one of your own workspaces, or sign in as someone else."
 msgstr "Du er logget inn, men denne kontoen har ikke tilgang her. Gå til et av dine egne arbeidsområder, eller logg inn som en annen."
 
-#: lib/barkpark/portable_doc/render/chrome.ex:45
+#: lib/barkpark/portable_doc/render/chrome.ex:47
 #, elixir-autogen, elixir-format
 msgid "%{label} · %{done}/%{total} done"
 msgstr "%{label} · %{done}/%{total} ferdig"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:42
+#: lib/barkpark/portable_doc/render/chrome.ex:44
 #, elixir-autogen, elixir-format
 msgid "Children"
 msgstr "Underoppgaver"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:37
+#: lib/barkpark/portable_doc/render/chrome.ex:39
 #, elixir-autogen, elixir-format
 msgid "Criteria · %{met}/%{total}"
 msgstr "Kriterier · %{met}/%{total}"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:52
+#: lib/barkpark/portable_doc/render/chrome.ex:54
 #, elixir-autogen, elixir-format
 msgid "DRAFT"
 msgstr "UTKAST"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:41
+#: lib/barkpark/portable_doc/render/chrome.ex:43
 #, elixir-autogen, elixir-format
 msgid "Dependencies"
 msgstr "Avhengigheter"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:53
+#: lib/barkpark/portable_doc/render/chrome.ex:55
 #, elixir-autogen, elixir-format
 msgid "No roadmap items."
 msgstr "Ingen veikartpunkter."
 
-#: lib/barkpark/portable_doc/render/chrome.ex:54
+#: lib/barkpark/portable_doc/render/chrome.ex:56
 #, elixir-autogen, elixir-format
 msgid "No schedule to place these items on."
 msgstr "Ingen tidsplan å plassere disse punktene på."
 
-#: lib/barkpark/portable_doc/render/chrome.ex:30
+#: lib/barkpark/portable_doc/render/chrome.ex:32
 #, elixir-autogen, elixir-format
 msgid "No tasks yet."
 msgstr "Ingen oppgaver ennå."
@@ -10964,92 +10969,92 @@ msgstr "Ingen oppgaver ennå."
 msgid "Recommendation: "
 msgstr "Anbefaling: "
 
-#: lib/barkpark/portable_doc/render/chrome.ex:73
+#: lib/barkpark/portable_doc/render/chrome.ex:114
 #, elixir-autogen, elixir-format
 msgid "a candidate being weighed"
 msgstr "en kandidat som vurderes"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:72
+#: lib/barkpark/portable_doc/render/chrome.ex:113
 #, elixir-autogen, elixir-format
 msgid "abandoned or superseded"
 msgstr "forlatt eller erstattet"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:67
+#: lib/barkpark/portable_doc/render/chrome.ex:108
 #, elixir-autogen, elixir-format
 msgid "backlog — not ready yet"
 msgstr "etterslep — ikke klar ennå"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:69
+#: lib/barkpark/portable_doc/render/chrome.ex:110
 #, elixir-autogen, elixir-format
 msgid "being worked right now"
 msgstr "under arbeid nå"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:40
+#: lib/barkpark/portable_doc/render/chrome.ex:42
 #, elixir-autogen, elixir-format
 msgid "blocked by %{n}"
 msgstr "blokkert av %{n}"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:38
+#: lib/barkpark/portable_doc/render/chrome.ex:40
 #, elixir-autogen, elixir-format
 msgid "blocks %{n} task"
 msgstr "blokkerer %{n} oppgave"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:39
+#: lib/barkpark/portable_doc/render/chrome.ex:41
 #, elixir-autogen, elixir-format
 msgid "blocks %{n} tasks"
 msgstr "blokkerer %{n} oppgaver"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:71
+#: lib/barkpark/portable_doc/render/chrome.ex:112
 #, elixir-autogen, elixir-format
 msgid "complete"
 msgstr "fullført"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:34
+#: lib/barkpark/portable_doc/render/chrome.ex:36
 #, elixir-autogen, elixir-format
 msgid "created %{when}"
 msgstr "opprettet %{when}"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:56
+#: lib/barkpark/portable_doc/render/chrome.ex:77
 #, elixir-autogen, elixir-format
 msgid "criteria unavailable"
 msgstr "kriterier utilgjengelige"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:51
+#: lib/barkpark/portable_doc/render/chrome.ex:53
 #, elixir-autogen, elixir-format
 msgid "in flight"
 msgstr "underveis"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:55
+#: lib/barkpark/portable_doc/render/chrome.ex:57
 #, elixir-autogen, elixir-format
 msgid "not scheduled"
 msgstr "ikke planlagt"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:70
+#: lib/barkpark/portable_doc/render/chrome.ex:111
 #, elixir-autogen, elixir-format
 msgid "something is required first"
 msgstr "noe må gjøres først"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:32
+#: lib/barkpark/portable_doc/render/chrome.ex:34
 #, elixir-autogen, elixir-format
 msgid "tasks unavailable — the Tasks plugin is not loaded"
 msgstr "oppgaver utilgjengelige — Tasks-tillegget er ikke lastet"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:68
+#: lib/barkpark/portable_doc/render/chrome.ex:109
 #, elixir-autogen, elixir-format
 msgid "unchecked — claim it now"
 msgstr "ikke tatt — ta den nå"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:74
+#: lib/barkpark/portable_doc/render/chrome.ex:115
 #, elixir-autogen, elixir-format
 msgid "under active investigation"
 msgstr "under aktiv utredning"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:35
+#: lib/barkpark/portable_doc/render/chrome.ex:37
 #, elixir-autogen, elixir-format
 msgid "updated %{when}"
 msgstr "oppdatert %{when}"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:50
+#: lib/barkpark/portable_doc/render/chrome.ex:52
 #, elixir-autogen, elixir-format
 msgid "… and %{n} more"
 msgstr "… og %{n} til"
@@ -11066,49 +11071,49 @@ msgctxt "answer"
 msgid "Yes"
 msgstr "Ja"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:61
+#: lib/barkpark/portable_doc/render/chrome.ex:102
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "blocked"
 msgstr "blokkert"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:63
+#: lib/barkpark/portable_doc/render/chrome.ex:104
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "cancelled"
 msgstr "avbrutt"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:64
+#: lib/barkpark/portable_doc/render/chrome.ex:105
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "considering"
 msgstr "vurderes"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:62
+#: lib/barkpark/portable_doc/render/chrome.ex:103
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "done"
 msgstr "ferdig"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:60
+#: lib/barkpark/portable_doc/render/chrome.ex:101
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "in progress"
 msgstr "pågår"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:58
+#: lib/barkpark/portable_doc/render/chrome.ex:99
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "open"
 msgstr "åpen"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:59
+#: lib/barkpark/portable_doc/render/chrome.ex:100
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "ready"
 msgstr "klar"
 
-#: lib/barkpark/portable_doc/render/chrome.ex:65
+#: lib/barkpark/portable_doc/render/chrome.ex:106
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "researching"
@@ -11124,32 +11129,177 @@ msgstr "Ikke lagret"
 msgid "This edit was not saved. Your text is still here."
 msgstr "Denne endringen ble ikke lagret. Teksten din er fortsatt her."
 
-#: lib/barkpark_web/studio_locale.ex:479
+#: lib/barkpark_web/studio_locale.ex:483
 #, elixir-autogen, elixir-format
 msgid "%{what} (×%{count})"
 msgstr "%{what} (×%{count})"
 
-#: lib/barkpark_web/studio_locale.ex:471
+#: lib/barkpark_web/studio_locale.ex:475
 #, elixir-autogen, elixir-format
 msgid "Pasted the text. Left out: %{what}. Add it separately: drag the image file in, or insert the block from the menu."
 msgstr "Teksten ble limt inn. Utelatt: %{what}. Legg det til for seg: dra bildefilen inn, eller sett inn blokken fra menyen."
 
-#: lib/barkpark_web/studio_locale.ex:478
+#: lib/barkpark_web/studio_locale.ex:482
 #, elixir-autogen, elixir-format
 msgid "a %{type} block"
 msgstr "en %{type}-blokk"
 
-#: lib/barkpark_web/studio_locale.ex:476
+#: lib/barkpark_web/studio_locale.ex:480
 #, elixir-autogen, elixir-format
 msgid "a video"
 msgstr "en video"
 
-#: lib/barkpark_web/studio_locale.ex:477
+#: lib/barkpark_web/studio_locale.ex:481
 #, elixir-autogen, elixir-format
 msgid "an embed"
 msgstr "en innbygging"
 
-#: lib/barkpark_web/studio_locale.ex:475
+#: lib/barkpark_web/studio_locale.ex:479
 #, elixir-autogen, elixir-format
 msgid "an image"
 msgstr "et bilde"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:85
+#, elixir-autogen, elixir-format
+msgid "%{kind} — no data"
+msgstr "%{kind} — ingen data"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:90
+#, elixir-autogen, elixir-format
+msgid "(none)"
+msgstr "(ingen)"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:79
+#, elixir-autogen, elixir-format
+msgid "Accept new baseline: update the pinned literal to the current value"
+msgstr "Godta ny grunnlinje: oppdater den festede verdien til gjeldende verdi"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:69
+#, elixir-autogen, elixir-format
+msgid "Danger"
+msgstr "Fare"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:64
+#, elixir-autogen, elixir-format
+msgid "Edition"
+msgstr "Utgave"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:60
+#, elixir-autogen, elixir-format
+msgid "Explore the work"
+msgstr "Utforsk arbeidet"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:66
+#, elixir-autogen, elixir-format
+msgid "Info"
+msgstr "Info"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:75
+#, elixir-autogen, elixir-format
+msgid "Linked master"
+msgstr "Koblet mal"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:63
+#, elixir-autogen, elixir-format
+msgid "Live edition"
+msgstr "Levende utgave"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:71
+#, elixir-autogen, elixir-format
+msgid "Loss"
+msgstr "Tap"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:76
+#, elixir-autogen, elixir-format
+msgid "Master unavailable"
+msgstr "Malen er utilgjengelig"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:70
+#, elixir-autogen, elixir-format
+msgid "Neutral"
+msgstr "Nøytral"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:30
+#, elixir-autogen, elixir-format
+msgid "No image"
+msgstr "Ingen bilde"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:93
+#, elixir-autogen, elixir-format
+msgid "Open the paper to see the live chart."
+msgstr "Åpne dokumentet for å se det levende diagrammet."
+
+#: lib/barkpark/portable_doc/render/chrome.ex:95
+#, elixir-autogen, elixir-format
+msgid "Open the paper to see the live progress."
+msgstr "Åpne dokumentet for å se framdriften direkte."
+
+#: lib/barkpark/portable_doc/render/chrome.ex:72
+#, elixir-autogen, elixir-format
+msgid "Peace"
+msgstr "Fred"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:97
+#, elixir-autogen, elixir-format
+msgid "Sheet truncated — showing the first %{n} rows"
+msgstr "Arket er avkortet — viser de første %{n} radene"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:67
+#, elixir-autogen, elixir-format
+msgid "Success"
+msgstr "Suksess"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:83
+#, elixir-autogen, elixir-format
+msgid "Terminal recording"
+msgstr "Terminalopptak"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:74
+#, elixir-autogen, elixir-format
+msgid "To do"
+msgstr "Å gjøre"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:68
+#, elixir-autogen, elixir-format
+msgid "Warning"
+msgstr "Advarsel"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:84
+#, elixir-autogen, elixir-format
+msgid "Watch the video"
+msgstr "Se videoen"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:80
+#, elixir-autogen, elixir-format
+msgid "accept"
+msgstr "godta"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:86
+#, elixir-autogen, elixir-format
+msgid "less"
+msgstr "mindre"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:87
+#, elixir-autogen, elixir-format
+msgid "more"
+msgstr "mer"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:89
+#, elixir-autogen, elixir-format
+msgid "now %{value}"
+msgstr "nå %{value}"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:62
+#, elixir-autogen, elixir-format
+msgid "rev %{n}"
+msgstr "rev. %{n}"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:92
+#, elixir-autogen, elixir-format
+msgid "route track"
+msgstr "rutespor"
+
+#: lib/barkpark/portable_doc/render/chrome.ex:88
+#, elixir-autogen, elixir-format
+msgid "series %{n}"
+msgstr "serie %{n}"

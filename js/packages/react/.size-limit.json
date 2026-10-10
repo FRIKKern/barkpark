@@ -7,13 +7,13 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-10-10 rebase (task-8e96278fc4ee7097, renderer chrome words via an explicit per-render ctx): 25774 B -> 26062 B (+288); measured against main 9a52ce2517 with the same build: the per-render ctx threaded through container emitters costs ~8 B (measured by building with those passes removed); the rest is the 39 form/task chrome words becoming ctx.t() lookups with named %{slot} templates (named, not positional, so a translation may reorder them) plus makeCtx in blocks/chrome.ts. No string table ships; the caller supplies it; 300 B headroom",
+  "name": "PortableDoc client — 2026-10-10 rebase 2 (task-2de470c7200d07c7, renderer chrome words part 2: callouts, data viz, equations, sheets, terminal, paper links): 26062 B -> 26163 B (+101); the remaining ~45 chrome words as ctx.t() lookups, no string table shipped (the caller supplies it); limit unchanged, 207 B headroom",
   "path": "dist/index.mjs",
   "limit": "26.37 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-10-10 rebase (task-8e96278fc4ee7097, renderer chrome words via an explicit per-render ctx): 24778 B -> 25063 B (+285); the same change through the server entry; 300 B headroom",
+  "name": "RSC server — 2026-10-10 rebase 2 (task-2de470c7200d07c7, renderer chrome words part 2: callouts, data viz, equations, sheets, terminal, paper links): 25063 B -> 25177 B (+114); the same change through the server entry; limit unchanged, 193 B headroom",
   "path": "dist/server.mjs",
   "limit": "25.37 KB",
   "gzip": true
@@ -35,7 +35,7 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-10-10 rebase (task-8e96278fc4ee7097, renderer chrome words via an explicit per-render ctx): 21806 B -> 22103 B (+297); the same change through the PortableDoc subpath; 300 B headroom",
+  "name": "PortableDoc subpath — 2026-10-10 rebase 2 (task-2de470c7200d07c7, renderer chrome words part 2: callouts, data viz, equations, sheets, terminal, paper links): 22103 B -> 22206 B (+103); the same change through the PortableDoc subpath; limit unchanged, 204 B headroom",
   "path": "dist/portable-doc.mjs",
   "limit": "22.41 KB",
   "gzip": true

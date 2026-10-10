@@ -12,6 +12,7 @@ defmodule Barkpark.PortableDoc.Render.Math do
   """
 
   alias Barkpark.PortableDoc.Render.Util
+  alias Barkpark.PortableDoc.Render.Chrome
 
   @macros %{
     "\\alpha" => "α",
@@ -66,7 +67,7 @@ defmodule Barkpark.PortableDoc.Render.Math do
     tex = block |> Map.get("tex", "") |> stringish() |> String.trim()
 
     if tex == "" do
-      ~s|<div class="bp-equation bp-equation--empty">equation — no tex source</div>|
+      ~s|<div class="bp-equation bp-equation--empty">#{Chrome.t("equation — no tex source")}</div>|
     else
       display = Map.get(block, "display") == true
       row = tex_to_mathml_row(tex)
@@ -76,14 +77,15 @@ defmodule Barkpark.PortableDoc.Render.Math do
   end
 
   def equation_html(_),
-    do: ~s|<div class="bp-equation bp-equation--empty">equation — no tex source</div>|
+    do:
+      ~s|<div class="bp-equation bp-equation--empty">#{Chrome.t("equation — no tex source")}</div>|
 
   @doc "Email-safe equation: a degrade badge showing the raw TeX source."
   def equation_email_html(block) when is_map(block) do
     tex = block |> Map.get("tex", "") |> stringish() |> String.trim()
 
     if tex == "" do
-      ~s|<div style="border:1px dashed #ccc;border-radius:10px;padding:10px 13px;color:#888;font-size:12px;margin:12px 0">equation — no tex source</div>|
+      ~s|<div style="border:1px dashed #ccc;border-radius:10px;padding:10px 13px;color:#888;font-size:12px;margin:12px 0">#{Chrome.t("equation — no tex source")}</div>|
     else
       ~s|<div style="border:1px solid #ddd;border-radius:10px;padding:10px 13px;font-family:monospace;font-size:13px;margin:12px 0">#{Util.escape_html(tex)}</div>|
     end
@@ -91,7 +93,7 @@ defmodule Barkpark.PortableDoc.Render.Math do
 
   def equation_email_html(_),
     do:
-      ~s|<div style="border:1px dashed #ccc;border-radius:10px;padding:10px 13px;color:#888;font-size:12px;margin:12px 0">equation — no tex source</div>|
+      ~s|<div style="border:1px dashed #ccc;border-radius:10px;padding:10px 13px;color:#888;font-size:12px;margin:12px 0">#{Chrome.t("equation — no tex source")}</div>|
 
   @doc "Convert one TeX math source string to a MathML row (no outer `<math>`)."
   def tex_to_mathml_row(tex) do

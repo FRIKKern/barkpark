@@ -401,7 +401,7 @@ export const Callout = Node.create({
         current = n;
         titleEl.contentEditable = editor.isEditable ? "plaintext-only" : "false";
         const shown = hasTitle ? title : isCollapsible && !focused
-          ? toneLabel(n.attrs && n.attrs.tone) : "";
+          ? t(toneLabel(n.attrs && n.attrs.tone)) : "";
         if (!composing && titleEl.textContent !== shown) titleEl.textContent = shown;
 
         if (isCollapsible) {

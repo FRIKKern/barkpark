@@ -33,7 +33,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   block type — the browser twin of pdrender's `unresolvedPlaceholder`.
   """
 
-  import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1, escape_attr: 1]
+  alias Barkpark.PortableDoc.Render.Chrome
   # Bitwise ops for the encoded-polyline varint decoder (route block).
   import Bitwise
 
@@ -449,11 +450,11 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     ~s|<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:#{track}repeat(#{cols},minmax(10px,44px))">| <>
       head <>
       body <>
-      ~s|</div><div class="bp-heat__legend">less | <>
+      ~s|</div><div class="bp-heat__legend">#{Chrome.t("less")} | <>
       Enum.map_join([0.15, 0.35, 0.55, 0.75, 1.0], "", fn i ->
         ~s|<i class="bp-heat__c" style="--i:#{fmt3(i)}"></i>|
       end) <>
-      " more</div></div>"
+      " " <> Chrome.t("more") <> "</div></div>"
   end
 
   # ── slate-2 heat modes: quantile dual-encode (calendar + matrix extras) ──────
@@ -622,9 +623,9 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   # The low→high key for the dual-encode modes: the four bin swatches.
   defp dual_legend do
-    ~s|<div class="bp-heat__legend">less | <>
+    ~s|<div class="bp-heat__legend">#{Chrome.t("less")} | <>
       Enum.map_join(0..3, "", fn k -> ~s|<i class="bp-heat__c bp-heat__c--b#{k}"></i>| end) <>
-      " more</div>"
+      " " <> Chrome.t("more") <> "</div>"
   end
 
   # The HeatQuantileBins port (heatmap.go:318, @canonical heat-quantile-bin):
@@ -1015,7 +1016,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
         ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
           rows <>
-          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">Open the paper to see the live chart.</div></div>|
+          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">#{Chrome.t("Open the paper to see the live chart.")}</div></div>|
     end
   end
 
@@ -1096,7 +1097,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
         ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
           row_html <>
-          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">Open the paper to see the live progress.</div></div>|
+          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">#{Chrome.t("Open the paper to see the live progress.")}</div></div>|
     end
   end
 
@@ -1111,7 +1112,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         {m + (numeric(get(row, "met")) || 0.0), t + (numeric(get(row, "total")) || 0.0)}
       end)
 
-    %{"label" => "Total", "met" => met, "total" => total}
+    %{"label" => Chrome.t("Total"), "met" => met, "total" => total}
   end
 
   # Resolved gauge rows for either mode: {:ok, [%{label, prop, digit, note}]},
@@ -1205,14 +1206,14 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # counted, never dropped (gaugelist.go gaugeBucketKey).
   defp gauge_bucket_key(row, "priority") do
     case row |> get("priority") |> display_string() do
-      "" -> "(none)"
+      "" -> Chrome.t("(none)")
       p -> "P" <> p
     end
   end
 
   defp gauge_bucket_key(row, group_by) do
     case row |> get(group_by) |> display_string() do
-      "" -> "(none)"
+      "" -> Chrome.t("(none)")
       key -> key
     end
   end
@@ -1313,7 +1314,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       (series
        |> Enum.with_index()
        |> Enum.map_join("", fn {s, si} ->
-         label = if s.label == "", do: "series #{si + 1}", else: s.label
+         label = if s.label == "", do: Chrome.t("series %{n}", n: si + 1), else: s.label
 
          ~s|<span class="bp-chart__key"><i class="bp-chart__swatch bp-chart__s#{rem(si, 4)}"></i>#{escape_html(label)}</span>|
        end)) <> "</div>"
@@ -1727,16 +1728,16 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           series
           |> Enum.with_index()
           |> Enum.map_join("", fn {s, si} ->
-            label = if s.label == "", do: "series #{si + 1}", else: s.label
+            label = if s.label == "", do: Chrome.t("series %{n}", n: si + 1), else: s.label
             last = List.last(s.points)
 
-            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.muted};margin:2px 0"><span style="display:inline-block;width:12px;height:3px;border-radius:2px;background:#{sk.accent};margin-right:8px;vertical-align:middle"></span>#{escape_html(label)} · #{tick(Enum.min(s.points))} → #{tick(Enum.max(s.points))} · now #{tick(last)}</div>|
+            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.muted};margin:2px 0"><span style="display:inline-block;width:12px;height:3px;border-radius:2px;background:#{sk.accent};margin-right:8px;vertical-align:middle"></span>#{escape_html(label)} · #{tick(Enum.min(s.points))} → #{tick(Enum.max(s.points))} · #{Chrome.t("now %{value}", value: tick(last))}</div>|
           end)
 
         ~s|<div style="background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:12px 0">| <>
           cap_html <>
           rows <>
-          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">Open the paper to see the live chart.</div></div>|
+          ~s|<div style="font-size:11px;color:#{sk.muted};margin-top:6px;font-style:italic">#{Chrome.t("Open the paper to see the live chart.")}</div></div>|
     end
   end
 
@@ -1805,7 +1806,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   defp empty_email(kind, theme) do
     sk = email_skin(theme)
 
-    ~s|<div style="border:1px dashed #{sk.border};border-radius:10px;padding:10px 13px;color:#{sk.muted};font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;margin:12px 0">#{escape_html(kind)} — no data</div>|
+    ~s|<div style="border:1px dashed #{sk.border};border-radius:10px;padding:10px 13px;color:#{sk.muted};font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;margin:12px 0">#{Chrome.t("%{kind} — no data", kind: escape_html(kind))}</div>|
   end
 
   # ── small helpers (Components conventions) ───────────────────────────────────
@@ -1909,7 +1910,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
     {sx, sy} = List.first(coords)
     {fx, fy} = List.last(coords)
 
-    ~s|<svg class="bp-route__map" viewBox="0 0 #{w} #{h}" role="img" aria-label="route track" style="display:block;width:100%;max-width:#{w}px;height:auto;">| <>
+    ~s|<svg class="bp-route__map" viewBox="0 0 #{w} #{h}" role="img" aria-label="#{escape_attr(Chrome.t("route track"))}" style="display:block;width:100%;max-width:#{w}px;height:auto;">| <>
       ~s|<path d="#{d}" fill="none" stroke="#{track}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>| <>
       ~s|<circle cx="#{sx}" cy="#{sy}" r="5.5" fill="none" stroke="#{@route_start}" stroke-width="3"/>| <>
       ~s|<circle cx="#{fx}" cy="#{fy}" r="5.5" fill="#{@route_finish}"/>| <>
@@ -1967,7 +1968,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   defp decode_chunk(_bin, _shift, _acc), do: :malformed
 
   defp empty(kind),
-    do: ~s|<div class="bp-dataviz bp-dataviz--empty">#{escape_html(kind)} — no data</div>|
+    do:
+      ~s|<div class="bp-dataviz bp-dataviz--empty">#{Chrome.t("%{kind} — no data", kind: escape_html(kind))}</div>|
 
   defp get(m, k) when is_map(m), do: Map.get(m, k)
   defp get(_, _), do: nil

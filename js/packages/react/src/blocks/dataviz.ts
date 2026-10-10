@@ -7,9 +7,10 @@
 // never author-controlled inline colour. Empty/absent data → the honest
 // `bp-dataviz bp-dataviz--empty` box (the browser twin of pdrender's placeholder).
 
-import { type Block, escapeHtml, isMap, safeUrl } from '../inline'
+import { type Block, escapeHtml, escapeAttr, isMap, safeUrl } from '../inline'
+import type { RenderCtx } from './chrome'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 /* ── coercion helpers (data_viz.ex small helpers) ──────────────────────────── */
 
@@ -72,8 +73,8 @@ function tickCompact(v: number): string {
   return (v / div).toFixed(1).replace(/\.0$/, '') + suffix
 }
 
-function empty(kind: string): string {
-  return `<div class="bp-dataviz bp-dataviz--empty">${escapeHtml(kind)} — no data</div>`
+function empty(kind: string, ctx: RenderCtx): string {
+  return `<div class="bp-dataviz bp-dataviz--empty">${ctx.t('%{kind} — no data', { kind: escapeHtml(kind) })}</div>`
 }
 
 /* ── stat / stats ──────────────────────────────────────────────────────────── */
@@ -101,12 +102,12 @@ export function sparkSvg(values: number[], cls = 'bp-stat__spark'): string {
 
 const VERDICTS = ['loss', 'peace']
 
-const stat: Emit = (block) => statHtml(block)
+const stat: Emit = (block, ctx) => statHtml(block, ctx)
 
-function statHtml(block: unknown): string {
-  if (!isMap(block)) return empty('stat')
+function statHtml(block: unknown, ctx: RenderCtx): string {
+  if (!isMap(block)) return empty('stat', ctx)
   const value = displayString(get(block, 'value'))
-  if (value === '') return empty('stat')
+  if (value === '') return empty('stat', ctx)
   const label = displayString(get(block, 'label'))
   const max = numeric(get(block, 'max'))
   const spark = numberList(get(block, 'spark'))
@@ -142,14 +143,14 @@ function statHtml(block: unknown): string {
   return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
 }
 
-const stats: Emit = (block) => {
+const stats: Emit = (block, ctx) => {
   const items = asArr(get(block, 'items')).filter(isMap)
-  if (items.length === 0) return empty('stats')
+  if (items.length === 0) return empty('stats', ctx)
   // Kilde law, aggregated: per-cell `source` (fallback `sourceDefault`) rolls
   // into ONE deduped footer — cells never stamp their own.
   const dflt = displayString(get(block, 'sourceDefault'))
   const refs = figureRefs(items, dflt, (it) => displayString(get(it, 'value')) !== '')
-  const cells = items.map((it) => statHtml(omitSource(it))).join('')
+  const cells = items.map((it) => statHtml(omitSource(it), ctx)).join('')
   return `<div class="bp-stats">${cells}${kildeHtml(refs)}</div>`
 }
 
@@ -255,13 +256,13 @@ function duelRowHtml(r: unknown): string {
   )
 }
 
-const duel: Emit = (block) => {
+const duel: Emit = (block, ctx) => {
   const legendA = displayString(get(block, 'legendA'))
   const legendB = displayString(get(block, 'legendB'))
   const rows = asArr(get(block, 'rows'))
     .filter(isMap)
     .filter((r) => ['label', 'valueA', 'valueB'].some((k) => displayString(get(r, k)) !== ''))
-  if (rows.length === 0 || legendA === '' || legendB === '') return empty('duel')
+  if (rows.length === 0 || legendA === '' || legendB === '') return empty('duel', ctx)
   const dflt = displayString(get(block, 'sourceDefault'))
   const refs = figureRefs(
     rows,
@@ -308,13 +309,13 @@ function lineageNodeHtml(n: unknown): string {
   return `<li class="${toneClass('bp-lineage__node', get(n, 'tone'))}">${parts}</li>`
 }
 
-const lineage: Emit = (block) => {
+const lineage: Emit = (block, ctx) => {
   const nodes = asArr(get(block, 'nodes'))
     .filter(isMap)
     .filter((n) =>
       ['overline', 'title', 'body', 'value'].some((k) => displayString(get(n, k)) !== ''),
     )
-  if (nodes.length === 0) return empty('lineage')
+  if (nodes.length === 0) return empty('lineage', ctx)
   const dflt = displayString(get(block, 'sourceDefault'))
   const refs = figureRefs(nodes, dflt, (n) => displayString(get(n, 'value')) !== '')
   const lis = nodes.map(lineageNodeHtml).join('')
@@ -328,10 +329,10 @@ function binClass(bin: number): string {
   return `bp-heat__c--b${Math.min(Math.max(bin, 0), 3)}`
 }
 
-function dualLegend(): string {
-  let s = '<div class="bp-heat__legend">less '
+function dualLegend(ctx: RenderCtx): string {
+  let s = `<div class="bp-heat__legend">${ctx.t('less')} `
   for (let k = 0; k <= 3; k++) s += `<i class="bp-heat__c bp-heat__c--b${k}"></i>`
-  return s + ' more</div>'
+  return s + ` ${ctx.t('more')}</div>`
 }
 
 function quantileBins(grid: number[][]): number[][] {
@@ -365,7 +366,7 @@ function normGrid(block: unknown): number[][] {
     .filter((row) => row.length > 0)
 }
 
-function heatGridHtml(grid: number[][], block: unknown): string {
+function heatGridHtml(grid: number[][], block: unknown, ctx: RenderCtx): string {
   const maxNum = numeric(get(block, 'max'))
   // Mirror data_viz.ex heat_grid_html/2: with no explicit `max`, the divisor is
   // the actual grid max (NOT floored at 1.0 — that would flatten all intensities),
@@ -402,14 +403,14 @@ function heatGridHtml(grid: number[][], block: unknown): string {
   })
 
   const track = rowLabels.length === 0 ? '' : 'auto '
-  let legend = '<div class="bp-heat__legend">less '
+  let legend = `<div class="bp-heat__legend">${ctx.t('less')} `
   for (const i of [0.15, 0.35, 0.55, 0.75, 1.0])
     legend += `<i class="bp-heat__c" style="--i:${fmt3(i)}"></i>`
-  legend += ' more</div>'
+  legend += ` ${ctx.t('more')}</div>`
   return `<div class="bp-heat"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},minmax(10px,44px))">${head}${body}</div>${legend}</div>`
 }
 
-function heatCalendarHtml(grid: number[][], block: unknown): string {
+function heatCalendarHtml(grid: number[][], block: unknown, ctx: RenderCtx): string {
   const bins = quantileBins(grid)
   const rowLabels = stringList(get(block, 'rowLabels'))
   const colLabels = stringList(get(block, 'colLabels'))
@@ -441,7 +442,7 @@ function heatCalendarHtml(grid: number[][], block: unknown): string {
   })
 
   const track = rowLabels.length === 0 ? '' : 'auto '
-  return `<div class="bp-heat bp-heat--cal"><div class="bp-heat__scroll"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${weeks},12px)">${head}${body}</div></div>${dualLegend()}</div>`
+  return `<div class="bp-heat bp-heat--cal"><div class="bp-heat__scroll"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${weeks},12px)">${head}${body}</div></div>${dualLegend(ctx)}</div>`
 }
 
 function matrixCell(bin: number, v: number, showVals: boolean): string {
@@ -450,7 +451,7 @@ function matrixCell(bin: number, v: number, showVals: boolean): string {
   return `<i class="bp-heat__c ${binClass(bin)}" title="${fmt(v)}"></i>`
 }
 
-function heatMatrixExtrasHtml(grid: number[][], block: unknown): string {
+function heatMatrixExtrasHtml(grid: number[][], block: unknown, ctx: RenderCtx): string {
   const bins = quantileBins(grid)
   const showVals = get(block, 'values') === true
   const showMarg = get(block, 'marginals') === true
@@ -498,16 +499,16 @@ function heatMatrixExtrasHtml(grid: number[][], block: unknown): string {
   const track = gutter ? 'auto ' : ''
   const cellTrack = showVals ? 'minmax(28px,auto)' : 'minmax(10px,44px)'
   const sumTrack = showMarg ? ' auto' : ''
-  return `<div class="bp-heat bp-heat--mtx"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},${cellTrack})${sumTrack}">${head}${body}${foot}</div>${dualLegend()}</div>`
+  return `<div class="bp-heat bp-heat--mtx"><div class="bp-heat__grid" style="grid-template-columns:${track}repeat(${cols},${cellTrack})${sumTrack}">${head}${body}${foot}</div>${dualLegend(ctx)}</div>`
 }
 
-const heatmap: Emit = (block) => {
+const heatmap: Emit = (block, ctx) => {
   const grid = normGrid(block)
-  if (grid.length === 0) return empty('heatmap')
-  if (displayString(get(block, 'mode')) === 'calendar') return heatCalendarHtml(grid, block)
+  if (grid.length === 0) return empty('heatmap', ctx)
+  if (displayString(get(block, 'mode')) === 'calendar') return heatCalendarHtml(grid, block, ctx)
   if (get(block, 'marginals') === true || get(block, 'values') === true)
-    return heatMatrixExtrasHtml(grid, block)
-  return heatGridHtml(grid, block)
+    return heatMatrixExtrasHtml(grid, block, ctx)
+  return heatGridHtml(grid, block, ctx)
 }
 
 /* ── chart (inline SVG) ────────────────────────────────────────────────────── */
@@ -604,12 +605,12 @@ function xLabelsSvg(labels: string[]): string {
   return out
 }
 
-function legendHtml(series: Series[]): string {
+function legendHtml(series: Series[], ctx: RenderCtx): string {
   return (
     '<div class="bp-chart__legend">' +
     series
       .map((s, si) => {
-        const label = s.label === '' ? `series ${si + 1}` : s.label
+        const label = s.label === '' ? ctx.t('series %{n}', { n: si + 1 }) : s.label
         return `<span class="bp-chart__key"><i class="bp-chart__swatch bp-chart__s${si % 4}"></i>${escapeHtml(label)}</span>`
       })
       .join('') +
@@ -617,12 +618,12 @@ function legendHtml(series: Series[]): string {
   )
 }
 
-const chart: Emit = (block) => {
+const chart: Emit = (block, ctx) => {
   const series: Series[] = asArr(get(block, 'series'))
     .map((s) => ({ label: displayString(get(s, 'label')), points: numberList(get(s, 'points')) }))
     .filter((s) => s.points.length > 0)
     .slice(0, 4)
-  if (series.length === 0) return empty('chart')
+  if (series.length === 0) return empty('chart', ctx)
 
   const kind = displayString(get(block, 'kind')) === 'bars' ? 'bars' : 'line'
   const axes = isMap(get(block, 'axes')) ? (get(block, 'axes') as Record<string, unknown>) : {}
@@ -645,7 +646,7 @@ const chart: Emit = (block) => {
     gridSvg(minV, maxV) +
     plot +
     xLabelsSvg(xLabels) +
-    `</svg></div>${legendHtml(series)}</div>`
+    `</svg></div>${legendHtml(series, ctx)}</div>`
   )
 }
 
@@ -689,18 +690,18 @@ function shareGauges(block: unknown): Gauge[] {
 
 // A task row's bucket label (gauge_bucket_key/2): priority via its P<n> label,
 // every other field by its trimmed string; missing/empty → "(none)".
-function gaugeBucketKey(row: unknown, groupBy: string): string {
+function gaugeBucketKey(row: unknown, groupBy: string, ctx: RenderCtx): string {
   if (groupBy === 'priority') {
     const p = displayString(get(row, 'priority'))
-    return p === '' ? '(none)' : 'P' + p
+    return p === '' ? ctx.t('(none)') : 'P' + p
   }
   const key = displayString(get(row, groupBy))
-  return key === '' ? '(none)' : key
+  return key === '' ? ctx.t('(none)') : key
 }
 
 // count_gauges/1: frequency of a `snapshot` grouped by a field; the unbacked
 // "epic" groupBy signals with the 'epic' sentinel (the note the renderer shows).
-function countGauges(block: unknown): 'epic' | Gauge[] {
+function countGauges(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {
   const raw = displayString(get(block, 'groupBy'))
   const groupBy = raw === '' ? 'status' : raw
   if (groupBy === 'epic') return 'epic'
@@ -708,7 +709,7 @@ function countGauges(block: unknown): 'epic' | Gauge[] {
   if (rows.length === 0) return []
   const counts = new Map<string, number>()
   for (const r of rows) {
-    const k = gaugeBucketKey(r, groupBy)
+    const k = gaugeBucketKey(r, groupBy, ctx)
     counts.set(k, (counts.get(k) ?? 0) + 1)
   }
   const maxCount = Math.max(1, ...counts.values())
@@ -718,8 +719,8 @@ function countGauges(block: unknown): 'epic' | Gauge[] {
   return entries.map(([label, count]) => ({ label, prop: count / maxCount, digit: String(count), note: '' }))
 }
 
-function gaugeRows(block: unknown): 'epic' | Gauge[] {
-  return gaugeMode(block) === 'share' ? shareGauges(block) : countGauges(block)
+function gaugeRows(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {
+  return gaugeMode(block) === 'share' ? shareGauges(block) : countGauges(block, ctx)
 }
 
 /* ── the shared proportional-bar row (gauge-list / bar-chart / criteria-progress) ── */
@@ -748,18 +749,18 @@ function barRow(
   )
 }
 
-const gaugeList: Emit = (block) => {
-  if (!isMap(block)) return empty('gauge-list')
+const gaugeList: Emit = (block, ctx) => {
+  if (!isMap(block)) return empty('gauge-list', ctx)
   const title = displayString(get(block, 'title'))
   const titleHtml = title === '' ? '' : `<div class="bp-gauge__t">${escapeHtml(title)}</div>`
-  const rows = gaugeRows(block)
+  const rows = gaugeRows(block, ctx)
   if (rows === 'epic') {
     return (
       `<div class="bp-gauge">${titleHtml}` +
       `<div class="bp-gauge__note">groupBy "epic" is unbacked here — needs the epic resolver</div></div>`
     )
   }
-  if (rows.length === 0) return empty('gauge-list')
+  if (rows.length === 0) return empty('gauge-list', ctx)
   const body = rows
     .map((g) => {
       const noteHtml = g.note === '' ? '' : `<span class="bp-gauge__n">${escapeHtml(g.note)}</span>`
@@ -775,9 +776,9 @@ const gaugeList: Emit = (block) => {
 // proportional-bar vocabulary as gauge-list's share mode (a labeled row +
 // a filled track), but denominated by the DATA MAX (never the sum — bars
 // are categorical counts, not shares) unless an explicit `max` is given.
-const barChart: Emit = (block) => {
+const barChart: Emit = (block, ctx) => {
   const bars = asArr(get(block, 'bars')).filter(isMap)
-  if (bars.length === 0) return empty('bar-chart')
+  if (bars.length === 0) return empty('bar-chart', ctx)
   const values = bars.map((b) => numeric(get(b, 'value')) ?? 0.0)
   const explicitMax = numeric(get(block, 'max'))
   let denom = explicitMax !== null && explicitMax > 0 ? explicitMax : Math.max(...values)
@@ -803,7 +804,7 @@ const barChart: Emit = (block) => {
 // row's own `total` (a fraction, not a shared max) and the digit is always
 // shown (met/total IS the datum). `detail: 'total'` collapses all rows into
 // one aggregate bar (summed met/total, label "Total").
-function effectiveCriteriaRows(rows: unknown[], detail: unknown): unknown[] {
+function effectiveCriteriaRows(rows: unknown[], detail: unknown, ctx: RenderCtx): unknown[] {
   if (detail !== 'total') return rows
   let met = 0
   let total = 0
@@ -811,14 +812,14 @@ function effectiveCriteriaRows(rows: unknown[], detail: unknown): unknown[] {
     met += numeric(get(row, 'met')) ?? 0
     total += numeric(get(row, 'total')) ?? 0
   }
-  return [{ label: 'Total', met, total }]
+  return [{ label: ctx.t('Total'), met, total }]
 }
 
-const criteriaProgress: Emit = (block) => {
+const criteriaProgress: Emit = (block, ctx) => {
   const rows = asArr(get(block, 'rows')).filter(isMap)
-  if (rows.length === 0) return empty('criteria-progress')
+  if (rows.length === 0) return empty('criteria-progress', ctx)
 
-  const body = effectiveCriteriaRows(rows, get(block, 'detail'))
+  const body = effectiveCriteriaRows(rows, get(block, 'detail'), ctx)
     .map((row) => {
       const met = numeric(get(row, 'met')) ?? 0
       const total = numeric(get(row, 'total')) ?? 0
@@ -888,9 +889,9 @@ export function decodePolyline(s: string): Array<[number, number]> {
 
 const fmt2 = (v: number): string => v.toFixed(2)
 
-const route: Emit = (block) => {
+const route: Emit = (block, ctx) => {
   const points = decodePolyline(displayString(get(block, 'polyline')))
-  if (points.length < 2) return empty('route')
+  if (points.length < 2) return empty('route', ctx)
 
   const midLat = points.reduce((a, p) => a + p[0], 0) / points.length
   const k = Math.cos((midLat * Math.PI) / 180)
@@ -911,14 +912,14 @@ const route: Emit = (block) => {
 
   const first = coords[0]
   const last = coords[coords.length - 1]
-  if (first === undefined || last === undefined) return empty('route')
+  if (first === undefined || last === undefined) return empty('route', ctx)
 
   const d = coords.map(([x, y], i2) => `${i2 === 0 ? 'M' : 'L'}${x},${y}`).join(' ')
   const [sx, sy] = first
   const [fx, fy] = last
 
   const svg =
-    `<svg class="bp-route__map" viewBox="0 0 ${ROUTE_W} ${h}" role="img" aria-label="route track" style="display:block;width:100%;max-width:${ROUTE_W}px;height:auto;">` +
+    `<svg class="bp-route__map" viewBox="0 0 ${ROUTE_W} ${h}" role="img" aria-label="${escapeAttr(ctx.t('route track'))}" style="display:block;width:100%;max-width:${ROUTE_W}px;height:auto;">` +
     `<path d="${d}" fill="none" stroke="${ROUTE_TRACK}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>` +
     `<circle cx="${sx}" cy="${sy}" r="5.5" fill="none" stroke="${ROUTE_START}" stroke-width="3"/>` +
     `<circle cx="${fx}" cy="${fy}" r="5.5" fill="${ROUTE_FINISH}"/>` +
