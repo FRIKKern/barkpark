@@ -1882,6 +1882,22 @@
       background: var(--danger-soft);
     }
 
+    /* A field canvas save that did not land (task-fcbf22671c0c82df): the paper
+       editor's conflict-banner classes, styled in Studio's tokens (the paper's
+       --paper-* tokens only exist inside the paper editor). */
+    .bp-field-canvas [data-field-save-state] {
+      display: block; margin: 0 0 8px; padding: 10px 12px;
+      border: 1px solid var(--border); border-inline-start: 3px solid var(--warn-text);
+      border-radius: 6px; background: var(--warn-soft); color: var(--fg);
+      font-size: var(--text-sm); overflow-wrap: anywhere;
+    }
+    .bp-field-canvas [data-field-save-state="refused"] {
+      border-inline-start-color: var(--danger-text); background: var(--danger-soft);
+    }
+    .bp-field-canvas [data-field-save-state] .bp-conflict-title { display: block; font-weight: 600; }
+    .bp-field-canvas [data-field-save-state] .bp-conflict-description { display: block; color: var(--fg-muted); }
+    .bp-field-canvas [data-field-save-state] .bp-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+
     /* A desk row is a real <button> (panes.ex pane_item/1) so it is
        Tab-reachable. ORDER IS LOAD-BEARING: the UA reset's `border: 0` must
        come BEFORE `border-left`, or it wipes the selected row's rail. The
@@ -6766,6 +6782,9 @@
           if (ds != null) el.setAttribute("data-dataset", ds);
           if (tok != null) el.setAttribute("data-token", tok);
           if (vocab != null) el.setAttribute("data-vocabulary", vocab);
+          // The canvas holds each batch until the server answers it (below), so
+          // a refused or conflicting save is never silently counted as saved.
+          el.acknowledgedSaves = true;
           const raw = this.el.dataset.canvasBlocks;
           if (!raw) return;
           try {
@@ -6779,15 +6798,96 @@
           seed(this.el.querySelector("bp-paper-canvas"));
         });
 
+        // task-fcbf22671c0c82df: FieldBlocks.field_block_ops applies ops only at a
+        // known revision (if_rev) and answers each request by id. This hook sent
+        // neither, so every batch from a browser-session canvas was refused while
+        // the canvas counted it saved. Each batch now carries the revision the
+        // field last saw and a request id, and its answer settles the batch:
+        //   saved     → the canvas advances; the reply's rev is the next if_rev
+        //   conflict  → someone else saved first. The batch stays held, unsaved,
+        //               and a banner says so; the field keeps its OLD revision, so
+        //               no later edit can land over the other save by accident.
+        //               Only "Keep mine" sends it again, at the current revision;
+        //               "Use latest" reloads to show the other save.
+        //   refused   → the batch is dropped so later edits still flow (they carry
+        //               the change again), and "Not saved" stays up until a save lands
+        this._rev = this.el.dataset.documentRev || null;
+        this._requests = 0;
+        let words = {};
+        try { words = JSON.parse(this.el.dataset.saveStrings || "{}"); } catch (_e) {}
+        const w = (text) => words[text] || text;
+        const banner = (kind, actions) => {
+          this._banner?.remove();
+          const el = document.createElement("div");
+          el.dataset.fieldSaveState = kind;
+          el.setAttribute("role", "alert");
+          const title = document.createElement("strong");
+          title.className = "bp-conflict-title";
+          title.textContent = w(kind === "conflict" ? "Save paused" : "Not saved");
+          const desc = document.createElement("span");
+          desc.className = "bp-conflict-description";
+          desc.textContent = w(kind === "conflict"
+            ? "This document changed elsewhere. Your edits are still here."
+            : "This edit was not saved. Your text is still here.");
+          el.append(title, desc);
+          if (actions.length) {
+            const row = document.createElement("div");
+            row.className = "bp-conflict-actions";
+            for (const [action, label, run] of actions) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = action === "keep" ? "btn btn-sm btn-primary" : "btn btn-sm";
+              button.dataset.action = action;
+              button.textContent = w(label);
+              button.addEventListener("click", run);
+              row.append(button);
+            }
+            el.append(row);
+          }
+          this.el.prepend(el);
+          this._banner = el;
+        };
+        const clearBanner = () => {
+          this._banner?.remove();
+          this._banner = null;
+        };
+        const send = (ops, seq) => {
+          const requestId = `field-${field}-${Date.now().toString(36)}-${++this._requests}`;
+          const wc = this.el.querySelector("bp-paper-canvas");
+          this.pushEvent("field-block-ops", { field, ops, if_rev: this._rev, request_id: requestId }, (reply) => {
+            if (!reply || reply.request_id !== requestId) return;
+            if (reply.saved === true) {
+              if (reply.rev) this._rev = reply.rev;
+              clearBanner();
+              if (seq != null) wc?.acknowledgeOps?.(seq, true);
+              return;
+            }
+            if (reply.conflict === true) {
+              const current = reply.current_rev;
+              banner("conflict", [
+                ["keep", "Keep mine", () => {
+                  if (current) this._rev = current;
+                  clearBanner();
+                  send(ops, seq);
+                }],
+                ["latest", "Use latest", () => window.location.reload()],
+              ]);
+              return;
+            }
+            banner("refused", []);
+            if (seq != null) wc?.discardInflightOps?.(seq);
+          });
+        };
         this._onCanvasOps = (e) => {
           const ops = e.detail && e.detail.ops;
           if (!Array.isArray(ops) || ops.length === 0) return;
-          this.pushEvent("field-block-ops", { field, ops });
+          send(ops, e.detail.seq);
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
 
         this._onUpdate = (payload) => {
           if (!payload || payload.field !== field || payload.doc_key !== docKey) return;
+          if (payload.rev) this._rev = payload.rev;
           const wc = this.el.querySelector("bp-paper-canvas");
           if (!wc || typeof wc.applyServerBlocks !== "function") return;
           wc.applyServerBlocks(payload.blocks || []);
