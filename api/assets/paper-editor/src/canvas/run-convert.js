@@ -4007,6 +4007,41 @@ export function hasOverlappingOps(ops, baseline, remote) {
   });
 }
 
+// Whether a batch of id-keyed ops authored against `baseline` can be resent on
+// a NEWER stored version `server` of the same run without losing either writer's
+// edit (task-e0987185b4de61e3). Two tabs editing different paragraphs of one
+// paper must both land. Safe when the other writer left the run's block list as
+// it was (no insert, remove or move there), every op is one that addresses a
+// block by id that the newer version still holds, and no op touches a field the
+// other writer changed. Anything else is held for the author to decide.
+export function opsRebaseSafe(ops, baseline, server) {
+  if (!Array.isArray(ops) || !ops.length || !Array.isArray(baseline) || !Array.isArray(server)) {
+    return false;
+  }
+  const order = (blocks) => blocks.map((block) => (block && block.id) || "").join("\n");
+  if (order(baseline) !== order(server)) return false;
+  const known = new Set(server.map((block) => block && block.id));
+  for (const op of ops) {
+    if (op.op === "insert-after" || op.op === "append-block") {
+      if (op.block && op.block.id) known.add(op.block.id);
+    }
+  }
+  const addressable = ops.every((op) => {
+    switch (op.op) {
+      case "patch-block":
+      case "remove-block":
+        return known.has(op.id);
+      case "insert-after":
+        return op.afterId == null || known.has(op.afterId);
+      case "append-block":
+        return true;
+      default:
+        return false;
+    }
+  });
+  return addressable && !hasOverlappingOps(ops, baseline, server);
+}
+
 // The byte-significant projection of a prose node for change detection: its
 // type, heading level (if any), and content — i.e. exactly the inputs to
 // buildPatchBlockOp / tiptapToBlock. bpId/bpType are excluded so an identity

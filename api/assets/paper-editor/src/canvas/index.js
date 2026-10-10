@@ -77,6 +77,7 @@ import {
   reconcileServerEcho,
   docToBlocks,
   hasOverlappingOps,
+  opsRebaseSafe,
   pendingUploadIndexes,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
@@ -1901,6 +1902,9 @@ class BpPaperCanvas extends HTMLElement {
         // call (its reused entries are shared, never edited in place), so a deep
         // copy of the whole run per keystroke bought nothing (task-fb938eb8be3bce48).
         afterBlocks: nextBlocks ? nextBlocks.slice() : deepCloneBlocks(this._blocks),
+        // The run these ops were diffed against, so the bridge can ask whether
+        // they still apply on a newer stored version (rebaseSafe).
+        baseline: diffBaseline,
         pendingServerBlocks: this._pendingServerBlocks,
         echoSeen: false,
         requestId: null,
@@ -1931,6 +1935,38 @@ class BpPaperCanvas extends HTMLElement {
         previousRequestId !== current.requestId) return false;
     current.requestId = requestId;
     return true;
+  }
+
+  // Whether the in-flight batch `seq` can be resent unchanged on the newer
+  // stored version `serverBlocks` of this run: its ops address blocks by id and
+  // touch nothing the other writer changed (opsRebaseSafe). The bridge asks this
+  // when the server refuses the batch because another session saved first.
+  rebaseSafe(seq, serverBlocks) {
+    const current = this._inflightOps;
+    if (!current || current.seq !== seq) return false;
+    return opsRebaseSafe(current.ops, current.baseline || this._blocks, serverBlocks);
+  }
+
+  // Whether the edits this canvas still holds (an in-flight batch and/or a
+  // draft not yet sent) can ride on top of `serverBlocks`, a newer version
+  // another session saved: the same test as rebaseSafe, over everything local.
+  // True means "no conflict to show yet"; the save itself rebases.
+  localEditsRebaseSafe(serverBlocks) {
+    if (!this._editor || !Array.isArray(serverBlocks)) return false;
+    const inflight = this._inflightOps;
+    if (inflight && !opsRebaseSafe(inflight.ops, inflight.baseline || this._blocks, serverBlocks)) {
+      return false;
+    }
+    const draftBase = inflight ? inflight.afterBlocks : (this._debounceBaselineBlocks || this._blocks);
+    const draft = runToOps(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+    if (!draft.length) return true;
+    // Behind an in-flight batch the run's shape was already checked above; the
+    // draft only must not touch what the other writer changed.
+    if (inflight) {
+      return draft.every((op) => ["patch-block", "remove-block", "insert-after", "append-block"].includes(op.op)) &&
+        !hasOverlappingOps(draft, draftBase, serverBlocks);
+    }
+    return opsRebaseSafe(draft, draftBase, serverBlocks);
   }
 
   acknowledgeOps(seq, saved) {

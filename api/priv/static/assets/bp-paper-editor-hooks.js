@@ -112,6 +112,8 @@
     },
   };
   const PAPER_OP_RETRY_TTL_MS = 60 * 60 * 1000;
+  // How many times one batch may be resent on a newer revision without asking.
+  const PAPER_AUTO_REBASE_LIMIT = 3;
   const PAPER_CONTEXTUAL_HISTORY_LIMIT = 100;
   const PAPER_CANVAS_LEASES = Symbol("bpPaperCanvasLeases");
   const PAPER_CANVAS_LEASE_PENDING = Symbol("bpPaperCanvasLeasePending");
@@ -801,6 +803,7 @@
       terminalOnHalt: options.terminalOnHalt === true,
       historyDirection: options.historyDirection,
       historyStep: options.historyStep,
+      rebaseSafe: options.rebaseSafe,
     });
   }
 
@@ -1470,7 +1473,7 @@
         mutate(source, {
           requestId, payload, send, onResult, reviewRequired = false,
           kind = "forward", trackDraft = true, historyDirection = null, historyStep = null,
-          terminalOnHalt = false,
+          terminalOnHalt = false, rebaseSafe = null,
         }) {
           requestId ||= bpPaperRequestId();
           if (!requestId) return { requestId: null, promise: Promise.resolve(false) };
@@ -1489,7 +1492,7 @@
             }
             entry = {
               source, requestId, payload, send, onResult, reviewRequired, kind,
-              trackDraft, historyDirection, historyStep, terminalOnHalt,
+              trackDraft, historyDirection, historyStep, terminalOnHalt, rebaseSafe,
               documentKey: record?.documentKey ?? documentKey,
               authoredRev: record?.authoredRev ?? confirmedRevision,
               ifRev: mutationQueue.length || (record?.documentKey ?? documentKey) !== documentKey
@@ -1522,6 +1525,7 @@
         },
         observeRevision({
           rev, requestId, apply, observedDocumentKey, source, reloadOnLatest = false,
+          deferConflict = null,
         }) {
           if (rev == null) return false;
           if (observedDocumentKey && observedDocumentKey !== documentKey) {
@@ -1548,7 +1552,12 @@
             quarantinedEchoes.push({
               rev, requestId, apply, documentKey, reloadOnLatest, source,
             });
-            if (!mutationActive && !reloadOnLatest) {
+            // A source whose unsaved edits touch nothing the other session
+            // changed (the paper canvas, task-e0987185b4de61e3) shows no
+            // conflict: its save is refused on the old revision and rebased.
+            const deferred = !reloadOnLatest && typeof deferConflict === "function" &&
+              deferConflict() === true;
+            if (!mutationActive && !reloadOnLatest && !deferred) {
               for (const [fallbackSource, fallbackRecord] of sources) {
                 if (!fallbackRecord.dirty ||
                     !fallbackSource.matches?.(".bp-paper-edit-form[phx-change]") ||
@@ -2393,6 +2402,37 @@
         const openDetail = banner.querySelector("[data-conflict-detail]:not([hidden])");
         if (openDetail) renderDetail();
       };
+      // Another session saved first and the server refused this batch on the
+      // old revision (task-e0987185b4de61e3). When the batch's id-keyed ops
+      // touch nothing that session changed, resend it on the newer revision
+      // without a banner: both edits land. Bounded, so two writers racing on
+      // the same run cannot loop; past the bound, or on any overlap, the
+      // ordinary conflict (Keep mine / Use latest) is shown.
+      coordinator._autoRebase = (entry, reply) => {
+        if (reply?.conflict !== true || reply?.request_id !== entry.requestId) return false;
+        const rev = reply.current_rev;
+        if (rev == null || typeof entry.rebaseSafe !== "function") return false;
+        if ((entry.autoRebases || 0) >= PAPER_AUTO_REBASE_LIMIT) return false;
+        if (mutationQueue[0] !== entry || conflict) return false;
+        let safe = false;
+        try {
+          safe = entry.rebaseSafe(rev) === true;
+        } catch (_) {
+          safe = false;
+        }
+        if (!safe) return false;
+        const replacementId = bpPaperRequestId();
+        if (!replacementId) return false;
+        entry.autoRebases = (entry.autoRebases || 0) + 1;
+        mutationById.delete(entry.requestId);
+        entry.requestId = replacementId;
+        entry.ifRev = rev;
+        mutationById.set(entry.requestId, entry);
+        confirmedRevision = rev;
+        mutationPaused = false;
+        coordinator._pumpMutations();
+        return true;
+      };
       coordinator._keepMine = () => {
         const head = mutationQueue[0];
         if (coordinator._conflictDetachedReferenceDraft()) {
@@ -2573,6 +2613,7 @@
             (entry.kind !== "history" || Boolean(replyHistoryStep));
           mutationActive = false;
           coordinator.finishSave(token, saved);
+          if (!saved && coordinator._autoRebase(entry, reply)) return;
           if (!saved && (coordinator._terminalHistoryFailure(entry, reply) ||
               coordinator._terminalMasterFailure(entry, reply) ||
               coordinator._terminalSlashFailure(entry, reply) ||
@@ -4005,6 +4046,15 @@
               requestId: entry.requestId,
               reviewRequired: entry.conflictBlocks != null,
               terminalOnHalt: true,
+              // Refused because another session saved first: may this batch
+              // ride on the version that session stored? The refusal's echo
+              // carried it (task-e0987185b4de61e3).
+              rebaseSafe: (rev) => {
+                const latest = this._latestServerRun;
+                if (!latest || latest.rev !== rev || entry.seq == null) return false;
+                const wc = this.el.querySelector("bp-paper-canvas");
+                return wc?.rebaseSafe?.(entry.seq, latest.blocks) === true;
+              },
               onResult: (saved, result) => {
                 // The server REFUSED this batch with a lifecycle halt (the
                 // hollow ratchet). It is final, so drop it, and — unless the
@@ -4303,6 +4353,10 @@
             if (this.el.id !== `paper-canvas-${run.run_id}`) return; // not my run
             const wc = this.el.querySelector("bp-paper-canvas");
             if (!wc || typeof wc.applyServerBlocks !== "function") return;
+            // The newest stored version of this run, for the rebase checks.
+            if (payload.rev != null && Array.isArray(run.blocks)) {
+              this._latestServerRun = { rev: payload.rev, blocks: run.blocks };
+            }
             const apply = (mode) => {
               const active = this._opsQueue.find((entry) =>
                 entry.mutationEntry?.requestId === payload.request_id);
@@ -4345,6 +4399,7 @@
               apply,
               observedDocumentKey: this.el.closest?.("[data-paper-doc-key]")?.dataset.paperDocKey,
               source: this.el,
+              deferConflict: () => wc.localEditsRebaseSafe?.(run.blocks) === true,
             }) || (payload.rev == null && apply("legacy"));
           });
         };
