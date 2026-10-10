@@ -33,8 +33,13 @@ async function test(name,run) {
 }
 const file=()=>new window.File([new Uint8Array([137,80,78,71])],'clipboard.png',{type:'image/png'});
 try {
- for(const html of [image,table+image,'<p>Lead</p>'+image+'<p>Tail</p>','<table><tr><td>'+image+'</td></tr></table>','<object data="unknown.bin"></object>','<span></span>']) await test('unsupported or empty rich paste preserves selection and emits no mutation',c=>{
+ for(const html of [image,'<object data="unknown.bin"></object>','<span></span>']) await test('unsupported or empty rich paste preserves selection and emits no mutation',c=>{
   const before=c.recoverySnapshot().blocks;const selection=c._editor.state.selection.toJSON();paste(c,{html,text:'Fallback text'});assert.deepEqual(c.recoverySnapshot().blocks,before);assert.deepEqual(c._editor.state.selection.toJSON(),selection);assert.match(c.textContent,/Nothing was pasted/);assert.equal(c.hasPendingChanges(),false);
+ });
+ // task-76c5440175affe20: an image inside formatted content no longer takes the
+ // text with it. The text lands; a notice names the image that was left out.
+ for(const [html,kept] of [[table+image,'Table text'],['<p>Lead</p>'+image+'<p>Tail</p>','Tail'],['<table><tr><td>'+image+'</td><td>Beside</td></tr></table>','Beside']]) await test('rich paste with an image keeps its text and names the image left out',c=>{
+  paste(c,{html,text:'Fallback text'});assert.match(c._editor.state.doc.textContent,new RegExp(kept));assert.equal(c.recoverySnapshot().blocks.some(b=>b.type==='image'),false);assert.match(c.querySelector('[data-bp-paste-notice]').textContent,/Left out: an image/);assert.doesNotMatch(c.textContent,/Nothing was pasted/);
  });
  for(const html of [table,image,'<p>Text beside file</p>']) await test('mixed clipboard files and rich content are explicit no-op',async(c,batches,uploads)=>{
   paste(c,{html,text:'Clipboard text',files:[file()]});assert.deepEqual(c.recoverySnapshot().blocks,seed);c.flushPendingChanges();assert.equal(batches.length,0);assert.equal(uploads(),0);assert.match(c.textContent,/both image files/);

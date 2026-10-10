@@ -30,7 +30,7 @@
 // The shipped <bp-paper-editor> behavior is byte-unchanged.
 
 import { Editor } from "@tiptap/core";
-import { clipboardPastePolicy } from "./clipboard-paste-policy.js";
+import { clipboardPastePolicy, stripPastedImages } from "./clipboard-paste-policy.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -316,7 +316,11 @@ import {
   quoteTypeFor,
   transactionVetoesVocabulary,
   slashItemsForVocabulary,
+  markAllowed,
 } from "./vocabulary.js";
+// A paste is fitted to the field's vocabulary node by node, never dropped whole
+// (task-76c5440175affe20).
+import { fitBlocksToVocabulary, blocksNeedFitting, droppedNotice } from "./paste-vocabulary.js";
 // Internal-link marks — schema registration only, so the canvas holds existing
 // wikilink/blockref/tag inline marks through a setContent->getJSON round-trip
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
@@ -456,6 +460,16 @@ function transactionVetoesFigureSingleton(tr, state, host) {
   const replacesChild = expectedId != null && expectedId !== after.attrs?.bpId;
   if (replacesChild) host._showFigureConstraint();
   return replacesChild;
+}
+
+// Unwrap the marks `keep` refuses, everywhere under `fragment`; text stays.
+function stripMarks(fragment, keep) {
+  const nodes = [];
+  fragment.forEach((node) => {
+    if (node.isText) nodes.push(node.mark(node.marks.filter((m) => keep(m.type.name))));
+    else nodes.push(node.copy(stripMarks(node.content, keep)));
+  });
+  return Fragment.fromArray(nodes);
 }
 
 function figurePastePlan(slice) {
@@ -1214,7 +1228,15 @@ class BpPaperCanvas extends HTMLElement {
         // Word puts list items on the clipboard as <p style="mso-list:…"> with the
         // bullet as literal text; rebuild them as real lists before parsing, or
         // they land as paragraphs starting "·   ". See ./word-paste.js.
-        transformPastedHTML: (html) => normalizeWordListHTML(html),
+        // Then images the schema cannot hold are left out (counted, and named in
+        // a notice by _fitPastedSlice) instead of refusing the whole paste.
+        transformPastedHTML: (html) => {
+          const { html: clean, count } = stripPastedImages(normalizeWordListHTML(html));
+          this._pasteImagesLeftOut = count;
+          return clean;
+        },
+        // A field canvas fits the pasted slice to its vocabulary, node by node.
+        transformPasted: (slice) => this._fitPastedSlice(slice),
         // Image files dropped onto the canvas land as image nodes at the drop point
         // and upload through the host's mediaUploader (see _insertImageFiles).
         handleDrop: (view, event, _slice, moved) => this._onDrop(view, event, moved),
@@ -1229,9 +1251,9 @@ class BpPaperCanvas extends HTMLElement {
         // follower. Read live off the attribute so hook/upgrade ordering can
         // never race the Editor construction.
       },
-      onUpdate: () => {
+      onUpdate: ({ transaction }) => {
         this._restoreUploadResults();
-        this._clearFigureConstraint();
+        this._clearFigureConstraint(transaction);
         this._scheduleEmit();
         // P4 mutual-exclusion chain (ported from ../index.js's onUpdate ~174-193):
         // callout shorthand FIRST → wikilink → tag → slash. AT MOST ONE fires per
@@ -2432,7 +2454,8 @@ class BpPaperCanvas extends HTMLElement {
   _pasteHTMLTables(view, event) {
     // Shift-paste deliberately chooses the native plain-text path.
     if ((view.input?.shiftKey && view.input.lastKeyCode !== 45) || view.state.selection.$from.parent.type.spec.code) return false;
-    const html = event?.clipboardData?.getData("text/html");
+    const raw = event?.clipboardData?.getData("text/html");
+    const { html, count: imagesLeftOut } = stripPastedImages(raw);
     const plan = prepareHTMLTablePaste(html);
     if (!plan) return false;
     const insideTable = [...Array(view.state.selection.$from.depth).keys()]
@@ -2442,7 +2465,9 @@ class BpPaperCanvas extends HTMLElement {
       return true;
     }
     const parsed = PMDOMParser.fromSchema(view.state.schema).parse(plan.dom);
-    view.dispatch(view.state.tr.replaceSelection(new Slice(parsed.content, 0, 0)).scrollIntoView());
+    const fitted = this._fitPastedNodes(parsed.content, imagesLeftOut);
+    view.dispatch(view.state.tr.replaceSelection(fitted ? fitted.slice : new Slice(parsed.content, 0, 0)).scrollIntoView());
+    if (fitted) this._noticeLeftOut(fitted.dropped);
     return true;
   }
 
@@ -2459,9 +2484,14 @@ class BpPaperCanvas extends HTMLElement {
     const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
     if (!lines.some((line) => blockish.test(line)) && !pipeTable) return false;
     let nodes;
+    let dropped = [];
     try {
-      const blocks = markdownToBlocks(text);
+      let blocks = markdownToBlocks(text);
       if (!blocks.length) return false;
+      // A field admits only its vocabulary: a `> quote` becomes the field's quote
+      // block (or a paragraph) instead of vetoing the whole paste.
+      const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
+      if (vocab) ({ blocks, dropped } = fitBlocksToVocabulary(blocks, vocab));
       nodes = runToTiptap(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
     } catch (_e) {
       return false;
@@ -2469,7 +2499,58 @@ class BpPaperCanvas extends HTMLElement {
     if (!nodes.length) return false;
     const tr = view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0)).scrollIntoView();
     view.dispatch(tr);
+    this._noticeLeftOut(dropped);
     return true;
+  }
+
+  // ── paste ⇄ field vocabulary (task-76c5440175affe20) ─────────────────────────
+  //
+  // The vocabulary veto drops a whole transaction that introduces anything the
+  // field cannot hold, so a paste carrying ONE such node (a table, a quote, a
+  // <pre>) used to vanish without a word. Every paste path fits its content first:
+  // each block becomes the nearest shape the field admits (paste-vocabulary.js),
+  // marks the field lacks are unwrapped, and whatever had nothing to keep (an
+  // image) is named in a notice that stays until the person moves on.
+  _fitPastedSlice(slice) {
+    const imagesLeftOut = this._pasteImagesLeftOut || 0;
+    this._pasteImagesLeftOut = 0;
+    if (!this._editable) return slice;
+    const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
+    let out = slice;
+    let dropped = Array(imagesLeftOut).fill("an image");
+    if (vocab && slice.content.childCount) {
+      if (slice.content.firstChild.isBlock) {
+        const fitted = this._fitPastedNodes(slice.content, 0);
+        if (fitted) ({ slice: out } = fitted), (dropped = dropped.concat(fitted.dropped));
+      } else {
+        out = new Slice(stripMarks(slice.content, (name) => markAllowed(name, vocab)), slice.openStart, slice.openEnd);
+      }
+    }
+    this._noticeLeftOut(dropped);
+    return out;
+  }
+
+  // Fit a fragment of top-level pasted nodes to the field's vocabulary. Answers
+  // null when nothing needed fitting (so the native slice keeps its open ends),
+  // else the fitted slice and what was left out.
+  _fitPastedNodes(fragment, imagesLeftOut = 0) {
+    const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
+    const leftOut = Array(imagesLeftOut).fill("an image");
+    if (!vocab) return leftOut.length ? { slice: new Slice(fragment, 0, 0), dropped: leftOut } : null;
+    const blocks = docToBlocks({ type: "doc", content: fragment.toJSON() || [] });
+    if (!blocksNeedFitting(blocks, vocab)) return leftOut.length ? { slice: new Slice(fragment, 0, 0), dropped: leftOut } : null;
+    const fit = fitBlocksToVocabulary(blocks, vocab);
+    const schema = this._editor.schema;
+    // Fresh nodes: an id the paste carried (copied from this or another paper)
+    // must not collide with a block the doc already holds.
+    const nodes = runToTiptap(fit.blocks).content.map((json) =>
+      schema.nodeFromJSON({ ...json, attrs: { ...(json.attrs || {}), bpId: null } }));
+    return { slice: Slice.maxOpen(Fragment.from(nodes)), dropped: leftOut.concat(fit.dropped) };
+  }
+
+  _noticeLeftOut(dropped) {
+    const message = droppedNotice(dropped);
+    if (message) this._showHTMLPasteNotice(message);
   }
 
   _showHTMLPasteNotice(message) {
@@ -2525,8 +2606,14 @@ class BpPaperCanvas extends HTMLElement {
     notice.textContent = message;
   }
 
-  _clearFigureConstraint() {
-    this._clearHTMLPasteNotice();
+  _clearFigureConstraint(transaction = null) {
+    // A programmatic write (an id write-back after a save, a server echo) is not
+    // the person resuming work: it leaves a paste notice up, so "Left out: an
+    // image" outlasts the save it rode in on (task-76c5440175affe20).
+    // The paste's own transaction does not clear the notice that paste raised.
+    if (!transaction || (transaction.getMeta("addToHistory") !== false && transaction.getMeta("uiEvent") !== "paste")) {
+      this._clearHTMLPasteNotice();
+    }
     this.querySelector("[data-bp-figure-constraint]")?.remove();
   }
 
