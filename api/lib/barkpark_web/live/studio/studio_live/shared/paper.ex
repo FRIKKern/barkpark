@@ -1795,17 +1795,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         TaskResolver.unavailable_previews(blocks)
 
       resolver ->
-        TaskResolver.preview(
-          blocks,
-          # The preview path NEVER stamps `dataset` into the block query, so the
-          # visibility gate MUST be threaded the session dataset explicitly (the
-          # same `socket.assigns.dataset` the agg fetcher below already carries) —
-          # deriving it from the raw query map would seal against the wrong
-          # (production default) schema on a cross-dataset preview. Charter W-one
-          # decision 10.
-          fn query -> resolver.rows_for_query(query, scope, dataset: dataset) end,
-          fn query -> resolver.agg_for_query(query, scope, dataset: dataset) end
-        )
+        # One RenderCache per preview, as in Papers.resolve_tasks_in_blocks/3.
+        Barkpark.Content.RenderCache.with_cache(fn cache ->
+          TaskResolver.preview(
+            blocks,
+            # The preview path NEVER stamps `dataset` into the block query, so the
+            # visibility gate MUST be threaded the session dataset explicitly (the
+            # same `socket.assigns.dataset` the agg fetcher below already carries) —
+            # deriving it from the raw query map would seal against the wrong
+            # (production default) schema on a cross-dataset preview. Charter W-one
+            # decision 10.
+            fn query ->
+              resolver.rows_for_query(query, scope, dataset: dataset, render_cache: cache)
+            end,
+            fn query ->
+              resolver.agg_for_query(query, scope, dataset: dataset, render_cache: cache)
+            end
+          )
+        end)
     end
   end
 

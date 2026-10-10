@@ -167,8 +167,9 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/tasks_controller.ex:seal_ctx",
                               "barkpark/content/export.ex:fetch_schema",
                               "barkpark/content/mutations.ex:echo_schema",
-                              "barkpark/tasks/query.ex:load_task_schema",
-                              "barkpark/tasks/query.ex:row_field_visibility_gate",
+                              # ctx-b6: row_field_visibility_gate and load_task_schema both read the
+                              # task schema through task_schema/3 (one read per render), which calls it.
+                              "barkpark/tasks/query.ex:task_schema",
                               # search facets: the schema feeds
                               # Envelope.field_readable?/3 to drop an author /
                               # category bucket the caller may not read
