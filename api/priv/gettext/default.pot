@@ -1629,6 +1629,54 @@ msgstr ""
 msgid "Color"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Blue"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Red"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Green"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Amber"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Violet"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Pink"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Cyan"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Orange"
+msgstr ""
+
 #: lib/barkpark_web/components/studio_components/modals.ex:421
 #, elixir-autogen, elixir-format
 msgid "Copied"

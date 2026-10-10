@@ -1629,6 +1629,54 @@ msgstr "Rettigheter"
 msgid "Color"
 msgstr "Farge"
 
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Blue"
+msgstr "Blå"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Red"
+msgstr "Rød"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Green"
+msgstr "Grønn"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Amber"
+msgstr "Gul"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Violet"
+msgstr "Lilla"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Pink"
+msgstr "Rosa"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Cyan"
+msgstr "Turkis"
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Orange"
+msgstr "Oransje"
+
 #: lib/barkpark_web/components/studio_components/modals.ex:421
 #, elixir-autogen, elixir-format
 msgid "Copied"

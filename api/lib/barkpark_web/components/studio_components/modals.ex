@@ -1086,21 +1086,31 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <%= @profile_error %>
             </div>
           </div>
-          <div class="form-group">
-            <label class="form-label"><%= gettext("Color") %></label>
+          <%!-- task-5bf6b5e5074396db: the radios were display:none, so Tab
+                skipped the colour and a screen reader found no choices. They
+                are visually hidden but focusable now (the .form-switch input
+                technique), named by a colour word, and the swatch shows their
+                :focus-visible and :checked state. D14 exempt: the browser
+                never paints this control (bp_radio would draw a circle); the
+                approved swatch hex literals are D10-exempt. --%>
+          <fieldset class="form-group profile-color-fieldset">
+            <legend class="form-label"><%= gettext("Color") %></legend>
             <div class="profile-colors">
-              <%= for c <- ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316) do %>
-                <%!-- D14 exempt: this radio is display:none behind the custom
-                      color-swatch UI — the browser never paints the control, so
-                      it stays a raw <input> (bp_radio would render a visible
-                      circle). The approved swatch hex literals are D10-exempt. --%>
+              <%= for {c, word} <- profile_colors() do %>
                 <label class={"profile-color-option #{if c == @user_color, do: "selected"}"}>
-                  <input type="radio" name="color" value={c} checked={c == @user_color} style="display:none" />
-                  <span class="profile-color-swatch" style={"background: #{c}"}></span>
+                  <input
+                    type="radio"
+                    class="profile-color-input"
+                    name="color"
+                    value={c}
+                    checked={c == @user_color}
+                    aria-label={word}
+                  />
+                  <span class="profile-color-swatch" style={"background: #{c}"} aria-hidden="true"></span>
                 </label>
               <% end %>
             </div>
-          </div>
+          </fieldset>
           <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 8px;">
             <a
               :if={@account_path}
@@ -1199,4 +1209,18 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     do: gettext("That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG.")
 
   defp upload_error_to_string(_), do: gettext("That image couldn't be uploaded.")
+
+  # The profile swatches and the word each is announced by.
+  defp profile_colors do
+    [
+      {"#3b82f6", pgettext("profile color", "Blue")},
+      {"#ef4444", pgettext("profile color", "Red")},
+      {"#10b981", pgettext("profile color", "Green")},
+      {"#f59e0b", pgettext("profile color", "Amber")},
+      {"#8b5cf6", pgettext("profile color", "Violet")},
+      {"#ec4899", pgettext("profile color", "Pink")},
+      {"#06b6d4", pgettext("profile color", "Cyan")},
+      {"#f97316", pgettext("profile color", "Orange")}
+    ]
+  end
 end
