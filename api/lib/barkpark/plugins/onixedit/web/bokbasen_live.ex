@@ -231,7 +231,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
       |> assign(:visible_submissions, visible_submissions(assigns))
 
     ~H"""
-    <div class="bp-admin-bokbasen" data-test-id="bokbasen-admin">
+    <main class="bp-admin-bokbasen" data-test-id="bokbasen-admin">
       <h1>Bokbasen Submissions</h1>
 
       <div class="bp-filters" data-test-id="bokbasen-filters">
@@ -371,7 +371,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
           </button>
         </nav>
       <% end %>
-    </div>
+    </main>
     """
   end
 

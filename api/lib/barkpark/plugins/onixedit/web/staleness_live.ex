@@ -148,7 +148,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="bp-admin-onixedit-staleness" data-test-id="onixedit-staleness-admin">
+    <main class="bp-admin-onixedit-staleness" data-test-id="onixedit-staleness-admin">
       <h1>OnixEdit Codelist Staleness</h1>
       <p class="bp-meta" data-test-id="current-issue">
         Current registry issue: <strong>{@current_issue}</strong>
@@ -252,7 +252,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
           <p>added: {length(@last_diff.diff.added)}</p>
         </section>
       <% end %>
-    </div>
+    </main>
     """
   end
 
