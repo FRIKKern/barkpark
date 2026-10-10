@@ -1143,6 +1143,63 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # Scheduled publish (task-8e88b5539acafdae). The publish runs later AS
+      # the scheduler and is refused if they can no longer write by then.
+      core_cmd(
+        "doc.schedule",
+        "doc",
+        "schedule",
+        "Schedule a document's draft to publish at a future time. The publish runs as you, and is refused if you can no longer write by then.",
+        "POST",
+        "/v1/data/schedules/:dataset",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type."),
+          arg("id", true, "string", "Document id (draft or published spelling)."),
+          arg(
+            "publishAt",
+            true,
+            "string",
+            "When to publish: ISO 8601 date-time with a zone, in the future."
+          ),
+          arg("ifRevisionID", false, "string", "Publish only if the draft is still at this rev.")
+        ],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.schedules",
+        "doc",
+        "schedules",
+        "List scheduled publishes in a dataset, soonest first (pending only unless --status all).",
+        "GET",
+        "/v1/data/schedules/:dataset",
+        "read",
+        flags: [
+          flag("id", "string", "Only this document's schedules."),
+          flag("type", "string", "Only this document type."),
+          flag("status", "string", "scheduled | published | cancelled | refused | failed | all.",
+            default: "scheduled"
+          )
+        ],
+        writes: false,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.unschedule",
+        "doc",
+        "unschedule",
+        "Cancel a pending scheduled publish.",
+        "DELETE",
+        "/v1/data/schedules/:dataset/:schedule_id",
+        "write",
+        args: [arg("schedule_id", true, "string", "Schedule id (from doc schedules).")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "dataset.stats",
         "dataset",
