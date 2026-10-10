@@ -133,13 +133,30 @@ defmodule Barkpark.Content.Writer do
     %{errors: error_findings, warnings: warning_findings} =
       Barkpark.Content.Validation.check_findings(content, title, schema)
 
-    case Barkpark.Content.Validation.validate(content, title, schema) do
-      {:ok, content} ->
-        {:ok, content, warning_findings}
+    # task-9754deb160e95a80 — the schema's cross-field rules ride the same
+    # door: error-level ones join the errors (ADVISE, or 422 on an enforcing
+    # dataset), warning-level ones only ever advise.
+    %{errors: cross_errors, warnings: cross_warnings} =
+      Barkpark.Content.Validation.cross_findings(content, title, schema)
 
-      {:error, errors} ->
-        {:error, errors, error_findings, warning_findings}
+    warnings = warning_findings ++ cross_warnings
+
+    case {Barkpark.Content.Validation.validate(content, title, schema), cross_errors} do
+      {{:ok, content}, []} ->
+        {:ok, content, warnings}
+
+      {{:ok, _content}, cross_errors} ->
+        {:error, errors_by_field(%{}, cross_errors), cross_errors, warnings}
+
+      {{:error, errors}, cross_errors} ->
+        {:error, errors_by_field(errors, cross_errors), error_findings ++ cross_errors, warnings}
     end
+  end
+
+  defp errors_by_field(errors, findings) do
+    Enum.reduce(findings, errors, fn f, acc ->
+      Map.update(acc, top_level_field(f.path), [f.message], &(List.wrap(&1) ++ [f.message]))
+    end)
   end
 
   @doc """

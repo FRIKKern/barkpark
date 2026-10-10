@@ -441,6 +441,7 @@ defmodule Barkpark.Content.ValidationFindingsTest do
                  block_fields_invalid not_in_list list_too_short list_too_long
                  list_not_unique number_too_small number_too_large
                  string_too_short string_too_long portable_text_not_portabledoc custom
+                 cross_validation
                )a)
     end
   end
