@@ -31,6 +31,7 @@
 
 import { Editor } from "@tiptap/core";
 import { clipboardPastePolicy, stripPastedImages } from "./clipboard-paste-policy.js";
+import { cleanPastedHTML } from "./paste-html.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -1231,7 +1232,7 @@ class BpPaperCanvas extends HTMLElement {
         // Then images the schema cannot hold are left out (counted, and named in
         // a notice by _fitPastedSlice) instead of refusing the whole paste.
         transformPastedHTML: (html) => {
-          const { html: clean, count } = stripPastedImages(normalizeWordListHTML(html));
+          const { html: clean, count } = stripPastedImages(cleanPastedHTML(normalizeWordListHTML(html)));
           this._pasteImagesLeftOut = count;
           return clean;
         },
@@ -2303,11 +2304,13 @@ class BpPaperCanvas extends HTMLElement {
         this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
         return true;
       }
-      if (policy?.plain && !isFigureSingletonCanvas(this)) return false;
+      // Paste as plain text keeps Sanity's line rule too (see _pastePlainText).
+      if (policy?.plain && !isFigureSingletonCanvas(this)) return this._pastePlainText(view, _event, true);
     }
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event, policy?.imageAlt)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteMarkdown(view, _event)) return true;
+    if (this._editable && !isFigureSingletonCanvas(this) && this._pastePlainText(view, _event)) return true;
     if (!this._editable || !isFigureSingletonCanvas(this)) return false;
     const plan = figurePastePlan(slice);
     if (plan.native) return false;
@@ -2455,7 +2458,7 @@ class BpPaperCanvas extends HTMLElement {
     // Shift-paste deliberately chooses the native plain-text path.
     if ((view.input?.shiftKey && view.input.lastKeyCode !== 45) || view.state.selection.$from.parent.type.spec.code) return false;
     const raw = event?.clipboardData?.getData("text/html");
-    const { html, count: imagesLeftOut } = stripPastedImages(raw);
+    const { html, count: imagesLeftOut } = stripPastedImages(cleanPastedHTML(raw));
     const plan = prepareHTMLTablePaste(html);
     if (!plan) return false;
     const insideTable = [...Array(view.state.selection.$from.depth).keys()]
@@ -2482,7 +2485,10 @@ class BpPaperCanvas extends HTMLElement {
     // A GFM pipe table announces itself by a delimiter row (dashes with a pipe) under a header line.
     const tableDelimiter = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
     const pipeTable = lines.some((line, k) => k + 1 < lines.length && line.includes("|") && lines[k + 1].includes("|") && tableDelimiter.test(lines[k + 1]));
-    if (!lines.some((line) => blockish.test(line)) && !pipeTable) return false;
+    // An inline markdown link ([text](url)) is markdown too, even on one line: it
+    // becomes a link over its text, not literal brackets (task-68314b1d334213e8).
+    const inlineLink = /\[[^\]\n]+\]\((?:https?:\/\/|mailto:|\/|#)[^)\s]*\)/.test(text);
+    if (!lines.some((line) => blockish.test(line)) && !pipeTable && !inlineLink) return false;
     let nodes;
     let dropped = [];
     try {
@@ -2497,9 +2503,49 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
     if (!nodes.length) return false;
-    const tr = view.state.tr.replaceSelection(new Slice(Fragment.from(nodes), 0, 0)).scrollIntoView();
+    // One paragraph flows into the line the caret is on, like typed text; blocks
+    // land as blocks.
+    const single = nodes.length === 1 && nodes[0].type.name === "paragraph";
+    const slice = single ? Slice.maxOpen(Fragment.from(nodes)) : new Slice(Fragment.from(nodes), 0, 0);
+    const tr = view.state.tr.replaceSelection(slice).scrollIntoView();
     view.dispatch(tr);
     this._noticeLeftOut(dropped);
+    return true;
+  }
+
+  // Plain text, Sanity's rule (task-68314b1d334213e8): a blank line starts a new
+  // block, a single newline is a soft break inside the block. ProseMirror's own
+  // plain-text paste made every line its own paragraph. `force` is Paste as plain
+  // text (Shift), which takes this path even when the clipboard also holds HTML.
+  _pastePlainText(view, event, force = false) {
+    const data = event && event.clipboardData;
+    if (!data) return false;
+    const text = data.getData("text/plain");
+    if (!text || (!force && data.getData("text/html")) || !/\r?\n/.test(text)) return false;
+    if (view.state.selection.$from.parent.type.spec.code) return false;
+    const { schema } = view.state;
+    const breakType = schema.nodes.hardBreak;
+    const paragraph = schema.nodes.paragraph;
+    if (!breakType || !paragraph) return false;
+    // A soft break needs a block that may hold one (portable-text-boundary.js:
+    // paragraphs and headings). Pasted into a quote or another role block, every
+    // line becomes its own block instead, as before.
+    const breakable = ["paragraph", "heading"].includes(view.state.selection.$from.parent.type.name);
+    const normalized = text.replace(/\r\n?/g, "\n");
+    const blocks = breakable ? normalized.split(/\n[ \t]*\n+/) : normalized.split(/\n+/);
+    const nodes = [];
+    for (const block of blocks) {
+      const lines = block.split("\n");
+      const inline = [];
+      lines.forEach((line, i) => {
+        if (i > 0) inline.push(breakType.create());
+        if (line) inline.push(schema.text(line));
+      });
+      while (inline.length && inline[inline.length - 1].type === breakType) inline.pop();
+      if (inline.length) nodes.push(paragraph.create(null, inline));
+    }
+    if (!nodes.length) return false;
+    view.dispatch(view.state.tr.replaceSelection(Slice.maxOpen(Fragment.from(nodes))).scrollIntoView());
     return true;
   }
 
