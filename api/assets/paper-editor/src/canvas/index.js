@@ -3469,7 +3469,10 @@ class BpPaperCanvas extends HTMLElement {
   // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
   // line with a verbatim bpOpaque carry of `{type}`. runToOps inserts it as a new
   // block (the opaque insert path), the server checks its declared fields.
-  _insertObjectBlock(type, bpBlock) {
+  // `opts.keepLine`: insert AFTER the caret's block instead of replacing it (the
+  // command palette's insert, where the caret's block holds real content); an
+  // empty paragraph is still replaced, as the slash pick replaces its "/query".
+  _insertObjectBlock(type, bpBlock, opts = {}) {
     const editor = this._editor;
     if (!editor || !this._editable || typeof type !== "string" || type === "") return false;
     const { state } = editor;
@@ -3480,7 +3483,21 @@ class BpPaperCanvas extends HTMLElement {
     for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
     const line = state.doc.child(index);
     const node = nodeType.create({ bpId: null, bpType: type, bpBlock: bpBlock || { type } });
-    editor.view.dispatch(state.tr.replaceWith(offset, offset + line.nodeSize, node));
+    const keep = opts.keepLine && !(line.type.name === "paragraph" && line.content.size === 0);
+    editor.view.dispatch(
+      keep
+        ? state.tr.insert(offset + line.nodeSize, node)
+        : state.tr.replaceWith(offset, offset + line.nodeSize, node),
+    );
+    return true;
+  }
+
+  // The palette's Insert command for a type the field DECLARES as an object
+  // block (task-441e0c1cc08acc5e): the same declared insert the slash pick
+  // makes (field dialog first), never the canvas built-in of that name.
+  _insertDeclaredObject(type) {
+    const insert = (values) => this._insertObjectBlock(type, values, { keepLine: true });
+    if (!openObjectBlockInsert(this, this._editor, type, insert)) insert(undefined);
     return true;
   }
 
@@ -3630,6 +3647,10 @@ class BpPaperCanvas extends HTMLElement {
       // Declared inline objects: inserted at the caret, anywhere in prose.
       inlineObjects: this.inlineObjectVocabulary()?.inlineObjects || [],
       onInlineInsert: (name) => insertInlineObject(this, this._editor, name),
+      // A declared object block wins over the same-named built-in insert
+      // (task-441e0c1cc08acc5e, the palette twin of the slash rule).
+      declaredObjects: this._objectOverrides(),
+      onObjectInsert: (type) => this._insertDeclaredObject(type),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({
