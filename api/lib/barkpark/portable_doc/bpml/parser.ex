@@ -39,7 +39,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h6" => ~w(id align),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
-    "stat" => ~w(label value denom verdict source),
+    "stat" => ~w(label value denom verdict source dots),
     # The grid/widget tier (task-3b08cbd8a16ad48e criterion 1) — the corpus's
     # biggest unspellable types and their child elements. `stat` above is
     # SHARED by <stats> and <stat-grid>: the renderer composes both through one
@@ -895,6 +895,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # JS mirror both read it, so a stat that lost it on a BPML round-trip came back
   # with its digits repainted `--paper-ink` and no error. Adding it MOVES the
   # /v1/capabilities grammar digest on purpose — that is this row's decision.
+  #
+  # `dots` rides after it (pe-bl-stat-tile-dots): the stored `%{"on", "of"}`
+  # map travels as `dots="2/10"` and comes back the map; text that is not two
+  # integers stays the string it was (the renderer draws nothing for it).
   defp stat_item_builder(stat_attrs, sc, cur) do
     with {:ok, body, cur} <- tag_text("stat", sc, cur) do
       item =
@@ -904,6 +908,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> put_attr("denom", stat_attrs)
         |> put_attr("verdict", stat_attrs)
         |> put_attr("source", stat_attrs)
+        |> put_dots_attr(stat_attrs)
         |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
       {:ok, item, cur}
@@ -1465,6 +1470,24 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         case Integer.parse(v) do
           {n, ""} -> Map.put(map, key, n)
           _ -> Map.put(map, key, v)
+        end
+
+      nil ->
+        map
+    end
+  end
+
+  # A stat's trial dots: "on/of" → `%{"on" => on, "of" => of}` when both halves
+  # are integers, else the string verbatim.
+  defp put_dots_attr(map, attrs) do
+    case List.keyfind(attrs, "dots", 0) do
+      {"dots", v} ->
+        with [on, of] <- String.split(v, "/"),
+             {on, ""} <- Integer.parse(on),
+             {of, ""} <- Integer.parse(of) do
+          Map.put(map, "dots", %{"on" => on, "of" => of})
+        else
+          _ -> Map.put(map, "dots", v)
         end
 
       nil ->

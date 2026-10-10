@@ -2052,6 +2052,13 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-stat__v--peace { color: var(--bp-verdict-peace); }
 .bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.75rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
 .bp-paper-surface .bp-stat__body { order: 3; font-size: 0.75rem; color: var(--paper-ink-soft); line-height: 1.45; }
+/* Trial dots (pe-bl-stat-tile-dots): `dots: {on, of}` — "2 of 10 trials" as a
+   discrete array under the value. Filled = on. The array is one role="img"
+   with an "on of total" label; the dots are aria-hidden. Shape, not color
+   alone, carries the datum: an "on" dot is filled, an "off" dot is a ring. */
+.bp-paper-surface .bp-stat__dots { order: 1; display: flex; flex-wrap: wrap; gap: 4px; margin: 2px 0 0; }
+.bp-paper-surface .bp-stat__dot { width: 8px; height: 8px; border-radius: 50%; border: var(--bp-rule-hairline) solid var(--paper-accent); box-sizing: border-box; }
+.bp-paper-surface .bp-stat__dot--on { background: var(--paper-accent); }
 
 .bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.04em; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }

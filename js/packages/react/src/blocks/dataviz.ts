@@ -140,7 +140,43 @@ function statHtml(block: unknown, ctx: RenderCtx): string {
   const verdictMod = VERDICTS.includes(displayString(get(block, 'verdict')))
     ? ` bp-stat__v--${displayString(get(block, 'verdict'))}`
     : ''
-  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${dotsHtml(block, ctx)}${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+}
+
+/* ── trial dots (pe-bl-stat-tile-dots) ─────────────────────────────────────── */
+//
+// `dots: {on, of}` — "2 of 10 trials": `of` dots, the first `on` filled. `of`
+// must be a whole number 1..MAX_DOTS and `on` is clamped into 0..of; anything
+// else renders nothing. The array is ONE image to assistive tech. MIRROR of
+// data_viz.ex dots/1 + dots_html/1.
+const MAX_DOTS = 50
+
+function whole(v: unknown): number | null {
+  if (typeof v === 'number') return Number.isInteger(v) ? v : null
+  if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim())) return parseInt(v.trim(), 10)
+  return null
+}
+
+function statDots(block: unknown): [number, number] | null {
+  const d = get(block, 'dots')
+  if (!isMap(d)) return null
+  const of = whole(get(d, 'of'))
+  const on = whole(get(d, 'on'))
+  if (of === null || of < 1 || of > MAX_DOTS || on === null) return null
+  return [Math.min(Math.max(on, 0), of), of]
+}
+
+function dotsHtml(block: unknown, ctx: RenderCtx): string {
+  const d = statDots(block)
+  if (d === null) return ''
+  const [on, of] = d
+  const label = ctx.t('%{on} of %{total}', { on, total: of })
+  return (
+    `<div class="bp-stat__dots" role="img" aria-label="${escapeAttr(label)}">` +
+    '<i class="bp-stat__dot bp-stat__dot--on" aria-hidden="true"></i>'.repeat(on) +
+    '<i class="bp-stat__dot" aria-hidden="true"></i>'.repeat(of - on) +
+    '</div>'
+  )
 }
 
 const stats: Emit = (block, ctx) => {
