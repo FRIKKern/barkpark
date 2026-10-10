@@ -3573,7 +3573,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "auth.token",
         "auth",
         "token",
-        "Describe the token sent as the bearer: its permissions, tier, dataset, workspace and seat — no session or admin token needed.",
+        "Describe the bearer: an API token (permissions, tier, dataset, workspace, seat) or a login session (kind session, its user's seats) — no admin token needed.",
         "GET",
         "/v1/auth/token",
         "read",

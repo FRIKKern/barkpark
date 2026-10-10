@@ -1437,6 +1437,23 @@ defmodule BarkparkWeb.Router do
     post("/login/magic", SessionController, :magic_request)
   end
 
+  # `GET /v1/auth/token` only: an API token (RequireToken + PublicRead, as on
+  # :require_token) or a login-session bearer (task-a89ef18ee88ba6a0).
+  pipeline :require_token_or_login_session do
+    plug(BarkparkWeb.Plugs.RequireTokenOrLoginSession)
+  end
+
+  # The bearer describes itself — permissions, tier, dataset, workspace, seat
+  # (task-bc2541aca8541ff1). /me needs a session; this needs only the bearer.
+  # task-a89ef18ee88ba6a0: the bearer may also be a LOGIN session (the token
+  # `/v1/auth/login` answers), which then describes its user's seats. An API
+  # token takes the unchanged RequireToken + PublicRead path.
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:api, :require_token_or_login_session])
+
+    get("/token", TokenSelfController, :show)
+  end
+
   # ── dwb-7: login-ticket mint (api_token bearer) ─────────────────────────
   # POST /v1/auth/login-tickets — the caller proves possession of an api_token
   # (typically the control plane's stored per-instance admin token) and gets a
@@ -1446,10 +1463,6 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     post("/login-tickets", LoginTicketController, :create)
-
-    # The bearer describes itself — permissions, tier, dataset, workspace, seat
-    # (task-bc2541aca8541ff1). /me needs a session; this needs only the token.
-    get("/token", TokenSelfController, :show)
 
     # Owner ruling #26 — the control plane takes a removed team member OFF this
     # instance: sessions revoked, seats dropped, owned tokens revoked. Admin
