@@ -7,10 +7,11 @@ defmodule BarkparkWeb.PreviewLinkController do
       workspace/project/dataset (never the request). JSON only — there is no
       paper/media kind to special-case the way `/s/:token` does.
     * `POST /v1/shares/preview-links` — any write-capable WORKSPACE MEMBER
-      (not just admin), widened per task-9cfe08fe1e91b6c9 — the third and
-      final sibling of this widening series, after task-ea6c9abb868593f8
-      (preview tokens, #22468) and task-d50757dc446514e7 (share links,
-      #22484). Mint (raw token shown once).
+      (not just admin), widened per task-9cfe08fe1e91b6c9, after
+      task-ea6c9abb868593f8 (preview tokens, #22468). The share-link mint
+      (`POST /v1/shares/links`) was NOT widened: #22484 closed unmerged and
+      the owner decision of 2026-10-10 keeps it admin-only. Mint (raw token
+      shown once).
     * `GET /v1/shares/preview-links` — an admin lists every link; a
       write-capable member lists only the ones THEY minted
       (task-0548f06277c4712e).
@@ -48,17 +49,16 @@ defmodule BarkparkWeb.PreviewLinkController do
   ## Member mint confinement (task-9cfe08fe1e91b6c9)
 
   Two checks mint never needed before this widening, because only a
-  workspace's own admin could reach `mint` at all — the SAME two
-  task-d50757dc446514e7 added to `ShareLinkController.mint/2`, applied here
-  verbatim because this controller takes the identical composite `scope`
-  string shape:
+  workspace's own admin could reach `mint` at all. This controller takes
+  the same composite `scope` string shape as `ShareLinkController.mint/2`
+  (which stays admin-only):
 
     * **dataset_bound (#22393).** `scope_triple/1` parses `"ws[/project[/dataset]]"`
       from the request body — the exact shape that let a dataset_bound
       token bypass `RequireToken`/`OptionalToken`'s `dataset_off_binding?/2`
       on `ShareLinkController.mint/2` (confirmed live there with a
-      throwaway probe before task-d50757dc446514e7's fix: neither plug ever
-      parses a `dataset` out of a composite `scope` param). Applying
+      throwaway probe; fixed there by #22546, task-03be4306d4226582: neither
+      plug ever parses a `dataset` out of a composite `scope` param). Applying
       `ensure_dataset_bound/2` HERE pre-emptively, rather than waiting to
       discover the same gap live a second time.
     * **Per-item read authority.** `ensure_doc_exists/5` threads
@@ -130,7 +130,7 @@ defmodule BarkparkWeb.PreviewLinkController do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          # Token-intrinsic, no workspace lookup needed -- runs FIRST so it
          # never becomes a workspace/project existence oracle (same ordering
-         # task-d50757dc446514e7 established on ShareLinkController.mint/2).
+         # ShareLinkController.mint/2 uses since #22546).
          :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_can_mint(conn, workspace.id),
@@ -263,8 +263,8 @@ defmodule BarkparkWeb.PreviewLinkController do
   # task-9cfe08fe1e91b6c9 — `mint` alone admits a write-capable MEMBER, not
   # just an admin. `TenancyAuth.authorize/3`'s api_token arm is
   # member?(token, ws) AND permits?(token, :write) -- the same
-  # write-capable-member primitive task-ea6c9abb868593f8 and
-  # task-d50757dc446514e7 both used.
+  # write-capable-member primitive task-ea6c9abb868593f8 used for preview
+  # tokens.
   defp ensure_can_mint(conn, workspace_id) do
     if PreviewLinks.workspace_admin?(conn.assigns[:api_token], workspace_id) or
          write_member?(conn, workspace_id),
@@ -280,7 +280,7 @@ defmodule BarkparkWeb.PreviewLinkController do
   end
 
   # task-9cfe08fe1e91b6c9 — closes the SAME pre-existing dataset_bound
-  # (#22393) gap task-d50757dc446514e7 found and fixed on
+  # (#22393) gap #22546 (task-03be4306d4226582) fixed on
   # ShareLinkController.mint/2: `dataset_off_binding?/2` only reads a
   # literal top-level `dataset` param, never this route's composite `scope`
   # string. Applied pre-emptively here rather than re-discovering it live.

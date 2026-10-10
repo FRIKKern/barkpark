@@ -3215,12 +3215,13 @@ defmodule BarkparkWeb.Router do
   end
 
   # task-9cfe08fe1e91b6c9 — PreviewLinkController.mint/2 widened from
-  # admin-only to any write-capable WORKSPACE MEMBER, the third and final
-  # sibling of this widening series (after task-ea6c9abb868593f8's preview
-  # tokens and task-d50757dc446514e7's share links). A SEPARATE scope so
-  # `:require_admin` is not on this route's pipeline at all — same combo as
-  # the flat `/v1/data/mutate` family (router.ex `:require_write` precedent)
-  # and task-d50757dc446514e7's own `/v1/shares/links` mint split. The
+  # admin-only to any write-capable WORKSPACE MEMBER, after
+  # task-ea6c9abb868593f8's preview tokens. The share-link mint
+  # (`POST /v1/shares/links`, above) was NOT widened: #22484 closed unmerged
+  # and the owner decision of 2026-10-10 keeps it under `:require_admin`.
+  # A SEPARATE scope so `:require_admin` is not on this route's pipeline at
+  # all — same combo as the flat `/v1/data/mutate` family (router.ex
+  # `:require_write` precedent). The
   # workspace-specific authorization (admin OR a write-capable member of the
   # SPECIFIC workspace named in the request's `scope` param) lives in the
   # controller's own `ensure_can_mint/2` — the workspace here comes from the
