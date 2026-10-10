@@ -114,6 +114,13 @@ defmodule BarkparkWeb.SchemaNamedTypeApplyTest do
       "blocks" => %{
         "of" => ["image", %{"name" => "cta", "fields" => [%{"name" => "u", "type" => "strng"}]}]
       }
+    },
+    "richText blocks.inline object field" => %{
+      "name" => "body",
+      "type" => "richText",
+      "blocks" => %{
+        "inline" => [%{"name" => "chip", "fields" => [%{"name" => "text", "type" => "strng"}]}]
+      }
     }
   }
 
@@ -132,6 +139,30 @@ defmodule BarkparkWeb.SchemaNamedTypeApplyTest do
       assert conn.resp_body =~ "strng"
       assert conn.resp_body =~ "unknown field type"
     end
+  end
+
+  test "an inline object field named type is a 422 naming the reserved name", ctx do
+    conn =
+      post_schema(ctx, %{
+        "name" => ctx.doc,
+        "title" => "Inline",
+        "visibility" => "public",
+        "fields" => [
+          %{
+            "name" => "body",
+            "type" => "richText",
+            "blocks" => %{
+              "inline" => [
+                %{"name" => "chip", "fields" => [%{"name" => "type", "type" => "string"}]}
+              ]
+            }
+          }
+        ]
+      })
+
+    assert conn.status == 422, "expected 422, got #{conn.status}: #{conn.resp_body}"
+    assert conn.resp_body =~ "/fields/0/blocks/inline/0/fields/0"
+    assert conn.resp_body =~ "is reserved"
   end
 
   test "a registered object type as an arrayOf member type is accepted", ctx do

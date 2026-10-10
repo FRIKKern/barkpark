@@ -90,7 +90,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
       rules(f["validation"], path <> "/validation") ++
       fields(f["fields"], path <> "/fields") ++
       of(f["of"], path <> "/of") ++
-      blocks(f["blocks"], path <> "/blocks/of")
+      blocks(f["blocks"], path <> "/blocks")
   end
 
   defp field(_, _), do: []
@@ -101,7 +101,13 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
   defp of(list, path) when is_list(list), do: fields(list, path)
   defp of(_, _), do: []
 
-  defp blocks(%{} = b, path), do: fields(b["of"] || b[:of], path)
+  # `blocks.of` object blocks and `blocks.inline` inline object types are both
+  # `{name, fields}` entries; a bare string entry has no keys to check.
+  defp blocks(%{} = b, path),
+    do:
+      fields(b["of"] || b[:of], path <> "/of") ++
+        fields(b["inline"] || b[:inline], path <> "/inline")
+
   defp blocks(_, _), do: []
 
   defp rules(m, path) when is_map(m), do: rule_map(m, path)

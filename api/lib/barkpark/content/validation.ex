@@ -126,6 +126,7 @@ defmodule Barkpark.Content.Validation do
 
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.SchemaDefinition.{Field, Parsed}
+  alias Barkpark.PortableDoc.FieldVocabulary
 
   @typedoc "One finding, ready for a caller that renders its own sentence per code."
   @type finding :: %{path: String.t(), message: String.t(), code: atom(), params: map()}
@@ -865,7 +866,9 @@ defmodule Barkpark.Content.Validation do
     # vocabulary — "block", "image", … — has no relation to this field's
     # `blocks.of` names), so it would otherwise fall through BOTH arms'
     # `_ -> []` catch-alls and find nothing, in either case.
-    pt_findings = portable_text_findings(richtext_blocks(value), path, level)
+    pt_findings =
+      portable_text_findings(richtext_blocks(value), path, level) ++
+        inline_object_findings(raw, richtext_blocks(value), path, level)
 
     case object_block_types(raw) do
       objects when map_size(objects) == 0 ->
@@ -918,6 +921,30 @@ defmodule Barkpark.Content.Validation do
   defp richtext_blocks(list) when is_list(list), do: list
   defp richtext_blocks(%{"blocks" => list}) when is_list(list), do: list
   defp richtext_blocks(_), do: []
+
+  # task-85fee859cf3bfef6 — a field that declares inline object types
+  # (`blocks.inline`) has a closed inline vocabulary: each block's prose is
+  # walked, an inline type outside it is `:inline_type_undeclared`, and a
+  # declared inline object's fields are checked. A field that declares none
+  # keeps the old behaviour (only the block-op write path checks inlines), so
+  # existing documents holding seeded inline nodes gain no new finding.
+  defp inline_object_findings(raw, blocks, path, level) do
+    if FieldVocabulary.declares_inline?(raw) do
+      vocab = FieldVocabulary.from_field(raw)
+
+      blocks
+      |> Enum.with_index()
+      |> Enum.flat_map(fn
+        {%{} = block, idx} ->
+          FieldVocabulary.inline_findings(vocab, block, "#{path}/#{idx}", level)
+
+        _ ->
+          []
+      end)
+    else
+      []
+    end
+  end
 
   # task-2d96f71d3fe52ee7 — one finding per Portable Text block, so a field
   # holding a MIX (a partial migration) names every offending block, not

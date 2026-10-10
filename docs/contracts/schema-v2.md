@@ -5,7 +5,7 @@ Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constra
 
 ## Four v2 field types
 
-All four appear only in plugin-authored schemas. The eight legacy seed schemas (post, page, author, category, project, siteSettings, navigation, colors) use only v1 primitives and round-trip unchanged via the permanent `flat_mode` branch.
+All four appear only in plugin-authored schemas. The eight legacy seed schemas use only v1 primitives and round-trip unchanged via the permanent `flat_mode` branch.
 
 ### `composite` — nested object with named subfields
 
@@ -23,7 +23,7 @@ Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ 
 
 ### `localizedText` — multi-language string with fallback chain
 
-The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when undeclared; callers supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order.
+Language slots are `languages` (e.g. `["nob", "eng"]`; an unknown or empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]`; callers supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order.
 
 ## Decisions (locked)
 
@@ -38,7 +38,7 @@ The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; va
 - **`flat_mode` branch** — `flat?/1` returns `true`: original v1 validator, byte-for-byte. Legacy schemas stay here forever.
 - **v2 branch** — `flat?/1` returns `false`: schema declares any of `composite | arrayOf | codelist | localizedText`, an `image` with `fields` or `options.hotspot`, OR any non-empty `validations: [...]`.
 
-`flat_mode` is NOT a deprecation gate; legacy schemas are never forced onto v2.
+It is not a deprecation gate: legacy schemas are never forced onto v2.
 
 ## Phase 0 / Phase 1+ boundary
 
@@ -52,7 +52,7 @@ References are stored as `{"_ref": id, "_type": "reference"}` (ruling #42), slug
 
 An `image` is a URL or `{asset: {_ref}, hotspot: {x,y,height,width}, crop: {top,bottom,left,right}}`, sides 0–1 (legacy `url`/`assetId` read). It may declare `fields` (e.g. `alt`), kept on the image and checked like a composite's.
 
-A block-editor `richText` declares its vocabulary under `blocks` (`FieldVocabulary`); a `blocks.of` entry `{name, fields}` is a custom object block whose fields are checked the same way.
+A block-editor `richText` declares its vocabulary under `blocks` (`FieldVocabulary`); a `blocks.of` entry `{name, fields}` is a custom object block whose fields are checked the same way. `blocks.inline` entries `{name, fields}` are inline objects, stored in prose as `{type: name, …fields}`; others: `inline_type_undeclared`.
 
 ## `required` lives under `validation`
 

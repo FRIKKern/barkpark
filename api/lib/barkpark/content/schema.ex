@@ -1256,9 +1256,10 @@ defmodule Barkpark.Content.Schema do
     cond do
       # Every position parse/2 walks (task-fecf7cc2ae7b04d5): a composite's or
       # an image/file's `fields`, an arrayOf `of` (one shape or a list of
-      # member types), a v1 `array.of` list, and a richText `blocks.of` object
-      # block's `fields`. Before, only composite and a single arrayOf.of map
-      # were walked, so `strng` inside the others landed with a 201.
+      # member types), a v1 `array.of` list, a richText `blocks.of` object
+      # block's `fields`, and a `blocks.inline` inline object's `fields`.
+      # Before, only composite and a single arrayOf.of map were walked, so
+      # `strng` inside the others landed with a 201.
       builtin_type?(type) ->
         walk_named_types(nested_fields(f), dataset, opts, visited)
 
@@ -1289,7 +1290,8 @@ defmodule Barkpark.Content.Schema do
     blocks =
       case f["blocks"] || f[:blocks] do
         %{} = b ->
-          for %{} = entry <- List.wrap(b["of"] || b[:of]),
+          for %{} = entry <-
+                List.wrap(b["of"] || b[:of]) ++ List.wrap(b["inline"] || b[:inline]),
               %{} = field <- List.wrap(entry["fields"] || entry[:fields]),
               do: field
 
