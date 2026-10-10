@@ -744,8 +744,12 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
-  # localizedText — shape only. fallbackChain enforcement is rendering's
-  # concern (W2.4); validator does NOT raise on missing primary translation.
+  # localizedText — shape, then the field's own rules (task-63ce1db795a67a04).
+  # `pattern`/`min`/`max` apply to EVERY locale's text uniformly, each finding
+  # at `/field/<lang>`; `required` means at least one locale holds text, so a
+  # `%{}` or all-blank map is reported once at `/field`. No locale is required
+  # on its own: fallbackChain enforcement is rendering's concern (W2.4), and
+  # the validator does NOT raise on a missing primary translation.
   defp walk_field(
          %Field{type: "localizedText", languages: langs, format: fmt} = f,
          value,
@@ -755,7 +759,7 @@ defmodule Barkpark.Content.Validation do
     rules = field_rules(f, level)
 
     cond do
-      blank?(value) and required?(rules) ->
+      (blank?(value) or (is_map(value) and not localized_filled?(value))) and required?(rules) ->
         Enum.map(apply_message([f("Required", :required)], rules), &pair(path, &1))
 
       is_nil(value) ->
@@ -767,7 +771,8 @@ defmodule Barkpark.Content.Validation do
         ])
 
       true ->
-        shape(level, localized_shape_findings(value, langs, fmt, path))
+        shape(level, localized_shape_findings(value, langs, fmt, path)) ++
+          localized_rule_findings(value, rules, f.raw || %{}, path)
     end
   end
 
@@ -1188,6 +1193,28 @@ defmodule Barkpark.Content.Validation do
             do: [],
             else: [{sub_path, "text must be a string", :text_not_string, %{}}]
       end
+    end)
+  end
+
+  # The field's `pattern`/`min`/`max` against each locale's text. `required`
+  # is dropped here (the caller judges it once, over the whole map), so an
+  # empty locale beside a filled one is not a finding. Non-string text (rich
+  # maps, shape errors) no-ops: every check below is `is_binary`-guarded.
+  defp localized_rule_findings(value, rules, raw, path) do
+    rules = Map.drop(rules, ["required", :required])
+
+    value
+    |> Enum.filter(fn {_lang, text} -> is_binary(text) end)
+    |> Enum.flat_map(fn {lang, text} ->
+      validate_field(text, rules, raw) |> Enum.map(&pair(path <> "/" <> to_string(lang), &1))
+    end)
+  end
+
+  defp localized_filled?(value) do
+    Enum.any?(value, fn
+      {_lang, text} when is_binary(text) -> text != ""
+      {_lang, text} when is_map(text) -> map_size(text) > 0
+      _ -> false
     end)
   end
 
