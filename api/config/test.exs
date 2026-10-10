@@ -418,3 +418,7 @@ config :barkpark, canonical_shape_writes: true
 # still share one derivation (Barkpark.SingleFlight); the TTL itself is
 # pinned in finder_graph_single_flight_test.exs.
 config :barkpark, :finder_graph_ttl_ms, 0
+
+# Barkpark's own test runs the publish wall, as every instance we run does
+# (task-8edd8e147c648a36; the library default in config.exs is off).
+config :barkpark, :authoring_wall, true

@@ -667,4 +667,12 @@ config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
 # `Barkpark.Content.CanonicalShapes`.
 config :barkpark, canonical_shape_writes: false
 
+# The publish wall (`Barkpark.Content.AuthoringWall`: label spine, tag
+# registry, dedup) is an INSTALL setting, declared by the installing door
+# (task-8edd8e147c648a36). The library default is OFF, so a fresh install and
+# @barkpark/engine publish a paper with only a slug, a title and blocks.
+# Barkpark's own instances turn it on: dev.exs, test.exs, and prod runtime.exs
+# (unless BARKPARK_AUTHORING_WALL is falsy).
+config :barkpark, :authoring_wall, false
+
 import_config "#{config_env()}.exs"

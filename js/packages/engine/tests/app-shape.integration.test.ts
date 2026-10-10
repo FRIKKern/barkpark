@@ -40,16 +40,6 @@ describe.skipIf(!release)('the App shape: an app boots the engine and uses it', 
     running.push(first)
     const origin = `http://127.0.0.1:${first.port}`
 
-    // A fresh engine starts clean, with no tags. The publish wall needs a registered
-    // tag, so the app registers one first: draft, then publish.
-    const tag = await call(first, 'POST', `/v1/data/mutate/${dataset}`, {
-      mutations: [
-        { createOrReplace: { _id: 'app-shape', _type: 'tag', title: 'App shape' } },
-        { publish: { id: 'app-shape', type: 'tag' } },
-      ],
-    })
-    expect(tag.status, tag.text).toBe(200)
-
     // Media: the URL the server hands back must carry the port, and must load.
     const form = new FormData()
     form.append('file', new Blob([png], { type: 'image/png' }), 'app-shape.png')
@@ -66,13 +56,13 @@ describe.skipIf(!release)('the App shape: an app boots the engine and uses it', 
     expect(Buffer.from(await mediaBefore.arrayBuffer()).equals(png)).toBe(true)
 
     // A paper: publish, edit under its revision, and a stale revision is refused.
+    // Only a slug, a title and blocks: the engine runs with the authoring wall off
+    // (BARKPARK_AUTHORING_WALL=off), so a fresh app registers no tag and writes no
+    // description first (task-8edd8e147c648a36).
     const slug = 'app-shape-paper'
     const published = await call(first, 'POST', '/v1/plugins/bulldocs/papers', {
       slug,
       title: 'App shape paper',
-      description: 'A paper the engine App-shape test publishes, edits and reads back after a restart.',
-      tags: [{ tag: 'app-shape', strength: 50, rationale: 'App-shape test fixture' }],
-      dedup_bypass: true,
       blocks: [
         { id: 'h', type: 'heading', level: 1, text: 'App shape paper' },
         { id: 'p1', type: 'paragraph', content: [{ type: 'text', value: 'Written before the restart.' }] },

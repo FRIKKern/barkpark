@@ -110,6 +110,9 @@ services:
       - BARKPARK_AUTH_RATE_REGISTER
       - BARKPARK_HOST_EUR_MONTH
       - BARKPARK_PUBLIC_DEMO_STUDIO
+      # The publish wall (label spine, tag registry, dedup). Unset keeps it ON in
+      # prod; set a falsy value to run without it (task-8edd8e147c648a36).
+      - BARKPARK_AUTHORING_WALL
       - BARKPARK_RATE_LIMIT_BROWSER
       - BARKPARK_RATE_LIMIT_BROWSER_ENABLED
       - BARKPARK_RATE_LIMIT_BROWSER_ENFORCE

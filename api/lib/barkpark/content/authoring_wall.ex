@@ -82,6 +82,23 @@ defmodule Barkpark.Content.AuthoringWall do
   def walled_types, do: @walled_types
 
   @doc """
+  Whether this install runs the wall at all (task-8edd8e147c648a36, ruling
+  "8edd A"). An install setting declared by the installing door, never derived
+  from the shape: `config :barkpark, :authoring_wall`. Prod `runtime.exs` turns
+  it ON unless `BARKPARK_AUTHORING_WALL` is falsy, so guerrilla and every box
+  the control plane provisions keep it; `@barkpark/engine` passes
+  `BARKPARK_AUTHORING_WALL=off`; the library default (`config.exs`) is OFF.
+
+  OFF, `enforce/5` passes the content through (a paper with only a slug, a
+  title and blocks publishes), the commit-time dedup recheck is `:ok`, and
+  `validate_all/5` reports nothing. Write-time SHAPE checks on labels a caller
+  did send (`LabelSpine.validate_shape/1`) are not part of the wall and still
+  run: a malformed tag is malformed on every install.
+  """
+  @spec enabled?() :: boolean()
+  def enabled?, do: Application.get_env(:barkpark, :authoring_wall, false) == true
+
+  @doc """
   Run the full wall over `ref` — a `%Document{}` (Lifecycle's draft) or an
   in-memory synthesized one (`upsert_paper`'s pre-write ref: `doc_id` = the
   paper slug, plus `title`/`content`/`dataset` and the tenancy scope).
@@ -101,6 +118,12 @@ defmodule Barkpark.Content.AuthoringWall do
           | {:error,
              {:label_spine | :unknown_tag | :duplicate_of | :invalid_epic_paper_quality, term()}}
   def enforce(ref, type, pid, dataset, opts \\ []) do
+    if enabled?(),
+      do: enforce_wall(ref, type, pid, dataset, opts),
+      else: {:ok, stamp_main_tag(content_of(ref), type)}
+  end
+
+  defp enforce_wall(ref, type, pid, dataset, opts) do
     # Exemption is read ONCE at wall entry: a grandfathered (pre-wall) doc
     # passes the WHOLE wall unchanged (D6), including E4. The ledger only
     # ever holds deploy-snapshot rows, so a FRESH doc (ingest-born paper,
@@ -206,7 +229,7 @@ defmodule Barkpark.Content.AuthoringWall do
 
   def recheck_dedup_under_scope_lock(ref, type, pid, dataset, opts)
       when type in @walled_types do
-    exempt? = is_binary(pid) and Exemptions.member?(pid, dataset, type, opts)
+    exempt? = not enabled?() or (is_binary(pid) and Exemptions.member?(pid, dataset, type, opts))
 
     if exempt? do
       :ok
@@ -248,6 +271,10 @@ defmodule Barkpark.Content.AuthoringWall do
   @spec validate_all(Document.t() | map(), String.t(), String.t() | nil, String.t(), keyword()) ::
           [{atom(), term()}]
   def validate_all(ref, type, pid, dataset, opts \\ []) do
+    if enabled?(), do: validate_all_gates(ref, type, pid, dataset, opts), else: []
+  end
+
+  defp validate_all_gates(ref, type, pid, dataset, opts) do
     exempt? =
       type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset, type, opts)
 

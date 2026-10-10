@@ -107,3 +107,7 @@ config :barkpark, :allow_private_outbound, true
 config :barkpark,
        :public_demo_studio,
        System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO", "1") not in ["0", "false", "no", "off"]
+
+# Barkpark's own dev runs the publish wall, as every instance we run does
+# (task-8edd8e147c648a36; the library default in config.exs is off).
+config :barkpark, :authoring_wall, true
