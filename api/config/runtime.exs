@@ -670,6 +670,12 @@ case System.get_env("BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS") do
     :ok
 end
 
+# Weekly public-read token rotation (task-eaaf13ab768f34f6). Off unless
+# switched on here; see config.exs.
+if System.get_env("BARKPARK_PUBLIC_READ_ROTATION") in ~w(1 true yes on) do
+  config :barkpark, :public_read_rotation, enabled: true
+end
+
 # Deleted-payload retention (owner ruling #33). Off unless switched on here;
 # the window keeps config.exs's 90 days unless overridden. Same
 # positive-int-or-warn shape as the access-log window above.
