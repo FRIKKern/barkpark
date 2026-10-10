@@ -168,9 +168,12 @@ defmodule BarkparkWeb.LiveMeterTest do
 
     {:ok, host, _} = live(browser(unique_peer()), "/quiz/host/#{pin}")
 
+    # Far past a 1/min budget, with enforce on: every event is still handled.
     for _ <- 1..5 do
       host |> element(~s{button[phx-value-action="lock"]}) |> render_click()
+      assert Quiz.state(pin).locked, "an event past the budget was refused with enforce on"
       host |> element(~s{button[phx-value-action="unlock"]}) |> render_click()
+      refute Quiz.state(pin).locked
     end
 
     assert Process.alive?(host.pid)
