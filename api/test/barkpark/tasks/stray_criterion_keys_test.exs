@@ -140,4 +140,33 @@ defmodule Barkpark.Tasks.StrayCriterionKeysTest do
     assert out =~ "dry run"
     assert criteria_of(doc) |> hd() |> Map.has_key?("index")
   end
+
+  # The PRIMARY path (lead ruling): migration 20261010110000 calls migrate/1.
+  test "migrate/1 (the data migration's body) cleans legacy rows, is idempotent, and skips clean rows",
+       %{
+         scope: scope
+       } do
+    dirty =
+      legacy_task!(scope, [
+        %{"criterion" => "a", "met" => true, "evidence" => "p", "index" => 0, "weight" => 1},
+        %{"criterion" => "b", "met" => true, "evidence" => "p", " met" => false},
+        %{"criterion" => "c", "met" => false, "evidence" => "", "amendment" => "by hand"}
+      ])
+
+    clean =
+      legacy_task!(scope, [%{"criterion" => "z", "met" => false, "evidence" => "", "weight" => 2}])
+
+    clean_rev = Repo.get!(Document, clean.id).rev
+
+    assert StrayCriterionKeys.migrate(Repo) >= 1
+    [a, b, c] = criteria_of(dirty)
+    assert a == %{"criterion" => "a", "met" => true, "evidence" => "p", "weight" => 1}
+    assert b == %{"criterion" => "b", "met" => true, "evidence" => "p"}
+    assert [%{"note" => "by hand", "worker" => "legacy-amendment"}] = c["amendments"]
+    assert Validation.criteria_violation(criteria_of(dirty)) == nil
+    refute Repo.get!(Document, dirty.id).rev == dirty.rev, "the write bumps rev"
+
+    assert Repo.get!(Document, clean.id).rev == clean_rev, "a clean row is not written"
+    assert StrayCriterionKeys.migrate(Repo) == 0, "a second run changes nothing"
+  end
 end

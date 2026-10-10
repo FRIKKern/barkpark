@@ -9,6 +9,11 @@ defmodule Barkpark.Tasks.StrayCriterionKeys do
       bin/barkpark eval 'Barkpark.Release.clean_stray_criterion_keys()'             # dry run
       bin/barkpark eval 'Barkpark.Release.clean_stray_criterion_keys(apply: true)'
 
+  THE PRIMARY PATH IS THE DATA MIGRATION (lead ruling): migration
+  20261010110000 calls `migrate/1` on deploy, so the rows are clean the moment
+  the refusal goes live and nobody runs anything. The Release function is for
+  re-runs and audits.
+
   Per entry, exactly the lead ruling (2026-10-10), nothing else:
 
     * `index` equal to the entry's position → dropped; any other `index` is
@@ -135,4 +140,60 @@ defmodule Barkpark.Tasks.StrayCriterionKeys do
   end
 
   defp tag(acts, doc), do: Enum.map(acts, &Map.put(&1, :doc_id, doc.doc_id))
+
+  @doc """
+  The migration body: the same `plan/2`, applied with plain SQL through the
+  given repo (a migration runs without the app's processes). Only rows whose
+  criteria carry a key outside the declared set are read; each write is
+  fenced on the row's `rev` and bumps it. Criterion text and order never
+  change, so the brief's criteria mirror stays true. Idempotent: a clean row
+  plans `:clean` and is not written. Returns the number of rows changed.
+  """
+  defp iso(%DateTime{} = t), do: DateTime.to_iso8601(t)
+  defp iso(%NaiveDateTime{} = t), do: NaiveDateTime.to_iso8601(t) <> "Z"
+  defp iso(_), do: "migration"
+
+  @spec migrate(module()) :: non_neg_integer()
+  def migrate(repo) do
+    declared = Validation.criterion_keys()
+
+    %{rows: rows} =
+      repo.query!(
+        """
+        SELECT d.id, d.rev, d.content, d.updated_at
+          FROM documents d
+         WHERE d.type = 'task'
+           AND jsonb_typeof(d.content->'acceptance_criteria') = 'array'
+           AND EXISTS (
+             SELECT 1
+               FROM jsonb_array_elements(d.content->'acceptance_criteria') e
+              CROSS JOIN LATERAL jsonb_object_keys(
+                CASE WHEN jsonb_typeof(e) = 'object' THEN e ELSE '{}'::jsonb END
+              ) k
+              WHERE NOT (k = ANY($1::text[]))
+           )
+        """,
+        [declared],
+        timeout: :infinity
+      )
+
+    Enum.count(rows, fn [id, rev, content, updated_at] ->
+      ts = iso(updated_at)
+
+      case plan(content, ts) do
+        {:changed, cleaned, _actions} ->
+          %{num_rows: n} =
+            repo.query!(
+              "UPDATE documents SET content = $1, rev = $2, updated_at = now() WHERE id = $3 AND rev = $4",
+              [cleaned, Internal.generate_rev(), id, rev],
+              timeout: :infinity
+            )
+
+          n == 1
+
+        _ ->
+          false
+      end
+    end)
+  end
 end
