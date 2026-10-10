@@ -72,7 +72,8 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type Tabs MARK:typekeyed-corpus-tabs
     // docgates-s27: 64 -> 65 (pre-gate-badge golden seeded).
     // task-7375ba22758155fa: 65 -> 79 (the 14 schema field blocks).
-    expect(cases.length).toBe(79)
+    // rpu-backlog-field-embed-coverage: 79 -> 80 (embed).
+    expect(cases.length).toBe(80)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -97,7 +98,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     }
   })
 
-  it('the partition is 27 prose + 52 textless = 79', () => {
+  it('the partition is 27 prose + 53 textless = 80', () => {
     // grown (pbw-stier-equation): tex source is reading content, the `code` precedent
     // grown (pbw-stier-tabs): each tab's label + nested blocks' prose, the `steps` precedent
     // grown (jarl-dogfood): expandable's summary + nested blocks are reading prose
@@ -113,7 +114,8 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type CodeTabs MARK:typekeyed-textless-code-tabs
     // docgates-s27: +pre-gate-badge (reader chrome, never authored prose).
     // task-7375ba22758155fa: +14 schema field blocks (datum rows, not prose).
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(52)
+    // rpu-backlog-field-embed-coverage: +embed (a target reference, not prose).
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(53)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 

@@ -22,6 +22,8 @@ import { renderPortableDocument } from '@barkpark/react'
 // The opt-in schema field blocks (task-7375ba22758155fa) are registered so their
 // goldens count here like every core type.
 import { fieldBlocks } from '@barkpark/react/field-blocks'
+import { embedBlocks } from '@barkpark/react/embed'
+const OPT_IN = { ...fieldBlocks, ...embedBlocks() }
 // Skin asset for visual fidelity — a global CSS import Astro bundles into a
 // `dist/_astro/*.css` file (CSS, not JS; the zero-JS guard globs only *.js).
 import '@barkpark/react/paper-surface.css'
@@ -47,7 +49,7 @@ const fixtures: GoldenFixture[] = readdirSync(FIXTURE_DIR)
 // container ourselves so the comparator can unwrap past it to the block.
 const rendered = fixtures.map((fx) => ({
   type: fx.type,
-  html: renderPortableDocument([fx.input as never], { blocks: fieldBlocks }),
+  html: renderPortableDocument([fx.input as never], { blocks: OPT_IN }),
 }))
 ---
 

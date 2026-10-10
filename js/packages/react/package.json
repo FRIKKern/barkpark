@@ -69,6 +69,16 @@
         "default": "./dist/field-blocks.cjs"
       }
     },
+    "./embed": {
+      "import": {
+        "types": "./dist/embed.d.mts",
+        "default": "./dist/embed.mjs"
+      },
+      "require": {
+        "types": "./dist/embed.d.ts",
+        "default": "./dist/embed.cjs"
+      }
+    },
     "./paper-surface.css": "./dist/paper-surface.css",
     "./package.json": "./package.json"
   },

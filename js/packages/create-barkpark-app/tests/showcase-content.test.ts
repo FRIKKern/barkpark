@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { renderPortableDocument } from '@barkpark/react'
 import { fieldBlocks } from '@barkpark/react/field-blocks'
+import { embedBlocks } from '@barkpark/react/embed'
 import { showcaseContent } from '../templates/blog-starter/seeds/showcase-content'
 
 // The blog-starter's flagship post body is the FULL 66-type PortableDocument
@@ -39,7 +40,7 @@ interface Golden {
 // The opt-in schema field blocks (@barkpark/react/field-blocks,
 // task-7375ba22758155fa) are not part of the blog grammar the starter renders,
 // so the generator leaves them out; so does this census.
-const OPT_IN = new Set(Object.keys(fieldBlocks))
+const OPT_IN = new Set([...Object.keys(fieldBlocks), ...Object.keys(embedBlocks())])
 
 function loadGoldens(): Golden[] {
   return readdirSync(GOLDEN_DIR)

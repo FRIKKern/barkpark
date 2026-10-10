@@ -47,6 +47,10 @@ import {
 } from './support/dom-shape'
 import { ELIXIR_MIRROR, goldenNames } from './support/pd-golden-mirrors'
 import { fieldBlocks } from '../src/field-blocks'
+import { embedBlocks } from '../src/embed'
+
+// Every opt-in emitter, registered for every golden so opt-in types count like core ones.
+const OPT_IN = { ...fieldBlocks, ...embedBlocks() }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SURFACE = 'bp-paper-surface' // wrapper both sides may (or may not) carry — unwrapped for per-block compare
@@ -335,10 +339,10 @@ describe(`PortableDoc × Elixir golden parity (${fixtureFiles.length} non-plugin
       // ARRAY (`value: Block[]`), so wrap it. It renders the single block inside
       // the `.bp-paper-surface` wrapper, which unwrapClass then descends past to
       // compare against the per-block Elixir golden.
-      // The opt-in field blocks (@barkpark/react/field-blocks) are registered for
-      // every fixture, so their goldens count here like any core type.
+      // The opt-in field blocks and embed are registered for every fixture, so
+      // their goldens count here like any core type.
       const actualHtml = renderToStaticMarkup(
-        createElement(Renderer, { value: [golden.input], blocks: fieldBlocks }),
+        createElement(Renderer, { value: [golden.input], blocks: OPT_IN }),
       )
       assertShapeEqual(actualHtml, golden.expectedHtml, { unwrapClass: SURFACE })
     })

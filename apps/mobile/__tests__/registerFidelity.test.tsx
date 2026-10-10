@@ -181,7 +181,7 @@ const REGISTER_BLIND: Record<string, Reason> = {
   diff: 'mono-apparatus',
   filetree: 'mono-apparatus',
 
-  // ── label / row chrome (29)
+  // ── label / row chrome (30)
   action: 'label-chrome',
   // field-number (B085): a labelled numeric definition row — label + value
   // chrome with no prose measure to carry, the `stat` precedent
@@ -202,6 +202,8 @@ const REGISTER_BLIND: Record<string, Reason> = {
   arrayOf: 'label-chrome',
   codelist: 'label-chrome',
   localizedText: 'label-chrome',
+  // embed (rpu-backlog-field-embed-coverage): one muted "↪ target" chrome line.
+  embed: 'label-chrome',
   byline: 'label-chrome',
   eyebrow: 'label-chrome',
   // The reader-synthesised pre-gate badge (#17199): a one-line caps micro mark
@@ -423,7 +425,8 @@ describe('arm 3 — the register fingerprint (D50 REGISTER_BLIND)', () => {
     // 43 → 44: field-number's label-chrome ruling (pbw-fix-field-number-react).
     // 44 → 45: pre-gate-badge's label-chrome ruling (docgates-s27, #17199).
     // 45 → 58: the 13 schema field blocks' label-chrome ruling (task-7375ba22758155fa).
-    expect(Object.keys(REGISTER_BLIND)).toHaveLength(58)
+    // 58 → 59: embed's label-chrome ruling (rpu-backlog-field-embed-coverage).
+    expect(Object.keys(REGISTER_BLIND)).toHaveLength(59)
     // Derived from the map, never a second copy of the literal above: the
     // partition must be total, with no type both blind and sensitive.
     const sensitive = Object.keys(BLOCK_RENDERERS).filter((t) => REGISTER_BLIND[t] === undefined)
