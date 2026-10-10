@@ -27,6 +27,7 @@ defmodule BarkparkWeb.QuizHostLive do
   (`/papers/hyperquiz-realtime-protocol`); for P1 it's the individual-tally view.
   """
   use Phoenix.LiveView
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Quiz
   alias Barkpark.Quiz.HostLink
@@ -40,12 +41,15 @@ defmodule BarkparkWeb.QuizHostLive do
 
   @impl true
   def mount(%{"pin" => "new"} = params, _session, socket) do
+    put_quiz_locale()
     query = params |> Map.take(["quiz", "host"]) |> URI.encode_query()
     to = "/quiz/host/" <> Quiz.new_pin() <> if(query == "", do: "", else: "?" <> query)
     {:ok, redirect(unavailable_assigns(socket, "new"), to: to)}
   end
 
   def mount(%{"pin" => pin} = params, session, socket) do
+    put_quiz_locale()
+
     if connected?(socket) do
       # `Quiz.ensure_room/1` is specced `{:ok, pid()} | {:error, term()}` and
       # returns `{:error, :max_children}` BY DESIGN once `Quiz.RoomSupervisor`
@@ -294,36 +298,36 @@ defmodule BarkparkWeb.QuizHostLive do
       |> assign(:roster_limit, @roster_limit)
 
     ~H"""
-    <div class="q-shell">
+    <%!-- The page's one main landmark (axe landmark-one-main / region). --%>
+    <main class="q-shell">
       <canvas class="quiz-cursor-canvas" data-quiz-pin={@pin} data-quiz-role="host"></canvas>
-      <p class="q-eyebrow">Hyperquiz · Host</p>
+      <p class="q-eyebrow">{gettext("Hyperquiz · Host")}</p>
       <p class="q-pin">
-        Join at <code>/quiz/play/{@pin}</code> · <span class="q-count">{@player_count} players</span>
+        {gettext("Join at")} <code>/quiz/play/{@pin}</code> · <span class="q-count">{ngettext("1 player", "%{count} players", @player_count)}</span>
       </p>
 
       <%= cond do %>
         <% @error == :spawn_budget -> %>
           <p class="q-status" role="status">
-            You have opened a lot of quiz rooms in the last hour, so this one is
-            on hold — that limit is what keeps every other host's rooms working.
-            Nothing is lost: your existing rooms are still live, and reopening
+            {gettext("You have opened a lot of quiz rooms in the last hour, so this one is on hold — that limit is what keeps every other host's rooms working. Nothing is lost: your existing rooms are still live, and reopening")}
             <a href={"/quiz/host/#{@pin}"}>/quiz/host/{@pin}</a>
-            a little later starts this one.
+            {gettext("a little later starts this one.")}
           </p>
         <% @error -> %>
           <p class="q-status" role="status">
-            This room could not be opened — the quiz service is at room capacity.
-            Nothing is lost: reopen
+            {gettext("This room could not be opened — the quiz service is at room capacity. Nothing is lost: reopen")}
             <a href={"/quiz/host/#{@pin}"}>/quiz/host/{@pin}</a>
-            in a moment and the room starts as soon as one frees up.
+            {gettext("in a moment and the room starts as soon as one frees up.")}
           </p>
         <% @question -> %>
           <p :if={@link_error} class="q-status" role="status">
-            {link_error_copy(@link_error)} This room is running the sample question.
+            {link_error_copy(@link_error)} {gettext("This room is running the sample question.")}
           </p>
-          <div :if={@host?} class="q-host-controls" role="toolbar" aria-label="Host controls">
+          <div :if={@host?} class="q-host-controls" role="toolbar" aria-label={gettext("Host controls")}>
             <button type="button" class="q-host-btn" phx-click="host" phx-value-action="start">
-              {if @phase == :question and is_nil(@ends_at), do: "Start question", else: "Restart question"}
+              {if @phase == :question and is_nil(@ends_at),
+                do: gettext("Start question"),
+                else: gettext("Restart question")}
             </button>
             <button
               type="button"
@@ -332,7 +336,7 @@ defmodule BarkparkWeb.QuizHostLive do
               phx-value-action="reveal"
               disabled={@phase != :question}
             >
-              Reveal answer
+              {gettext("Reveal answer")}
             </button>
             <button
               type="button"
@@ -341,7 +345,7 @@ defmodule BarkparkWeb.QuizHostLive do
               phx-value-action="scores"
               disabled={@phase not in [:reveal, :ended]}
             >
-              Show scores
+              {gettext("Show scores")}
             </button>
             <button
               type="button"
@@ -350,7 +354,7 @@ defmodule BarkparkWeb.QuizHostLive do
               phx-value-action="end"
               disabled={@phase == :ended}
             >
-              End game
+              {gettext("End game")}
             </button>
             <button
               type="button"
@@ -359,14 +363,14 @@ defmodule BarkparkWeb.QuizHostLive do
               phx-value-action={if @locked, do: "unlock", else: "lock"}
               aria-pressed={to_string(@locked)}
             >
-              {if @locked, do: "Unlock room", else: "Lock room"}
+              {if @locked, do: gettext("Unlock room"), else: gettext("Lock room")}
             </button>
           </div>
           <p :if={@locked} class="q-status" role="status">
-            The room is locked: players already in can answer, nobody new can join.
+            {gettext("The room is locked: players already in can answer, nobody new can join.")}
           </p>
           <details :if={@host? and @players != []} class="q-host-players">
-            <summary>Players ({@player_count})</summary>
+            <summary>{gettext("Players (%{count})", count: @player_count)}</summary>
             <ul>
               <li :for={p <- Enum.take(@players, @roster_limit)}>
                 <span>{p.name}</span>
@@ -375,30 +379,30 @@ defmodule BarkparkWeb.QuizHostLive do
                   class="q-host-btn"
                   phx-click="kick"
                   phx-value-player={p.id}
-                  aria-label={"Remove " <> p.name}
+                  aria-label={gettext("Remove %{name}", name: p.name)}
                 >
-                  Remove
+                  {gettext("Remove")}
                 </button>
               </li>
             </ul>
             <p :if={@player_count > @roster_limit} class="q-status">
-              Showing the newest {@roster_limit}. Lock the room to stop more joining.
+              {gettext("Showing the newest %{count}. Lock the room to stop more joining.", count: @roster_limit)}
             </p>
           </details>
 
           <%= if @phase in [:leaderboard, :ended] do %>
-            <h1 class="q-question">{if @phase == :ended, do: "Game over", else: "Scores"}</h1>
+            <h1 class="q-question">{if @phase == :ended, do: gettext("Game over"), else: gettext("Scores")}</h1>
             <ol :if={@scores != []} class="q-scores">
               <li :for={row <- @scores}>
                 <span>{row.name}</span> <span class="q-count">{row.score}</span>
               </li>
             </ol>
-            <p :if={@scores == []} class="q-status">No points scored yet.</p>
+            <p :if={@scores == []} class="q-status">{gettext("No points scored yet.")}</p>
           <% else %>
             <h1 class="q-question">{@question.prompt}</h1>
             <img :if={@question[:image]} src={@question[:image]} alt="" class="q-image" />
             <div class="q-meta">
-              {@total} answers in<span :if={@remaining} class="q-timer" role="timer"> · {@remaining}s left</span><span :if={@phase == :reveal}> · answers locked</span>
+              {ngettext("1 answer in", "%{count} answers in", @total)}<span :if={@remaining} class="q-timer" role="timer"> · {gettext("%{seconds}s left", seconds: @remaining)}</span><span :if={@phase == :reveal}> · {gettext("answers locked")}</span>
             </div>
 
             <div class="q-bar-row" :for={{choice, idx} <- Enum.with_index(@question.choices)}>
@@ -420,9 +424,9 @@ defmodule BarkparkWeb.QuizHostLive do
             </ol>
           <% end %>
         <% true -> %>
-          <p class="q-status">Opening the room…</p>
+          <p class="q-status">{gettext("Opening the room…")}</p>
       <% end %>
-    </div>
+    </main>
     """
   end
 
@@ -447,10 +451,13 @@ defmodule BarkparkWeb.QuizHostLive do
   defp connect_info(%{private: private}), do: Map.get(private, :connect_info)
 
   defp link_error_copy(:expired),
-    do: "This host link has expired. Open Host this quiz in Studio again for a new one."
+    do: gettext("This host link has expired. Open Host this quiz in Studio again for a new one.")
 
   defp link_error_copy(_missing_or_invalid),
-    do: "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
+    do:
+      gettext(
+        "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
+      )
 
   # The host's kick list: newest first, at most @roster_limit kept in assigns
   # so a 2,000-player room does not re-render a 2,000-row list on every join.
@@ -463,4 +470,11 @@ defmodule BarkparkWeb.QuizHostLive do
 
   defp pct(_count, 0), do: 0
   defp pct(count, total), do: round(count / total * 100)
+
+  # The page speaks the quiz's workspace language, never the viewer's (the host
+  # route is anonymous): every bindable quiz resolves through
+  # `Content.get_public_document/3`, pinned to the seeded Default workspace, so
+  # that workspace IS the quiz's workspace. Same rule as QuizPlayLive.
+  defp put_quiz_locale,
+    do: BarkparkWeb.StudioLocale.put(Barkpark.Tenancy.get_default_workspace())
 end

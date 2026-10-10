@@ -11907,3 +11907,207 @@ msgstr ""
 msgctxt "paper event"
 msgid "goal-snapshot"
 msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{seconds}s left"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answer locked in — tap another to change it."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answers are closed — look up at the host screen."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Connecting to the room…"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "End game"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Game over"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host controls"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hyperquiz · Host"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hyperquiz · Player"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Join at"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lock room"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lots of players are joining this room right now. Refresh in a few seconds to join."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "No points scored yet."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody is hosting this room right now — check the pin, or refresh once your host is up."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Opening the room…"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Player"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Players (%{count})"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{name}"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Restart question"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal answer"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Room"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scores"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show scores"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the newest %{count}. Lock the room to stop more joining."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Start question"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The host has locked this room, so nobody new can join. Ask the host to unlock it."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The host removed you from this room."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The room is locked: players already in can answer, nobody new can join."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This host link has expired. Open Host this quiz in Studio again for a new one."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room could not be opened — the quiz service is at room capacity. Nothing is lost: reopen"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room is running the sample question."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room is unavailable right now. Try again shortly."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unlock room"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "You have opened a lot of quiz rooms in the last hour, so this one is on hold — that limit is what keeps every other host's rooms working. Nothing is lost: your existing rooms are still live, and reopening"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "a little later starts this one."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "answers locked"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "in a moment and the room starts as soon as one frees up."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 player"
+msgid_plural "%{count} players"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 answer in"
+msgid_plural "%{count} answers in"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
+msgstr ""

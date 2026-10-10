@@ -11910,3 +11910,207 @@ msgstr "mål åpnet"
 msgctxt "paper event"
 msgid "goal-snapshot"
 msgstr "målstatus"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{seconds}s left"
+msgstr "%{seconds} s igjen"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answer locked in — tap another to change it."
+msgstr "Svaret er registrert — trykk på et annet for å endre det."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answers are closed — look up at the host screen."
+msgstr "Svarene er stengt — se opp på vertsskjermen."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Connecting to the room…"
+msgstr "Kobler til rommet …"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "End game"
+msgstr "Avslutt spillet"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Game over"
+msgstr "Spillet er over"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host controls"
+msgstr "Vertskontroller"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hyperquiz · Host"
+msgstr "Hyperquiz · Vert"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hyperquiz · Player"
+msgstr "Hyperquiz · Spiller"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Join at"
+msgstr "Bli med på"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lock room"
+msgstr "Lås rommet"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lots of players are joining this room right now. Refresh in a few seconds to join."
+msgstr "Mange spillere blir med i rommet akkurat nå. Last inn siden på nytt om noen sekunder for å bli med."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "No points scored yet."
+msgstr "Ingen poeng ennå."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody is hosting this room right now — check the pin, or refresh once your host is up."
+msgstr "Ingen leder dette rommet akkurat nå — sjekk PIN-koden, eller last inn siden på nytt når verten er klar."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Opening the room…"
+msgstr "Åpner rommet …"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Player"
+msgstr "Spiller"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Players (%{count})"
+msgstr "Spillere (%{count})"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{name}"
+msgstr "Fjern %{name}"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Restart question"
+msgstr "Start spørsmålet på nytt"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal answer"
+msgstr "Vis svaret"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Room"
+msgstr "Rom"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scores"
+msgstr "Poeng"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show scores"
+msgstr "Vis poengene"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the newest %{count}. Lock the room to stop more joining."
+msgstr "Viser de %{count} nyeste. Lås rommet for å hindre at flere blir med."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Start question"
+msgstr "Start spørsmålet"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The host has locked this room, so nobody new can join. Ask the host to unlock it."
+msgstr "Verten har låst rommet, så ingen nye kan bli med. Be verten om å låse det opp."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The host removed you from this room."
+msgstr "Verten fjernet deg fra dette rommet."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The room is locked: players already in can answer, nobody new can join."
+msgstr "Rommet er låst: spillere som allerede er med, kan svare, men ingen nye kan bli med."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This host link has expired. Open Host this quiz in Studio again for a new one."
+msgstr "Denne vertslenken er utløpt. Åpne «Host this quiz» i Studio igjen for å få en ny."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room could not be opened — the quiz service is at room capacity. Nothing is lost: reopen"
+msgstr "Rommet kunne ikke åpnes — quiztjenesten har nådd grensen for antall rom. Ingenting er tapt: åpne"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room is running the sample question."
+msgstr "Rommet kjører eksempelspørsmålet."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room is unavailable right now. Try again shortly."
+msgstr "Rommet er ikke tilgjengelig akkurat nå. Prøv igjen om litt."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unlock room"
+msgstr "Lås opp rommet"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "You have opened a lot of quiz rooms in the last hour, so this one is on hold — that limit is what keeps every other host's rooms working. Nothing is lost: your existing rooms are still live, and reopening"
+msgstr "Du har åpnet mange quizrom den siste timen, så dette står på vent — den grensen holder alle andre verters rom i gang. Ingenting er tapt: rommene du har, er fortsatt aktive, og åpner du"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "a little later starts this one."
+msgstr "litt senere, starter dette."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "answers locked"
+msgstr "svarene er låst"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "in a moment and the room starts as soon as one frees up."
+msgstr "igjen om et øyeblikk, så starter rommet så snart det blir ledig plass."
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 player"
+msgid_plural "%{count} players"
+msgstr[0] "1 spiller"
+msgstr[1] "%{count} spillere"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 answer in"
+msgid_plural "%{count} answers in"
+msgstr[0] "1 svar inne"
+msgstr[1] "%{count} svar inne"
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
+msgstr "Bare quizens forfattere kan lede den. Åpne «Host this quiz» i Studio for å få en vertslenke."
