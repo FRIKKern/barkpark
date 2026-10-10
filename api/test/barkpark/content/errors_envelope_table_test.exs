@@ -167,6 +167,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "invalid_filter", 400, [:details]},
       {"invalid_filter/legacy", {:error, {:invalid_filter, "price>10"}}, "invalid_filter", 400,
        [:details]},
+      {"malformed_filter_param", {:error, {:malformed_filter_param, "filter[["}},
+       "invalid_filter", 400, [:details]},
       {"forbidden_field", {:error, {:forbidden_field, "secret"}}, "forbidden_field", 422,
        [:details]},
       {"conflict", {:error, :conflict}, "conflict", 409, []},
