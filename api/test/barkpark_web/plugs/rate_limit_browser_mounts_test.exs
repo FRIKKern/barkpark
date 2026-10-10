@@ -91,6 +91,24 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserMountsTest do
     end
   end
 
+  test "shadow means served: ten requests far past the budget, never a 429", ctx do
+    # The shipped default never enforces: nothing in the test config sets it,
+    # exactly as no deploy config does (grep in the PR body).
+    refute Keyword.get(Application.get_env(:barkpark, :rate_limits), :browser_enforce)
+
+    path = Keyword.fetch!(paths(ctx), :browser)
+
+    events =
+      shadow_events(fn ->
+        for _ <- 1..10 do
+          conn = scoped_conn() |> get(path)
+          assert conn.status in 200..399, "#{path} answered #{conn.status} past the budget"
+        end
+      end)
+
+    assert Enum.count(events, fn {_m, md} -> md[:class] == :browser end) >= 9
+  end
+
   test "the kill switch silences the browser class (control)", ctx do
     Application.put_env(
       :barkpark,
