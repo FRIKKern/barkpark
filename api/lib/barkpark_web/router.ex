@@ -15,6 +15,10 @@ defmodule BarkparkWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -640,6 +644,10 @@ defmodule BarkparkWeb.Router do
   pipeline :scoped_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -705,6 +713,10 @@ defmodule BarkparkWeb.Router do
   pipeline :shared_studio_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -754,6 +766,10 @@ defmodule BarkparkWeb.Router do
   pipeline :shared_paper_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -2141,6 +2157,10 @@ defmodule BarkparkWeb.Router do
   pipeline :workspace_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -2395,8 +2415,12 @@ defmodule BarkparkWeb.Router do
   # Authed with the SAME Bearer-token seam the agent health gate probes
   # (`RequireToken`); never unauthenticated. Contract owned by
   # `BarkparkWeb.RequestStats` and pinned by `RequestStatsControllerTest`:
+  # EIGHT keys (anonymous-metering D10, additive over the original four):
   # {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s": float|null,
-  #  "window_s": int}.
+  #  "window_s": int, "count": int, "elapsed_s": float, "sampled_at": iso8601,
+  #  "classes": {class: {"count", "req_per_s", "authed", "anon",
+  #  "auth_unknown"}}}, `classes` keyed by the five-class route enum and `{}` on
+  # an empty window.
   # Both nullable keys are `null` — never 0 — on an empty window: the agent maps
   # a null (or an absent key, from an instance that predates it) to its -1
   # unmeasured sentinel, and the control plane renders that unmetered.
