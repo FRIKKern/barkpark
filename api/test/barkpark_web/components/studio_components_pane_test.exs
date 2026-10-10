@@ -60,6 +60,31 @@ defmodule BarkparkWeb.StudioComponentsPaneTest do
       assert html =~ "body content"
     end
 
+    # task-462c98e4f1abdf92: the desk's pane columns were plain divs, so each
+    # pane header sat outside any landmark (axe region).
+    test "an expanded pane is a region named by its title; a collapsed strip is a button" do
+      expanded =
+        render_component(&StudioComponents.pane_column/1, %{
+          id: "pane-endpoints",
+          title: "Endpoints",
+          inner_block: [%{inner_block: fn _, _ -> "body" end}]
+        })
+
+      assert expanded =~ ~s(role="region")
+      assert expanded =~ ~s(aria-label="Endpoints")
+
+      collapsed =
+        render_component(&StudioComponents.pane_column/1, %{
+          title: "Post",
+          collapsed: true,
+          phx_click: "expand-pane",
+          phx_value_idx: "1",
+          inner_block: [%{inner_block: fn _, _ -> "" end}]
+        })
+
+      refute collapsed =~ ~s(role="region")
+    end
+
     test "collapsed=true renders a vertical strip instead of full body" do
       html =
         render_component(&StudioComponents.pane_column/1, %{
