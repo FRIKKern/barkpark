@@ -1205,16 +1205,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="bp-violations" role="status" aria-live="polite" data-test-id="cross-violations">
         <div class="bp-violations-summary">
           <span class="bp-violations-count">
-            <%= length(@violations) %> issue<%= if length(@violations) != 1, do: "s" %>:
+            <%= ngettext("1 issue:", "%{count} issues:", length(@violations)) %>
           </span>
           <%= if @counts.error > 0 do %>
-            <span class="bp-violations-error"><%= @counts.error %> error<%= if @counts.error != 1, do: "s" %></span>
+            <span class="bp-violations-error"><%= ngettext("1 error", "%{count} errors", @counts.error) %></span>
           <% end %>
           <%= if @counts.error > 0 and @counts.warning > 0 do %>
             <span>·</span>
           <% end %>
           <%= if @counts.warning > 0 do %>
-            <span class="bp-violations-warning"><%= @counts.warning %> warning<%= if @counts.warning != 1, do: "s" %></span>
+            <span class="bp-violations-warning"><%= ngettext("1 warning", "%{count} warnings", @counts.warning) %></span>
           <% end %>
         </div>
         <ul class="bp-violations-list">

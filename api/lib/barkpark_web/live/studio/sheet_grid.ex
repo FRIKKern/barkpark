@@ -3471,17 +3471,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   name="op"
                   value={@cf_panel["op"]}
                   options={[
-                    {"gt", "is greater than"},
-                    {"lt", "is less than"},
-                    {"eq", "is equal to"},
-                    {"between", "is between"},
-                    {"contains", "contains"}
+                    {"gt", gettext("is greater than")},
+                    {"lt", gettext("is less than")},
+                    {"eq", gettext("is equal to")},
+                    {"between", gettext("is between")},
+                    {"contains", gettext("contains")}
                   ]}
                   data-test-id="sheet-cf-op"
                 />
               </label>
               <label class="sheet-cf-field">
-                <span><%= if @cf_panel["op"] == "between", do: "min", else: "value" %></span>
+                <span><%= if @cf_panel["op"] == "between", do: gettext("min"), else: gettext("value") %></span>
                 <.bp_input
                   name="value"
                   value={@cf_panel["value"]}
@@ -3491,7 +3491,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 />
               </label>
               <label :if={@cf_panel["op"] == "between"} class="sheet-cf-field">
-                <span>max</span>
+                <span><%= gettext("max") %></span>
                 <.bp_input
                   name="value2"
                   value={@cf_panel["value2"]}
@@ -3558,7 +3558,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <div :if={@notice} class="sheet-notice" role="alert" data-test-id="sheet-notice">
         <span><%= @notice %></span>
         <button type="button" class="btn btn-ghost btn-sm" phx-click="notice-dismiss" phx-target={@myself}>
-          dismiss
+          <%= gettext("dismiss") %>
         </button>
       </div>
 
@@ -4150,19 +4150,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                     name="op"
                     value={@filter_panel["op"]}
                     options={[
-                      {"nonblank", "is not empty"},
-                      {"blank", "is empty"},
-                      {"eq", "is equal to"},
-                      {"gt", "is greater than"},
-                      {"lt", "is less than"},
-                      {"between", "is between"},
-                      {"contains", "contains"}
+                      {"nonblank", gettext("is not empty")},
+                      {"blank", gettext("is empty")},
+                      {"eq", gettext("is equal to")},
+                      {"gt", gettext("is greater than")},
+                      {"lt", gettext("is less than")},
+                      {"between", gettext("is between")},
+                      {"contains", gettext("contains")}
                     ]}
                     data-test-id="sheet-filter-op"
                   />
                 </label>
                 <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
-                  <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
+                  <span><%= if @filter_panel["op"] == "between", do: gettext("min"), else: gettext("value") %></span>
                   <.bp_input
                     name="value"
                     value={@filter_panel["value"]}
@@ -4173,7 +4173,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   />
                 </label>
                 <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
-                  <span>max</span>
+                  <span><%= gettext("max") %></span>
                   <.bp_input
                     name="value2"
                     value={@filter_panel["value2"]}

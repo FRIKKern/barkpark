@@ -12141,3 +12141,101 @@ msgstr "navn"
 #, elixir-autogen, elixir-format
 msgid "slug"
 msgstr "slug"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is greater than"
+msgstr "er større enn"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is less than"
+msgstr "er mindre enn"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is equal to"
+msgstr "er lik"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is between"
+msgstr "er mellom"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "contains"
+msgstr "inneholder"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is not empty"
+msgstr "er ikke tom"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is empty"
+msgstr "er tom"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "min"
+msgstr "min"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "max"
+msgstr "maks"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Start editing to see preview"
+msgstr "Begynn å redigere for å se forhåndsvisningen"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "ONIX 3.0 preview"
+msgstr "ONIX 3.0-forhåndsvisning"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "export failed"
+msgstr "eksporten mislyktes"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Start editing to see ONIX"
+msgstr "Begynn å redigere for å se ONIX"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "updates on publish"
+msgstr "oppdateres ved publisering"
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 issue:"
+msgid_plural "%{count} issues:"
+msgstr[0] "1 problem:"
+msgstr[1] "%{count} problemer:"
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 error"
+msgid_plural "%{count} errors"
+msgstr[0] "1 feil"
+msgstr[1] "%{count} feil"
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 warning"
+msgid_plural "%{count} warnings"
+msgstr[0] "1 advarsel"
+msgstr[1] "%{count} advarsler"
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 byte"
+msgid_plural "%{count} bytes"
+msgstr[0] "1 byte"
+msgstr[1] "%{count} byte"

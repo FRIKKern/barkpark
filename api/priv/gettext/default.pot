@@ -12138,3 +12138,101 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "slug"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is greater than"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is less than"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is equal to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is between"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "contains"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is not empty"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is empty"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "min"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "max"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Start editing to see preview"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "ONIX 3.0 preview"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "export failed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Start editing to see ONIX"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "updates on publish"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 issue:"
+msgid_plural "%{count} issues:"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 error"
+msgid_plural "%{count} errors"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 warning"
+msgid_plural "%{count} warnings"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 byte"
+msgid_plural "%{count} bytes"
+msgstr[0] ""
+msgstr[1] ""
