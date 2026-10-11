@@ -48,7 +48,12 @@ for (const name of ["Publiser", "Dupliser", "Slett"]) {
 document.getElementById("slot").appendChild(host);
 await tick();
 
-// JSDOM has no layout: mark the two rightmost as collapsed, as _reflow would.
+// JSDOM has no layout, so a real _reflow measures 0px and clears every mark.
+// Let the one scheduled on connect run, stop further ones, then mark the two
+// rightmost as collapsed, as _reflow would at 390px.
+await frame();
+await frame();
+host._scheduleReflow = () => {};
 const [, dup, del] = host.querySelectorAll("button[aria-label]");
 dup.setAttribute("data-overflowed", "true");
 del.setAttribute("data-overflowed", "true");
