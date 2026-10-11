@@ -50,7 +50,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
   # classified `:write` is covered by a run below or by the sibling suite named
   # in its comment.
 
-  # StudioLive — 14 heads today. `:write` = reaches persisted state.
+  # StudioLive — 17 heads today. `:write` = reaches persisted state.
   @studio_heads [
     # grant reload + flash; `load_access_grants`/`refresh_caps` are reads
     {"{:airdrop_granted}", :no_write},
@@ -81,6 +81,9 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     {"{:tree_codelist_change, msg}", :write},
     # Enablement.forget/1 — drops this process's memo (task-c8a87043cb286a2f)
     {"{:plugin_enablement_changed, ws_id}", :no_write},
+    # push_patch(replace: true) that drops a desk search hit's `?focus=doc`
+    # from the URL: a navigation, no store call (task-4e10550394f87112)
+    {"{:drop_focus_query, to}", :no_write},
     {"(_other, socket)", :no_write}
   ]
 
@@ -237,7 +240,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every StudioLive handle_info head is enumerated and classified" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
-      assert length(heads) == 16,
+      assert length(heads) == 17,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 
@@ -270,9 +273,10 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
       end
     end
 
-    # The measured set is NINE sites in the LiveView/component tree (the two
+    # The measured set is TEN sites in the LiveView/component tree (the two
     # remaining tree-wide sends are `:after_join` in the channels, which are
-    # not LiveView seams). The two `paper_op` sites deliberately cover the
+    # not LiveView seams). `{:drop_focus_query, …}` is the one that writes
+    # nothing: a URL patch after a desk search hit (task-4e10550394f87112). The two `paper_op` sites deliberately cover the
     # ordinary op and its save-ack-correlated variant; both terminate on the
     # same guarded parent chokepoint. Pinning the set means a NEW in-process
     # sender — the exact event that turned `paper_op` from "safe by
@@ -283,6 +287,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
                {"live/studio/chat_live.ex", "{:dispatch_send,"},
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
                {"live/studio/paper_field_block.ex", "{:paper_op,"},
+               {"live/studio/studio_live.ex", "{:drop_focus_query,"},
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
                {"live/studio/studio_live/handlers/media.ex", "{:autosave_form,"},
