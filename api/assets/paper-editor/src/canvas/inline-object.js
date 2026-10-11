@@ -550,45 +550,6 @@ function safeCoords(view, pos) {
   }
 }
 
-// The carried block the selection holds as a NodeSelection, or null.
-export function selectedCarry(state) {
-  const sel = state.selection;
-  return sel instanceof NodeSelection && sel.node.type.name === BLOCK ? sel.node : null;
-}
-
-// A transaction that opens an empty paragraph after the NodeSelected carry and
-// puts the caret in it, so typing, a paste or a composition lands there instead of
-// replacing the block (task-0075081d540d1390). Null when no paragraph fits there.
-export function paragraphAfterSelectedCarry(state) {
-  const paragraph = state.schema.nodes.paragraph;
-  if (!selectedCarry(state) || !paragraph) return null;
-  const at = state.selection.to;
-  try {
-    const tr = state.tr.insert(at, paragraph.create());
-    return tr.setSelection(TextSelection.create(tr.doc, at + 1));
-  } catch (_e) {
-    return null;
-  }
-}
-
-// True (the key is consumed, the caret stays) when the caret is collapsed at the
-// `dir` edge of its textblock and the next block that way is a carried block.
-function keepCaretBesideCarry(editor, dir) {
-  const sel = editor.state.selection;
-  if (!(sel instanceof TextSelection) || !sel.empty) return false;
-  const $pos = sel.$head;
-  if (!$pos.parent.isTextblock) return false;
-  if (dir > 0 ? $pos.parentOffset < $pos.parent.content.size : $pos.parentOffset > 0) return false;
-  for (let depth = $pos.depth; depth > 0; depth--) {
-    const index = $pos.index(depth - 1);
-    const parent = $pos.node(depth - 1);
-    const beside = dir > 0 ? (index + 1 < parent.childCount ? parent.child(index + 1) : null) : (index > 0 ? parent.child(index - 1) : null);
-    if (beside) return beside.type.name === BLOCK;
-    // Nothing beside it at this depth: the next block is a level up.
-  }
-  return false;
-}
-
 // The canvas extension: accessible names on atoms, Enter / double-click to edit.
 // `host` is the canvas element: inlineObjectVocabulary(), inlineObjectDialog(),
 // noteInlineObjectSave(values).
@@ -604,15 +565,6 @@ export function inlineObjects(host) {
           if (sel.node.type.name === BLOCK) return editObjectBlockAt(host, editor, sel.from);
           return false;
         },
-        // A line jump at the edge of a textblock stays in it when the block beside
-        // it is a carried block (task-0075081d540d1390). ProseMirror and the browser
-        // otherwise NodeSelect the carry, and the next keystroke replaced it.
-        End: ({ editor }) => keepCaretBesideCarry(editor, 1),
-        "Mod-ArrowRight": ({ editor }) => keepCaretBesideCarry(editor, 1),
-        "Alt-ArrowRight": ({ editor }) => keepCaretBesideCarry(editor, 1),
-        Home: ({ editor }) => keepCaretBesideCarry(editor, -1),
-        "Mod-ArrowLeft": ({ editor }) => keepCaretBesideCarry(editor, -1),
-        "Alt-ArrowLeft": ({ editor }) => keepCaretBesideCarry(editor, -1),
       };
     },
     addProseMirrorPlugins() {
@@ -644,23 +596,6 @@ export function inlineObjects(host) {
                 }));
               }
               return DecorationSet.create(state.doc, decos);
-            },
-            // Typing over a selected carried block never replaces it: the text
-            // goes into a new paragraph after the block (task-0075081d540d1390).
-            handleTextInput(view, _from, _to, text) {
-              if (!selectedCarry(view.state) || !text) return false;
-              const tr = paragraphAfterSelectedCarry(view.state);
-              if (tr) view.dispatch(tr.insertText(text).scrollIntoView());
-              return true;
-            },
-            // An IME composition starts in that new paragraph too; ProseMirror
-            // then composes into it as usual.
-            handleDOMEvents: {
-              compositionstart(view) {
-                const tr = selectedCarry(view.state) && paragraphAfterSelectedCarry(view.state);
-                if (tr) view.dispatch(tr.scrollIntoView());
-                return false;
-              },
             },
             handleDoubleClickOn(view, pos, node, nodePos) {
               if (node.type.name !== ATOM || !host._editable) return false;
