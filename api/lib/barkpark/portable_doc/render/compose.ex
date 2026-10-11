@@ -1611,8 +1611,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # choice on, so picking "Go" once switches every code-tabs block sharing
   # the key (the "choose npm once" pitch) — inert here, read only client-side.
   # Article: tab strip (role=tablist) + every panel via the SAME
-  # Figures.code_block_html/1 the standalone `code` block uses (inline-styled,
-  # so it needs no stylesheet — reused verbatim for the email leg too).
+  # Figures.code_block_html/1 the standalone `code` block uses (its colours ride
+  # the `bp-codeblock` class there). The email leg passes `:email` and keeps the
+  # inline colours, since a mail client has no stylesheet.
   # Email/default: no dead tab strip (nothing would ever switch it) — stacked
   # panels under a plain label heading, matching the `tabs` block's degrade.
   # Empty `tabs` composes to "" (the `video` src-less precedent).
@@ -1665,7 +1666,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         Enum.map_join(tabs, fn t ->
           ~s(<div class="bp-code-tabs__panel">) <>
             ~s(<p class="bp-code-tabs__label">#{Util.escape_html(t.label)}</p>) <>
-            Figures.code_block_html(t.value) <> ~s(</div>)
+            Figures.code_block_html(t.value, [], nil, :email) <> ~s(</div>)
         end)
 
       %{"kind" => "_raw", "html" => ~s(<div class="bp-code-tabs">#{panels}</div>)}

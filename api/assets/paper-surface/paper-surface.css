@@ -611,6 +611,11 @@ html[data-theme="dark"] .bp-paper-body {
   background: var(--paper-bg-deep); border: 1px solid var(--paper-rule);
   border-radius: var(--bp-pre-radius); padding: var(--bp-pre-pad); margin: var(--bp-pre-margin); overflow-x: auto;
 }
+/* The renderer's code slab and diagram frame carry no colour inline
+   (task-2c5d3da1b7f7db25): their ground, ink and rule colour live here. Layout,
+   type and the frame's border width and style stay in the markup. */
+.bp-paper-surface .bp-codeblock { background: var(--paper-bg-deep); color: var(--paper-ink); }
+.bp-paper-surface .bp-diagram { background: var(--paper-bg-deep); border-color: var(--paper-rule); }
 .bp-paper-surface img {
   display: block; max-width: 100%; height: auto; margin: var(--bp-img-margin);
   border-radius: var(--bp-img-radius); border: 1px solid var(--paper-rule); background: var(--paper-bg-deep);

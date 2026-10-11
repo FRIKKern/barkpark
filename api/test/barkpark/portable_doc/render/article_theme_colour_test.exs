@@ -36,7 +36,7 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
   # colour on `:article` today, each a slice of the follow-up row. An unlisted
   # type that inlines one fails (a new theme style), and a listed type that comes
   # back clean fails too, so its entry leaves the list in the diff that fixed it.
-  @known MapSet.new(~w(code code-tabs diagram))
+  @known MapSet.new()
 
   test "in every theme, :article output carries no inline var(--paper-*) and no palette colour the fixture did not author" do
     authored = authored_colours()
@@ -85,9 +85,12 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
            "these @known types no longer inline one — delete them from @known: #{inspect(MapSet.to_list(cleared))}"
   end
 
-  test "control: the block-level detector flags a known offender and the :email render of paper-links" do
-    assert theme_paint?(GenPdParity.input("diagram"))
-    assert theme_paint?(GenPdParity.input("paper-links"), :email)
+  # @known is empty, so the detector's positive control can no longer be a known
+  # :article offender: it is the :email render, which inlines its whole theme.
+  test "control: the block-level detector flags the :email render of blocks that inline their theme there" do
+    for type <- ~w(paper-links code) do
+      assert theme_paint?(GenPdParity.input(type), :email), "#{type} :email"
+    end
   end
 
   # The guard is about COLOUR. A `--paper-font-*` face is a theme FONT, and fonts

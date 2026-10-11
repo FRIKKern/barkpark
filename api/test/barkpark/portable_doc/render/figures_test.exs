@@ -43,7 +43,7 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
   describe "code_block_html/1" do
     test "a lang rides as data-lang (escaped); no lang keeps the frame byte-identical (plan #27)" do
       with_lang = Figures.code_block_html("IO.puts(1)", [], "elixir")
-      assert with_lang =~ ~s(<pre data-lang="elixir" style=")
+      assert with_lang =~ ~s(<pre class="bp-codeblock" data-lang="elixir" style=")
       assert with_lang =~ "IO.puts(1)</pre>"
       assert Figures.code_block_html("x", [], nil) == Figures.code_block_html("x")
       assert Figures.code_block_html("x", [], "  ") == Figures.code_block_html("x")
@@ -52,13 +52,17 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
 
     test "wraps value in <pre> with expected inline styles" do
       html = Figures.code_block_html("hello world")
-      assert html =~ "<pre style="
+      assert html =~ ~s(<pre class="bp-codeblock" style=")
       assert html =~ "hello world"
       # task-ddb1e0ab09a62466: the slab is the mark. The S8 terracotta left bar
       # (`border-left:var(--bp-codeblock-accent-w, 3px) solid
       # var(--paper-reading-accent, …)`) is gone — it only ever existed because
       # the reader body painted --paper-bg-deep and the slab could not be seen.
-      assert html =~ "background:var(--paper-bg-deep, #eaf1ee);border:0;"
+      # task-2c5d3da1b7f7db25: the slab's ground and ink are the `bp-codeblock`
+      # paper-surface rule's, not inline.
+      assert html =~ ~s(style="border:0;)
+      refute html =~ "var(--paper-bg-deep"
+      refute html =~ "var(--paper-ink"
       refute html =~ "border-left"
       refute html =~ "--paper-reading-accent"
     end
@@ -119,7 +123,7 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
     test "article mode wraps source in <pre class=\"mermaid\"> inside <figure>" do
       html = Figures.diagram_html("graph TD\nA-->B", "", :article)
       assert html =~ ~s(<pre class="mermaid">graph TD\nA--&gt;B</pre>)
-      assert html =~ "<figure style="
+      assert html =~ ~s(<figure class="bp-diagram" style=")
       assert html =~ "</figure>"
     end
 
