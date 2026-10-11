@@ -3,8 +3,9 @@ defmodule BarkparkWeb.RequestStatsTest do
 
   alias BarkparkWeb.RequestStats
 
-  # A window sample: {time_ms, duration_ms, status, route_class, auth_state}.
-  defp sample(t, d, s, class \\ :api, auth \\ :anon), do: {t, d, s, class, auth}
+  # A window sample: {time_ms, duration_ms, status, route_class, auth_state, route}.
+  defp sample(t, d, s, class \\ :api, auth \\ :anon, route \\ nil),
+    do: {t, d, s, class, auth, route}
 
   defp routed_conn(method, path) do
     Plug.Test.conn(method, path)
@@ -151,6 +152,63 @@ defmodule BarkparkWeb.RequestStatsTest do
           List.duplicate(sample(now - 1000, 2900.0, 200, :api, :authed), 6)
 
       assert RequestStats.compute(six_slow, now, started, 60_000).classes[:api].p95_ms == 2900
+    end
+  end
+
+  describe "compute/4 — routes (task-5d86dc4dc2a94c55: name the endpoint behind the tail)" do
+    test "two routes in one class get separate p95s, slowest first, with count and max" do
+      now = 1_000_000
+      started = now - 300_000
+
+      # Both routes are :api/:authed, so classes[:api] blends them; routes
+      # must not.
+      samples =
+        List.duplicate(sample(now - 1000, 4.0, 200, :api, :authed, "GET /v1/capabilities"), 40) ++
+          List.duplicate(
+            sample(now - 1000, 2400.0, 200, :api, :authed, "POST /v1/data/query/:dataset"),
+            19
+          ) ++
+          [sample(now - 1000, 3100.0, 200, :api, :authed, "POST /v1/data/query/:dataset")]
+
+      assert %{routes: routes} = RequestStats.compute(samples, now, started, 60_000)
+
+      assert routes == [
+               %{route: "POST /v1/data/query/:dataset", count: 20, p95_ms: 2400, max_ms: 3100},
+               %{route: "GET /v1/capabilities", count: 40, p95_ms: 4, max_ms: 4}
+             ]
+    end
+
+    test "rows with no route pattern are dropped, never bucketed; stale rows are excluded" do
+      now = 1_000_000
+      started = now - 300_000
+
+      samples = [
+        sample(now - 1000, 9000.0, 404, :unrouted, :auth_unknown, nil),
+        sample(now - 1000, 9000.0, 500, :pre_router, :auth_unknown, nil),
+        sample(now - 120_000, 9000.0, 200, :api, :authed, "GET /v1/stale"),
+        sample(now - 1000, 7.0, 200, :api, :authed, "GET /v1/fresh")
+      ]
+
+      assert %{count: 3, routes: [%{route: "GET /v1/fresh", count: 1}]} =
+               RequestStats.compute(samples, now, started, 60_000)
+    end
+
+    test "the list is capped at ten, keeping the ten slowest" do
+      now = 1_000_000
+      started = now - 300_000
+
+      samples =
+        for i <- 1..15, do: sample(now - 1000, i * 100.0, 200, :api, :authed, "GET /v1/r#{i}")
+
+      %{routes: routes} = RequestStats.compute(samples, now, started, 60_000)
+
+      assert length(routes) == 10
+      assert Enum.map(routes, & &1.route) == for(i <- 15..6//-1, do: "GET /v1/r#{i}")
+    end
+
+    test "an empty window is routes: [] — no fabricated rows" do
+      now = 1_000_000
+      assert %{routes: []} = RequestStats.compute([], now, now - 60_000, 60_000)
     end
   end
 
@@ -399,20 +457,20 @@ defmodule BarkparkWeb.RequestStatsTest do
       pid: pid
     } do
       # A stale-arity matchspec (the pre-class 3-element row) would match nothing
-      # against these 5-element rows and this test would be red on the leak.
+      # against these 6-element rows and this test would be red on the leak.
       old_t = System.monotonic_time(:millisecond) - 120_000
       fresh_t = System.monotonic_time(:millisecond)
-      :ets.insert(table, {{old_t, 0}, 5.0, 200, :api, :anon})
-      :ets.insert(table, {{fresh_t, 1}, 5.0, 200, :api, :anon})
+      :ets.insert(table, {{old_t, 0}, 5.0, 200, :api, :anon, "GET /v1/old"})
+      :ets.insert(table, {{fresh_t, 1}, 5.0, 200, :api, :anon, "GET /v1/fresh"})
 
       send(pid, :prune)
       # A GenServer processes messages in order: this call syncs after :prune.
       _ = RequestStats.stats(name)
 
-      assert [{{^fresh_t, 1}, _d, 200, :api, :anon}] = :ets.tab2list(table)
+      assert [{{^fresh_t, 1}, _d, 200, :api, :anon, "GET /v1/fresh"}] = :ets.tab2list(table)
     end
 
-    test "the served route body carries the additive 8-key payload as real JSON keys", %{
+    test "the served route body carries the additive 9-key payload as real JSON keys", %{
       name: name
     } do
       # The controller is `json(conn, RequestStats.stats())` — encoding the map is
@@ -426,6 +484,7 @@ defmodule BarkparkWeb.RequestStatsTest do
       assert body =~ ~s("window_s":60)
       assert body =~ ~s("count":0)
       assert body =~ ~s("classes":{})
+      assert body =~ ~s("routes":[])
       assert body =~ ~s("sampled_at":")
       assert body =~ ~s("elapsed_s":)
 
@@ -433,6 +492,7 @@ defmodule BarkparkWeb.RequestStatsTest do
       assert Map.has_key?(decoded, "err_5xx_per_s")
       assert decoded["err_5xx_per_s"] == nil
       assert decoded["classes"] == %{}
+      assert decoded["routes"] == []
     end
   end
 

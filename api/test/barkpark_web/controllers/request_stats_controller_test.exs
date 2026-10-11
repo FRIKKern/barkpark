@@ -43,7 +43,7 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
     assert json_response(conn, 401)
   end
 
-  test "200 with the agent token seam; contract shape {req_per_s, p95_ms, err_5xx_per_s, window_s, count, elapsed_s, sampled_at, classes}",
+  test "200 with the agent token seam; contract shape {req_per_s, p95_ms, err_5xx_per_s, window_s, count, elapsed_s, sampled_at, classes, routes}",
        %{
          conn: conn
        } do
@@ -61,6 +61,7 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
                "err_5xx_per_s",
                "p95_ms",
                "req_per_s",
+               "routes",
                "sampled_at",
                "window_s"
              ]
@@ -91,6 +92,13 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
                ["anon", "auth_unknown", "authed", "count", "p95_ms", "req_per_s"]
 
       assert row["count"] == row["authed"] + row["anon"] + row["auth_unknown"]
+    end
+
+    # Every route row carries the closed four-key shape.
+    assert is_list(body["routes"])
+
+    for row <- body["routes"] do
+      assert Map.keys(row) |> Enum.sort() == ["count", "max_ms", "p95_ms", "route"]
     end
   end
 
@@ -138,6 +146,31 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
 
       %{classes: classes, count: 1} = RequestStats.stats(name)
       assert %{lv_dead: %{count: 1, authed: 0, anon: 0, auth_unknown: 1}} = classes
+    end
+
+    test "a routed request lands in routes under its route PATTERN — the slug never reaches the payload",
+         %{conn: conn, name: name} do
+      slug = "reqstats-route-paper-#{System.unique_integer([:positive])}"
+      seed_paper(slug)
+
+      conn = get(conn, "/papers/#{slug}?token=sekrit-query-value")
+      assert html_response(conn, 200) =~ "Metered"
+
+      stats = RequestStats.stats(name)
+      assert [%{route: "GET /papers/:slug", count: 1}] = stats.routes
+
+      # The request path and query carried a slug and a query value; the
+      # served body carries neither.
+      body = Jason.encode!(stats)
+      refute body =~ slug
+      refute body =~ "sekrit-query-value"
+    end
+
+    test "an unrouted 404 lands in NO route row", %{conn: conn, name: name} do
+      conn = get(conn, "/definitely-not-a-route-xyz")
+      assert response(conn, 404)
+
+      assert %{count: 1, routes: []} = RequestStats.stats(name)
     end
 
     test "HIGH-FLIP-RISK pin: a SIGNED-IN paper-reader dead render is lv_dead.authed and moves NO anon counter anywhere",
