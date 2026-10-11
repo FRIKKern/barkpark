@@ -12,7 +12,9 @@
 //                the clipboard; pasting exactly what it wrote, back at the same
 //                place, restores a block of the same type whose stored form
 //                equals the original's, under its OWN id.
-//   copy + paste The original stays and the copy gets a new id.
+//   copy + paste The original stays and the copy gets a new id — with the
+//                exact-slice stamp AND without it (the HTML parsed by each
+//                node's parse rules, as an older bundle's copy arrives).
 //   grip drag    block-handle.js: pointer drag on the grip to the end and to the
 //                start of the document.
 //   native drag  ProseMirror dragstart/drop on the editor, to the end and to the
@@ -130,7 +132,7 @@ function fire(target, type, extra) {
   target.dispatchEvent(event);
   return event;
 }
-async function cutPaste(entry, { plainOnly = false, copy = false } = {}) {
+async function cutPaste(entry, { plainOnly = false, copy = false, stripStamp = false } = {}) {
   const c = await mount(entry);
   const t = targetNode(c.editor);
   const baseline = stored(c.editor).find((b) => b.id === TARGET);
@@ -147,7 +149,10 @@ async function cutPaste(entry, { plainOnly = false, copy = false } = {}) {
   const after = topNodes(c.editor).find((n) => n.node.attrs.bpId === "mv-after");
   c.editor.view.dispatch(c.editor.state.tr.setSelection(TextSelection.create(c.editor.state.doc, after.pos + 1)));
   const paste = clipboard();
-  if (!plainOnly && board.data["text/html"]) paste.setData("text/html", board.data["text/html"]);
+  // Without the stamp the paste parses the HTML itself: what an older bundle's
+  // copy, or another tab, puts on the clipboard (task-d175b72aba4d5cd6).
+  const html = stripStamp ? (board.data["text/html"] || "").replace(/ data-bp-fragment="[^"]*"/, "") : board.data["text/html"];
+  if (!plainOnly && html) paste.setData("text/html", html);
   paste.setData("text/plain", board.data["text/plain"] || "");
   paste.types = Object.keys(paste.data);
   fire(c.editor.view.dom, "paste", { clipboardData: paste });
@@ -253,7 +258,7 @@ async function nativeDrag(entry, where) {
 // ── run ─────────────────────────────────────────────────────────────────────
 const findings = [];
 const covered = new Set();
-const counts = { "cut+paste": 0, "copy+paste": 0, "grip drag": 0, "native drag": 0 };
+const counts = { "cut+paste": 0, "copy+paste": 0, "copy+paste (no stamp)": 0, "grip drag": 0, "native drag": 0 };
 let inScope = 0;
 let failures = 0;
 
@@ -270,6 +275,7 @@ try {
     const cases = [
       ["cut+paste", () => cutPaste(entry)],
       ["copy+paste", () => cutPaste(entry, { copy: true })],
+      ["copy+paste (no stamp)", () => cutPaste(entry, { copy: true, stripStamp: true })],
       ["grip drag", () => gripDrag(entry, "end")], ["grip drag", () => gripDrag(entry, "start")],
       ["native drag", () => nativeDrag(entry, "end")], ["native drag", () => nativeDrag(entry, "start")],
     ];

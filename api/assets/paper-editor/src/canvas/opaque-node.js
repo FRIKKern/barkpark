@@ -83,7 +83,10 @@ export const Opaque = Node.create({
   // Match ONLY our own generic opaque wrapper; no bare-tag claim, so we never contend
   // with sheet/embed/section/field parse rules (all of which key on data-bp-type).
   parseHTML() {
-    return [{ tag: "div[data-bp-opaque]" }];
+    // Above every built-in block's `div[data-bp-type=…]` rule: a carried block
+    // that shares a built-in's name (a declared `callout`) must come back as the
+    // carry, bpBlock and all (task-d175b72aba4d5cd6).
+    return [{ tag: "div[data-bp-opaque]", priority: 80 }];
   },
 
   renderHTML({ HTMLAttributes }) {
