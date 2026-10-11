@@ -12564,3 +12564,278 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Password %{message}."
 msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "OnixEdit Codelist Staleness"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current registry issue:"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drift is UNMEASURED, not absent."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scanned %{count} book document(s) and recognized 0 codelist refs across all of them."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "This analyzer only counts a ref when one map carries both"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "and"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "no writer produces that shape, so every row below reports"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "rather than a clean bill of health."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Treat this page as offline until refs are annotated."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "No book documents in the production dataset yet."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book title"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Codelist refs"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ref issue versions"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current registry version"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Actions"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "view"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-validate"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Mark accepted as-is"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last re-validate diff —"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "changed: %{count}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "removed: %{count}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "added: %{count}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book %{id} not loaded in this view."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-validated %{id}: %{changed} changed, %{removed} removed, %{added} added"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Marked %{id} as accepted as-is."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book %{id} no longer exists."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book %{id} exists in more than one workspace. Reload the page and try again."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Acknowledge failed: %{reason}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "current"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "unmeasured"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "stale"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "deprecated"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "acknowledged"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bokbasen Submissions"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reset"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "From"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "To"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "No Bokbasen submissions yet."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "No submissions match your filters."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Submission ID"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last action"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last error"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "View Document"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Submissions pages"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Newer"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page %{page}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Older"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Document not found in current page"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Retry enqueued for %{id}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Retry failed: %{reason}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cannot retry from state %{state}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "OnixEdit · Plugin Route Highway"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "This page proves Barkpark's"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "macro emitted the route declared by OnixEdit's"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "callback."
+msgstr ""
