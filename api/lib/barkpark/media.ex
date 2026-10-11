@@ -610,6 +610,63 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  Internal local cleanup preparation. Removes database rows with a durable pending
+  operation; leaves original bytes and all media effects untouched. No HTTP door
+  calls this yet. An outer transaction must already own the content broadcast
+  queue and flush it only after commit (or clear it on rollback).
+  """
+  def commit_pending_delete(request, opts) when is_map(request) and is_list(opts) do
+    _policy = where_used_policy!(opts)
+
+    cond do
+      Blobstore.impl() != Barkpark.Media.Blobstore.Local ->
+        {:error, :unsupported_media_backend}
+
+      get_in(request, ["root", "path"]) != pending_delete_root() ->
+        {:error, :media_root_mismatch}
+
+      Repo.in_transaction?() and not Process.get(:barkpark_deferred_owner, false) ->
+        {:error, :content_transaction_owner_required}
+
+      true ->
+        Door.admit(fn ->
+          Barkpark.Content.Broadcast.with_deferred_queue(fn ->
+            Barkpark.Media.Storage.DeleteOperation.commit(
+              request,
+              pending_delete_context(opts),
+              fn ->
+                with {:ok, file} <-
+                       get_file(request["mediaId"], Keyword.drop(opts, [:where_used, :override])) do
+                  snapshots = Assets.pending_delete_snapshot(file)
+
+                  case delete_row_with_asset_doc(file) do
+                    {:ok, _deleted} -> {:ok, snapshots}
+                    error -> error
+                  end
+                end
+              end
+            )
+          end)
+        end)
+    end
+  end
+
+  defp pending_delete_root do
+    upload_dir()
+    |> Path.expand()
+    |> String.replace("/", "\\")
+    |> String.replace(~r/^[a-z]:/i, &String.upcase/1)
+  end
+
+  defp pending_delete_context(opts) do
+    opts
+    |> Keyword.take([:where_used, :workspace_id, :project_id, :override])
+    |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
+    |> Jason.encode!()
+    |> Jason.decode!()
+  end
+
+  @doc """
   Delete a media file from disk and DB.
 
   ## `:where_used` is REQUIRED — there is no default, in either direction
