@@ -12236,3 +12236,328 @@ msgid "1 byte"
 msgid_plural "%{count} bytes"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Back to sign in"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Check your email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "you@example.com"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Show password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Hide password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "to continue to Studio on"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Log in with Barkpark Cloud"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "or sign in with email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Forgot password?"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "or"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "email me a sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "no password needed"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Using enterprise SSO? Open your organization's sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "or ask your admin for it."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Barkpark — the self-hosted content studio"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Set a new password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a new password for your account."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "New password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Set new password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "At least %{count} characters."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email confirmed"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your account is confirmed — you're all set."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Confirmation link expired"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This confirmation link is invalid, expired, or has already been used."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Click below to confirm your account."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "If that address has an account, a sign-in link is on its way. The link is single-use and expires soon — open it promptly, from this device if you can."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "No password needed — enter your account email and we'll send you a link that signs you in."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Rather use your password?"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "If that address has an account, a password-reset link is on its way. The link is single-use and expires soon — open it promptly."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Reset your password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Enter your account email and we'll send you a link to set a new password."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a reset link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Remembered it after all?"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step verification"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Enter the six-digit code from your authenticator app."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Authenticator code"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Use a recovery code instead"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Recovery code"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "recovery code"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Verify"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Start over"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Signed in."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Invalid API token."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Token is required."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This sign-in link is invalid or has expired."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email or password is incorrect."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email and password are required."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This sign-in link is invalid or has expired — request a fresh one."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Password updated — sign in with your new password."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That reset link is invalid or has expired — request a fresh one."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That code didn't work — try again."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in expired — start again."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You were already signed out."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That password can't be used — pick a different one."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Reset password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Password %{message}."
+msgstr ""
