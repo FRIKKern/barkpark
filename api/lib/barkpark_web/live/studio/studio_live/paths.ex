@@ -82,12 +82,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Paths do
   """
   def paper_path(scope_prefix, slug), do: (scope_prefix || "") <> "/papers/#{slug}"
 
+  # `desk:` selects a declared desk; `focus: :doc` asks the opened document's
+  # header to take focus (a desk search hit, which is a live navigation and
+  # so carries no socket state across).
   @doc false
   def append_desk_query(path, opts) do
-    case Keyword.get(opts, :desk) do
-      nil -> path
-      "" -> path
-      desk -> path <> "?desk=" <> URI.encode_www_form(to_string(desk))
+    query =
+      [desk: Keyword.get(opts, :desk), focus: Keyword.get(opts, :focus)]
+      |> Enum.reject(fn {_key, value} -> value in [nil, ""] end)
+
+    case query do
+      [] ->
+        path
+
+      _ ->
+        path <>
+          "?" <>
+          Enum.map_join(query, "&", fn {key, value} ->
+            "#{key}=" <> URI.encode_www_form(to_string(value))
+          end)
     end
   end
 

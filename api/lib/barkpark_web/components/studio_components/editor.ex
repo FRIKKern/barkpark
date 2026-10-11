@@ -75,9 +75,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def document_header(assigns) do
     ~H"""
+    <%!-- tabindex stays on, so the header is always a focus target: the
+          one-shot `phx-mounted` mark is spent by the next width-bucket
+          report, and a desk search hit's live navigation focuses it from the
+          client (`bp:focus-doc-header`) with no mark at all. --%>
     <div
       class="pane-header editor-header"
-      tabindex={@focus_on_mount && "-1"}
+      tabindex="-1"
       phx-mounted={@focus_on_mount && JS.focus()}
     >
       <%!-- spd-b35: `min-width: 0` + `max-width: 70%` are LOAD-BEARING, not

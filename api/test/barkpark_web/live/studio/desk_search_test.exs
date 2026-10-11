@@ -108,8 +108,44 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     refute html =~ "Songs from the South"
 
     prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
-    assert html =~ ~s(href="#{prefix}/publication/pub-nord")
-    assert html =~ ~s(href="#{prefix}/author/aut-nord")
+    assert html =~ ~s(href="#{prefix}/publication/pub-nord?focus=doc")
+    assert html =~ ~s(href="#{prefix}/author/aut-nord?focus=doc")
+  end
+
+  # task-4e10550394f87112: a hit was a plain href, so opening it reloaded the
+  # page and keyboard focus started at the top. It is now a live navigation
+  # that asks for the opened document's header, the target a row open uses.
+  test "a hit opens its document by live navigation with the header focused", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {view, _} = desk(conn, ws, proj)
+    type_in(view, "crime")
+    prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
+
+    assert {:error, {:live_redirect, %{to: to}}} =
+             view |> element(~s([data-test-id="desk-search-hit"])) |> render_click()
+
+    assert to == prefix <> "/publication/pub-nord?focus=doc"
+
+    {:ok, doc, _html} = live(conn, to)
+    assert_push_event(doc, "bp:focus-doc-header", %{})
+    assert_patch(doc, prefix <> "/publication/pub-nord")
+    assert has_element?(doc, ~s(.editor-header[tabindex="-1"]))
+  end
+
+  test "a document opened without the hit's request does not take focus", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, doc, _html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/publication/pub-nord")
+
+    assert has_element?(doc, ".editor-header")
+    refute_push_event(doc, "bp:focus-doc-header", %{})
+    refute has_element?(doc, ".editor-header[phx-mounted]")
   end
 
   # task-6f820118621e0f9d: the hit's type label is the schema TITLE the desk
@@ -186,7 +222,7 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
 
     assert html =~ "Zulukladd draft only"
     prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
-    assert html =~ ~s(href="#{prefix}/publication/pub-fresh")
+    assert html =~ ~s(href="#{prefix}/publication/pub-fresh?focus=doc")
     refute html =~ "drafts.pub-fresh"
   end
 
