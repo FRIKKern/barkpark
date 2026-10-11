@@ -53,11 +53,15 @@
 
   // Where focus goes back to: the focused element, unless the dialog (or a
   // parent hook) already moved focus inside, then the last outside focus.
+  // Focus on <body> means it was lost on the way here, so the last outside
+  // focus answers that too: the patch that renders a dialog can move a
+  // script-built opener (the overflow menu's ••• trigger) and blur it before
+  // this hook mounts, and Safari never focuses a clicked button at all.
   function openerOf(container) {
     var a = document.activeElement;
     var dialog = container.closest('[aria-modal="true"]') || container;
     if (a && dialog.contains(a)) return lastOutside;
-    return a && a !== document.body && a !== document.documentElement ? a : null;
+    return a && a !== document.body && a !== document.documentElement ? a : lastOutside;
   }
 
   window.BarkparkModalFocus = {
@@ -110,7 +114,7 @@
     destroyed() {
       document.removeEventListener("keydown", this._onKey, true);
       let back = this._returnTo;
-      if (back && !back.isConnected && this._returnId) back = document.getElementById(this._returnId);
+      if (back && !back.isConnected && this._returnId) back = document.getElementById(this._returnId) || back;
       if (back && !back.isConnected && this._returnClick) {
         const click = this._returnClick;
         const label = this._returnLabel;
@@ -118,7 +122,24 @@
           (el) => el.getAttribute("phx-click") === click && el.getAttribute("aria-label") === label
         ) || back;
       }
-      if (back && back.isConnected) back.focus();
+      if (back && back.isConnected) {
+        back.focus();
+      } else if (back) {
+        // A script-built opener can be stripped by the same patch that closes
+        // the dialog and put back by its owner a microtask later (the
+        // overflow menu's ••• trigger: morphdom drops it, a MutationObserver
+        // re-appends the same node; measured: back by the second frame). Retry
+        // for a few frames, unless focus has gone somewhere in the meantime.
+        const opener = back;
+        let frames = 5;
+        const retry = () => {
+          const lost = !document.activeElement || document.activeElement === document.body;
+          if (!lost) return;
+          if (opener.isConnected) opener.focus();
+          else if (--frames > 0) requestAnimationFrame(retry);
+        };
+        requestAnimationFrame(retry);
+      }
     },
     _focusIn() {
       const target =

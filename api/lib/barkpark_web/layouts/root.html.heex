@@ -1993,6 +1993,9 @@
       flex-shrink: 0;
     }
     .bp-desk-search-icon { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; }
+    /* The clear button is a 24px target; as a flex item beside the input it
+       shrank to 19-21px wide. */
+    .bp-desk-search .pane-add-btn { flex-shrink: 0; }
     .bp-desk-search-input {
       flex: 1 1 auto; min-width: 0;
       background: transparent; border: 0; box-shadow: none;
@@ -3733,6 +3736,12 @@
          `safe` keeps the first line. */
       justify-content: safe flex-end;
     }
+    /* Items keep their own width. Allowed to shrink, the doc actions squeezed
+       from 32px to 23.8px at 390px (Publish from 46px) instead of overflowing,
+       so `scrollWidth` never passed `clientWidth`, the ••• trigger never
+       appeared, and every action sat below the 24px target size. With shrink
+       off the row overflows and the priority+ collapse does its job. */
+    bp-overflow-menu > * { flex-shrink: 0; }
     bp-overflow-menu > [data-overflowed] { display: none !important; }
     .bp-overflow-trigger {
       appearance: none; background: transparent;
