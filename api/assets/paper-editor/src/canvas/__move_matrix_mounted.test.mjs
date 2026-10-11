@@ -18,9 +18,9 @@
 //   native drag  ProseMirror dragstart/drop on the editor, to the end and to the
 //                start of the document.
 //
-// A drag must land the block in its new place under its own id, with no
-// remove-block of any original block. (That a drag is exactly ONE move-block is
-// task-d20a8200b28f0d7a, pinned with its own fix.)
+// A drag must land the block in its new place under its own id, as exactly ONE
+// move-block for that block (task-d20a8200b28f0d7a), with no remove-block of
+// any original block.
 // Control: a paste that carries only the plain text of a cut block IS reported
 // as not restored, so the round-trip assertion can fail.
 // Run: node src/canvas/__move_matrix_mounted.test.mjs
@@ -191,6 +191,10 @@ function checkMove(c, label, where) {
   if (canonical(order) !== canonical(DESTINATIONS[where])) problems.push(`${label} to ${where}: order ${canonical(order)}`);
   const removed = c.ops.filter((op) => op.op === "remove-block" && ORIGINAL.has(op.id));
   if (removed.length) problems.push(`${label} to ${where}: remove-block ${removed.map((o) => o.id).join(",")}`);
+  // One dragged block is ONE move-block, for that block (task-d20a8200b28f0d7a):
+  // a move of any other block is a move the author never made.
+  const moves = c.ops.filter((op) => op.op === "move-block");
+  if (moves.length !== 1 || moves[0].id !== TARGET) problems.push(`${label} to ${where}: moves ${canonical(moves.map((o) => o.id))}, wanted exactly one for the block`);
   // An insert of the block's content under a new id would be a remove+insert in
   // disguise: the moved block must keep its id.
   const reinserted = c.ops.filter((op) => op.op === "insert-after" && op.block && op.block.type !== "paragraph");
@@ -312,5 +316,5 @@ if (inScope < 20) { failures += 1; console.log(`FAIL  only ${inScope} non-text b
 for (const f of findings) console.log(`FAIL  ${f}`);
 failures += findings.length;
 if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
-console.log("\nmove matrix: every cut and copy round-trips and every drag keeps its block");
+console.log("\nmove matrix: every cut and copy round-trips and every drag is one move-block");
 process.exit(0);
