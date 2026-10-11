@@ -866,7 +866,10 @@ const action: Emit = (b) => {
 }
 
 /* paper-links (compose.ex paper_links_html) — authored refs render everywhere;
- * `_paper_links` may carry transient live metadata injected by a reader. */
+ * `_paper_links` may carry transient live metadata injected by a reader. Theme
+ * colours ride classes (`bp-plinks*`, `bp-plink*`) the paper-surface stylesheet
+ * paints; geometry and type stay inline, a border keeping its width and style
+ * with only its colour moved (task-ef9f386f8cb5e32a). */
 
 interface PaperLinkRef {
   slug: string
@@ -912,20 +915,20 @@ function paperLinkCard(ref: PaperLinkRef, ctx: RenderCtx): string {
   const description =
     ref.description === ''
       ? ''
-      : `<span style="display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55">${escapeHtml(ref.description)}</span>`
+      : `<span class="bp-plink__desc" style="display:block;margin-top:0.42rem;line-height:1.55">${escapeHtml(ref.description)}</span>`
   const reason =
     ref.reason !== '' && normalizedCopy(ref.reason) !== normalizedCopy(ref.description)
-      ? `<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>${ctx.t('Why it matters:')}</strong> ${escapeHtml(ref.reason)}</span>`
+      ? `<span class="bp-plink__reason" style="display:block;margin-top:0.65rem;font-size:0.88rem;line-height:1.45"><strong>${ctx.t('Why it matters:')}</strong> ${escapeHtml(ref.reason)}</span>`
       : ''
   const metadataParts = [ref.eventType, ref.rev === '' ? '' : ctx.t('rev %{n}', { n: ref.rev }), ref.updatedAt].filter(Boolean)
   const metadata =
     metadataParts.length === 0
       ? ''
-      : `<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">${escapeHtml(metadataParts.join(' · '))}</span>`
+      : `<span class="bp-plink__meta" style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em">${escapeHtml(metadataParts.join(' · '))}</span>`
 
   return (
-    `<a data-paper-link-card href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none">` +
-    `<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">${escapeHtml(ref.title)}</strong>` +
+    `<a data-paper-link-card class="bp-plink bp-plink--list" href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid;border-left:3px solid;border-radius:0.65rem;color:inherit;text-decoration:none">` +
+    `<strong class="bp-plink__title bp-plink__title--list" style="display:block;font-size:1.02rem;line-height:1.35">${escapeHtml(ref.title)}</strong>` +
     description +
     reason +
     metadata +
@@ -948,12 +951,12 @@ const paperLinks: Emit = (b, ctx) => {
   const intro =
     description === ''
       ? ''
-      : `<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">${escapeHtml(description)}</p>`
+      : `<p class="bp-plinks__desc" style="margin:0.45rem 0 0;line-height:1.6">${escapeHtml(description)}</p>`
 
   return (
-    `<section data-paper-links aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #e2e6e5)">` +
-    `<header style="margin:0 0 1.15rem"><h2 style="margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)">${escapeHtml(title)}</h2>${intro}</header>` +
-    `<div style="display:grid;gap:0.85rem">${cards}</div></section>`
+    `<section data-paper-links class="bp-plinks bp-plinks--list" aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid">` +
+    `<header style="margin:0 0 1.15rem"><h2 class="bp-plinks__title" style="margin:0;font-size:1.15rem;line-height:1.25">${escapeHtml(title)}</h2>${intro}</header>` +
+    `<div class="bp-plinks__grid bp-plinks__grid--list" style="display:grid;gap:0.85rem">${cards}</div></section>`
   )
 }
 

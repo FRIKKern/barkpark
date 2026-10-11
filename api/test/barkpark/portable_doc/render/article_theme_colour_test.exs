@@ -4,6 +4,7 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
 
   alias Barkpark.PortableDoc.Render
   alias Barkpark.PortableDoc.Render.{Palettes, ParityFixture, TokensGen}
+  alias Mix.Tasks.Barkpark.PortableDoc.GenPdParity
 
   # ── no inline THEME colour on `:article` output (task-10ca9c3597695db7) ─────
   #
@@ -24,7 +25,18 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
   # FIND palette colours: email inlines its whole theme, so a detector that comes
   # back empty there is blind, not proof.
 
-  @colour ~r/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|var\(--paper-[a-z-]+/
+  # A colour: a hex, an rgb()/rgba(), or a `--paper-*` token (not the
+  # `--paper-font-*` faces, which are type, not paint).
+  @colour ~r/#[0-9a-fA-F]{3,8}\b|rgba?\([^)]*\)|var\(--paper-(?!font-)[a-z-]+/
+
+  # ── the block-level sweep (task-ef9f386f8cb5e32a) ────────────────────────────
+  #
+  # The same detector over every pd-parity fixture, one block type at a time.
+  # @known is a SHRINK-ONLY ratchet: the block types that still inline a theme
+  # colour on `:article` today, each a slice of the follow-up row. An unlisted
+  # type that inlines one fails (a new theme style), and a listed type that comes
+  # back clean fails too, so its entry leaves the list in the diff that fixed it.
+  @known MapSet.new(~w(asciicast code code-tabs diagram divider filetree))
 
   test "in every theme, :article output carries no inline var(--paper-*) and no palette colour the fixture did not author" do
     authored = authored_colours()
@@ -55,6 +67,57 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
     assert MapSet.size(authored) > 0
     seen = inline_colours(render(:article, :evergreen)) |> MapSet.intersection(authored)
     assert MapSet.size(seen) > 0
+  end
+
+  test "every pd-parity block type outside @known inlines no theme colour on :article, in every theme" do
+    offenders =
+      GenPdParity.types()
+      |> Enum.filter(&theme_paint?(GenPdParity.input(&1)))
+      |> MapSet.new()
+
+    new = MapSet.difference(offenders, @known)
+    cleared = MapSet.difference(@known, offenders)
+
+    assert MapSet.size(new) == 0,
+           "these block types inline a theme colour on :article: #{inspect(MapSet.to_list(new))}"
+
+    assert MapSet.size(cleared) == 0,
+           "these @known types no longer inline one — delete them from @known: #{inspect(MapSet.to_list(cleared))}"
+  end
+
+  test "control: the block-level detector flags a known offender and the :email render of paper-links" do
+    assert theme_paint?(GenPdParity.input("divider"))
+    assert theme_paint?(GenPdParity.input("paper-links"), :email)
+  end
+
+  # The guard is about COLOUR. A `--paper-font-*` face is a theme FONT, and fonts
+  # are deliberately out of scope: a font token must never trip it by accident.
+  test "control: the detector sees colour tokens and ignores font tokens" do
+    style =
+      ~s|<p style="font-family:var(--paper-font-mono);color:var(--paper-ink-soft, #55635e)">|
+
+    assert inline_colours(style) == MapSet.new(["var(--paper-ink-soft", "#55635e"])
+    assert inline_colours(~s|<p style="font-family:var(--paper-font-serif)">|) == MapSet.new()
+  end
+
+  # True when `block`, rendered in `style` in ANY theme, carries an inline
+  # `var(--paper-*)` or a palette colour the block itself did not author.
+  defp theme_paint?(block, style \\ :article) do
+    authored =
+      ~r/#[0-9a-fA-F]{3,8}\b/
+      |> Regex.scan(Jason.encode!(block))
+      |> List.flatten()
+      |> MapSet.new(&String.downcase/1)
+
+    Enum.any?(TokensGen.themes(), fn theme ->
+      colours = inline_colours(Render.render_block(block, %{style: style, theme: theme}))
+
+      Enum.any?(colours, &String.starts_with?(&1, "var(--paper-")) or
+        colours
+        |> MapSet.intersection(palette(theme))
+        |> MapSet.difference(authored)
+        |> MapSet.size() > 0
+    end)
   end
 
   defp render(style, theme) do

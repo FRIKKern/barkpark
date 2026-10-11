@@ -885,9 +885,10 @@ const ROUTE_MAX_H = 400
 const ROUTE_PAD = 16
 const ROUTE_START = '#2f9e63'
 const ROUTE_FINISH = '#c65a3f'
-const ROUTE_TRACK = 'var(--paper-accent, #1e5347)'
-const ROUTE_MUTED = '#55635e'
-const ROUTE_BORDER = '#e2e6e5'
+// The track strokes currentColor; the paper-surface stylesheet paints it and the
+// meta/caption/separator inks (task-ef9f386f8cb5e32a), so no theme colour rides
+// the markup.
+const ROUTE_TRACK = 'currentColor'
 
 /** Google encoded-polyline decoder — the same drop-at-last-whole-pair contract
  * as the Elixir/Go twins: a malformed tail never invents a point. */
@@ -968,15 +969,15 @@ const route: Emit = (block, ctx) => {
   const metaHtml =
     meta.length === 0
       ? ''
-      : `<div class="bp-route__meta" style="font-size:13px;color:${ROUTE_MUTED};margin-top:6px;">` +
-        meta.map(escapeHtml).join(` <span style="color:${ROUTE_BORDER};">·</span> `) +
+      : `<div class="bp-route__meta" style="font-size:13px;margin-top:6px;">` +
+        meta.map(escapeHtml).join(` <span class="bp-route__sep">·</span> `) +
         '</div>'
 
   const caption = displayString(get(block, 'caption'))
   const captionHtml =
     caption === ''
       ? ''
-      : `<div class="bp-route__caption" style="font-size:13px;color:${ROUTE_MUTED};font-style:italic;margin-top:2px;">${escapeHtml(caption)}</div>`
+      : `<div class="bp-route__caption" style="font-size:13px;font-style:italic;margin-top:2px;">${escapeHtml(caption)}</div>`
 
   return `<div class="bp-route">${svg}${metaHtml}${captionHtml}</div>`
 }
