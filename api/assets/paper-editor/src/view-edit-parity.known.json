@@ -16,34 +16,6 @@
    "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
   },
   {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "○",
-   "axis": "fontSize",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "○",
-   "axis": "lineHeight",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "fontSize",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "lineHeight",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
    "surface": "liveview",
    "fixture": "field-boolean",
    "text": "Yes",
@@ -56,34 +28,6 @@
    "text": "Hardcover",
    "axis": "text-owner-missing-in-edit",
    "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "○",
-   "axis": "fontSize",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "○",
-   "axis": "lineHeight",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "fontSize",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "lineHeight",
-   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   }
  ]
 }

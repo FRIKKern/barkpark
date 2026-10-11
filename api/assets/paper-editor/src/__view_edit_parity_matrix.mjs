@@ -278,10 +278,11 @@ function paintLayer(control, t) {
 }
 function ownersFor(root) {
   const out = {};
-  const add = (t, style) => {
-    if (SURFACE === "reader") { if (!(t in out)) out[t] = style; }
-    else (out[t] ||= []).push(style);
-  };
+  // Every owner of a text, in document order, on both surfaces: a text that
+  // repeats the same number of times on each side is compared by position
+  // (view-edit-parity-compare.js ownerPairs), so a task-list's header glyph
+  // meets the header glyph and a row's glyph meets that row's.
+  const add = (t, style) => { (out[t] ||= []).push(style); };
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode;

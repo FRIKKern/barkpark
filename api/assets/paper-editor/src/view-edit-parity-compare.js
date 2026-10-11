@@ -33,6 +33,16 @@ export const keyOf = ({ surface, fixture, text, axis }) =>
 // Edit owners for one View text. An Edit surface can paint the same text more
 // than once — a resting paint button AND the textarea that replaces it on
 // focus — and both must match the reader, so every owner is compared.
+// The owner pairs to compare for one text. A text that repeats on both sides the
+// SAME number of times is paired by position (document order): the task-list's
+// ○ in the momentum header against the header's ○, a row's ○ against the same
+// row's ○. Otherwise (a single View owner, or an Edit side that adds a control
+// behind its painted text) the first View owner meets every Edit owner.
+function ownerPairs(vList, eList) {
+  if (vList.length > 1 && vList.length === eList.length) return vList.map((v, i) => [v, eList[i]]);
+  return eList.map((e) => [vList[0], e]);
+}
+
 function editOwnersFor(text, edit) {
   if (edit[text]) return edit[text];
   // ProseMirror and the reader can split a run differently (a mark boundary);
@@ -55,21 +65,23 @@ export function diffSurface({ surface, fixtures, view, edit }) {
       differences.push({ surface, fixture, text: "(block)", axis: "mounted", view: !v?.missing, edit: !e?.missing });
       continue;
     }
-    for (const [text, vStyle] of Object.entries(v.owners)) {
+    for (const [text, vOwners] of Object.entries(v.owners)) {
+      const vList = Array.isArray(vOwners) ? vOwners : [vOwners];
+      const vStyle = vList[0];
       const owners = editOwnersFor(text, e.owners);
       if (!owners || owners.length === 0) {
         differences.push({ surface, fixture, text: clip(text), axis: MISSING, view: vStyle.tag || "li", edit: "(none)" });
         continue;
       }
-      for (const eStyle of owners) {
+      for (const [vPaired, eStyle] of ownerPairs(vList, owners)) {
         compared++;
-        for (const axis of Object.keys(vStyle)) {
+        for (const axis of Object.keys(vPaired)) {
           if (axis === "tag" || axis === "role") continue;
-          if (vStyle[axis] !== eStyle[axis]) {
+          if (vPaired[axis] !== eStyle[axis]) {
             differences.push({
               surface, fixture, text: clip(text), axis,
-              view: vStyle[axis], edit: eStyle[axis],
-              viewTag: vStyle.tag, editTag: eStyle.tag, editRole: eStyle.role,
+              view: vPaired[axis], edit: eStyle[axis],
+              viewTag: vPaired.tag, editTag: eStyle.tag, editRole: eStyle.role,
             });
           }
         }
