@@ -76,4 +76,49 @@ const identical = {
   }
 }
 
-console.log("view-edit-parity compare: 5 checks passed");
+// 6. A text that repeats the same number of times on both sides is paired by
+//    POSITION (task-6306bdab9b1cb699). The task-list's ○ is first the momentum
+//    header's glyph (0.78rem row), then a row's glyph: the header meets the
+//    header and the row meets the row, so two matching surfaces show no
+//    divergence. Under the old pairing the reader kept only its FIRST owner and
+//    met every Edit owner, so the header glyph was compared with the row glyph.
+const header = style({ fontSize: "12.48px", lineHeight: "18px", tag: "span.bp-g" });
+const row = style({ fontSize: "14.08px", lineHeight: "22px", tag: "span.bp-g" });
+const glyphView = { tasks: { owners: { "○": [header, row] } } };
+{
+  const edit = { tasks: { owners: { "○": [structuredClone(header), structuredClone(row)] } } };
+  const r = diffSurface({ surface: "canvas", fixtures: ["tasks"], view: glyphView, edit });
+  assert.deepEqual(r.differences, [], "header↔header and row↔row match");
+  assert.equal(r.compared, 2, "both positions are compared, not skipped");
+
+  const legacy = diffSurface({ surface: "canvas", fixtures: ["tasks"], view: { tasks: { owners: { "○": header } } }, edit });
+  assert.deepEqual(
+    legacy.differences.map((d) => [d.axis, d.view, d.edit]),
+    [["fontSize", "12.48px", "14.08px"], ["lineHeight", "18px", "22px"]],
+    "a single View owner still meets every Edit owner (the old pairing, kept for unequal counts)",
+  );
+}
+
+// 7. Control: a planted style difference on a ROW glyph still surfaces — the
+//    pairing compares rows, it does not excuse them.
+{
+  const planted = { tasks: { owners: { "○": [structuredClone(header), { ...structuredClone(row), fontSize: "15px" }] } } };
+  const r = diffSurface({ surface: "canvas", fixtures: ["tasks"], view: glyphView, edit: planted });
+  assert.deepEqual(r.differences.map((d) => [d.text, d.axis, d.view, d.edit]), [["○", "fontSize", "14.08px", "15px"]]);
+  const { unexpected } = classify(r.differences, []);
+  assert.equal(unexpected.length, 1);
+
+  const plantedHeader = { tasks: { owners: { "○": [{ ...structuredClone(header), lineHeight: "30px" }, structuredClone(row)] } } };
+  const h = diffSurface({ surface: "canvas", fixtures: ["tasks"], view: glyphView, edit: plantedHeader });
+  assert.deepEqual(h.differences.map((d) => [d.axis, d.view, d.edit]), [["lineHeight", "18px", "30px"]]);
+}
+
+// 8. Unequal counts fall back to the first View owner against every Edit owner,
+//    so an Edit side that lost (or gained) an occurrence is still compared.
+{
+  const r = diffSurface({ surface: "canvas", fixtures: ["tasks"], view: glyphView, edit: { tasks: { owners: { "○": [structuredClone(row)] } } } });
+  assert.equal(r.compared, 1);
+  assert.deepEqual(r.differences.map((d) => d.axis), ["fontSize", "lineHeight"], "the header-first View owner meets the lone row owner");
+}
+
+console.log("view-edit-parity compare: 8 checks passed");
