@@ -75,26 +75,26 @@ defmodule BarkparkWeb.GettextNbCompletenessTest do
   test "control: the counter sees an empty and a fuzzy entry, and skips an English-ruled one" do
     po =
       Expo.PO.parse_string!("""
-      #: lib/barkpark_web/live/studio/settings_live.ex:1
+      #: lib/barkpark_web/live/studio/settings_live.ex
       msgid "Empty"
       msgstr ""
 
-      #: lib/barkpark_web/live/studio/settings_live.ex:2
+      #: lib/barkpark_web/live/studio/settings_live.ex
       #, fuzzy
       msgid "Fuzzy"
       msgstr "Uklar"
 
-      #: lib/barkpark_web/live/studio/settings_live.ex:3
+      #: lib/barkpark_web/live/studio/settings_live.ex
       msgid "%{count} item"
       msgid_plural "%{count} items"
       msgstr[0] "%{count} element"
       msgstr[1] ""
 
-      #: lib/barkpark/plugins/tickets/web/inbox_live.ex:4
+      #: lib/barkpark/plugins/tickets/web/inbox_live.ex
       msgid "Ticket only"
       msgstr ""
 
-      #: lib/barkpark_web/live/studio/settings_live.ex:5
+      #: lib/barkpark_web/live/studio/settings_live.ex
       msgid "Done"
       msgstr "Ferdig"
       """)
