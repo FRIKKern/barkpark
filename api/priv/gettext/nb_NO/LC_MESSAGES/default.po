@@ -12839,3 +12839,57 @@ msgstr "makro laget ruten som OnixEdits"
 #, elixir-autogen, elixir-format
 msgid "callback."
 msgstr "tilbakekall erklærte."
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search — Barkpark"
+msgstr "Søk — Barkpark"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search everything."
+msgstr "Søk i alt."
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search everything…"
+msgstr "Søk i alt …"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "live search served by Phoenix"
+msgstr "direktesøk levert av Phoenix"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "type to search"
+msgstr "skriv for å søke"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "graph truncated (%{reason})"
+msgstr "grafen er avkortet (%{reason})"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "showing %{shown} of %{total} hits"
+msgstr "viser %{shown} av %{total} treff"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search"
+msgstr "Søk"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 document"
+msgid_plural "%{count} documents"
+msgstr[0] "1 dokument"
+msgstr[1] "%{count} dokumenter"
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 hit"
+msgid_plural "%{count} hits"
+msgstr[0] "1 treff"
+msgstr[1] "%{count} treff"

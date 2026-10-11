@@ -12839,3 +12839,57 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "callback."
 msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search — Barkpark"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search everything."
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search everything…"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "live search served by Phoenix"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "type to search"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "graph truncated (%{reason})"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "showing %{shown} of %{total} hits"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 document"
+msgid_plural "%{count} documents"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 hit"
+msgid_plural "%{count} hits"
+msgstr[0] ""
+msgstr[1] ""

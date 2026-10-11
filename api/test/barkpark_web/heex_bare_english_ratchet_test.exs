@@ -19,6 +19,7 @@ defmodule BarkparkWeb.HeexBareEnglishRatchetTest do
       * A. Studio author core.
       * B. The sign-in pages (`session_html`), by Accept-Language, never the
            Default workspace's locale.
+      * The finder (public search), by the same Accept-Language rule.
       * C. OnixEdit's console (staleness, Bokbasen, ping): used by Norwegian
            publisher staff, and Bokbasen is Norwegian.
 
@@ -29,9 +30,7 @@ defmodule BarkparkWeb.HeexBareEnglishRatchetTest do
         surfaces (C, the operator half).
       * The styleguide, chat, chat hosts, tmux: developer surfaces (D).
 
-  THE NINE LEFT AT THE CEILING (measured on the tree that pinned it):
-    * `finder_live.ex` — 5 (the public search page; it puts no locale, and its
-      language is not yet ruled);
+  THE FOUR LEFT AT THE CEILING (measured on the tree that pinned it):
     * `layouts/studio.html.heex` — "Token", the API tester's label (an
       English-ruled surface that lives in the shared layout);
     * `layouts/bulldocs.html.heex` — "bp paper view", a CLI command in the
@@ -43,7 +42,7 @@ defmodule BarkparkWeb.HeexBareEnglishRatchetTest do
   """
   use ExUnit.Case, async: true
 
-  @ceiling 9
+  @ceiling 4
 
   @api Path.expand("../..", __DIR__)
 
