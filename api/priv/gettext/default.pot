@@ -12111,3 +12111,30 @@ msgstr[1] ""
 #, elixir-autogen, elixir-format
 msgid "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
 msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Could not create %{what}: %{field} %{message}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Could not create %{what}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "(+1 more)"
+msgid_plural "(+%{count} more)"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "name"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "slug"
+msgstr ""
