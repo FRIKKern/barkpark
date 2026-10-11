@@ -87,6 +87,7 @@ import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
 import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, openObjectBlockInsert, refusalField } from "./inline-object.js";
 import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
+import { exactClipboardSerializer, exactSliceFromClipboard } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -1240,6 +1241,10 @@ class BpPaperCanvas extends HTMLElement {
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
+        // The canvas's own copy carries the exact fragment, so its paste rebuilds
+        // the very nodes copied instead of re-parsing their HTML. See
+        // ./clipboard-slice.js.
+        clipboardSerializer: exactClipboardSerializer(() => this._editor.schema),
         // Word puts list items on the clipboard as <p style="mso-list:…"> with the
         // bullet as literal text; rebuild them as real lists before parsing, or
         // they land as paragraphs starting "·   ". See ./word-paste.js.
@@ -2441,6 +2446,16 @@ class BpPaperCanvas extends HTMLElement {
       if (opened) view.dispatch(opened);
       // Paste as plain text keeps Sanity's line rule too (see _pastePlainText).
       if (policy?.plain && !isFigureSingletonCanvas(this)) return this._pastePlainText(view, _event, true);
+      // The canvas's own clipboard: rebuild exactly what was copied, fitted to
+      // this canvas's vocabulary like any paste (clipboard-slice.js).
+      const exact = !isFigureSingletonCanvas(this) && exactSliceFromClipboard(view.state.schema, _event, view.state.doc);
+      if (exact) {
+        const fitted = this._fitPastedSlice(exact);
+        const single = fitted.openStart === 0 && fitted.openEnd === 0 && fitted.content.childCount === 1 ? fitted.content.firstChild : null;
+        const tr = single ? view.state.tr.replaceSelectionWith(single) : view.state.tr.replaceSelection(fitted);
+        view.dispatch(tr.scrollIntoView().setMeta("paste", true).setMeta("uiEvent", "paste"));
+        return true;
+      }
     }
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event, policy?.imageAlt)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
