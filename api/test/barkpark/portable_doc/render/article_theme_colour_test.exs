@@ -36,7 +36,7 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
   # colour on `:article` today, each a slice of the follow-up row. An unlisted
   # type that inlines one fails (a new theme style), and a listed type that comes
   # back clean fails too, so its entry leaves the list in the diff that fixed it.
-  @known MapSet.new(~w(asciicast code code-tabs diagram divider filetree))
+  @known MapSet.new(~w(code code-tabs diagram))
 
   test "in every theme, :article output carries no inline var(--paper-*) and no palette colour the fixture did not author" do
     authored = authored_colours()
@@ -86,7 +86,7 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
   end
 
   test "control: the block-level detector flags a known offender and the :email render of paper-links" do
-    assert theme_paint?(GenPdParity.input("divider"))
+    assert theme_paint?(GenPdParity.input("diagram"))
     assert theme_paint?(GenPdParity.input("paper-links"), :email)
   end
 

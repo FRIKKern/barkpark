@@ -1032,6 +1032,12 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface > #paper-body > .bp-section-divider:has(+ h2),
 .bp-paper-surface > #paper-body > div:not([class]):has(> .bp-section-divider):has(+ div:not([class]) > h2) { display: none; }
 
+/* The authored divider's paint (task-2c5d3da1b7f7db25): the rule keeps its
+   width and style inline, and its colour, the § mark's ground and its ink live
+   here. Its layout stays inline. */
+.bp-paper-surface .bp-section-divider { border-top-color: var(--paper-rule); }
+.bp-paper-surface .bp-section-divider__mark { background: var(--paper-bg); color: var(--paper-ink-soft); }
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TASK LIST — the Barkpark task design language (bp-task-design-language-spec)
@@ -1471,6 +1477,10 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
   width: var(--bp-evidence-width, 100%); box-sizing: border-box; overflow-x: auto;
 }
 .bp-paper-surface .bp-filetree-note { white-space: pre; }
+/* The note colours ride these modifiers, not the markup (task-2c5d3da1b7f7db25). */
+.bp-paper-surface .bp-filetree-note--ok { color: var(--ok); }
+.bp-paper-surface .bp-filetree-note--soft { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-filetree-note--danger { color: var(--danger); }
 .bp-paper-surface .bp-filetree-legend { color: var(--paper-ink-soft); font-size: 12px; margin-top: 4px; }
 
 .bp-paper-surface .bp-tasks {
@@ -2420,7 +2430,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-toc--sticky { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
 
 /* asciicast: the player mount — reserve height so the figure never jumps. */
-.bp-paper-surface .bp-asciicast { min-height: 120px; background: var(--paper-bg-deep); }
+.bp-paper-surface .bp-asciicast { min-height: 120px; background: var(--paper-bg-deep); border-color: var(--paper-rule); }
 /* The player's own control bar draws `border-top: 2px` (asciinema-player 3.8.0,
    `div.ap-player div.ap-control-bar`), which is a vendor stylesheet loaded from
    a CDN — so a terminal recording put a section-weight rule inside a figure, and

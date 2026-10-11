@@ -849,11 +849,37 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
     [container_style, mark_style] = styles
 
+    # The reader's COLOURS are not inline (task-2c5d3da1b7f7db25): the rule keeps
+    # its width and style inline and paper-surface.css paints its colour, the
+    # mark's ground and its ink. The reader's paint is both halves, so overlay
+    # the surface rule on the inline decls, folding `border-top-color` back into
+    # the `border-top` shorthand the edit mirror writes.
+    surface = Stylesheet.css()
+
     %{
-      container: container_style |> parse_decls() |> strip_var_fallbacks(),
-      mark: mark_style |> parse_decls() |> strip_var_fallbacks()
+      container:
+        container_style
+        |> parse_decls()
+        |> Map.merge(declarations_for(surface, "bp-paper-surface", @divider_container_selector))
+        |> fold_border_top_color()
+        |> strip_var_fallbacks(),
+      mark:
+        mark_style
+        |> parse_decls()
+        |> Map.merge(declarations_for(surface, "bp-paper-surface", @divider_mark_selector))
+        |> strip_var_fallbacks()
     }
   end
+
+  defp fold_border_top_color(
+         %{"border-top" => width_style, "border-top-color" => colour} = decls
+       ),
+       do:
+         decls
+         |> Map.delete("border-top-color")
+         |> Map.put("border-top", "#{width_style} #{colour}")
+
+  defp fold_border_top_color(decls), do: decls
 
   # Normalise every value in a decl map so `var(--name, fallback)` -> `var(--name)`.
   # The reader carries light-only hex fallbacks; the CSS mirrors carry none. Comparing

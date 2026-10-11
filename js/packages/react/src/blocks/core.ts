@@ -433,26 +433,27 @@ const diff: Emit = (b) => {
   )
 }
 
-// The D78 annotation markers with their evergreen token colors (glyph is the
-// semantic carrier; the legend row disambiguates locally).
+// The D78 annotation markers and the modifier class paper-surface.css paints
+// each one's colour through (glyph is the semantic carrier; the legend row
+// disambiguates locally). No colour rides the markup (task-2c5d3da1b7f7db25).
 const FILETREE_MARKERS: Array<[string, string]> = [
-  [' ● ', 'var(--ok)'],
-  [' ○ ', 'var(--paper-ink-soft)'],
-  [' ✕ ', 'var(--danger)'],
+  [' ● ', 'ok'],
+  [' ○ ', 'soft'],
+  [' ✕ ', 'danger'],
 ]
 
 function filetreeRowHtml(line: string): string {
-  let hit: { idx: number; glyph: string; color: string } | null = null
-  for (const [glyph, color] of FILETREE_MARKERS) {
+  let hit: { idx: number; glyph: string; tone: string } | null = null
+  for (const [glyph, tone] of FILETREE_MARKERS) {
     const idx = line.indexOf(glyph)
-    if (idx !== -1 && (hit === null || idx < hit.idx)) hit = { idx, glyph, color }
+    if (idx !== -1 && (hit === null || idx < hit.idx)) hit = { idx, glyph, tone }
   }
   if (hit === null) return `<div style="white-space: pre;">${escapeHtml(line)}</div>`
   const path = line.slice(0, hit.idx)
   const note = hit.glyph + line.slice(hit.idx + hit.glyph.length)
   return (
     `<div style="white-space: pre;">${escapeHtml(path)}` +
-    `<span class="bp-filetree-note" style="color: ${hit.color};">${escapeHtml(note)}</span></div>`
+    `<span class="bp-filetree-note bp-filetree-note--${hit.tone}">${escapeHtml(note)}</span></div>`
   )
 }
 
@@ -727,16 +728,16 @@ const code: Emit = (b) => {
   return source.trim() === '' ? '' : codeBlockHtml(source, codeEmphasis(b))
 }
 
-// The `bp-section-divider` classes carry no styling (every value is inline, the
-// same bytes figures.ex emits) — they are the handle the reader shell needs to
-// say something about a divider's POSITION, e.g. that one sitting directly in
-// front of a section head draws a boundary the head already draws. Kept here so
-// an SDK-rendered document is the same document the reader renders. The § mark
-// paints the PAGE token (--paper-bg): it masks the hairline, it is not a fill.
+// The `bp-section-divider` classes are the handle the reader shell needs to say
+// something about a divider's POSITION (one directly in front of a section head
+// draws a boundary the head already draws), and they carry its COLOURS: the
+// rule keeps its width and style inline, and paper-surface.css paints its
+// colour, the § mark's ground (the PAGE token, --paper-bg: it masks the
+// hairline) and its ink (task-2c5d3da1b7f7db25). The same bytes figures.ex emits.
 const divider: Emit = () =>
-  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e2e6e5)">` +
+  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid">` +
   `<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
-  `background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
+  `font-size:1.1rem">§</span></div>`
 
 const image: Emit = (b) => {
   const rawSrc = str(b.src).trim()
@@ -819,7 +820,7 @@ const asciicast: Emit = (b) => {
   const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid;border-radius:6px;overflow:hidden"></div>` +
     articleFigcaption(caption) +
     `</figure>`
   )

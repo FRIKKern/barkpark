@@ -1012,22 +1012,19 @@ describe('PortableDoc — the type-keyed renderer', () => {
       }
     })
 
-    // The mount point's chrome is TOKENISED, not a bare hex: on a dark
-    // `.bp-paper-surface` a literal #e2e6e5 drew a light rule around a black
-    // terminal. Every sibling emitter (evidence figure, paper-link card,
-    // section divider) already reads `var(--paper-rule, …)`; the cast was the
-    // last bare literal in this file, and its Elixir twin
-    // (Figures.asciicast_html/5) carries the identical string — the pd-parity
+    // The mount point's chrome carries NO colour inline (task-2c5d3da1b7f7db25):
+    // the border keeps its width and style, and paper-surface.css paints its
+    // colour through `.bp-asciicast` — so a dark `.bp-paper-surface` never shows
+    // a light literal rule around a black terminal. Its Elixir twin
+    // (Figures.asciicast_html/5) carries the identical string, and the pd-parity
     // comparator diffs the style attribute, so the two cannot drift apart.
-    it('the asciicast mount border is var(--paper-rule, …), with the hex only as fallback', () => {
+    it('the asciicast mount border keeps its geometry inline and no colour', () => {
       const html = renderPortableDocument([
         { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },
       ])
-      expect(html).toContain('style="border:1px solid var(--paper-rule, #e2e6e5);')
-      // The negative leg: no BARE hex survives anywhere in the emitted block —
-      // `:#e2e6e5` would match `border:1px solid #e2e6e5` but never the
-      // `var(--paper-rule, #e2e6e5)` fallback (which is preceded by a space).
-      expect(html).not.toContain(':#e2e6e5')
+      expect(html).toContain('style="border:1px solid;border-radius:6px;overflow:hidden"')
+      expect(html).not.toContain('var(--paper-')
+      expect(html).not.toContain('#e2e6e5')
       expect(html).not.toContain('#55635e')
     })
 
