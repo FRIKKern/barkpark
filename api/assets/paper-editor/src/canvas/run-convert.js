@@ -4228,6 +4228,47 @@ export function docToBlocks(doc, options = {}) {
   });
 }
 
+// The fewest move-block ops that fold `running` into nextSeq's order, or null when
+// the batch would not reproduce it. Stable = the longest increasing subsequence
+// of running positions in nextSeq order, plus every locked id (a locked block
+// never moves). Each other id moves right after its nextSeq predecessor, left to
+// right: nothing is ever spliced between a moved id and its predecessor, so the
+// fold lands exactly on nextSeq. The fold is simulated to prove it.
+function minimalMoves(running, nextSeq, lockedIds) {
+  const ids = nextSeq.map((e) => e.id);
+  if (running.length !== ids.length) return null;
+  const pos = new Map(running.map((id, i) => [id, i]));
+  if (ids.some((id) => !pos.has(id))) return null;
+  const seq = ids.map((id) => pos.get(id));
+  // Longest increasing subsequence of `seq` (patience sorting, O(n log n)).
+  const tails = [];
+  const prev = new Array(seq.length).fill(-1);
+  for (let i = 0; i < seq.length; i++) {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (seq[tails[mid]] < seq[i]) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0) prev[i] = tails[lo - 1];
+    tails[lo] = i;
+  }
+  const stable = new Set(lockedIds);
+  for (let i = tails.length ? tails[tails.length - 1] : -1; i !== -1; i = prev[i]) stable.add(ids[i]);
+  const ops = [];
+  const order = running.slice();
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    if (stable.has(id)) continue;
+    const after = i === 0 ? null : ids[i - 1];
+    ops.push({ op: "move-block", id, after });
+    order.splice(order.indexOf(id), 1);
+    order.splice(after == null ? 0 : order.indexOf(after) + 1, 0, id);
+  }
+  return order.every((id, i) => id === ids[i]) ? ops : null;
+}
+
 // runToOps(prevBlocks, nextDoc) → [ op, … ] (ordered)
 //
 // Diff the ORIGINAL block list against the edited doc (the runToTiptap shape
@@ -4413,7 +4454,19 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // that is linear; the walk's indexOf per entry is quadratic in the run's length
   // (task-fb938eb8be3bce48).
   const inOrder = running.length === nextSeq.length && nextSeq.every((e, i) => running[i] === e.id);
-  for (let i = 0; !inOrder && i < nextSeq.length; i++) {
+  // MINIMAL MOVES (task-d20a8200b28f0d7a). The longest run of blocks already in
+  // nextSeq's relative order stays put, and only the others move. Dragging one
+  // block from [a, X, b, c] to [a, b, c, X] is ONE move-block for X; the greedy
+  // walk below would emit moves for b and c, blocks the author never touched.
+  // The minimal batch is checked by folding it; if it does not reproduce
+  // nextSeq, the greedy walk runs instead.
+  const minimal = inOrder ? [] : minimalMoves(running, nextSeq, lockedIds);
+  if (minimal) {
+    for (const op of minimal) ops.push(op);
+    running.length = 0;
+    for (const e of nextSeq) running.push(e.id);
+  }
+  for (let i = 0; !inOrder && !minimal && i < nextSeq.length; i++) {
     const id = nextSeq[i].id;
     // A LOCKED block holds its position (pdd-t2): never emit a move for it. The
     // filterTransaction veto keeps a locked node at its fixed index, so `running`

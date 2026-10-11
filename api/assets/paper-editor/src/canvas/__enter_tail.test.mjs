@@ -122,24 +122,25 @@ function fixtureRun(tail) {
 // THE BATCH Enter-at-tail emits on a 13-block run, with the minted id normalised (it
 // carries a random nonce). One insert anchored at the FIRST block + a move for blocks
 // 2…13 — the run-convert INSERTS/MOVES normalisation, and NOTHING else.
+// Since task-d20a8200b28f0d7a the move pass emits the FEWEST moves: the twelve
+// surviving blocks stay put and only the new paragraph moves to the tail. (Before,
+// a greedy walk moved every block the insert had jumped, twelve moves.)
 const EXPECTED_BATCH = [
   {
     op: "insert-after",
     afterId: "pp-001",
     block: { id: "<minted>", type: "paragraph", content: [] },
   },
-  ...Array.from({ length: 12 }, (_, i) => ({
-    op: "move-block",
-    id: pad(i + 2),
-    after: pad(i + 1),
-  })),
+  { op: "move-block", id: "<minted>", after: pad(13) },
 ];
 
 const normaliseMint = (ops) =>
   JSON.parse(JSON.stringify(ops)).map((op) =>
     op.op === "insert-after" && op.block && /^c-/.test(op.block.id)
       ? { ...op, block: { ...op.block, id: "<minted>" } }
-      : op,
+      : op.op === "move-block" && /^c-/.test(op.id)
+        ? { ...op, id: "<minted>" }
+        : op,
   );
 
 // Mount the real canvas, put the caret at the run's TAIL, press Enter, return the batch.
@@ -183,7 +184,7 @@ console.log("── A) mounted: Enter at the tail of a run ending in a node-view
 for (const [label, tail] of Object.entries(TAILS)) {
   for (const mode of ["focus-end", "node-selection"]) {
     await checkAsync(
-      `Enter at tail (${label}, ${mode}): NO remove-block, tail id survives, batch is insert-after+12 moves`,
+      `Enter at tail (${label}, ${mode}): NO remove-block, tail id survives, batch is insert-after+1 move`,
       async () => {
         const { ops, live } = await enterAtTail(fixtureRun(tail), mode);
         // THE VERDICT: not one remove-block. The filed batch's defining op is absent.
@@ -195,13 +196,10 @@ for (const [label, tail] of Object.entries(TAILS)) {
         // The tail id is still in the doc the diff ran against…
         const liveIds = (live.content || []).map((n) => n.attrs && n.attrs.bpId);
         assert.ok(liveIds.includes(TAIL_ID), "tail id missing from the live doc");
-        // …and the batch touches it ONLY as a move.
+        // …and the batch never touches it: the new paragraph moves past it
+        // (minimal moves, task-d20a8200b28f0d7a).
         const tailOps = ops.filter((o) => o.id === TAIL_ID);
-        assert.deepEqual(
-          tailOps.map((o) => o.op),
-          ["move-block"],
-          "the tail block was touched by something other than a move",
-        );
+        assert.deepEqual(tailOps.map((o) => o.op), [], "the tail block was touched by the batch");
         // And the WHOLE batch is the normalisation, byte for byte.
         assert.deepEqual(normaliseMint(ops), EXPECTED_BATCH);
       },
@@ -212,7 +210,9 @@ for (const [label, tail] of Object.entries(TAILS)) {
 // ── B) the DISCRIMINANT: what the FILED batch actually means ──────────────────────
 console.log("\n── B) discriminant: the filed remove-block batch = a tail that never mounted ──");
 
-// The filed batch, verbatim from spd-bl-enter-at-tail-block-drop (minted id normalised).
+// The filed batch's shape, as runToOps emits it today (minted id normalised). The
+// filing itself carried eleven moves from the older greedy move pass; since
+// task-d20a8200b28f0d7a only the new paragraph moves.
 const FILED_BATCH = [
   { op: "remove-block", id: TAIL_ID },
   {
@@ -220,15 +220,11 @@ const FILED_BATCH = [
     afterId: "pp-001",
     block: { id: "<minted>", type: "paragraph", content: [] },
   },
-  ...Array.from({ length: 11 }, (_, i) => ({
-    op: "move-block",
-    id: pad(i + 2),
-    after: pad(i + 1),
-  })),
+  { op: "move-block", id: "<minted>", after: pad(12) },
 ];
 
 check(
-  "runToOps: a live doc MISSING the tail node reproduces the FILED batch exactly (remove-block + insert-after + 11 moves)",
+  "runToOps: a live doc MISSING the tail node reproduces the FILED batch exactly (remove-block + insert-after + 1 move)",
   () => {
     const blocks = fixtureRun(TAILS["divider (bpDivider leaf atom)"]);
     // The doc ProseMirror would hold if the tail node type were NOT registered in the
@@ -241,12 +237,12 @@ check(
 );
 
 check(
-  "the two batches differ ONLY by the remove-block (and the move it costs) — remove-block IS the discriminant",
+  "the two batches differ ONLY by the remove-block — remove-block IS the discriminant",
   () => {
     assert.equal(EXPECTED_BATCH.filter((o) => o.op === "remove-block").length, 0);
     assert.equal(FILED_BATCH.filter((o) => o.op === "remove-block").length, 1);
-    assert.equal(EXPECTED_BATCH.filter((o) => o.op === "move-block").length, 12);
-    assert.equal(FILED_BATCH.filter((o) => o.op === "move-block").length, 11);
+    assert.equal(EXPECTED_BATCH.filter((o) => o.op === "move-block").length, 1);
+    assert.equal(FILED_BATCH.filter((o) => o.op === "move-block").length, 1);
     // Both anchor the insert at block 1 — so "the paragraph landed after block 1" is
     // NOT itself a symptom of loss. It is how runToOps expresses every insert.
     assert.equal(EXPECTED_BATCH[0].afterId, "pp-001");
