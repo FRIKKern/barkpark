@@ -50,6 +50,8 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
       "role is StatusVocab.role_for_status/1 output or a board_roles/0 literal; glyph_html/1 never sees author text",
     {"components.ex", "class", "src_class"} =>
       "pnode_source/1 returns the literal \" bp-pnode--src\" or \"\" — the author string goes to the escaped body, not the class",
+    {"components.ex", "class", "tone"} =>
+      "the third element of a @filetree_markers tuple — one of the literals \"ok\", \"soft\", \"danger\"; the author's note goes to the escaped body",
     {"components.ex", "style", "color"} =>
       "the @filetree_markers module attribute's literal token colour (split_filetree_note/1 returns the marker, not the line)",
     {"components.ex", "style", "pad"} =>

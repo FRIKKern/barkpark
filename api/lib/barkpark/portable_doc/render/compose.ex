@@ -1929,9 +1929,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   # scaffy:add-block-type Filetree MARK:ex-compose-filetree
   # `filetree` (W7 grow, charter D78): verbatim tree lines with annotation
-  # spans + the optional legend row — Components.filetree_html/1 through the
-  # `_raw` pre-rendered-HTML hatch. Style-invariant single clause like
-  # chat-tool-diff (inline-token mono rendering reads identically in email).
+  # spans + the optional legend row — Components.filetree_html/2 through the
+  # `_raw` pre-rendered-HTML hatch. One clause for both styles; the only style
+  # difference is the note colour, inline on `:email` and a paper-surface class on
+  # `:article` (task-2c5d3da1b7f7db25).
   #
   # CONTENTLESS FILETREE (the empty-chrome invariant — see `blank_field?/2`): of
   # the framed arms surveyed alongside the four media blocks, this is the one that
@@ -1944,11 +1945,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # "Allow tool? pending", …), so an empty one still SAYS something. Blank now
   # composes to the empty `_raw` node; a tree with EITHER lines or a legend is
   # byte-UNCHANGED.
-  def compose_block(%{"type" => "filetree"} = b, _style) do
+  def compose_block(%{"type" => "filetree"} = b, style) do
     if blank_filetree?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b)}
+      %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b, style)
+      }
     end
   end
 

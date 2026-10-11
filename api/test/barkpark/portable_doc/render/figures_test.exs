@@ -3,6 +3,7 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
   use ExUnit.Case, async: true
 
   alias Barkpark.PortableDoc.Render.Figures
+  alias Barkpark.PortableDoc.Render.Stylesheet
 
   describe "encode_mermaid/1" do
     test "encodes & < > in that order" do
@@ -76,20 +77,26 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
       assert html =~ "§"
     end
 
-    # The class is a HANDLE, not styling: the reader shell needs to be able to say
-    # "this divider sits directly in front of a section head, which already draws
-    # that boundary" (paper-surface.css §divider dedup), and a class-less box
-    # gives a stylesheet nothing to say it about. So the values must all still be
-    # INLINE — view_edit_parity_test.exs §8 compares those declarations against
-    # the edit mirror, and a value that migrated into a class rule would leave
-    # that comparison passing over an empty set.
-    test "carries the class as a positional handle only — every value stays inline" do
+    # The class is the HANDLE the reader shell needs ("this divider sits directly
+    # in front of a section head, which already draws that boundary" —
+    # paper-surface.css §divider dedup), and since task-2c5d3da1b7f7db25 it also
+    # carries the divider's COLOURS. Layout and the rule's width and style stay
+    # inline; the rule colour, the mark's ground and its ink are paper-surface
+    # rules. view_edit_parity_test.exs §8 compares BOTH halves (inline overlaid
+    # with the surface rule) against the edit mirror, so it never runs over an
+    # empty set.
+    test "keeps layout inline and its colours in paper-surface rules" do
       html = Figures.section_divider_html()
 
       assert html =~ ~s(class="bp-section-divider" style="position:relative;)
       assert html =~ ~s(class="bp-section-divider__mark" style="position:relative;)
-      assert html =~ "border-top:1px solid var(--paper-rule"
-      assert html =~ "margin:2.4rem 0"
+      assert html =~ "margin:2.4rem 0;border-top:1px solid\""
+      refute html =~ "var(--paper-"
+
+      css = Stylesheet.css()
+
+      assert css =~
+               ".bp-paper-surface .bp-section-divider { border-top-color: var(--paper-rule); }"
     end
 
     # The § mask hides the hairline behind the glyph, so it must be the PAGE
@@ -97,12 +104,14 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
     # by design/emit.mjs) and the Studio `.bp-paper-surface` both stand on. While
     # the reader body was painted `--paper-bg-deep` the deep mask was invisible;
     # with the body on `--paper-bg` (task-ddb1e0ab09a62466) a deep mask would
-    # render as a tile around the §.
+    # render as a tile around the §. The mask lives in the surface rule.
     test "the § mask paints the page token, not the fill token" do
-      html = Figures.section_divider_html()
+      css = Stylesheet.css()
 
-      assert html =~ "padding:0 0.8rem;background:var(--paper-bg, #f6faf9)"
-      refute html =~ "background:var(--paper-bg-deep"
+      assert css =~
+               ".bp-paper-surface .bp-section-divider__mark { background: var(--paper-bg); color: var(--paper-ink-soft); }"
+
+      refute css =~ ~r/\.bp-section-divider__mark \{[^}]*--paper-bg-deep/
     end
   end
 

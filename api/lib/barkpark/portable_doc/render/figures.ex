@@ -111,10 +111,14 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # the edit surface has bound its mirror to since the divider-lockstep slice
   # (`.bp-section-divider` / `.bp-section-divider__mark`), so this closes an
   # asymmetry rather than inventing a second vocabulary for one block.
+  #
+  # Its COLOURS are not inline (task-2c5d3da1b7f7db25): the rule keeps its width
+  # and style here and paper-surface.css paints its colour, the § mark's ground
+  # and its ink through these same two classes.
   def section_divider_html do
-    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e2e6e5)">| <>
+    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid">| <>
       ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
-      ~s|background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
+      ~s|font-size:1.1rem">§</span></div>|
   end
 
   # ── diagram / figure HTML emission ─────────────────────────────────────────
@@ -246,7 +250,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     # radius:") and the file will not compile. The pipe delimiter has no such
     # ambiguity, and the sibling figure/divider strings above already use it.
     ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
-      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div>| <>
+      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid;border-radius:6px;overflow:hidden"></div>| <>
       cap <>
       "</figure>"
   end
