@@ -685,12 +685,6 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PaperReaderCsp)
   end
 
-  # A public page with no workspace speaks the browser's language (the finder;
-  # lead ruling, run 8). See BarkparkWeb.AcceptLanguage.
-  pipeline :accept_locale do
-    plug(BarkparkWeb.AcceptLanguage)
-  end
-
   # Reader conditional (http-edge-truth D9/D10/D11): weak time-bucketed ETag +
   # honored 304 for the FLAT paper reader spellings. Layered AFTER
   # :paper_reader_csp so the 304 branch can delete the freshly-nonced CSP that
@@ -1915,6 +1909,12 @@ defmodule BarkparkWeb.Router do
     pipe_through([:browser, :paper_reader_csp, :reader_noindex, :paper_revision_headers])
 
     plugin_routes(scope: :public_root)
+  end
+
+  # A public page with no workspace speaks the browser's language (the finder;
+  # lead ruling, run 8). See BarkparkWeb.AcceptLanguage.
+  pipeline :accept_locale do
+    plug(BarkparkWeb.AcceptLanguage)
   end
 
   # ── Public finder (LiveView) — the flagship search, Phoenix-native ──────
