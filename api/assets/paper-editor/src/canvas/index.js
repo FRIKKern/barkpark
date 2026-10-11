@@ -85,7 +85,8 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
-import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, openObjectBlockInsert, refusalField, paragraphAfterSelectedCarry } from "./inline-object.js";
+import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, openObjectBlockInsert, refusalField } from "./inline-object.js";
+import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -1004,6 +1005,9 @@ class BpPaperCanvas extends HTMLElement {
         // Declared inline objects (blocks.inline): accessible names on the atoms,
         // Enter / double-click opens the field dialog. See ./inline-object.js.
         inlineObjects(this),
+        // No keystroke at a block boundary deletes a block the author did not
+        // Backspace/Delete. See ./block-boundary.js.
+        BlockBoundary,
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
@@ -2431,9 +2435,9 @@ class BpPaperCanvas extends HTMLElement {
         this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
         return true;
       }
-      // A paste over a selected carried block lands in a new paragraph after it
-      // and never replaces the block (task-0075081d540d1390).
-      const opened = paragraphAfterSelectedCarry(view.state);
+      // A paste over a selected non-text block lands in a new paragraph after it
+      // and never replaces the block (block-boundary.js).
+      const opened = paragraphAfterSelectedBlock(view.state);
       if (opened) view.dispatch(opened);
       // Paste as plain text keeps Sanity's line rule too (see _pastePlainText).
       if (policy?.plain && !isFigureSingletonCanvas(this)) return this._pastePlainText(view, _event, true);
