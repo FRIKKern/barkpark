@@ -655,11 +655,13 @@ const MONO = 'ui-monospace,Menlo,monospace'
 // code-tabs panel and a standalone `code` block render the same chrome. A bare
 // --paper-bg-deep slab on the --paper-bg page — no left bar: the 3px
 // reading-accent bar was retired with task-ddb1e0ab09a62466 once the reader
-// body stopped painting the fill token as the page.
+// body stopped painting the fill token as the page. The slab's ground and ink
+// ride the `bp-codeblock` class paper-surface.css paints; layout and type stay
+// inline (task-2c5d3da1b7f7db25).
 function codeBlockHtml(value: string, emphasis: EmphasisRange[] = []): string {
   const escaped = codeBodyHtml(value, emphasis)
   return (
-    `<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
+    `<pre class="bp-codeblock" style="border:0;border-radius:var(--bp-codeblock-radius, 0);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
     `margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ${MONO});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);` +
     `overflow-x:auto;white-space:pre">${escaped}</pre>`
   )
@@ -796,7 +798,7 @@ const diagram: Emit = (b) => {
   const source = str(b.source)
   const caption = str(b.caption)
   return (
-    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto">` +
+    `<figure class="bp-diagram" style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;border:1px solid;border-radius:4px;overflow-x:auto">` +
     `<pre class="mermaid">${encodeMermaid(source)}</pre>` +
     articleFigcaption(caption) +
     `</figure>`
