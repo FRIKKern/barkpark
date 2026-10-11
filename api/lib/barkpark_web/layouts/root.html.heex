@@ -5583,6 +5583,34 @@
       attempt();
     });
 
+    // task-4e10550394f87112: a desk search hit is a live navigation, which
+    // remounts the desk with focus on <body>. The server pushes
+    // `bp:focus-doc-header` for it, and the opened document's header takes
+    // focus: the target a desk row open uses. The join re-renders the panes
+    // once the width bucket arrives, which moves the header and blurs it, so
+    // keep it focused for a second while focus is idle on <body>; a key or a
+    // press means the user has moved on.
+    window.addEventListener("phx:bp:focus-doc-header", () => {
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const until = Date.now() + 1000;
+      const settle = () => {
+        if (interrupted) return;
+        const header = document.querySelector(".pane-header.editor-header");
+        const idle = !document.activeElement || document.activeElement === document.body;
+        if (header && idle) header.focus();
+        if (Date.now() < until) {
+          setTimeout(settle, 50);
+        } else {
+          document.removeEventListener("keydown", interrupt, { capture: true });
+          document.removeEventListener("pointerdown", interrupt, { capture: true });
+        }
+      };
+      settle();
+    });
+
     // task-e73be8429cfa08af: picking a dataset in the scope switcher navigates
     // (push_navigate), and the new view left focus on <body>. A pick arms a
     // one-shot flag; once the navigation lands, the scope trigger (now naming

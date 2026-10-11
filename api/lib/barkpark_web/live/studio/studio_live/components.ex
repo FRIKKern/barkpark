@@ -1558,7 +1558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 the one pane every desk has and the only one whose contents are
                 not already a single type. Typing swaps THIS pane's body for the
                 hits and leaves every other pane untouched, so a drilled path
-                stays on screen behind the results. A hit is an ordinary link to
+                stays on screen behind the results. A hit is a real link to
                 `/…/studio/<type>/<id>`, so it is deep-linkable, middle-clickable,
                 and opens a type the desk does not list at its root through the
                 E3.5 dead-head alias. --%>
@@ -1617,16 +1617,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   <%= gettext("No documents match “%{query}”", query: String.trim(@desk_search)) %>
                 </div>
               <% else %>
-                <a
+                <%!-- A live navigation, not a page load: `navigate` keeps the
+                      real href (middle-click, new tab), and `focus: :doc`
+                      lands focus on the opened document's header, where a
+                      desk row open puts it (task-4e10550394f87112). --%>
+                <.link
                   :for={hit <- @desk_search_hits}
                   class="pane-doc-item bp-desk-search-hit"
                   data-test-id="desk-search-hit"
                   data-hit-type={hit.type}
-                  href={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset)}
+                  navigate={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset, focus: :doc)}
                 >
                   <span class="pane-doc-title"><%= hit.title %></span>
                   <span class="pane-doc-sub"><%= hit.type_title %></span>
-                </a>
+                </.link>
               <% end %>
             <% end %>
           </div>
