@@ -21,13 +21,17 @@
 //      javascript:/data:text/html URL;
 //   4. schema.nodeFromJSON builds every node and node.check() accepts it. That
 //      also refuses any attribute the schema does not declare.
-// Ids never come from the clipboard: every bpId is dropped, and the canvas mints
-// new ones. The server validates every op as well; this is defence in depth.
+// Ids: a pasted block keeps its bpId only when the id is well-formed and NOT
+// already in this document (the cut case: comments, backlinks and history
+// anchored to the block follow it). An id already present (the copy case), a
+// repeat within the paste, or a malformed one is cleared, and the canvas mints a
+// fresh one. The server validates every op as well; this is defence in depth.
 
 import { DOMSerializer, Fragment, Slice } from "@tiptap/pm/model";
 
 const ATTR = "data-bp-fragment";
 const MAX_HTML = 1024 * 1024;
+const WELL_FORMED_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 // A script tag, an event handler INSIDE a tag (so code like `el.onclick = f` in a
 // code block is not refused), or a javascript:/data:text/html URL.
 const UNSAFE = /<\s*\/?\s*script|<[^>]*\son[a-z]+\s*=|javascript\s*:|data\s*:\s*text\/html/i;
@@ -54,26 +58,31 @@ export function exactClipboardSerializer(getSchema) {
 }
 
 // The exact slice a canvas copy put on this paste's clipboard, or null when there
-// is none or it fails any of the four checks above.
-export function exactSliceFromClipboard(schema, event) {
+// is none or it fails any of the four checks above. `doc` is the document being
+// pasted into (its ids decide which pasted ids survive).
+export function exactSliceFromClipboard(schema, event, doc = null) {
   const data = event && event.clipboardData;
   const html = data && typeof data.getData === "function" ? data.getData("text/html") : "";
   if (!html || html.length > MAX_HTML || !html.includes(ATTR)) return null;
   try {
-    const doc = new window.DOMParser().parseFromString(html, "text/html");
-    const el = doc.querySelector(`[${ATTR}]`);
+    const parsed = new window.DOMParser().parseFromString(html, "text/html");
+    const el = parsed.querySelector(`[${ATTR}]`);
     if (!el) return null;
-    const json = JSON.parse(el.getAttribute(ATTR));
+    const raw = el.getAttribute(ATTR) || "";
+    if (raw.length > MAX_HTML) return null;
+    const json = JSON.parse(raw);
     if (!Array.isArray(json) || !json.every((n) => admissible(schema, n))) return null;
+    const taken = new Set();
+    if (doc) doc.descendants((n) => { if (n.attrs && typeof n.attrs.bpId === "string") taken.add(n.attrs.bpId); });
     const nodes = json.map((n) => {
-      const node = schema.nodeFromJSON(withoutIds(n));
+      const node = schema.nodeFromJSON(withIdsChecked(n, taken));
       node.check();
       return node;
     });
     // data-pm-slice = "<openStart> <openEnd> …context": the slice's open sides.
     // ProseMirror may wrap the first element (an <li> in a <ul>) and stamp the
     // wrapper, so read it from whichever element carries it.
-    const sliced = doc.querySelector("[data-pm-slice]");
+    const sliced = parsed.querySelector("[data-pm-slice]");
     const [openStart, openEnd] = ((sliced && sliced.getAttribute("data-pm-slice")) || "0 0").split(" ").map((n) => parseInt(n, 10) || 0);
     return new Slice(Fragment.from(nodes), Math.max(0, openStart), Math.max(0, openEnd));
   } catch (_e) {
@@ -92,6 +101,8 @@ function admissible(schema, node) {
     if (!safeAttrs(mark.attrs)) return false;
   }
   if (node.content != null && !Array.isArray(node.content)) return false;
+  // A text node has no children: one that claims some is a crafted shape.
+  if (node.type === "text" && node.content != null) return false;
   return (node.content || []).every((child) => admissible(schema, child));
 }
 
@@ -102,14 +113,19 @@ function safeAttrs(value) {
   return true;
 }
 
-// Ids never come from the clipboard: drop every bpId (the attribute's default,
-// null, applies, and the canvas mints a fresh one).
-function withoutIds(node) {
+// Keep a bpId only when it is well-formed, absent from the document and not a
+// repeat within this paste; otherwise drop it (the attribute's default, null,
+// applies, and the canvas mints a fresh id).
+function withIdsChecked(node, taken) {
   const out = { ...node };
-  if (node.attrs && typeof node.attrs === "object") {
-    const { bpId: _drop, ...attrs } = node.attrs;
+  if (node.attrs && typeof node.attrs === "object" && "bpId" in node.attrs) {
+    const { bpId, ...attrs } = node.attrs;
+    if (typeof bpId === "string" && WELL_FORMED_ID.test(bpId) && !taken.has(bpId)) {
+      taken.add(bpId);
+      attrs.bpId = bpId;
+    }
     out.attrs = attrs;
   }
-  if (Array.isArray(node.content)) out.content = node.content.map(withoutIds);
+  if (Array.isArray(node.content)) out.content = node.content.map((child) => withIdsChecked(child, taken));
   return out;
 }

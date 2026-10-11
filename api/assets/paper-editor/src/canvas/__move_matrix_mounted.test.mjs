@@ -11,7 +11,8 @@
 //   cut + paste  The cut event (ProseMirror's default, Mod+X) puts the block on
 //                the clipboard; pasting exactly what it wrote, back at the same
 //                place, restores a block of the same type whose stored form
-//                equals the original's (its id may be new).
+//                equals the original's, under its OWN id.
+//   copy + paste The original stays and the copy gets a new id.
 //   grip drag    block-handle.js: pointer drag on the grip to the end and to the
 //                start of the document.
 //   native drag  ProseMirror dragstart/drop on the editor, to the end and to the
@@ -166,6 +167,10 @@ async function cutPaste(entry, { plainOnly = false, copy = false } = {}) {
   }
   if (restored.length !== 1) {
     problems.push(`the paste did not restore it (${restored.length} matching blocks): wanted ${canonical(withoutId(baseline)).slice(0, 160)}, got ${canonical(candidates).slice(0, 200)}`);
+  } else if (restored[0].id !== TARGET) {
+    // A cut block keeps its id, so comments, backlinks and history anchored to it
+    // follow it back.
+    problems.push(`the cut block came back under a new id ${restored[0].id}`);
   }
   const lostAround = AROUND.filter((id) => !blocks.some((b) => b.id === id));
   if (lostAround.length) problems.push(`the round trip removed ${lostAround.join(",")}`);

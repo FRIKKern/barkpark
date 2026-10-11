@@ -49,7 +49,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0, 4).join(" | ")}`);
   }
 }
-const EXPECTED = 11;
+const EXPECTED = 13;
 
 const canvas = document.createElement("bp-paper-canvas");
 canvas.blocks = [
@@ -80,10 +80,18 @@ await check("a genuine canvas copy round-trips: the serializer stamps it and the
   assert.equal(slice.content.firstChild.type.name, "divider");
 });
 
-await check("ids never come from the clipboard: a bpId in the stamp is dropped", () => {
-  const slice = sliceOf([{ type: "divider", attrs: { bpId: "p1", bpType: "divider" } }]);
-  assert.ok(slice);
-  assert.equal(slice.content.firstChild.attrs.bpId, null);
+await check("ids: a well-formed id absent from the doc is kept (cut); a present, repeated or malformed id is cleared", () => {
+  const doc = editor.state.doc; // holds p1, dv, p2
+  const kept = exactSliceFromClipboard(schema, eventWith(stamped([{ type: "divider", attrs: { bpId: "cut-away-1" } }])), doc);
+  assert.equal(kept.content.firstChild.attrs.bpId, "cut-away-1", "a cut block keeps its id");
+  const present = exactSliceFromClipboard(schema, eventWith(stamped([{ type: "divider", attrs: { bpId: "dv" } }])), doc);
+  assert.equal(present.content.firstChild.attrs.bpId, null, "a copy of a block still in the doc gets a new id");
+  const twice = exactSliceFromClipboard(schema, eventWith(stamped([{ type: "divider", attrs: { bpId: "x-1" } }, { type: "divider", attrs: { bpId: "x-1" } }])), doc);
+  assert.deepEqual([twice.content.child(0).attrs.bpId, twice.content.child(1).attrs.bpId], ["x-1", null], "a repeat within the paste is cleared");
+  for (const bad of ["<b>x</b>", "a b", "", "-lead", "x".repeat(200)]) {
+    const s1 = exactSliceFromClipboard(schema, eventWith(stamped([{ type: "divider", attrs: { bpId: bad } }])), doc);
+    assert.equal(s1.content.firstChild.attrs.bpId, null, `malformed id ${JSON.stringify(bad).slice(0, 20)} kept`);
+  }
 });
 
 await check("an unknown NODE type is refused (fallback)", () => {
@@ -109,6 +117,10 @@ await check("a script-bearing attribute string is refused (fallback)", () => {
   assert.equal(sliceOf([{ type: image, attrs: { src: "https://ok.example/a.png", alt: "<img src=x onerror=alert(1)>" } }]) === null, true);
   assert.equal(sliceOf([{ type: "paragraph", attrs: { bpType: "<script>alert(1)</script>" } }]) === null, true);
   assert.ok(sliceOf([{ type: image, attrs: { src: "https://ok.example/a.png", alt: "A cover" } }]), "control: a safe image is rebuilt");
+});
+
+await check("a text node that claims children is refused (fallback)", () => {
+  assert.equal(sliceOf([{ type: "paragraph", content: [{ type: "text", text: "x", content: [{ type: "paragraph" }] }] }]) === null, true);
 });
 
 await check("content the schema refuses is refused (node.check / nodeFromJSON throw → fallback)", () => {
@@ -149,6 +161,26 @@ await check("end to end: a script-bearing stamp falls back — no javascript: UR
   await pasteAtEnd(stamped([{ type: "bpImage", attrs: { src: "javascript:alert(1)", alt: "x" } }], "<p>Safe body</p>"), "Safe body");
   assert.ok(textOf().some((t) => t.includes("Safe body")), JSON.stringify(textOf()));
   assert.ok(!JSON.stringify(editor.getJSON()).includes("javascript:"));
+});
+
+await check("a javascript: href in a link mark comes out no worse than the normal paste path (the stamp is refused, the link sanitising applies)", async () => {
+  const body = '<p><a href="javascript:alert(1)">bad link</a> and <a href="https://ok.example/">good link</a></p>';
+  const linkMark = schema.marks.link ? "link" : Object.keys(schema.marks).find((m) => /link/i.test(m));
+  assert.ok(linkMark, "the schema has a link mark");
+  const json = [{ type: "paragraph", content: [{ type: "text", text: "bad link", marks: [{ type: linkMark, attrs: { href: "javascript:alert(1)" } }] }] }];
+  assert.equal(sliceOf(json, body) === null, true, "the stamp with a javascript: href is refused");
+  const hrefs = () => [...JSON.stringify(editor.getJSON()).matchAll(/"href":"([^"]*)"/g)].map((m) => m[1]);
+  // The normal path alone, then the same body behind the crafted stamp.
+  const before = hrefs().length;
+  await pasteAtEnd(body, "bad link and good link");
+  const plainPath = hrefs().slice(before);
+  const mid = hrefs().length;
+  await pasteAtEnd(stamped(json, body), "bad link and good link");
+  const stampPath = hrefs().slice(mid);
+  // Precondition: the normal path really pastes links (else both lists are empty).
+  assert.ok(plainPath.includes("https://ok.example/"), `the normal paste landed no link: ${JSON.stringify(plainPath)}`);
+  assert.deepEqual(stampPath, plainPath, "the stamped paste did not land exactly like the normal paste");
+  assert.ok(!stampPath.some((h) => /^\s*javascript:/i.test(h)), `a javascript: href landed: ${JSON.stringify(stampPath)}`);
 });
 
 if (ran !== EXPECTED) { failures += 1; console.log(`FAIL  ran ${ran} of ${EXPECTED} checks`); }

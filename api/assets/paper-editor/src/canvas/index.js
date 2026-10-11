@@ -2448,7 +2448,7 @@ class BpPaperCanvas extends HTMLElement {
       if (policy?.plain && !isFigureSingletonCanvas(this)) return this._pastePlainText(view, _event, true);
       // The canvas's own clipboard: rebuild exactly what was copied, fitted to
       // this canvas's vocabulary like any paste (clipboard-slice.js).
-      const exact = !isFigureSingletonCanvas(this) && exactSliceFromClipboard(view.state.schema, _event);
+      const exact = !isFigureSingletonCanvas(this) && exactSliceFromClipboard(view.state.schema, _event, view.state.doc);
       if (exact) {
         const fitted = this._fitPastedSlice(exact);
         const single = fitted.openStart === 0 && fitted.openEnd === 0 && fitted.content.childCount === 1 ? fitted.content.firstChild : null;
