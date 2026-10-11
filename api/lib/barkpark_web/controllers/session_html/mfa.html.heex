@@ -3,8 +3,8 @@
   <div class="bp-auth-card">
     <.auth_brand />
 
-    <h1 class="bp-auth-title">Two-step verification</h1>
-    <p class="bp-auth-sub">Enter the six-digit code from your authenticator app.</p>
+    <h1 class="bp-auth-title"><%= gettext("Two-step verification") %></h1>
+    <p class="bp-auth-sub"><%= gettext("Enter the six-digit code from your authenticator app.") %></p>
 
     <.auth_flash flash={@flash} />
 
@@ -12,7 +12,7 @@
       <input type="hidden" name="return_to" value={@return_to} />
 
       <div class="form-group">
-        <label class="form-label" for="mfa_code">Authenticator code</label>
+        <label class="form-label" for="mfa_code"><%= gettext("Authenticator code") %></label>
         <input
           type="text"
           name="code"
@@ -27,27 +27,27 @@
       </div>
 
       <details>
-        <summary>Use a recovery code instead</summary>
+        <summary><%= gettext("Use a recovery code instead") %></summary>
         <div class="form-group">
-          <label class="form-label" for="mfa_recovery">Recovery code</label>
+          <label class="form-label" for="mfa_recovery"><%= gettext("Recovery code") %></label>
           <input
             type="text"
             name="recovery_code"
             id="mfa_recovery"
             class="form-input"
             autocomplete="off"
-            placeholder="recovery code"
+            placeholder={gettext("recovery code")}
           />
         </div>
       </details>
 
       <div style="margin-top: 16px;">
-        <button type="submit" class="bp-auth-btn">Verify</button>
+        <button type="submit" class="bp-auth-btn"><%= gettext("Verify") %></button>
       </div>
     </.form>
 
     <p class="bp-auth-foot">
-      <a href={~p"/login"}>Start over</a>
+      <a href={~p"/login"}><%= gettext("Start over") %></a>
     </p>
   </div>
 </div>
