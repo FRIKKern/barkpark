@@ -37,7 +37,7 @@ defmodule BarkparkWeb.SessionController do
   defp put_signin_locale(conn, _opts) do
     return_to = sanitize_return_to(conn.params["return_to"])
 
-    (return_to_locale(return_to) || accept_language_locale(conn) ||
+    (return_to_locale(return_to) || BarkparkWeb.AcceptLanguage.locale(conn) ||
        Barkpark.Tenancy.default_locale())
     |> BarkparkWeb.StudioLocale.put_named()
 
@@ -50,38 +50,6 @@ defmodule BarkparkWeb.SessionController do
       Barkpark.Tenancy.workspace_locale(ws)
     else
       _ -> nil
-    end
-  end
-
-  # Highest-q tag the Studio speaks; ties keep the header's order.
-  defp accept_language_locale(conn) do
-    conn
-    |> get_req_header("accept-language")
-    |> Enum.flat_map(&String.split(&1, ","))
-    |> Enum.with_index()
-    |> Enum.map(fn {part, i} ->
-      [tag | params] = part |> String.trim() |> String.split(";")
-      q = Enum.find_value(params, 1.0, &language_q/1)
-      {tag |> String.trim() |> String.downcase(), q, i}
-    end)
-    |> Enum.sort_by(fn {_tag, q, i} -> {-q, i} end)
-    |> Enum.find_value(fn {tag, q, _i} -> q > 0 and supported_language(tag) end)
-  end
-
-  defp language_q(param) do
-    with ["q", value] <- param |> String.trim() |> String.split("=", parts: 2),
-         {q, _} <- Float.parse(value) do
-      q
-    else
-      _ -> nil
-    end
-  end
-
-  defp supported_language(tag) do
-    cond do
-      Regex.match?(~r/^(nb|no|nn)(-|$)/, tag) -> "nb-NO"
-      Regex.match?(~r/^en(-|$)/, tag) -> "en"
-      true -> nil
     end
   end
 

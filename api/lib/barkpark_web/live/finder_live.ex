@@ -49,7 +49,11 @@ defmodule BarkparkWeb.FinderLive do
   @graph_node_per_type_limit 1000
 
   @impl true
-  def mount(params, _session, socket) do
+  def mount(params, session, socket) do
+    # The browser's language (lead ruling, run 8), stored by the
+    # BarkparkWeb.AcceptLanguage plug on the static request: the connected
+    # mount cannot read Accept-Language itself.
+    session |> BarkparkWeb.AcceptLanguage.from_session() |> BarkparkWeb.StudioLocale.put_named()
     dataset = sanitize_dataset(params["dataset"])
 
     # THE PUBLIC TENANT, resolved ONCE (task-f9c30aa28c64f24a). This LiveView is
@@ -91,7 +95,7 @@ defmodule BarkparkWeb.FinderLive do
     socket =
       socket
       |> assign(
-        page_title: "Search — Barkpark",
+        page_title: gettext("Search — Barkpark"),
         dataset: dataset,
         # The pinned public tenant every read below threads (or `nil` → empty
         # page). Assigned, not re-resolved per event: it cannot change within a
@@ -333,17 +337,17 @@ defmodule BarkparkWeb.FinderLive do
       >
       </div>
       <section class="bp-finder-panel">
-        <p class="bp-finder-eyebrow">Search</p>
-        <h1>Search everything.</h1>
+        <p class="bp-finder-eyebrow">{gettext("Search")}</p>
+        <h1>{gettext("Search everything.")}</h1>
         <form phx-change="search" phx-submit="search" autocomplete="off">
           <input
             type="search"
             name="q"
             value={@q}
-            placeholder="Search everything…"
+            placeholder={gettext("Search everything…")}
             phx-debounce="150"
             autofocus
-            aria-label="Search"
+            aria-label={gettext("Search")}
             class="bp-finder-input"
           />
         </form>
@@ -360,9 +364,11 @@ defmodule BarkparkWeb.FinderLive do
           </li>
         </ol>
         <p class="bp-finder-count">
-          {@document_count} documents · live search served by Phoenix · {if @q != "",
+          {ngettext("1 document", "%{count} documents", @document_count)} · {gettext(
+            "live search served by Phoenix"
+          )} · {if @q != "",
             do: hit_summary(@hit_count, length(@hits)),
-            else: "type to search"}<span :if={@graph_truncated}> · graph truncated ({@graph_truncation_reason})</span>
+            else: gettext("type to search")}<span :if={@graph_truncated}> · {gettext("graph truncated (%{reason})", reason: @graph_truncation_reason)}</span>
         </p>
       </section>
     </main>
@@ -391,8 +397,10 @@ defmodule BarkparkWeb.FinderLive do
   # rows and offers no pagination — so "437 hits" beside 12 rows read as a
   # rendering bug. Say which is which. Under the limit the wording is unchanged,
   # which is what the existing spec pins.
-  defp hit_summary(total, shown) when total > shown, do: "showing #{shown} of #{total} hits"
-  defp hit_summary(total, _shown), do: "#{total} hits"
+  defp hit_summary(total, shown) when total > shown,
+    do: gettext("showing %{shown} of %{total} hits", shown: shown, total: total)
+
+  defp hit_summary(total, _shown), do: ngettext("1 hit", "%{count} hits", total)
 
   defp sanitize_dataset(raw) do
     case to_string(raw || "") do

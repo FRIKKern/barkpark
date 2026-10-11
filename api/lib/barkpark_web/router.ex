@@ -1911,6 +1911,12 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :public_root)
   end
 
+  # A public page with no workspace speaks the browser's language (the finder;
+  # lead ruling, run 8). See BarkparkWeb.AcceptLanguage.
+  pipeline :accept_locale do
+    plug(BarkparkWeb.AcceptLanguage)
+  end
+
   # ── Public finder (LiveView) — the flagship search, Phoenix-native ──────
   # search-template W3: the same premium experience the Next/Astro starters
   # ship, as pure LiveView — per-keystroke search round-trips into the same
@@ -1918,7 +1924,7 @@ defmodule BarkparkWeb.Router do
   # topology into the shared Canvas2D renderer. Same public pipeline + reader
   # layout as the flat /papers reader it links into.
   scope "/", BarkparkWeb do
-    pipe_through([:browser, :paper_reader_csp])
+    pipe_through([:browser, :paper_reader_csp, :accept_locale])
 
     # LiveMeter: the socket half of the :browser meter (charter D4 Gate B),
     # shadow-only — hooked here so finder_live.ex itself is untouched.

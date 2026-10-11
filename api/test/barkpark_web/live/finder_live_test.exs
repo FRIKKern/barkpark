@@ -61,7 +61,7 @@ defmodule BarkparkWeb.FinderLiveTest do
     # whatever the fixture stored — the slug here — so assert the semantics,
     # not the fixture's cosmetics.)
     assert html =~ ~s(href="/papers/finder-sentinel-alpha")
-    assert html =~ "1 hits"
+    assert html =~ ~r/\b1 hit\b/
   end
 
   test "an empty query clears hits instead of erroring", %{conn: conn} do
