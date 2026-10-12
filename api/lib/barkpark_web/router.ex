@@ -273,8 +273,8 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
-  # task-db8de40bbc928c54 — byte-identical to :scoped_api, ONE line swapped:
-  # RateLimit runs with `class: :presence_focus` instead of the bare
+  # task-db8de40bbc928c54 — :scoped_api with two lines swapped: the credential
+  # step (`scoped_presence_credential`) and RateLimit, with `class: :presence_focus` instead of the bare
   # method-verb classification every other :scoped_api route gets. Without
   # this, `POST .../presence/:dataset/focus` (a POST, so `method_class/1`
   # bills it :write) shared the SAME write bucket #22206 raised for a
@@ -293,7 +293,7 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit, class: :presence_focus)
-    plug(:scoped_api_optional_credential)
+    plug(:scoped_presence_credential)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
@@ -1104,6 +1104,31 @@ defmodule BarkparkWeb.Router do
     # RequireBearerOrSessionToken always assigns :api_token on success, so the
     # permits?(:write) check has a principal. Mirrors the doc :mutate gate.
     plug(BarkparkWeb.Plugs.RequireWritePermission)
+  end
+
+  # task-cc6ad07a8aa36338 — the scoped editor streams (listen, presence and
+  # presence's focus/leave): an API token, or a member's login session as the
+  # bearer. See `Plugs.RequireTokenOrMemberSession`: it reads what
+  # `OptionalSessionToken` (#22764) and `ResolveWorkspace` already decided and
+  # adds no resolver of its own; an API token takes the `:require_token` chain
+  # unchanged.
+  pipeline :require_token_or_member_session do
+    plug(BarkparkWeb.Plugs.RequireTokenOrMemberSession)
+  end
+
+  # Credential resolution for presence's focus/leave (POST/DELETE): as
+  # `:scoped_api_optional_credential`, except that a request carrying a Bearer
+  # also resolves through `OptionalSessionToken`, so a login-session bearer is
+  # read as one (#22764's resolver). A bearer is not an ambient credential; a
+  # cookie-only write still needs the CSRF header exactly as before.
+  defp scoped_presence_credential(%Plug.Conn{} = conn, opts) do
+    if match?(["Bearer " <> _], Plug.Conn.get_req_header(conn, "authorization")) do
+      conn
+      |> Plug.Conn.fetch_session()
+      |> BarkparkWeb.Plugs.OptionalSessionToken.call(strict_on_presented: true)
+    else
+      scoped_api_optional_credential(conn, opts)
+    end
   end
 
   # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
@@ -3676,13 +3701,6 @@ defmodule BarkparkWeb.Router do
     # parity with the rest of this block.
     get("/v1/codelists/:codelist_id", CodelistController, :show)
 
-    get("/v1/data/listen/:dataset", ListenController, :listen)
-    # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
-    # GET rides this read pipeline; the POST moves to its own scope right
-    # below (task-db8de40bbc928c54) so it gets the presence_focus rate
-    # class rather than the generic write bucket. Scoped only: the room is
-    # workspace + project.
-    get("/v1/data/presence/:dataset", PresenceController, :stream)
     get("/v1/data/export/:dataset", ExportController, :export)
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
@@ -3697,12 +3715,27 @@ defmodule BarkparkWeb.Router do
     get("/v1/papers/:slug/fleet-blocks", PaperFleetBlocksController, :show)
   end
 
-  # task-db8de40bbc928c54 — the presence-focus POST, split out of the scoped
-  # reads above into its own rate class. Still :require_token (same auth as
-  # its GET sibling); `:scoped_api_presence_focus` differs from `:scoped_api`
-  # in ONE line, the RateLimit class — see that pipeline's comment.
+  # The editor streams: an API token or a member's login-session bearer
+  # (task-cc6ad07a8aa36338, `:require_token_or_member_session`). A signed-in
+  # editor's studio joins presence and listens with their own session.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through([:scoped_api_presence_focus, :require_token])
+    pipe_through([:scoped_api, :require_token_or_member_session])
+
+    get("/v1/data/listen/:dataset", ListenController, :listen)
+    # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
+    # GET rides this read pipeline; the POST moves to its own scope right
+    # below (task-db8de40bbc928c54) so it gets the presence_focus rate
+    # class rather than the generic write bucket. Scoped only: the room is
+    # workspace + project.
+    get("/v1/data/presence/:dataset", PresenceController, :stream)
+  end
+
+  # task-db8de40bbc928c54 — the presence-focus POST, split out of the scoped
+  # reads above into its own rate class, with the same credentials as its GET
+  # sibling; `:scoped_api_presence_focus` differs from `:scoped_api` in its
+  # RateLimit class and in reading a login-session bearer on a write.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api_presence_focus, :require_token_or_member_session])
 
     post("/v1/data/presence/:dataset/focus", PresenceController, :focus)
     # task-936472b77285df5b — explicit leave, same rate class and pipeline
