@@ -446,8 +446,21 @@ defmodule BarkparkWeb.ListenController do
   # stream's workspace, is it still one? A failure writes one `unauthorized`
   # frame and ends the stream. A grant-admitted caller is held to token
   # liveness; its grant narrowing is the read path's job.
+  #
+  # A member's login-session bearer (task-cc6ad07a8aa36338) is held to the same
+  # two questions: does the bearer still verify as that user's session (logout,
+  # expiry and the org session policy, through `Accounts.verify_user_session/1`,
+  # #22764's resolver), and is the user still a member?
   defp arm_reauth(conn, workspace_id) do
-    case conn.assigns[:api_token] do
+    case conn.assigns[:api_token] || member_session_bearer(conn) do
+      {:session, raw, user_id} ->
+        put_private(conn, :listen_reauth, %{
+          session: raw,
+          user_id: user_id,
+          workspace_id: workspace_id,
+          checked_at: System.monotonic_time(:millisecond)
+        })
+
       %Barkpark.Auth.ApiToken{} = token ->
         member? =
           is_binary(workspace_id) and
@@ -485,9 +498,31 @@ defmodule BarkparkWeb.ListenController do
 
   defp reauth_step(conn), do: {:ok, conn}
 
+  defp still_authorized?(%{session: raw, user_id: user_id, workspace_id: ws_id}) do
+    case Barkpark.Accounts.verify_user_session(raw) do
+      {%Barkpark.Accounts.User{id: ^user_id} = user, _session} ->
+        is_binary(ws_id) and Barkpark.Tenancy.Auth.authorize(user, ws_id, :read) == :ok
+
+      _ ->
+        false
+    end
+  end
+
   defp still_authorized?(%{token: token, workspace_id: ws_id, member?: member?}) do
     Barkpark.Auth.token_live?(token) and
       (not member? or Barkpark.Tenancy.Auth.authorize(token, ws_id, :read) == :ok)
+  end
+
+  # Only the caller `RequireTokenOrMemberSession` admits by session: a member,
+  # with the session as the bearer.
+  defp member_session_bearer(%Plug.Conn{assigns: assigns} = conn) do
+    with true <- assigns[:member_user] == true and assigns[:current_user_via] == :bearer,
+         %Barkpark.Accounts.User{id: user_id} <- assigns[:current_user],
+         ["Bearer " <> raw] <- get_req_header(conn, "authorization") do
+      {:session, String.trim(raw), user_id}
+    else
+      _ -> nil
+    end
   end
 
   defp reauth_interval_ms,

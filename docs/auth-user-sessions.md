@@ -64,7 +64,10 @@ workspace_required` listing them.
   `GET /v1/auth/token` answers a session bearer with `kind: "session"` and every
   seat (`can.read/write/publish/admin`, `publish` = `write`). A member seat
   writes, as in LiveView Studio; a member's self-minted PAT stays `["read"]`
-  (`Auth.max_pat_permissions_for_role/1`, a minting policy).
+  (`Auth.max_pat_permissions_for_role/1`, a minting policy). The scoped
+  listen and presence streams take it too, from a member only and as the
+  bearer only (`RequireTokenOrMemberSession`); listen re-checks the session
+  and the seat mid-stream. The flat listen stays API-token only.
 - **Kill switch.** `revoked_at` is set by `revoke_user_session_token/1`
   (single logout) and `revoke_all_user_sessions/1` (sign-out-everywhere).
 
