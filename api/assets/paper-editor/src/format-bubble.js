@@ -17,6 +17,7 @@
 // the patch-block op shape, the slash menu, or the keyboard path.
 
 import { t } from "./i18n.js";
+import { safeUrl } from "./safe-url.js";
 
 // TipTap's toggle command per mark. The bubble's buttons and the canvas's toolbar
 // commands (canvas/host-commands.js) both toggle through applyMark and set links
@@ -47,11 +48,24 @@ export function applyMark(editor, name) {
   return can ? editor.chain().focus()[cmd]().run() : false;
 }
 
-// Set the link over the selection's whole link range; an empty href clears it.
+// The href a link may carry, or null: the reader's allowlist (safe-url.js: http, https,
+// mailto, tel, a relative or in-document address, "#"), so a javascript: or data: link
+// never lands, whether the bubble or a host toolbar sets it.
+export function linkHref(rawHref) {
+  if (typeof rawHref !== "string") return null;
+  const href = rawHref.trim();
+  if (href === "") return null;
+  const safe = safeUrl(href);
+  return safe !== "#" || href === "#" ? safe : null;
+}
+
+// Set the link over the selection's whole link range; an empty href clears it, and an
+// href off the allowlist does nothing (false).
 export function applyLink(editor, rawHref) {
-  const href = typeof rawHref === "string" ? rawHref.trim() : "";
   const chain = editor.chain().focus().extendMarkRange("link");
-  return href ? chain.setLink({ href }).run() : chain.unsetLink().run();
+  if (typeof rawHref !== "string" || rawHref.trim() === "") return chain.unsetLink().run();
+  const href = linkHref(rawHref);
+  return href ? chain.setLink({ href }).run() : false;
 }
 
 export class FormatBubble {

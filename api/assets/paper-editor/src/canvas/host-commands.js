@@ -17,7 +17,7 @@
 
 import { allowedBlockTypes, allowedHeadingLevels, markAllowed, quoteTypeFor, pdTypeOf } from "./vocabulary.js";
 import { topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
-import { applyLink, applyMark, markToggle } from "../format-bubble.js";
+import { applyLink, applyMark, linkHref, markToggle } from "../format-bubble.js";
 
 // Portable-doc mark names (the contract's) → the canvas's TipTap marks.
 export const TOOLBAR_MARKS = {
@@ -68,7 +68,10 @@ export function canToggleMark(editor, mark, href, vocab) {
   if (!name || !markAllowed(name, vocab)) return false;
   if (name !== "link") return canRun(editor, markToggle(name));
   // A link needs an href to set, or one in place to clear.
-  if (typeof href === "string" && href.trim()) return !editor.state.selection.empty && canRun(editor, "setLink", { href: href.trim() });
+  if (typeof href === "string" && href.trim()) {
+    const safe = linkHref(href);
+    return !!safe && !editor.state.selection.empty && canRun(editor, "setLink", { href: safe });
+  }
   return editor.isActive("link");
 }
 

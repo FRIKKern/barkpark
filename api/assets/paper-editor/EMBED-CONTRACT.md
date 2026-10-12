@@ -205,7 +205,7 @@ less than 500 ms apart group into one undo step, as typing does.
 
 | Method | Effect |
 |---|---|
-| `toggleMark(mark, { href }?)` | `mark`: `strong`, `em`, `code`, `underline`, `strike`, `highlight`, `link`. `link` with an `href` sets the link over the selection's link range; without one it clears the link there |
+| `toggleMark(mark, { href }?)` | `mark`: `strong`, `em`, `code`, `underline`, `strike`, `highlight`, `link`. `link` with an `href` sets the link over the selection's link range; without one it clears the link there. Only the reader's allowlist links (`http`, `https`, `mailto`, `tel`, a relative or in-document address, `#`): anything else (`javascript:`, `data:`, a protocol-relative `//`) returns `false`, `can()` is `false`, and the format bubble's link row refuses it the same way |
 | `setBlockStyle(style)` | `normal`, `h1`–`h6`, `blockquote`. A quote keeps the block's id and text; in a field canvas it is the quote kind the field admits (its pullquote when `blockquote` maps there), as `> ` makes |
 | `toggleList(kind)` | `bullet` or `number`. Off a list: makes one. In a list of the other kind: converts it, keeping the list's id. In a list of that kind: lifts the item out |
 | `insertBlock(type, { level }?)` | any type the canvas's slash menu offers here (narrowed to the field's vocabulary). Inserts after the caret's block, an empty paragraph is replaced; a declared object block opens its fields first, a type the host builds on the server emits `bp-server-insert` |

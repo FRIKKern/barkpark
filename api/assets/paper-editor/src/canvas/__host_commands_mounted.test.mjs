@@ -138,6 +138,32 @@ try {
   editor.commands.undo();
   await undoesInOneStep(editor, beforeLink);
 
+  // Only the reader's allowlist links: a script or data address leaves no link mark,
+  // can() refuses it, and the selection's text is unchanged. Allowed addresses still link.
+  for (const bad of ["javascript:alert(1)", " JAVASCRIPT:alert(1)", "data:text/html,<script>alert(1)</script>", "java\tscript:alert(1)", "//evil.example/x"]) {
+    selectText(editor, "world");
+    const before = editor.getJSON();
+    assert.equal(canvas.can("toggleMark", { mark: "link", href: bad }), false, `can() refuses ${JSON.stringify(bad)}`);
+    assert.equal(canvas.toggleMark("link", { href: bad }), false, `toggleMark refuses ${JSON.stringify(bad)}`);
+    assert.equal(editor.isActive("link"), false, `no link mark for ${JSON.stringify(bad)}`);
+    assert.deepEqual(editor.getJSON(), before, `the doc is unchanged for ${JSON.stringify(bad)}`);
+  }
+  // The format bubble's link row sets links through the same applyLink.
+  selectText(editor, "world");
+  const beforeBubble = editor.getJSON();
+  assert.ok(canvas._bubble, "the canvas has its format bubble");
+  canvas._bubble._applyLink(" JAVASCRIPT:alert(1)");
+  assert.equal(editor.isActive("link"), false, "the bubble's link row refuses a script address too");
+  assert.deepEqual(editor.getJSON(), beforeBubble);
+  for (const good of ["https://example.com/b", "mailto:a@example.com", "tel:+4712345678", "/papers/x", "#top"]) {
+    selectText(editor, "world");
+    const before = editor.getJSON();
+    assert.equal(canvas.can("toggleMark", { mark: "link", href: good }), true, `can() allows ${good}`);
+    assert.equal((await opsAfter(batches, () => canvas.toggleMark("link", { href: good }))).result, true, `toggleMark links ${good}`);
+    assert.deepEqual(canvas.state().link, { href: good }, `the link is ${good}`);
+    await undoesInOneStep(editor, before);
+  }
+
   // setBlockStyle: h2, back to normal, blockquote (same block id, text kept).
   select(editor, posOfText(editor, "Second") + 2);
   let doc = editor.getJSON();
