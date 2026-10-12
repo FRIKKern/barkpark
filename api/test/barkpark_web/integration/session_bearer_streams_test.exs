@@ -193,6 +193,16 @@ defmodule BarkparkWeb.Integration.SessionBearerStreamsTest do
       assert request(conn, ctx.listen).status in [401, 403]
     end
 
+    test "a cookie-only presence write without the CSRF header is refused", ctx do
+      resp =
+        scoped_conn()
+        |> Plug.Test.init_test_session(%{"user_session" => ctx.session})
+        |> put_req_header("content-type", "application/json")
+        |> post(ctx.presence <> "/focus", Jason.encode!(%{sessionId: "cc6-c", field: "title"}))
+
+      assert resp.status in [401, 403], resp.resp_body
+    end
+
     test "the flat listen stays API-token only", ctx do
       assert request(bearer(ctx.session), "/v1/data/listen/#{@ds}").status == 401
     end

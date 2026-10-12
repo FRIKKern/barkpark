@@ -28,19 +28,21 @@ defmodule BarkparkWeb.Plugs.RequireTokenOrMemberSession do
 
   alias BarkparkWeb.Plugs.{PublicRead, RequireToken, RequireWriteForMutation}
 
+  @doc """
+  The plugs an API token runs here, in order: router.ex's `pipeline
+  :require_token`, plug for plug. `RequireTokenOrMemberSessionTest` fails if
+  the two ever differ.
+  """
+  def token_chain, do: [RequireToken, PublicRead, RequireWriteForMutation]
+
   def init(opts), do: opts
 
   def call(%Plug.Conn{assigns: assigns} = conn, _opts) do
     if member_session?(assigns) do
       conn
     else
-      [
-        {RequireToken, RequireToken.init([])},
-        {PublicRead, PublicRead.init([])},
-        {RequireWriteForMutation, RequireWriteForMutation.init([])}
-      ]
-      |> Enum.reduce_while(conn, fn {plug, opts}, conn ->
-        case plug.call(conn, opts) do
+      Enum.reduce_while(token_chain(), conn, fn plug, conn ->
+        case plug.call(conn, plug.init([])) do
           %Plug.Conn{halted: true} = halted -> {:halt, halted}
           conn -> {:cont, conn}
         end
