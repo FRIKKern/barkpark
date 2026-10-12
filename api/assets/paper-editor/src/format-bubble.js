@@ -18,6 +18,42 @@
 
 import { t } from "./i18n.js";
 
+// TipTap's toggle command per mark. The bubble's buttons and the canvas's toolbar
+// commands (canvas/host-commands.js) both toggle through applyMark and set links
+// through applyLink, so a press is the same transaction whichever surface made it.
+const TOGGLE = {
+  bold: "toggleBold",
+  italic: "toggleItalic",
+  code: "toggleCode",
+  underline: "toggleUnderline",
+  strike: "toggleStrike",
+  highlight: "toggleHighlight",
+  subscript: "toggleSubscript",
+  superscript: "toggleSuperscript",
+};
+
+export const markToggle = (name) => TOGGLE[name] || null;
+
+// Toggle a mark over the selection; false when this editor has no such mark or it
+// cannot apply here.
+export function applyMark(editor, name) {
+  const cmd = TOGGLE[name];
+  let can = false;
+  try {
+    can = !!cmd && editor.can()[cmd]?.() === true;
+  } catch (_e) {
+    can = false;
+  }
+  return can ? editor.chain().focus()[cmd]().run() : false;
+}
+
+// Set the link over the selection's whole link range; an empty href clears it.
+export function applyLink(editor, rawHref) {
+  const href = typeof rawHref === "string" ? rawHref.trim() : "";
+  const chain = editor.chain().focus().extendMarkRange("link");
+  return href ? chain.setLink({ href }).run() : chain.unsetLink().run();
+}
+
 export class FormatBubble {
   constructor({ editor }) {
     this._editor = editor;
@@ -238,25 +274,13 @@ export class FormatBubble {
     if (!this._editor) return;
     switch (name) {
       case "bold":
-        this._editor.chain().focus().toggleBold().run();
-        break;
       case "italic":
-        this._editor.chain().focus().toggleItalic().run();
-        break;
       case "strike":
-        this._editor.chain().focus().toggleStrike().run();
-        break;
       case "underline":
-        if (this._editor.can().toggleUnderline?.()) this._editor.chain().focus().toggleUnderline().run();
-        break;
       case "highlight":
-        if (this._editor.can().toggleHighlight?.()) this._editor.chain().focus().toggleHighlight().run();
-        break;
       case "subscript":
-        if (this._editor.can().toggleSubscript?.()) this._editor.chain().focus().toggleSubscript().run();
-        break;
       case "superscript":
-        if (this._editor.can().toggleSuperscript?.()) this._editor.chain().focus().toggleSuperscript().run();
+        applyMark(this._editor, name);
         break;
       case "align-left":
       case "align-center":
@@ -273,7 +297,7 @@ export class FormatBubble {
         break;
       }
       case "code":
-        this._editor.chain().focus().toggleCode().run();
+        applyMark(this._editor, name);
         break;
       case "link":
         this._toggleLinkRow();
@@ -320,13 +344,7 @@ export class FormatBubble {
   // Apply (or, on empty input, clear) the link mark over the selection's full
   // mark range, then refocus the editor.
   _applyLink(rawHref) {
-    const href = (rawHref || "").trim();
-    const chain = this._editor.chain().focus().extendMarkRange("link");
-    if (href.length === 0) {
-      chain.unsetLink().run();
-    } else {
-      chain.setLink({ href }).run();
-    }
+    applyLink(this._editor, rawHref);
     this._closeLinkRow(false);
     this._syncPressed();
   }
