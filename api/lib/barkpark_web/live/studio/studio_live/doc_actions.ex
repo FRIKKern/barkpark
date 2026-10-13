@@ -41,7 +41,11 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     assigns = socket_to_assigns(socket_or_assigns)
     ctx = doc_actions_ctx(assigns)
     baseline = default_doc_actions(assigns, ctx)
-    Barkpark.Plugins.Registry.collect_doc_actions(baseline: baseline, ctx: ctx)
+    disabled = Barkpark.Plugins.Registry.ResolverChain.disabled_action_names(ctx)
+
+    [baseline: baseline, ctx: ctx]
+    |> Barkpark.Plugins.Registry.collect_doc_actions()
+    |> Enum.reject(&MapSet.member?(disabled, &1["name"]))
   end
 
   defp socket_to_assigns(%{assigns: assigns}), do: assigns
@@ -455,6 +459,16 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   def dispatch_action(socket, name, doc_id, dataset, mode) do
     ctx = action_handler_ctx(socket, doc_id, dataset)
 
+    # The plugin that owns this action is off in this workspace: not listed,
+    # so not dispatchable either (task-a11fcaa6d46a5fa4).
+    if MapSet.member?(Barkpark.Plugins.Registry.ResolverChain.disabled_action_names(ctx), name) do
+      {:error, {:plugin_disabled, name}}
+    else
+      dispatch_enabled(ctx, name, doc_id, dataset, mode)
+    end
+  end
+
+  defp dispatch_enabled(ctx, name, doc_id, dataset, mode) do
     handlers =
       Barkpark.Plugins.Registry.collect_action_handlers(
         baseline: default_action_handlers(ctx),
@@ -518,6 +532,8 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       doc_id: doc_id,
       doc_type: socket.assigns[:editor_type],
       doc: socket.assigns[:editor_doc],
+      # Whose plugin enablement gates the dispatch (task-a11fcaa6d46a5fa4).
+      workspace_id: workspace_id_from_assigns(socket.assigns),
       # barkpark-zdvi — the tenancy scope of the dispatching Studio session.
       # Resolver plugins (OnixEdit) close over this so a scope-aware action
       # (publish/dry-run) reads only THIS workspace/project's document and
@@ -557,6 +573,12 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
 
   def format_action_error(:not_a_book),
     do: gettext("This action works on book documents only")
+
+  def format_action_error({:plugin_disabled, name}),
+    do:
+      gettext("Action %{name} belongs to a plugin that is turned off in this workspace",
+        name: name
+      )
 
   def format_action_error({:unknown_action, name}),
     do: gettext("Unknown action: %{name}", name: name)

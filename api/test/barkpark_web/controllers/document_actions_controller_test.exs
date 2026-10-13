@@ -288,6 +288,72 @@ defmodule BarkparkWeb.DocumentActionsControllerTest do
     end
   end
 
+  # task-a11fcaa6d46a5fa4 — a schema action whose plugin is turned off in the
+  # workspace is neither listed nor dispatchable.
+  describe "a schema action whose plugin is off in the workspace" do
+    defp action_names(conn, raw, path),
+      do:
+        conn
+        |> as(raw)
+        |> get(path)
+        |> json_response(200)
+        |> Map.fetch!("actions")
+        |> Enum.map(& &1["name"])
+
+    defp dispatch(raw, path, mode) do
+      scoped_conn()
+      |> as(raw)
+      |> put_req_header("content-type", "application/json")
+      |> post(path, Jason.encode!(%{"mode" => mode}))
+    end
+
+    test "enabled (the default): listed and dispatchable" do
+      %{ws: ws, proj: proj, raw: raw} = admin_setup!()
+      path = actions_path(ws, proj, create_post!(ws, proj, "pd-on").doc_id)
+
+      assert "stub-ok" in action_names(scoped_conn(), raw, path)
+
+      assert json_response(dispatch(raw, path <> "/stub-ok", "dryrun"), 200)["preview"]["kind"] ==
+               "xml"
+    end
+
+    test "disabled: not listed, and a dispatch answers 422 plugin_disabled in both modes" do
+      %{ws: ws, proj: proj, raw: raw} = admin_setup!()
+
+      {:ok, _} =
+        Tenancy.set_workspace_plugin_settings(ws.id, %{
+          "stub-action-plugin" => %{"enabled" => false}
+        })
+
+      path = actions_path(ws, proj, create_post!(ws, proj, "pd-off").doc_id)
+
+      names = action_names(scoped_conn(), raw, path)
+      refute "stub-ok" in names
+      refute "stub-fail-dryrun" in names
+      assert "duplicate-doc" in names
+
+      for mode <- ["dryrun", "real"] do
+        body = json_response(dispatch(raw, path <> "/stub-ok", mode), 422)
+        assert body["error"]["code"] == "plugin_disabled"
+        assert body["error"]["message"] =~ "turned off in this workspace"
+      end
+    end
+
+    test "a token from another workspace neither lists nor dispatches" do
+      %{ws: ws, proj: proj} = admin_setup!()
+      %{raw: other} = admin_setup!()
+      path = actions_path(ws, proj, create_post!(ws, proj, "pd-x").doc_id)
+
+      list = scoped_conn() |> as(other) |> get(path)
+      assert list.status in [401, 403, 404]
+      refute Map.has_key?(Jason.decode!(list.resp_body), "actions")
+
+      run = dispatch(other, path <> "/stub-ok", "real")
+      assert run.status in [401, 403, 404]
+      refute Map.has_key?(Jason.decode!(run.resp_body), "result")
+    end
+  end
+
   describe "draft-first targeting" do
     test "a bare id resolving to its OWN open draft lists the draft's actions, " <>
            "and the draft's published twin is visible to the resolver (discard-draft offered)" do
