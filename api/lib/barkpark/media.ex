@@ -70,6 +70,11 @@ defmodule Barkpark.Media do
       the same dataset and workspace return `{:existing, file}` and store
       nothing (task-b6e57c37f6928344). Off by default: a caller that owns its
       file's lifecycle (a ticket attachment) must never share one.
+    * `:source_id` — the id the file had in the system it was imported from,
+      such as a Sanity asset id (task-0bc9247eca1bd741). When a file in the
+      same dataset and workspace already carries it, the upload returns
+      `{:existing, file}` and stores nothing, so a re-run import is
+      idempotent. A dedupe hit with no `source_id` of its own takes this one.
 
   Every new row stores the SHA-1 of its bytes in `sha1`.
   """
@@ -152,13 +157,15 @@ defmodule Barkpark.Media do
                mime_type: mime_type,
                size: size,
                dataset: dataset,
-               sha1: sha1
+               sha1: sha1,
+               source_id: Keyword.get(opts, :source_id)
              },
              opts
            ) do
-      case Keyword.get(opts, :dedupe, false) && find_duplicate(attrs) do
+      case find_by_source_id(attrs) ||
+             (Keyword.get(opts, :dedupe, false) && find_duplicate(attrs)) do
         %MediaFile{} = existing ->
-          {:existing, existing}
+          {:existing, adopt_source_id(existing, attrs.source_id)}
 
         _ ->
           persist_upload(
@@ -274,32 +281,68 @@ defmodule Barkpark.Media do
   end
 
   # An earlier file with the same bytes in the SAME dataset and workspace
-  # (task-b6e57c37f6928344). Never across a workspace: a NULL workspace only
-  # matches a NULL workspace, and a resolved dataset_id is matched exactly (a
-  # pre-tenancy row with no dataset_id matches on the dataset slug instead).
-  # The oldest match wins, so repeats keep answering with one id. Two
+  # (task-b6e57c37f6928344). The oldest match wins, so repeats keep answering with one id. Two
   # concurrent first uploads of the same bytes can both insert: there is no
   # unique index, by design, because rows born before the column are NULL.
   defp find_duplicate(%{sha1: sha1} = attrs) when is_binary(sha1) do
-    query =
-      from(m in MediaFile, where: m.sha1 == ^sha1, order_by: [asc: m.inserted_at], limit: 1)
+    from(m in MediaFile, where: m.sha1 == ^sha1, order_by: [asc: m.inserted_at], limit: 1)
+    |> same_dataset_and_workspace(attrs)
+    |> Repo.one()
+  end
 
+  defp find_duplicate(_attrs), do: nil
+
+  # A file that already carries the upload's `source_id` in the same dataset
+  # and workspace (task-0bc9247eca1bd741).
+  defp find_by_source_id(%{source_id: source_id} = attrs) when is_binary(source_id) do
+    from(m in MediaFile, where: m.source_id == ^source_id, limit: 1)
+    |> same_dataset_and_workspace(attrs)
+    |> Repo.one()
+  end
+
+  defp find_by_source_id(_attrs), do: nil
+
+  # Never across a workspace: a NULL workspace only matches a NULL workspace,
+  # and a resolved dataset_id is matched exactly (a pre-tenancy row with no
+  # dataset_id matches on the dataset slug instead).
+  defp same_dataset_and_workspace(query, attrs) do
     query =
       case Map.get(attrs, :dataset_id) do
         nil -> where(query, [m], is_nil(m.dataset_id) and m.dataset == ^attrs.dataset)
         dataset_id -> where(query, [m], m.dataset_id == ^dataset_id)
       end
 
-    query =
-      case Map.get(attrs, :workspace_id) do
-        nil -> where(query, [m], is_nil(m.workspace_id))
-        workspace_id -> where(query, [m], m.workspace_id == ^workspace_id)
-      end
-
-    Repo.one(query)
+    case Map.get(attrs, :workspace_id) do
+      nil -> where(query, [m], is_nil(m.workspace_id))
+      workspace_id -> where(query, [m], m.workspace_id == ^workspace_id)
+    end
   end
 
-  defp find_duplicate(_attrs), do: nil
+  # A dedupe hit with no source id of its own takes the upload's. One that
+  # already has a different id keeps it: the bytes are the same file, and the
+  # sha1 lookup still finds it.
+  defp adopt_source_id(%MediaFile{source_id: nil} = file, source_id) when is_binary(source_id) do
+    case set_source_id(file, source_id) do
+      {:ok, file} -> file
+      {:error, _} -> file
+    end
+  end
+
+  defp adopt_source_id(file, _source_id), do: file
+
+  @doc """
+  Set (or, with `nil`, clear) the `source_id` of a media file: the id it had
+  in the system it was imported from, such as a Sanity asset id
+  (task-0bc9247eca1bd741). Returns `{:error, changeset}` when the id is
+  malformed or already names another file in the dataset.
+  """
+  @spec set_source_id(MediaFile.t(), String.t() | nil) ::
+          {:ok, MediaFile.t()} | {:error, Ecto.Changeset.t()}
+  def set_source_id(%MediaFile{} = file, source_id) do
+    file
+    |> MediaFile.source_id_changeset(source_id)
+    |> Repo.update()
+  end
 
   defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata) do
     # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
@@ -755,6 +798,44 @@ defmodule Barkpark.Media do
   def get_file_by_path(relative_path, opts \\ []) when is_binary(relative_path) do
     MediaFile
     |> where([m], m.path == ^relative_path)
+    |> scoped_one(opts)
+  end
+
+  @doc """
+  Get a media file in `dataset` by its `source_id`, the id it had in the
+  system it was imported from. Scoped like `get_file_by_path/2`.
+  """
+  @spec get_file_by_source_id(String.t(), String.t(), keyword()) ::
+          {:ok, MediaFile.t()} | {:error, :not_found}
+  def get_file_by_source_id(source_id, dataset, opts \\ [])
+      when is_binary(source_id) and is_binary(dataset) do
+    from(m in MediaFile,
+      where: m.source_id == ^source_id and m.dataset == ^dataset,
+      order_by: [asc: m.inserted_at],
+      limit: 1
+    )
+    |> scoped_one(opts)
+  end
+
+  @doc """
+  Get the oldest media file in `dataset` whose stored bytes hash to `sha1`.
+  Scoped like `get_file_by_path/2`. Rows with no `sha1` yet never match.
+  """
+  @spec get_file_by_sha1(String.t(), String.t(), keyword()) ::
+          {:ok, MediaFile.t()} | {:error, :not_found}
+  def get_file_by_sha1(sha1, dataset, opts \\ []) when is_binary(sha1) and is_binary(dataset) do
+    from(m in MediaFile,
+      where: m.sha1 == ^String.downcase(sha1) and m.dataset == ^dataset,
+      order_by: [asc: m.inserted_at],
+      limit: 1
+    )
+    |> scoped_one(opts)
+  end
+
+  # The one scoped single-row read behind the path, source id and sha1
+  # lookups. The controllers confine its result with `confine_one/2`.
+  defp scoped_one(query, opts) do
+    query
     |> Content.Scope.scope_to_workspace_or_global(
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)

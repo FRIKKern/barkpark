@@ -3722,6 +3722,19 @@ defmodule BarkparkWeb.Router do
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
   end
 
+  # Sanity CDN URL shapes (task-0bc9247eca1bd741). A site keeps
+  # `@sanity/image-url` and sets its `baseUrl` to `<host>/w/<ws>/p/<proj>`.
+  # Same pipeline as the scoped media reads above, so access, share and CORS
+  # behave as for `/media/files/*path`. The first segment after `images` or
+  # `files` is Sanity's projectId and is ignored; `:dataset` is the Barkpark
+  # dataset, which `RequireShareScope` checks against a share.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:shared_media_api)
+
+    get("/images/:sanity_project/:dataset/*rest", MediaController, :serve_sanity_image)
+    get("/files/:sanity_project/:dataset/*rest", MediaController, :serve_sanity_file)
+  end
+
   # Token-required scoped reads (listen/export/analytics/history/revision/locale/codelists).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token])

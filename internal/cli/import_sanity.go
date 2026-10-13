@@ -388,6 +388,13 @@ func (s *sanityImport) uploadOne(u string, ctx manifest.Context, id, file string
 	}
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
+	// sourceId records the Sanity asset id on the Barkpark file, so a
+	// Sanity-shaped URL (`/images/<project>/<dataset>/<sha1>-<w>x<h>.<ext>`)
+	// finds it and a re-run gets the same asset back
+	// (task-0bc9247eca1bd741).
+	if err := mw.WriteField("sourceId", id); err != nil {
+		return "", err
+	}
 	h := make(map[string][]string)
 	h["Content-Disposition"] = []string{fmt.Sprintf(`form-data; name="file"; filename=%q`, name)}
 	ct := mime.TypeByExtension(filepath.Ext(file))

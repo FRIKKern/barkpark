@@ -3,7 +3,7 @@ defmodule BarkparkWeb.MediaController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Blobstore, Delivery, ImageBackend, Renditions, Transform}
+  alias Barkpark.Media.{Blobstore, Delivery, ImageBackend, Renditions, SanityAsset, Transform}
   alias Barkpark.Media.Storage.{Access, MediaFile}
   alias Barkpark.Media.WhereUsed
   alias Barkpark.Tenancy
@@ -278,18 +278,71 @@ defmodule BarkparkWeb.MediaController do
   `blur`, ...) is still refused with 400 rather than ignored.
   """
   def serve(conn, %{"path" => path_parts}) do
+    lookup = by_path(path_parts)
     params = conn.query_params
 
     case Transform.unsupported(params) do
       [] ->
         if Transform.requested?(params),
-          do: serve_transform(conn, path_parts, params),
-          else: serve_file(conn, path_parts)
+          do: serve_transform(conn, lookup, params),
+          else: serve_file(conn, lookup)
 
       ignored ->
         unsupported_transform_params(conn, ignored)
     end
   end
+
+  defp by_path(path_parts) do
+    relative_path = Enum.join(path_parts, "/")
+    fn opts -> Media.get_file_by_path(relative_path, opts) end
+  end
+
+  # ── Sanity CDN URLs (task-0bc9247eca1bd741) ───────────────────────────────
+  #
+  # `@sanity/image-url` with `baseUrl` set to `<host>/w/<ws>/p/<proj>` asks
+  # for `/images/<projectId>/<dataset>/<sha1>-<w>x<h>.<ext>` and
+  # `/files/<projectId>/<dataset>/<sha1>.<ext>`, optionally followed by a
+  # vanity file name. `projectId` is ignored: the workspace and project in the
+  # prefix already name the tenant. `Barkpark.Media.SanityAsset` finds the
+  # file, and from there the request is the same as `serve/2` on its path:
+  # the same scope, share and dataset fences, the same `Access.allowed?/4`
+  # check, and the same transform cache and headers.
+
+  @doc """
+  Serve a Sanity image URL from the Barkpark media file it maps to. Transform
+  parameters work as on `serve/2`; `rect` is moved into the stored image's
+  pixel space when the import stored it at another size.
+  """
+  def serve_sanity_image(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
+    params = conn.query_params
+
+    with {:ok, ref} <- SanityAsset.parse_image(name),
+         [] <- Transform.unsupported(params) do
+      lookup = fn opts -> SanityAsset.find(ref, dataset, opts) end
+
+      if Transform.requested?(params),
+        do: serve_transform(conn, lookup, params, ref.size),
+        else: serve_file(conn, lookup)
+    else
+      :error -> not_found(conn, "not a Sanity image asset URL")
+      ignored -> unsupported_transform_params(conn, ignored)
+    end
+  end
+
+  def serve_sanity_image(conn, _params), do: not_found(conn, "not a Sanity image asset URL")
+
+  @doc """
+  Serve a Sanity file URL from the Barkpark media file it maps to. Query
+  parameters, such as Sanity's `dl`, are ignored.
+  """
+  def serve_sanity_file(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
+    case SanityAsset.parse_file(name) do
+      {:ok, ref} -> serve_file(conn, fn opts -> SanityAsset.find(ref, dataset, opts) end)
+      :error -> not_found(conn, "not a Sanity file asset URL")
+    end
+  end
+
+  def serve_sanity_file(conn, _params), do: not_found(conn, "not a Sanity file asset URL")
 
   # ── On-demand transforms (task-50cabce448b02af7, #23016) ──────────────────
   #
@@ -298,17 +351,20 @@ defmodule BarkparkWeb.MediaController do
   # transform can return the original at full size. The asset's watermark
   # profile is applied and is part of the cache key, so a watermarked asset
   # cannot be fetched clean through a transform URL.
-  defp serve_transform(conn, path_parts, params) do
-    relative_path = Enum.join(path_parts, "/")
+  #
+  # `declared_size` is the original's size as the URL states it (a Sanity
+  # asset id carries one); a `rect` is moved from it into the stored size.
+  defp serve_transform(conn, lookup, params, declared_size \\ nil) do
     opts = scope_opts(conn)
 
     with {:ok, plan} <- Transform.parse(params),
-         {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+         {:ok, file} <- lookup.(opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
          {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :original),
+         plan = SanityAsset.rescale_rect(plan, declared_size, stored_size(doc)),
          plan = resolve_plan(conn, plan, file, doc),
          {:ok, relative} <-
            Renditions.transform(file, plan, watermark: Access.watermark_profile(doc)) do
@@ -405,16 +461,16 @@ defmodule BarkparkWeb.MediaController do
 
   defp stored_size(_doc), do: nil
 
-  defp serve_file(conn, path_parts) do
-    relative_path = Enum.join(path_parts, "/")
+  defp serve_file(conn, lookup) do
     opts = scope_opts(conn)
 
-    with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+    with {:ok, file} <- lookup.(opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
          {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
-         true <- Access.allowed?(conn, file, doc, :original) do
+         true <- Access.allowed?(conn, file, doc, :original),
+         true <- Access.clean_original_allowed?(conn, doc) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
       # lookup already matched on `path == relative_path`, but deriving the blob
       # key from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`

@@ -356,6 +356,104 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert body["error"]["description"] =~ "geo::distance"
   end
 
+  describe "title, which the writer keeps in the documents.title column" do
+    setup %{scope: scope} do
+      publish!("genre", %{"_id" => "g-novel", "title" => "Novels"}, scope)
+
+      publish!(
+        "book",
+        %{
+          "_id" => "t1",
+          "title" => "Peppa's Christmas",
+          "genre" => ref("g-novel"),
+          "genres" => [Map.put(ref("g-novel"), "_key", "k1")]
+        },
+        scope
+      )
+
+      # Written through the content-present branch: the column stays blank and
+      # the envelope emits content.title.
+      publish!(
+        "book",
+        %{"_id" => "t2", "content" => %{"title" => "Only in content", "genre" => ref("g-novel")}},
+        scope
+      )
+
+      :ok
+    end
+
+    test "a top-level document carries the title the envelope renders", %{
+      conn: conn,
+      token: token,
+      scope: scope
+    } do
+      %{"result" => doc} = conn |> get_query(token, ~s'*[_id == "t1"][0]') |> json_response(200)
+
+      stored = Content.get_document("t1", "book", @dataset, scope)
+      assert {:ok, %{title: "Peppa's Christmas"} = row} = stored
+      assert doc["title"] == Barkpark.Content.Envelope.render(row)["title"]
+      assert doc["title"] == "Peppa's Christmas"
+    end
+
+    test "projections, dereferences and ^ subqueries carry title", %{conn: conn, token: token} do
+      query = """
+      *[_id == "g-novel"][0]{
+        title,
+        "books": *[_type == "book" && references(^._id)] | order(_id asc) {
+          title,
+          "genre": genre->title,
+          "genreDoc": genre->{title},
+          "genres": genres[]->title
+        }
+      }
+      """
+
+      %{"result" => result} = conn |> get_query(token, query) |> json_response(200)
+
+      assert result == %{
+               "title" => "Novels",
+               "books" => [
+                 %{
+                   "title" => "Peppa's Christmas",
+                   "genre" => "Novels",
+                   "genreDoc" => %{"title" => "Novels"},
+                   "genres" => ["Novels"]
+                 },
+                 %{
+                   "title" => "Only in content",
+                   "genre" => "Novels",
+                   "genreDoc" => %{"title" => "Novels"},
+                   "genres" => nil
+                 }
+               ]
+             }
+    end
+
+    test "an equality on title matches the column and the content fallback", %{
+      conn: conn,
+      token: token
+    } do
+      for {title, id} <- [{"Peppa's Christmas", "t1"}, {"Only in content", "t2"}] do
+        %{"result" => ids} =
+          conn
+          |> get_query(token, ~s'*[_type == "book" && title == $t]._id', %{
+            "$t" => Jason.encode!(title)
+          })
+          |> json_response(200)
+
+        assert ids == [id]
+      end
+
+      {:ok, {:filter, {:everything}, filter}} = Barkpark.Groq.Parser.parse(~s'*[title == "x"]')
+      assert Barkpark.Groq.Pushdown.constraints(filter).eq == [{["title"], "x"}]
+    end
+
+    test "a document written without a title has no title key", %{conn: conn, token: token} do
+      %{"result" => doc} = conn |> get_query(token, ~s'*[_id == "b1"][0]') |> json_response(200)
+      refute Map.has_key?(doc, "title")
+    end
+  end
+
   defp count_repo_queries(fun) do
     ref = make_ref()
     parent = self()

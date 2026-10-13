@@ -35,6 +35,8 @@ type sanityFakeServer struct {
 
 	mu      sync.Mutex
 	uploads []string // filename of each upload, in order
+	// sourceIDs is the sourceId form field of each upload, in order.
+	sourceIDs []string
 	// schemas is what GET /v1/schemas answers; empty means no schemas.
 	schemas string
 }
@@ -52,6 +54,7 @@ func newSanityFakeServer(t *testing.T) *sanityFakeServer {
 			f.Close()
 			s.mu.Lock()
 			s.uploads = append(s.uploads, h.Filename)
+			s.sourceIDs = append(s.sourceIDs, r.FormValue("sourceId"))
 			n := len(s.uploads)
 			s.mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
@@ -164,6 +167,11 @@ func TestRunImportSanityTarballUploadsAssetsOnceAndRewritesRefs(t *testing.T) {
 	// and the image (image-…) asset-2.
 	if got := f.uploads; len(got) != 2 || got[1] != "hero.png" {
 		t.Fatalf("uploads = %v, want 2 with the image named by assets.json", got)
+	}
+	// Each upload names its Sanity asset id, so Sanity-shaped image and file
+	// URLs resolve to it (task-0bc9247eca1bd741).
+	if len(f.sourceIDs) != 2 || !strings.HasPrefix(f.sourceIDs[0], "file-") || !strings.HasPrefix(f.sourceIDs[1], "image-") {
+		t.Errorf("sourceIds = %v, want the file id then the image id", f.sourceIDs)
 	}
 
 	docs := importDocsByID(t, importExportTo(t, f.importFakeServer))
