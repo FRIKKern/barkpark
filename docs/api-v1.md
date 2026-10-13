@@ -90,7 +90,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 **`createOrReplace`** — upserts the draft; **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
 
-**Direct publish** — `{ "createOrReplace": {…}, "publish": true }` is one write to `<id>` (one revision, event, audit row; no draft); publish gates run; drafts deleted; `ifRevisionID` checks `<id>`; `task`/`paper`/system types → 422.
+**Direct publish** — `{ "createOrReplace": {…}, "publish": true }` is one write to `<id>` (one revision, event, audit row); publish gates run; drafts deleted; `ifRevisionID` checks `<id>`; `task`/`paper`/system types → 422.
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
