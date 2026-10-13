@@ -138,7 +138,14 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	src := path
 	var sanity *sanityImport
 	if importIsSanityTarball(path) {
-		s, err := sanityPrepare(path, scope)
+		// A Portable Text body becomes PortableDoc only on a field the target
+		// declares as the block editor, so the target's schemas are read first.
+		blocks, err := sanityFetchBlocksFields(ctx, dataset)
+		if err != nil {
+			return useError(out, "request_failed",
+				fmt.Sprintf("import: cannot read the schemas of %s: %v. Nothing was written.", scope, err), exitGeneric)
+		}
+		s, err := sanityPrepare(path, scope, blocks)
 		if err != nil {
 			return useError(out, "validation_failed", fmt.Sprintf("import: %s: %v. Nothing was written.", path, err), exitValidation)
 		}
@@ -273,8 +280,9 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	out.outf("imported %d documents into %s from %s (%d created, %d overwritten, %d skipped) in %d batch(es)",
 		applied, scope, path, counts["create"], counts["overwrite"], counts["skip"], len(batches))
 	if sanity != nil {
-		out.outf("%d asset(s) referenced by %d value(s) point at Barkpark media; %d Sanity asset document(s) were not imported",
+		out.outf("%d asset(s) referenced by %d value(s) point at Barkpark media; %d Sanity system document(s) were not imported",
 			len(sanity.assets), sanity.refs, sanity.skipped)
+		sanity.reportPortableText(out, false)
 	}
 	return exitOK
 }
@@ -597,8 +605,9 @@ func importRenderPlan(out *writer, path, scope string, rows []*importRow, batche
 		return
 	}
 	if sanity != nil {
-		out.outf("dry run: %d asset(s) referenced by %d value(s): %d to upload, %d already uploaded. %d Sanity asset document(s) would not be imported.",
+		out.outf("dry run: %d asset(s) referenced by %d value(s): %d to upload, %d already uploaded. %d Sanity system document(s) would not be imported.",
 			len(sanity.assets), sanity.refs, sanity.pending(), len(sanity.assets)-sanity.pending(), sanity.skipped)
+		sanity.reportPortableText(out, true)
 	}
 	out.outf("dry run: importing %s into %s. Nothing was written.", path, scope)
 	for _, r := range rows {
@@ -650,10 +659,15 @@ func usageImport(out *writer, toStdout bool) {
 	p("A `sanity dataset export` tarball (.tar.gz or .tgz) imports its data.ndjson. Each")
 	p("asset file uploads once as Barkpark media and every image/file value pointing at")
 	p("it is rewritten to {asset: {_type: reference, _ref: <Barkpark asset id>}}. Sanity's")
-	p("own sanity.imageAsset / sanity.fileAsset documents are not imported. Uploads start")
+	p("own sanity.* documents (assets, preview secrets, …) are not imported. Uploads start")
 	p("only after the checks above pass; <tarball>.assets.json records each uploaded asset")
 	p("per target, so a re-run or a --from-line resume uploads nothing twice. A value whose")
 	p("file is missing from the tarball refuses the import before anything is written.")
+	p("A Portable Text body on a richText field the target declares as the block editor")
+	p("(\"editor\": \"blocks\") becomes PortableDoc: styles, lists, marks and links, and the")
+	p("object blocks the field declares. A body holding anything else, or formatting")
+	p("PortableDoc cannot carry (an internalLink, a nested list, a custom style), is kept")
+	p("as it was and named in the report, so no formatting is lost.")
 	p("")
 	p("  bp import backup.ndjson --dry-run")
 	p("  bp import backup.ndjson")

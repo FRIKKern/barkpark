@@ -4,7 +4,9 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,6 +35,8 @@ type sanityFakeServer struct {
 
 	mu      sync.Mutex
 	uploads []string // filename of each upload, in order
+	// schemas is what GET /v1/schemas answers; empty means no schemas.
+	schemas string
 }
 
 func newSanityFakeServer(t *testing.T) *sanityFakeServer {
@@ -52,6 +56,14 @@ func newSanityFakeServer(t *testing.T) *sanityFakeServer {
 			s.mu.Unlock()
 			w.WriteHeader(http.StatusCreated)
 			_, _ = fmt.Fprintf(w, `{"result":{"id":"file-%d","assetDocId":"drafts.asset-%d"}}`, n, n)
+			return
+		}
+		if r.Method == http.MethodGet && r.URL.Path == "/w/ws/p/proj/v1/schemas/production" {
+			body := s.schemas
+			if body == "" {
+				body = `{"schemas":[]}`
+			}
+			_, _ = io.WriteString(w, body)
 			return
 		}
 		s.importFakeServer.handle(w, r)
@@ -262,5 +274,92 @@ func TestSanityAssetIDRoundTrip(t *testing.T) {
 	}
 	if _, err := sanityAssetID("image@https://cdn.sanity.io/x.png"); err == nil {
 		t.Errorf("a remote _sanityAsset was accepted")
+	}
+}
+
+// task-5412419a2e931805 — a Portable Text body on a block-editor richText field
+// becomes PortableDoc; a plain richText field keeps Portable Text; a body
+// holding an undeclared object block, or formatting PortableDoc has no node for,
+// is kept whole and reported (never a silent loss); every sanity.* document is
+// left out.
+func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
+	f := newSanityFakeServer(t)
+	f.schemas = `{"schemas":[{"name":"post","fields":[
+		{"name":"body","type":"richText","editor":"blocks","blocks":{"of":["image",{"name":"callout","fields":[{"name":"tone","type":"string"}]}]}},
+		{"name":"summary","type":"richText"}]}]}`
+	span := func(key, text string, marks ...string) string {
+		m, _ := json.Marshal(marks)
+		if marks == nil {
+			m = []byte("[]")
+		}
+		return fmt.Sprintf(`{"_type":"span","_key":%q,"text":%q,"marks":%s}`, key, text, m)
+	}
+	block := func(key, extra string, spans ...string) string {
+		return fmt.Sprintf(`{"_type":"block","_key":%q,%s"children":[%s]}`, key, extra, strings.Join(spans, ","))
+	}
+	body := strings.Join([]string{
+		block("h", `"style":"h2","markDefs":[],`, span("h1", "Title")),
+		block("p", `"style":"normal","markDefs":[{"_key":"l1","_type":"link","href":"https://x.test"}],`,
+			span("p1", "Read "), span("p2", "this", "strong", "l1"), span("p3", " now")),
+		block("u1", `"style":"normal","listItem":"bullet","level":1,"markDefs":[],`, span("u1s", "one")),
+		block("u2", `"style":"normal","listItem":"bullet","level":1,"markDefs":[],`, span("u2s", "two")),
+		block("n1", `"style":"normal","listItem":"number","level":1,"markDefs":[],`, span("n1s", "first")),
+		block("q", `"style":"blockquote","markDefs":[],`, span("qs", "quoted")),
+		`{"_type":"callout","_key":"c","tone":"info"}`,
+	}, ",")
+	pt := "[" + block("s", `"style":"normal","markDefs":[],`, span("ss", "plain")) + "]"
+	lines := []string{
+		`{"_id":"post-1","_type":"post","title":"One","body":[` + body + `],"summary":` + pt + `}`,
+		`{"_id":"post-2","_type":"post","title":"Two","body":[` + block("x", `"style":"normal","markDefs":[],`, span("xs", "hi")) + `,{"_type":"youtube","_key":"y","url":"u"}]}`,
+		`{"_id":"drafts.secret-1","_type":"sanity.previewUrlSecret","secret":"s"}`,
+		// Each of these would lose formatting, so each body is kept whole.
+		`{"_id":"post-3","_type":"post","body":[` + block("i", `"style":"normal","markDefs":[{"_key":"r","_type":"internalLink","reference":{"_ref":"post-1"}}],`, span("is", "see", "r")) + `]}`,
+		`{"_id":"post-4","_type":"post","body":[` + block("l", `"style":"normal","listItem":"bullet","level":2,"markDefs":[],`, span("ls", "deep")) + `]}`,
+		`{"_id":"post-5","_type":"post","body":[` + block("m", `"style":"normal","markDefs":[],`, span("ms", "hi", "highlight")) + `]}`,
+		`{"_id":"post-6","_type":"post","body":[` + block("g", `"style":"h2","markDefs":[],`, span("gs", "Big", "em")) + `]}`,
+	}
+	tarball := writeSanityTarball(t, lines, nil)
+
+	code, stdout, stderr := runImportForTest(t, f.ctx(), globals{}, tarball)
+	if code != exitOK {
+		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
+	}
+	docs := importDocsByID(t, importExportTo(t, f.importFakeServer))
+	if _, ok := docs["drafts.secret-1"]; ok || len(docs) != 6 {
+		t.Fatalf("imported %v, want post-1..post-6 (sanity.* is not imported)", docs)
+	}
+
+	got, _ := json.Marshal(docs["post-1"]["body"])
+	want := `{"blocks":[` +
+		`{"id":"h","level":2,"text":"Title","type":"heading"},` +
+		`{"content":[{"type":"text","value":"Read "},{"children":[{"children":[{"type":"text","value":"this"}],"type":"strong"}],"href":"https://x.test","type":"link"},{"type":"text","value":" now"}],"id":"p","type":"paragraph"},` +
+		`{"id":"u1","items":[[{"type":"text","value":"one"}],[{"type":"text","value":"two"}]],"ordered":false,"type":"list"},` +
+		`{"id":"n1","items":[[{"type":"text","value":"first"}]],"ordered":true,"type":"list"},` +
+		`{"content":[{"type":"text","value":"quoted"}],"id":"q","type":"pullquote"},` +
+		`{"id":"c","tone":"info","type":"callout"}]}`
+	if string(got) != want {
+		t.Errorf("post-1 body =\n%s\nwant\n%s", got, want)
+	}
+	if summary, _ := docs["post-1"]["summary"].([]any); len(summary) != 1 {
+		t.Errorf("a plain richText field was converted: %#v", docs["post-1"]["summary"])
+	}
+	for _, id := range []string{"post-2", "post-3", "post-4", "post-5", "post-6"} {
+		if _, ok := docs[id]["body"].([]any); !ok {
+			t.Errorf("%s body was converted; want it kept as Portable Text: %#v", id, docs[id]["body"])
+		}
+	}
+	for _, s := range []string{
+		"1 Portable Text body(ies) were converted to PortableDoc",
+		"5 body(ies) were kept as Portable Text:",
+		`post-2.body: block type "youtube" is not declared by the field`,
+		`post-3.body: block i: annotation "internalLink" has no PortableDoc mark`,
+		`post-4.body: block l: a level-2 list item (PortableDoc lists do not nest)`,
+		`post-5.body: block m: mark "highlight" has no PortableDoc mark`,
+		`post-6.body: block g: a h2 with marks or links (a PortableDoc heading is plain text)`,
+		"1 Sanity system document(s) were not imported",
+	} {
+		if !strings.Contains(stdout, s) {
+			t.Errorf("report lacks %q:\n%s", s, stdout)
+		}
 	}
 }
