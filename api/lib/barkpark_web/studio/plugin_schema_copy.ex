@@ -66,6 +66,7 @@ defmodule BarkparkWeb.Studio.PluginSchemaCopy do
     gettext_noop("Original filename"),
     gettext_noop("Width"),
     gettext_noop("Height"),
+    gettext_noop("Blur placeholder (LQIP)"),
     gettext_noop("Asset kind"),
     gettext_noop("Processing status"),
     gettext_noop("CDN status"),

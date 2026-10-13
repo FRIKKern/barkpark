@@ -3,7 +3,7 @@ defmodule BarkparkWeb.MediaController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Blobstore, Delivery, Renditions}
+  alias Barkpark.Media.{Blobstore, Delivery, ImageBackend, Renditions, Transform}
   alias Barkpark.Media.Storage.{Access, MediaFile}
   alias Barkpark.Media.WhereUsed
   alias Barkpark.Tenancy
@@ -268,13 +268,142 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
-  @doc "Serve a file — from disk, or via redirect to the object-storage backend."
+  @doc """
+  Serve a file — from disk, or via redirect to the object-storage backend.
+
+  With image transform parameters (`w`, `h`, `fit`, `crop`, `rect`, `fp-x`,
+  `fp-y`, `fm`, `auto`, `q`; contract in `docs/media/IMAGE-TRANSFORMS.md`) it
+  serves a transformed copy instead, made on the first request and cached
+  (`serve_transform/3`). Transform vocabulary Barkpark does not apply (`dpr`,
+  `blur`, ...) is still refused with 400 rather than ignored.
+  """
   def serve(conn, %{"path" => path_parts}) do
-    case ignored_transform_params(conn) do
-      [] -> serve_file(conn, path_parts)
-      ignored -> unsupported_transform_params(conn, ignored)
+    params = conn.query_params
+
+    case Transform.unsupported(params) do
+      [] ->
+        if Transform.requested?(params),
+          do: serve_transform(conn, path_parts, params),
+          else: serve_file(conn, path_parts)
+
+      ignored ->
+        unsupported_transform_params(conn, ignored)
     end
   end
+
+  # ── On-demand transforms (task-50cabce448b02af7, #23016) ──────────────────
+  #
+  # The SAME lookup and gates as `serve_file/2` — scoped row, share/bound
+  # dataset confinement, and `Access.allowed?/4` at `:original`, because a
+  # transform can return the original at full size. The asset's watermark
+  # profile is applied and is part of the cache key, so a watermarked asset
+  # cannot be fetched clean through a transform URL.
+  defp serve_transform(conn, path_parts, params) do
+    relative_path = Enum.join(path_parts, "/")
+    opts = scope_opts(conn)
+
+    with {:ok, plan} <- Transform.parse(params),
+         {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+         {:ok, file} <- confine_one(opts, file),
+         {:ok, file} <- confine_share_dataset(conn, file),
+         {:ok, file} <- confine_bound_dataset(conn, file),
+         doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
+         true <- Access.allowed?(conn, file, doc, :original),
+         plan = resolve_plan(conn, plan, file, doc),
+         {:ok, relative} <-
+           Renditions.transform(file, plan, watermark: Access.watermark_profile(doc)) do
+      full_path = Media.file_path(relative)
+
+      conn
+      |> put_resp_header("vary", "Accept")
+      |> Delivery.put_transform_cache_headers(full_path, Access.visibility(doc))
+      |> maybe_send_file(full_path, Transform.mime(plan.fm))
+    else
+      {:error, {:invalid_param, name, message}} ->
+        bad_request(conn, "invalid_transform_param", "#{name} #{message}", %{param: name})
+
+      {:error, :not_found} ->
+        not_found(conn, "file not found")
+
+      false ->
+        forbidden(conn)
+
+      {:error, :not_transformable} ->
+        bad_request(
+          conn,
+          "not_transformable",
+          "image transforms apply to png, jpeg, gif and webp files only",
+          %{}
+        )
+
+      {:error, :transforms_unsupported} ->
+        bad_request(
+          conn,
+          "transforms_unsupported",
+          "this server's image backend does not run URL transforms; use a named preset",
+          %{presets: Renditions.presets()}
+        )
+
+      {:error, :variant_limit} ->
+        error_response(
+          conn,
+          429,
+          "transform_variant_limit",
+          "this asset already has #{Transform.max_variants_per_asset()} cached transforms; " <>
+            "reuse an existing size",
+          %{limit: Transform.max_variants_per_asset()}
+        )
+
+      {:error, {:write_admission, _}} = refused ->
+        env = Errors.to_envelope(refused, conn)
+
+        conn
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
+
+      {:error, _} ->
+        not_found(conn, "transform unavailable")
+    end
+  end
+
+  # The stored focal point (`mediaAsset.focalPoint`, fractions of the
+  # original) applies when the URL crops without naming a crop mode or a focal
+  # point. `Accept` picks AVIF or WebP for `auto=format`.
+  defp resolve_plan(conn, plan, file, doc) do
+    Transform.resolve(plan,
+      focal_point: stored_focal_point(doc),
+      source_size: stored_size(doc),
+      accept: conn |> get_req_header("accept") |> Enum.join(","),
+      source_mime: file.mime_type,
+      avif?: ImageBackend.avif?()
+    )
+  end
+
+  defp stored_focal_point(%{content: %{"focalPoint" => %{"x" => x, "y" => y}}}) do
+    with {fx, _} <- Float.parse(to_string(x)),
+         {fy, _} <- Float.parse(to_string(y)) do
+      # Percent values (0-100) are read as fractions.
+      {fraction(fx), fraction(fy)}
+    else
+      _ -> nil
+    end
+  end
+
+  defp stored_focal_point(_doc), do: nil
+
+  defp fraction(v) when v > 1.0, do: min(v / 100, 1.0)
+  defp fraction(v), do: max(v, 0.0)
+
+  defp stored_size(%{content: %{"fileInfo" => %{"width" => w, "height" => h}}}) do
+    with {wi, ""} <- Integer.parse(to_string(w)),
+         {hi, ""} <- Integer.parse(to_string(h)) do
+      {wi, hi}
+    else
+      _ -> nil
+    end
+  end
+
+  defp stored_size(_doc), do: nil
 
   defp serve_file(conn, path_parts) do
     relative_path = Enum.join(path_parts, "/")
@@ -599,13 +728,16 @@ defmodule BarkparkWeb.MediaController do
   # (the same shape `unprocessable/3` below already uses) rather than inlined
   # as a map literal, matching this file's existing convention for a
   # controller-local code not registered in `Content.Errors` @hints.
-  defp bad_request(conn, code, message, details) do
+  defp bad_request(conn, code, message, details),
+    do: error_response(conn, 400, code, message, details)
+
+  defp error_response(conn, status, code, message, details) do
     env =
-      %{code: code, message: message, status: 400, details: details}
+      %{code: code, message: message, status: status, details: details}
       |> Errors.stamp(conn)
 
     conn
-    |> put_status(:bad_request)
+    |> put_status(status)
     |> json(%{error: Map.delete(env, :status)})
   end
 
@@ -614,8 +746,8 @@ defmodule BarkparkWeb.MediaController do
       conn,
       "unsupported_transform_param",
       "transform parameter(s) #{Enum.join(ignored, ", ")} are not supported on this " <>
-        "endpoint and would otherwise be silently ignored — request a server-rendered " <>
-        "preset at /media/renditions/<id>/<preset> instead",
+        "endpoint and would otherwise be silently ignored — /media/files/<path> takes " <>
+        "w, h, fit, crop, rect, fp-x, fp-y, fm, auto and q (docs/media/IMAGE-TRANSFORMS.md)",
       %{ignored: ignored}
     )
   end

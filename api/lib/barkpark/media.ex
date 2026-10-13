@@ -63,6 +63,9 @@ defmodule Barkpark.Media do
   `Barkpark.Content` write scoping):
     * `:workspace_id` — stamp the owning workspace (nil = unscoped / pre-tenancy).
     * `:project_id`   — stamp the owning project (nil = workspace-wide).
+    * `:asset_metadata` — `mediaAsset` metadata (`metadata_fields/0` keys,
+      string-keyed) for the media plugin to write in the same create as the
+      asset document, instead of a follow-up patch. Ignored for a dedupe hit.
     * `:dedupe` — when `true`, bytes whose SHA-1 already belongs to a file in
       the same dataset and workspace return `{:existing, file}` and store
       nothing (task-b6e57c37f6928344). Off by default: a caller that owns its
@@ -163,7 +166,8 @@ defmodule Barkpark.Media do
             blob_key(date_dir, filename, Map.get(attrs, :dataset_id)),
             temp_path,
             mime_type,
-            dataset
+            dataset,
+            Keyword.get(opts, :asset_metadata, %{})
           )
       end
     else
@@ -297,7 +301,7 @@ defmodule Barkpark.Media do
 
   defp find_duplicate(_attrs), do: nil
 
-  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset) do
+  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata) do
     # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
     # (see Blobstore.receipt/3). The row's `size` stays the SOURCE size (what the
     # client uploaded); the receipt is not persisted here, it is the seam that
@@ -305,7 +309,12 @@ defmodule Barkpark.Media do
     # a 503, instead of inserting a row over bytes that are not there.
     case Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
       {:ok, _receipt} ->
-        insert_uploaded_row(Map.put(attrs, :path, relative_path), relative_path, dataset)
+        insert_uploaded_row(
+          Map.put(attrs, :path, relative_path),
+          relative_path,
+          dataset,
+          asset_metadata
+        )
 
       {:error, _reason} ->
         # The backend write failed. A partial write may survive → best-effort
@@ -321,7 +330,7 @@ defmodule Barkpark.Media do
     end
   end
 
-  defp insert_uploaded_row(attrs, relative_path, dataset) do
+  defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata) do
     %MediaFile{}
     |> MediaFile.changeset(attrs)
     |> Repo.insert()
@@ -330,7 +339,8 @@ defmodule Barkpark.Media do
         _ =
           Barkpark.Plugins.Registry.run_after_media_upload(%{
             media_file: file,
-            dataset: dataset
+            dataset: dataset,
+            asset_metadata: asset_metadata
           })
 
         ok

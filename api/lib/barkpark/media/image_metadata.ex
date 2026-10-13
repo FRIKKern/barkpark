@@ -26,12 +26,12 @@ defmodule Barkpark.Media.ImageMetadata do
   save path.
 
   Sources, in order: the `mediaAsset` document's `fileInfo` (url, width,
-  height — written by `Barkpark.Media.Processing` after upload), reached
+  height, lqip — written by `Barkpark.Media.Processing` at upload), reached
   through `Barkpark.Media.asset_doc_for_file/3`; the blob itself via
   `Barkpark.Media.Probe` when `fileInfo` has no dimensions yet; and for
-  `lqip` the `"lqip"` rendition preset (a ≤ 24 px JPEG, base64-encoded as a
-  `data:` URI), generated on demand through `Barkpark.Media.Renditions` —
-  never fabricated.
+  `lqip` on an asset uploaded before upload stored it, the `"lqip"` rendition
+  preset (a ≤ 24 px JPEG, base64-encoded as a `data:` URI), generated on
+  demand through `Barkpark.Media.Renditions` — never fabricated.
 
   Lives under `Barkpark.Media` (not `Content`): it is the media concept that
   knows blobs, asset documents and renditions; the Studio save path calls it
@@ -136,6 +136,7 @@ defmodule Barkpark.Media.ImageMetadata do
         |> put_missing("url", Map.get(file_info, "url"))
         |> put_missing("width", int(Map.get(file_info, "width")))
         |> put_missing("height", int(Map.get(file_info, "height")))
+        |> put_missing("lqip", Map.get(file_info, "lqip"))
         |> maybe_probe_dimensions(file)
         |> maybe_lqip(file)
 

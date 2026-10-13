@@ -478,7 +478,13 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
     with :ok <- require_write(conn) do
-      case Media.upload(upload, dataset, [dedupe: true] ++ scope_opts(conn)) do
+      metadata = upload_metadata(params)
+
+      case Media.upload(
+             upload,
+             dataset,
+             [dedupe: true, asset_metadata: metadata] ++ scope_opts(conn)
+           ) do
         # task-b6e57c37f6928344 — the same bytes already live in this dataset
         # and workspace: answer with that asset, 200 not 201, `existing: true`,
         # and store nothing. The upload's inline metadata is NOT applied: it
@@ -505,7 +511,7 @@ defmodule BarkparkWeb.V1.MediaController do
           # `Media.patch_asset_metadata/3` runs everything through
           # `pick_metadata/1` (@metadata_fields), so a multipart part named
           # `path` or `mimeType` still cannot touch a blob column.
-          doc = apply_upload_metadata(file, params, dataset)
+          doc = apply_upload_metadata(file, metadata, dataset)
 
           conn
           |> put_status(:created)
@@ -531,26 +537,39 @@ defmodule BarkparkWeb.V1.MediaController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
-  # Patch the just-created `mediaAsset` doc with any inline metadata the
-  # multipart carried, and return the document the receipt should render.
+  # Return the document the receipt should render. Upload passes the inline
+  # metadata to `Media.upload/3` as `:asset_metadata`, and the media plugin
+  # writes it in the same create as the asset document. The patch below runs
+  # only when the created document does not hold it (an asset document that
+  # already existed, or a plugin that did not apply it), so the common upload
+  # is one document write instead of two.
   #
   # FAIL-SOFT ON PURPOSE: the BYTES are already persisted and the row is
   # committed, so a metadata patch that fails must not turn a successful upload
   # into an error the client reads as "nothing was stored" — it would retry and
   # duplicate the blob. The receipt then renders the unpatched document, which
   # states plainly that the metadata did not land.
-  defp apply_upload_metadata(file, params, dataset) do
-    case upload_metadata(params) do
-      metadata when map_size(metadata) == 0 ->
-        asset_doc(file, dataset)
+  defp apply_upload_metadata(file, metadata, dataset) do
+    doc = asset_doc(file, dataset)
 
-      metadata ->
-        case Media.patch_asset_metadata(file, metadata, dataset) do
-          {:ok, doc} -> doc
-          _ -> asset_doc(file, dataset)
-        end
+    if map_size(metadata) == 0 or metadata_applied?(doc, metadata) do
+      doc
+    else
+      case Media.patch_asset_metadata(file, metadata, dataset) do
+        {:ok, doc} -> doc
+        _ -> doc
+      end
     end
   end
+
+  defp metadata_applied?(%{content: content, title: title}, metadata) when is_map(content) do
+    Enum.all?(metadata, fn
+      {"title", value} -> title == value
+      {key, value} -> Map.get(content, key) == value
+    end)
+  end
+
+  defp metadata_applied?(_doc, _metadata), do: false
 
   # `metadata` as a nested object (JSON clients) or the flat multipart parts
   # (`altText=…`, `tags=a,b,c`). `tags` arrives as ONE string over multipart —
