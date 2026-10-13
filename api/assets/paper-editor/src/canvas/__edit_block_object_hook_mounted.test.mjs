@@ -125,7 +125,7 @@ try {
     assert.equal(asked.length, 2, "asked, then asked again");
     assert.deepEqual(asked[0], { type: "factBox", title: "Faktaboks", inline: false, fields: VOCAB.of[0].fields, value: { type: "factBox" }, error: null });
     assert.deepEqual(asked[1].error, { field: "body", message: "Required" });
-    assert.equal(asked[1].value.type, "factBox");
+    assert.deepEqual(asked[1].value, { type: "factBox", tone: "info" }, "asked again over what it answered");
     assert.equal(blocks().length, 1, "nothing was inserted");
   });
 

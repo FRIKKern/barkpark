@@ -129,7 +129,8 @@ the current `value` (`{ type }` for a new one; a block's `id` and undeclared key
 included), plus `error` (`{ field, message }`, or `null`) when asked again. Only the
 declared fields are taken from the answer (`null`, `undefined` or `""` removes
 one); `type`, `id` and undeclared keys stay as stored. A required field left
-empty asks again with `{ field, message: "Required" }`. `null` or a throw inserts
+empty asks again with `{ field, message: "Required" }`, its `value` what the host
+answered. `null` or a throw inserts
 or changes nothing. The canvas still owns where the object lands and the undo step.
 
 ### Outbound (canvas → host)
