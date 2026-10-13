@@ -192,7 +192,7 @@ defmodule Barkpark.Media.Renditions do
   # lib/barkpark/media/storage/checkout.ex:91, the force-release path), so the
   # value has already survived Ecto's binary_id cast and can contain neither `/`
   # nor `..`. The join therefore names exactly one direct child of
-  # `renditions_root/0` (lib/barkpark/media/renditions.ex:210 —
+  # `renditions_root/0` (this module, `defp renditions_root` —
   # `{upload_dir}/_renditions`), and the rm_rf cannot escape that cache root.
   # sobelow_skip ["Traversal.FileModule"]
   def delete_for_file(media_file_id) when is_binary(media_file_id) do

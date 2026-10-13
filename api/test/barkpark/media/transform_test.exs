@@ -85,8 +85,10 @@ defmodule Barkpark.Media.TransformTest do
             {%{"auto" => "compress"}, "auto"},
             {%{"crop" => "entropy,top"}, "crop"}
           ] do
-        assert {:error, {:invalid_param, ^name, _msg}} = Transform.parse(params),
-               "expected #{inspect(params)} to be refused on #{name}"
+        result = Transform.parse(params)
+
+        assert match?({:error, {:invalid_param, ^name, _msg}}, result),
+               "expected #{inspect(params)} to be refused on #{name}, got #{inspect(result)}"
       end
     end
   end
