@@ -43,10 +43,11 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     * `"op" => "rebuild"` (default) — full per-scope rebuild: list the corpus
       (one `list_documents` per `"types"` entry at `perspective: :published`),
       hand it to `Projector.rebuild_scope/3`. Routed by `:after_save` /
-      `:after_publish` when the `incremental_project` flag is OFF (the default).
+      `:after_publish` when the `incremental_project` flag is OFF
+      (`EDGE_PROJECTOR_INCREMENTAL=0`; ON is the default).
     * `"op" => "upsert"` — per-doc incremental projection of one `"_id"`,
       diffing its outbound edges. Routed by `:after_save` / `:after_publish`
-      ONLY when the flag is ON. INERT by default.
+      ONLY when the flag is ON, the default.
     * `"op" => "delete"` — per-doc removal of every edge touching one `"_id"`.
       Routed by `:after_unpublish` / `:after_delete` (always incremental).
 

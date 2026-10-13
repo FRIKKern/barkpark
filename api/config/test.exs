@@ -180,6 +180,11 @@ config :barkpark, :search_analytics_async, false
 # `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
 config :barkpark, :audit_dispatch_async, false
 
+# The content write's post-commit work (webhook selection, async edge upserts)
+# runs inline in the test's process, for the same reason as the line above.
+# Read by `Barkpark.Content.Broadcast.flush_deferred_broadcasts/1`.
+config :barkpark, :post_commit_async, false
+
 # Task transition → paper cache-bust (`Barkpark.Tasks.PaperRefresh`) is OFF by
 # default in tests: its async spawn would leak queries past a test's sandbox
 # owner (the audit-dispatch deadlock above), and inline it would add queries to
