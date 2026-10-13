@@ -53,8 +53,7 @@ Source: `manifest.Resolve` + `internal/cli/repofile.go`. Active context is persi
 
 ## Core verbs (summary)
 
-A **worked subset** — the tree is a pure function of the live manifest, so `bp capabilities`
-(`GET /v1/capabilities`) is the authority and this table can only lag it. Nouns not broken
+A **worked subset**; the authority is `bp capabilities`. Nouns not broken
 out below but carried by the manifest: `data`, `access`, `cycle`, `chat`, `github`, `fleet`
 (`roster`/`beat`), `ticket` + `ticket-key` (cards/cli.md), and the `search`/`media` synonym,
 settings and insights tuning verbs.
@@ -87,7 +86,9 @@ settings and insights tuning verbs.
 
 ## Output
 
-`-o table|json|yaml|minimal` (or `--json`, `-q`). Default: `table` on TTY, `json` piped. The CLI **unwraps** `{"result":…}` envelopes.
+`-o table|json|yaml|minimal` (or `--json`, `-q`). Default: `table` on TTY, `json` piped. The CLI **unwraps** `{"result":…}` envelopes; warnings go to stderr. `doc ls`/`doc query` JSON adds `returned` (rows in this output, like `count`); `--count` adds `total` (all matches).
+
+bp retries a 429 (honouring `Retry-After`) and a read's transient 500; `--no-retry` or `BARKPARK_NO_RETRY=1` sends each request once.
 
 Minimal receipts (writes, shape-keyed — never per-verb): `rev:`/`id:` lines when the body carries them; an `{"ok":true,"doc":{…}}` body prints the doc's identity line — `<doc_id>` plus `epoch=<n>` when the doc carries a claim fence, including a released claim whose worker is now null (e.g. `drafts.task-992199 epoch=2 rev=a1b2c3`); a 2xx `{"ok":false,"reason":…}` prints the reason token (e.g. `no_ready`, exit 0); otherwise a bare `ok`.
 
@@ -103,7 +104,7 @@ The manifest's per-command `dry_run` is `false` everywhere in v1. Flips to `true
 
 ### Production write-guard
 
-Writes against a prod-looking target (`prod`/`production`/`api.barkpark.cloud`) prompt `⚠ PROD: … Continue? [y/N]` unless `--yes`. `localhost`/`127.0.0.1`/`0.0.0.0` are never prod. Local UX only — does not client-refuse `scoped_admin`.
+Writes against a prod-looking target (`prod`/`production`/`api.barkpark.cloud`) prompt `⚠ PROD: … Continue? [y/N]` unless `--yes`. `localhost`/`127.0.0.1`/`0.0.0.0` are never prod. Local UX only.
 
 ## Exit codes
 
@@ -172,7 +173,5 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 
 ## v1 deferrals
 
-- `--dry-run` is client-side only; no server validate-only.
 - Dataset discovery absent; `production` is the assumed default.
-- `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh/fish scripts (`bp completion bash|zsh|fish`); `bp --version`/`-V` prints the version offline.
-- `scoped_prefix` is inert.
+- `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh/fish scripts; `bp --version`/`-V` prints the version offline.
