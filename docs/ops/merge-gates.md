@@ -390,11 +390,16 @@ when selected, a successful matrix job. Failed, cancelled or unknown dependencie
 fail the gate. An unrelated nonempty diff emits NOT APPLICABLE, explicitly saying
 no row ran. The matrix records both checkout commits and retains its results.
 
-This name is **not currently required**. Promotion must update/apply the required
-spec and classify this PR-scoped context for the main watcher; workflow success
-alone does not establish merge enforcement. Barkdown's separate weekly/dispatch
-policy is unchanged. G2 acceptance still needs a live deliberately broken Tab
-failure and the owner’s cadence/enforcement decision.
+This name is **not currently required**. The proposed watcher change names it
+as PR-scoped: this workflow has no push, schedule or merge-group trigger, so its
+context is not owed on main. Revisit that classification if the triggers change.
+Branch protection and Barkdown's weekly/dispatch policy are unchanged.
+
+[Paired proof](https://github.com/FRIKKern/barkdown/pull/78) records actual20/20
+execution, two deliberate native Tab failures with aggregate red, and exact
+restoration with aggregate green. These results do not make the check required.
+Promotion still needs observed-name generation, preservation of the four-context
+floor, distinct PR path shapes and the owner's cadence/enforcement decision.
 
 <!-- doc-exec: allowlisted deps=scripts/barkdown-parity-dispatch.mjs,scripts/barkdown-parity-dispatch.test.mjs -->
 ```sh

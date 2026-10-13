@@ -188,7 +188,7 @@ Elixir gate"
 # render post-merge. Named, one per line, with the reason in the comment above.
 # Adding a row here is a DECISION and shows up in a diff; an inline filter would
 # not.
-EXCLUDED_CONTEXTS="PR references an active task"
+EXCLUDED_CONTEXTS=$'PR references an active task\nBarkdown parity gate'
 
 PROTECTION_FILE=""
 CHECK_RUNS_FILE=""
