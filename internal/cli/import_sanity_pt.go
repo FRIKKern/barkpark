@@ -35,6 +35,9 @@ import (
 type sanityBlocksField struct {
 	// objects names the custom object blocks the field declares in blocks.of.
 	objects map[string]bool
+	// annotations names the annotations the field declares in
+	// blocks.annotations; nil when it declares none (every one is admitted).
+	annotations map[string]bool
 }
 
 // sanityBlocksFields maps type → field name → field for every richText field
@@ -66,7 +69,8 @@ func sanityFetchBlocksFields(ctx manifest.Context, dataset string) (sanityBlocks
 				Type   string `json:"type"`
 				Editor string `json:"editor"`
 				Blocks struct {
-					Of []json.RawMessage `json:"of"`
+					Of          []json.RawMessage `json:"of"`
+					Annotations []json.RawMessage `json:"annotations"`
 				} `json:"blocks"`
 			} `json:"fields"`
 		} `json:"schemas"`
@@ -94,7 +98,14 @@ func sanityFetchBlocksFields(ctx manifest.Context, dataset string) (sanityBlocks
 			if out[s.Name] == nil {
 				out[s.Name] = map[string]sanityBlocksField{}
 			}
-			out[s.Name][f.Name] = sanityBlocksField{objects: objects}
+			var annotations map[string]bool
+			if len(f.Blocks.Annotations) > 0 {
+				annotations = map[string]bool{}
+				for _, raw := range f.Blocks.Annotations {
+					annotations[sanityDeclName(raw)] = true
+				}
+			}
+			out[s.Name][f.Name] = sanityBlocksField{objects: objects, annotations: annotations}
 		}
 	}
 	return out, nil
@@ -173,7 +184,7 @@ func sanityToPortableDoc(items []any, field sanityBlocksField) ([]any, string) {
 			blocks = append(blocks, obj)
 			continue
 		}
-		content, reason := sanityInline(m)
+		content, reason := sanityInline(m, field)
 		if reason != "" {
 			return nil, fmt.Sprintf("block %s: %s", id, reason)
 		}
@@ -234,7 +245,7 @@ var sanityDecorators = map[string]string{
 
 // sanityInline turns a block's children into PortableDoc inline nodes. A
 // non-empty reason names a mark it has no node for.
-func sanityInline(block map[string]any) ([]any, string) {
+func sanityInline(block map[string]any, field sanityBlocksField) ([]any, string) {
 	defs := map[string]map[string]any{}
 	if mds, ok := block["markDefs"].([]any); ok {
 		for _, d := range mds {
@@ -278,17 +289,21 @@ func sanityInline(block map[string]any) ([]any, string) {
 				continue
 			}
 			def, ok := defs[name]
-			if ok && def["_type"] == "link" {
+			if ok && def["_type"] == "link" && field.admits("link") {
 				if href, _ := def["href"].(string); href != "" && link == nil {
 					link = map[string]any{"type": "link", "href": href}
 					continue
 				}
 			}
-			if ok && def["_type"] == "internalLink" {
+			if ok && def["_type"] == "internalLink" && (field.admits("wikilink") || field.admits("internalLink")) {
 				if id := sanityRefID(def["reference"]); id != "" && link == nil {
 					link = map[string]any{"type": "wikilink", "target": id, "docId": id}
 					continue
 				}
+			}
+			if t := def["_type"]; ok && ((t == "link" && !field.admits("link")) ||
+				(t == "internalLink" && !field.admits("wikilink") && !field.admits("internalLink"))) {
+				return nil, fmt.Sprintf("annotation %q is not declared by the field", t)
 			}
 			if ok {
 				return nil, fmt.Sprintf("annotation %q has no PortableDoc mark", def["_type"])
@@ -302,6 +317,25 @@ func sanityInline(block map[string]any) ([]any, string) {
 		out = append(out, node)
 	}
 	return out, ""
+}
+
+// admits: the field's annotations include name, or it declares none.
+func (f sanityBlocksField) admits(name string) bool {
+	return f.annotations == nil || f.annotations[name]
+}
+
+// sanityDeclName is a blocks declaration entry's name: a bare string, or an
+// object's "name".
+func sanityDeclName(raw json.RawMessage) string {
+	var name string
+	if json.Unmarshal(raw, &name) == nil {
+		return name
+	}
+	var obj struct {
+		Name string `json:"name"`
+	}
+	_ = json.Unmarshal(raw, &obj)
+	return obj.Name
 }
 
 // sanityRefID is the published id a Sanity reference ({_ref: "…"}) names, or ""

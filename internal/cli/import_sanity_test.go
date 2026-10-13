@@ -286,7 +286,8 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 	f := newSanityFakeServer(t)
 	f.schemas = `{"schemas":[{"name":"post","fields":[
 		{"name":"body","type":"richText","editor":"blocks","blocks":{"of":["image",{"name":"callout","fields":[{"name":"tone","type":"string"}]}]}},
-		{"name":"summary","type":"richText"}]}]}`
+		{"name":"summary","type":"richText"}]},
+		{"name":"note","fields":[{"name":"body","type":"richText","editor":"blocks","blocks":{"annotations":[{"name":"link"}]}}]}]}`
 	span := func(key, text string, marks ...string) string {
 		m, _ := json.Marshal(marks)
 		if marks == nil {
@@ -320,6 +321,8 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 		// An internalLink (B14's post-11/12/13) becomes a wikilink pinned to its document.
 		`{"_id":"post-7","_type":"post","body":[` + block("w", `"style":"normal","markDefs":[{"_key":"il1","_type":"internalLink","reference":{"_ref":"drafts.author-ada","_type":"reference"}}],`,
 			span("w1", "By "), span("w2", "Ada", "strong", "il1")) + `]}`,
+		// A field whose annotations leave out wikilink/internalLink keeps the body.
+		`{"_id":"note-1","_type":"note","body":[` + block("n", `"style":"normal","markDefs":[{"_key":"il1","_type":"internalLink","reference":{"_ref":"author-ada"}}],`, span("ns", "Ada", "il1")) + `]}`,
 	}
 	tarball := writeSanityTarball(t, lines, nil)
 
@@ -328,8 +331,8 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
 	}
 	docs := importDocsByID(t, importExportTo(t, f.importFakeServer))
-	if _, ok := docs["drafts.secret-1"]; ok || len(docs) != 7 {
-		t.Fatalf("imported %v, want post-1..post-7 (sanity.* is not imported)", docs)
+	if _, ok := docs["drafts.secret-1"]; ok || len(docs) != 8 {
+		t.Fatalf("imported %v, want post-1..post-7 and note-1 (sanity.* is not imported)", docs)
 	}
 
 	got, _ := json.Marshal(docs["post-1"]["body"])
@@ -360,7 +363,8 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 	}
 	for _, s := range []string{
 		"2 Portable Text body(ies) were converted to PortableDoc",
-		"5 body(ies) were kept as Portable Text:",
+		"6 body(ies) were kept as Portable Text:",
+		`note-1.body: block n: annotation "internalLink" is not declared by the field`,
 		`post-2.body: block type "youtube" is not declared by the field`,
 		`post-3.body: block i: annotation "internalLink" has no PortableDoc mark`,
 		`post-4.body: block l: a level-2 list item (PortableDoc lists do not nest)`,
