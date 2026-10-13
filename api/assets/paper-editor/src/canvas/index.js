@@ -1738,6 +1738,7 @@ class BpPaperCanvas extends HTMLElement {
       case "setBlockStyle": return hcSetBlockStyle(editor, a.style, this._toolbarVocabulary()) === true;
       case "toggleList": return hcToggleList(editor, a.kind) === true;
       case "insertBlock": return this._insertToolbarBlock(a.type, a.attrs) === true;
+      case "insertInline": return this._insertToolbarInline(a.type) === true;
       default: return false;
     }
   }
@@ -1746,6 +1747,7 @@ class BpPaperCanvas extends HTMLElement {
   setBlockStyle(style) { return this.run("setBlockStyle", { style }); }
   toggleList(kind) { return this.run("toggleList", { kind }); }
   insertBlock(type, attrs) { return this.run("insertBlock", { type, attrs }); }
+  insertInline(type) { return this.run("insertInline", { type }); }
 
   can(command, args = {}) {
     const editor = this._editor;
@@ -1757,6 +1759,7 @@ class BpPaperCanvas extends HTMLElement {
       case "setBlockStyle": return canSetBlockStyle(editor, a.style, vocab);
       case "toggleList": return canToggleList(editor, a.kind, vocab);
       case "insertBlock": return !!this._toolbarInsertItem(a.type);
+      case "insertInline": return this._canInsertInline(a.type, vocab);
       default: return false;
     }
   }
@@ -1776,6 +1779,29 @@ class BpPaperCanvas extends HTMLElement {
     if (typeof type !== "string" || type === "") return null;
     const items = slashItemsForVocabulary(CANVAS_SLASH_ITEMS, this._toolbarVocabulary());
     return items.find((item) => item.type === type && !item.compound && !item.preset && !item.inline && !item.master) || null;
+  }
+
+  // A declared inline object (the field's blocks.inline) may go at the caret: inside
+  // text the field writes in, never in a code block.
+  _canInsertInline(type, vocab) {
+    if (typeof type !== "string" || type === "") return false;
+    if (!((vocab && vocab.inlineObjects) || []).some((o) => o.name === type)) return false;
+    const { $from } = this._editor.state.selection;
+    return $from.parent.inlineContent && !$from.parent.type.spec.code;
+  }
+
+  // At the caret, exactly as the slash and palette picks do: the field editor (the
+  // popover, or the host's editBlockObject) first; its answer puts the atom in.
+  _insertToolbarInline(type) {
+    this._editor.commands.focus();
+    if (!insertInlineObject(this, this._editor, type)) return false;
+    // TipTap's focus() takes the caret back on the next frame, after the popover
+    // focused its first field: give it back (as _insertDeclaredObject does).
+    const dialog = this.inlineObjectDialog();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
+    }
+    return true;
   }
 
   // Insert after the caret's block, exactly as the palette's Insert command does

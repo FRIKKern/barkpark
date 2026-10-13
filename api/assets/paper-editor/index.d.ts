@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.5.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.6.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -143,7 +143,7 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
 export type ToolbarMark = "strong" | "em" | "code" | "underline" | "strike" | "highlight" | "link";
 export type ToolbarBlockStyle = "normal" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote";
 export type ToolbarList = "bullet" | "number";
-export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock";
+export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock" | "insertInline";
 export interface ToolbarCommandArgs {
   mark?: ToolbarMark;
   href?: string;
@@ -278,6 +278,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   setBlockStyle(style: ToolbarBlockStyle): boolean;
   toggleList(kind: ToolbarList): boolean;
   insertBlock(type: string, attrs?: { level?: number }): boolean;
+  /** A declared inline object at the caret; its field editor opens first. */
+  insertInline(type: string): boolean;
   /** Whether the command would apply here, without applying it. */
   can(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
   state(): ToolbarState;
