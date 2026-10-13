@@ -35,9 +35,12 @@ defmodule Barkpark.Audit.DeferredBatchAppendTest do
     {:ok, ws} =
       Tenancy.create_workspace(%{slug: "audit-defer-#{tag}", name: "audit defer #{tag}"})
 
+    # The workspace goes too: a second committed workspace turns the shared
+    # test database multi-tenant for every test that runs after this one.
     on_exit(fn ->
       :ok = Sandbox.checkout(Repo, sandbox: false)
       Repo.delete_all(from(d in Document, where: d.workspace_id == ^ws.id))
+      Repo.delete!(ws)
     end)
 
     {:ok, ws: ws, tag: tag}
