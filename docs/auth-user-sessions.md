@@ -67,7 +67,9 @@ workspace_required` listing them.
   (`Auth.max_pat_permissions_for_role/1`, a minting policy). The scoped
   listen and presence streams take it too, from a member only and as the
   bearer only (`RequireTokenOrMemberSession`); listen re-checks the session
-  and the seat mid-stream. The flat listen stays API-token only.
+  and the seat mid-stream. The flat listen stays API-token only. The switcher's
+  lists (`GET /api/workspaces`, `…/projects`, `…/datasets`) take it too, as the
+  bearer, listing only what its user is seated in.
 - **Kill switch.** `revoked_at` is set by `revoke_user_session_token/1`
   (single logout) and `revoke_all_user_sessions/1` (sign-out-everywhere).
 

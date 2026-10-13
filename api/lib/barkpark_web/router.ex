@@ -4053,6 +4053,37 @@ defmodule BarkparkWeb.Router do
   # beside the scoped plugin scopes. Sweeps: move this comment only whole,
   # on its own lines. MARK:zone-scoped-mirrors
 
+  # task-6224d34a5a8a6017 — the switcher's three LISTs also take a login session
+  # as the bearer (`:require_token_or_login_session`, #22783's gate), so a
+  # signed-in editor's studio can list where it may switch to, as the scoped
+  # data API (#22764) and its streams (#23023) already let it work there. The
+  # actions decide membership for either principal (`Tenancy.Auth` takes a
+  # `%User{}`): a session lists only the workspaces its user is seated in, and
+  # their projects and datasets. An API token's path is `RequireToken` +
+  # `PublicRead`, which on these GETs is what `:require_token` does
+  # (`RequireWriteForMutation` passes a GET). Bearer only: no cookie is read.
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_token_or_login_session, :managed_refusal])
+
+    get("/workspaces", WorkspaceController, :index,
+      private: %{
+        barkpark_archived_workspace_exempt: true,
+        barkpark_workspaceless_token_allowed: true
+      }
+    )
+
+    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
+
+    get(
+      "/workspaces/:workspace_slug/projects/:project_slug/datasets",
+      WorkspaceController,
+      :datasets,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
+  end
+
   # ── Workspace / project switcher — membership-scoped LIST ───────────────
   # The web switcher's read surface: which workspaces (and their projects) the
   # bearer token's principal can reach. Membership-scoped in the context layer
@@ -4072,23 +4103,8 @@ defmodule BarkparkWeb.Router do
     # workspace, so an owner-bound token with NO workspace — a signup PAT — may
     # use them. That is how such a user creates their FIRST workspace. The
     # plug refuses that token everywhere else on the flat routes.
-    get("/workspaces", WorkspaceController, :index,
-      private: %{
-        barkpark_archived_workspace_exempt: true,
-        barkpark_workspaceless_token_allowed: true
-      }
-    )
-
-    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects,
-      private: %{barkpark_workspaceless_token_allowed: true}
-    )
-
-    get(
-      "/workspaces/:workspace_slug/projects/:project_slug/datasets",
-      WorkspaceController,
-      :datasets,
-      private: %{barkpark_workspaceless_token_allowed: true}
-    )
+    # The three LISTs (GET /workspaces, …/projects, …/datasets) are in the scope
+    # just above: they also take a login-session bearer (task-6224d34a5a8a6017).
 
     # Create surface: any authenticated token may create a workspace (becomes
     # its owner-member, + Default project + production dataset); project
