@@ -62,7 +62,7 @@ function parseArgs(argv) {
 }
 
 // An export line is a Barkpark envelope; the GROQ endpoint drops `_draft`,
-// `_publishedId`, and a `title` the content never had.
+// `_publishedId`, and a `title` that is null. A set title stays.
 function exportToSanity(doc) {
   const out = {...doc}
   delete out._draft
