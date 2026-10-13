@@ -193,12 +193,16 @@ export class BlockHandle {
   // openSlash(): host callback that opens the slash menu at the caret.
   // canSaveMaster(node) / saveMaster(node): optional paper-masters seam — when
   // canSaveMaster answers true the menu offers "Save as master".
-  constructor({ host, editor, openSlash, canSaveMaster, saveMaster }) {
+  // canEdit(node) / edit(pos): optional — when canEdit answers true the menu offers
+  // "Edit" first (a declared object block's field editor).
+  constructor({ host, editor, openSlash, canSaveMaster, saveMaster, canEdit, edit }) {
     this._host = host;
     this._editor = editor;
     this._openSlash = openSlash;
     this._canSaveMaster = typeof canSaveMaster === "function" ? canSaveMaster : () => false;
     this._saveMaster = typeof saveMaster === "function" ? saveMaster : () => false;
+    this._canEdit = typeof canEdit === "function" ? canEdit : () => false;
+    this._edit = typeof edit === "function" ? edit : () => false;
     this._index = -1;
     this._menu = null;
     this._drag = null;
@@ -408,6 +412,7 @@ export class BlockHandle {
     menu.innerHTML = [
       prose ? group("Turn into", TURN_INTO.map((t) => item(t.label, t.glyph, "turn:" + t.kind))) : "",
       group("Block", [
+        this._canEdit(node) ? item("Edit", "✎", "edit") : "",
         item("Duplicate", "⧉", "duplicate"),
         item("Move up", "↑", "up"),
         item("Move down", "↓", "down"),
@@ -479,6 +484,15 @@ export class BlockHandle {
 
   _runAction(action, index) {
     if (action.startsWith("turn:")) { turnTopLevelInto(this._editor, index, action.slice(5)); return; }
+    if (action === "edit") {
+      // Hide first: the editor that opens takes focus, and the handle must not linger.
+      this._index = -1;
+      this.hide();
+      let pos = 0;
+      for (let i = 0; i < index && i < this._editor.state.doc.childCount; i++) pos += this._editor.state.doc.child(i).nodeSize;
+      if (index >= 0 && index < this._editor.state.doc.childCount) this._edit(pos);
+      return;
+    }
     if (action === "save-master") {
       const node = index >= 0 && index < this._editor.state.doc.childCount
         ? this._editor.state.doc.child(index)

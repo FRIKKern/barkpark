@@ -86,7 +86,7 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
-import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, openObjectBlockInsert, refusalField } from "./inline-object.js";
+import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
 import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
 import { exactClipboardSerializer, exactSliceFromClipboard } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
@@ -1380,6 +1380,9 @@ class BpPaperCanvas extends HTMLElement {
         // block is one the server already holds.
         canSaveMaster: (node) => this._canSaveMaster(node),
         saveMaster: (node) => this._saveMaster(node),
+        // A declared object block's Edit opens its field editor, as a double-click does.
+        canEdit: (node) => this._editable && canEditObjectBlock(this, node),
+        edit: (pos) => editObjectBlockAt(this, this._editor, pos),
       });
     }
     // The link hover card works in both modes (a reader wants the address too); Edit shows only
