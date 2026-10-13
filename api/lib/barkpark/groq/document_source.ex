@@ -197,9 +197,7 @@ defmodule Barkpark.Groq.DocumentSource do
       c.types && c.types |> Enum.uniq() |> Enum.sort(),
       c.ids && c.ids |> Enum.uniq() |> Enum.sort(),
       c.eq |> Enum.uniq() |> Enum.sort(),
-      c.any
-      |> Enum.map(fn {path, vs} -> {path, vs |> Enum.uniq() |> Enum.sort()} end)
-      |> Enum.sort()
+      c.any |> Enum.map(fn probes -> probes |> Enum.uniq() |> Enum.sort() end) |> Enum.sort()
     }
   end
 

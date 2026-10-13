@@ -154,6 +154,31 @@ defmodule BarkparkWeb.GroqControllerTest do
            }
   end
 
+  test "in-lists and an || of field equalities filter through SQL", %{conn: conn, token: token} do
+    body =
+      conn
+      |> get_query(token, ~s'*[_type == "book" && year in $years] | order(year asc).name', %{
+        "$years" => "[1999, 2010]"
+      })
+      |> json_response(200)
+
+    assert body["result"] == ["First", "Third"]
+
+    body =
+      scoped_conn()
+      |> get_query(
+        token,
+        ~s'*[_type == "book" && (name == $n || year == $y)] | order(year asc).name',
+        %{
+          "$n" => ~s("Second"),
+          "$y" => "1999"
+        }
+      )
+      |> json_response(200)
+
+    assert body["result"] == ["First", "Second"]
+  end
+
   test "POST takes the query and params in the body", %{conn: conn, token: token} do
     body =
       conn
