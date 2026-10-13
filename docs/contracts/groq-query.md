@@ -17,7 +17,7 @@ Barkpark answers GROQ queries on the URL scheme of Sanity's HTTP query API, so a
 
 Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, a `public-read` token) gets `published` whatever it asks for. POST is billed to the read rate-limit bucket.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt` and their content fields at the top level; field visibility redaction applies. `drafts` overlays a draft on its published twin, sets `_id` to the published id and adds `_originalId`; `raw` returns `drafts.<id>` rows as stored.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` is the value a regular document read returns: Barkpark stores it in the `documents.title` column, and `title == "x"` is matched there. A document without a title has no `title` key. `drafts` overlays a draft on its published twin, sets `_id` to the published id and adds `_originalId`; `raw` returns `drafts.<id>` rows as stored.
 
 Errors keep Barkpark's envelope and add Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
 

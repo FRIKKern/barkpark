@@ -17,7 +17,8 @@ defmodule Barkpark.Groq.DocumentSource do
 
   The outermost `*[...]` filter's `_type`, `_id` and simple equality
   constraints become SQL (`Barkpark.Groq.Pushdown`); everything else runs in
-  memory over the loaded documents.
+  memory over the loaded documents. An equality on `title` reads the
+  `documents.title` column, where the writer keeps it.
 
   ## Scope and visibility
 
@@ -27,7 +28,7 @@ defmodule Barkpark.Groq.DocumentSource do
   only types whose schema is public. Documents are rendered through
   `Content.Envelope.render/3`, so field visibility redaction applies, and are
   then shaped as Sanity documents: `_id`, `_type`, `_rev`, `_createdAt`,
-  `_updatedAt` and the content fields at the top level.
+  `_updatedAt`, `title` and the content fields at the top level.
 
   ## Perspectives
 
@@ -293,10 +294,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
     condition =
       Enum.reduce(eq, condition, fn {path, value}, acc ->
-        dynamic(
-          [d],
-          ^acc and fragment("? @> ?", d.content, type(^Pushdown.nest(path, value), :map))
-        )
+        dynamic([d], ^acc and ^eq_condition(path, value))
       end)
 
     Enum.reduce(any, condition, fn probes, acc ->
@@ -308,6 +306,22 @@ defmodule Barkpark.Groq.DocumentSource do
           fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^json, {:array, :string}))
       )
     end)
+  end
+
+  # `title` lives in the `documents.title` column. `Envelope.render/3` emits
+  # the column, or `content.title` when the column is blank, so a row matches
+  # when either holds the value. The evaluator re-applies the filter to the
+  # rendered document, which drops a row whose column wins with another value.
+  defp eq_condition(["title"], value) do
+    dynamic(
+      [d],
+      d.title == ^value or
+        fragment("? @> ?", d.content, type(^Pushdown.nest(["title"], value), :map))
+    )
+  end
+
+  defp eq_condition(path, value) do
+    dynamic([d], fragment("? @> ?", d.content, type(^Pushdown.nest(path, value), :map)))
   end
 
   defp ids_condition(ids, :drafts) do
@@ -423,7 +437,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
     rows
     |> Enum.zip(rendered)
-    |> Enum.map(fn {row, doc} -> to_sanity(row, doc) end)
+    |> Enum.map(fn {_row, doc} -> to_sanity(doc) end)
     |> apply_overlay(state.perspective)
   end
 
@@ -444,14 +458,16 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
-  # Barkpark's envelope adds `_draft`, `_publishedId` and a `title` promoted
-  # from the column; a Sanity document has none of them.
-  defp to_sanity(row, doc) do
+  # Barkpark's envelope adds `_draft` and `_publishedId`; a Sanity document has
+  # neither. `title` is a user field: the writer moves it out of `content` into
+  # the `documents.title` column, and `Envelope.render/3` puts it back, so it
+  # stays exactly as the envelope emits it. A document written without a title
+  # renders `title: nil`; it is dropped, as a Sanity document has no such key,
+  # and GROQ reads a missing key and a null the same way.
+  defp to_sanity(doc) do
     doc = Map.drop(doc, ["_draft", "_publishedId"])
 
-    if is_map(row.content) and Map.has_key?(row.content, "title"),
-      do: doc,
-      else: Map.delete(doc, "title")
+    if is_nil(doc["title"]), do: Map.delete(doc, "title"), else: doc
   end
 
   defp apply_overlay(docs, :drafts) do

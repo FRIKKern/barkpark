@@ -9,6 +9,8 @@ defmodule Barkpark.Groq.Pushdown do
     * `_type == "t"`, `_type in ["a", "b"]` -> `types`
     * `_id == "x"`, `_id in [...]` -> `ids`
     * `a.b == "x"` on a content path -> `eq` (JSON containment)
+    * `title == "x"` -> `eq` with the path `["title"]`, which the document
+      source matches against the `documents.title` column
     * `a.b in ["x", "y"]` with scalar members, and `a == "x" || b.c == "y"`
       over content paths -> `any`, a list of containment probes of which a
       document must match at least one
@@ -137,6 +139,9 @@ defmodule Barkpark.Groq.Pushdown do
   defp add(acc, "==", ["_type"], _v), do: narrow(acc, :types, [])
   defp add(acc, "==", ["_id"], _v), do: narrow(acc, :ids, [])
   defp add(acc, "in", ["_id"], vs), do: narrow(acc, :ids, Enum.filter(vs, &is_binary/1))
+
+  # `title` is stored in a column, not in content; the source matches it there.
+  defp add(acc, "==", ["title"], v) when is_binary(v), do: %{acc | eq: [{["title"], v} | acc.eq]}
 
   defp add(acc, "==", [first | _] = path, v) when is_binary(v) or is_number(v) or is_boolean(v) do
     if system_path?(first), do: acc, else: %{acc | eq: [{path, v} | acc.eq]}
