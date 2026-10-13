@@ -380,8 +380,9 @@ forbids is advisory while read as blocking.
 ### Barkdown editor parity
 
 `barkdown-parity.yml` has an unfiltered PR trigger. Its dispatcher runs the
-original editor/PortableDoc path selection plus its own workflow/helper paths;
-empty diffs and explicit dispatch run the full matrix, while unknown refs or
+original editor/PortableDoc selection plus its workflow/helper paths. Helpers run
+from the merged checkout; explicit PR base/head SHAs keep the diff head-scoped.
+Empty diffs and explicit dispatch run the full matrix, while unknown refs or
 failed/truncated diffs fail. Public Barkdown checkout uses the standard read-only
 workflow token. A missing private-read secret cannot skip the rows.
 
@@ -390,7 +391,7 @@ when selected, a successful matrix job. Failed, cancelled or unknown dependencie
 fail the gate. An unrelated nonempty diff emits NOT APPLICABLE, explicitly saying
 no row ran. The matrix records both checkout commits and retains its results.
 
-This name is **not currently required**. The proposed watcher change names it
+This name is **not currently required**. The watcher names it
 as PR-scoped: this workflow has no push, schedule or merge-group trigger, so its
 context is not owed on main. Revisit that classification if the triggers change.
 Branch protection and Barkdown's weekly/dispatch policy are unchanged.

@@ -1,7 +1,7 @@
 name: Barkdown parity
 # The Barkdown editor-parity rows (FRIKKern/barkdown, docs/EDITOR-PARITY.md) against THIS checkout's
 # Barkpark, on a PR that touches the paper editor or the PortableDoc render/schema it rides on. Each row
-# drives Barkdown's real Electron app against Phoenix booted from the PR head and compares the canvas
+# drives Barkdown's real Electron app against Phoenix booted from the merged checkout and compares the canvas
 # with the server; a green row going red fails the check (Barkdown plan #4).
 #
 # Barkdown is public. A cheap dispatcher keeps the gate present on every PR;
@@ -31,7 +31,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Keep helpers introduced on the base available to older PR branches.
+          # The dispatcher compares explicit PR base/head SHAs, not this checkout's HEAD.
           fetch-depth: 0
       - uses: actions/setup-node@v7
         with:

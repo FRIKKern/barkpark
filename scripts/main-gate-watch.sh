@@ -184,8 +184,9 @@ WATCHED_CONTEXTS="Cloud gate
 Console gate
 Elixir gate"
 
-# EXCLUDED: required contexts that are PR-scoped by construction and can never
-# render post-merge. Named, one per line, with the reason in the comment above.
+# EXCLUDED: required verdicts scoped to PRs, with no automatic main run owed.
+# An optional manual dispatch does not create that post-merge obligation.
+# Named, one per line, with the reason in the comment above.
 # Adding a row here is a DECISION and shows up in a diff; an inline filter would
 # not.
 EXCLUDED_CONTEXTS=$'PR references an active task\nBarkdown parity gate'

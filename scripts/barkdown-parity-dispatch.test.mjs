@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -104,12 +104,71 @@ test('CLI uses real Git diffs for editor and documentation-only commits', () => 
   }
 });
 
+test('an older PR head runs merged helpers while the diff still names only its own changes', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'bp-parity-older-head-'));
+  const git = args => {
+    const result = spawnSync('git', args, { cwd: root, encoding: 'utf8', windowsHide: true });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = message => {
+    git(['add', '.']);
+    git(['commit', '--quiet', '-m', message]);
+    return git(['rev-parse', 'HEAD']);
+  };
+  git(['init', '--quiet']);
+  git(['config', 'user.name', 'Parity fixture']);
+  git(['config', 'user.email', 'parity@example.invalid']);
+  mkdirSync(path.join(root, 'empty-hooks'));
+  git(['config', 'core.hooksPath', path.join(root, 'empty-hooks')]);
+  writeFileSync(path.join(root, 'README.md'), 'initial fixture\n');
+  const initial = commit('before helpers existed');
+  mkdirSync(path.join(root, 'scripts'));
+  for (const file of ['barkdown-parity-dispatch.mjs', 'node-test-floor.mjs']) {
+    copyFileSync(new URL(`./${file}`, import.meta.url), path.join(root, 'scripts', file));
+  }
+  const base = commit('base introduces actual helpers');
+  for (const [file, needed] of [['README.md', false], ['api/assets/paper-editor/index.js', true]]) {
+    git(['checkout', '--quiet', '--detach', initial]);
+    mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
+    writeFileSync(path.join(root, file), 'head-only change\n');
+    const head = commit('older branch edit');
+    const missing = spawnSync(process.execPath, ['scripts/barkdown-parity-dispatch.mjs', 'dispatch'], {
+      cwd: root, encoding: 'utf8', windowsHide: true,
+    });
+    assert.notEqual(missing.status, 0);
+    assert.match(missing.stderr, /MODULE_NOT_FOUND/);
+    git(['checkout', '--quiet', '--detach', base]);
+    git(['merge', '--quiet', '--no-ff', head, '-m', 'actual merged checkout']);
+    const merged = git(['rev-parse', 'HEAD']);
+    assert.notEqual(merged, head);
+    assert.equal(git(['show', '-s', '--format=%P']), `${base} ${head}`);
+    const output = path.join(root, `decision-${head}.txt`);
+    const result = spawnSync(process.execPath, ['scripts/barkdown-parity-dispatch.mjs', 'dispatch'], {
+      cwd: root, env: { ...process.env, G2_EVENT: 'pull_request', G2_BASE: base, G2_HEAD: head, GITHUB_OUTPUT: output },
+      encoding: 'utf8', windowsHide: true,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const decision = JSON.parse(result.stdout);
+    assert.equal(decision.base, base);
+    assert.equal(decision.head, head);
+    assert.equal(decision.needed, needed);
+    assert.deepEqual(decision.selected, needed ? [file] : []);
+    assert.equal(readFileSync(output, 'utf8'), `needed=${needed}\n`);
+  }
+});
+
 test('workflow routes real dependency results into an unconditional gate', () => {
   const workflow = readFileSync(new URL('../.github/workflows/barkdown-parity.yml', import.meta.url), 'utf8');
   const trigger = workflow.slice(workflow.indexOf('\non:'), workflow.indexOf('\npermissions:'));
   assert.match(trigger, /\n  pull_request:/);
   assert.doesNotMatch(trigger, /\n    paths:/);
   assert.doesNotMatch(workflow, /BARKDOWN_READ_TOKEN|continue-on-error/);
+  const changesJob = workflow.slice(workflow.indexOf('\n  changes:'), workflow.indexOf('\n  parity:'));
+  assert.doesNotMatch(changesJob, /\n\s+ref:/, 'merged checkout must carry base helpers for older PR heads');
+  assert.match(changesJob, /fetch-depth: 0/);
+  assert.ok(changesJob.includes('G2_BASE: ${{ github.event.pull_request.base.sha }}'));
+  assert.ok(changesJob.includes('G2_HEAD: ${{ github.event.pull_request.head.sha }}'));
   const gateJob = workflow.slice(workflow.indexOf('\n  gate:'));
   assert.match(gateJob, /needs: \[changes, parity\]/);
   assert.match(gateJob, /if: always\(\)/);
