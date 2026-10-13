@@ -34,16 +34,14 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
       mirroring Indx.
     * `:after_delete`    — a doc was removed          → DELETE op (always)
 
-  ## The feature flag (default OFF)
+  ## The feature flag (default ON since task-6e2552cdeb223fa2)
 
   `Settings.get().incremental_project` gates the `:after_save` add/update path
   ONLY:
 
-    * OFF (the DEFAULT) → save takes the deterministic full per-scope REBUILD
-      path. Inert incremental path.
-    * ON  → save routes to the per-document incremental UPSERT op. A mis-diff
-      strands stale edges in the durable table (no blue/green to discard,
-      unlike Indx) — UNPROVEN, spike-gated.
+    * ON (the DEFAULT) → save routes to the per-document incremental UPSERT op.
+    * OFF (`EDGE_PROJECTOR_INCREMENTAL=0`) → save takes the full per-scope
+      REBUILD path, one type-wide rebuild per save.
 
   `:after_publish` no longer reads this flag (see below) — it always runs the
   bounded per-doc upsert, synchronously. delete/unpublish are ALWAYS
@@ -217,15 +215,29 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
 
   def enqueue_rebuild(_other), do: :ok
 
-  # add/update routing gated by the incremental_project flag. OFF (default) →
-  # the full per-scope REBUILD op. ON → the per-document UPSERT op carrying the
-  # doc _id; with no resolvable _id we cannot target a doc, so fall back to a
-  # rebuild (never leave the graph stale).
+  # add/update routing gated by the incremental_project flag. ON (default) →
+  # the per-document UPSERT op carrying the doc _id. OFF → the full per-scope
+  # REBUILD op. With no resolvable _id we cannot target a doc, so fall back to
+  # a rebuild (never leave the graph stale).
+  #
+  # A DRAFT save under the incremental path enqueues nothing. The table is the
+  # PUBLISHED graph: the rebuild path re-extracts the published corpus, so a
+  # draft save never changed what it wrote, and an upsert of a draft would
+  # project the draft's references onto the published row's PK
+  # (`Projector.doc_pk/2` prefers the published row). The publish that lands
+  # the draft upserts it.
   defp route_save(doc, dataset) do
-    if incremental_project?() do
-      do_enqueue_upsert(doc, dataset)
-    else
-      do_enqueue_rebuild(doc, dataset)
+    cond do
+      not incremental_project?() -> do_enqueue_rebuild(doc, dataset)
+      draft_doc?(doc) -> :ok
+      true -> do_enqueue_upsert(doc, dataset)
+    end
+  end
+
+  defp draft_doc?(doc) do
+    case doc_id(doc) do
+      "drafts." <> _ -> true
+      _ -> false
     end
   end
 
@@ -455,8 +467,12 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   defp require_workspace?(nil), do: Tenancy.multi_tenant?()
   defp require_workspace?(ws) when is_binary(ws), do: false
 
+  # Read once per request or batch: `Settings.get/0` reads the
+  # `plugin_settings` row, and a batch asked once per saved document.
   defp incremental_project? do
-    Settings.get().incremental_project == true
+    Barkpark.Content.WriteScope.request_memo([], :edge_projector_incremental, fn ->
+      Settings.get().incremental_project == true
+    end)
   rescue
     # Settings.get/0 never raises by contract, but a misconfigured DB read must
     # never crash a lifecycle hook — degrade to the safe rebuild path.

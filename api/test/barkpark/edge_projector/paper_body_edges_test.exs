@@ -40,6 +40,17 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
   @dataset "production"
 
   setup do
+    # These tests pin the REBUILD wiring, which runs with incremental edge
+    # projection OFF. ON is the default since task-6e2552cdeb223fa2.
+    prev = Application.get_env(:barkpark, Barkpark.EdgeProjector)
+    Application.put_env(:barkpark, Barkpark.EdgeProjector, incremental_project: false)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, Barkpark.EdgeProjector, prev),
+        else: Application.delete_env(:barkpark, Barkpark.EdgeProjector)
+    end)
+
     # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
     # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
     Barkpark.LabelFixtures.register_tags!(@dataset)
