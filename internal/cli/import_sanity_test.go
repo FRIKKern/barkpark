@@ -313,10 +313,13 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 		`{"_id":"post-2","_type":"post","title":"Two","body":[` + block("x", `"style":"normal","markDefs":[],`, span("xs", "hi")) + `,{"_type":"youtube","_key":"y","url":"u"}]}`,
 		`{"_id":"drafts.secret-1","_type":"sanity.previewUrlSecret","secret":"s"}`,
 		// Each of these would lose formatting, so each body is kept whole.
-		`{"_id":"post-3","_type":"post","body":[` + block("i", `"style":"normal","markDefs":[{"_key":"r","_type":"internalLink","reference":{"_ref":"post-1"}}],`, span("is", "see", "r")) + `]}`,
+		`{"_id":"post-3","_type":"post","body":[` + block("i", `"style":"normal","markDefs":[{"_key":"r","_type":"internalLink","reference":{}}],`, span("is", "see", "r")) + `]}`,
 		`{"_id":"post-4","_type":"post","body":[` + block("l", `"style":"normal","listItem":"bullet","level":2,"markDefs":[],`, span("ls", "deep")) + `]}`,
 		`{"_id":"post-5","_type":"post","body":[` + block("m", `"style":"normal","markDefs":[],`, span("ms", "hi", "highlight")) + `]}`,
 		`{"_id":"post-6","_type":"post","body":[` + block("g", `"style":"h2","markDefs":[],`, span("gs", "Big", "em")) + `]}`,
+		// An internalLink (B14's post-11/12/13) becomes a wikilink pinned to its document.
+		`{"_id":"post-7","_type":"post","body":[` + block("w", `"style":"normal","markDefs":[{"_key":"il1","_type":"internalLink","reference":{"_ref":"drafts.author-ada","_type":"reference"}}],`,
+			span("w1", "By "), span("w2", "Ada", "strong", "il1")) + `]}`,
 	}
 	tarball := writeSanityTarball(t, lines, nil)
 
@@ -325,8 +328,8 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
 	}
 	docs := importDocsByID(t, importExportTo(t, f.importFakeServer))
-	if _, ok := docs["drafts.secret-1"]; ok || len(docs) != 6 {
-		t.Fatalf("imported %v, want post-1..post-6 (sanity.* is not imported)", docs)
+	if _, ok := docs["drafts.secret-1"]; ok || len(docs) != 7 {
+		t.Fatalf("imported %v, want post-1..post-7 (sanity.* is not imported)", docs)
 	}
 
 	got, _ := json.Marshal(docs["post-1"]["body"])
@@ -340,6 +343,13 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 	if string(got) != want {
 		t.Errorf("post-1 body =\n%s\nwant\n%s", got, want)
 	}
+	got, _ = json.Marshal(docs["post-7"]["body"])
+	want = `{"blocks":[{"content":[{"type":"text","value":"By "},` +
+		`{"children":[{"children":[{"type":"text","value":"Ada"}],"type":"strong"}],"docId":"author-ada","target":"author-ada","type":"wikilink"}],` +
+		`"id":"w","type":"paragraph"}]}`
+	if string(got) != want {
+		t.Errorf("post-7 body (internalLink) =\n%s\nwant\n%s", got, want)
+	}
 	if summary, _ := docs["post-1"]["summary"].([]any); len(summary) != 1 {
 		t.Errorf("a plain richText field was converted: %#v", docs["post-1"]["summary"])
 	}
@@ -349,7 +359,7 @@ func TestRunImportSanityConvertsPortableTextBodies(t *testing.T) {
 		}
 	}
 	for _, s := range []string{
-		"1 Portable Text body(ies) were converted to PortableDoc",
+		"2 Portable Text body(ies) were converted to PortableDoc",
 		"5 body(ies) were kept as Portable Text:",
 		`post-2.body: block type "youtube" is not declared by the field`,
 		`post-3.body: block i: annotation "internalLink" has no PortableDoc mark`,

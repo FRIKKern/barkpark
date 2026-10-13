@@ -26,9 +26,10 @@ import (
 // `blocks.of` (`{"name": "callout", …}`) is kept as `{id, type, …fields}`. A
 // body holding anything else (an undeclared object, a Sanity image, whose
 // shape is not PortableDoc's), or formatting PortableDoc has no node for (an
-// internalLink annotation, a nested list level, a mark inside a heading, a
-// custom style), is left as it was and reported: never half converted, never
-// formatting silently lost.
+// annotation other than link or a resolvable internalLink, a nested list level,
+// a mark inside a heading, a custom style), is left as it was and reported:
+// never half converted, never formatting silently lost. An internalLink
+// becomes a wikilink {target: id, docId: id} pinned to the referenced document.
 
 // sanityBlocksField is one block-editor richText field of the target schema.
 type sanityBlocksField struct {
@@ -278,8 +279,14 @@ func sanityInline(block map[string]any) ([]any, string) {
 			}
 			def, ok := defs[name]
 			if ok && def["_type"] == "link" {
-				if href, _ := def["href"].(string); href != "" {
+				if href, _ := def["href"].(string); href != "" && link == nil {
 					link = map[string]any{"type": "link", "href": href}
+					continue
+				}
+			}
+			if ok && def["_type"] == "internalLink" {
+				if id := sanityRefID(def["reference"]); id != "" && link == nil {
+					link = map[string]any{"type": "wikilink", "target": id, "docId": id}
 					continue
 				}
 			}
@@ -295,6 +302,15 @@ func sanityInline(block map[string]any) ([]any, string) {
 		out = append(out, node)
 	}
 	return out, ""
+}
+
+// sanityRefID is the published id a Sanity reference ({_ref: "…"}) names, or ""
+// when it names none. A wikilink pins it as docId (and target: Sanity's
+// markDef carries no title, so the id is the only name it has).
+func sanityRefID(v any) string {
+	ref, _ := v.(map[string]any)
+	id, _ := ref["_ref"].(string)
+	return strings.TrimPrefix(id, "drafts.")
 }
 
 // sanityAllText: inline nodes that are all plain text (no mark, link or object).
