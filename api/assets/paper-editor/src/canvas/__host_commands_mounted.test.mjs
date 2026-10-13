@@ -244,7 +244,7 @@ try {
   await twoFrames();
   assert.equal(states.length, 1, "one event for three synchronous moves");
   assert.deepEqual(states[0], canvas.state(), "detail equals state()");
-  assert.deepEqual(states[0], { marks: [], blockStyle: "normal", list: "bullet", link: null, selection: { empty: true, inBlockType: "list" } });
+  assert.deepEqual(states[0], { marks: [], blockStyle: "normal", list: "bullet", link: null, wikilink: null, selection: { empty: true, inBlockType: "list" } });
   select(editor, posOfText(editor, "one") + 1);
   await twoFrames();
   assert.equal(states.length, 1, "an unchanged state is not re-emitted");
@@ -283,7 +283,7 @@ try {
   assert.equal(r.canvas.toggleMark("strong"), false, "read-only: does nothing");
   const loose = document.createElement("bp-paper-canvas");
   assert.equal(loose.toggleMark("strong"), false, "unmounted: false");
-  assert.deepEqual(loose.state(), { marks: [], blockStyle: null, list: null, link: null, selection: { empty: true, inBlockType: null } }, "unmounted: the empty state");
+  assert.deepEqual(loose.state(), { marks: [], blockStyle: null, list: null, link: null, wikilink: null, selection: { empty: true, inBlockType: null } }, "unmounted: the empty state");
 
   console.log("PASS host_commands: toggleMark, setBlockStyle, toggleList, insertBlock, run; can() honours the vocabulary; state() and bp-selection-change");
 } catch (error) {

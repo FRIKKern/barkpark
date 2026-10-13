@@ -1734,7 +1734,7 @@ class BpPaperCanvas extends HTMLElement {
     const editor = this._editor;
     const a = args && typeof args === "object" ? args : {};
     switch (command) {
-      case "toggleMark": return hcToggleMark(editor, a.mark, a.href) === true;
+      case "toggleMark": return hcToggleMark(editor, a.mark, a.href, a.docId, a.target) === true;
       case "setBlockStyle": return hcSetBlockStyle(editor, a.style, this._toolbarVocabulary()) === true;
       case "toggleList": return hcToggleList(editor, a.kind) === true;
       case "insertBlock": return this._insertToolbarBlock(a.type, a.attrs) === true;
@@ -1743,7 +1743,7 @@ class BpPaperCanvas extends HTMLElement {
     }
   }
 
-  toggleMark(mark, attrs) { return this.run("toggleMark", { mark, href: attrs && attrs.href }); }
+  toggleMark(mark, attrs) { return this.run("toggleMark", { mark, href: attrs && attrs.href, docId: attrs && attrs.docId, target: attrs && attrs.target }); }
   setBlockStyle(style) { return this.run("setBlockStyle", { style }); }
   toggleList(kind) { return this.run("toggleList", { kind }); }
   insertBlock(type, attrs) { return this.run("insertBlock", { type, attrs }); }
@@ -1755,7 +1755,7 @@ class BpPaperCanvas extends HTMLElement {
     const a = args && typeof args === "object" ? args : {};
     const vocab = this._toolbarVocabulary();
     switch (command) {
-      case "toggleMark": return canToggleMark(editor, a.mark, a.href, vocab);
+      case "toggleMark": return canToggleMark(editor, a.mark, a.href, vocab, a.docId);
       case "setBlockStyle": return canSetBlockStyle(editor, a.style, vocab);
       case "toggleList": return canToggleList(editor, a.kind, vocab);
       case "insertBlock": return !!this._toolbarInsertItem(a.type);

@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.6.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.7.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.6.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.7.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`.
 
 ## The element
 
@@ -231,7 +231,7 @@ less than 500 ms apart group into one undo step, as typing does. Such a host usu
 
 | Method | Effect |
 |---|---|
-| `toggleMark(mark, { href }?)` | `mark`: `strong`, `em`, `code`, `underline`, `strike`, `highlight`, `link`. `link` with an `href` sets the link over the selection's link range; without one it clears the link there. Only the reader's allowlist links (`http`, `https`, `mailto`, `tel`, a relative or in-document address, `#`): anything else (`javascript:`, `data:`, a protocol-relative `//`) returns `false`, `can()` is `false`, and the format bubble's link row refuses it the same way |
+| `toggleMark(mark, { href }?)` | `mark`: `strong`, `em`, `code`, `underline`, `strike`, `highlight`, `link`, `wikilink`. `wikilink` takes `{ docId, target? }`: a link to that document over the selection (`docId` must be a document id — letters, digits, `.`, `_`, `-`, `:` — or the command is `false`; the server refuses anything else in a field's write path) (`target` defaults to the id; the canvas's own picks put the document's title there), and without a `docId` it clears the document link in place. A field admits it when it declares `link`'s sibling `internalLink` (Sanity's link to a document), which portable-doc stores as this `wikilink`. Resolution reads only the rendering document's dataset and workspace, so a `docId` from elsewhere renders as an unresolved link. `link` with an `href` sets the link over the selection's link range; without one it clears the link there. Only the reader's allowlist links (`http`, `https`, `mailto`, `tel`, a relative or in-document address, `#`): anything else (`javascript:`, `data:`, a protocol-relative `//`) returns `false`, `can()` is `false`, and the format bubble's link row refuses it the same way |
 | `setBlockStyle(style)` | `normal`, `h1`–`h6`, `blockquote`. A quote keeps the block's id and text; in a field canvas it is the quote kind the field admits (its pullquote when `blockquote` maps there), as `> ` makes |
 | `toggleList(kind)` | `bullet` or `number`. Off a list: makes one. In a list of the other kind: converts it, keeping the list's id. In a list of that kind: lifts the item out |
 | `insertBlock(type, { level }?)` | any type the canvas's slash menu offers here (narrowed to the field's vocabulary). Inserts after the caret's block, an empty paragraph is replaced; a declared object block opens its fields first, a type the host builds on the server emits `bp-server-insert` |
@@ -240,16 +240,17 @@ less than 500 ms apart group into one undo step, as typing does. Such a host usu
 | `can(command, args?)` | whether `run(command, args)` would apply now, without applying it. `false` for what the field's vocabulary forbids (its veto would drop the edit) |
 | `state()` | the active state, below |
 
-`state()` is `{ marks, blockStyle, list, link, selection }`:
+`state()` is `{ marks, blockStyle, list, link, wikilink, selection }`:
 
 - `marks`: the active marks, by the names above.
 - `blockStyle`: the caret's textblock (`normal`, `h1`–`h6`, `blockquote`), or `null` in another block.
 - `list`: `bullet` or `number` when the caret is in such a list, else `null`.
 - `link`: `{ href }` when the selection is in a link, else `null`.
+- `wikilink`: `{ target, docId }` when the selection is in a document link, else `null`.
 - `selection`: `{ empty, inBlockType }`; `inBlockType` is the portable-doc type of the top-level block, or `null`.
 
 Before mount it is `{ marks: [], blockStyle: null, list: null, link: null,
-selection: { empty: true, inBlockType: null } }`.
+wikilink: null, selection: { empty: true, inBlockType: null } }`.
 
 `bp-selection-change` (bubbles, composed) fires when that state changes (a
 selection move, a stored mark, a block turned into a heading), at most once per

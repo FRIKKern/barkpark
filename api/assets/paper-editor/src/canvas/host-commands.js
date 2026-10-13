@@ -28,7 +28,11 @@ export const TOOLBAR_MARKS = {
   strike: "strike",
   highlight: "highlight",
   link: "link",
+  wikilink: "wikilink",
 };
+// A document id as Barkpark mints them (FieldVocabulary's wikilink check): never
+// markup, a path or a URL.
+const DOC_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const MARK_TO_TOOLBAR = Object.fromEntries(Object.entries(TOOLBAR_MARKS).map(([pd, tiptap]) => [tiptap, pd]));
 
 export const BLOCK_STYLES = ["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"];
@@ -63,9 +67,14 @@ function listKindAt(state) {
 
 // ── can ────────────────────────────────────────────────────────────────────
 
-export function canToggleMark(editor, mark, href, vocab) {
+export function canToggleMark(editor, mark, href, vocab, docId) {
   const name = TOOLBAR_MARKS[mark];
   if (!name || !markAllowed(name, vocab)) return false;
+  // A document link needs the document to set (its id), or one in place to clear.
+  if (name === "wikilink") {
+    if (typeof docId === "string" && docId.trim()) return DOC_ID.test(docId.trim()) && !editor.state.selection.empty && canRun(editor, "setMark", "wikilink", { target: docId, docId });
+    return editor.isActive("wikilink");
+  }
   if (name !== "link") return canRun(editor, markToggle(name));
   // A link needs an href to set, or one in place to clear.
   if (typeof href === "string" && href.trim()) {
@@ -99,9 +108,18 @@ export function canToggleList(editor, kind, vocab) {
 
 // ── apply ──────────────────────────────────────────────────────────────────
 
-export function toggleMark(editor, mark, href) {
+export function toggleMark(editor, mark, href, docId, target) {
   const name = TOOLBAR_MARKS[mark];
   if (name === "link") return applyLink(editor, editor.isActive("link") && !href ? "" : href);
+  if (name === "wikilink") {
+    if (typeof docId === "string" && docId.trim()) {
+      const id = docId.trim();
+      const label = typeof target === "string" && target.trim() ? target.trim() : id;
+      // Over the selection; a link already there is replaced, not nested.
+      return editor.chain().focus().unsetMark("wikilink").setMark("wikilink", { target: label, docId: id }).run();
+    }
+    return editor.chain().focus().extendMarkRange("wikilink").unsetMark("wikilink").run();
+  }
   return applyMark(editor, name);
 }
 
@@ -132,7 +150,7 @@ export function toggleList(editor, kind) {
 
 // ── state ──────────────────────────────────────────────────────────────────
 
-export const emptyToolbarState = () => ({ marks: [], blockStyle: null, list: null, link: null, selection: { empty: true, inBlockType: null } });
+export const emptyToolbarState = () => ({ marks: [], blockStyle: null, list: null, link: null, wikilink: null, selection: { empty: true, inBlockType: null } });
 
 export function toolbarState(editor) {
   const { state } = editor;
@@ -146,11 +164,13 @@ export function toolbarState(editor) {
     : null;
   const top = $from.depth >= 1 ? $from.node(1) : selection.node || null;
   const href = editor.isActive("link") ? editor.getAttributes("link").href : null;
+  const doc = editor.isActive("wikilink") ? editor.getAttributes("wikilink") : null;
   return {
     marks,
     blockStyle,
     list: listKindAt(state),
     link: typeof href === "string" ? { href } : null,
+    wikilink: doc ? { target: doc.target || "", docId: doc.docId || null } : null,
     selection: { empty: selection.empty, inBlockType: top ? pdTypeOf({ type: top.type.name, attrs: top.attrs }) : null },
   };
 }

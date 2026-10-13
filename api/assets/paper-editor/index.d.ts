@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.6.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.7.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -140,13 +140,16 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
 }
 
 /** A mark a toolbar toggles (portable-doc names). */
-export type ToolbarMark = "strong" | "em" | "code" | "underline" | "strike" | "highlight" | "link";
+export type ToolbarMark = "strong" | "em" | "code" | "underline" | "strike" | "highlight" | "link" | "wikilink";
 export type ToolbarBlockStyle = "normal" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote";
 export type ToolbarList = "bullet" | "number";
 export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock" | "insertInline";
 export interface ToolbarCommandArgs {
   mark?: ToolbarMark;
   href?: string;
+  /** `wikilink`: the document to link to (its published id), and the label kept as `target`. */
+  docId?: string;
+  target?: string;
   style?: ToolbarBlockStyle;
   kind?: ToolbarList;
   type?: string;
@@ -158,6 +161,7 @@ export interface ToolbarState {
   blockStyle: ToolbarBlockStyle | null;
   list: ToolbarList | null;
   link: { href: string } | null;
+  wikilink: { target: string; docId: string | null } | null;
   selection: { empty: boolean; inBlockType: string | null };
 }
 
@@ -274,7 +278,7 @@ export interface BpPaperCanvasElement extends HTMLElement {
   setRemoteSelections(list: RemoteSelection[]): void;
   /** Toolbar commands on the current selection: true when applied. */
   run(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
-  toggleMark(mark: ToolbarMark, attrs?: { href?: string }): boolean;
+  toggleMark(mark: ToolbarMark, attrs?: { href?: string; docId?: string; target?: string }): boolean;
   setBlockStyle(style: ToolbarBlockStyle): boolean;
   toggleList(kind: ToolbarList): boolean;
   insertBlock(type: string, attrs?: { level?: number }): boolean;

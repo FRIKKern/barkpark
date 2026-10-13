@@ -41,6 +41,69 @@ defmodule Barkpark.PortableDoc.FieldVocabularyTest do
     assert V.allowed_inline_types(vocab) == MapSet.new(["text", "strong", "em", "link"])
   end
 
+  # A declared `internalLink` (Sanity's link to a document) is portable-doc's
+  # document link: the field admits `wikilink`; without it, a wikilink is refused.
+  test "a declared internalLink admits a wikilink; undeclared, it is refused" do
+    declared =
+      put_in(@agency, ["blocks", "annotations"], [
+        %{"name" => "link"},
+        %{"name" => "internalLink"}
+      ])
+
+    link = %{
+      "type" => "wikilink",
+      "target" => "author-ada",
+      "docId" => "author-ada",
+      "children" => [%{"type" => "text", "value" => "Ada"}]
+    }
+
+    assert "wikilink" in V.allowed_inline_types(V.from_field(declared))
+    assert :ok == V.validate(V.from_field(declared), [p(nil, [link])])
+    assert {:error, {:out_of_vocabulary, _}} = V.validate(V.from_field(@agency), [p(nil, [link])])
+  end
+
+  # A host can put any docId into a document link (the toolbar's toggleMark): the
+  # write path takes only a well-formed document id, never markup, a path or a URL.
+  test "a wikilink's docId must be a well-formed document id" do
+    vocab =
+      V.from_field(put_in(@agency, ["blocks", "annotations"], [%{"name" => "internalLink"}]))
+
+    with_id = fn id ->
+      [p(nil, [%{"type" => "wikilink", "target" => "x", "docId" => id, "children" => []}])]
+    end
+
+    for good <- [
+          "author-ada",
+          "drafts.post-05",
+          "task-0f50b057a3a15243",
+          "3f2c9a1e-7b1d-4c2a-9a55-0d6b2b1f9e10"
+        ] do
+      assert :ok == V.validate(vocab, with_id.(good)), good
+    end
+
+    for bad <- [
+          "",
+          "javascript:alert(1)",
+          "../other",
+          "https://evil.example/x",
+          "<b>x</b>",
+          "a b",
+          42,
+          %{"_ref" => "x"}
+        ] do
+      result = V.validate(vocab, with_id.(bad))
+
+      assert match?({:error, {:out_of_vocabulary, _}}, result) and
+               elem(elem(result, 1), 1) =~ "well-formed docId",
+             inspect(bad)
+    end
+
+    assert {:error, _} =
+             V.validate(vocab, [
+               p(nil, [%{"type" => "wikilink", "target" => 7, "children" => []}])
+             ])
+  end
+
   # An EXPLICITLY empty declaration still admits nothing — a schema author who
   # writes `"blocks": {}` said "nothing", and is taken at their word.
   test "an explicitly empty declaration admits nothing but text-less nothing" do
