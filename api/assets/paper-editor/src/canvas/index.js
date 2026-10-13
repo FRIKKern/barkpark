@@ -1314,6 +1314,17 @@ class BpPaperCanvas extends HTMLElement {
         // others shut so a stale popup never lingers (triggers disjoint by leading
         // token "[[" vs "#" vs "/", but the gate makes the single-popup invariant
         // code-enforced rather than incidental).
+        // An object editor open over the canvas (the popover, or the host's): its slash
+        // line stays until the answer, and an update meanwhile (the save echo stamping
+        // ids) must not reopen a menu behind it.
+        if (this._objectEditorOpen()) {
+          this._closeWikilink();
+          this._closeTag();
+          this._closeEmoji();
+          this._closeSlash();
+          if (this._bubble) this._bubble.update();
+          return;
+        }
         const consumed = this._maybeBlockShorthand() || this._maybeCalloutShorthand();
         if (!consumed) {
           if (this._maybeWikilink()) {
@@ -2293,6 +2304,11 @@ class BpPaperCanvas extends HTMLElement {
 
   get editBlockObject() {
     return this._editBlockObject;
+  }
+
+  // Whether a declared object's editor is open (the popover or the host's).
+  _objectEditorOpen() {
+    return !!((this._inlineDialog && this._inlineDialog.isOpen()) || (this._hostObjectDialog && this._hostObjectDialog.isOpen()));
   }
 
   // The value the dialog just saved: the batch that carries it is the one a
