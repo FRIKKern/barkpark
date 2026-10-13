@@ -936,6 +936,10 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # The POST form of the GROQ query read (task-cf961ac7f324b6cc). It writes
+    # nothing: Sanity's client sends a query too long for a URL as POST. It
+    # renders the evaluated result, never an `ok: true` literal.
+    {:post, "/w/:workspace_slug/p/:project_slug/v:api_version/data/query/:dataset", "BarkparkWeb.GroqController", :read_post, :status_only_receipt},
     # Seat consent (owner ruling #7, task-a08da65bc33083d0): three NEW routed
     # writes, rows proposed by `--routed-rows` and pasted verbatim. Each renders
     # the row the context function returned (accept: the created seat; decline:

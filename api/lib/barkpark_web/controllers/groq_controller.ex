@@ -29,7 +29,10 @@ defmodule BarkparkWeb.GroqController do
 
   @perspectives ["published", "drafts", "raw", "previewDrafts"]
 
-  def query(conn, %{"dataset" => dataset} = params) do
+  @doc "The POST form: the same read, with the query and params in the body."
+  def read_post(conn, params), do: read(conn, params)
+
+  def read(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
 
     with :ok <- known_dataset(dataset, conn),

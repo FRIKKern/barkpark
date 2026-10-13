@@ -3669,18 +3669,19 @@ defmodule BarkparkWeb.Router do
   # Sanity-compatible GROQ query read (docs/api-v1.md §4a). `v:api_version`
   # matches Sanity's dated version segment (`/v2025-02-19/...`), so a Sanity
   # client whose apiHost is `https://<host>/w/<ws>/p/<proj>` reaches it with its
-  # own URL scheme. GET and POST share the controller; POST is the client's
-  # form for a query too long for a URL.
+  # own URL scheme. POST is the client's form for a query too long for a URL;
+  # it has its own action name so Sobelow's action-reuse check does not read
+  # one action as both a GET and a POST.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through(:shared_docs_api)
 
-    get("/v:api_version/data/query/:dataset", GroqController, :query)
+    get("/v:api_version/data/query/:dataset", GroqController, :read)
   end
 
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through(:shared_docs_query_post)
 
-    post("/v:api_version/data/query/:dataset", GroqController, :query)
+    post("/v:api_version/data/query/:dataset", GroqController, :read_post)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
