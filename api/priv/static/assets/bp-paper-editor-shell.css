@@ -1148,6 +1148,16 @@
       font-weight: 500;
       line-height: 1.2;
     }
+    /* A declared object block (Sanity's block object row): full width, an icon, the kind
+     * title and a preview line, each its own element for a host to style. The chip's
+     * text keeps "Title · value" for its name; the separator is not shown. */
+    .bp-canvas-object-row .bp-canvas-readonly-chip { display: flex; width: 100%; box-sizing: border-box; gap: 10px; padding: 8px 12px; font-weight: 400; }
+    .bp-canvas-object-icon { flex: none; position: relative; width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; }
+    .bp-canvas-object-icon::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 1.5px solid currentColor; }
+    .bp-canvas-object-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+    .bp-canvas-object-title { color: var(--paper-ink); font-weight: 600; }
+    .bp-canvas-object-sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .bp-canvas-object-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper-ink-soft); }
     /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
        <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
        names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
