@@ -80,7 +80,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 ### Mutation kinds
 
-**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact draft ID + revision (missing →404, stale →412). Removes only that draft, with recovery history; generic `delete` removes both variants. On a lost reply, reconcile; never retry against a recreated row.
+**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact draft ID + revision (missing →404, stale →412). Removes only that draft, with recovery history; a bare-id `delete` removes both. On a lost reply, reconcile; never retry against a recreated row.
 
 **`create`** — new draft (`conflict` if one exists): `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
@@ -97,7 +97,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — deletes `<id>`; keeps `drafts.<id>`, else copies `<id>` there.
 - **`discardDraft`** — deletes `drafts.<id>` only.
-- **`delete`** — deletes `<id>` and `drafts.<id>` if they exist; honors `ifRevisionID`.
+- **`delete`** — `<id>`: both rows; `drafts.<id>`: only the draft. Honors `ifRevisionID`.
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. May add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
