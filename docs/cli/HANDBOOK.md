@@ -30,7 +30,7 @@ Detects OS (`darwin`/`linux`) + arch (`arm64`/`amd64`), installs to `/usr/local/
 bp [global flags] <noun> <verb> [args] [command flags]
 ```
 
-Command tree is a **pure function** of `GET /v1/capabilities` — plugins add noun/verb with zero client code change.
+Command tree is a **pure function** of `GET /v1/capabilities` — plugins add nouns and verbs with no client change.
 
 ## Context precedence
 
@@ -88,7 +88,7 @@ settings and insights tuning verbs.
 
 `-o table|json|yaml|minimal` (or `--json`, `-q`). Default: `table` on TTY, `json` piped. The CLI **unwraps** `{"result":…}` envelopes; warnings go to stderr. `doc ls`/`doc query` JSON adds `returned` (rows in this output, like `count`); `--count` adds `total` (all matches).
 
-bp retries a 429 (honouring `Retry-After`) and a read's transient 500; `--no-retry` or `BARKPARK_NO_RETRY=1` sends each request once.
+bp retries a 429 (honouring a `Retry-After` in seconds) and a read's transient 500; `--no-retry` or `BARKPARK_NO_RETRY=1` sends each request once.
 
 Minimal receipts (writes, shape-keyed — never per-verb): `rev:`/`id:` lines when the body carries them; an `{"ok":true,"doc":{…}}` body prints the doc's identity line — `<doc_id>` plus `epoch=<n>` when the doc carries a claim fence, including a released claim whose worker is now null (e.g. `drafts.task-992199 epoch=2 rev=a1b2c3`); a 2xx `{"ok":false,"reason":…}` prints the reason token (e.g. `no_ready`, exit 0); otherwise a bare `ok`.
 
@@ -100,11 +100,11 @@ Prints the resolved request (method, URL, headers redacted, body) then exits 0 *
 dry-run: client-side preview only (server validate-only not available)
 ```
 
-The manifest's per-command `dry_run` is `false` everywhere in v1. Flips to `true` (sends the request) only when a server later supports validate-only for a command.
+The manifest's per-command `dry_run` is `false` everywhere in v1. Flips to `true` (sends the request) only once a server supports validate-only for it.
 
 ### Production write-guard
 
-Writes against a prod-looking target (`prod`/`production`/`api.barkpark.cloud`) prompt `⚠ PROD: … Continue? [y/N]` unless `--yes`. `localhost`/`127.0.0.1`/`0.0.0.0` are never prod. Local UX only.
+Writes against a prod-looking target (`prod`/`production`/`api.barkpark.cloud`) prompt `⚠ PROD: … Continue? [y/N]` unless `--yes`. `localhost`/`127.0.0.1`/`0.0.0.0` are never prod. Local UX only — does not client-refuse `scoped_admin`.
 
 ## Exit codes
 
@@ -139,7 +139,7 @@ On-ramp CLI-native built-in (no manifest needed). Four targets:
 
 `--dry-run` prints the plan object (`-o json` → machine-readable Plan). `--yes` gates destructive/outbound runs. Wizard on bare `bp setup` only when stdin+stdout are a TTY with no `--target`/`-o json`/`--yes`.
 
-Server cache: every successful `connect` upserts into `known_servers` in `~/.config/barkpark/config.json` (0600, 0700 dir; tokens never exposed). `bp use <name>` switches the active server. `bp servers` lists all. `-s <name>` targets one command without switching. A committed `.barkpark.json` (`{"server":"<name-or-url>"}`) pins a whole repo without switching (see Context precedence).
+Server cache: every successful `connect` upserts into `known_servers` in `~/.config/barkpark/config.json` (0600, 0700 dir; tokens never exposed). `bp use <name>` switches the active server. `bp servers` lists all. `-s <name>` targets one command without switching. A committed `.barkpark.json` pins a repo without switching (see Context precedence).
 
 ## `bp migrate`
 
@@ -154,8 +154,8 @@ bp migrate prod local --include-schemas --yes -o json
 ## `bp make` · `bp seed` · `bp tinker` (authoring + dev built-ins)
 
 CLI-native built-ins (no manifest), like `setup`/`migrate`:
-- `bp make schema <name>` — print a fill-the-blanks **schema v2 JSON skeleton** (stdout or file; purely local, no network).
-- `bp seed <type> [--count N] [--publish]` — fabricate schema-valid sample docs as **drafts** (honours the prod write-guard); `--publish` also publishes them so they're visible to the public read API.
+- `bp make schema <name>` — print a fill-the-blanks **schema v2 JSON skeleton** (stdout or file; local, no network).
+- `bp seed <type> [--count N] [--publish]` — fabricate schema-valid sample docs as **drafts** (honours the prod write-guard); `--publish` also publishes them for the public read API.
 - `bp tinker [--dataset <ds>]` — interactive authenticated **REPL** (query/doc/mutate) against a live dataset.
 - `bp export [--type <t>] [--perspective <p>] [--out <file>]` — stream the active dataset as **NDJSON** (one doc per line) for backup: `bp export > backup.ndjson`. CLI twin of the SDK `exportDataset`. `--out` streams into `<file>.partial` (same directory, so the promoting rename is atomic) and moves it onto `<file>` **only after a clean completion**, followed by its `<file>.meta` sidecar `{documents,bytes,sha256,scope,completed_at}` — artifact renamed first, the stale sidecar removed, the new sidecar renamed LAST, so the only reachable in-between state is file-without-sidecar. A dying run leaves `<file>.partial` and never touches `<file>` or its sidecar; a missing sidecar is the truncation signal. Restore with `bp import <file>` (`--dry-run`, `--overwrite`, `--from-line N`). `bp export --verify <file>` re-derives sha/count/bytes from the artifact alone and **fails closed** on a missing, empty, unparsable or sha-less sidecar.
 
@@ -163,15 +163,17 @@ CLI-native built-ins (no manifest), like `setup`/`migrate`:
 
 - `bp attach root@<host> --name <n>` (alias `bp register ssh root@<host> --name <n>`) — add a self-hosted server to local config; no network call.
 - `bp uninstall [--local]` — remove bp's local state (config; `--local` also tears down the local dev stack). Never the binary, never a remote server.
-- `bp paper view <slug>` — one-shot terminal render of a Bulldocs paper (headless counterpart to the browser reader).
+- `bp paper view <slug>` — one-shot terminal render of a Bulldocs paper.
 - `bp instance credentials <id>` — retrieve a provisioned instance's admin token (team-admin-gated; needs `bp login`).
 - `bp doctor [--name <handle>] [--url <url>]` — post-deploy health gate against the active/named server; exits non-zero on any failing check.
 - `bp agent disable|uninstall [--name <handle>]` — local surface for the managed agent (renders the SSH command it would run; does not execute). `bp vercel quick-setup …` — stand up a Barkpark-backed site and ship it to Vercel in one shot.
 - `bp deploy <site> --artifact-url <url>` — enqueue a deployment for a hosted site through the control plane (needs `bp login`).
-- `bp cloud hetzner <resource> <verb>` — direct Hetzner control via the provider's own API (server: list/get/create/delete/poweron/poweroff; ssh-key: list/get/create/delete; read-only discovery: server-types/locations/images/isos/pricing). No control plane, no `bp login` Plus `instance`: archive/archives/decommission/resurrect/adopt/eject/audit + export/import — whole-instance fleet lifecycle (server + DNS record + registry row as one unit, so teardown/move never strands half; `export`/`import` make an instance portable migrate-to-anywhere).
+- `bp cloud hetzner <resource> <verb>` — direct Hetzner control via the provider's own API (server: list/get/create/delete/poweron/poweroff; ssh-key: list/get/create/delete; read-only discovery: server-types/locations/images/isos/pricing). No control plane, no `bp login` Plus `instance`: archive/archives/decommission/resurrect/adopt/eject/audit + export/import — whole-instance fleet lifecycle (server + DNS record + registry row as one unit, so teardown/move never strands half; `export`/`import` make an instance portable).
 - `bp mcp serve [--tools tasks|all]` — run a **stdio MCP server** so Cursor and any MCP client reach Barkpark as first-class tools. `tasks` (default) exposes the eight curated task tools (`task_ready`/`task_next`/`task_show`/`task_close`/`task_create`/`task_prime`/`task_stamp`/`task_pulse`); `all` generates one tool per manifest verb (mind Cursor's 40-tool cap). The manifest is fetched once at startup; **stdout carries only JSON-RPC frames** — all chrome goes to stderr. Registration recipe: `docs/setup/CURSOR.md`.
 
 ## v1 deferrals
 
+- `--dry-run` is client-side only; no server validate-only.
 - Dataset discovery absent; `production` is the assumed default.
 - `login`/`signup` authenticate to Barkpark Cloud; `completion` generates bash/zsh/fish scripts; `bp --version`/`-V` prints the version offline.
+- `scoped_prefix` is inert.

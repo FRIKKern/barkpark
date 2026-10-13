@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -264,11 +265,18 @@ func numberOrNumericString(raw json.RawMessage) (float64, bool) {
 	return 0, false
 }
 
-// parseRetryAfterSeconds reads Retry-After in either form RFC 9110 allows,
-// delay-seconds or an HTTP-date. One parser for both clients:
-// apiclient.ParseRetryAfter.
+// parseRetryAfterSeconds reads the delta-seconds form. The HTTP-date form is
+// NOT parsed: this service never emits it, and guessing at a date form would be
+// honouring a clock skew rather than a wait.
 func parseRetryAfterSeconds(v string) (float64, bool) {
-	return apiclient.ParseRetryAfter(v)
+	if v == "" {
+		return 0, false
+	}
+	n, err := strconv.ParseFloat(v, 64)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // restoredBody hands back a body that reads the peeked prefix and then whatever

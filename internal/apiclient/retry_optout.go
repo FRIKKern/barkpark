@@ -4,12 +4,9 @@
 package apiclient
 
 import (
-	"net/http"
 	"os"
-	"strconv"
 	"strings"
 	"sync/atomic"
-	"time"
 )
 
 // TURNING THE AUTOMATIC RETRIES OFF.
@@ -57,36 +54,4 @@ func RetryDisabled() bool {
 		return false
 	}
 	return true
-}
-
-// ParseRetryAfter reads a Retry-After header value in both forms RFC 9110
-// allows: delay-seconds ("3", and "1.5" for the servers that send a fraction)
-// and an HTTP-date ("Wed, 21 Oct 2026 07:28:00 GMT"). It returns the wait in
-// seconds. A date in the past is a wait of zero. An unparseable value reports
-// false, and the caller treats it as no header at all.
-//
-// Barkpark's own rate-limit plugs send seconds. A proxy or CDN in front of an
-// instance may send the date form, and reading it as "no header" would replace
-// the server's wait with our one-second default.
-func ParseRetryAfter(v string) (float64, bool) {
-	return parseRetryAfterAt(v, time.Now())
-}
-
-func parseRetryAfterAt(v string, now time.Time) (float64, bool) {
-	v = strings.TrimSpace(v)
-	if v == "" {
-		return 0, false
-	}
-	if n, err := strconv.ParseFloat(v, 64); err == nil {
-		return n, true
-	}
-	t, err := http.ParseTime(v)
-	if err != nil {
-		return 0, false
-	}
-	d := t.Sub(now)
-	if d < 0 {
-		return 0, true
-	}
-	return d.Seconds(), true
 }
