@@ -171,6 +171,22 @@ export const Image = Node.create({
       chrome.appendChild(altInput);
       chrome.appendChild(srcInput);
       chrome.appendChild(widthInput);
+      // The host's picker (mediaPicker): shown only when the canvas has one
+      // (bp-paper-canvas[data-media-picker]); the canvas runs it for this node.
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "bp-canvas-image-pick";
+      pick.textContent = t("Select");
+      pick.setAttribute("contenteditable", "false");
+      pick.addEventListener("mousedown", (e) => e.preventDefault());
+      pick.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!editor.isEditable || typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        dom.dispatchEvent(new CustomEvent("bp-canvas-image-pick", { detail: { pos }, bubbles: true }));
+      });
+      chrome.appendChild(pick);
       dom.appendChild(chrome);
 
       let hovered = false;
@@ -214,6 +230,7 @@ export const Image = Node.create({
         dom.classList.toggle("bp-canvas-image--empty", !shown);
         dom.classList.toggle("bp-canvas-image--locked", locked);
         srcInput.readOnly = altInput.readOnly = widthInput.readOnly = !editor.isEditable;
+        pick.disabled = !editor.isEditable || !!a.uploading;
         syncChrome();
       };
       paint(node);
