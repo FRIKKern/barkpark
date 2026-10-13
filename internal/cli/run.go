@@ -554,6 +554,12 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return code
 	}
 
+	// `bp media delete asset-<id>`: the upload receipt's asset document id is
+	// turned into the media file id the delete route takes, before the request
+	// is built, so --dry-run and the confirmations show the id that is sent.
+	// See media_delete_asset_id.go.
+	tail = resolveMediaDeleteID(out, g, ctx, m, cmd, tail)
+
 	req, derr := buildManifestRequest(g, ctx, m, cmd, tail, true)
 	if derr != nil {
 		if !renderErrorEnvelope(out, derr.envelopeCode(), derr.msg, "", "") {

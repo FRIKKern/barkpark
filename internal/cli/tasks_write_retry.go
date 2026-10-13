@@ -65,6 +65,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
@@ -319,6 +320,11 @@ func sendLedgerWrite(req *manifestRequest) (int, []byte, string, error) {
 	retries := lw.retries
 	if retries <= 0 {
 		retries = ledgerWriteRetries
+	}
+	// --no-retry / BARKPARK_NO_RETRY: one send, no read-back, no repeat. The
+	// caller that asked for this owns the retry and the landed check.
+	if apiclient.RetryDisabled() {
+		retries = 0
 	}
 
 	// Starts UNKNOWN and stays UNKNOWN unless a read-back actually answers:
