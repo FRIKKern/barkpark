@@ -345,20 +345,14 @@ defmodule BarkparkWeb.MediaController do
         )
 
       {:error, :variant_limit} ->
-        env =
-          %{
-            code: "transform_variant_limit",
-            message:
-              "this asset already has #{Transform.max_variants_per_asset()} cached transforms; " <>
-                "reuse an existing size",
-            status: 429,
-            details: %{limit: Transform.max_variants_per_asset()}
-          }
-          |> Errors.stamp(conn)
-
-        conn
-        |> put_status(429)
-        |> json(%{error: Map.delete(env, :status)})
+        error_response(
+          conn,
+          429,
+          "transform_variant_limit",
+          "this asset already has #{Transform.max_variants_per_asset()} cached transforms; " <>
+            "reuse an existing size",
+          %{limit: Transform.max_variants_per_asset()}
+        )
 
       {:error, {:write_admission, _}} = refused ->
         env = Errors.to_envelope(refused, conn)
@@ -734,13 +728,16 @@ defmodule BarkparkWeb.MediaController do
   # (the same shape `unprocessable/3` below already uses) rather than inlined
   # as a map literal, matching this file's existing convention for a
   # controller-local code not registered in `Content.Errors` @hints.
-  defp bad_request(conn, code, message, details) do
+  defp bad_request(conn, code, message, details),
+    do: error_response(conn, 400, code, message, details)
+
+  defp error_response(conn, status, code, message, details) do
     env =
-      %{code: code, message: message, status: 400, details: details}
+      %{code: code, message: message, status: status, details: details}
       |> Errors.stamp(conn)
 
     conn
-    |> put_status(:bad_request)
+    |> put_status(status)
     |> json(%{error: Map.delete(env, :status)})
   end
 
