@@ -243,9 +243,10 @@ defmodule Barkpark.Plugins.OnixEditTest do
       assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == []
     end
 
-    test "non-book doc is left untouched" do
+    test "non-book doc drops the book-only action, keeps the rest" do
       ctx = %{doc_type: "post", doc: %Document{type: "post"}}
-      assert OnixEdit.resolve_doc_actions([@publish_action], ctx) == [@publish_action]
+      other = %{"name" => "publish", "label" => "Publish"}
+      assert OnixEdit.resolve_doc_actions([@publish_action, other], ctx) == [other]
     end
   end
 
