@@ -469,7 +469,8 @@ defmodule BarkparkWeb.MediaController do
          {:ok, file} <- confine_share_dataset(conn, file),
          {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
-         true <- Access.allowed?(conn, file, doc, :original) do
+         true <- Access.allowed?(conn, file, doc, :original),
+         true <- Access.clean_original_allowed?(conn, doc) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
       # lookup already matched on `path == relative_path`, but deriving the blob
       # key from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`

@@ -17,6 +17,8 @@ GET /media/files/<path>?w=800&h=450&fit=crop&fp-x=0.3&fp-y=0.4&auto=format&q=70
 
 Sanity CDN URLs from `@sanity/image-url` take the same parameters: [SANITY-IMAGE-URLS.md](SANITY-IMAGE-URLS.md).
 
+Anonymous reads, as a website's `<img>` makes, need the scope's `:media` share: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.md).
+
 | Param | Values | Meaning |
 |---|---|---|
 | `w`, `h` | integer ≥ 1 | Output size in pixels. One side alone keeps the aspect ratio. |
