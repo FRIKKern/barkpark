@@ -3,6 +3,7 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
   Internal database boundary for local pending cleanup. No physical effect runs
   here. The supplied native observation is retained evidence, not permission to
   delete a later object. HTTP adoption, writer fencing and settlement are separate.
+  Immutable migrations version the exact raw-row schema; unknown columns refuse.
   """
   alias Barkpark.Repo
 

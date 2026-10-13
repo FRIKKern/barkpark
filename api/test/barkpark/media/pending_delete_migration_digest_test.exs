@@ -38,6 +38,55 @@ defmodule Barkpark.Media.PendingDeleteMigrationDigestTest do
                  end
   end
 
+  test "the source-id forward migration also binds both SQL versions" do
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "pending-source-id-digest-#{System.unique_integer([:positive])}"
+      )
+
+    migrations = Path.join(root, "api/priv/repo/migrations")
+    resources = Path.join(root, "api/priv/media")
+    File.mkdir_p!(migrations)
+    File.mkdir_p!(resources)
+
+    for name <- ["delete_operations_v1.sql", "delete_operations_source_id_v2.sql"] do
+      File.cp!(Path.join(Path.dirname(@resource), name), Path.join(resources, name))
+    end
+
+    migration =
+      Path.join(
+        Path.dirname(@migration),
+        "20261014001000_refresh_pending_media_delete_source_id.exs"
+      )
+
+    module = Module.concat(__MODULE__, "SourceId#{System.unique_integer([:positive])}")
+
+    source =
+      File.read!(migration)
+      |> String.replace(
+        "Barkpark.Repo.Migrations.RefreshPendingMediaDeleteSourceId",
+        module |> Atom.to_string() |> String.trim_leading("Elixir.")
+      )
+
+    probe = Path.join(migrations, "source_id.exs")
+    File.write!(probe, source)
+    assert [{^module, _}] = Code.compile_file(probe)
+
+    for name <- ["delete_operations_v1.sql", "delete_operations_source_id_v2.sql"] do
+      original = File.read!(Path.join(resources, name))
+      File.write!(Path.join(resources, name), original <> "\n-- altered applied SQL\n")
+
+      assert_raise ArgumentError,
+                   ~r/pending media migration SQL changed; add a forward migration/,
+                   fn ->
+                     Code.compile_file(probe)
+                   end
+
+      File.write!(Path.join(resources, name), original)
+    end
+  end
+
   defp probe_source(module) do
     @migration
     |> File.read!()

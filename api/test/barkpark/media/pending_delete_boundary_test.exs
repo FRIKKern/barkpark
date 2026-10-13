@@ -35,6 +35,8 @@ defmodule Barkpark.Media.PendingDeleteBoundaryTest do
              Repo.query!("SELECT prepare_media_delete_v1($1::jsonb)", [request])
 
     assert prepared["rawRow"]["sha1"] == String.duplicate("a", 40)
+    assert Map.has_key?(prepared["rawRow"], "source_id")
+    assert prepared["rawRow"]["source_id"] == nil
     assert prepared["state"] == "prepared"
 
     Repo.query!(
@@ -52,6 +54,48 @@ defmodule Barkpark.Media.PendingDeleteBoundaryTest do
 
     assert_raise Postgrex.Error, ~r/media object address is reserved/, fn ->
       insert_media(String.upcase(key))
+    end
+  end
+
+  test "an imported source id is captured exactly and cannot change on an intent retry" do
+    key = "2026/imported-#{System.unique_integer([:positive])}.png"
+    id = insert_media(key)
+    source_id = "imported-日本語-#{System.unique_integer([:positive])}"
+
+    Repo.query!("UPDATE media_files SET source_id=$1 WHERE id=$2::uuid", [
+      source_id,
+      uuid_binary(id)
+    ])
+
+    request = request(id, Ecto.UUID.generate(), key)
+
+    assert %{rows: [[prepared]]} =
+             Repo.query!("SELECT prepare_media_delete_v1($1::jsonb)", [request])
+
+    assert prepared["rawRow"]["source_id"] == source_id
+
+    assert %{rows: [[^prepared]]} =
+             Repo.query!("SELECT prepare_media_delete_v1($1::jsonb)", [request])
+
+    Repo.query!("UPDATE media_files SET source_id=$1 WHERE id=$2::uuid", [
+      source_id <> "-changed",
+      uuid_binary(id)
+    ])
+
+    assert_raise Postgrex.Error, ~r/conflicting deletion intent retry/, fn ->
+      Repo.query!("SELECT prepare_media_delete_v1($1::jsonb)", [request])
+    end
+  end
+
+  test "a future unknown column still refuses the raw-row schema" do
+    key = "2026/unknown-#{System.unique_integer([:positive])}.png"
+    id = insert_media(key)
+    Repo.query!("ALTER TABLE media_files ADD COLUMN pending_delete_unknown text", [])
+
+    assert_raise Postgrex.Error, ~r/unsupported media row schema/, fn ->
+      Repo.query!("SELECT prepare_media_delete_v1($1::jsonb)", [
+        request(id, Ecto.UUID.generate(), key)
+      ])
     end
   end
 
