@@ -12,6 +12,8 @@ Media HTTP responses — asset `absoluteUrl` and the `/v1/media/*` list envelope
 
 Image upload and on-demand transforms (`/media/files/<path>?w=&h=&fit=&crop=&rect=&fp-x=&fp-y=&fm=&auto=&q=`, cached on first request): [../media/IMAGE-TRANSFORMS.md](../media/IMAGE-TRANSFORMS.md).
 
+Sanity image and file URLs, `@sanity/image-url` config, `sourceId`: [../media/SANITY-IMAGE-URLS.md](../media/SANITY-IMAGE-URLS.md).
+
 Media discovery: the **Find-vs-Pick** philosophy (search-first Find pane vs browse Pick modal) and the OpenSearch-vs-Meilisearch decision point live in docs/media/DISCOVERY.md. Media plugin itself: `api/lib/barkpark/plugins/media.ex`; assets in `priv/plugins/media/`.
 
 ## Code anchors
