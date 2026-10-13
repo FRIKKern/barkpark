@@ -88,24 +88,30 @@ defmodule Barkpark.Media.Delivery.Cdn do
     # the caller observes. The delete-path Cdn.invalidate (media.ex, D36
     # after-commit deferral) is unaffected — it still runs inline under its own
     # transaction-boundary policy.
-    purge_edge_cache_async(file)
+    purge_async(file)
 
-    status =
-      if base_url() do
-        "published"
-      else
-        "skipped"
-      end
-
-    if doc, do: patch_cdn_status(doc, file, status)
+    if doc, do: patch_cdn_status(doc, file, publish_status())
     :ok
   end
 
-  # Background the CDN round-trip on the general-purpose supervised task pool
-  # (mirrors Media.Delivery.Events.dispatch/4's fire-and-forget seam). The task
-  # is unlinked from the caller, so a purge crash can never take down the upload
-  # process; a lost result is acceptable — the next asset change re-purges.
-  defp purge_edge_cache_async(%MediaFile{} = file) do
+  @doc """
+  The `bp_cdn_status` an asset gets on publish: `"published"` when
+  `:media_cdn, :base_url` is set, else `"skipped"`. Upload writes it into the
+  asset document it creates, so it needs no second write.
+  """
+  @spec publish_status() :: String.t()
+  def publish_status, do: if(base_url(), do: "published", else: "skipped")
+
+  @doc """
+  Purge the asset's CDN paths on the supervised task pool.
+
+  The task is unlinked from the caller (mirrors
+  Media.Delivery.Events.dispatch/4's fire-and-forget seam), so a purge crash
+  can never take down the upload process; a lost result is acceptable — the
+  next asset change re-purges.
+  """
+  @spec purge_async(%MediaFile{}) :: :ok
+  def purge_async(%MediaFile{} = file) do
     Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn -> invalidate(file) end)
     :ok
   end

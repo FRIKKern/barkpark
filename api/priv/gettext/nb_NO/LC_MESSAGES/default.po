@@ -11612,6 +11612,11 @@ msgstr "Størrelse (byte)"
 
 #: lib/barkpark_web/studio/plugin_schema_copy.ex
 #, elixir-autogen, elixir-format
+msgid "Blur placeholder (LQIP)"
+msgstr "Uskarp forhåndsvisning (LQIP)"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
 msgid "Original filename"
 msgstr "Opprinnelig filnavn"
 

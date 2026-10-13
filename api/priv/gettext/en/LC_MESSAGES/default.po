@@ -11612,6 +11612,11 @@ msgstr ""
 
 #: lib/barkpark_web/studio/plugin_schema_copy.ex
 #, elixir-autogen, elixir-format
+msgid "Blur placeholder (LQIP)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
 msgid "Original filename"
 msgstr ""
 

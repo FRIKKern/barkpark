@@ -34,6 +34,8 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   """
   @behaviour Barkpark.Media.ImageBackend
 
+  alias Barkpark.Media.Transform
+
   # The `:image` dep is OPTIONAL by construction (api/mix.exs image_dep/0):
   # absent on native Windows by default and under BARKPARK_SKIP_IMAGE=1 (the
   # mix-test CI lane, which never executes a vips-reaching test — they are
@@ -42,7 +44,7 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   # as the moduledoc records. Without this directive the compiler's
   # undefined-module warning turns `mix compile --warnings-as-errors` red on
   # every image-less host, which is exactly the supported configuration.
-  @compile {:no_warn_undefined, [Image, Image.Text]}
+  @compile {:no_warn_undefined, [Image, Image.Text, Vix.Vips.Image, Vix.Vips.Operation]}
 
   # Explicit pre-decode raster ceiling, mirroring Magick's `-limit memory 256MiB`
   # so BOTH backends fail closed on the same class of decompression bomb. This is
@@ -55,15 +57,122 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   @impl true
   def available?, do: Code.ensure_loaded?(Image)
 
+  # A named preset is a fixed transform plan: `render/4` builds the plan and
+  # runs it through `transform/4`, so presets and URL-parameter transforms share
+  # one pipeline. Without `:crop` a preset is `fit=clip` inside its box (the
+  # libvips `thumbnail` default this backend always used); with `:crop`
+  # (`og`'s `:attention`) it is `fit=crop` with that smart-crop mode.
   @impl true
   def render(src, dest, spec, watermark) do
+    transform(src, dest, preset_plan(spec), watermark)
+  end
+
+  @impl true
+  def transform(src, dest, plan, watermark) do
     with {:ok, image} <- Image.open(src),
          :ok <- guard_dimensions(image),
-         {:ok, thumb} <- Image.thumbnail(image, spec.max_width, thumbnail_opts(spec)),
-         {:ok, stamped} <- maybe_watermark(thumb, watermark),
-         :ok <- write_image(stamped, dest, spec) do
-      :ok
+         {src_w, src_h} = oriented_size(image),
+         geometry = Transform.geometry(plan, src_w, src_h),
+         {:ok, image} <- shape(src, geometry),
+         {:ok, image} <- crop(image, geometry.crop),
+         {:ok, image} <- pad(image, geometry.pad),
+         {:ok, stamped} <- maybe_watermark(image, watermark) do
+      write_image(stamped, dest, plan)
     end
+  end
+
+  @impl true
+  def avif?, do: avif_supported?()
+
+  @doc false
+  def preset_plan(spec) do
+    {fit, crop} =
+      case Map.get(spec, :crop) do
+        nil -> {"clip", []}
+        mode -> {"crop", [to_string(mode)]}
+      end
+
+    %{
+      w: spec.max_width,
+      h: spec.max_height,
+      fit: fit,
+      crop: crop,
+      rect: nil,
+      fp: nil,
+      fm: spec.format,
+      auto_format: false,
+      q: spec.quality
+    }
+  end
+
+  # Width and height as the viewer sees them: EXIF orientations 5-8 swap the
+  # axes, and every later step works on the auto-rotated image.
+  defp oriented_size(image) do
+    case Vix.Vips.Image.header_value(image, "orientation") do
+      {:ok, o} when o in 5..8 -> {Image.height(image), Image.width(image)}
+      _ -> {Image.width(image), Image.height(image)}
+    end
+  end
+
+  # `shape/2` applies rect, resize and any smart crop; `crop/2` then cuts a
+  # plain box. Without a rect, libvips `thumbnail` loads from the PATH, which
+  # shrinks a JPEG while decoding it (much faster than decode-then-resize) and
+  # auto-rotates. libvips' smart crop runs inside `thumbnail` too: a separate
+  # `smartcrop` over a sequentially loaded JPEG fails with "out of order read".
+  defp shape(src, %{rect: nil, crop: {:smart, mode, w, h}}),
+    do: smart_thumbnail(src, mode, w, h)
+
+  defp shape(src, %{rect: nil, resize: {w, h}}),
+    do: Image.thumbnail(src, w, height: h, resize: :force)
+
+  defp shape(src, %{rect: rect, resize: resize, crop: crop}) do
+    with {:ok, image} <- Image.open(src, access: :random),
+         {:ok, rotated} <- Image.autorotate(image) |> unwrap_rotate(),
+         {:ok, cut} <- cut_rect(rotated, rect) do
+      case {resize, crop} do
+        {_, {:smart, mode, w, h}} -> smart_thumbnail(cut, mode, w, h)
+        {nil, _} -> {:ok, cut}
+        {{rw, rh}, _} -> Image.thumbnail(cut, rw, height: rh, resize: :force)
+      end
+    end
+  end
+
+  defp cut_rect(image, nil), do: {:ok, image}
+  defp cut_rect(image, {x, y, w, h}), do: Image.crop(image, x, y, w, h)
+
+  defp smart_thumbnail(src_or_image, mode, w, h) do
+    crop = if mode == "entropy", do: :entropy, else: :attention
+    Image.thumbnail(src_or_image, w, height: h, crop: crop)
+  end
+
+  defp unwrap_rotate({:ok, {image, _flags}}), do: {:ok, image}
+  defp unwrap_rotate({:ok, %Vix.Vips.Image{} = image}), do: {:ok, image}
+  defp unwrap_rotate(error), do: error
+
+  defp crop(image, nil), do: {:ok, image}
+  defp crop(image, {:smart, _mode, _w, _h}), do: {:ok, image}
+
+  defp crop(image, {left, top, w, h}) do
+    Image.crop(
+      image,
+      left,
+      top,
+      min(w, Image.width(image) - left),
+      min(h, Image.height(image) - top)
+    )
+  end
+
+  defp pad(image, nil), do: {:ok, image}
+
+  defp pad(image, {w, h}) do
+    x = div(max(w - Image.width(image), 0), 2)
+    y = div(max(h - Image.height(image), 0), 2)
+    background = List.duplicate(255, Image.bands(image))
+
+    Vix.Vips.Operation.embed(image, x, y, w, h,
+      extend: :VIPS_EXTEND_BACKGROUND,
+      background: background
+    )
   end
 
   # Reject a decompression bomb BEFORE the (lazy) thumbnail pipeline is built.
@@ -84,14 +193,6 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     do: Keyword.get(config(), :max_decode_bytes, @default_max_decode_bytes)
 
   defp config, do: Application.get_env(:barkpark, __MODULE__, [])
-
-  # Aspect-preserving fit by default; an exact-fill crop when the spec asks for
-  # one (`crop: :attention` → cover-and-centre-crop to exactly WxH). `Image 0.67`
-  # `thumbnail/3` takes `:crop` alongside `:height`.
-  defp thumbnail_opts(%{crop: crop} = spec) when not is_nil(crop),
-    do: [height: spec.max_height, crop: crop]
-
-  defp thumbnail_opts(spec), do: [height: spec.max_height]
 
   defp maybe_watermark(image, profile) when profile in [nil, "", "none"], do: {:ok, image}
 
@@ -124,17 +225,39 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     |> max(18)
   end
 
-  defp write_image(image, dest, %{format: "webp"} = spec) do
-    case Image.write(image, dest, suffix: ".webp", quality: spec.quality) do
+  # `fm` picks the encoder; the caller already gave `dest` the matching
+  # extension. Every output drops EXIF and other metadata (`strip`), which also
+  # keeps camera GPS tags off public derivatives.
+  defp write_image(image, dest, plan) do
+    case Image.write(image, dest, write_options(plan.fm, plan.q)) do
       {:ok, _} -> :ok
       error -> error
     end
   end
 
-  defp write_image(image, dest, spec) do
-    case Image.write(image, dest, suffix: ".jpg", quality: spec.quality) do
-      {:ok, _} -> :ok
-      error -> error
+  defp write_options("png", _q), do: [suffix: ".png", strip_metadata: true]
+  defp write_options("webp", q), do: [suffix: ".webp", quality: q, strip_metadata: true]
+  defp write_options("avif", q), do: [suffix: ".avif", quality: q, strip_metadata: true]
+  defp write_options(_jpg, q), do: [suffix: ".jpg", quality: q, strip_metadata: true]
+
+  # AVIF needs libvips built with libheif and an AV1 encoder. The precompiled
+  # libvips that ships with vix may lack one; probe once per node and cache.
+  defp avif_supported? do
+    case :persistent_term.get({__MODULE__, :avif?}, :unknown) do
+      :unknown ->
+        supported =
+          try do
+            {:ok, img} = Image.new(2, 2)
+            match?({:ok, _}, Image.write(img, :memory, suffix: ".avif"))
+          rescue
+            _ -> false
+          end
+
+        :persistent_term.put({__MODULE__, :avif?}, supported)
+        supported
+
+      cached ->
+        cached
     end
   end
 end

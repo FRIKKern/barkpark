@@ -140,11 +140,11 @@ Contract: [plugin HTTP](contracts/plugin-http-api.md) covers ticket keys/limits,
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
-Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. Contract: [`cycle-fleet.md`](contracts/cycle-fleet.md).
+Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless legacy aliases. [Contract](contracts/cycle-fleet.md).
 
-## 8d. Media — asset record (`absoluteUrl`) + `/v1/media/*` list envelope
+## 8d. Media — assets, `/v1/media/*` lists, image transforms
 
-Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md). `GET /v1/i18n/paper_canvas`: [contract](contracts/paper-canvas-i18n.md).
+[Envelope](contracts/media-http-envelope.md). `/media/files/<path>?w=…`: [transforms](media/IMAGE-TRANSFORMS.md). `GET /v1/i18n/paper_canvas`: [contract](contracts/paper-canvas-i18n.md).
 
 ## 9. Error Codes
 

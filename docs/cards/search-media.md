@@ -10,6 +10,8 @@ Shape of the system:
 
 Media HTTP responses — asset `absoluteUrl` and the `/v1/media/*` list envelope (`total`/`hasMore`/`nextOffset`/`nextCursor`, and the two meanings of `count`): [../contracts/media-http-envelope.md](../contracts/media-http-envelope.md).
 
+Image upload and on-demand transforms (`/media/files/<path>?w=&h=&fit=&crop=&rect=&fp-x=&fp-y=&fm=&auto=&q=`, cached on first request): [../media/IMAGE-TRANSFORMS.md](../media/IMAGE-TRANSFORMS.md).
+
 Media discovery: the **Find-vs-Pick** philosophy (search-first Find pane vs browse Pick modal) and the OpenSearch-vs-Meilisearch decision point live in docs/media/DISCOVERY.md. Media plugin itself: `api/lib/barkpark/plugins/media.ex`; assets in `priv/plugins/media/`.
 
 ## Code anchors
@@ -18,3 +20,4 @@ Media discovery: the **Find-vs-Pick** philosophy (search-first Find pane vs brow
 - api/lib/barkpark/media/delivery/retriever.ex — defmodule Barkpark.Media.Delivery.Retriever
 - api/lib/barkpark/plugins/media.ex — defmodule (media plugin)
 - api/lib/barkpark/media/storage/delete_operation.ex — def commit
+- api/lib/barkpark/media/transform.ex — defmodule Barkpark.Media.Transform
