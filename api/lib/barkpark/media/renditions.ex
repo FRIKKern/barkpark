@@ -2,14 +2,23 @@ defmodule Barkpark.Media.Renditions do
   @moduledoc """
   On-disk rendition cache and on-demand image transforms.
 
-  Presets mirror WoodWing-style delivery profiles. Files live under
-  `{upload_dir}/_renditions/{media_file_id}/{preset}.{ext}` and are
-  generated lazily on first request or eagerly after image upload.
+  Nothing here runs at upload. Every rendition is made on its first request
+  and cached:
+
+    * named presets (`thumb`, `preview`, `hero`, `og`, `lqip`) under
+      `{upload_dir}/_renditions/{media_file_id}/{preset}.{ext}`;
+    * URL-parameter transforms (`Barkpark.Media.Transform`) under
+      `{upload_dir}/_renditions/{media_file_id}/t/{hash}.{ext}`, where the hash
+      is taken over the normalised parameters.
+
+  Both kinds go through one generate path: a per-file lock so concurrent first
+  requests render once, a write to a temporary file, and a rename into place
+  so a reader never sees a partial file.
   """
 
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Media
-  alias Barkpark.Media.{Blobstore, ImageBackend}
+  alias Barkpark.Media.{Blobstore, ImageBackend, Transform}
   alias Barkpark.Media.Storage.MediaFile
 
   # MIME types the rendition backend can actually decode. This mirrors the
@@ -32,10 +41,15 @@ defmodule Barkpark.Media.Renditions do
     "og" => %{max_width: 1200, max_height: 630, format: "jpg", quality: 85, crop: :attention},
     # `lqip` is the blur placeholder a schema `image` value carries as a data:
     # URI (Gyldendal parity E1.7, Barkpark.Media.ImageMetadata): a ≤ 24 px
-    # JPEG, a few hundred bytes, generated on demand at save time and eagerly
-    # with the other presets after upload.
+    # JPEG, a few hundred bytes. Upload computes it once in memory and stores
+    # it on the asset (`fileInfo.lqip`, `Barkpark.Media.Processing`); this
+    # preset serves the file form on request.
     "lqip" => %{max_width: 24, max_height: 24, format: "jpg", quality: 40}
   }
+
+  @doc "The spec for a named preset, or nil."
+  @spec preset_spec(String.t()) :: map() | nil
+  def preset_spec(preset), do: Map.get(@presets, preset)
 
   @doc "All supported preset names."
   @spec presets() :: [String.t()]
@@ -101,10 +115,71 @@ defmodule Barkpark.Media.Renditions do
       else
         # C083: a GET may write rendition bytes; a held instance refuses the
         # generate (the cached rendition above still serves).
-        Door.admit(fn -> generate(file, preset, spec, dest, rel, profile) end)
+        render = fn src, tmp ->
+          ImageBackend.impl().render(src, tmp, spec, normalize_profile(profile))
+        end
+
+        Door.admit(fn -> generate(file, preset, dest, rel, render) end)
       end
     else
       nil -> {:error, :unknown_preset}
+    end
+  end
+
+  @doc """
+  Ensure a URL-parameter transform exists on disk, generating it if needed.
+
+  `plan` is a resolved `Barkpark.Media.Transform` plan. Returns the cached
+  file's relative path, or:
+
+    * `{:error, :not_transformable}` — the blob is not a raster image libvips
+      decodes (png, jpeg, gif, webp);
+    * `{:error, :transforms_unsupported}` — the selected image backend has no
+      `transform/4` (the ImageMagick backend on Windows);
+    * `{:error, :variant_limit}` — this asset already holds
+      `Transform.max_variants_per_asset/0` cached transforms and this plan is
+      not one of them.
+  """
+  @spec transform(%MediaFile{}, Transform.plan(), keyword()) ::
+          {:ok, String.t()} | {:error, term()}
+  def transform(%MediaFile{} = file, plan, opts \\ []) do
+    profile = normalize_profile(watermark_profile(opts))
+    rel = Path.join(["_renditions", file.id, "t", Transform.cache_name(plan, profile)])
+    dest = Media.file_path(rel)
+
+    cond do
+      not renderable?(file) ->
+        {:error, :not_transformable}
+
+      File.exists?(dest) ->
+        {:ok, rel}
+
+      not ImageBackend.transforms?() ->
+        {:error, :transforms_unsupported}
+
+      variant_count(file.id) >= Transform.max_variants_per_asset() ->
+        {:error, :variant_limit}
+
+      true ->
+        render = fn src, tmp -> ImageBackend.impl().transform(src, tmp, plan, profile) end
+        Door.admit(fn -> generate(file, "transform", dest, rel, render) end)
+    end
+  end
+
+  @doc "Whether a blob is a raster image the rendition backend can decode."
+  @spec renderable?(%MediaFile{}) :: boolean()
+  def renderable?(%MediaFile{mime_type: mime}) when is_binary(mime),
+    do: mime in @rendition_mime_types
+
+  def renderable?(_), do: false
+
+  # Reachability: the directory is `renditions_root/0` joined with a loaded
+  # row's `:binary_id` UUID and the literal "t"; no request data reaches it.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp variant_count(media_file_id) do
+    case File.ls(Path.join([renditions_root(), media_file_id, "t"])) do
+      {:ok, names} -> Enum.count(names, &(not String.starts_with?(&1, ".")))
+      {:error, _} -> 0
     end
   end
 
@@ -126,11 +201,33 @@ defmodule Barkpark.Media.Renditions do
     :ok
   end
 
-  # Reachability: `dest` is `Media.file_path/1` over `cache_relative/4` — the
-  # fixed `_renditions` prefix, a DB-issued `MediaFile` UUID, a `@presets` key
-  # and its format; no caller-supplied path component reaches the mkdir.
+  # Reachability: `dest` is `Media.file_path/1` over either `cache_relative/4`
+  # (the fixed `_renditions` prefix, a DB-issued `MediaFile` UUID, a `@presets`
+  # key and its format) or `transform/3`'s path (the same prefix and UUID, the
+  # literal "t", and a hex SHA-256 prefix plus an allow-listed format). No
+  # caller-supplied path component reaches the mkdir, the temp write or the
+  # rename.
   # sobelow_skip ["Traversal.FileModule"]
-  defp generate(%MediaFile{} = file, preset, spec, dest, rel, profile) do
+  defp generate(%MediaFile{} = file, label, dest, rel, render) do
+    # ONE RENDER PER FILE. Two first requests for the same uncached rendition
+    # used to both decode the original and both write `dest`. The lock is keyed
+    # on `dest`, and the holder re-checks the cache inside it, so the second
+    # caller waits and then serves the first caller's file.
+    :global.trans(
+      {{__MODULE__, dest}, self()},
+      fn ->
+        if File.exists?(dest) do
+          {:ok, rel}
+        else
+          do_generate(file, label, dest, rel, render)
+        end
+      end,
+      [node()]
+    )
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp do_generate(%MediaFile{} = file, preset, dest, rel, render) do
     # The SOURCE original comes via the blobstore (a local path join today; a
     # one-time cache download under an object-storage backend). The rendition
     # OUTPUT stays a plain local write regardless of backend — renditions are
@@ -143,8 +240,18 @@ defmodule Barkpark.Media.Renditions do
       {:ok, src} ->
         File.mkdir_p!(Path.dirname(dest))
 
+        # Render to a temporary name in the same directory, then rename: a
+        # concurrent reader that finds `dest` always finds a whole file. The
+        # temp name keeps `dest`'s extension because the backends pick the
+        # encoder from it.
+        tmp =
+          Path.join(
+            Path.dirname(dest),
+            ".tmp-#{System.unique_integer([:positive])}-" <> Path.basename(dest)
+          )
+
         # libvips on macOS/Linux/Docker; ImageMagick CLI on Windows. See ImageBackend.
-        case ImageBackend.impl().render(src, dest, spec, normalize_profile(profile)) do
+        case render.(src, tmp) |> promote(tmp, dest) do
           :ok ->
             # Post-generate parent recheck — closes the delete-vs-generate race.
             # A lazy generate that loaded `file` before an admin DELETE, then
@@ -169,7 +276,7 @@ defmodule Barkpark.Media.Renditions do
                 {:ok, rel}
 
               {:error, :not_found} ->
-                File.rm_rf(Path.dirname(dest))
+                File.rm_rf(Path.join(renditions_root(), file.id))
                 {:error, :parent_deleted}
             end
 
@@ -182,6 +289,27 @@ defmodule Barkpark.Media.Renditions do
         log_generate_failure(preset, file, reason)
         {:error, reason}
     end
+  end
+
+  # Reachability: as `promote/3` below; `dest` is `generate/5`'s server-built path.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp promote(:ok, tmp, dest) do
+    case File.rename(tmp, dest) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        File.rm(tmp)
+        {:error, reason}
+    end
+  end
+
+  # Reachability: `tmp` is built in `do_generate/5` from `dest`'s directory and
+  # basename (see the waiver on `generate/5`) plus a unique integer.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp promote(error, tmp, _dest) do
+    File.rm(tmp)
+    error
   end
 
   defp log_generate_failure(preset, file, reason) do
@@ -211,11 +339,4 @@ defmodule Barkpark.Media.Renditions do
   end
 
   defp renditions_root, do: Path.join(Media.upload_dir(), "_renditions")
-
-  # Only raster mimes libvips can decode get renditions. A non-raster `image/*`
-  # (SVG/TIFF/ICO/AVIF/HEIC) is skipped cleanly — no backend call, no error log.
-  defp renderable?(%MediaFile{mime_type: mime}) when is_binary(mime),
-    do: mime in @rendition_mime_types
-
-  defp renderable?(_), do: false
 end

@@ -39,7 +39,8 @@
         { "name": "size", "title": "Size (bytes)", "type": "string" },
         { "name": "originalName", "title": "Original filename", "type": "string" },
         { "name": "width", "title": "Width", "type": "string" },
-        { "name": "height", "title": "Height", "type": "string" }
+        { "name": "height", "title": "Height", "type": "string" },
+        { "name": "lqip", "title": "Blur placeholder (LQIP)", "type": "string" }
       ]
     },
     {
