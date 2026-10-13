@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.1.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.2.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -133,6 +133,30 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-server-insert": CustomEvent<BpServerInsertDetail>;
   /** The local selection, one per animation frame when it changes; null when blurred or none. */
   "bp-canvas-selection": CustomEvent<CanvasSelection | null>;
+  /** The toolbar state, one per animation frame when it changes; detail equals state(). */
+  "bp-selection-change": CustomEvent<ToolbarState>;
+}
+
+/** A mark a toolbar toggles (portable-doc names). */
+export type ToolbarMark = "strong" | "em" | "code" | "underline" | "strike" | "highlight" | "link";
+export type ToolbarBlockStyle = "normal" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote";
+export type ToolbarList = "bullet" | "number";
+export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock";
+export interface ToolbarCommandArgs {
+  mark?: ToolbarMark;
+  href?: string;
+  style?: ToolbarBlockStyle;
+  kind?: ToolbarList;
+  type?: string;
+  attrs?: { level?: number };
+}
+/** What a toolbar shows as pressed. */
+export interface ToolbarState {
+  marks: ToolbarMark[];
+  blockStyle: ToolbarBlockStyle | null;
+  list: ToolbarList | null;
+  link: { href: string } | null;
+  selection: { empty: boolean; inBlockType: string | null };
 }
 
 /** A caret address. path only below the id-bearing block ("items[2]", "rows[1].cells[0]"); offset in UTF-16 units. */
@@ -229,6 +253,15 @@ export interface BpPaperCanvasElement extends HTMLElement {
   replaceAll(text: string): FindState & { replaced: number };
   /** Replace the remote carets (decorations only; [] clears). */
   setRemoteSelections(list: RemoteSelection[]): void;
+  /** Toolbar commands on the current selection: true when applied. */
+  run(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
+  toggleMark(mark: ToolbarMark, attrs?: { href?: string }): boolean;
+  setBlockStyle(style: ToolbarBlockStyle): boolean;
+  toggleList(kind: ToolbarList): boolean;
+  insertBlock(type: string, attrs?: { level?: number }): boolean;
+  /** Whether the command would apply here, without applying it. */
+  can(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
+  state(): ToolbarState;
 
   addEventListener<K extends keyof BpPaperCanvasEventMap>(
     type: K,

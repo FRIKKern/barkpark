@@ -221,6 +221,17 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
+// Toolbar commands for a host's own field chrome (EMBED-CONTRACT "Toolbar commands").
+import {
+  canSetBlockStyle,
+  canToggleList,
+  canToggleMark,
+  emptyToolbarState,
+  setBlockStyle as hcSetBlockStyle,
+  toggleList as hcToggleList,
+  toggleMark as hcToggleMark,
+  toolbarState,
+} from "./host-commands.js";
 import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
 // for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
@@ -751,6 +762,9 @@ class BpPaperCanvas extends HTMLElement {
     this._remoteSelections = [];
     this._selectionFrame = null;
     this._lastSelectionDetail = undefined;
+    // Toolbar state: the rAF-coalesced bp-selection-change emit.
+    this._toolbarFrame = null;
+    this._lastToolbarState = undefined;
     this._uploadSeq = 0;
     // Settled receipts survive native history while this editor is mounted.
     // They contain metadata only, never another upload request.
@@ -1310,6 +1324,9 @@ class BpPaperCanvas extends HTMLElement {
         if (this._bubble) this._bubble.update();
         this._scheduleSelectionEmit();
       },
+      // Every transaction may change what a host toolbar shows (a stored mark, a
+      // block turned into a heading): bp-selection-change, one per frame at most.
+      onTransaction: () => this._scheduleToolbarState(),
       onBlur: () => {
         const version = ++this._richFocusIntentVersion;
         queueMicrotask(() => {
@@ -1543,6 +1560,10 @@ class BpPaperCanvas extends HTMLElement {
       cancelAnimationFrame(this._selectionFrame);
       this._selectionFrame = null;
     }
+    if (this._toolbarFrame != null) {
+      cancelAnimationFrame(this._toolbarFrame);
+      this._toolbarFrame = null;
+    }
     this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -1657,6 +1678,87 @@ class BpPaperCanvas extends HTMLElement {
       if (key === this._lastSelectionDetail) return;
       this._lastSelectionDetail = key;
       this.dispatchEvent(new CustomEvent("bp-canvas-selection", { bubbles: true, composed: true, detail }));
+    });
+  }
+
+  // ── toolbar commands (EMBED-CONTRACT "Toolbar commands"; canvas/host-commands.js) ──
+  //
+  // Each runs the transaction the canvas's own surfaces run, on the current
+  // selection, and answers whether it applied. Unmounted or read-only: false.
+
+  run(command, args = {}) {
+    if (!this.can(command, args)) return false;
+    const editor = this._editor;
+    const a = args && typeof args === "object" ? args : {};
+    switch (command) {
+      case "toggleMark": return hcToggleMark(editor, a.mark, a.href) === true;
+      case "setBlockStyle": return hcSetBlockStyle(editor, a.style, this._toolbarVocabulary()) === true;
+      case "toggleList": return hcToggleList(editor, a.kind) === true;
+      case "insertBlock": return this._insertToolbarBlock(a.type, a.attrs) === true;
+      default: return false;
+    }
+  }
+
+  toggleMark(mark, attrs) { return this.run("toggleMark", { mark, href: attrs && attrs.href }); }
+  setBlockStyle(style) { return this.run("setBlockStyle", { style }); }
+  toggleList(kind) { return this.run("toggleList", { kind }); }
+  insertBlock(type, attrs) { return this.run("insertBlock", { type, attrs }); }
+
+  can(command, args = {}) {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || !this._editable) return false;
+    const a = args && typeof args === "object" ? args : {};
+    const vocab = this._toolbarVocabulary();
+    switch (command) {
+      case "toggleMark": return canToggleMark(editor, a.mark, a.href, vocab);
+      case "setBlockStyle": return canSetBlockStyle(editor, a.style, vocab);
+      case "toggleList": return canToggleList(editor, a.kind, vocab);
+      case "insertBlock": return !!this._toolbarInsertItem(a.type);
+      default: return false;
+    }
+  }
+
+  state() {
+    const editor = this._editor;
+    return editor && !editor.isDestroyed ? toolbarState(editor) : emptyToolbarState();
+  }
+
+  _toolbarVocabulary() {
+    return parseVocabulary(this.getAttribute("data-vocabulary"));
+  }
+
+  // The block types a toolbar may insert: the slash menu's own rows for this
+  // canvas (narrowed to the field's vocabulary), one per type.
+  _toolbarInsertItem(type) {
+    if (typeof type !== "string" || type === "") return null;
+    const items = slashItemsForVocabulary(CANVAS_SLASH_ITEMS, this._toolbarVocabulary());
+    return items.find((item) => item.type === type && !item.compound && !item.preset && !item.inline && !item.master) || null;
+  }
+
+  // Insert after the caret's block, exactly as the palette's Insert command does
+  // (a declared object block opens its fields first; a server-built type goes to
+  // the server; the rest through the slash seam).
+  _insertToolbarBlock(type, attrs) {
+    const item = this._toolbarInsertItem(type);
+    if (!item) return false;
+    this._editor.commands.focus();
+    if (item.object || this._objectOverrides().has(type)) return this._insertDeclaredObject(type);
+    if (serverBuildsInsert(type, this._hostBuildsInserts())) return this._insertViaServer(type, { replaceSlashLine: false });
+    const level = attrs && Number.isInteger(attrs.level) ? attrs.level : item.level;
+    return insertSlashTypeAtSelection(this._editor, type, undefined, level ? { level } : undefined);
+  }
+
+  _scheduleToolbarState() {
+    if (this._toolbarFrame != null) return;
+    this._toolbarFrame = requestAnimationFrame(() => {
+      this._toolbarFrame = null;
+      const editor = this._editor;
+      if (!editor || editor.isDestroyed) return;
+      const detail = toolbarState(editor);
+      const key = JSON.stringify(detail);
+      if (key === this._lastToolbarState) return;
+      this._lastToolbarState = key;
+      this.dispatchEvent(new CustomEvent("bp-selection-change", { bubbles: true, composed: true, detail }));
     });
   }
 

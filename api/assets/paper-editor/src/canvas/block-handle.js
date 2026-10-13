@@ -103,7 +103,7 @@ export function insertParagraphAfter(editor, index) {
 }
 
 // "Turn into" for prose blocks. Non-prose targets are handled by the caller through the slash insert path.
-export function turnTopLevelInto(editor, index, kind) {
+export function turnTopLevelInto(editor, index, kind, { quoteType = "blockquote" } = {}) {
   const { state } = editor;
   const src = topLevelAt(state, index);
   if (!src) return false;
@@ -150,9 +150,10 @@ export function turnTopLevelInto(editor, index, kind) {
   };
   switch (kind) {
     case "paragraph":
-      return src.node.type.name === "blockquote" ? swapTextblock("paragraph") : chain.setParagraph().run();
+      return src.node.type.name === "blockquote" || src.node.type.name === "pullquote" ? swapTextblock("paragraph") : chain.setParagraph().run();
     case "quote":
-      return src.node.type.name === "blockquote" ? true : swapTextblock("blockquote");
+      // `quoteType`: the quote a field admits (vocabulary.js quoteTypeFor), as `> ` makes.
+      return src.node.type.name === quoteType ? true : swapTextblock(quoteType);
     case "h1": return chain.setHeading({ level: 1 }).run();
     case "h2": return chain.setHeading({ level: 2 }).run();
     case "h3": return chain.setHeading({ level: 3 }).run();

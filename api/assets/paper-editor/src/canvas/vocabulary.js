@@ -164,7 +164,7 @@ export function markAllowed(markName, vocab) {
 }
 
 // The portable-doc type a TipTap node JSON stands for, or null when unknown.
-function pdTypeOf(node) {
+export function pdTypeOf(node) {
   if (!node) return null;
   const a = node.attrs || {};
   if (typeof a.bpType === "string" && a.bpType !== "") return a.bpType;

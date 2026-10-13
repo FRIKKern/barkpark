@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.1.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.2.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,10 +6,11 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.1.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.2.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
-unchanged from 1.0.0.
+unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
+`bp-selection-change`.
 
 ## The element
 
@@ -124,6 +125,7 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-master-insert` | a Masters pick from the slash menu | `{ master_id, after_id, mode?: "linked" }` |
 | `bp-server-insert` | a `terminal`, `stage`, `image` or `equation` pick, only when the editor or an ancestor carries `data-server-insert` (the host inserts it); without it they insert in the canvas | `{ type, after_id }` |
 | `bp-canvas-selection` | the local selection changed, at most once per animation frame | `{ anchor: Point, head: Point }`, or `null` when blurred or none (see Shared carets) |
+| `bp-selection-change` | the toolbar state changed, at most once per animation frame | `state()` (see Toolbar commands) |
 
 `ops` is a non-empty array of: `patch-block { id, patch }`, `replace-block { id,
 block }`, `insert-after { afterId, block }`, `append-block { block }`,
@@ -191,6 +193,40 @@ mount `findSet`/`findState` return `{ query: "", count: 0, index: -1 }` and
 | `findClear()` | nothing |
 | `replaceCurrent(text)` | `state` after replacing the active match (read-only: unchanged `state`) |
 | `replaceAll(text)` | `{ replaced, ...state }`, one transaction (read-only: `replaced: 0`) |
+
+### Toolbar commands
+
+For a host that draws its own toolbar (a field's chrome). Each command acts on
+the current selection and returns `true` when it applied; unmounted or read-only
+it returns `false` and does nothing. Each runs the transaction the canvas's own
+surfaces run (the format bubble, the block menu's Turn into, the palette's
+Insert), so a press is one undo step and the same ops on the wire. Commands
+less than 500 ms apart group into one undo step, as typing does.
+
+| Method | Effect |
+|---|---|
+| `toggleMark(mark, { href }?)` | `mark`: `strong`, `em`, `code`, `underline`, `strike`, `highlight`, `link`. `link` with an `href` sets the link over the selection's link range; without one it clears the link there. Only the reader's allowlist links (`http`, `https`, `mailto`, `tel`, a relative or in-document address, `#`): anything else (`javascript:`, `data:`, a protocol-relative `//`) returns `false`, `can()` is `false`, and the format bubble's link row refuses it the same way |
+| `setBlockStyle(style)` | `normal`, `h1`–`h6`, `blockquote`. A quote keeps the block's id and text; in a field canvas it is the quote kind the field admits (its pullquote when `blockquote` maps there), as `> ` makes |
+| `toggleList(kind)` | `bullet` or `number`. Off a list: makes one. In a list of the other kind: converts it, keeping the list's id. In a list of that kind: lifts the item out |
+| `insertBlock(type, { level }?)` | any type the canvas's slash menu offers here (narrowed to the field's vocabulary). Inserts after the caret's block, an empty paragraph is replaced; a declared object block opens its fields first, a type the host builds on the server emits `bp-server-insert` |
+| `run(command, args?)` | the same, by name: `toggleMark` `{ mark, href? }`, `setBlockStyle` `{ style }`, `toggleList` `{ kind }`, `insertBlock` `{ type, attrs? }`. An unknown command is `false` |
+| `can(command, args?)` | whether `run(command, args)` would apply now, without applying it. `false` for what the field's vocabulary forbids (its veto would drop the edit) |
+| `state()` | the active state, below |
+
+`state()` is `{ marks, blockStyle, list, link, selection }`:
+
+- `marks`: the active marks, by the names above.
+- `blockStyle`: the caret's textblock (`normal`, `h1`–`h6`, `blockquote`), or `null` in another block.
+- `list`: `bullet` or `number` when the caret is in such a list, else `null`.
+- `link`: `{ href }` when the selection is in a link, else `null`.
+- `selection`: `{ empty, inBlockType }`; `inBlockType` is the portable-doc type of the top-level block, or `null`.
+
+Before mount it is `{ marks: [], blockStyle: null, list: null, link: null,
+selection: { empty: true, inBlockType: null } }`.
+
+`bp-selection-change` (bubbles, composed) fires when that state changes (a
+selection move, a stored mark, a block turned into a heading), at most once per
+animation frame. Its `detail` equals `state()`.
 
 ### Shared carets
 
