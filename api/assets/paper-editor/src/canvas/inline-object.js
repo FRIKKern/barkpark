@@ -528,6 +528,13 @@ function findAtom(doc, pos, stored, typeName = ATOM, attr = "node") {
   return hit ? hit.pos : null;
 }
 
+// True when `node` is a declared object block with fields to edit (its Edit).
+export function canEditObjectBlock(host, node) {
+  if (!node || node.type.name !== BLOCK) return false;
+  const kind = objectBlockFor(host.inlineObjectVocabulary(), node.attrs.bpType);
+  return !!(kind && editableKind(kind).fields.length);
+}
+
 // Open the dialog for the declared object block at `pos`. Save rewrites its
 // carried block in one transaction; keys the dialog does not own (its id) ride along.
 export function editObjectBlockAt(host, editor, pos, error) {
