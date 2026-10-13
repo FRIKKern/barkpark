@@ -25,8 +25,10 @@ import (
 // Sanity `_key` becomes its `id`. A custom object block the field declares in
 // `blocks.of` (`{"name": "callout", …}`) is kept as `{id, type, …fields}`. A
 // body holding anything else (an undeclared object, a Sanity image, whose
-// shape is not PortableDoc's) is left as it was and reported, never half
-// converted.
+// shape is not PortableDoc's), or formatting PortableDoc has no node for (an
+// internalLink annotation, a nested list level, a mark inside a heading, a
+// custom style), is left as it was and reported: never half converted, never
+// formatting silently lost.
 
 // sanityBlocksField is one block-editor richText field of the target schema.
 type sanityBlocksField struct {
@@ -40,10 +42,8 @@ type sanityBlocksFields map[string]map[string]sanityBlocksField
 
 // sanityConversion tallies what the conversion did, for the import report.
 type sanityConversion struct {
-	fields    int      // bodies converted to PortableDoc
-	kept      []string // "<doc id>.<field>: <reason>" for bodies left as Portable Text
-	flattened int      // list items below level 1, put in their list's top level
-	dropped   int      // marks and styles PortableDoc has no node for (their text is kept)
+	fields int      // bodies converted to PortableDoc
+	kept   []string // "<doc id>.<field>: <reason>" for bodies left as Portable Text
 }
 
 // sanityFetchBlocksFields reads the target's schemas (GET /v1/schemas/:dataset)
@@ -114,7 +114,7 @@ func sanityConvertDoc(doc map[string]any, fields sanityBlocksFields, conv *sanit
 		if !ok || !sanityIsPortableText(items) {
 			continue
 		}
-		blocks, reason := sanityToPortableDoc(items, fields[typ][name], conv)
+		blocks, reason := sanityToPortableDoc(items, fields[typ][name])
 		if reason != "" {
 			id, _ := doc["_id"].(string)
 			conv.kept = append(conv.kept, fmt.Sprintf("%s.%s: %s", id, name, reason))
@@ -143,12 +143,11 @@ func sanityIsPortableText(items []any) bool {
 var sanityHeadingLevels = map[string]int{"h1": 1, "h2": 2, "h3": 3, "h4": 4, "h5": 5, "h6": 6}
 
 // sanityToPortableDoc converts one Portable Text array. A non-empty reason
-// means it could not, and nothing of it is used.
-func sanityToPortableDoc(items []any, field sanityBlocksField, conv *sanityConversion) ([]any, string) {
+// means it could not without losing something, and nothing of it is used.
+func sanityToPortableDoc(items []any, field sanityBlocksField) ([]any, string) {
 	var blocks []any
 	var list map[string]any // the list block a run of list items is filling
 	listKind := ""
-	flattened, dropped := 0, 0
 	for i, it := range items {
 		m, ok := it.(map[string]any)
 		if !ok {
@@ -173,8 +172,10 @@ func sanityToPortableDoc(items []any, field sanityBlocksField, conv *sanityConve
 			blocks = append(blocks, obj)
 			continue
 		}
-		content, d := sanityInline(m)
-		dropped += d
+		content, reason := sanityInline(m)
+		if reason != "" {
+			return nil, fmt.Sprintf("block %s: %s", id, reason)
+		}
 
 		if kind, _ := m["listItem"].(string); kind != "" {
 			level := 1
@@ -184,20 +185,15 @@ func sanityToPortableDoc(items []any, field sanityBlocksField, conv *sanityConve
 				}
 			}
 			if kind != "bullet" && kind != "number" {
-				kind = "bullet"
-				dropped++
+				return nil, fmt.Sprintf("block %s: list kind %q has no PortableDoc list", id, kind)
 			}
-			// A deeper item stays in the list it is nested in; PortableDoc's
-			// list items are flat.
-			if list != nil && (level > 1 || kind == listKind) {
-				if level > 1 {
-					flattened++
-				}
+			// PortableDoc's list items are flat: a nested level would be lost.
+			if level > 1 {
+				return nil, fmt.Sprintf("block %s: a level-%d list item (PortableDoc lists do not nest)", id, level)
+			}
+			if list != nil && kind == listKind {
 				list["items"] = append(list["items"].([]any), content)
 				continue
-			}
-			if level > 1 {
-				flattened++
 			}
 			list = map[string]any{"id": id, "type": "list", "ordered": kind == "number", "items": []any{content}}
 			listKind = kind
@@ -209,18 +205,20 @@ func sanityToPortableDoc(items []any, field sanityBlocksField, conv *sanityConve
 		style, _ := m["style"].(string)
 		switch {
 		case sanityHeadingLevels[style] > 0:
+			// A heading holds plain text: a mark or link in it would be lost.
+			if !sanityAllText(content) {
+				return nil, fmt.Sprintf("block %s: a %s with marks or links (a PortableDoc heading is plain text)", id, style)
+			}
 			blocks = append(blocks, map[string]any{"id": id, "type": "heading", "level": sanityHeadingLevels[style], "text": sanityPlainText(m)})
 		case style == "blockquote":
 			blocks = append(blocks, map[string]any{"id": id, "type": "pullquote", "content": content})
 		default:
 			if style != "" && style != "normal" {
-				dropped++
+				return nil, fmt.Sprintf("block %s: style %q has no PortableDoc block", id, style)
 			}
 			blocks = append(blocks, map[string]any{"id": id, "type": "paragraph", "content": content})
 		}
 	}
-	conv.flattened += flattened
-	conv.dropped += dropped
 	if blocks == nil {
 		blocks = []any{}
 	}
@@ -233,9 +231,9 @@ var sanityDecorators = map[string]string{
 	"strike-through": "strikethrough", "code": "code",
 }
 
-// sanityInline turns a block's children into PortableDoc inline nodes and
-// counts the marks it had no node for (their text is kept).
-func sanityInline(block map[string]any) ([]any, int) {
+// sanityInline turns a block's children into PortableDoc inline nodes. A
+// non-empty reason names a mark it has no node for.
+func sanityInline(block map[string]any) ([]any, string) {
 	defs := map[string]map[string]any{}
 	if mds, ok := block["markDefs"].([]any); ok {
 		for _, d := range mds {
@@ -248,7 +246,6 @@ func sanityInline(block map[string]any) ([]any, int) {
 	}
 	children, _ := block["children"].([]any)
 	out := []any{}
-	dropped := 0
 	for _, c := range children {
 		cm, ok := c.(map[string]any)
 		if !ok {
@@ -279,13 +276,17 @@ func sanityInline(block map[string]any) ([]any, int) {
 				}
 				continue
 			}
-			if def, ok := defs[name]; ok && def["_type"] == "link" {
+			def, ok := defs[name]
+			if ok && def["_type"] == "link" {
 				if href, _ := def["href"].(string); href != "" {
 					link = map[string]any{"type": "link", "href": href}
 					continue
 				}
 			}
-			dropped++
+			if ok {
+				return nil, fmt.Sprintf("annotation %q has no PortableDoc mark", def["_type"])
+			}
+			return nil, fmt.Sprintf("mark %q has no PortableDoc mark", name)
 		}
 		if link != nil {
 			link["children"] = []any{node}
@@ -293,7 +294,17 @@ func sanityInline(block map[string]any) ([]any, int) {
 		}
 		out = append(out, node)
 	}
-	return out, dropped
+	return out, ""
+}
+
+// sanityAllText: inline nodes that are all plain text (no mark, link or object).
+func sanityAllText(nodes []any) bool {
+	for _, n := range nodes {
+		if m, _ := n.(map[string]any); m["type"] != "text" {
+			return false
+		}
+	}
+	return true
 }
 
 // sanityPlainText is a block's text, spans joined (a heading carries no marks).

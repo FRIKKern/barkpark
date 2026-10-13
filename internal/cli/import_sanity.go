@@ -487,7 +487,6 @@ func (s *sanityImport) summary() map[string]any {
 		"system_documents_skipped": s.skipped, "assets_file": s.tarball + sanityAssetsSuffix,
 		"portable_text": map[string]any{
 			"converted": s.conv.fields, "kept": append([]string{}, s.conv.kept...),
-			"list_items_flattened": s.conv.flattened, "marks_dropped": s.conv.dropped,
 		},
 	}
 }
@@ -502,8 +501,7 @@ func (s *sanityImport) reportPortableText(out *writer, dry bool) {
 	if dry {
 		verb = "would be"
 	}
-	out.outf("%d Portable Text body(ies) %s converted to PortableDoc (%d list item(s) flattened, %d mark(s) or style(s) dropped, their text kept)",
-		c.fields, verb, c.flattened, c.dropped)
+	out.outf("%d Portable Text body(ies) %s converted to PortableDoc", c.fields, verb)
 	if len(c.kept) > 0 {
 		out.outf("%d body(ies) %s kept as Portable Text:", len(c.kept), verb)
 		for _, k := range c.kept {
