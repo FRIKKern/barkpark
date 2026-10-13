@@ -238,7 +238,7 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
   describe "the existing pipeline mounts are untouched (criterion 3)" do
     @router Path.expand("../../../lib/barkpark_web/router.ex", __DIR__)
 
-    test "the only RateLimit mounts with options are :presence_focus and the five browser pipelines" do
+    test "the only RateLimit mounts with options are :presence_focus, the GROQ POST read and the five browser pipelines" do
       src = File.read!(@router)
 
       mounts =
@@ -274,7 +274,10 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
              "expected exactly 5 `class: :browser` mounts (the HTML browser pipelines), " <>
                "found #{length(browser)}"
 
-      assert Enum.all?(others, &(&1 == ", class: :presence_focus")),
+      # SECOND DELIBERATE EXCEPTION: `class: :read` on `:shared_docs_query_post`,
+      # the POST form of the GROQ query read. It meters a read as a read
+      # (one of the two existing method classes), so it adds no class.
+      assert Enum.all?(others, &(&1 in [", class: :presence_focus", ", class: :read"])),
              "a RateLimit mount now passes options: #{inspect(others)} — a new class must be " <>
                "reasoned about here deliberately, not silently"
     end

@@ -1341,6 +1341,23 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  # :shared_docs_api for the POST form of the GROQ query read. Sanity's client
+  # sends a query too long for a URL as POST; it reads and writes nothing, so
+  # RateLimit bills it to the read bucket instead of the method's write bucket.
+  pipeline :shared_docs_query_post do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit, class: :read)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    plug(BarkparkWeb.Plugs.PublicRead)
+  end
+
   # The grant fold WITHOUT `:api_grant_read`'s PublicRead clamp, for the flat
   # federated search route (task-e6939d27b7e0b3aa). `ResolveTokenOwner` maps an
   # owned token to its user and `AssignGrantScope` flags `:grant_scoped_read`
@@ -3647,6 +3664,24 @@ defmodule BarkparkWeb.Router do
     # Scoped mirror of the flat bundled-counts read (AXI decision 19) — a scoped
     # caller resolves its real workspace/project, so counts stay tenant-true.
     get("/v1/data/counts/:dataset", QueryController, :counts)
+  end
+
+  # Sanity-compatible GROQ query read (docs/api-v1.md §4a). `v:api_version`
+  # matches Sanity's dated version segment (`/v2025-02-19/...`), so a Sanity
+  # client whose apiHost is `https://<host>/w/<ws>/p/<proj>` reaches it with its
+  # own URL scheme. POST is the client's form for a query too long for a URL;
+  # it has its own action name so Sobelow's action-reuse check does not read
+  # one action as both a GET and a POST.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:shared_docs_api)
+
+    get("/v:api_version/data/query/:dataset", GroqController, :read)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:shared_docs_query_post)
+
+    post("/v:api_version/data/query/:dataset", GroqController, :read_post)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public
