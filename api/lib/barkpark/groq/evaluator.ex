@@ -425,9 +425,15 @@ defmodule Barkpark.Groq.Evaluator do
   end
 
   defp func("global", "count", [arg], scope, ctx) do
-    case eval(arg, scope, ctx) do
-      list when is_list(list) -> length(list)
-      _ -> nil
+    case source_count(arg, scope, ctx) do
+      {:ok, n} ->
+        n
+
+      :error ->
+        case eval(arg, scope, ctx) do
+          list when is_list(list) -> length(list)
+          _ -> nil
+        end
     end
   end
 
@@ -690,6 +696,21 @@ defmodule Barkpark.Groq.Evaluator do
 
     Regex.compile!("^" <> body <> "$", "u")
   end
+
+  # `count(*[...])` whose filter SQL matches exactly is counted by the source,
+  # without loading the documents.
+  defp source_count({:memo, inner}, scope, ctx), do: source_count(inner, scope, ctx)
+
+  defp source_count({:filter, {:everything}, expr}, scope, ctx) do
+    resolve = fn outer_expr -> eval(outer_expr, nested(scope, nil), ctx) end
+
+    case Pushdown.exact(expr, resolve) do
+      {:ok, constraints} -> Source.count(ctx.source, constraints)
+      :error -> :error
+    end
+  end
+
+  defp source_count(_arg, _scope, _ctx), do: :error
 
   # `references()` walks the whole value. A document straight from the source
   # is walked once per query and its id set reused, which matters for the

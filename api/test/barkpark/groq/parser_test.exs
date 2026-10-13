@@ -76,6 +76,96 @@ defmodule Barkpark.Groq.ParserTest do
       assert c.any == [[%{"isbn" => "9"}, %{"onix" => %{"isbn" => "9"}}]]
     end
 
+    # Constraints for the first `*[...]` filter, with `^` bound to `parent`.
+    defp constraints_under(query, parent, params \\ %{}) do
+      {:ok, tree} = Parser.parse(query, params)
+      expr = filter_expr(tree)
+      ctx = %Evaluator{source: MemorySource.new([])}
+      scope = %{value: nil, parent: %{value: parent, parent: nil, hidden: false}, hidden: false}
+      Pushdown.constraints(expr, &Evaluator.eval(&1, scope, ctx))
+    end
+
+    defp filter_expr({:filter, {:everything}, expr}), do: expr
+
+    defp filter_expr(node) when is_tuple(node),
+      do: node |> Tuple.to_list() |> Enum.find_value(&filter_expr/1)
+
+    defp filter_expr(list) when is_list(list), do: Enum.find_value(list, &filter_expr/1)
+    defp filter_expr(_), do: nil
+
+    test "references() with a parameter or ^ becomes a refs probe" do
+      c = constraints(~s|*[_type == "p" && references($s)]|, %{"s" => "series-1"})
+      assert c.any == [[{:refs, ["series-1"]}]]
+
+      c = constraints_under(~s|*[_type == "p" && references(^._id, "x")]|, %{"_id" => "p4"})
+      assert c.any == [[{:refs, ["p4", "x"]}]]
+    end
+
+    test "references() with no string matches nothing" do
+      c = constraints_under(~s|*[_type == "p" && references(^.missing)]|, %{"_id" => "p4"})
+      assert c.any == [[]]
+    end
+
+    test "membership in an array path becomes containment with the array in the probe" do
+      c =
+        constraints_under(~s|*[$paths[0] in slugHistory[].value]|, %{}, %{"paths" => ["/a", "/b"]})
+
+      assert c.eq == [] and c.any == [[%{"slugHistory" => [%{"value" => "/a"}]}]]
+
+      c =
+        constraints_under(
+          ~s'*[$p[0] in slugHistory[].value || $p[1] in slugHistory[].value]',
+          %{},
+          %{"p" => ["/a", "/b"]}
+        )
+
+      assert c.any == [
+               [
+                 %{"slugHistory" => [%{"value" => "/a"}]},
+                 %{"slugHistory" => [%{"value" => "/b"}]}
+               ]
+             ]
+    end
+
+    test "membership of null stays in memory, since null matches a missing value" do
+      c = constraints_under(~s|*[$x in slugHistory[].value]|, %{}, %{"x" => nil})
+      assert c.any == []
+    end
+
+    test "each disjunct gives its most selective condition and a false one drops" do
+      filter = """
+      *[_type == "product" && _id != ^._id && (defined(isbn) || defined(onix.isbn)) && (
+        (references(^._id) && (mainProduct._ref == ^._id || ^._id in variants[]._ref)) ||
+        _id == ^.mainProduct._ref ||
+        (defined(^.mainProduct._ref) && references(^.mainProduct._ref) && mainProduct._ref == ^.mainProduct._ref) ||
+        _id in ^.variants[]._ref ||
+        (defined(^.onix.publicationId) && onix.publicationId == ^.onix.publicationId)
+      )]
+      """
+
+      root = %{"_id" => "p4", "onix" => %{"publicationId" => "pub-1"}}
+      assert constraints_under(filter, root).types == ["product"]
+
+      assert constraints_under(filter, root).any == [
+               [{:refs, ["p4"]}, %{"onix" => %{"publicationId" => "pub-1"}}]
+             ]
+
+      child = %{
+        "_id" => "p5",
+        "mainProduct" => %{"_ref" => "p4"},
+        "variants" => [%{"_ref" => "p9"}]
+      }
+
+      assert constraints_under(filter, child).any == [
+               [{:refs, ["p5"]}, {:ids, ["p4"]}, {:refs, ["p4"]}, {:ids, ["p9"]}]
+             ]
+    end
+
+    test "an || with a disjunct SQL cannot narrow stays in memory" do
+      c = constraints(~s'*[_type == "p" && (references($a) || count(tags) > 2)]', %{"a" => "x"})
+      assert c.any == []
+    end
+
     test "or, functions and ^ stay in memory" do
       c = constraints(~s'*[_type == "a" || _type == "b"]')
       assert c.types == nil

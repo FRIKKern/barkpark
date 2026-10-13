@@ -15,10 +15,13 @@ defmodule Barkpark.Groq.DocumentSource do
   the source switches to loading on demand so a pathological query still
   finishes.
 
-  The outermost `*[...]` filter's `_type`, `_id` and simple equality
-  constraints become SQL (`Barkpark.Groq.Pushdown`); everything else runs in
-  memory over the loaded documents. An equality on `title` reads the
-  `documents.title` column, where the writer keeps it.
+  The constraints `Barkpark.Groq.Pushdown` reads off each `*[...]` filter
+  become SQL: `_type`, `_id`, field equalities and array membership as JSON
+  containment on `content`, and `references()` against an expression index
+  over the `_ref` values in `content`. Everything else runs in memory over the
+  loaded documents. An equality on `title` reads the `documents.title`
+  column, where the writer keeps it. Both GIN indexes are created by
+  `20261013180000_add_documents_groq_pushdown_indexes.exs`.
 
   ## Scope and visibility
 
@@ -97,7 +100,7 @@ defmodule Barkpark.Groq.DocumentSource do
   defp run_rounds(tree, state, eval_opts, round) do
     mode = if round > @max_rounds, do: :direct, else: :collect
     Process.put(:groq_src_mode, mode)
-    Process.put(:groq_src_missing, %{ids: MapSet.new(), keys: MapSet.new()})
+    Process.put(:groq_src_missing, %{ids: MapSet.new(), keys: MapSet.new(), counts: MapSet.new()})
 
     result = Evaluator.evaluate(tree, Keyword.put(eval_opts, :source, {__MODULE__, state}))
     missing = Process.get(:groq_src_missing)
@@ -106,10 +109,12 @@ defmodule Barkpark.Groq.DocumentSource do
       mode == :direct ->
         result
 
-      MapSet.size(missing.ids) == 0 and MapSet.size(missing.keys) == 0 ->
+      MapSet.size(missing.ids) == 0 and MapSet.size(missing.keys) == 0 and
+          MapSet.size(missing.counts) == 0 ->
         result
 
       true ->
+        load_counts(state, MapSet.to_list(missing.counts))
         load_keys(state, MapSet.to_list(missing.keys))
         load_ids(state, MapSet.to_list(missing.ids))
         run_rounds(tree, state, eval_opts, round + 1)
@@ -138,6 +143,43 @@ defmodule Barkpark.Groq.DocumentSource do
         docs
     end
   end
+
+  # A count is answered in SQL only when it equals the number of documents
+  # the evaluator would load: the filter is exact (`Pushdown.exact/2`), it
+  # names its types, and rendering hides no field of those types from this
+  # caller, since SQL reads the stored fields.
+  @impl true
+  def count(state, constraints) do
+    cond do
+      constraints.types == nil or "paper" in constraints.types ->
+        :error
+
+      constraints.eq != [] and not Enum.all?(constraints.types, &renders_all_fields?(&1, state)) ->
+        :error
+
+      true ->
+        key = cache_key(constraints)
+
+        case Process.get({:groq_src_count, key}) do
+          nil ->
+            case Process.get(:groq_src_mode) do
+              :direct ->
+                load_counts(state, [key])
+                {:ok, Process.get({:groq_src_count, key})}
+
+              _ ->
+                record_missing(:counts, key)
+                {:ok, 0}
+            end
+
+          n ->
+            {:ok, n}
+        end
+    end
+  end
+
+  defp renders_all_fields?(type, state),
+    do: Envelope.renders_all_fields?(schema_for(type, state), state.caller_context)
 
   @impl true
   def get(state, id) do
@@ -204,6 +246,76 @@ defmodule Barkpark.Groq.DocumentSource do
 
   # ── Loading ──────────────────────────────────────────────────────────────
 
+  # All counts of a round in one statement: a UNION ALL of one `count(*)` per
+  # constraint set. A count reads no document, so it is not held to the
+  # per-fetch limits.
+  defp load_counts(_state, []), do: :ok
+
+  defp load_counts(state, keys) do
+    keys = Enum.with_index(keys)
+
+    [first | rest] =
+      Enum.map(keys, fn {{types, ids, eq, _any}, i} ->
+        state
+        |> counted_rows()
+        |> maybe_where_types(types)
+        |> where(^exact_condition(ids, eq, state.perspective))
+        |> select([d], %{i: type(^i, :integer), n: count(d.id)})
+      end)
+
+    counts =
+      rest
+      |> Enum.reduce(first, fn q, acc -> union_all(acc, ^q) end)
+      |> Repo.all()
+      |> Map.new(&{&1.i, &1.n})
+
+    Enum.each(keys, fn {{types, _ids, _eq, _any} = key, i} ->
+      Process.put({:groq_src_count, key}, Map.get(counts, i, 0))
+      Enum.each(types || [], &touch_type/1)
+    end)
+  end
+
+  # The rows the evaluator would see. In the drafts perspective a published
+  # row whose draft is visible to this caller is replaced by that draft, so
+  # it is not counted.
+  defp counted_rows(%{perspective: :drafts} = state) do
+    twins =
+      state
+      |> base_query()
+      |> where(
+        [t],
+        t.type == parent_as(:doc).type and
+          t.doc_id == fragment("'drafts.' || ?", parent_as(:doc).doc_id)
+      )
+      |> select([t], 1)
+
+    state
+    |> base_query(from(d in Document, as: :doc))
+    |> where([d], like(d.doc_id, ^(@drafts_prefix <> "%")) or not exists(twins))
+  end
+
+  defp counted_rows(state), do: base_query(state)
+
+  # `a.b == v` exactly: containment narrows through the GIN index, and the
+  # value at the path must equal `v` (containment alone also matches an array
+  # holding `v`).
+  defp exact_condition(ids, eq, perspective) do
+    condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
+
+    Enum.reduce(eq, condition, fn {path, value}, acc ->
+      dynamic(
+        [d],
+        ^acc and ^eq_condition(path, value) and
+          fragment(
+            "? #> ? = CAST(? AS jsonb)",
+            d.content,
+            type(^path, {:array, :string}),
+            type(^Jason.encode!(value), :string)
+          )
+      )
+    end)
+  end
+
   defp load_key(state, key), do: load_keys(state, [key])
 
   # Keys that scan the same types are read in one query: their conditions are
@@ -239,6 +351,8 @@ defmodule Barkpark.Groq.DocumentSource do
       else
         matching |> admit!(state) |> then(&Repo.all(from(d in Document, where: d.id in ^&1)))
       end
+
+    rows = if twins_needed?(state, keys), do: with_twins(rows, state, types), else: rows
 
     docs = rows |> render(state) |> sort_by_id()
     count_loaded!(state, length(docs))
@@ -286,6 +400,44 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
+  # In the drafts perspective a draft replaces its published twin, and the
+  # filter applies to the draft. A content condition in SQL sees each row on
+  # its own, so it can load a published row whose draft no longer matches.
+  # Loading the twin of every matched row lets the overlay pick the draft and
+  # the evaluator reject it.
+  defp twins_needed?(%{perspective: :drafts}, keys),
+    do: Enum.any?(keys, fn {_types, _ids, eq, any} -> eq != [] or any != [] end)
+
+  defp twins_needed?(_state, _keys), do: false
+
+  defp with_twins(rows, state, types) do
+    have = MapSet.new(rows, & &1.doc_id)
+
+    wanted =
+      rows
+      |> Enum.flat_map(fn row ->
+        published = DraftId.published_id(row.doc_id)
+        [published, DraftId.draft_id(published)]
+      end)
+      |> Enum.uniq()
+      |> Enum.reject(&MapSet.member?(have, &1))
+
+    case wanted do
+      [] ->
+        rows
+
+      _ ->
+        twins =
+          state
+          |> base_query()
+          |> maybe_where_types(types)
+          |> where([d], d.doc_id in ^wanted)
+          |> Repo.all()
+
+        rows ++ twins
+    end
+  end
+
   defp unconstrained?({_types, nil, [], []}), do: true
   defp unconstrained?(_key), do: false
 
@@ -298,14 +450,57 @@ defmodule Barkpark.Groq.DocumentSource do
       end)
 
     Enum.reduce(any, condition, fn probes, acc ->
-      json = Enum.map(probes, &Jason.encode!/1)
-
-      dynamic(
-        [d],
-        ^acc and
-          fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^json, {:array, :string}))
-      )
+      dynamic([d], ^acc and ^probes_condition(probes, perspective))
     end)
+  end
+
+  # A row matches one of the probes. Containment probes use the GIN index on
+  # `content`, `{:refs, ids}` the GIN index on the `_ref` values, `{:ids, ids}`
+  # the `doc_id` index. An empty list matches nothing.
+  defp probes_condition(probes, perspective) do
+    {maps, refs, ids} =
+      Enum.reduce(probes, {[], [], []}, fn
+        {:refs, r}, {m, rs, is} -> {m, rs ++ r, is}
+        {:ids, i}, {m, rs, is} -> {m, rs, is ++ i}
+        map, {m, rs, is} -> {[map | m], rs, is}
+      end)
+
+    conditions =
+      Enum.reject(
+        [
+          maps != [] && contains_any(Enum.reverse(maps)),
+          refs != [] && references_any(Enum.uniq(refs)),
+          ids != [] && ids_condition(Enum.uniq(ids), perspective)
+        ],
+        &(&1 == false)
+      )
+
+    Enum.reduce(conditions, dynamic(false), fn c, acc -> dynamic([d], ^acc or ^c) end)
+  end
+
+  defp contains_any(maps) do
+    json = Enum.map(maps, &Jason.encode!/1)
+
+    dynamic(
+      [d],
+      fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^json, {:array, :string}))
+    )
+  end
+
+  # The expression is the one `documents_content_refs_idx` is built on, word
+  # for word; Postgres uses the index only for that exact expression. It
+  # collects the `_ref` of every object at any depth, which is a superset of
+  # what `references()` matches (it also descends into an object that has a
+  # `_ref`), so the evaluator's own check decides.
+  defp references_any(ids) do
+    dynamic(
+      [d],
+      fragment(
+        "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref') \\?| ?",
+        d.content,
+        type(^ids, {:array, :string})
+      )
+    )
   end
 
   # `title` lives in the `documents.title` column. `Envelope.render/3` emits
@@ -377,10 +572,10 @@ defmodule Barkpark.Groq.DocumentSource do
 
   # ── SQL ──────────────────────────────────────────────────────────────────
 
-  defp base_query(state) do
+  defp base_query(state, source \\ Document) do
     opts = state.opts
 
-    Document
+    source
     |> WriteScope.scope_to_dataset(state.dataset, opts)
     |> Scope.scope_to_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
     # Typeless read: `scope_to_owner/2` is applied unconditionally, as

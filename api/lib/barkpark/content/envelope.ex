@@ -961,6 +961,31 @@ defmodule Barkpark.Content.Envelope do
   # `fields` are the raw string-keyed JSON maps; the `%Parsed{}` / raw-map shapes
   # are supported defensively. Parse-free on purpose — robust against schemas
   # carrying plugin-namespaced fields that would fail a strict parse.
+  @doc """
+  True when `render/3` returns every stored field for `caller_context` on a
+  document of `schema`: the caller is internal or an admin, or no field at any
+  depth of the schema declares a visibility restriction. Encrypted values are
+  still dropped for non-admins; a value test against a stored ciphertext
+  matches nothing either way. `Barkpark.Groq.DocumentSource` uses this before
+  it answers `count()` from SQL, since SQL sees the stored fields.
+  """
+  @spec renders_all_fields?(term(), term()) :: boolean()
+  def renders_all_fields?(_schema, :internal), do: true
+  def renders_all_fields?(_schema, %CallerContext{is_admin: true}), do: true
+
+  def renders_all_fields?(schema, _caller_context),
+    do: not Enum.any?(raw_fields(schema), &restricted_anywhere?/1)
+
+  defp restricted_anywhere?(field) when is_map(field) do
+    restricted?(field) or Enum.any?(nested_kids(field), &restricted_anywhere?/1) or
+      case item_field(field) do
+        nil -> false
+        item -> restricted_anywhere?(item)
+      end
+  end
+
+  defp restricted_anywhere?(_field), do: false
+
   defp raw_fields(%SchemaDefinition{fields: f}) when is_list(f), do: f
   defp raw_fields(%SchemaDefinition.Parsed{raw: %{"fields" => f}}) when is_list(f), do: f
   defp raw_fields(%{"fields" => f}) when is_list(f), do: f

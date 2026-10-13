@@ -1,0 +1,126 @@
+defmodule BarkparkWeb.GroqBenchTest do
+  @moduledoc """
+  Server time of the GROQ page-query shapes over 20,000 synthetic products
+  (`Barkpark.Test.GroqSyntheticProducts`), with the pushdown indexes and then
+  with them dropped inside the test transaction. Prints a table; asserts only
+  that every shape answers. Excluded by default. Run:
+
+      mix test --include groq_bench test/barkpark_web/controllers/groq_bench_test.exs
+  """
+  use BarkparkWeb.ConnCase, async: false
+
+  alias Barkpark.{Auth, Content, Repo, Tenancy}
+  alias Barkpark.Test.GroqSyntheticProducts
+
+  @moduletag :groq_bench
+  @moduletag timeout: 600_000
+
+  @dataset "groq_bench"
+  @products 20_000
+  @runs 9
+
+  @shapes [
+    {"1 sibling editions, references(^._id) in ||",
+     """
+     *[_type == "product" && isbn == $isbn][0]{_id, "siblings": *[
+       _type == "product" && _id != ^._id && (defined(isbn) || defined(onix.isbn)) && (
+         (references(^._id) && (mainProduct._ref == ^._id || ^._id in bokbasen.languageFormatVariants[]._ref)) ||
+         _id == ^.mainProduct._ref ||
+         (defined(^.mainProduct._ref) && references(^.mainProduct._ref) && (
+           mainProduct._ref == ^.mainProduct._ref || ^.mainProduct._ref in bokbasen.languageFormatVariants[]._ref)) ||
+         _id in ^.bokbasen.languageFormatVariants[]._ref ||
+         (defined(^.onix.publicationId) && defined(onix.publicationId) &&
+          onix.publicationId == ^.onix.publicationId && lower(title) == lower(^.title))
+       )] | order(_id asc)._id}
+     """, %{"isbn" => "9780000005"}},
+    {"2 series page, references($seriesId)",
+     """
+     *[_type == "product" && !(_id in path("drafts.**")) && defined(isbn) &&
+       isMainProduct == true && references($seriesId)]{_id, isbn}
+     """, %{"seriesId" => "series-3"}},
+    {"3 author books, references($contributorId)",
+     """
+     *[_type == "product" && references($contributorId) &&
+       count(onix.contributors[contributor._ref == $contributorId && role._ref in ["A01", "B01"]]) > 0].isbn
+     """, %{"contributorId" => "c-8"}},
+    {"4 redirect, $path in slugHistory[].value",
+     """
+     *[($paths[0] in slugHistory[].value || $paths[1] in slugHistory[].value) &&
+       count((slugHistory)[match == "url" && lower(value) in $paths]) > 0 &&
+       (isHidden != true || _type == "article")] | order(_updatedAt desc)[0]{_id}
+     """, %{"paths" => ["/bok/p12345", "/bok/P12345"]}},
+    {"5 count(*[_type == \"product\"])", ~s'count(*[_type == "product"])', %{}},
+    {"6 count per department via ^",
+     ~s'*[_type == "department"]{_id, "n": count(*[_type == "product" && department._ref == ^._id])}',
+     %{}}
+  ]
+
+  setup do
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "groq-bench", name: "GROQ bench"})
+    {:ok, proj} = Tenancy.create_project(ws, %{slug: "site", name: "Site"})
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    for type <- ["product", "article", "department"] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => type, "title" => type, "visibility" => "public", "fields" => []},
+          @dataset,
+          scope
+        )
+    end
+
+    {:ok, _} = Content.create_document("product", %{"_id" => "template"}, @dataset, scope)
+    {:ok, _} = Content.publish_document("template", "product", @dataset, scope)
+
+    for id <- ["dept-big", "dept-small"] do
+      {:ok, _} = Content.create_document("department", %{"_id" => id}, @dataset, scope)
+      {:ok, _} = Content.publish_document(id, "department", @dataset, scope)
+    end
+
+    GroqSyntheticProducts.seed!(@dataset, @products)
+
+    token = "groq-bench-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(token, "groq bench", @dataset, ["read"], ws.id)
+    {:ok, token: token}
+  end
+
+  test "page-query shapes over 20,000 products", %{token: token} do
+    indexed = Enum.map(@shapes, &measure(token, &1))
+
+    Repo.query!("DROP INDEX documents_content_refs_idx")
+    Repo.query!("DROP INDEX documents_content_path_ops_idx")
+    unindexed = Enum.map(@shapes, &measure(token, &1))
+
+    IO.puts("\nGROQ over #{@products} products, median of #{@runs} runs (server ms)")
+    IO.puts("| shape | status | with indexes | without indexes |")
+    IO.puts("|---|---|---|---|")
+
+    for {{name, status, ms}, {_, _, ms_off}} <- Enum.zip(indexed, unindexed) do
+      IO.puts("| #{name} | #{status} | #{ms} | #{ms_off} |")
+    end
+
+    assert Enum.all?(indexed, fn {_, status, _} -> status == 200 end)
+  end
+
+  defp measure(token, {name, query, params}) do
+    timings =
+      for _ <- 0..@runs do
+        conn =
+          build_conn()
+          |> put_req_header("authorization", "Bearer " <> token)
+          |> put_req_header("content-type", "application/json")
+          |> post(
+            "/w/groq-bench/p/site/v2025-02-19/data/query/#{@dataset}",
+            Jason.encode!(%{"query" => query, "params" => params})
+          )
+
+        {conn.status, Jason.decode!(conn.resp_body)["ms"]}
+      end
+
+    # The first run warms caches and is dropped.
+    [_ | timed] = timings
+    {status, _} = List.last(timed)
+    ms = timed |> Enum.map(fn {_, ms} -> ms || 0 end) |> Enum.sort() |> Enum.at(div(@runs, 2))
+    {name, status, ms}
+  end
+end
