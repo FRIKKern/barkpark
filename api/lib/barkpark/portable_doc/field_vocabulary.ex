@@ -308,6 +308,24 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
 
   def inline_findings(_vocab, _block, _path, _level), do: []
 
+  # A document link's `docId` (when present) is a document id as Barkpark mints them
+  # (letters, digits, `.`, `_`, `-`, `:`; `drafts.` included), never markup, a path
+  # or a URL; `target` (when present) is a string. Resolution is scoped to the
+  # rendering document's dataset and workspace either way (Papers.resolve_wikilinks_in_blocks/3).
+  @doc_id_shape ~r/\A[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\z/
+  defp wikilink_well_formed?(node) do
+    target_ok = not Map.has_key?(node, "target") or is_binary(node["target"])
+
+    doc_id_ok =
+      case Map.get(node, "docId", Map.get(node, "doc_id")) do
+        nil -> true
+        id when is_binary(id) -> Regex.match?(@doc_id_shape, id)
+        _ -> false
+      end
+
+    target_ok and doc_id_ok
+  end
+
   defp inline_list_findings(nodes, path, vocab, level) do
     allowed = allowed_inline_types(vocab)
     objects = Map.get(vocab, :inline_objects, %{})
@@ -329,6 +347,12 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
 
           is_map_key(objects, t) ->
             Validation.object_block_findings(Map.fetch!(objects, t), node, node_path, level)
+
+          t == "wikilink" and level == :error and not wikilink_well_formed?(node) ->
+            [
+              {node_path, "a document link needs a string target and a well-formed docId",
+               :wikilink_malformed, %{}}
+            ]
 
           is_list(node["children"]) ->
             inline_list_findings(node["children"], "#{node_path}/children", vocab, level)

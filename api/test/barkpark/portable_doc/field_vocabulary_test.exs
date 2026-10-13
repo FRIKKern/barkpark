@@ -62,6 +62,48 @@ defmodule Barkpark.PortableDoc.FieldVocabularyTest do
     assert {:error, {:out_of_vocabulary, _}} = V.validate(V.from_field(@agency), [p(nil, [link])])
   end
 
+  # A host can put any docId into a document link (the toolbar's toggleMark): the
+  # write path takes only a well-formed document id, never markup, a path or a URL.
+  test "a wikilink's docId must be a well-formed document id" do
+    vocab =
+      V.from_field(put_in(@agency, ["blocks", "annotations"], [%{"name" => "internalLink"}]))
+
+    with_id = fn id ->
+      [p(nil, [%{"type" => "wikilink", "target" => "x", "docId" => id, "children" => []}])]
+    end
+
+    for good <- [
+          "author-ada",
+          "drafts.post-05",
+          "task-0f50b057a3a15243",
+          "3f2c9a1e-7b1d-4c2a-9a55-0d6b2b1f9e10"
+        ] do
+      assert :ok == V.validate(vocab, with_id.(good)), good
+    end
+
+    for bad <- [
+          "",
+          "javascript:alert(1)",
+          "../other",
+          "https://evil.example/x",
+          "<b>x</b>",
+          "a b",
+          42,
+          %{"_ref" => "x"}
+        ] do
+      result = V.validate(vocab, with_id.(bad))
+
+      assert match?({:error, {:out_of_vocabulary, _}}, result) and
+               elem(elem(result, 1), 1) =~ "well-formed docId",
+             inspect(bad)
+    end
+
+    assert {:error, _} =
+             V.validate(vocab, [
+               p(nil, [%{"type" => "wikilink", "target" => 7, "children" => []}])
+             ])
+  end
+
   # An EXPLICITLY empty declaration still admits nothing — a schema author who
   # writes `"blocks": {}` said "nothing", and is taken at their word.
   test "an explicitly empty declaration admits nothing but text-less nothing" do

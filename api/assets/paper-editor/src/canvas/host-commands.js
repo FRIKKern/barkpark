@@ -30,6 +30,9 @@ export const TOOLBAR_MARKS = {
   link: "link",
   wikilink: "wikilink",
 };
+// A document id as Barkpark mints them (FieldVocabulary's wikilink check): never
+// markup, a path or a URL.
+const DOC_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 const MARK_TO_TOOLBAR = Object.fromEntries(Object.entries(TOOLBAR_MARKS).map(([pd, tiptap]) => [tiptap, pd]));
 
 export const BLOCK_STYLES = ["normal", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote"];
@@ -69,7 +72,7 @@ export function canToggleMark(editor, mark, href, vocab, docId) {
   if (!name || !markAllowed(name, vocab)) return false;
   // A document link needs the document to set (its id), or one in place to clear.
   if (name === "wikilink") {
-    if (typeof docId === "string" && docId.trim()) return !editor.state.selection.empty && canRun(editor, "setMark", "wikilink", { target: docId, docId });
+    if (typeof docId === "string" && docId.trim()) return DOC_ID.test(docId.trim()) && !editor.state.selection.empty && canRun(editor, "setMark", "wikilink", { target: docId, docId });
     return editor.isActive("wikilink");
   }
   if (name !== "link") return canRun(editor, markToggle(name));

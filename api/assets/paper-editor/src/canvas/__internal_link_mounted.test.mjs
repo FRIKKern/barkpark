@@ -101,6 +101,14 @@ try {
     assert.ok(link.includes('"docId":"author-ada"') && link.includes('"target":"Ada Lovelace"') && link.includes('"author page"'), link);
   });
 
+  await check("a docId that is not a document id is refused (markup, path, URL)", () => {
+    selectWord(editor, "page");
+    for (const bad of ["javascript:alert(1)", "../other", "https://evil.example/x", "<b>x</b>", "a b"]) {
+      assert.equal(canvas.can("toggleMark", { mark: "wikilink", docId: bad }), false, bad);
+      assert.equal(canvas.toggleMark("wikilink", { docId: bad }), false, bad);
+    }
+  });
+
   await check("with no document it clears the link in place", () => {
     selectWord(editor, "author");
     assert.equal(canvas.can("toggleMark", { mark: "wikilink" }), true);
