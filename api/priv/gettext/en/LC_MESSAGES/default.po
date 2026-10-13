@@ -12893,3 +12893,8 @@ msgid "1 hit"
 msgid_plural "%{count} hits"
 msgstr[0] ""
 msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex
+#, elixir-autogen, elixir-format
+msgid "This action works on book documents only"
+msgstr ""

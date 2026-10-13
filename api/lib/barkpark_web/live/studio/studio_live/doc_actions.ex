@@ -555,6 +555,9 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
 
   def format_action_error(:no_doc), do: gettext("No document loaded")
 
+  def format_action_error(:not_a_book),
+    do: gettext("This action works on book documents only")
+
   def format_action_error({:unknown_action, name}),
     do: gettext("Unknown action: %{name}", name: name)
 
