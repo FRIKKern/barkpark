@@ -201,6 +201,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     codelist_value_translations codelist_values
     codelists collapsed_schema_definitions_backup
     cycle_release_gate_migration_state_20260719020100 idempotency_keys login_tickets
+    media_delete_operations_v1 media_object_reservations_v1
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
@@ -478,6 +479,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   """
   def assert_partition!(repo) do
     assert_connector_credential_exclusion!(repo)
+    assert_no_pending_media_cleanup!(repo)
 
     live_e1 = live_e1(repo)
     live_e2 = live_e2(repo)
@@ -545,6 +547,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
 
     assert_webhook_delivery_confinement!(repo)
+
+    :ok
+  end
+
+  # Native root/file identities are host-local recovery state. Reservations
+  # are rebuilt from media rows on another host. An unresolved operation must
+  # neither silently disappear nor travel as permission to delete a path.
+  @doc "Refuse export preflight while host-local media cleanup remains unresolved."
+  def assert_no_pending_media_cleanup!(repo) do
+    if "media_delete_operations_v1" in live_base_tables(repo) do
+      %{rows: [[pending]]} =
+        repo.query!("SELECT EXISTS (SELECT FROM public.media_delete_operations_v1)", [])
+
+      if pending do
+        raise "WorkspaceBundle.Catalog: pending host-local media cleanup must be reconciled before export"
+      end
+    end
 
     :ok
   end
@@ -848,6 +867,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   """
   def assert_dev_partition!(repo, partition \\ @dev_partition) do
     assert_connector_credential_exclusion!(repo)
+    assert_no_pending_media_cleanup!(repo)
 
     malformed = for {table, c} <- partition, not valid_dev_classification?(c), do: table
 

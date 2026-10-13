@@ -477,17 +477,19 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
-    with :ok <- require_write(conn) do
+    with :ok <- require_write(conn),
+         {:ok, source_id} <- source_id_param(params) do
       metadata = upload_metadata(params)
 
       case Media.upload(
              upload,
              dataset,
-             [dedupe: true, asset_metadata: metadata] ++ scope_opts(conn)
+             [dedupe: true, asset_metadata: metadata, source_id: source_id] ++ scope_opts(conn)
            ) do
         # task-b6e57c37f6928344 — the same bytes already live in this dataset
-        # and workspace: answer with that asset, 200 not 201, `existing: true`,
-        # and store nothing. The upload's inline metadata is NOT applied: it
+        # and workspace, or (task-0bc9247eca1bd741) a file there already
+        # carries this `sourceId`: answer with that asset, 200 not 201,
+        # `existing: true`, and store nothing. The upload's inline metadata is NOT applied: it
         # would overwrite an asset other documents already show.
         {:existing, file} ->
           conn
@@ -594,6 +596,30 @@ defmodule BarkparkWeb.V1.MediaController do
 
   defp normalize_tags(metadata), do: metadata
 
+  # `sourceId` (task-0bc9247eca1bd741): the id the file had in the system it
+  # was imported from, such as a Sanity asset id. Sanity-shaped image and file
+  # URLs resolve by it. Absent or blank is nil; a malformed value is a 422.
+  defp source_id_param(params) do
+    case blank_to_nil(params["sourceId"]) do
+      nil ->
+        {:ok, nil}
+
+      value ->
+        if MediaFile.valid_source_id?(value),
+          do: {:ok, value},
+          else: {:error, invalid_source_id_changeset(value)}
+    end
+  end
+
+  defp invalid_source_id_changeset(value),
+    do: MediaFile.source_id_changeset(%MediaFile{}, value)
+
+  # PATCH sets `sourceId` when the body names it; `null` or "" clears it.
+  defp maybe_set_source_id(file, %{"sourceId" => value}),
+    do: Media.set_source_id(file, blank_to_nil(value))
+
+  defp maybe_set_source_id(file, _params), do: {:ok, file}
+
   def update(conn, %{"dataset" => dataset, "id" => id} = params) do
     metadata = metadata_params(params)
 
@@ -602,6 +628,7 @@ defmodule BarkparkWeb.V1.MediaController do
          :ok <- ensure_dataset(file, dataset),
          doc = asset_doc(file, dataset),
          :ok <- ensure_edit(conn, file, doc),
+         {:ok, file} <- maybe_set_source_id(file, params),
          {:ok, doc} <- Media.patch_asset_metadata(file, metadata, dataset) do
       json(conn, %{
         result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),

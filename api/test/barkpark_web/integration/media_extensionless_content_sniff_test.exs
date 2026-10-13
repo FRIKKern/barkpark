@@ -191,18 +191,31 @@ defmodule BarkparkWeb.MediaExtensionlessContentSniffTest do
       assert file.mime_type == "application/octet-stream"
     end
 
-    test "the dangerous family still collapses at the SERVE edge", ctx do
-      # An honestly-named .svg: the write-side neutralizer already downgrades
-      # it, and the serve edge collapses the dangerous family a second time.
+    test "an honestly-named .svg is served as image/svg+xml under a script-blocking CSP", ctx do
+      # The write-side neutralizer still downgrades the row. Since
+      # task-3047d0a672092b0e the serve edge types a `.svg` path as
+      # image/svg+xml so an <img> renders it, and a CSP with script-src
+      # 'none' and sandbox stops its script when it is opened directly.
       file = upload_bytes(ctx, "logo.svg", @svg)
 
       assert file.mime_type == "application/octet-stream"
 
       conn = scoped_conn() |> get("/media/files/#{file.path}")
       assert conn.status == 200
-      assert get_resp_header(conn, "content-type") |> List.first() =~ "application/octet-stream"
+      assert get_resp_header(conn, "content-type") == ["image/svg+xml"]
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
-      assert get_resp_header(conn, "content-disposition") |> List.first() =~ "attachment"
+      assert [csp] = get_resp_header(conn, "content-security-policy")
+      assert csp =~ "script-src 'none'"
+      assert csp =~ "sandbox"
+    end
+
+    test "SVG bytes wearing a .png name still collapse to octet-stream on serve", ctx do
+      file = upload_bytes(ctx, "pixel.png", @svg)
+
+      conn = scoped_conn() |> get("/media/files/#{file.path}")
+      assert conn.status == 200
+      assert get_resp_header(conn, "content-type") == ["application/octet-stream"]
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
     end
 
     test "a row whose stored mime is dangerous is STILL collapsed on serve", ctx do

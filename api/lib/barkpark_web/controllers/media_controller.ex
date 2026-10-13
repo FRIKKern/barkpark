@@ -3,13 +3,21 @@ defmodule BarkparkWeb.MediaController do
 
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.{Blobstore, Delivery, ImageBackend, Renditions, Transform}
+  alias Barkpark.Media.{Blobstore, Delivery, ImageBackend, Renditions, SanityAsset, Transform}
   alias Barkpark.Media.Storage.{Access, MediaFile}
   alias Barkpark.Media.WhereUsed
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
+
+  @svg_mime "image/svg+xml"
+
+  # Served with every SVG (task-3047d0a672092b0e). Script and every fetch are
+  # blocked, inline styles and data: images and fonts still render, and
+  # `sandbox` gives a directly opened SVG a unique origin.
+  @svg_csp "default-src 'none'; script-src 'none'; style-src 'unsafe-inline'; " <>
+             "img-src data:; font-src data:; sandbox"
 
   action_fallback BarkparkWeb.FallbackController
 
@@ -278,18 +286,103 @@ defmodule BarkparkWeb.MediaController do
   `blur`, ...) is still refused with 400 rather than ignored.
   """
   def serve(conn, %{"path" => path_parts}) do
+    lookup = by_path(path_parts)
     params = conn.query_params
+    svg_url? = svg_name?(List.last(path_parts))
 
     case Transform.unsupported(params) do
       [] ->
-        if Transform.requested?(params),
-          do: serve_transform(conn, path_parts, params),
-          else: serve_file(conn, path_parts)
+        cond do
+          not Transform.requested?(params) -> serve_file(conn, lookup)
+          svg_url? -> serve_svg_transform(conn, lookup, params, [])
+          true -> serve_transform(conn, lookup, params)
+        end
 
       ignored ->
         unsupported_transform_params(conn, ignored)
     end
   end
+
+  # ── SVG (task-3047d0a672092b0e) ───────────────────────────────────────────
+  #
+  # libvips does not transform SVG here, and Sanity does not either: its CDN
+  # answers `auto=format`, `w`, `h`, `rect` and the rest on an SVG with the
+  # SVG itself, 200 `image/svg+xml`. `@sanity/image-url` adds `auto=format`
+  # and `w` to every SVG URL it builds, so refusing them broke every SVG on a
+  # Sanity-built site. A plan that names no explicit `fm` serves the original
+  # through `serve_file/3`, with every gate that path runs. An explicit `fm`
+  # asks for a raster this server cannot make, so it still reaches the
+  # transform path and its `not_transformable` 400.
+  defp serve_svg_transform(conn, lookup, params, file_opts) do
+    case Transform.parse(params) do
+      {:ok, %{fm: nil}} ->
+        serve_file(conn, lookup, Keyword.put(file_opts, :svg_hint, true))
+
+      {:ok, _explicit_format} ->
+        serve_transform(conn, lookup, params, file_opts[:declared_size])
+
+      {:error, {:invalid_param, name, message}} ->
+        bad_request(conn, "invalid_transform_param", "#{name} #{message}", %{param: name})
+    end
+  end
+
+  defp svg_name?(name) when is_binary(name), do: MIME.from_path(name) == @svg_mime
+  defp svg_name?(_name), do: false
+
+  defp by_path(path_parts) do
+    relative_path = Enum.join(path_parts, "/")
+    fn opts -> Media.get_file_by_path(relative_path, opts) end
+  end
+
+  # ── Sanity CDN URLs (task-0bc9247eca1bd741) ───────────────────────────────
+  #
+  # `@sanity/image-url` with `baseUrl` set to `<host>/w/<ws>/p/<proj>` asks
+  # for `/images/<projectId>/<dataset>/<sha1>-<w>x<h>.<ext>` and
+  # `/files/<projectId>/<dataset>/<sha1>.<ext>`, optionally followed by a
+  # vanity file name. `projectId` is ignored: the workspace and project in the
+  # prefix already name the tenant. `Barkpark.Media.SanityAsset` finds the
+  # file, and from there the request is the same as `serve/2` on its path:
+  # the same scope, share and dataset fences, the same `Access.allowed?/4`
+  # check, and the same transform cache and headers.
+
+  @doc """
+  Serve a Sanity image URL from the Barkpark media file it maps to. Transform
+  parameters work as on `serve/2`; `rect` is moved into the stored image's
+  pixel space when the import stored it at another size.
+  """
+  def serve_sanity_image(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
+    params = conn.query_params
+
+    with {:ok, ref} <- SanityAsset.parse_image(name),
+         [] <- Transform.unsupported(params) do
+      lookup = fn opts -> SanityAsset.find(ref, dataset, opts) end
+      svg? = ref.ext == "svg"
+
+      cond do
+        not Transform.requested?(params) -> serve_file(conn, lookup, svg_hint: svg?)
+        svg? -> serve_svg_transform(conn, lookup, params, declared_size: ref.size)
+        true -> serve_transform(conn, lookup, params, ref.size)
+      end
+    else
+      :error -> not_found(conn, "not a Sanity image asset URL")
+      ignored -> unsupported_transform_params(conn, ignored)
+    end
+  end
+
+  def serve_sanity_image(conn, _params), do: not_found(conn, "not a Sanity image asset URL")
+
+  @doc """
+  Serve a Sanity file URL from the Barkpark media file it maps to. Query
+  parameters, such as Sanity's `dl`, are ignored.
+  """
+  def serve_sanity_file(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
+    case SanityAsset.parse_file(name) do
+      {:ok, ref} -> serve_file(conn, fn opts -> SanityAsset.find(ref, dataset, opts) end)
+      :error -> not_found(conn, "not a Sanity file asset URL")
+    end
+  end
+
+  def serve_sanity_file(conn, _params), do: not_found(conn, "not a Sanity file asset URL")
 
   # ── On-demand transforms (task-50cabce448b02af7, #23016) ──────────────────
   #
@@ -298,17 +391,20 @@ defmodule BarkparkWeb.MediaController do
   # transform can return the original at full size. The asset's watermark
   # profile is applied and is part of the cache key, so a watermarked asset
   # cannot be fetched clean through a transform URL.
-  defp serve_transform(conn, path_parts, params) do
-    relative_path = Enum.join(path_parts, "/")
+  #
+  # `declared_size` is the original's size as the URL states it (a Sanity
+  # asset id carries one); a `rect` is moved from it into the stored size.
+  defp serve_transform(conn, lookup, params, declared_size \\ nil) do
     opts = scope_opts(conn)
 
     with {:ok, plan} <- Transform.parse(params),
-         {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+         {:ok, file} <- lookup.(opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
          {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :original),
+         plan = SanityAsset.rescale_rect(plan, declared_size, stored_size(doc)),
          plan = resolve_plan(conn, plan, file, doc),
          {:ok, relative} <-
            Renditions.transform(file, plan, watermark: Access.watermark_profile(doc)) do
@@ -405,16 +501,19 @@ defmodule BarkparkWeb.MediaController do
 
   defp stored_size(_doc), do: nil
 
-  defp serve_file(conn, path_parts) do
-    relative_path = Enum.join(path_parts, "/")
+  # `opts[:svg_hint]` is true when the URL names an SVG (a Sanity
+  # `<sha1>-<w>x<h>.svg` id). It covers a stored path with no `.svg`
+  # extension, whose row type ingest neutralized to octet-stream.
+  defp serve_file(conn, lookup, file_opts \\ []) do
     opts = scope_opts(conn)
 
-    with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
+    with {:ok, file} <- lookup.(opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
          {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
-         true <- Access.allowed?(conn, file, doc, :original) do
+         true <- Access.allowed?(conn, file, doc, :original),
+         true <- Access.clean_original_allowed?(conn, doc) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
       # lookup already matched on `path == relative_path`, but deriving the blob
       # key from `file.path` (a server-generated `uploads/YYYY/MM/slug-rand.ext`
@@ -471,33 +570,62 @@ defmodule BarkparkWeb.MediaController do
       # the published reference and is still what the JSON and URL builders emit.
       visibility = Access.visibility(doc)
 
-      case Blobstore.serve_strategy(file,
-             response_content_type: MediaFile.serve_content_type(mime),
-             response_content_disposition: disposition(mime),
-             response_cache_control: Delivery.file_cache_control(visibility)
-           ) do
-        {:file, full_path} ->
-          conn
-          |> Delivery.put_file_cache_headers(full_path, visibility)
-          |> maybe_send_file(full_path, mime)
-
-        {:redirect, url} ->
-          redirect_to_blob(conn, url)
-
-        # HONEST missing-blob 404: a media_files ROW can outlive its blob — most
-        # notably right after a workspace bundle import copies the DB rows but the
-        # blobs have not been re-pointed/pushed yet (pds W1 G2). Without this guard
-        # send_file's internal `{:ok, %File.Stat{}} = File.stat(path)` raises a
-        # MatchError on :enoent → a bare 500. Answer a truthful 404 instead.
-        {:error, :not_found} ->
-          not_found(conn, "media blob missing")
-      end
+      if svg_file?(file, path_mime, file_opts[:svg_hint]),
+        do: serve_svg(conn, file, visibility),
+        else: serve_blob(conn, file, mime, visibility)
     else
       {:error, :not_found} ->
         not_found(conn, "file not found")
 
       false ->
         forbidden(conn)
+    end
+  end
+
+  # An SVG is served as `image/svg+xml` so an `<img>` renders it, and made
+  # safe by headers instead of by the octet-stream collapse every other
+  # dangerous type gets: a CSP with `script-src 'none'` and `sandbox`, plus
+  # `nosniff`. A browser that opens the SVG directly runs no script in it and
+  # treats it as a unique origin. The bytes always come from a local copy,
+  # never a redirect, because a presigned bucket URL cannot carry the CSP.
+  defp svg_file?(file, path_mime, svg_hint) do
+    path_mime == @svg_mime or
+      (svg_hint == true and file.mime_type in [nil, @svg_mime, "application/octet-stream"])
+  end
+
+  defp serve_svg(conn, file, visibility) do
+    case Blobstore.ensure_local(file) do
+      {:ok, full_path} ->
+        conn
+        |> Delivery.put_file_cache_headers(full_path, visibility)
+        |> maybe_send_file(full_path, @svg_mime, svg: true)
+
+      {:error, _} ->
+        not_found(conn, "media blob missing")
+    end
+  end
+
+  defp serve_blob(conn, file, mime, visibility) do
+    case Blobstore.serve_strategy(file,
+           response_content_type: MediaFile.serve_content_type(mime),
+           response_content_disposition: disposition(mime),
+           response_cache_control: Delivery.file_cache_control(visibility)
+         ) do
+      {:file, full_path} ->
+        conn
+        |> Delivery.put_file_cache_headers(full_path, visibility)
+        |> maybe_send_file(full_path, mime)
+
+      {:redirect, url} ->
+        redirect_to_blob(conn, url)
+
+      # HONEST missing-blob 404: a media_files ROW can outlive its blob — most
+      # notably right after a workspace bundle import copies the DB rows but the
+      # blobs have not been re-pointed/pushed yet (pds W1 G2). Without this guard
+      # send_file's internal `{:ok, %File.Stat{}} = File.stat(path)` raises a
+      # MatchError on :enoent → a bare 500. Answer a truthful 404 instead.
+      {:error, :not_found} ->
+        not_found(conn, "media blob missing")
     end
   end
 
@@ -562,7 +690,9 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
-  defp maybe_send_file(%Plug.Conn{state: :sent} = conn, _path, _mime), do: conn
+  defp maybe_send_file(conn, full_path, mime, opts \\ [])
+
+  defp maybe_send_file(%Plug.Conn{state: :sent} = conn, _path, _mime, _opts), do: conn
 
   # Serve blobs defensively — these bytes can be written by an outsider-held key
   # and the default asset visibility is public:
@@ -590,13 +720,27 @@ defmodule BarkparkWeb.MediaController do
   #     same server-derived `full_path` the send_file argument uses — never a
   #     request segment — and an unreadable stat degrades to the whole-file
   #     200 rather than guessing a size.
+  #
+  # `svg: true` is the one exception to the collapse, set only by
+  # `serve_svg/3`: the type stays `image/svg+xml` and the CSP below stops any
+  # script in it from running.
+  #
+  # NO CHARSET on a binary type (task-701191424b8d15e8). `put_resp_content_type/2`
+  # appends `; charset=utf-8` by default, which is wrong for image and other
+  # binary bytes. Only `text/*` keeps it.
   # sobelow_skip ["Traversal.SendFile", "XSS.ContentType", "Traversal.FileModule"]
-  defp maybe_send_file(conn, full_path, mime) do
+  defp maybe_send_file(conn, full_path, mime, opts) do
+    {served_type, disposition} =
+      if opts[:svg],
+        do: {@svg_mime, "inline"},
+        else: {MediaFile.serve_content_type(mime), disposition(mime)}
+
     conn =
       conn
-      |> put_resp_content_type(MediaFile.serve_content_type(mime))
+      |> put_resp_content_type(served_type, charset_for(served_type))
       |> put_resp_header("x-content-type-options", "nosniff")
-      |> put_resp_header("content-disposition", disposition(mime))
+      |> put_resp_header("content-disposition", disposition)
+      |> put_svg_csp(opts[:svg])
       # BYTE RANGES, so a browser can SEEK (2026-08-24). Without this every
       # `Range:` request answered 200 with the whole blob, so a <video> asking
       # for one minute out of a 47-minute recording had to download the file
@@ -681,6 +825,12 @@ defmodule BarkparkWeb.MediaController do
   end
 
   defp clamp_range(_first, _last, _size), do: :unsatisfiable
+
+  defp put_svg_csp(conn, true), do: put_resp_header(conn, "content-security-policy", @svg_csp)
+  defp put_svg_csp(conn, _svg), do: conn
+
+  defp charset_for("text/" <> _), do: "utf-8"
+  defp charset_for(_type), do: nil
 
   defp disposition(mime) do
     if MediaFile.dangerous_mime?(mime), do: "attachment", else: "inline"

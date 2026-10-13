@@ -146,7 +146,9 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   end
 
   defp unwrap_rotate({:ok, {image, _flags}}), do: {:ok, image}
-  defp unwrap_rotate({:ok, %Vix.Vips.Image{} = image}), do: {:ok, image}
+  # A struct pattern would require the optional Vix module at compile time.
+  # Keep the same runtime type check on hosts that do not carry that dependency.
+  defp unwrap_rotate({:ok, image}) when is_struct(image, Vix.Vips.Image), do: {:ok, image}
   defp unwrap_rotate(error), do: error
 
   defp crop(image, nil), do: {:ok, image}
@@ -199,12 +201,19 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   defp maybe_watermark(image, profile) when profile in ["draft", "editorial"] do
     label = watermark_label(profile)
 
+    # `Image.Text.text/2` takes no RGBA fill and no `background_color` option:
+    # both answered `{:error, "Invalid option ..."}`, so every watermarked
+    # transform and rendition failed and answered 404 (task-c9fb2c2087dbba4d).
+    # White text on the default transparent background, with its alpha band
+    # scaled to 35%, gives the same translucent label.
     with {:ok, text_layer} <-
            Image.Text.text(label,
              font_size: watermark_font_size(image),
-             text_fill_color: {255, 255, 255, 0.35},
-             background_color: :none
+             text_fill_color: :white
            ),
+         {text, alpha} = Image.split_alpha(text_layer),
+         {:ok, faded_alpha} <- Image.Math.multiply(alpha, 0.35),
+         {:ok, text_layer} <- Image.add_alpha(text, faded_alpha),
          {:ok, watermarked} <- Image.compose(image, text_layer, x: :center, y: :middle) do
       {:ok, watermarked}
     else

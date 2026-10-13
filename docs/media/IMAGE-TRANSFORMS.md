@@ -15,6 +15,10 @@ GET /media/files/<path>?w=800&h=450&fit=crop&fp-x=0.3&fp-y=0.4&auto=format&q=70
 
 `<path>` is the asset's `path`; `url` and `originalUrl` already carry it. The scoped form `/w/:ws/p/:proj/media/files/<path>` takes the same parameters. Without transform parameters the URL serves the original bytes, as before.
 
+Sanity CDN URLs from `@sanity/image-url` take the same parameters: [SANITY-IMAGE-URLS.md](SANITY-IMAGE-URLS.md).
+
+Anonymous reads, as a website's `<img>` makes, need the scope's `:media` share: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.md).
+
 | Param | Values | Meaning |
 |---|---|---|
 | `w`, `h` | integer ≥ 1 | Output size in pixels. One side alone keeps the aspect ratio. |
@@ -53,7 +57,7 @@ A Sanity-shaped image value stores `crop` `{top, bottom, left, right}` and `hots
 - `w` and `h` are capped at 4096 and values above 100 round up to a multiple of 10. One asset keeps at most 100 cached transforms; a new one past that answers 429 `transform_variant_limit`, while cached ones still serve. Set them in `config :barkpark, Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).
 - Access is the same check as the original (`:original`). A watermark profile on the asset is applied to the transform.
 
-Errors: 400 `invalid_transform_param` (bad value, `details.param`), 400 `not_transformable` (not png, jpeg, gif or webp), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
+Errors: 400 `invalid_transform_param` (bad value, `details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
 
 ## Named presets
 

@@ -64,6 +64,28 @@ defmodule Barkpark.Media.Storage.Access do
     end
   end
 
+  # task-c9fb2c2087dbba4d — the original URL of a WATERMARKED asset.
+  #
+  # Transforms and named renditions apply the asset's watermark profile, so
+  # their bytes are safe to hand to anyone `allowed?/4` admits. The original
+  # URL (`/media/files/<path>` with no transform parameters, and the Sanity
+  # image and file routes without them) sends the stored bytes, which carry no
+  # watermark. Before this check an anonymous reader admitted by a `:media`
+  # share, or a `public-read` site token, got those clean bytes for an asset
+  # whose owner had set `rights.watermarkProfile`. A media principal
+  # (`authenticated?/1`) still gets the original, as before.
+  @doc """
+  Whether the request may receive the asset's stored bytes WITHOUT a
+  watermark. True when the asset has no watermark profile, or when the caller
+  is a media principal (`authenticated?/1`). Asked by the original-file
+  delivery path after `allowed?/4`; transforms and renditions apply the
+  watermark instead and do not ask.
+  """
+  @spec clean_original_allowed?(Plug.Conn.t(), Document.t() | nil) :: boolean()
+  def clean_original_allowed?(conn, doc) do
+    watermark_profile(doc) == "none" or authenticated?(conn)
+  end
+
   @doc "WoodWing-style permission list for API responses."
   @spec permissions(Plug.Conn.t(), %MediaFile{}, Document.t() | nil) :: [String.t()]
   def permissions(conn, file, doc) do
