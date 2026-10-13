@@ -250,12 +250,13 @@ func (m model) deleteTarget() (*Doc, string) {
 
 // performDelete deletes the armed document via the delete mutation
 // ({"delete":{"id":…,"type":…}}, matching Content.apply_one's delete arm).
-// The id goes over the wire EXACTLY as listed — drafts. prefix included — per
-// the API contract for drafts vs published rows. If the deleted doc is open
-// in the editor we pop out first; either way the panes re-query so the row
-// disappears now (the SSE refresh will confirm).
+// D deletes the DOCUMENT, so the id goes over the wire bare: since #23059 a
+// drafts.<id> delete removes only that draft (R is discard-draft), and a bare
+// id removes both rows. If the deleted doc is open in the editor we pop out
+// first; either way the panes re-query so the row disappears now (the SSE
+// refresh will confirm).
 func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
-	if err := m.ds.Delete(typeName, docID); err != nil {
+	if err := m.ds.Delete(typeName, strings.TrimPrefix(docID, "drafts.")); err != nil {
 		m.setStatus(fmt.Sprintf("delete failed: %v", err), true)
 		return m, nil
 	}
