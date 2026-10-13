@@ -128,7 +128,7 @@ defmodule BarkparkWeb.GroqBenchTest do
     timings =
       for _ <- 0..@runs do
         conn =
-          build_conn()
+          scoped_conn()
           |> put_req_header("authorization", "Bearer " <> token)
           |> put_req_header("content-type", "application/json")
           |> post(

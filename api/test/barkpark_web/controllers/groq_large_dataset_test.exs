@@ -107,7 +107,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
   defp query(token, query, params, extra \\ %{}) do
     body = Map.merge(%{"query" => query, "params" => params}, extra)
 
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer " <> token)
     |> put_req_header("content-type", "application/json")
     |> post(path(), Jason.encode!(body))
