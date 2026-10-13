@@ -1,6 +1,10 @@
 # Standalone owned-release integration proof; do not point at an existing library.
 # The launcher supplies native-observed fixtures and starts the release in inert
 # seed mode. No SQL sandbox is used: commits and outer rollback are real.
+unless Code.ensure_loaded?(Barkpark.PluginEnv) do
+  Code.require_file(Path.expand("../../support/plugin_env.ex", __DIR__))
+end
+
 defmodule Barkpark.Media.PendingDeleteLiveTest do
   use ExUnit.Case, async: false
   alias Barkpark.{Content, Media, Repo}
@@ -121,15 +125,13 @@ defmodule Barkpark.Media.PendingDeleteLiveTest do
       unchanged(request)
       check("outer rollback restores exact row and both documents; intent absent and bytes exact")
 
-      previous = Application.get_env(:barkpark, :plugins)
+      previous = Barkpark.PluginEnv.capture()
 
       try do
-        Application.put_env(:barkpark, :plugins, [HaltAsset])
+        Barkpark.PluginEnv.put!([HaltAsset])
         assert {:error, _} = Media.commit_pending_delete(refused["request"], opts(refused))
       after
-        if previous == nil,
-          do: Application.delete_env(:barkpark, :plugins),
-          else: Application.put_env(:barkpark, :plugins, previous)
+        Barkpark.PluginEnv.restore(previous)
       end
 
       assert operation(refused["request"]) == []

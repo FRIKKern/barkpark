@@ -75,7 +75,7 @@ BEGIN
   IF (SELECT jsonb_object_agg(a.attname,t.typname) FROM pg_attribute a
       JOIN pg_type t ON t.oid=a.atttypid WHERE a.attrelid='public.media_files'::regclass
       AND a.attnum > 0 AND NOT a.attisdropped) IS DISTINCT FROM
-    '{"id":"uuid","filename":"varchar","original_name":"varchar","path":"varchar","mime_type":"varchar","size":"int4","dataset":"varchar","inserted_at":"timestamp","updated_at":"timestamp","workspace_id":"uuid","project_id":"uuid","dataset_id":"uuid","object_key":"varchar","sha1":"varchar"}'::jsonb
+    '{"id":"uuid","filename":"varchar","original_name":"varchar","path":"varchar","mime_type":"varchar","size":"int4","dataset":"varchar","inserted_at":"timestamp","updated_at":"timestamp","workspace_id":"uuid","project_id":"uuid","dataset_id":"uuid","object_key":"varchar","sha1":"text"}'::jsonb
   THEN RAISE EXCEPTION 'unsupported media row schema'; END IF;
   SELECT * INTO prior FROM public.media_delete_operations_v1 WHERE operation_id = op;
   SELECT to_jsonb(m) INTO original FROM public.media_files m WHERE id = target FOR UPDATE;
@@ -122,22 +122,30 @@ END $address$;
 -- @statement
 CREATE TABLE public.media_object_reservations_v1 (
   address text PRIMARY KEY,
-  media_id uuid NOT NULL UNIQUE,
+  media_ids uuid[] NOT NULL CHECK (cardinality(media_ids) > 0),
   operation_id uuid UNIQUE REFERENCES public.media_delete_operations_v1(operation_id)
 );
--- The migration transaction locks the row set; ambiguity refuses installation.
+-- Preserve ordinary co-owners; intent preparation must prove a sole claimant.
 -- @statement
 LOCK TABLE public.media_files IN SHARE ROW EXCLUSIVE MODE;
 -- @statement
-INSERT INTO public.media_object_reservations_v1(address,media_id)
-  SELECT public.media_object_address_v1(coalesce(object_key,path)),id FROM public.media_files;
+INSERT INTO public.media_object_reservations_v1(address,media_ids)
+  SELECT public.media_object_address_v1(coalesce(object_key,path)),array_agg(id ORDER BY id)
+  FROM public.media_files GROUP BY public.media_object_address_v1(coalesce(object_key,path));
 -- @statement
 CREATE FUNCTION public.reserve_media_object_v1() RETURNS trigger
 LANGUAGE plpgsql SET search_path = pg_catalog, public AS $reserve$
 DECLARE address_key text;
 BEGIN
   IF TG_OP = 'DELETE' THEN
-    DELETE FROM public.media_object_reservations_v1 WHERE media_id=OLD.id AND operation_id IS NULL;
+    DELETE FROM public.media_object_reservations_v1
+      WHERE address=public.media_object_address_v1(coalesce(OLD.object_key,OLD.path))
+        AND media_ids=ARRAY[OLD.id] AND operation_id IS NULL;
+    IF NOT FOUND THEN
+      UPDATE public.media_object_reservations_v1 SET media_ids=array_remove(media_ids,OLD.id)
+        WHERE address=public.media_object_address_v1(coalesce(OLD.object_key,OLD.path))
+          AND OLD.id=ANY(media_ids) AND cardinality(media_ids)>1 AND operation_id IS NULL;
+    END IF;
     RETURN OLD;
   END IF;
   IF TG_OP = 'UPDATE' AND NEW.id IS DISTINCT FROM OLD.id THEN
@@ -146,13 +154,25 @@ BEGIN
   address_key := public.media_object_address_v1(coalesce(NEW.object_key,NEW.path));
   IF TG_OP = 'UPDATE' AND address_key IS DISTINCT FROM
        public.media_object_address_v1(coalesce(OLD.object_key,OLD.path)) THEN
-    DELETE FROM public.media_object_reservations_v1 WHERE media_id=OLD.id AND operation_id IS NULL;
-    IF NOT FOUND THEN RAISE EXCEPTION 'media address has pending cleanup'; END IF;
+    DELETE FROM public.media_object_reservations_v1
+      WHERE address=public.media_object_address_v1(coalesce(OLD.object_key,OLD.path))
+        AND media_ids=ARRAY[OLD.id] AND operation_id IS NULL;
+    IF NOT FOUND THEN
+      UPDATE public.media_object_reservations_v1 SET media_ids=array_remove(media_ids,OLD.id)
+        WHERE address=public.media_object_address_v1(coalesce(OLD.object_key,OLD.path))
+          AND OLD.id=ANY(media_ids) AND cardinality(media_ids)>1 AND operation_id IS NULL;
+      IF NOT FOUND THEN RAISE EXCEPTION 'media address has pending cleanup'; END IF;
+    END IF;
   END IF;
-  INSERT INTO public.media_object_reservations_v1 AS r(address,media_id)
-    VALUES(address_key,NEW.id)
-    ON CONFLICT(address) DO UPDATE SET media_id=EXCLUDED.media_id
-      WHERE r.media_id=EXCLUDED.media_id AND r.operation_id IS NULL;
+  -- One address row serializes ownership updates even under repeatable read.
+  -- Ordinary co-owners are an existing NULL-dataset contract. Preparation
+  -- requires a sole claimant; pending cleanup excludes every new claimant.
+  INSERT INTO public.media_object_reservations_v1 AS r(address,media_ids)
+    VALUES(address_key,ARRAY[NEW.id])
+    ON CONFLICT(address) DO UPDATE
+      SET media_ids=CASE WHEN NEW.id=ANY(r.media_ids) THEN r.media_ids
+        ELSE array_append(r.media_ids,NEW.id) END
+      WHERE r.operation_id IS NULL;
   IF NOT FOUND THEN RAISE EXCEPTION 'media object address is reserved'; END IF;
   RETURN NEW;
 END $reserve$;

@@ -12,9 +12,8 @@ permission to recover.
 
 Retries require the same request, caller scope and database reservation. Insert,
 update and COPY triggers reserve ASCII keys across scopes and case aliases.
-Ambiguous existing addresses refuse migration installation. Legacy absolute
-and Unicode addresses remain ordinary rows; native intent still requires a
-validated Windows-relative key. Migration
+Ordinary co-owners and legacy addresses remain valid; intent preparation
+requires one physical claimant and a validated Windows-relative key. Migration
 rollback refuses to discard retained operations.
 
 Physical writers can write before inserting rows. Native cleanup stays disabled

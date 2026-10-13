@@ -11,7 +11,7 @@ defmodule Barkpark.Media.PendingDeleteBoundaryTest do
 
       assert %{rows: [[^id]]} =
                Repo.query!(
-                 "SELECT media_id::text FROM media_object_reservations_v1 WHERE address=public.media_object_address_v1($1)",
+                 "SELECT media_ids[1]::text FROM media_object_reservations_v1 WHERE address=public.media_object_address_v1($1)",
                  [address]
                )
 
@@ -19,7 +19,7 @@ defmodule Barkpark.Media.PendingDeleteBoundaryTest do
 
       assert %{rows: [[0]]} =
                Repo.query!(
-                 "SELECT count(*) FROM media_object_reservations_v1 WHERE media_id=$1::uuid",
+                 "SELECT count(*) FROM media_object_reservations_v1 WHERE $1::uuid=ANY(media_ids)",
                  [uuid_binary(id)]
                )
     end
@@ -38,7 +38,7 @@ defmodule Barkpark.Media.PendingDeleteBoundaryTest do
     assert prepared["state"] == "prepared"
 
     Repo.query!(
-      "UPDATE media_object_reservations_v1 SET operation_id=$1::uuid WHERE media_id=$2::uuid",
+      "UPDATE media_object_reservations_v1 SET operation_id=$1::uuid WHERE media_ids=ARRAY[$2::uuid]",
       [uuid_binary(operation), uuid_binary(id)]
     )
 
@@ -46,13 +46,33 @@ defmodule Barkpark.Media.PendingDeleteBoundaryTest do
 
     assert %{rows: [[^id]]} =
              Repo.query!(
-               "SELECT media_id::text FROM media_object_reservations_v1 WHERE operation_id=$1::uuid",
+               "SELECT media_ids[1]::text FROM media_object_reservations_v1 WHERE operation_id=$1::uuid",
                [uuid_binary(operation)]
              )
 
     assert_raise Postgrex.Error, ~r/media object address is reserved/, fn ->
       insert_media(String.upcase(key))
     end
+  end
+
+  test "ordinary co-owners survive until individually deleted" do
+    key = "2026/shared-#{System.unique_integer([:positive])}.png"
+    first = insert_media(key)
+    second = insert_media(key)
+
+    assert %{rows: [[2]]} =
+             Repo.query!(
+               "SELECT cardinality(media_ids) FROM media_object_reservations_v1 WHERE address=public.media_object_address_v1($1)",
+               [key]
+             )
+
+    Repo.query!("DELETE FROM media_files WHERE id=$1::uuid", [uuid_binary(first)])
+
+    assert %{rows: [[^second]]} =
+             Repo.query!(
+               "SELECT media_ids[1]::text FROM media_object_reservations_v1 WHERE address=public.media_object_address_v1($1)",
+               [key]
+             )
   end
 
   test "pending host-local cleanup refuses both bundle paths instead of disappearing" do

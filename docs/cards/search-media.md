@@ -17,4 +17,4 @@ Media discovery: the **Find-vs-Pick** philosophy (search-first Find pane vs brow
 - api/lib/barkpark/search/intelligence.ex — def record, def record_interaction
 - api/lib/barkpark/media/delivery/retriever.ex — defmodule Barkpark.Media.Delivery.Retriever
 - api/lib/barkpark/plugins/media.ex — defmodule (media plugin)
-- Internal pending cleanup: `api/lib/barkpark/media/storage/README.md`; no HTTP adoption.
+- api/lib/barkpark/media/storage/delete_operation.ex — def commit

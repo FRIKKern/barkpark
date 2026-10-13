@@ -11,8 +11,7 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
     result =
       Repo.transaction(fn ->
         prepared =
-          Repo
-          |> Ecto.Adapters.SQL.query!("SELECT public.prepare_media_delete_v1($1::jsonb)", [
+          Ecto.Adapters.SQL.query!(Repo, "SELECT public.prepare_media_delete_v1($1::jsonb)", [
             request
           ])
           |> one!()
@@ -27,7 +26,7 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
                 """
                 UPDATE public.media_object_reservations_v1 SET operation_id=($1::jsonb->>'operationId')::uuid
                 WHERE address=public.media_object_address_v1($1::jsonb->>'expectedKey')
-                  AND media_id=($1::jsonb->>'mediaId')::uuid AND operation_id IS NULL
+                  AND media_ids=ARRAY[($1::jsonb->>'mediaId')::uuid] AND operation_id IS NULL
                 """,
                 [request]
               )
@@ -36,8 +35,8 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
 
             case delete_database_rows.() do
               {:ok, snapshots} ->
-                Repo
-                |> Ecto.Adapters.SQL.query!(
+                Ecto.Adapters.SQL.query!(
+                  Repo,
                   """
                   UPDATE public.media_delete_operations_v1 AS o
                   SET state='pending_cleanup', asset_documents=$2::jsonb, call_context=$3::jsonb, logical_deleted_at=clock_timestamp()
@@ -56,13 +55,13 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
           "pending_cleanup" ->
             if prepared["rowStillPresent"], do: Repo.rollback(:media_row_reappeared)
 
-            Repo
-            |> Ecto.Adapters.SQL.query!(
+            Ecto.Adapters.SQL.query!(
+              Repo,
               """
               SELECT to_jsonb(o) FROM public.media_delete_operations_v1 o
               WHERE operation_id=($1::jsonb->>'operationId')::uuid AND call_context=$2::jsonb
                 AND EXISTS(SELECT FROM public.media_object_reservations_v1 r
-                  WHERE r.operation_id=o.operation_id AND r.media_id=o.media_id
+                  WHERE r.operation_id=o.operation_id AND r.media_ids=ARRAY[o.media_id]
                     AND r.address=public.media_object_address_v1(o.request->>'expectedKey'))
               """,
               [request, context]
