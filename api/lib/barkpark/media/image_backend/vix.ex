@@ -146,7 +146,9 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   end
 
   defp unwrap_rotate({:ok, {image, _flags}}), do: {:ok, image}
-  defp unwrap_rotate({:ok, %Vix.Vips.Image{} = image}), do: {:ok, image}
+  # A struct pattern would require the optional Vix module at compile time.
+  # Keep the same runtime type check on hosts that do not carry that dependency.
+  defp unwrap_rotate({:ok, image}) when is_struct(image, Vix.Vips.Image), do: {:ok, image}
   defp unwrap_rotate(error), do: error
 
   defp crop(image, nil), do: {:ok, image}
