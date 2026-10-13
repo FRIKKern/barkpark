@@ -33,6 +33,11 @@ defmodule Barkpark.Content.ReferenceIntegrity do
   # jsonpath filters are written with `?`.
   @strong_ref_path "$.** ? (@._ref == $id && !exists(@._weak ? (@ == true)))"
 
+  # Every strong `_ref` VALUE in a document, at any depth. The batched scan
+  # below reads these once per document and matches them against the whole id
+  # set, instead of walking the document once per id.
+  @strong_ref_values_path "$.** ? (exists(@._ref) && !exists(@._weak ? (@ == true)))._ref"
+
   @default_limit 50
 
   @doc """
@@ -148,31 +153,34 @@ defmodule Barkpark.Content.ReferenceIntegrity do
     end
   end
 
-  # The `$.**` structural-reference arm, batched: ONE query whose WHERE is an
-  # OR across every target id (one database round trip regardless of batch
-  # size), then — because that WHERE only proves "matches AT LEAST ONE id",
-  # never which — each candidate row's own `content` (already fetched) is
-  # walked in Elixir to attribute it to the right target(s). The candidate
-  # set is already narrowed by the SQL OR, so this walk runs over the (small)
-  # match set, never the whole corpus.
+  # The `$.**` structural-reference arm, batched: ONE query that walks each
+  # document's content ONCE, collects its strong `_ref` values, and keeps the
+  # row when any of them is in `pub_ids`. That WHERE only proves "matches AT
+  # LEAST ONE id", never which, so each candidate row's own `content` (already
+  # fetched) is walked in Elixir to attribute it to the right target(s). The
+  # candidate set is already narrowed by SQL, so this walk runs over the
+  # (small) match set, never the whole corpus.
+  #
+  # task-d374f21e76ea166f: this WHERE used to OR one `jsonb_path_exists(content,
+  # @strong_ref_path, id)` per id. Postgres evaluated each one against every
+  # document in the tenant's dataset, so a run of N deletes walked the whole
+  # corpus N times inside one statement. Measured locally on 28,044 synthetic
+  # documents averaging 10 KB of JSON text (the document count of the gyl
+  # import that hit the 500): one walk took 2.6 s, two OR-ed walks 6.3 s and
+  # fourteen 30.7 s, and Ecto's default query timeout is 15 s. This form took
+  # 2.1 s for 2 ids, 3.9 s for 14 and 4.7 s for 500 on the same corpus. A
+  # jsonpath `$ids[*]` comparison is no better: it compares every node against
+  # every id (500 ids: 231 s).
   defp ref_objects_for_ids(pub_ids, excluded_all, dataset, opts) do
-    conditions =
-      Enum.reduce(pub_ids, dynamic(false), fn id, acc ->
-        dynamic(
-          [d],
-          ^acc or
-            fragment(
-              "jsonb_path_exists(?, (?::text)::jsonpath, jsonb_build_object('id', ?::text))",
-              d.content,
-              ^@strong_ref_path,
-              ^id
-            )
-        )
-      end)
-
     from(d in Document,
       where: d.dataset == ^dataset and d.doc_id not in ^excluded_all,
-      where: ^conditions,
+      where:
+        fragment(
+          "EXISTS (SELECT 1 FROM jsonb_path_query(?, (?::text)::jsonpath) AS r(v) WHERE jsonb_typeof(r.v) = 'string' AND r.v #>> '{}' = ANY(?))",
+          d.content,
+          ^@strong_ref_values_path,
+          type(^pub_ids, {:array, :string})
+        ),
       select: %{id: d.doc_id, type: d.type, content: d.content}
     )
     |> scope_to_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
