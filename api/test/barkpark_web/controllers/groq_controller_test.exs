@@ -474,7 +474,12 @@ defmodule BarkparkWeb.GroqControllerTest do
 
       {:ok, _} =
         Content.upsert_schema(
-          %{"name" => "record", "title" => "record", "visibility" => "public", "fields" => fields},
+          %{
+            "name" => "record",
+            "title" => "record",
+            "visibility" => "public",
+            "fields" => fields
+          },
           @dataset,
           scope
         )
@@ -499,7 +504,9 @@ defmodule BarkparkWeb.GroqControllerTest do
       end
 
       admin = "groq-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "groq admin", @dataset, ["read", "admin"], scope[:workspace_id])
+
+      {:ok, _} =
+        Auth.create_token(admin, "groq admin", @dataset, ["read", "admin"], scope[:workspace_id])
 
       {:ok, admin: admin}
     end
