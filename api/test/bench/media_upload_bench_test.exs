@@ -111,7 +111,7 @@ defmodule Barkpark.Bench.MediaUploadBenchTest do
     fetch_all = fn ->
       Enum.flat_map(assets, fn asset ->
         Enum.map(urls.(asset), fn url ->
-          {us, resp} = :timer.tc(fn -> get(build_conn(), url) end)
+          {us, resp} = :timer.tc(fn -> get(scoped_conn(), url) end)
           assert resp.status == 200, "GET #{url} answered #{resp.status}"
           us
         end)
