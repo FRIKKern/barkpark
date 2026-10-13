@@ -751,6 +751,30 @@ defmodule Barkpark.Content.Mutations do
          do: {:ok, doc, "deleteExactDraft"}
   end
 
+  # A `delete` naming a `drafts.` id deletes ONLY that draft; the published row
+  # survives (Sanity semantics, task-47f8394f07b97f8b). Before, the id was
+  # widened to the whole pair, so asking to drop a draft deleted the published
+  # document too. It runs through `delete_exact_draft/5`, fenced at the caller's
+  # `ifRevisionID` or else at the draft's rev as read here. References point at
+  # the published id, so they block it only when no published row exists, i.e.
+  # when the draft IS the whole document. A bare id keeps deleting both rows.
+  defp apply_one(
+         %{"delete" => %{"id" => "drafts." <> _ = id, "type" => type} = op},
+         dataset,
+         opts
+       ) do
+    case Content.get_document(id, type, dataset, opts) do
+      {:ok, draft} ->
+        with :ok <- ensure_draft_unreferenced(id, type, op, dataset, opts),
+             {:ok, doc} <-
+               Content.delete_exact_draft(id, type, dataset, if_rev(op) || draft.rev, opts),
+             do: {:ok, doc, "delete"}
+
+      _ ->
+        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+    end
+  end
+
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
     # Reference integrity (task-c8c22ee8076535fe): refuse while another document
     # still points here, unless the op says `force: true`. See ensure_unreferenced/5.
@@ -1940,6 +1964,15 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp ensure_unreferenced(_id, _type, _op, _dataset, _opts), do: :ok
+
+  # A draft delete leaves the published row, which is what references name, so
+  # only a draft-only document (no published row) is checked.
+  defp ensure_draft_unreferenced(id, type, op, dataset, opts) do
+    case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+      {:ok, _published} -> :ok
+      _ -> ensure_unreferenced(id, type, op, dataset, opts)
+    end
+  end
 
   defp delete_target(id, type, dataset, opts) do
     Enum.find_value([DraftId.published_id(id), DraftId.draft_id(id)], fn v ->
