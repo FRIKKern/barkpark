@@ -17,7 +17,10 @@ defmodule Barkpark.Content.Edges do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
-  alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition, Writer, WriteScope}
+  alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition, Validation, WriteScope}
+  alias Barkpark.Content.Writer
+  alias Barkpark.PortableDoc.BodyWalk
 
   import Barkpark.Content.Scope,
     only: [
@@ -79,6 +82,69 @@ defmodule Barkpark.Content.Edges do
   end
 
   @doc """
+  Batched sibling of `find_referencing_docs/3` (task-6b5e4b3e572d38c9): the
+  SAME bare-id/`._ref` referencer scan, but for a WHOLE SET of ids in ONE
+  pass -- one query per `(type, reference field, shape)`, same count as a
+  SINGLE call, instead of that count MULTIPLIED by `length(doc_ids)`.
+
+  Returns `%{published_id => [%{doc_id:, type:, title:, field:}]}` keyed by
+  the id each referencer actually points at (the batched WHERE only proves
+  "this row matches ONE of the ids", never which one, so each matching
+  row's own stored value is re-read in Elixir to attribute it -- cheap,
+  since the SQL filter already narrowed the row set to genuine matches).
+
+  Callers that pass no scope keep the explicit-global behaviour, same as
+  `find_referencing_docs/3`.
+  """
+  @spec find_referencing_docs_for_ids([String.t()], String.t(), keyword()) :: %{
+          optional(String.t()) => [
+            %{doc_id: String.t(), type: String.t(), title: term(), field: String.t()}
+          ]
+        }
+  def find_referencing_docs_for_ids(doc_ids, dataset, opts \\ []) when is_list(doc_ids) do
+    pub_ids = doc_ids |> Enum.map(&DraftId.published_id/1) |> Enum.uniq()
+    schemas = Content.list_schemas(dataset, opts)
+
+    ref_fields =
+      for schema <- schemas,
+          field <- schema.fields,
+          field["type"] == "reference",
+          do: {schema.name, field["name"]}
+
+    Enum.reduce(ref_fields, %{}, fn {type_name, field_name}, acc ->
+      [field_name, field_name <> "._ref"]
+      |> Enum.reduce(acc, fn path, acc2 ->
+        ref_opts =
+          opts
+          |> Keyword.put(:perspective, :raw)
+          |> Keyword.put(:filter_map, %{path => %{"in" => pub_ids}})
+          |> Keyword.put_new(:limit, 1000)
+
+        type_name
+        |> Content.list_documents(dataset, ref_opts)
+        |> Enum.reduce(acc2, fn doc, acc3 ->
+          case matched_target(doc.content, path, pub_ids) do
+            nil ->
+              acc3
+
+            target ->
+              entry = %{doc_id: doc.doc_id, type: type_name, title: doc.title, field: field_name}
+              Map.update(acc3, target, [entry], &[entry | &1])
+          end
+        end)
+      end)
+    end)
+  end
+
+  # Re-reads the stored value AT `path` from the already-fetched `content` map
+  # to learn WHICH of `pub_ids` this row's own batched-query match was for --
+  # the WHERE clause (`= ANY(pub_ids)`) proves membership, not identity.
+  defp matched_target(content, path, pub_ids) do
+    value = get_in(content, String.split(path, "."))
+    if is_binary(value) and value in pub_ids, do: value, else: nil
+  end
+
+  @doc """
   The target id a stored reference VALUE points at, or `nil`.
 
   A reference is stored either as a bare id string (what Studio writes) or as a
@@ -122,6 +188,11 @@ defmodule Barkpark.Content.Edges do
   closes the gap: for each referencing source we strip the target from BOTH
   scalar `reference` fields (delete the field) AND `arrayOf`-of-`reference`
   fields (`List.delete` the element, keeping the array's other references).
+
+  `opts[:source_guard]`, when given, is `fun(type, doc_id) -> boolean` — may the
+  caller write that referencing document? If any referencer fails it, nothing is
+  stripped and the call returns `{:error, {:outside_write_grant, [{doc_id, type}]}}`;
+  otherwise it returns `:ok`.
   """
   def disconnect_references(doc_id, dataset, opts \\ []),
     do: Door.admit!(fn -> admitted_disconnect_references(doc_id, dataset, opts) end)
@@ -129,7 +200,73 @@ defmodule Barkpark.Content.Edges do
   # C083: the referencer strip is a door; it runs before the Lifecycle door in the
   # Studio delete and unpublish handlers, so a hold must refuse it on its own.
   defp admitted_disconnect_references(doc_id, dataset, opts) do
+    {source_guard, opts} = Keyword.pop(opts, :source_guard)
     pub_id = DraftId.published_id(doc_id)
+
+    # `:source_guard` (r4a Q8): `fun(type, doc_id) -> boolean`, true when the
+    # caller may WRITE that referencing document. A grant-graded Studio socket
+    # passes one, because its write gate checked only the target, not the
+    # documents a disconnect rewrites. Refuse as a whole BEFORE any write when a
+    # referencer is outside it — a partial strip would leave the caller's delete
+    # with dangling references it cannot see.
+    case denied_sources(source_guard, doc_id, pub_id, dataset, opts) do
+      [] -> strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard)
+      denied -> {:error, {:outside_write_grant, denied}}
+    end
+  end
+
+  defp denied_sources(nil, _doc_id, _pub_id, _dataset, _opts), do: []
+
+  defp denied_sources(guard, doc_id, pub_id, dataset, opts) when is_function(guard, 2) do
+    doc_id
+    |> referencing_sources(pub_id, dataset, opts)
+    |> Enum.reject(fn {id, type} -> guard.(type, id) end)
+  end
+
+  # `{doc_id, type}` of every document that references `pub_id`, from the same
+  # three probes the disconnect acts on (inbound edges, the scalar scan, the
+  # arrayOf document scan).
+  defp referencing_sources(doc_id, pub_id, dataset, opts) do
+    edge_refs =
+      Barkpark.Content.Graph.reverse_referencers(pub_id, [dataset: dataset] ++ opts)
+      |> Enum.map(fn ref -> {ref[:from_doc_id] || ref[:from_id], ref[:type]} end)
+
+    scalar_refs =
+      doc_id |> find_referencing_docs(dataset, opts) |> Enum.map(&{&1.doc_id, &1.type})
+
+    (edge_refs ++ scalar_refs ++ find_array_referencing_docs(pub_id, dataset, opts))
+    |> Enum.reject(fn {id, type} -> is_nil(id) or is_nil(type) end)
+    |> Enum.uniq()
+  end
+
+  @doc """
+  The documents that reference `doc_id`, each with the fields that hold the
+  reference — what `disconnect_references/3` would rewrite
+  (task-0bc05ce5cdefd8dc). Read before the disconnect so the HTTP door can say
+  which documents and fields changed. The scalar scan shares
+  `find_referencing_docs/3`'s 1,000-row cap.
+  """
+  @spec referencing_fields(String.t(), String.t(), keyword()) :: [
+          %{id: String.t(), type: String.t(), fields: [String.t()]}
+        ]
+  def referencing_fields(doc_id, dataset, opts \\ []) do
+    pub_id = DraftId.published_id(doc_id)
+
+    for {id, type} <- referencing_sources(doc_id, pub_id, dataset, opts),
+        {:ok, doc} <- [Content.get_document(id, type, dataset, opts)],
+        fields =
+          doc
+          |> extract_edges(dangling: :skip)
+          |> Enum.filter(&(&1.to_id == pub_id))
+          |> Enum.map(& &1.field)
+          |> Enum.uniq(),
+        fields != [] do
+      %{id: id, type: type, fields: fields}
+    end
+  end
+
+  defp strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard) do
+    opts = if source_guard, do: Keyword.put(opts, :source_guard, source_guard), else: opts
 
     # arrayOf-of-reference referencers come from the materialised inbound-edge
     # scan (`list_inbound_edges`, no row cap) — gather + disconnect them once.
@@ -192,7 +329,7 @@ defmodule Barkpark.Content.Edges do
   defp find_array_referencing_docs(pub_id, dataset, opts) do
     for schema <- Content.list_schemas(dataset, opts),
         field <- schema.fields || [],
-        get_in(field, ["of", "type"]) == "reference",
+        reference_array?(field),
         doc <-
           Barkpark.Content.Query.list_array_reference_holders(
             schema.name,
@@ -204,6 +341,16 @@ defmodule Barkpark.Content.Edges do
         uniq: true,
         do: {doc.doc_id, schema.name}
   end
+
+  # An arrayOf whose element is a reference. `of` is a map, or — Sanity's
+  # shape — a list of element types; `get_in/2` on the list raised, so a schema
+  # declared that way crashed every disconnect (and the unpublish guard).
+  defp reference_array?(%{"of" => %{"type" => "reference"}}), do: true
+
+  defp reference_array?(%{"of" => of}) when is_list(of),
+    do: Enum.any?(of, &match?(%{"type" => "reference"}, &1))
+
+  defp reference_array?(_field), do: false
 
   # Repeatedly scan + disconnect scalar referencers until none remain. Bounded:
   # `attempted` tracks every {doc_id, type} we have already tried to strip, and
@@ -246,7 +393,12 @@ defmodule Barkpark.Content.Edges do
   # workspace's, so another workspace's referencer was stripped by Default's
   # field list, or not at all, leaving its reference dangling.
   defp disconnect_one_source(ref_doc_id, type, target_pub_id, dataset, opts) do
-    with {:ok, doc} <- Content.get_document(ref_doc_id, type, dataset, opts),
+    {source_guard, opts} = Keyword.pop(opts, :source_guard)
+
+    # The pre-pass already refused when a referencer was outside the guard; a
+    # source a later drain page surfaces is re-checked here and left untouched.
+    with true <- is_nil(source_guard) or source_guard.(type, ref_doc_id),
+         {:ok, doc} <- Content.get_document(ref_doc_id, type, dataset, opts),
          {:ok, schema} <- doc_scoped_schema(doc, type, dataset) do
       content = doc.content || %{}
       updated_content = strip_reference_fields(content, schema.fields, target_pub_id)
@@ -302,7 +454,7 @@ defmodule Barkpark.Content.Edges do
         field["type"] == "reference" and targets?(value, target_pub_id) ->
           Map.delete(acc, name)
 
-        get_in(field, ["of", "type"]) == "reference" and is_list(value) ->
+        reference_array?(field) and is_list(value) ->
           kept = Enum.reject(value, &targets?(&1, target_pub_id))
 
           if kept == value, do: acc, else: Map.put(acc, name, kept)
@@ -561,7 +713,77 @@ defmodule Barkpark.Content.Edges do
     |> Enum.map(fn value -> {value, field_name, ref_type} end)
   end
 
+  # richText field → every STRUCTURAL reference inside its block tree
+  # (task-e13285602dccceca, ruled: a markDef/annotation, inline object, or
+  # custom object block carrying a `_ref` — self-describing, no schema
+  # needed — OR a declared reference-typed field inside a custom object
+  # block's OWN schema, which may store a bare string id (the field's type
+  # tells us, `_ref` does not) — PLUS a wikilink resolving to a doc id. NOT
+  # a plain URL link: nothing here ever reads `"href"`.
+  #
+  # `BlockOps.field_blocks/1` resolves EITHER live shape a richText value
+  # holds (a bare list, or the block-editor's `%{"blocks", "html"}` wrapper
+  # — task-839f9bebf5628c03/#22575/#22576) before the walk ever starts, so
+  # this clause does not need its own shape test. `BodyWalk.collect/2` is
+  # the shared deep walker (wire §7.3) — generic over maps/lists, so it
+  # does not care about shape EITHER; it just needs the blocks `field_blocks/1`
+  # already found.
+  defp extract_field_edges(%{"type" => "richText", "name" => field_name} = field, content)
+       when is_binary(field_name) do
+    objects = Validation.object_block_types(field)
+
+    content
+    |> Map.get(field_name)
+    |> BlockOps.field_blocks()
+    |> BodyWalk.collect(&richtext_node_targets(&1, objects))
+    |> Enum.map(fn {target, ref_type} -> {target, field_name, ref_type} end)
+  end
+
   defp extract_field_edges(_field, _content), do: []
+
+  defp richtext_node_targets(node, objects) do
+    Enum.map(structural_ref_targets(node), &{&1, nil}) ++
+      typed_block_field_targets(node, objects)
+  end
+
+  # Self-describing: a bare `_ref` map, wherever it occurs — a markDef, an
+  # inline object, or a custom block's reference field that happens to use
+  # the wrapped convention. No schema lookup needed; `_ref` already says
+  # what it is.
+  defp structural_ref_targets(%{"_ref" => ref}) when is_binary(ref) and ref != "", do: [ref]
+
+  # A wikilink resolves by `docId` (pre-resolved) or its raw `target` —
+  # mirrors the Bulldocs body-walk extractor's own wikilink arm exactly.
+  # Deliberately does NOT read `"href"`: a plain URL link is ruled OUT.
+  defp structural_ref_targets(%{"type" => "wikilink"} = node) do
+    case node["docId"] || node["target"] do
+      t when is_binary(t) and t != "" -> [t]
+      _ -> []
+    end
+  end
+
+  defp structural_ref_targets(_node), do: []
+
+  # A custom object block's OWN declared field of `"type" => "reference"`
+  # may store a BARE STRING id (the legacy v1 convention `reference_target/1`
+  # already accepts for a top-level scalar reference field) — no `_ref`
+  # wrapper to self-describe it, so only the block's OWN schema (`objects`,
+  # from `Validation.object_block_types/1`) can tell a reference field from
+  # an ordinary string field of the same shape.
+  defp typed_block_field_targets(%{"type" => block_type} = node, objects)
+       when is_map_key(objects, block_type) do
+    objects
+    |> Map.fetch!(block_type)
+    |> Enum.filter(&(&1["type"] == "reference"))
+    |> Enum.flat_map(fn field_def ->
+      case node |> Map.get(field_def["name"]) |> reference_target() do
+        nil -> []
+        target -> [{target, dangling_ref_type(field_def)}]
+      end
+    end)
+  end
+
+  defp typed_block_field_targets(_node, _objects), do: []
 
   # The SHARED resolve-and-dangling helper (gap #2). TWO branches that MUST
   # agree on lens (:published) + scope so a typed and an untyped ref to the same

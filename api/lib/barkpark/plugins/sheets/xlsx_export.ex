@@ -881,7 +881,7 @@ defmodule Barkpark.Plugins.Sheets.XlsxExport do
   defp fmt_props(%{"t" => "datetime"} = cell), do: [num_format: date_format(cell, "datetime")]
 
   defp fmt_props(cell) do
-    case Fmt.num_format(Map.get(cell, "fmt")) do
+    case Fmt.num_format(Map.get(cell, "fmt"), Map.get(cell, "cur")) do
       nil -> []
       format -> [num_format: format]
     end

@@ -10,7 +10,7 @@
 // `sources` (['tags'] / ['references'] / both) and `shared_tags` so a surface
 // can render WHY two docs relate.
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { BarkparkValidationError } from './errors'
@@ -36,7 +36,7 @@ export async function getRelated(
   }
   const qs = opts?.limit !== undefined ? `?limit=${opts.limit}` : ''
   const path =
-    `${scopePrefix(config)}/v1/data/related/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}${qs}`
+    `${dataPath(config, 'related')}/${encodeURIComponent(id)}${qs}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<RelatedResult & { result?: RelatedResult }>(

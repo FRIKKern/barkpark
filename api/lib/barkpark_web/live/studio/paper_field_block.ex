@@ -138,7 +138,11 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
 
     if resolved?,
       do: nil,
-      else: Barkpark.PortableDoc.Render.render_block(block, %{style: :article})
+      else:
+        Barkpark.PortableDoc.Render.render_block(
+          block,
+          BarkparkWeb.StudioLocale.pd_opts(%{style: :article})
+        )
   end
 
   defp unresolved_codelist_paint(_block, _type), do: nil
@@ -179,14 +183,14 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <ul class="bp-paper-chips">
           <li :for={{chip, i} <- Enum.with_index(@value)} class="bp-paper-chip">
-            <input type="text" name={"[#{i}]"} value={chip} aria-label="Edit value" />
+            <input type="text" name={"[#{i}]"} value={chip} aria-label={gettext("Edit value")} />
             <button
               type="button"
               phx-click="inner-array-op"
               phx-target={@myself}
               phx-value-action="remove_row"
               phx-value-index={i}
-              aria-label="Remove"
+              aria-label={gettext("Remove")}
             >×</button>
           </li>
         </ul>
@@ -195,7 +199,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
           phx-click="inner-array-op"
           phx-target={@myself}
           phx-value-action="add_row"
-        >+ Add</button>
+        ><%= gettext("+ Add") %></button>
       </form>
     </div>
     """
@@ -293,7 +297,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     ~H"""
     <div class="bp-paper-composite-block bp-paper-composite-unknown" data-block-id={@block_id}>
       <p class="bp-paper-edit-readonly">
-        <%= @field_type %> blocks are not editable yet.
+        <%= gettext("%{type} blocks are not editable yet.", type: @field_type) %>
       </p>
     </div>
     """

@@ -1035,12 +1035,30 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// say — muscle-1's rung is removal_failed and its reason is a 200-character
 	// deprovision error, behind which a trailing "dark 50d" would be cut off.
 	parts := make([]string, 0, 8)
-	for _, s := range []string{darkMarker(b, status), reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	for _, s := range []string{darkMarker(b, status), reason, pausedMarker(b), queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// pausedMarker names a box whose autoupdate is PAUSED, with the command that
+// resumes it. No code path clears the pause on its own: a team admin sets it, or
+// the rollout sets it when an update it started did not land within its settle
+// grace (that case also writes a `barkpark.autoupdate_paused` audit row naming
+// why). Either way the box will not update again until someone resumes it, and
+// "behind" alone reads as "waiting for the rollout". A pin wins: it is a
+// deliberate freeze the POLICY column already names, so no second sentence.
+func pausedMarker(b cloudclient.Barkpark) string {
+	if !b.AutoupdatePaused || strings.TrimSpace(b.PinnedRelease) != "" {
+		return ""
+	}
+	target := strings.TrimSpace(b.Slug)
+	if target == "" {
+		target = strings.TrimSpace(b.Name)
+	}
+	return "autoupdate paused — it will not update until `bp cloud autoupdate resume " + sanitizeCell(target) + "`"
 }
 
 // reachabilityEvidence renders the two counters `health_status` is computed
@@ -1530,6 +1548,11 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 			row["autoupdate_triggered_at"] = at
 		}
 	}
+	// The last failed self-update run (phase + redacted tail), only when the
+	// plane has one on file — an absent key is "no failed run", never "fine".
+	if f := r.BP.UpdateLastFailure; f != nil {
+		row["update_last_failure"] = f
+	}
 	// The attached custom domain, only when one is attached.
 	if h := strings.TrimSpace(r.BP.CustomHost); h != "" {
 		row["custom_host"] = h
@@ -1778,8 +1801,66 @@ func runCloudStatus(out *writer, g globals, args []string) int {
 	renderStatusBucket(out, "IN-FLIGHT", "in-flight", ranked)
 	renderStatusBucket(out, "HEALTHY", "healthy", ranked)
 	renderStatusDeploy(out, deploy, ranked)
+	renderUpdateFailures(out, ranked)
 	renderDuplicates(out, findDuplicateRows(list))
 	return exitOK
+}
+
+// updateFailureTailLines is how many tail lines the table view prints per box;
+// `-o json` carries the whole (at most 40-line) tail.
+const updateFailureTailLines = 15
+
+// renderUpdateFailures prints, per box whose last self-update run FAILED, the
+// phase it failed in and the end of its redacted log — so an operator learns
+// "build or migrate?" without SSH to the box's .deploy-status.json. Silent when
+// no box has a failed run on file.
+func renderUpdateFailures(out *writer, ranked []rankedBarkpark) {
+	var failed []rankedBarkpark
+	for _, r := range ranked {
+		if r.BP.UpdateLastFailure != nil {
+			failed = append(failed, r)
+		}
+	}
+	if len(failed) == 0 {
+		return
+	}
+	out.outf("")
+	out.outf("LAST FAILED UPDATE (%d)", len(failed))
+	for _, r := range failed {
+		out.outf("%s", updateFailureHeadline(r.BP))
+		tail := r.BP.UpdateLastFailure.Tail
+		if len(tail) > updateFailureTailLines {
+			out.outf("    … %d earlier line(s) — full tail: bp cloud status -o json", len(tail)-updateFailureTailLines)
+			tail = tail[len(tail)-updateFailureTailLines:]
+		}
+		for _, line := range tail {
+			out.outf("    %s", sanitizeCell(line))
+		}
+	}
+}
+
+// updateFailureHeadline is the one-line verdict: which box, which phase, which
+// exit code, how the phase was learned, and when.
+func updateFailureHeadline(b cloudclient.Barkpark) string {
+	f := b.UpdateLastFailure
+	verb := "update"
+	if f.Mode == "rollback" {
+		verb = "rollback"
+	}
+	parts := []string{fmt.Sprintf("  %s: %s failed in phase %s", statusDash(b.Name), verb, statusDash(f.Phase))}
+	if f.ExitCode != nil {
+		parts = append(parts, fmt.Sprintf("exit %d", *f.ExitCode))
+	}
+	switch f.Source {
+	case "deploy_status":
+		parts = append(parts, "per the box's deploy-status record")
+	case "exit_code":
+		parts = append(parts, "inferred from the exit code")
+	}
+	if at := strings.TrimSpace(f.FinishedAt); at != "" {
+		parts = append(parts, "at "+at)
+	}
+	return strings.Join(parts, " · ")
 }
 
 // renderStatusBucket prints one bucket section (header + painted table) when it

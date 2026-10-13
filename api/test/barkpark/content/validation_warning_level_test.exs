@@ -180,4 +180,34 @@ defmodule Barkpark.Content.ValidationWarningLevelTest do
       assert %{errors: %{}, warnings: %{}} = Validation.check(content, "T", @v2_schema)
     end
   end
+
+  # task-b183e15684138399 — Sanity's third level, `info`, was read as an ERROR,
+  # so `{min: 50, level: info}` on seo.metaDescription blocked a save. It is
+  # surfaced like a warning and never blocks.
+  describe "level info" do
+    @info_schema %{
+      "name" => "post",
+      "fields" => [
+        %{"name" => "title", "title" => "Title", "type" => "string"},
+        %{
+          "name" => "metaDescription",
+          "title" => "Meta description",
+          "type" => "text",
+          "validation" => %{"min" => 50, "level" => "info"}
+        }
+      ]
+    }
+
+    test "an info-level rule never blocks, and is reported with the warnings" do
+      content = %{"metaDescription" => "too short"}
+
+      assert {:ok, ^content} = Validation.validate(content, "T", @info_schema)
+
+      assert %{errors: errors, warnings: warnings} =
+               Validation.check(content, "T", @info_schema)
+
+      assert errors == %{}
+      assert Map.has_key?(warnings, "metaDescription")
+    end
+  end
 end

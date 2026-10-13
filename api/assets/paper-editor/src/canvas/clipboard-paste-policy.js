@@ -29,18 +29,28 @@ export function clipboardPastePolicy(view, event, slice) {
     blocked: "The clipboard contains both image files and formatted content or text. Paste text with Ctrl+Shift+V, or drag the image files into the editor separately.",
   };
   if (files.length) return null; // Existing host-owned upload path.
-  if (html) {
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    // Only existing native image/Figure wrappers are represented by our schema.
-    // Do not fetch external images or reinterpret arbitrary HTML as an upload.
-    const missingImage = [...doc.body.querySelectorAll("img")].some(image =>
-      !image.closest("figure[data-bp-type='image'], figure[data-bp-type='figure']"));
-    if (missingImage) return {
-      blocked: "This formatted content includes an image that cannot be pasted together with its text. Paste text with Ctrl+Shift+V, or drag the image file into the editor separately.",
-    };
-  }
+  // An <img> inside formatted content is no longer a reason to refuse the whole
+  // paste (task-76c5440175affe20): stripPastedImages leaves it out, the text
+  // lands, and the canvas names what was left out.
   if (slice && !slice.content.size && (html || text || data.files?.length)) return {
     blocked: "This clipboard content cannot be represented here. Copy text or an image file to paste.",
   };
   return null;
+}
+
+// Only existing native image/Figure wrappers are represented by our schema. Do
+// not fetch external images or reinterpret arbitrary HTML as an upload: every
+// other <img> is removed before parsing, and counted so the canvas can say so.
+// A <figure> keeps its caption text; a <picture>/<source> wrapper goes with it.
+export function stripPastedImages(html) {
+  if (!html || !/<img[\s>]/i.test(html)) return { html, count: 0 };
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const native = "figure[data-bp-type='image'], figure[data-bp-type='figure']";
+  const stray = [...doc.querySelectorAll("img")].filter(image => !image.closest(native));
+  if (!stray.length) return { html, count: 0 };
+  for (const image of stray) {
+    const picture = image.closest("picture");
+    (picture || image).remove();
+  }
+  return { html: doc.body.innerHTML, count: stray.length };
 }

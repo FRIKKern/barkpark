@@ -31,8 +31,19 @@ defmodule BarkparkWeb.RequestStats do
     * `sampled_at` — UTC wall-clock at read time, stamping WHEN the window was
       observed (the window itself runs on monotonic time).
     * `classes` — per-route-class breakdown, `%{class => %{count, req_per_s,
-      authed, anon, auth_unknown}}`; `%{}` on an empty window (no fabricated
-      zero-rows for classes nobody observed).
+      p95_ms, authed, anon, auth_unknown}}`; `%{}` on an empty window (no fabricated
+      zero-rows for classes nobody observed). The per-class `p95_ms` says WHICH
+      class carries a tail (am-bl-idle-p95-anomaly); a class row exists only
+      with samples, so it is never `nil`.
+    * `routes` — the slowest ROUTED endpoints, `[%{route, count, p95_ms,
+      max_ms}]`, sorted by `p95_ms` descending and capped at
+      `@routes_cap`; `[]` on an empty window. The class names WHICH class carries
+      a tail; this names WHICH endpoint (task-5d86dc4dc2a94c55). `route` is the
+      method plus the router's route PATTERN (`"GET /v1/data/query/:dataset"`),
+      never the request path: a path carries document ids, slugs and dataset
+      names, a pattern carries none of them, and no query string or token is
+      ever read. Unrouted and pre-router samples have no pattern and never
+      appear here. Cardinality is bounded by the router's own route table.
 
   ## Route classes — enum CLOSED at five (charter D9)
 
@@ -105,8 +116,8 @@ defmodule BarkparkWeb.RequestStats do
   `cloud-console-w5-agent-reqstats-beat`). A timer prunes expired rows so memory
   stays bounded to roughly one window's worth of samples.
 
-  The read shape — the additive 8-key map `%{req_per_s, p95_ms, err_5xx_per_s,
-  window_s, count, elapsed_s, sampled_at, classes}` — is pinned on the wire by
+  The read shape — the additive 9-key map `%{req_per_s, p95_ms, err_5xx_per_s,
+  window_s, count, elapsed_s, sampled_at, classes, routes}` — is pinned on the wire by
   `BarkparkWeb.RequestStatsControllerTest` and in the pure math by
   `BarkparkWeb.RequestStatsTest`. Those two tests are the contract; a charter
   letter is not, because charters are rewritten per wave and the code does not
@@ -123,6 +134,7 @@ defmodule BarkparkWeb.RequestStats do
   @window_ms 60_000
   @prune_every_ms 10_000
   @default_table :barkpark_request_stats
+  @routes_cap 10
 
   # The pipelines that run a plug which assigns `:api_token` on success
   # (OptionalToken / RequireToken / OptionalSessionToken /
@@ -168,13 +180,13 @@ defmodule BarkparkWeb.RequestStats do
   def auth_resolving_pipelines, do: @auth_resolving_pipelines
 
   @doc """
-  Current window stats — the additive 8-key map `%{req_per_s: float,
+  Current window stats — the additive 9-key map `%{req_per_s: float,
   p95_ms: integer | nil, err_5xx_per_s: float | nil, window_s: integer,
   count: non_neg_integer, elapsed_s: float, sampled_at: String.t(),
-  classes: %{atom => map}}`.
+  classes: %{atom => map}, routes: [map]}`.
 
   Falls back to an honest empty window (`req_per_s: 0.0`, `p95_ms: nil`,
-  `err_5xx_per_s: nil`, `count: 0`, `classes: %{}`) if the aggregator process
+  `err_5xx_per_s: nil`, `count: 0`, `classes: %{}`, `routes: []`) if the aggregator process
   is not running, so the exposed route degrades to the truth rather than
   500-ing. Note which one is `0.0`: no requests observed IS a true rate of zero
   requests, but "no 5xx observed" is unknowable from a window that holds
@@ -256,8 +268,8 @@ defmodule BarkparkWeb.RequestStats do
   def handle_event([:phoenix, :endpoint, :stop], %{duration: duration}, meta, %{table: table}) do
     duration_ms = System.convert_time_unit(duration, :native, :microsecond) / 1000
     key = {System.monotonic_time(:millisecond), System.unique_integer([:monotonic])}
-    {route_class, auth_state} = classify(meta)
-    :ets.insert(table, {key, duration_ms, status_of(meta), route_class, auth_state})
+    {route_class, auth_state, route} = classify_route(meta)
+    :ets.insert(table, {key, duration_ms, status_of(meta), route_class, auth_state, route})
     :ok
   rescue
     # A telemetry handler must NEVER take down the request it is measuring — a
@@ -279,23 +291,35 @@ defmodule BarkparkWeb.RequestStats do
   — see the moduledoc for both enums). Total: any meta shape without a conn is
   `{:pre_router, :auth_unknown}` — no router ran, no auth plug ran.
   """
-  def classify(%{conn: %Plug.Conn{} = conn}) do
+  def classify(meta) do
+    {route_class, auth_state, _route} = classify_route(meta)
+    {route_class, auth_state}
+  end
+
+  # `classify/1` plus the sample's route label — the method and the router's
+  # route PATTERN, read off the same `route_info/4` match, or `nil` when no
+  # route matched. Never `conn.request_path`: see `routes` in the moduledoc.
+  defp classify_route(%{conn: %Plug.Conn{} = conn}) do
     case conn.private do
       %{phoenix_router: router} ->
         case Phoenix.Router.route_info(router, conn.method, conn.request_path, conn.host) do
           :error ->
-            {:unrouted, auth_state(conn, [])}
+            {:unrouted, auth_state(conn, []), nil}
 
           info when is_map(info) ->
-            {routed_class(conn), auth_state(conn, Map.get(info, :pipe_through) || [])}
+            {routed_class(conn), auth_state(conn, Map.get(info, :pipe_through) || []),
+             route_label(conn.method, Map.get(info, :route))}
         end
 
       _ ->
-        {:pre_router, auth_state(conn, [])}
+        {:pre_router, auth_state(conn, []), nil}
     end
   end
 
-  def classify(_meta), do: {:pre_router, :auth_unknown}
+  defp classify_route(_meta), do: {:pre_router, :auth_unknown, nil}
+
+  defp route_label(method, pattern) when is_binary(pattern), do: method <> " " <> pattern
+  defp route_label(_method, _pattern), do: nil
 
   defp routed_class(conn) do
     cond do
@@ -335,23 +359,27 @@ defmodule BarkparkWeb.RequestStats do
 
   @doc """
   Derive the window stats from raw `{time_ms, duration_ms, status, route_class,
-  auth_state}` samples.
+  auth_state, route}` samples, where `route` is the `"METHOD /pattern"` label or
+  `nil` for a sample no route matched.
 
   `elapsed = min(now - started, window)` — a fresh boot reports over the time it
   has actually lived, never a fabricated full window. Empty window ⇒
   `req_per_s: 0.0` (true — zero requests were observed), `p95_ms: nil` (no
   samples is not 0ms), `err_5xx_per_s: nil` (no samples is not "no errors"),
-  `count: 0`, `classes: %{}` (no fabricated per-class zero-rows).
+  `count: 0`, `classes: %{}` (no fabricated per-class zero-rows), `routes: []`.
 
   `status` may be `nil` for a sample whose response status was not knowable; such
   a sample counts toward throughput and latency but is never counted as a 5xx.
 
-  Returns 7 of the 8 payload keys — `sampled_at` is wall-clock at READ time and
+  Returns 8 of the 9 payload keys — `sampled_at` is wall-clock at READ time and
   is stamped by the callers, keeping this function pure.
   """
   def compute(samples, now_ms, started_ms, window_ms) do
     cutoff = now_ms - window_ms
-    in_window = for {t, d, s, class, auth} <- samples, t >= cutoff, do: {d, s, class, auth}
+
+    in_window =
+      for {t, d, s, class, auth, route} <- samples, t >= cutoff, do: {d, s, class, auth, route}
+
     count = length(in_window)
 
     uptime_ms = max(now_ms - started_ms, 0)
@@ -383,7 +411,7 @@ defmodule BarkparkWeb.RequestStats do
 
         samples ->
           errors =
-            Enum.count(samples, fn {_d, s, _class, _auth} ->
+            Enum.count(samples, fn {_d, s, _class, _auth, _route} ->
               is_integer(s) and s >= 500 and s < 600
             end)
 
@@ -395,15 +423,16 @@ defmodule BarkparkWeb.RequestStats do
     # samples has no row (absence, not a fabricated zero).
     classes =
       in_window
-      |> Enum.group_by(fn {_d, _s, class, _auth} -> class end)
+      |> Enum.group_by(fn {_d, _s, class, _auth, _route} -> class end)
       |> Map.new(fn {class, rows} ->
         n = length(rows)
-        by_auth = Enum.frequencies_by(rows, fn {_d, _s, _class, auth} -> auth end)
+        by_auth = Enum.frequencies_by(rows, fn {_d, _s, _class, auth, _route} -> auth end)
 
         {class,
          %{
            count: n,
            req_per_s: Float.round(n * 1000 / elapsed_ms, 2),
+           p95_ms: rows |> Enum.map(&elem(&1, 0)) |> Enum.sort() |> percentile(95) |> round(),
            authed: Map.get(by_auth, :authed, 0),
            anon: Map.get(by_auth, :anon, 0),
            auth_unknown: Map.get(by_auth, :auth_unknown, 0)
@@ -417,7 +446,8 @@ defmodule BarkparkWeb.RequestStats do
       window_s: div(window_ms, 1000),
       count: count,
       elapsed_s: Float.round(elapsed_ms / 1000, 3),
-      classes: classes
+      classes: classes,
+      routes: slowest_routes(in_window)
     }
   end
 
@@ -433,6 +463,29 @@ defmodule BarkparkWeb.RequestStats do
     n = length(sorted)
     rank = (p / 100 * n) |> Float.ceil() |> round() |> max(1) |> min(n)
     Enum.at(sorted, rank - 1)
+  end
+
+  # The `routes` key: per-pattern count, p95 and max over the in-window rows,
+  # slowest p95 first, `@routes_cap` long. Ties break on volume, then on the
+  # label, so two reads of the same window list the same routes in the same
+  # order. Rows with no pattern (unrouted, pre-router) are dropped, not bucketed
+  # under a fabricated label.
+  defp slowest_routes(in_window) do
+    in_window
+    |> Enum.reject(fn {_d, _s, _class, _auth, route} -> is_nil(route) end)
+    |> Enum.group_by(fn {_d, _s, _class, _auth, route} -> route end, &elem(&1, 0))
+    |> Enum.map(fn {route, durations} ->
+      sorted = Enum.sort(durations)
+
+      %{
+        route: route,
+        count: length(sorted),
+        p95_ms: sorted |> percentile(95) |> round(),
+        max_ms: sorted |> List.last() |> round()
+      }
+    end)
+    |> Enum.sort_by(&{-&1.p95_ms, -&1.count, &1.route})
+    |> Enum.take(@routes_cap)
   end
 
   # ── GenServer ─────────────────────────────────────────────────────────────
@@ -466,7 +519,7 @@ defmodule BarkparkWeb.RequestStats do
     samples =
       state.table
       |> :ets.tab2list()
-      |> Enum.map(fn {{t, _uniq}, d, s, class, auth} -> {t, d, s, class, auth} end)
+      |> Enum.map(fn {{t, _uniq}, d, s, class, auth, route} -> {t, d, s, class, auth, route} end)
 
     reply =
       samples
@@ -482,10 +535,10 @@ defmodule BarkparkWeb.RequestStats do
     # ordered_set keyed by {time_ms, unique}: drop every row whose time is older
     # than the window. Bounds memory to ~one window (+ one prune interval). The
     # head must carry the row's FULL arity — a narrower pattern against the
-    # 5-tuple rows matches nothing and the "prune" silently becomes an unbounded
+    # 6-tuple rows matches nothing and the "prune" silently becomes an unbounded
     # leak. `RequestStatsTest` proves prune-still-deletes at this arity.
     :ets.select_delete(state.table, [
-      {{{:"$1", :_}, :_, :_, :_, :_}, [{:<, :"$1", cutoff}], [true]}
+      {{{:"$1", :_}, :_, :_, :_, :_, :_}, [{:<, :"$1", cutoff}], [true]}
     ])
 
     schedule_prune()

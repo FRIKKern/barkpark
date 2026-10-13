@@ -113,9 +113,10 @@ defmodule BarkparkWeb.BulldocsEmailControllerTest do
     refute html =~ "<style"
     refute html =~ "#4f46e5"
 
-    # Content + the harmonized success tint + the pinned snapshot.
+    # Content + the success callout (a quiet card since 2026-10-05: hairline frame,
+    # the tone in a dot) + the pinned snapshot.
     assert html =~ "The full deck, mailed"
-    assert html =~ "#e7f2ec"
+    assert html =~ "border:1px solid #e2e6e5;border-radius:12px"
     assert html =~ "ship the email view"
 
     # Canonical PortableDoc lists retain semantic structure in the actual email

@@ -28,20 +28,53 @@
     return (fi && fi.mimeType) || "";
   }
 
+  // Numbers and dates read in the page's language (the Studio sets <html lang>),
+  // not the browser's: 33,1 KB in an nb-NO Studio. The date takes the shape
+  // Hooks.LocalTime gives the history list (task-114329329fc3bd37).
+  function pageLang() {
+    const lang = typeof document !== "undefined" && document.documentElement && document.documentElement.lang;
+    return lang || undefined;
+  }
+
+  function fmtDecimal(n) {
+    try {
+      return new Intl.NumberFormat(pageLang(), {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+        useGrouping: false
+      }).format(n);
+    } catch (_e) {
+      return n.toFixed(1);
+    }
+  }
+
+  function fmtCount(n) {
+    try {
+      return n.toLocaleString(pageLang());
+    } catch (_e) {
+      return String(n);
+    }
+  }
+
   function formatSize(raw) {
     const n = parseInt(raw, 10);
     if (!n || isNaN(n)) return "";
     if (n < 1024) return n + " B";
-    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
-    return (n / 1048576).toFixed(1) + " MB";
+    if (n < 1048576) return fmtDecimal(n / 1024) + " KB";
+    return fmtDecimal(n / 1048576) + " MB";
   }
 
   function fmtDate(iso) {
     if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
     try {
-      return new Date(iso).toLocaleString();
+      return new Intl.DateTimeFormat(pageLang(), {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit"
+      }).format(d);
     } catch (_e) {
-      return iso;
+      return d.toLocaleString();
     }
   }
 
@@ -114,6 +147,14 @@
   ];
 
   const FACET_FIELDS = ["tags", "mimeType", "processing", "visibility", "status"];
+  // Facets whose values are a closed set the Studio names (task-9b39b33f9b4e63c2):
+  // the raw value is the strings-map key, so English reads unchanged. Tags and
+  // MIME types are data and stay as stored.
+  const FACET_VALUE_WORDS = {
+    processing: ["ready", "processing", "failed"],
+    visibility: ["public", "private"],
+    status: ["draft", "published"],
+  };
   const FACET_LABELS = {
     tags: "Tags",
     mimeType: "Format",
@@ -131,6 +172,21 @@
   ];
 
   const STORAGE_KEY = "bp-ae-prefs";
+
+  // The explorer's words in the workspace's Studio language: a JSON map from
+  // the English text to its translation, stamped by the server as
+  // `data-strings` (BarkparkWeb.StudioLocale.component_strings(:asset_explorer)).
+  // A missing map or key reads the English, so a host that stamps nothing
+  // renders exactly as before.
+  function readStrings(el) {
+    try {
+      const raw = el && el.dataset ? el.dataset.strings : null;
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_e) {
+      return {};
+    }
+  }
 
   function facetEntries(bucket) {
     if (!bucket) return [];
@@ -182,51 +238,54 @@
       this.className = "bp-ae-root";
       this.innerHTML =
         '<div class="bp-ae-toast" hidden></div>' +
-        '<aside class="bp-ae-sidebar">' +
-        '<div class="bp-ae-sidebar-title">Library</div>' +
-        '<nav class="bp-ae-filters"></nav>' +
-        '<div class="bp-ae-sidebar-title bp-ae-facets-title" hidden>Refine</div>' +
-        '<nav class="bp-ae-facets" hidden></nav>' +
+        // Each landmark carries the name its visible title gives it, so a screen
+        // reader's landmark list tells the sidebar, its three navigations and the
+        // inspector apart (task-0374792cb435a2e3).
+        '<aside class="bp-ae-sidebar" aria-label="' + this._e("Library") + '">' +
+        '<div class="bp-ae-sidebar-title">' + this._e("Library") + "</div>" +
+        '<nav class="bp-ae-filters" aria-label="' + this._e("Library") + '"></nav>' +
+        '<div class="bp-ae-sidebar-title bp-ae-facets-title" hidden>' + this._e("Refine") + "</div>" +
+        '<nav class="bp-ae-facets" aria-label="' + this._e("Refine") + '" hidden></nav>' +
         '<div class="bp-ae-sidebar-head">' +
-        '<div class="bp-ae-sidebar-title bp-ae-collections-title">Collections</div>' +
-        '<button type="button" class="bp-ae-new-collection btn btn-sm" title="New folder">+</button>' +
+        '<div class="bp-ae-sidebar-title bp-ae-collections-title">' + this._e("Collections") + "</div>" +
+        '<button type="button" class="bp-ae-new-collection btn btn-sm" title="' + this._e("New folder") + '" aria-label="' + this._e("New folder") + '">+</button>' +
         "</div>" +
-        '<nav class="bp-ae-collections"></nav>' +
+        '<nav class="bp-ae-collections" aria-label="' + this._e("Collections") + '"></nav>' +
         "</aside>" +
         '<main class="bp-ae-main">' +
         '<header class="bp-ae-toolbar">' +
         '<div class="bp-ae-search-wrap">' +
-        '<input type="search" class="bp-ae-search form-input" placeholder="Find assets…  (/ to focus)" aria-label="Search assets" autocomplete="off" aria-expanded="false" aria-controls="bp-ae-suggest-list" />' +
+        '<input type="search" class="bp-ae-search form-input" placeholder="' + this._e("Find assets…  (/ to focus)") + '" aria-label="' + this._e("Search assets") + '" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bp-ae-suggest-list" />' +
         '<div class="bp-ae-suggest" id="bp-ae-suggest-list" hidden role="listbox"></div>' +
         "</div>" +
         '<div class="bp-ae-toolbar-pills"></div>' +
-        '<div class="bp-ae-view-toggle" role="group" aria-label="Result view">' +
-        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="Grid view">Grid</button>' +
-        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-list" data-view="list" title="List view">List</button>' +
+        '<div class="bp-ae-view-toggle" role="group" aria-label="' + this._e("Result view") + '">' +
+        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="' + this._e("Grid view") + '" aria-pressed="true">' + this._e("Grid") + "</button>" +
+        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-list" data-view="list" title="' + this._e("List view") + '" aria-pressed="false">' + this._e("List") + "</button>" +
         "</div>" +
-        '<select class="form-input bp-ae-sort text-sm" aria-label="Sort results">' +
+        '<select class="form-input bp-ae-sort text-sm" aria-label="' + this._e("Sort results") + '">' +
         SORT_OPTIONS.map(
           (o) =>
-            '<option value="' + o.id + '">' + esc(o.label) + "</option>"
+            '<option value="' + o.id + '">' + this._e(o.label) + "</option>"
         ).join("") +
         "</select>" +
-        '<label class="btn btn-primary btn-sm bp-ae-upload">' +
-        "<span>Upload</span>" +
-        '<input type="file" multiple hidden />' +
-        "</label>" +
+        // A real button: a <label> around a `hidden` input takes no focus, so
+        // keyboard users could not upload at all (task-6553d48bdfa3035d).
+        '<button type="button" class="btn btn-primary btn-sm bp-ae-upload">' + this._e("Upload") + "</button>" +
+        '<input type="file" class="bp-ae-upload-input" multiple hidden />' +
         '<span class="bp-ae-count text-sm text-muted"></span>' +
         '<label class="bp-ae-density-label text-sm text-muted">' +
-        "Size" +
+        this._e("Size") +
         '<input type="range" class="bp-ae-density" min="100" max="240" value="160" />' +
         "</label>" +
         "</header>" +
         '<div class="bp-ae-find-bar text-sm" hidden></div>' +
         '<section class="bp-ae-grid-wrap">' +
-        '<div class="bp-ae-loading text-sm text-muted" hidden>Loading assets…</div>' +
-        '<div class="bp-ae-empty text-sm text-muted" hidden>No assets yet — upload a file to get started.</div>' +
+        '<div class="bp-ae-loading text-sm text-muted" hidden>' + this._e("Loading assets…") + "</div>" +
+        '<div class="bp-ae-empty text-sm text-muted" hidden>' + this._e("No assets yet — upload a file to get started.") + "</div>" +
         '<div class="bp-ae-grid media-grid"></div>' +
         '<div class="bp-ae-load-more-wrap">' +
-        '<button type="button" class="btn btn-sm bp-ae-load-more" hidden>Load more</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-load-more" hidden>' + this._e("Load more") + "</button>" +
         '<div class="bp-ae-scroll-sentinel" aria-hidden="true"></div>' +
         "</div>" +
         "</section>" +
@@ -234,19 +293,19 @@
         '<div class="bp-ae-filmstrip-track"></div>' +
         "</footer>" +
         "</main>" +
-        '<aside class="bp-ae-inspector">' +
-        '<div class="bp-ae-inspector-empty text-sm text-muted">Select an asset or collection</div>' +
+        '<aside class="bp-ae-inspector" aria-label="' + this._e("Asset details") + '">' +
+        '<div class="bp-ae-inspector-empty text-sm text-muted">' + this._e("Select an asset or collection") + "</div>" +
         '<div class="bp-ae-inspector-body" hidden></div>' +
         "</aside>" +
         '<div class="bp-ae-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bp-ae-modal-title">' +
         '<div class="bp-ae-modal-backdrop"></div>' +
         '<div class="bp-ae-modal-card">' +
-        '<h3 id="bp-ae-modal-title" class="bp-ae-modal-title">New folder</h3>' +
-        '<p class="bp-ae-modal-hint text-sm text-muted">Folder collections hold curated sets of assets.</p>' +
-        '<input type="text" class="form-input bp-ae-modal-input" placeholder="Collection name" maxlength="120" />' +
+        '<h2 id="bp-ae-modal-title" class="bp-ae-modal-title">' + this._e("New folder") + "</h2>" +
+        '<p class="bp-ae-modal-hint text-sm text-muted">' + this._e("Folder collections hold curated sets of assets.") + "</p>" +
+        '<input type="text" class="form-input bp-ae-modal-input" placeholder="' + this._e("Collection name") + '" maxlength="120" />' +
         '<div class="bp-ae-modal-actions">' +
-        '<button type="button" class="btn btn-sm bp-ae-modal-cancel">Cancel</button>' +
-        '<button type="button" class="btn btn-primary btn-sm bp-ae-modal-submit">Create folder</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-modal-cancel">' + this._e("Cancel") + "</button>" +
+        '<button type="button" class="btn btn-primary btn-sm bp-ae-modal-submit">' + this._e("Create folder") + "</button>" +
         "</div></div></div>";
 
       this._filtersEl = this.querySelector(".bp-ae-filters");
@@ -275,7 +334,8 @@
       this._emptyEl = this.querySelector(".bp-ae-empty");
       this._inspectorEmpty = this.querySelector(".bp-ae-inspector-empty");
       this._inspectorBody = this.querySelector(".bp-ae-inspector-body");
-      this._uploadInput = this.querySelector(".bp-ae-upload input");
+      this._uploadInput = this.querySelector(".bp-ae-upload-input");
+      this.querySelector(".bp-ae-upload").addEventListener("click", () => this._uploadInput.click());
       this._densityInput = this.querySelector(".bp-ae-density");
       this._toastEl = this.querySelector(".bp-ae-toast");
       this._modalEl = this.querySelector(".bp-ae-modal");
@@ -354,7 +414,6 @@
       if (this._modalInput) {
         this._modalInput.addEventListener("keydown", (e) => {
           if (e.key === "Enter") this._submitCollectionModal();
-          if (e.key === "Escape") this._closeCollectionModal();
         });
       }
 
@@ -377,6 +436,7 @@
           this._viewMode = mode;
           this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
             b.classList.toggle("is-active", b.dataset.view === mode);
+            b.setAttribute("aria-pressed", String(b.dataset.view === mode));
           });
           this._syncToolbarChrome();
           this._savePrefs();
@@ -417,6 +477,23 @@
         this._filterKind = raw;
         this._renderFilters();
       }
+    }
+
+    // `text` is the English (and the key); `vars` fill its %{name} slots.
+    _t(text, vars) {
+      if (!this._strings) this._strings = readStrings(this);
+      let out = typeof this._strings[text] === "string" ? this._strings[text] : text;
+      if (vars) {
+        out = out.replace(/%\{(\w+)\}/g, (slot, name) =>
+          Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : slot
+        );
+      }
+      return out;
+    }
+
+    // _t, escaped for an HTML string.
+    _e(text, vars) {
+      return esc(this._t(text, vars));
     }
 
     _openPath() {
@@ -528,9 +605,9 @@
       if (filters.kind) parts.push(this._kindLabel(filters.kind));
       const facets = filters.facets || {};
       Object.entries(facets).forEach(([k, v]) => {
-        parts.push((FACET_LABELS[k] || k) + ": " + v);
+        parts.push((FACET_LABELS[k] ? this._t(FACET_LABELS[k]) : k) + ": " + v);
       });
-      return parts.length ? parts.join(" · ") : "Filtered search";
+      return parts.length ? parts.join(" · ") : this._t("Filtered search");
     }
 
     _renderSuggest() {
@@ -552,7 +629,7 @@
 
       if (recent.length) {
         html +=
-          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">Recent</div>' +
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">' + this._e("Recent") + "</div>" +
           recent
             .map((item, i) => this._suggestRow(item, "recent", i))
             .join("") +
@@ -561,7 +638,7 @@
 
       if (popular.length) {
         html +=
-          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">Popular</div>' +
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">' + this._e("Popular") + "</div>" +
           popular
             .map((item, i) => this._suggestRow(item, "popular", i, item.count))
             .join("") +
@@ -570,7 +647,7 @@
 
       if (nohits.length) {
         html +=
-          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">No matches before</div>' +
+          '<div class="bp-ae-suggest-section"><div class="bp-ae-suggest-title">' + this._e("No matches before") + "</div>" +
           nohits
             .map((item, i) =>
               this._suggestRow({ query: item.query, filters: {} }, "nohits", i, item.count)
@@ -603,9 +680,9 @@
       const label = esc(this._suggestLabel(item));
       const meta =
         typeof count === "number"
-          ? '<span class="bp-ae-suggest-meta">' + count + " searches</span>"
+          ? '<span class="bp-ae-suggest-meta">' + this._e("%{count} searches", { count: count }) + "</span>"
           : item.resultCount != null
-            ? '<span class="bp-ae-suggest-meta">' + item.resultCount + " assets</span>"
+            ? '<span class="bp-ae-suggest-meta">' + this._e("%{count} assets", { count: item.resultCount }) + "</span>"
             : "";
       return (
         '<button type="button" class="bp-ae-suggest-item" role="option" data-section="' +
@@ -659,6 +736,7 @@
           this._viewMode = prefs.viewMode;
           this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
             b.classList.toggle("is-active", b.dataset.view === this._viewMode);
+            b.setAttribute("aria-pressed", String(b.dataset.view === this._viewMode));
           });
         }
         if (prefs.sort && SORT_OPTIONS.some((o) => o.id === prefs.sort)) {
@@ -716,8 +794,9 @@
         return;
       }
       this._loadMoreEl.hidden = false;
-      this._loadMoreEl.textContent =
-        "Load more · " + remaining.toLocaleString() + " remaining";
+      this._loadMoreEl.textContent = this._t("Load more · %{count} remaining", {
+        count: fmtCount(remaining)
+      });
     }
 
     _toast(msg) {
@@ -733,13 +812,13 @@
     _copyText(text, label) {
       if (!text || !navigator.clipboard) return;
       navigator.clipboard.writeText(text).then(() => {
-        this._toast((label || "Link") + " copied");
+        this._toast(this._t("%{what} copied", { what: this._t(label || "Link") }));
       });
     }
 
     _kindLabel(id) {
       const match = FILTERS.find((f) => f.id === id);
-      return (match && match.label) || id;
+      return match ? this._t(match.label) : id;
     }
 
     _activeFacetEntries() {
@@ -765,11 +844,19 @@
       return entries;
     }
 
+    // The entries that NARROW the list: search, facets, kind. The open folder
+    // is a place, not a filter (task-575bf6656312084a): counting it made an
+    // empty folder read "No assets match these filters" with no filter set.
+    // Its pill still renders from _activeFacetEntries().
+    _narrowingEntries() {
+      return this._activeFacetEntries().filter(([field]) => field !== "collection");
+    }
+
     _pillLabel(field, value) {
-      if (field === "q") return "Search: " + value;
-      if (field === "collection") return "Collection: " + value;
-      if (field === "kind") return "Kind: " + this._kindLabel(value);
-      const label = FACET_LABELS[field] || field;
+      if (field === "q") return this._t("Search: %{value}", { value: value });
+      if (field === "collection") return this._t("Collection: %{value}", { value: value });
+      if (field === "kind") return this._t("Kind: %{value}", { value: this._kindLabel(value) });
+      const label = FACET_LABELS[field] ? this._t(FACET_LABELS[field]) : field;
       return label + ": " + value;
     }
 
@@ -813,7 +900,7 @@
           })
           .join("") +
         (entries.length > 1
-          ? '<button type="button" class="bp-ae-pill bp-ae-pill--clear">Clear all</button>'
+          ? '<button type="button" class="bp-ae-pill bp-ae-pill--clear">' + this._e("Clear all") + "</button>"
           : "");
       this._pillsEl.querySelectorAll(".bp-ae-pill").forEach((btn) => {
         if (btn.classList.contains("bp-ae-pill--clear")) {
@@ -848,7 +935,7 @@
 
     _renderFindBar() {
       if (!this._findBarEl) return;
-      const entries = this._activeFacetEntries();
+      const entries = this._narrowingEntries();
       if (!entries.length) {
         this._findBarEl.hidden = true;
         this._findBarEl.innerHTML = "";
@@ -858,24 +945,26 @@
       const scope =
         total > 0
           ? total === 1
-            ? "1 asset matches"
-            : total.toLocaleString() + " assets match"
-          : "No assets match";
+            ? this._t("1 asset matches")
+            : this._t("%{count} assets match", { count: fmtCount(total) })
+          : this._t("No assets match");
       this._findBarEl.hidden = false;
       this._findBarEl.innerHTML =
         '<span class="bp-ae-find-scope">' +
         esc(scope) +
-        '</span><span class="bp-ae-find-hint text-muted">Use Refine or clear filters to broaden</span>';
+        '</span><span class="bp-ae-find-hint text-muted">' +
+        this._e("Use Refine or clear filters to broaden") +
+        "</span>";
     }
 
     _emptyMessage() {
-      if (this._activeFacetEntries().length) {
-        return "No assets match these filters — try removing one or search for something broader.";
+      if (this._narrowingEntries().length) {
+        return this._t("No assets match these filters — try removing one or search for something broader.");
       }
       if (this._collectionId) {
-        return "This folder is empty — upload files or add assets from All assets.";
+        return this._t("This folder is empty — upload files or add assets from All assets.");
       }
-      return "No assets yet — upload a file to get started.";
+      return this._t("No assets yet — upload a file to get started.");
     }
 
     _toggleFacet(field, value) {
@@ -916,7 +1005,10 @@
         const entries = facetEntries(this._facets[field]);
         if (!entries.length) return;
         html += '<div class="bp-ae-facet-group">';
-        html += '<div class="bp-ae-facet-label">' + esc(FACET_LABELS[field] || field) + "</div>";
+        html +=
+          '<div class="bp-ae-facet-label">' +
+          (FACET_LABELS[field] ? this._e(FACET_LABELS[field]) : esc(field)) +
+          "</div>";
         entries.forEach(([value, count]) => {
           const active =
             this._facetSelections[field] === value ? " is-active" : "";
@@ -928,7 +1020,7 @@
             '" data-value="' +
             esc(value) +
             '">' +
-            esc(value) +
+            ((FACET_VALUE_WORDS[field] || []).includes(value) ? this._e(value) : esc(value)) +
             ' <span class="bp-ae-facet-count">' +
             esc(String(count)) +
             "</span></button>";
@@ -951,10 +1043,12 @@
         return (
           '<button type="button" class="bp-ae-filter' +
           active +
+          '" aria-pressed="' +
+          (active ? "true" : "false") +
           '" data-kind="' +
           f.id +
           '">' +
-          esc(f.label) +
+          this._e(f.label) +
           "</button>"
         );
       }).join("");
@@ -1001,7 +1095,11 @@
       let html =
         '<button type="button" class="bp-ae-collection' +
         allActive +
-        '" data-id="">All assets</button>';
+        '" aria-pressed="' +
+        (allActive ? "true" : "false") +
+        '" data-id="">' +
+        this._e("All assets") +
+        "</button>";
       html += this._collections
         .map((col) => {
           const active = this._collectionId === col.id ? " is-active" : "";
@@ -1009,6 +1107,8 @@
           return (
             '<button type="button" class="bp-ae-collection' +
             active +
+            '" aria-pressed="' +
+            (active ? "true" : "false") +
             '" data-id="' +
             esc(col.id) +
             '">' +
@@ -1020,7 +1120,9 @@
         .join("");
       if (!this._collections.length) {
         html +=
-          '<p class="bp-ae-collections-empty text-sm text-muted">No folders yet — click + to create one.</p>';
+          '<p class="bp-ae-collections-empty text-sm text-muted">' +
+          this._e("No folders yet — click + to create one.") +
+          "</p>";
       }
       this._collectionsEl.innerHTML = html;
       this._collectionsEl.querySelectorAll(".bp-ae-collection").forEach((btn) => {
@@ -1205,7 +1307,15 @@
     _listHeadHtml() {
       return (
         '<div class="bp-ae-list-head" aria-hidden="true">' +
-        "<span></span><span>Name</span><span>Kind</span><span>Format</span><span>Size</span>" +
+        "<span></span><span>" +
+        this._e("Name") +
+        "</span><span>" +
+        this._e("Kind") +
+        "</span><span>" +
+        this._e("Format") +
+        "</span><span>" +
+        this._e("Size") +
+        "</span>" +
         "</div>"
       );
     }
@@ -1213,7 +1323,7 @@
     _renderListRow(doc) {
       const id = doc._id || "";
       const title = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
-      const kind = esc(doc.bp_asset_kind || "other");
+      const kind = this._e(doc.bp_asset_kind || "other");
       const mime = esc(assetMime(doc) || "—");
       const size = esc(formatSize(doc.fileInfo && doc.fileInfo.size) || "—");
       const sel = this._selected && this._selected._id === id ? " is-selected" : "";
@@ -1259,8 +1369,10 @@
           if (this._loadError) {
             this._emptyEl.classList.add("bp-ae-status-error");
             this._emptyEl.innerHTML =
-              "Couldn't load your media library — the request failed. " +
-              '<button type="button" class="bp-ae-retry-btn">Retry</button>';
+              this._e("Couldn't load your media library — the request failed.") +
+              ' <button type="button" class="bp-ae-retry-btn">' +
+              this._e("Retry") +
+              "</button>";
             const retryBtn = this._emptyEl.querySelector(".bp-ae-retry-btn");
             if (retryBtn) {
               retryBtn.addEventListener("click", () => this._loadAssets());
@@ -1345,12 +1457,20 @@
           const inner =
             kind === "image"
               ? '<img src="' + thumbUrl + '" alt="" />'
-              : '<span>' + esc(kind) + "</span>";
+              : '<span>' + this._e(kind) + "</span>";
+          // The thumbnail is decorative (alt=""), so the button carries the
+          // asset's name and whether it is the selected one — before this it
+          // had no accessible name at all (task-d4619e875ace82ca).
+          const name = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
           return (
             '<button type="button" class="bp-ae-strip-item' +
             sel +
             '" data-id="' +
             esc(id) +
+            '" aria-label="' +
+            name +
+            '" aria-pressed="' +
+            (sel ? "true" : "false") +
             '">' +
             inner +
             "</button>"
@@ -1400,7 +1520,7 @@
       const proc = String(status || "ready").toLowerCase();
       const variant =
         proc === "processing" ? "processing" : proc === "failed" ? "failed" : "ready";
-      return this._statusBadge(proc, variant);
+      return this._statusBadge(this._t(proc), variant);
     }
 
     _statusBadge(label, variant) {
@@ -1429,7 +1549,9 @@
       let tagsHtml = "";
       if (tagList.length) {
         tagsHtml =
-          "<dt>Tags</dt><dd>" +
+          "<dt>" +
+          this._e("Tags") +
+          "</dt><dd>" +
           tagList
             .map((t) => '<span class="bp-ae-tag">' + esc(String(t)) + "</span>")
             .join(" ") +
@@ -1438,24 +1560,31 @@
 
       this._inspectorBody.innerHTML =
         preview +
-        '<h3 class="bp-ae-inspector-title">' +
+        // h2: the page's h1 is the library; nothing sits between (axe heading-order).
+        '<h2 class="bp-ae-inspector-title">' +
         esc(doc.title || fi.originalName || doc._id) +
-        "</h3>" +
+        "</h2>" +
         '<div class="bp-ae-inspector-status">' +
         this._procBadge(payload.bp_processing_status) +
-        this._statusBadge(doc.visibility || payload.bp_visibility || "public", "visibility") +
+        this._statusBadge(this._t(doc.visibility || payload.bp_visibility || "public"), "visibility") +
         "</div>" +
         '<dl class="bp-ae-meta">' +
-        "<dt>Kind</dt><dd>" +
-        esc(kind) +
+        "<dt>" +
+        this._e("Kind") +
+        "</dt><dd>" +
+        this._e(kind) +
         "</dd>" +
         "<dt>MIME</dt><dd>" +
         esc(assetMime(doc)) +
         "</dd>" +
-        "<dt>Size</dt><dd>" +
+        "<dt>" +
+        this._e("Size") +
+        "</dt><dd>" +
         esc(formatSize(fi.size)) +
         "</dd>" +
-        "<dt>Updated</dt><dd>" +
+        "<dt>" +
+        this._e("Updated") +
+        "</dt><dd>" +
         esc(fmtDate(doc._updatedAt || payload._updatedAt)) +
         "</dd>" +
         tagsHtml +
@@ -1464,29 +1593,39 @@
         '<div class="bp-ae-relations text-sm" hidden></div>' +
         '<div class="bp-ae-inspector-actions">' +
         '<div class="bp-ae-action-row">' +
-        '<button type="button" class="btn btn-sm bp-ae-checkout" hidden>Check out</button>' +
-        '<button type="button" class="btn btn-sm bp-ae-undo-checkout" hidden>Release</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-checkout" hidden>' + this._e("Check out") + "</button>" +
+        '<button type="button" class="btn btn-sm bp-ae-undo-checkout" hidden>' + this._e("Release") + "</button>" +
         '<div class="bp-ae-copy-menu">' +
-        '<button type="button" class="btn btn-sm bp-ae-copy-toggle">Copy link ▾</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-copy-toggle">' + this._e("Copy link") + " ▾</button>" +
         '<div class="bp-ae-copy-dropdown" hidden>' +
-        '<button type="button" data-link="original">Original</button>' +
-        '<button type="button" data-link="preview">Preview</button>' +
-        '<button type="button" data-link="thumb">Thumbnail</button>' +
+        '<button type="button" data-link="original">' + this._e("Original") + "</button>" +
+        '<button type="button" data-link="preview">' + this._e("Preview") + "</button>" +
+        '<button type="button" data-link="thumb">' + this._e("Thumbnail") + "</button>" +
         "</div></div></div>" +
         (this._collectionId && this._currentCollection() && this._currentCollection().kind !== "virtual"
-          ? '<button type="button" class="btn btn-sm bp-ae-remove-member">Remove from collection</button>'
+          ? '<button type="button" class="btn btn-sm bp-ae-remove-member">' +
+            this._e("Remove from collection") +
+            "</button>"
           : "") +
         (this._collections.filter((c) => c.kind !== "virtual").length
-          ? '<select class="form-input bp-ae-add-collection"><option value="">Add to collection…</option></select>'
+          ? '<select class="form-input bp-ae-add-collection" aria-label="' +
+            this._e("Add to collection") +
+            '"><option value="">' +
+            this._e("Add to collection…") +
+            "</option></select>"
           : "") +
         "</div>" +
         '<div class="bp-ae-action-row bp-ae-action-row--secondary">' +
         (this._openPath()
-          ? '<button type="button" class="btn btn-primary btn-sm bp-ae-open-doc">Edit metadata</button>'
+          ? '<button type="button" class="btn btn-primary btn-sm bp-ae-open-doc">' +
+            this._e("Edit metadata") +
+            "</button>"
           : "") +
         '<a class="btn btn-sm bp-ae-open-doc-link" href="' +
         esc(originalUrl) +
-        '" target="_blank" rel="noopener">Open file</a>' +
+        '" target="_blank" rel="noopener">' +
+        this._e("Open file") +
+        "</a>" +
         "</div></div>";
 
       const openBtn = this._inspectorBody.querySelector(".bp-ae-open-doc");
@@ -1555,13 +1694,13 @@
           '<div class="bp-ae-inspector-preview"><img class="bp-ae-inspector-img" src="' +
           esc(previewUrl) +
           '" alt="" /><span class="bp-ae-preview-badge">' +
-          esc(kind === "video" ? "Video preview" : "Preview") +
+          this._e(kind === "video" ? "Video preview" : "Preview") +
           "</span></div>"
         );
       }
       const label =
         kind === "document" ? "Document" : kind === "video" ? "Video" : kind === "audio" ? "Audio" : kind;
-      return '<div class="bp-ae-inspector-icon">' + esc(label) + "</div>";
+      return '<div class="bp-ae-inspector-icon">' + this._e(label) + "</div>";
     }
 
     async _fetchAssetDetail(doc) {
@@ -1601,7 +1740,16 @@
 
       if (isCheckedOut) {
         row.hidden = false;
-        row.innerHTML = this._statusBadge("Checked out by " + checkedOutBy, "lock");
+        // The server names the holder for THIS viewer (task-36a302b2e981d5e1):
+        // "you", a token's label, the holder's display name, or "another
+        // editor". checkedOutBy itself is a stamp ("user:<id>", or a legacy
+        // email) and is never printed. The two fixed words go through _t; a
+        // name has no entry, so it reads as written.
+        const who = detail && typeof detail.checkoutLabel === "string" ? this._t(detail.checkoutLabel) : "";
+        row.innerHTML = this._statusBadge(
+          who ? this._t("Checked out by %{who}", { who: who }) : this._t("Checked out"),
+          "lock"
+        );
         checkoutBtn.hidden = true;
         undoBtn.hidden = false;
       } else {
@@ -1618,8 +1766,11 @@
       if (statusEl && detail) {
         let badges =
           this._procBadge(payload.bp_processing_status) +
-          this._statusBadge(detail.visibility || payload.bp_visibility || "public", "visibility");
-        if (isCheckedOut) badges += this._statusBadge("Locked", "lock");
+          this._statusBadge(
+            this._t(detail.visibility || payload.bp_visibility || "public"),
+            "visibility"
+          );
+        if (isCheckedOut) badges += this._statusBadge(this._t("Locked"), "lock");
         statusEl.innerHTML = badges;
       }
     }
@@ -1634,10 +1785,10 @@
           headers: this._headers()
         });
         if (!r.ok) throw new Error(String(r.status));
-        this._toast("Asset checked out");
+        this._toast(this._t("Asset checked out"));
         await this._fetchAssetDetail(doc);
       } catch (_e) {
-        this._toast("Checkout failed");
+        this._toast(this._t("Checkout failed"));
       }
     }
 
@@ -1650,10 +1801,10 @@
           { method: "POST", credentials: "same-origin", headers: this._headers() }
         );
         if (!r.ok) throw new Error(String(r.status));
-        this._toast("Checkout released");
+        this._toast(this._t("Checkout released"));
         await this._fetchAssetDetail(doc);
       } catch (_e) {
-        this._toast("Release failed");
+        this._toast(this._t("Release failed"));
       }
     }
 
@@ -1668,19 +1819,19 @@
       this._inspectorBody.hidden = false;
       this._inspectorMode = "collection";
 
-      const kindLabel = col.kind === "virtual" ? "Smart collection" : "Folder";
+      const kindLabel = this._t(col.kind === "virtual" ? "Smart collection" : "Folder");
       // The folder's own total, not the loaded page (a folder larger than one
       // page would otherwise read as the page size).
       const count = Math.max(this._total || 0, this._assets.length);
-      const countLabel = count === 1 ? "1 asset" : count + " assets";
+      const countLabel = count === 1 ? this._t("1 asset") : this._t("%{count} assets", { count: count });
 
       this._inspectorBody.innerHTML =
         '<div class="bp-ae-collection-icon">' +
         (col.kind === "virtual" ? "⚡" : "📁") +
         "</div>" +
-        '<h3 class="bp-ae-inspector-title">' +
+        '<h2 class="bp-ae-inspector-title">' +
         esc(col.title || col.id) +
-        "</h3>" +
+        "</h2>" +
         '<div class="bp-ae-inspector-status">' +
         this._statusBadge(kindLabel, "visibility") +
         this._statusBadge(countLabel, "muted") +
@@ -1689,18 +1840,20 @@
           ? '<p class="bp-ae-collection-desc text-sm text-muted">' + esc(col.description) + "</p>"
           : "") +
         '<div class="bp-ae-share-block">' +
-        '<div class="bp-ae-share-label text-sm text-muted">Public share link</div>' +
+        '<div class="bp-ae-share-label text-sm text-muted">' + this._e("Public share link") + "</div>" +
         '<div class="bp-ae-share-row" hidden>' +
         '<input type="text" class="form-input bp-ae-share-url" readonly />' +
-        '<button type="button" class="btn btn-sm bp-ae-share-copy">Copy</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-share-copy">' + this._e("Copy") + "</button>" +
         "</div>" +
         '<div class="bp-ae-share-actions">' +
-        '<button type="button" class="btn btn-primary btn-sm bp-ae-share-create">Generate link</button>' +
-        '<button type="button" class="btn btn-sm bp-ae-share-revoke" hidden>Revoke</button>' +
+        '<button type="button" class="btn btn-primary btn-sm bp-ae-share-create">' + this._e("Generate link") + "</button>" +
+        '<button type="button" class="btn btn-sm bp-ae-share-revoke" hidden>' + this._e("Revoke") + "</button>" +
         "</div></div>" +
         '<div class="bp-ae-inspector-actions">' +
         (col.kind !== "virtual" && this._selected
-          ? '<button type="button" class="btn btn-sm bp-ae-add-selected">Add selected to folder</button>'
+          ? '<button type="button" class="btn btn-sm bp-ae-add-selected">' +
+            this._e("Add selected to folder") +
+            "</button>"
           : "") +
         "</div>";
 
@@ -1714,7 +1867,7 @@
         shareRow.hidden = false;
         const raw = this._shareInfo.shareUrl;
         shareInput.value = raw.indexOf("http") === 0 ? raw : window.location.origin + raw;
-        createBtn.textContent = "Rotate link";
+        createBtn.textContent = this._t("Rotate link");
         revokeBtn.hidden = false;
       }
 
@@ -1741,11 +1894,11 @@
         if (!r.ok) throw new Error(String(r.status));
         const data = await r.json();
         this._shareInfo = (data && data.result) || null;
-        this._toast("Share link created");
+        this._toast(this._t("Share link created"));
         await this._loadCollections();
         this._renderCollectionInspector();
       } catch (_e) {
-        this._toast("Share link failed");
+        this._toast(this._t("Share link failed"));
       }
     }
 
@@ -1757,11 +1910,11 @@
         );
         if (!r.ok) throw new Error(String(r.status));
         this._shareInfo = null;
-        this._toast("Share link revoked");
+        this._toast(this._t("Share link revoked"));
         await this._loadCollections();
         this._renderCollectionInspector();
       } catch (_e) {
-        this._toast("Revoke failed");
+        this._toast(this._t("Revoke failed"));
       }
     }
 
@@ -1779,10 +1932,10 @@
           }
         );
         if (!r.ok) throw new Error(String(r.status));
-        this._toast("Added to collection");
+        this._toast(this._t("Added to collection"));
         if (this._collectionId === collectionId) await this._loadAssets();
       } catch (_e) {
-        this._toast("Could not add to collection");
+        this._toast(this._t("Could not add to collection"));
       }
     }
 
@@ -1799,17 +1952,28 @@
           { method: "DELETE", credentials: "same-origin", headers: this._headers() }
         );
         if (!r.ok) throw new Error(String(r.status));
-        this._toast("Removed from collection");
+        this._toast(this._t("Removed from collection"));
         await this._loadAssets();
         if (this._selected) this._renderAssetInspector(this._selected);
       } catch (_e) {
-        this._toast("Remove failed");
+        this._toast(this._t("Remove failed"));
       }
     }
 
     _openCollectionModal() {
       if (!this._modalEl || !this._modalInput) return;
-      this._modalInput.value = "New folder";
+      this._modalInput.value = this._t("New folder");
+      // The shared dialog focus manager (bp-modal-focus.js): Escape from any
+      // control closes, Tab stays inside, and closing gives focus back to
+      // the opener (task-3713c75065d471d4; one copy since the dialog sweep).
+      const mf = window.BarkparkModalFocus;
+      this._releaseModal =
+        mf && typeof mf.trap === "function"
+          ? mf.trap(this._modalEl, {
+              onEscape: () => this._closeCollectionModal(),
+              fallback: this.querySelector(".bp-ae-new-collection")
+            })
+          : null;
       this._modalEl.hidden = false;
       requestAnimationFrame(() => {
         this._modalInput.focus();
@@ -1818,13 +1982,17 @@
     }
 
     _closeCollectionModal() {
-      if (this._modalEl) this._modalEl.hidden = true;
+      if (!this._modalEl || this._modalEl.hidden) return;
+      this._modalEl.hidden = true;
+      const release = this._releaseModal;
+      this._releaseModal = null;
+      if (release) release();
     }
 
     _submitCollectionModal() {
       const title = (this._modalInput && this._modalInput.value || "").trim();
       if (!title) {
-        this._toast("Enter a collection name");
+        this._toast(this._t("Enter a collection name"));
         if (this._modalInput) this._modalInput.focus();
         return;
       }
@@ -1834,36 +2002,28 @@
 
     async _createCollection(title) {
       if (!title) return;
-      const id = "col-" + Date.now().toString(36);
       try {
-        const r = await fetch(this._scopePrefix() + "/v1/data/mutate/" + encodeURIComponent(this._dataset()), {
+        // The media-scoped folder door (task-c09196a99fad3d3a). It used to be a
+        // create+publish batch on /v1/data/mutate, whose scoped pipeline is
+        // token-only, so an account (cookie) session got 403.
+        const r = await fetch(this._mediaBase() + "/collections", {
           method: "POST",
           credentials: "same-origin",
           headers: this._headers(true),
-          body: JSON.stringify({
-            mutations: [
-              {
-                create: {
-                  _type: "mediaCollection",
-                  _id: id,
-                  title: title,
-                  kind: "folder",
-                  slug: id
-                }
-              },
-              { publish: { id: id, type: "mediaCollection" } }
-            ]
-          })
+          body: JSON.stringify({ title: title })
         });
         if (!r.ok) throw new Error(String(r.status));
-        this._toast("Collection created");
+        const data = await r.json();
+        const id = data && data.result && data.result.id;
+        if (!id) throw new Error("no id");
+        this._toast(this._t("Collection created"));
         this._collectionId = id;
         this._inspectorMode = "collection";
         await this._loadCollections();
         await this._loadAssets();
         this._renderCollectionInspector();
       } catch (_e) {
-        this._toast("Could not create collection");
+        this._toast(this._t("Could not create collection"));
       }
     }
 
@@ -1897,7 +2057,8 @@
             "?";
           lines.push("← " + esc(edge.relation) + ": " + esc(title));
         });
-        el.innerHTML = "<strong>Relations</strong><div>" + lines.join("<br/>") + "</div>";
+        el.innerHTML =
+          "<strong>" + this._e("Relations") + "</strong><div>" + lines.join("<br/>") + "</div>";
       } catch (_e) {
         /* optional */
       }
@@ -1906,7 +2067,13 @@
     async _uploadFiles(fileList) {
       const headers = { Accept: "application/json" };
       const tok = this._token();
+      // The same two credentials `_headers/2` sends (task-8cf148ac47fb34ae):
+      // a bearer when the page has one, otherwise the account-session
+      // header the cookie branch requires. Without it every account/SSO
+      // user's upload was refused 403 csrf_required. No Content-Type: the
+      // browser sets the multipart boundary.
       if (tok) headers["Authorization"] = "Bearer " + tok;
+      else headers["x-requested-with"] = "bp-asset-explorer";
 
       let failed = 0;
 
@@ -1929,20 +2096,20 @@
           if (!r.ok) {
             failed++;
             if (r.status === 401) {
-              this._toast("Upload blocked — sign in at /login with barkpark-dev-token");
+              this._toast(this._t("Upload blocked — your session has ended. Sign in again."));
             } else {
-              this._toast("Upload failed (" + r.status + ")");
+              this._toast(this._t("Upload failed (%{status})", { status: r.status }));
             }
           }
         } catch (_e) {
           failed++;
-          this._toast("Upload failed — check that the API is running");
+          this._toast(this._t("Upload failed — check that the API is running"));
         }
       }
 
       if (!failed) {
         this._setStatus("");
-        this._toast("Upload complete");
+        this._toast(this._t("Upload complete"));
       }
       await this._loadAssets();
     }
@@ -1960,25 +2127,22 @@
 
       if (col) {
         if (total > loaded) {
-          return (
-            "Showing " +
-            loaded +
-            " of " +
-            total +
-            " in " +
-            (col.title || col.id)
-          );
+          return this._t("Showing %{loaded} of %{total} in %{name}", {
+            loaded: loaded,
+            total: total,
+            name: col.title || col.id
+          });
         }
-        return loaded + " in " + (col.title || col.id);
+        return this._t("%{loaded} in %{name}", { loaded: loaded, name: col.title || col.id });
       }
 
       if (total > loaded) {
-        return "Showing " + loaded + " of " + total + " assets";
+        return this._t("Showing %{loaded} of %{total} assets", { loaded: loaded, total: total });
       }
       if (total === loaded && total > 0) {
-        return total === 1 ? "1 asset" : total + " assets";
+        return total === 1 ? this._t("1 asset") : this._t("%{count} assets", { count: total });
       }
-      return loaded === 1 ? "1 asset" : loaded + " assets";
+      return loaded === 1 ? this._t("1 asset") : this._t("%{count} assets", { count: loaded });
     }
   }
 

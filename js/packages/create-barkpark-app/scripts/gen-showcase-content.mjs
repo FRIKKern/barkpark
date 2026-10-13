@@ -20,8 +20,17 @@ const here = dirname(fileURLToPath(import.meta.url))
 const GOLDEN_DIR = join(here, '..', '..', 'react', 'tests', 'fixtures', 'pd-golden')
 const OUT = join(here, '..', 'templates', 'blog-starter', 'seeds', 'showcase-content.ts')
 
+// The schema field blocks are OPT-IN in @barkpark/react
+// (@barkpark/react/field-blocks, task-7375ba22758155fa): the blog starter does
+// not register them, and a blog post holds no schema fields, so they stay out.
+const { fieldBlocks } = await import('@barkpark/react/field-blocks')
+const { embedBlocks } = await import('@barkpark/react/embed')
+// `embed` too: a transclusion needs its target pre-rendered, which a static seed has not.
+const OPT_IN = new Set([...Object.keys(fieldBlocks), ...Object.keys(embedBlocks())])
+
 const files = readdirSync(GOLDEN_DIR)
   .filter((f) => f.endsWith('.golden.json'))
+  .filter((f) => !OPT_IN.has(f.replace(/\.golden\.json$/, '')))
   .sort()
 
 const blocks = files.map((f) => {

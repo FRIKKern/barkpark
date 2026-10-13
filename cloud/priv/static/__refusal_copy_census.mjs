@@ -770,6 +770,10 @@ const PIN = [
   // diff that deleted its wire-vs-reader census row.
   { key: "MAP|ERRORS.installation_not_found", verdict: "CONSULTED", copy: "Barkpark can't see that GitHub installation any more — it w..." },
   { key: "MAP|ERRORS.install_state_invalid", verdict: "CONSULTED", copy: "That GitHub install link was started by another account or..." },
+  // task-0cf611238d4ad597 CQ7a: the 422s on POST /v1/github/installations when the
+  // install came back without GitHub's user authorization, or GitHub refused it.
+  { key: "MAP|ERRORS.github_authorization_required", verdict: "CONSULTED", copy: "GitHub didn't send an authorization with this install, so Barkpark can..." },
+  { key: "MAP|ERRORS.github_authorization_failed", verdict: "CONSULTED", copy: "GitHub refused the authorization for this install \\u2014 it may have e..." },
   // githubInstallOutcome's two TOAST sentences. AUTHORED, both, and neither is
   // a refusal CAUSE: the first is the console's own success line for a 201 it
   // verified (installation.connected === true and nothing less), the second is
@@ -824,6 +828,9 @@ const PIN = [
   { key: "FN|deployLoadFailureHtml|08e51fd2", verdict: "UNREVIEWED", copy: "<p class=\"muted\">The server replied:" },
   { key: "FN|accountTwoFactorErrorCopy|2cc1513b", verdict: "UNREVIEWED", copy: "That code didn't match. Check your authenticator app and en..." },
   { key: "FN|accountTwoFactorErrorCopy|7b0c80b9", verdict: "UNREVIEWED", copy: "That setup is no longer pending. Start again to get a fresh..." },
+  // task-e4cdc0f2e7766e1a: CONSULTED, it branches on the server's 401 reauth_failed
+  // (cloud router DELETE /v1/account/two-factor), which the server emits.
+  { key: "FN|twoFactorOffReauthCopy|e54d88ea", verdict: "CONSULTED", copy: "That password or code didn't match. Enter your account pass..." },
   { key: "ARG|run|ctl.fail|acff7839", verdict: "DELEGATED", copy: "Couldn't turn two-factor off." },
   { key: "ARG|run|friendly|2b55dad9", verdict: "DELEGATED", copy: "Couldn't sign out the other devices." },
   { key: "ARG|run|ctl.fail|2b55dad9", verdict: "DELEGATED", copy: "Couldn't sign out the other devices." },
@@ -882,6 +889,9 @@ const PIN = [
   { key: "ARG|attachDomainFailureCopy|friendly|6f7b7820", verdict: "DELEGATED", copy: "Something went wrong — please try again." },
   { key: "FN|addSupportErrorCopy|45d1a36b", verdict: "UNREVIEWED", copy: "This server has no stored admin credentials, so a support c..." },
   { key: "FN|addSupportErrorCopy|ca370b1b", verdict: "UNREVIEWED", copy: "You're at your plan's support-server limit." },
+  { key: "FN|addSupportErrorCopy|44c74178", verdict: "AUTHORED", copy: "Your team is at its support-server cap." },
+  { key: "FN|addSupportErrorCopy|4089fcb5", verdict: "CONSULTED", copy: "Your team is at its cap of" },
+  { key: "FN|addSupportErrorCopy|5c57a528", verdict: "AUTHORED", copy: "Remove one, or ask Barkpark support to raise the cap." },
   { key: "ARG|addSupportErrorCopy|friendly|b230fdae", verdict: "DELEGATED", copy: "Couldn't add the support server — please try again." },
   { key: "FN|updateConflictCopy|fbbaa42b", verdict: "UNREVIEWED", copy: "You can't update this instance" },
   { key: "FN|updateConflictCopy|0deec518", verdict: "UNREVIEWED", copy: "This instance is pinned" },

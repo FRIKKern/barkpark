@@ -52,7 +52,7 @@ defmodule BarkparkWeb.SearchSynonymsFailClosedTest do
   defp insert_admin_token!(attrs) do
     raw = "tok-" <> Ecto.UUID.generate()
 
-    {:ok, _token} =
+    {:ok, token} =
       %ApiToken{}
       |> ApiToken.changeset(
         Map.merge(
@@ -66,6 +66,19 @@ defmodule BarkparkWeb.SearchSynonymsFailClosedTest do
         )
       )
       |> Repo.insert()
+
+    # Every real mint path seats a bound token (`Auth.create_token/5`: `admin`
+    # permission => `admin` seat). Since owner ruling #2 the seat is what
+    # RequireAdmin checks, so a bound fixture carries the seat a mint gives it.
+    if is_binary(token.workspace_id) do
+      {:ok, _} =
+        Barkpark.Tenancy.Auth.create_membership(
+          token.workspace_id,
+          token.id,
+          "admin",
+          "api_token"
+        )
+    end
 
     raw
   end

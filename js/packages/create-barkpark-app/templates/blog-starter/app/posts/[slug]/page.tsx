@@ -12,6 +12,7 @@ import { formatDate } from '../../../lib/format-date'
 import { DraftModePreview } from './draft-preview'
 import { PortableDocSurface } from './portable-doc-surface'
 import { slugOf, type SlugValue } from '../../../lib/slug'
+import { refOf, type RefValue } from '../../../lib/ref'
 
 interface Author {
   _id: string
@@ -36,8 +37,8 @@ interface Post {
   // block grammar) — rendered by `@barkpark/react`'s `PortableDoc`, NOT Sanity
   // PortableText.
   content?: Block[]
-  author?: { _ref: string }
-  tags?: Array<{ _ref: string }>
+  author?: RefValue
+  tags?: RefValue[]
 }
 
 export async function generateMetadata({
@@ -66,10 +67,14 @@ export default async function PostPage({
   const post = await getDocBySlug<Post>('post', slug, isDraft)
   if (!post) notFound()
 
+  const authorId = refOf(post.author)
   const [author, tags] = await Promise.all([
-    post.author?._ref ? getDocById<Author>('author', post.author._ref, isDraft) : null,
+    authorId ? getDocById<Author>('author', authorId, isDraft) : null,
     Promise.all(
-      (post.tags ?? []).map((t) => getDocById<Tag>('tag', t._ref, isDraft)),
+      (post.tags ?? [])
+        .map((t) => refOf(t))
+        .filter((id): id is string => id !== undefined)
+        .map((id) => getDocById<Tag>('tag', id, isDraft)),
     ).then((arr) => arr.filter((t): t is Tag => t !== null)),
   ])
 

@@ -67,6 +67,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :form_gen, :integer, default: 0
   attr :doc_type, :string, default: "document"
   attr :document_rev, :string, default: nil
+  # Whether the viewer may change a `readOnly` schema field (an admin, as the
+  # server's #21536 rule). `false` renders such a field display-only; `nil`
+  # (a caller that does not say) keeps the ordinary input.
+  attr :schema_admin, :boolean, default: nil
   # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
   # the pickers' scope-prefix attribute so their fetches hit the scoped API
   # mirror. "" on the flat surface keeps every fetch byte-identical.
@@ -90,7 +94,28 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # Types whose own clause below already copes with a structured (map/list)
   # stored value: reference/image read ids and JSON, array/object render
   # read-only JSON, richText renders block content read-only.
-  @structured_value_types ~w(richText reference image array object)
+  @structured_value_types ~w(richText reference image array object slug)
+
+  # A schema field declared `"readOnly": true` is shown, not edited, in the
+  # Classic form for a NON-admin (task-d483903133c370e1). No form input is
+  # rendered, so the save never posts it and the stored value survives
+  # byte-identical, the same way the structured-value clause above keeps a value
+  # it cannot show. It matches the server rule (#21536): the mutate door refuses
+  # a non-admin change and keeps an admin's. So an admin (`schema_admin: true`,
+  # from `Caps.admin_affordance?/1`) gets the ordinary input below, and a
+  # caller that does not say (`schema_admin` absent) keeps today's input too.
+  # Declared before the structured-value clause so a readOnly composite (a
+  # map, like mediaAsset `fileInfo`) is display-only too (task-08b6c963d72ce983).
+  def input(%{field: %{"readOnly" => true, "name" => name}, schema_admin: false} = assigns) do
+    form = assigns[:editor_form] || %{}
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-schema-readonly>
+      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
+    </div>
+    """
+  end
 
   # A SCALAR input handed a STRUCTURED stored value — a Sanity-shaped slug
   # `{"_type": "slug", "current": "…"}`, an object in a string field, a list in
@@ -108,7 +133,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n} data-structured-value>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — stored as structured data this field's editor cannot show; saved unchanged") %></span>
     </div>
     """
   end
@@ -146,7 +171,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <% end %>
     </div>
     <select :if={not @radio} id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
-      <option :if={@show_placeholder} value="" selected disabled={@required}>Select…</option>
+      <option :if={@show_placeholder} value="" selected disabled={@required}><%= gettext("Select…") %></option>
       <%= for o <- @opts do %><option value={o.value} selected={o.value == @v}><%= o.label %></option><% end %>
     </select>
     """
@@ -199,6 +224,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
       data-canvas-vocabulary={@vocab_json}
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
+      data-save-strings={field_canvas_save_strings()}
+      data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
       data-test-id="field-canvas"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -219,6 +246,16 @@ defmodule BarkparkWeb.Components.FieldInputs do
     case Map.get(assigns.editor_form, name, "") do
       val when is_binary(val) or is_nil(val) ->
         rich_text_editor(assign(assigns, n: name, v: val))
+
+      # Portable Text (owner ruling #44) edits as HTML in the contenteditable;
+      # the save turns it back into blocks.
+      blocks when name not in ["body", "blocks"] and is_list(blocks) and blocks != [] ->
+        if Barkpark.Content.PortableText.blocks?(blocks),
+          do:
+            rich_text_editor(
+              assign(assigns, n: name, v: Barkpark.Content.PortableText.to_html(blocks))
+            ),
+          else: rich_text_readonly(assign(assigns, n: name, v: readonly_json(blocks)))
 
       blocks ->
         rich_text_readonly(assign(assigns, n: name, v: readonly_json(blocks)))
@@ -248,17 +285,28 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <input type="hidden" name={"doc[#{@n}]"} value="false" />
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="checkbox" name={"doc[#{@n}]"} value="true" checked={@c} phx-debounce="100" />
       <span class="form-switch-track" aria-hidden="true"></span>
-      <span class="form-switch-state"><%= if @c, do: "On", else: "Off" %></span>
+      <%!-- Both words ship and CSS `:checked` shows the true one, so the word
+            follows a click before any re-render, in the Studio language
+            (task-70fd7cef5d0266aa). aria-hidden: the checkbox announces its state. --%>
+      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off"><%= gettext("Off") %></span><span class="form-switch-state-on"><%= gettext("On") %></span></span>
     </label>
     """
   end
 
+  # A datetime shows local wall time and saves a UTC instant (owner ruling
+  # #46). The HIDDEN input carries the name and the stored value and is the
+  # only control the form posts; the nameless picker is the editor's view,
+  # and `BarkparkDatetimeField` (priv/static/assets/bp-datetime-field.js)
+  # converts between the two.
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="datetime-local" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="300" />
+    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+      <input type="hidden" id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
+      <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+    </div>
     """
   end
 
@@ -281,7 +329,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     hidden_v = if has_value, do: stored, else: ""
     # Native picker needs a #rrggbb value; use a neutral fallback when unset.
     picker_v = if has_value, do: stored, else: "#000000"
-    label = if has_value, do: stored, else: "No color"
+    label = if has_value, do: stored, else: gettext("No color")
 
     picker_style =
       "width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" <>
@@ -302,7 +350,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <input type="hidden" data-color-value name={"doc[#{@n}]"} value={@hidden_v} phx-debounce="300" />
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="color" value={@picker_v} data-color-unset={to_string(not @has_value)} style={@picker_style} />
       <span style="font-family:var(--font-mono);font-size:13px;"><%= @label %></span>
-      <button :if={@has_value} type="button" data-color-clear class="btn btn-sm" style="font-size:12px;">Clear</button>
+      <button :if={@has_value} type="button" data-color-clear class="btn btn-sm" style="font-size:12px;"><%= gettext("Clear") %></button>
     </div>
     """
   end
@@ -402,7 +450,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # exactly like a typed value. The input itself stays the standard text
   # input (hand-editing always wins).
   def input(%{field: %{"type" => "slug", "name" => name} = f} = assigns) do
-    val = scalar_text(Map.get(assigns.editor_form, name, ""))
+    # Either stored shape edits as its text (owner ruling #43).
+    raw = Map.get(assigns.editor_form, name, "")
+    val = if is_map(raw), do: Barkpark.Content.SlugValue.text(raw) || "", else: scalar_text(raw)
     source = slug_source_of(f)
     assigns = assign(assigns, n: name, v: val, source: source)
 
@@ -432,7 +482,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n} data-source-field>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;line-height:1.5;white-space:pre;overflow:auto;max-height:60vh;opacity:0.85;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — the .scaffy source of truth; edit in the repo</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — the .scaffy source of truth; edit in the repo") %></span>
     </div>
     """
   end
@@ -454,7 +504,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n}>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — managed via API</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — managed via API") %></span>
     </div>
     """
   end
@@ -524,11 +574,40 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # alt-text input the way Sanity does (`options.hotspot`), or flat:
   # {"type":"image","hotspot":true,"alt":true}. Absent → the picker renders
   # byte-identically (the attribute is omitted, not set to "false").
-  defp image_option?(field, key) do
-    flat = Map.get(field, key)
-    nested = get_in(field, ["options", key])
-    if flat == true or nested == true, do: true, else: nil
+  #
+  # Sanity also declares alt text as a SUBFIELD, `fields: [{name: "alt"}]`
+  # (task-6f2b84a0e32688ad, server side task-f0f51946d2de672d): the picker's alt
+  # input then edits that subfield, which sits on the image object as `alt`,
+  # beside the asset (docs/contracts/schema-v2.md "Stored value shapes").
+  defp image_option?(field, "alt" = key) do
+    if image_flag?(field, key) or declares_subfield?(field, "alt"), do: true, else: nil
   end
+
+  defp image_option?(field, key), do: if(image_flag?(field, key), do: true, else: nil)
+
+  defp image_flag?(field, key),
+    do: Map.get(field, key) == true or get_in(field, ["options", key]) == true
+
+  defp declares_subfield?(field, name) do
+    case Map.get(field, "fields") do
+      fields when is_list(fields) ->
+        Enum.any?(fields, &(is_map(&1) and (&1["name"] || &1[:name]) == name))
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  The picker attributes an image schema field asks for — `%{hotspot:, alt:}`,
+  each `true` or `nil` (omitted). Shared by the Classic input and Beta's
+  property rows so both offer the same controls.
+  """
+  @spec image_picker_flags(map() | nil) :: %{hotspot: true | nil, alt: true | nil}
+  def image_picker_flags(%{} = field),
+    do: %{hotspot: image_option?(field, "hotspot"), alt: image_option?(field, "alt")}
+
+  def image_picker_flags(_), do: %{hotspot: nil, alt: nil}
 
   # The picker's wire value is a STRING (a bare URL or a JSON object). A value
   # that was decoded into a map at the save boundary (Forms.coerce_field_value)
@@ -549,11 +628,17 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def slug_source_of(_), do: "title"
 
+  # The text box's accessible name: the field's title, else its name.
+  defp rich_text_label(%{"title" => title}, _name) when is_binary(title) and title != "",
+    do: title
+
+  defp rich_text_label(_field, name), do: name
+
   defp rich_text_editor(assigns) do
     ~H"""
     <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}></bp-rich-text-editor>
     </div>
     """
   end
@@ -604,7 +689,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n}>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged") %></span>
     </div>
     """
   end
@@ -669,7 +754,27 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp to_types(_), do: []
 
-  defp image_form_value(%{} = map), do: Jason.encode!(map)
-  defp image_form_value(v) when is_binary(v), do: v
-  defp image_form_value(_), do: ""
+  @doc """
+  The image picker's wire value: a stored image object re-encoded as JSON, a
+  string as is, anything else empty. Shared with the Beta block editor, whose
+  field-image block carries the stored value verbatim.
+  """
+  def image_form_value(%{} = map), do: Jason.encode!(map)
+  def image_form_value(v) when is_binary(v), do: v
+  def image_form_value(_), do: ""
+
+  # The words the field canvas hook shows when a save does not land
+  # (task-fcbf22671c0c82df), in the Studio's language, keyed by the English.
+  defp field_canvas_save_strings do
+    Jason.encode!(%{
+      "Save paused" => gettext("Save paused"),
+      "This document changed elsewhere. Your edits are still here." =>
+        gettext("This document changed elsewhere. Your edits are still here."),
+      "Keep mine" => gettext("Keep mine"),
+      "Use latest" => gettext("Use latest"),
+      "Not saved" => gettext("Not saved"),
+      "This edit was not saved. Your text is still here." =>
+        gettext("This edit was not saved. Your text is still here.")
+    })
+  end
 end

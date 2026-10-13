@@ -74,7 +74,7 @@ Examples:
   bp-vercel-quick-setup.sh --site hundesteder --app-dir apps/hundesteder \
     --schema templates/place-directory/schemas/place.json \
     --seed  templates/place-directory/seed-places.json \
-    --publish-type place --token-ssh root@89.167.28.206 --vercel-team guerrilla
+    --publish-type place --token-ssh root@<your-box> --vercel-team guerrilla
 EOF
 }
 

@@ -79,6 +79,12 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("--verify <file> re-derives the sha256 and document count from the")
 		out.outf("artifact itself and compares them to the sidecar. It FAILS CLOSED:")
 		out.outf("a missing, empty or unparsable sidecar is a refusal, never a pass.")
+		out.outf("")
+		out.outf("RESTORE with `bp import <file>`. Run `bp import <file> --dry-run` first: it")
+		out.outf("reports per document whether it would be created, overwritten or skipped.")
+		out.outf("A published row becomes createOrReplace + publish and a draft row stays a")
+		out.outf("draft. An id that already exists in the target is refused unless you pass")
+		out.outf("--overwrite. See `bp import --help` for batching and --from-line.")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts

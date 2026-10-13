@@ -152,7 +152,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.TabsEditorTest do
       |> LazyHTML.text()
 
     assert footer =~ "3 words"
-    assert footer =~ "1 blocks"
+    assert footer =~ "1 block"
+    refute footer =~ "1 blocks"
   end
 
   defp tabs do

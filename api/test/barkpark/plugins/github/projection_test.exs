@@ -8,7 +8,11 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
 
   alias Barkpark.Plugins.Github.Projection
 
+  # The brief-bearing cases below exercise fences and prose around a PUBLISHED
+  # brief, so the fixture opts into the allowlist (`labels: ["public"]`) unless
+  # a case sets its own labels. The strip cases set `"labels" => []`.
   defp task(content, extra \\ %{}) do
+    content = Map.put_new(content, "labels", ["public"])
     Map.merge(%{"doc_id" => "task-abc", "content" => content}, extra)
   end
 
@@ -92,6 +96,47 @@ defmodule Barkpark.Plugins.Github.ProjectionTest do
 
       issue = Projection.task_to_issue(doc)
       assert issue.title == "Real top-level title"
+    end
+  end
+
+  describe "task_to_issue/1 — body strip and allowlist (owner ruling #11)" do
+    @internal "Fix api/lib/barkpark/auth.ex:412; lane worker fable-7 found the hole."
+
+    test "an internal task's brief never reaches the public issue body" do
+      issue =
+        Projection.task_to_issue(
+          task(%{
+            "labels" => [],
+            "description" => @internal,
+            "acceptance_criteria" => [%{"criterion" => "the hole is closed", "met" => false}]
+          })
+        )
+
+      refute issue.body =~ "auth.ex"
+      refute issue.body =~ "fable-7"
+      # The stripped shape keeps the checkboxes and the trailer.
+      assert issue.body =~ "- [ ] the hole is closed"
+      assert issue.body =~ "Task: task-abc"
+    end
+
+    test "a task labelled `public` publishes its brief" do
+      issue =
+        Projection.task_to_issue(
+          task(%{"description" => "A public roadmap item.", "labels" => ["public"]})
+        )
+
+      assert issue.body =~ "A public roadmap item."
+    end
+
+    test "an adopted intake task (gh-<num>) keeps the outsider's own issue text" do
+      issue =
+        Projection.task_to_issue(%{
+          "doc_id" => "gh-77",
+          "content" => %{"description" => "Reporter text."}
+        })
+
+      assert issue.body =~ "Reporter text."
+      assert issue.body =~ "Task: gh-77"
     end
   end
 

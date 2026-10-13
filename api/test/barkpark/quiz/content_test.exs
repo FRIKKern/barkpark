@@ -33,6 +33,25 @@ defmodule Barkpark.Quiz.ContentTest do
       assert q.time_limit == 20
     end
 
+    # task-a1bc0e141b645b3f: an API publish can store any JSON here; the room
+    # multiplies it by 1000 and arms a timer with it.
+    test "time_limit is always a positive number" do
+      tl = fn v -> Content.to_question(%{"time_limit" => v}, "q").time_limit end
+
+      assert tl.(45) == 45
+      assert tl.(2.5) == 2.5
+      assert tl.("30") == 30
+      assert tl.(" 7.5 ") == 7.5
+      assert tl.("ten") == 20
+      assert tl.("30abc") == 20
+      assert tl.("") == 20
+      assert tl.(0) == 20
+      assert tl.(-5) == 20
+      assert tl.("-5") == 20
+      assert tl.(nil) == 20
+      assert tl.(%{"seconds" => 30}) == 20
+    end
+
     test "uses title when prompt is absent" do
       assert Content.to_question(%{"title" => "T"}, "q").prompt == "T"
     end

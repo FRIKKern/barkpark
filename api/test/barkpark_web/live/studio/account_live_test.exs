@@ -249,9 +249,10 @@ defmodule BarkparkWeb.Studio.AccountLiveTest do
       {view, _} = mount!(ctx)
       submit(view, %{"acknowledge" => "true", "password" => @password})
 
-      # The erased user's workspace no longer admits the cookie at all...
+      # The erased user's workspace no longer admits the cookie at all: it
+      # reads as signed out and is sent to sign in (task-c1ccdbfaa26876cb)...
       dead = ctx.conn |> as_user(ctx.raw) |> get(ctx.path)
-      assert dead.status == 403
+      assert redirected_to(dead) =~ "/login?return_to="
       refute dead.resp_body =~ "erase-form"
 
       # ...and where anonymous visitors may look, it reads as signed out.

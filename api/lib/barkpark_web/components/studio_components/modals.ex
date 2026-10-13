@@ -8,6 +8,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   unchanged.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   import BarkparkWeb.Icons
   import BarkparkWeb.StudioComponents.Controls, only: [bp_radio: 1, bp_checkbox: 1]
@@ -59,12 +60,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="image-picker-title"
+        id="image-picker-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-image-picker"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="image-picker-title" style="font-weight: 600; font-size: 14px;">Select Image</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker" aria-label="Close">×</button>
+          <span id="image-picker-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Select Image") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-image-picker" aria-label={gettext("Close")}>×</button>
         </div>
         <div class="image-picker-upload">
           <form phx-change="validate-upload" phx-submit="upload-image" phx-value-field={@image_picker_field} id="upload-form">
@@ -76,7 +79,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <div class="image-upload-entry">
                 <.live_img_preview entry={entry} width="60" height="60" />
                 <span class="text-sm"><%= entry.client_name %></span>
-                <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+                <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Upload") %></button>
               </div>
               <%= for err <- upload_errors(@uploads.image, entry) do %>
                 <p class="text-sm image-upload-error" role="alert"><%= upload_error_to_string(err) %></p>
@@ -86,7 +89,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         </div>
         <div class="image-picker-grid">
           <%= if @media_files == [] do %>
-            <div class="text-sm text-muted" style="padding: 16px; text-align: center;">No images yet. Upload one above.</div>
+            <div class="text-sm text-muted" style="padding: 16px; text-align: center;"><%= gettext("No images yet. Upload one above.") %></div>
           <% end %>
           <%= for file <- @media_files do %>
             <div class="image-picker-item" phx-click="select-media" phx-value-url={"/media/files/#{file.path}"} phx-value-field={@image_picker_field}>
@@ -133,18 +136,20 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="shares-modal-title"
+        id="shares-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="shares-close"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="shares-modal-title" style="font-weight: 600; font-size: 14px;">Network shares</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="shares-close" aria-label="Close">×</button>
+          <span id="shares-modal-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Network shares") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="shares-close" aria-label={gettext("Close")}>×</button>
         </div>
 
         <%= if @admin? do %>
           <form phx-submit="shares-add" class="shares-add-form">
             <label class="shares-field">
-              <span class="shares-field-label">Scope</span>
+              <span class="shares-field-label"><%= gettext("Scope") %></span>
               <input
                 type="text"
                 name="scope"
@@ -156,35 +161,35 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               />
             </label>
             <div class="shares-field">
-              <span class="shares-field-label">Surfaces</span>
+              <span class="shares-field-label"><%= gettext("Surfaces") %></span>
               <div class="shares-surfaces">
                 <.bp_checkbox
                   :for={surface <- ~w(papers docs media)}
                   name="surfaces[]"
                   value={surface}
-                  label={String.capitalize(surface)}
+                  label={surface_label(surface)}
                   checked={surface in @prefill_surfaces}
                 />
               </div>
             </div>
             <p class="shares-note">
-              Read-only — anyone on the local network can view this scope, not edit it.
+              <%= gettext("Read-only — anyone on the local network can view this scope, not edit it.") %>
             </p>
             <p :if={@error} class="shares-error"><%= @error %></p>
             <div class="shares-add-actions">
-              <button type="submit" class="btn btn-primary btn-sm">Share</button>
+              <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Share") %></button>
             </div>
           </form>
         <% else %>
           <p class="shares-note" style="padding: 16px;">
-            An admin token is required to manage network shares.
+            <%= gettext("An admin token is required to manage network shares.") %>
           </p>
         <% end %>
 
         <div class="shares-list">
-          <div class="shares-list-title">Active shares</div>
+          <div class="shares-list-title"><%= gettext("Active shares") %></div>
           <%= if @rows == [] do %>
-            <div class="shares-empty">Nothing is shared — this scope is private.</div>
+            <div class="shares-empty"><%= gettext("Nothing is shared — this scope is private.") %></div>
           <% else %>
             <div :for={row <- @rows} class="share-row">
               <div class="share-row-main">
@@ -194,7 +199,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 </div>
                 <div :if={row.url} class="share-row-url"><%= row.url %></div>
                 <p :if={row.source == "env"} class="shares-note share-row-env-note">
-                  Declared in <%= env_baseline_immutable() %>
+                  <%= gettext("Declared in %{file}", file: env_baseline_immutable()) %>
                 </p>
               </div>
               <button
@@ -203,9 +208,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 class="btn btn-ghost btn-sm share-row-remove"
                 phx-click="shares-remove"
                 phx-value-scope={row.scope}
-                title="Stop sharing this scope"
+                title={gettext("Stop sharing this scope")}
               >
-                Remove
+                <%= gettext("Remove") %>
               </button>
             </div>
           <% end %>
@@ -250,12 +255,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="item-share-title"
+        id="item-share-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="item-share-close"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="item-share-title" style="font-weight: 600; font-size: 14px;">Share &ldquo;<%= @title %>&rdquo;</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="item-share-close" aria-label="Close">×</button>
+          <span id="item-share-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Share “%{title}”", title: @title) %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="item-share-close" aria-label={gettext("Close")}>×</button>
         </div>
 
         <%= if @admin? do %>
@@ -263,17 +270,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <div class="item-share-lead">
               <span class="item-share-lead-icon"><.icon name="share-2" size={18} /></span>
               <div>
-                <div class="item-share-lead-title">Anyone with the link</div>
-                <div class="item-share-lead-sub">can open just this item — no account needed.</div>
+                <div class="item-share-lead-title"><%= gettext("Anyone with the link") %></div>
+                <div class="item-share-lead-sub"><%= gettext("can open just this item — no account needed.") %></div>
               </div>
             </div>
 
             <%= if @links == [] do %>
-              <div class="item-share-empty">No link yet.</div>
+              <div class="item-share-empty"><%= gettext("No link yet.") %></div>
             <% else %>
               <div :for={link <- @links} class="item-share-link-row">
                 <span class={"item-share-access item-share-access-#{link.access}"}>
-                  <%= String.capitalize(link.access) %>
+                  <%= link_access_label(link.access) %>
                 </span>
                 <%= if link.url do %>
                   <input
@@ -288,13 +295,15 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                     class="btn btn-ghost btn-sm"
                     data-url={link.url}
                     onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
-                    title="Copy link"
+                    title={gettext("Copy link")}
                   >
-                    Copy
+                    <%= gettext("Copy") %>
                   </button>
                 <% else %>
                   <span class="item-share-url item-share-url-hidden">
-                    Link is active. Regenerate to copy a new URL.
+                    <%= gettext(
+                      "Link is active. Its address is shown only when the link is created: to share it again, create a new link, and revoke this one if it should stop working."
+                    ) %>
                   </span>
                 <% end %>
                 <button
@@ -302,9 +311,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                   class="btn btn-ghost btn-sm item-share-revoke"
                   phx-click="item-share-revoke"
                   phx-value-id={link.id}
-                  title="Revoke this link"
+                  title={gettext("Revoke this link")}
                 >
-                  Revoke
+                  <%= gettext("Revoke") %>
                 </button>
               </div>
             <% end %>
@@ -312,27 +321,31 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <p :if={@error} class="shares-error"><%= @error %></p>
 
             <div class="item-share-footer">
-              <span class="shares-note">An edit link opens this one paper in the reader's editor.</span>
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm"
-                phx-click="item-share-create"
-                phx-value-access="read"
-              >
-                Create view link
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary btn-sm"
-                phx-click="item-share-create"
-                phx-value-access="edit"
-              >
-                Create edit link
-              </button>
+              <span class="shares-note"><%= gettext("An edit link opens this one paper in the reader's editor.") %></span>
+              <%!-- One group, so a narrow dialog wraps the note above the pair
+                    rather than orphaning the primary action on a row of its own. --%>
+              <div class="item-share-actions">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  phx-click="item-share-create"
+                  phx-value-access="read"
+                >
+                  <%= gettext("Create view link") %>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  phx-click="item-share-create"
+                  phx-value-access="edit"
+                >
+                  <%= gettext("Create edit link") %>
+                </button>
+              </div>
             </div>
           </div>
         <% else %>
-          <p class="shares-note" style="padding: 16px;">An admin token is required to share items.</p>
+          <p class="shares-note" style="padding: 16px;"><%= gettext("An admin token is required to share items.") %></p>
         <% end %>
       </div>
     <% end %>
@@ -356,6 +369,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   """
   attr :show, :boolean, default: false
   attr :type, :string, default: nil
+  attr :type_word, :string, default: nil
   attr :caps, :list, default: []
   attr :link, :string, default: nil
   attr :error, :string, default: nil
@@ -370,14 +384,16 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="airdrop-sheet-title"
+        id="airdrop-sheet-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="airdrop-close"
         phx-key="escape"
       >
         <div class="image-picker-header">
           <span id="airdrop-sheet-title" style="font-weight: 600; font-size: 14px;">
-            Share access<%= if @type, do: " · #{@type}", else: "" %>
+            <%= gettext("Share access") %><%= if @type, do: " · " <> (@type_word || BarkparkWeb.Studio.PaneBuilder.type_word(@type)), else: "" %>
           </span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="airdrop-close" aria-label="Close">×</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="airdrop-close" aria-label={gettext("Close")}>×</button>
         </div>
 
         <%= if @link do %>
@@ -386,8 +402,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <div class="item-share-lead">
               <span class="item-share-lead-icon"><.icon name="check-circle" size={18} /></span>
               <div>
-                <div class="item-share-lead-title">Access shared</div>
-                <div class="item-share-lead-sub">Emailed to the recipient. Copy the link if you want to hand it over directly.</div>
+                <div class="item-share-lead-title"><%= gettext("Access shared") %></div>
+                <div class="item-share-lead-sub"><%= gettext("Emailed to the recipient. Copy the link if you want to hand it over directly.") %></div>
               </div>
             </div>
             <div class="item-share-link-row">
@@ -402,20 +418,21 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <button
                 type="button"
                 class="btn btn-primary btn-sm"
-                onclick="var u=this.previousElementSibling.value; if(navigator.clipboard){navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent='Copied'}"
-                title="Copy link"
+                data-copied={gettext("Copied")}
+                onclick="var u=this.previousElementSibling.value; if(navigator.clipboard){navigator.clipboard.writeText(/^https?:/.test(u)?u:location.origin+u);this.textContent=this.dataset.copied}"
+                title={gettext("Copy link")}
               >
-                Copy
+                <%= gettext("Copy") %>
               </button>
             </div>
             <div class="item-share-footer">
-              <button type="button" class="btn btn-sm" phx-click="airdrop-close">Done</button>
+              <button type="button" class="btn btn-sm" phx-click="airdrop-close"><%= gettext("Done") %></button>
             </div>
           </div>
         <% else %>
           <form phx-submit="airdrop-create" class="airdrop-body">
             <label class="shares-field">
-              <span class="shares-field-label">Recipient email</span>
+              <span class="shares-field-label"><%= gettext("Recipient email") %></span>
               <%!-- Free-text recipient. The <datalist> is ADVISORY typeahead of
                     workspace members (phx-change → airdrop-suggest); emailing a
                     stranger with no account is still valid, and mint validates. --%>
@@ -423,6 +440,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 type="email"
                 name="grantee_email"
                 placeholder="person@example.com"
+                data-modal-focus
                 class="form-input"
                 autocomplete="off"
                 list="airdrop-email-options"
@@ -437,27 +455,27 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             </label>
 
             <div class="shares-field">
-              <span class="shares-field-label">Access lasts</span>
-              <div class="airdrop-duration" role="radiogroup" aria-label="Duration">
-                <.bp_radio name="duration" value="30m">30 min</.bp_radio>
-                <.bp_radio name="duration" value="5h">5 hours</.bp_radio>
-                <.bp_radio name="duration" value="1d" checked>1 day</.bp_radio>
-                <.bp_radio name="duration" value="custom">Custom…</.bp_radio>
+              <span class="shares-field-label"><%= gettext("Access lasts") %></span>
+              <div class="airdrop-duration" role="radiogroup" aria-label={gettext("Duration")}>
+                <.bp_radio name="duration" value="30m"><%= gettext("30 min") %></.bp_radio>
+                <.bp_radio name="duration" value="5h"><%= gettext("5 hours") %></.bp_radio>
+                <.bp_radio name="duration" value="1d" checked><%= gettext("1 day") %></.bp_radio>
+                <.bp_radio name="duration" value="custom"><%= gettext("Custom…") %></.bp_radio>
               </div>
               <input
                 type="datetime-local"
                 name="expires_at"
                 class="form-input airdrop-custom-expiry"
                 data-test-id="airdrop-custom-expiry"
-                aria-label="Custom expiry"
+                aria-label={gettext("Custom expiry")}
               />
             </div>
 
             <div class="shares-field">
-              <span class="shares-field-label">Capabilities</span>
+              <span class="shares-field-label"><%= gettext("Capabilities") %></span>
               <%= if @caps == [] do %>
                 <p class="shares-note" data-test-id="airdrop-no-caps">
-                  You hold no shareable access in this workspace.
+                  <%= gettext("You hold no shareable access in this workspace.") %>
                 </p>
               <% else %>
                 <div class="airdrop-caps">
@@ -465,14 +483,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                     :if={"read" in @caps}
                     name="capabilities[]"
                     value="read"
-                    label="View"
+                    label={gettext("View")}
                     checked
                   />
                   <.bp_checkbox
                     :if={"write" in @caps}
                     name="capabilities[]"
                     value="write"
-                    label="Edit"
+                    label={gettext("Edit")}
                   />
                 </div>
               <% end %>
@@ -481,20 +499,20 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <.bp_checkbox
               name="single_use"
               value="true"
-              label="Single use (link is spent on first claim)"
+              label={gettext("Single use (link is spent on first claim)")}
             />
 
             <p :if={@error} class="shares-error" data-test-id="airdrop-error"><%= @error %></p>
 
             <div class="item-share-footer">
-              <button type="button" class="btn btn-sm" phx-click="airdrop-close">Cancel</button>
+              <button type="button" class="btn btn-sm" phx-click="airdrop-close"><%= gettext("Cancel") %></button>
               <button
                 type="submit"
                 class="btn btn-primary btn-sm"
                 data-test-id="airdrop-submit"
                 disabled={@caps == []}
               >
-                Share access
+                <%= gettext("Share access") %>
               </button>
             </div>
           </form>
@@ -539,12 +557,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="access-panel-title"
+        id="access-panel-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="access-close"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="access-panel-title" style="font-weight: 600; font-size: 14px;">Access</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="access-close" aria-label="Close">×</button>
+          <span id="access-panel-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Access") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="access-close" aria-label={gettext("Close")}>×</button>
         </div>
 
         <div class="access-panel-body" data-test-id="access-panel">
@@ -552,10 +572,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
           <%!-- ── Your access — the caller's own inbound grants ── --%>
           <section class="access-section" data-test-id="access-your">
-            <h3 class="access-section-title">Your access</h3>
+            <h3 class="access-section-title"><%= gettext("Your access") %></h3>
             <%= if @own_grants == [] do %>
               <p class="shares-note" data-test-id="access-your-empty">
-                You have no scoped access grants right now.
+                <%= gettext("You have no scoped access grants right now.") %>
               </p>
             <% else %>
               <ul class="access-list">
@@ -572,10 +592,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
           <%!-- ── Active grants in this workspace — members only ── --%>
           <section :if={@workspace_view} class="access-section" data-test-id="access-workspace">
-            <h3 class="access-section-title">Active grants in this workspace</h3>
+            <h3 class="access-section-title"><%= gettext("Active grants in this workspace") %></h3>
             <%= if @workspace_grants == [] do %>
               <p class="shares-note" data-test-id="access-workspace-empty">
-                No active grants in this workspace.
+                <%= gettext("No active grants in this workspace.") %>
               </p>
             <% else %>
               <ul class="access-list">
@@ -592,9 +612,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                     phx-click="access-revoke"
                     phx-value-id={g.id}
                     data-test-id="access-revoke"
-                    aria-label={"Revoke access for #{g.grantee_email}"}
+                    aria-label={gettext("Revoke access for %{email}", email: g.grantee_email)}
                   >
-                    <.icon name="trash-2" size={14} /> Revoke
+                    <.icon name="trash-2" size={14} /> <%= gettext("Revoke") %>
                   </button>
                 </li>
               </ul>
@@ -623,10 +643,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         data-expires-at={DateTime.to_iso8601(@grant.expires_at)}
         data-test-id="access-countdown"
       >
-        expiring…
+        <%= gettext("expiring…") %>
       </span>
     <% else %>
-      <span class="access-chip" data-test-id="access-no-expiry">No expiry</span>
+      <span class="access-chip" data-test-id="access-no-expiry"><%= gettext("No expiry") %></span>
     <% end %>
     """
   end
@@ -637,17 +657,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   defp grant_scope_label(grant) do
     narrows =
       [
-        grant.dataset && "dataset: #{grant.dataset}",
-        grant.type && "type: #{grant.type}",
-        grant.doc_id && "doc: #{grant.doc_id}"
+        grant.dataset && gettext("dataset: %{name}", name: grant.dataset),
+        grant.type && gettext("type: %{name}", name: grant.type),
+        grant.doc_id && gettext("doc: %{id}", id: grant.doc_id)
       ]
       |> Enum.reject(&is_nil/1)
 
-    project = if grant.project_id, do: "project", else: nil
+    project = if grant.project_id, do: gettext("project"), else: nil
 
     case Enum.reject([project | narrows], &is_nil/1) do
-      [] -> "Workspace"
-      parts -> "Workspace · " <> Enum.join(parts, " · ")
+      [] -> gettext("Workspace")
+      parts -> gettext("Workspace") <> " · " <> Enum.join(parts, " · ")
     end
   end
 
@@ -655,9 +675,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   defp grant_caps_label(%{capabilities: caps}) when is_list(caps) do
     caps
     |> Enum.map(fn
-      "read" -> "View"
-      "write" -> "Edit"
-      "admin" -> "Admin"
+      "read" -> gettext("View")
+      "write" -> gettext("Edit")
+      "admin" -> gettext("Admin")
       other -> other
     end)
     |> Enum.join(", ")
@@ -686,15 +706,17 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="ref-picker-title"
+        id="ref-picker-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-ref-picker"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="ref-picker-title" style="font-weight: 600; font-size: 14px;">Select reference</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker" aria-label="Close">×</button>
+          <span id="ref-picker-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Select reference") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker" aria-label={gettext("Close")}>×</button>
         </div>
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
-          <input type="text" placeholder="Search..." class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} />
+          <input type="text" placeholder={gettext("Search...")} aria-label={gettext("Search documents")} class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} data-modal-focus />
         </div>
         <div style="max-height: 400px; overflow-y: auto;">
           <% filtered = filter_ref_candidates(@ref_candidates, @ref_search) %>
@@ -705,13 +727,23 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             </div>
           <% end %>
           <%= if filtered == [] do %>
-            <div class="text-sm text-muted" style="padding: 20px; text-align: center;">No documents found</div>
+            <div class="text-sm text-muted" style="padding: 20px; text-align: center;"><%= gettext("No documents found") %></div>
           <% end %>
         </div>
       </div>
     <% end %>
     """
   end
+
+  # A share's surface and a link's access level, in words.
+  defp surface_label("papers"), do: gettext("Papers")
+  defp surface_label("docs"), do: gettext("Docs")
+  defp surface_label("media"), do: gettext("Media")
+  defp surface_label(other), do: String.capitalize(other)
+
+  defp link_access_label("read"), do: gettext("Read")
+  defp link_access_label("edit"), do: gettext("Edit")
+  defp link_access_label(other), do: String.capitalize(other)
 
   defp filter_ref_candidates(candidates, ""), do: candidates
   defp filter_ref_candidates(candidates, nil), do: candidates
@@ -744,27 +776,58 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="history-modal-title"
+        id="history-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-history"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="history-modal-title" style="font-weight: 600; font-size: 14px;">Document history</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history" aria-label="Close">×</button>
+          <span id="history-modal-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Document history") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history" aria-label={gettext("Close")}>×</button>
         </div>
-        <div class="history-list">
+        <div class="history-list" id="history-list" phx-hook="LocalTime">
           <%= if @revisions == [] do %>
-            <div class="text-sm text-muted" style="padding: 24px; text-align: center;">No history yet</div>
+            <div class="text-sm text-muted" style="padding: 24px; text-align: center;"><%= gettext("No history yet") %></div>
           <% end %>
           <%= for rev <- @revisions do %>
             <div class="history-item">
               <div class="history-item-info">
                 <div class="history-item-action">
-                  <span class={"history-action-badge history-action-#{rev.action}"}><%= rev.action %></span>
-                  <span class="history-item-title"><%= rev.title || "Untitled" %></span>
+                  <span class={"history-action-badge history-action-#{rev.action}"}><%= history_action_label(rev.action) %></span>
+                  <span class="history-item-title"><%= BarkparkWeb.Studio.DocTitle.shown(rev.title) || gettext("Untitled") %></span>
                 </div>
-                <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
+                <%!-- UTC on the server; Hooks.LocalTime rewrites it in the
+                      viewer's own zone (task-7a12da688a06f880). --%>
+                <time
+                  class="history-item-time"
+                  datetime={history_iso(rev.inserted_at)}
+                  data-local-time
+                ><%= utc_history_time(rev.inserted_at) %></time>
               </div>
-              <button class="btn btn-sm" phx-click="restore-revision" phx-value-id={rev.id} data-confirm="Restore this version? Current changes will be overwritten.">Restore</button>
+              <%!-- Every row's button said only "Restore", so a screen reader's
+                    button list was thirty identical names
+                    (task-880a2d3f48ccbfcb). --%>
+              <button
+                class="btn btn-sm"
+                phx-click="restore-revision"
+                phx-value-id={rev.id}
+                aria-label={
+                  gettext("Restore the version from %{time} (%{action})",
+                    time: utc_history_time(rev.inserted_at),
+                    action: history_action_label(rev.action)
+                  )
+                }
+                data-datetime={history_iso(rev.inserted_at)}
+                data-local-label={
+                  gettext("Restore the version from %{time} (%{action})",
+                    time: "{time}",
+                    action: history_action_label(rev.action)
+                  )
+                }
+                data-confirm={gettext("Restore this version? Current changes will be overwritten.")}
+              >
+                <%= gettext("Restore") %>
+              </button>
             </div>
           <% end %>
         </div>
@@ -773,9 +836,48 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     """
   end
 
+  # The stored action is a code ("discardDraft" rendered as DISCARDDRAFT
+  # under the badge's uppercase style); show what happened in words.
+  defp history_action_label("create"), do: gettext("Created")
+  defp history_action_label("update"), do: gettext("Edited")
+  defp history_action_label("publish"), do: gettext("Published")
+  defp history_action_label("unpublish"), do: gettext("Unpublished")
+  defp history_action_label("discardDraft"), do: gettext("Draft discarded")
+  defp history_action_label("delete"), do: gettext("Deleted")
+  defp history_action_label("restore"), do: gettext("Restored")
+  defp history_action_label(action), do: to_string(action)
+
+  # The pattern and the month names are the locale's: an nb-NO Studio reads
+  # "06. okt. 2026 kl. 07:25:45".
+  # The server's own render says which clock it is in: the stored time is UTC,
+  # and the app has no time-zone database to convert it (task-7a12da688a06f880).
+  defp utc_history_time(dt), do: gettext("%{time} UTC", time: format_history_time(dt))
+
+  # Whole seconds: the shown time has none finer, and ECMAScript only promises
+  # to parse three fractional digits.
+  defp history_iso(dt), do: dt |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
   defp format_history_time(dt) do
-    Calendar.strftime(dt, "%b %d, %Y at %H:%M:%S")
+    Calendar.strftime(dt, gettext("%b %d, %Y at %H:%M:%S"),
+      abbreviated_month_names: fn month -> Enum.at(month_abbreviations(), month - 1) end
+    )
   end
+
+  defp month_abbreviations,
+    do: [
+      gettext("Jan"),
+      gettext("Feb"),
+      gettext("Mar"),
+      gettext("Apr"),
+      gettext("May"),
+      gettext("Jun"),
+      gettext("Jul"),
+      gettext("Aug"),
+      gettext("Sep"),
+      gettext("Oct"),
+      gettext("Nov"),
+      gettext("Dec")
+    ]
 
   @doc """
   Delete-confirmation modal, formerly inline in StudioLive, now aggregated
@@ -799,38 +901,43 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-modal-title"
+        id="delete-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-delete"
         phx-key="escape"
       >
         <div class="delete-modal-header">
-          <span id="delete-modal-title" style="font-weight: 600; font-size: 16px;">Delete document</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete" aria-label="Close">×</button>
+          <span id="delete-modal-title" style="font-weight: 600; font-size: 16px;"><%= gettext("Delete document") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-delete" aria-label={gettext("Close")}>×</button>
         </div>
         <div class="delete-modal-body">
           <%= if @delete_refs == [] do %>
-            <p class="text-sm">Are you sure you want to delete <strong><%= @editor_doc && @editor_doc.title %></strong>? This action cannot be undone.</p>
+            <p class="text-sm"><%= gettext("Are you sure you want to delete") %> <strong><%= @editor_doc && @editor_doc.title %></strong>? <%= gettext("This action cannot be undone.") %></p>
             <div class="delete-modal-actions">
-              <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
-              <button class="btn btn-destructive btn-sm" phx-click="confirm-delete">Delete</button>
+              <button class="btn btn-sm" phx-click="close-delete" data-modal-focus><%= gettext("Cancel") %></button>
+              <button class="btn btn-destructive btn-sm" phx-click="confirm-delete"><%= gettext("Delete") %></button>
             </div>
           <% else %>
             <div class="delete-warning">
               <p class="text-sm" style="margin-bottom: 12px;">
-                <strong><%= @editor_doc && @editor_doc.title %></strong> is referenced by
-                <strong><%= length(@delete_refs) %></strong> document<%= if length(@delete_refs) != 1, do: "s" %>:
+                <strong><%= @editor_doc && @editor_doc.title %></strong> <%= ngettext(
+                  "is referenced by %{count} document:",
+                  "is referenced by %{count} documents:",
+                  length(@delete_refs)
+                ) %>
               </p>
               <div class="delete-ref-list">
                 <%= for ref <- @delete_refs do %>
                   <div class="delete-ref-item">
-                    <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                    <span class="delete-ref-title"><%= BarkparkWeb.Studio.DocTitle.shown(ref.title) || gettext("Untitled") %></span>
                     <span class="delete-ref-meta"><%= ref.type %> / <%= ref.field %></span>
                   </div>
                 <% end %>
               </div>
             </div>
             <div class="delete-modal-actions">
-              <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
-              <button class="btn btn-destructive btn-sm" phx-click="confirm-delete" phx-value-disconnect="true">Disconnect references and delete</button>
+              <button class="btn btn-sm" phx-click="close-delete" data-modal-focus><%= gettext("Cancel") %></button>
+              <button class="btn btn-destructive btn-sm" phx-click="confirm-delete" phx-value-disconnect="true"><%= gettext("Disconnect references and delete") %></button>
             </div>
           <% end %>
         </div>
@@ -864,26 +971,28 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="discard-modal-title"
+        id="discard-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-discard"
         phx-key="escape"
       >
         <div class="delete-modal-header">
-          <span id="discard-modal-title" style="font-weight: 600; font-size: 16px;">Discard draft</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-discard" aria-label="Close">×</button>
+          <span id="discard-modal-title" style="font-weight: 600; font-size: 16px;"><%= gettext("Discard draft") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-discard" aria-label={gettext("Close")}>×</button>
         </div>
         <div class="delete-modal-body">
           <p class="text-sm">
-            Discard all unsaved changes to <strong><%= @editor_doc && @editor_doc.title %></strong>?
-            The published version will remain untouched.
+            <%= gettext("Discard all unsaved changes to") %> <strong><%= @editor_doc && @editor_doc.title %></strong>?
+            <%= gettext("The published version will remain untouched.") %>
           </p>
           <div class="delete-modal-actions">
-            <button class="btn btn-sm" phx-click="close-discard">Cancel</button>
+            <button class="btn btn-sm" phx-click="close-discard" data-modal-focus><%= gettext("Cancel") %></button>
             <button
               class="btn btn-destructive btn-sm"
               phx-click="confirm-discard"
               data-test-id="confirm-discard"
             >
-              Discard draft
+              <%= gettext("Discard draft") %>
             </button>
           </div>
         </div>
@@ -904,9 +1013,19 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, required: true
   attr :user_color, :string, required: true
+  # The generated name of a session with no name of its own. While it is the
+  # name, the field shows it as a placeholder, not as a value that Save would
+  # store as the account's display name (task-acae5df91728ca9d).
+  attr :user_name_fallback, :string, default: nil
+  # The signed-in account's email, shown ONLY here, in the viewer's own dialog:
+  # never on the avatar or in presence (task-9f31f04ab4882f7d). nil when the
+  # session has no account.
+  attr :account_label, :string, default: nil
   # The scoped `…/studio/_account` page (download or erase your data). nil on a
   # surface that cannot build a scoped path — the link is then not rendered.
   attr :account_path, :string, default: nil
+  # Why the last save of the name was refused (too long), shown under the field.
+  attr :profile_error, :string, default: nil
 
   def profile_modal(assigns) do
     ~H"""
@@ -917,12 +1036,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="profile-modal-title"
+        id="profile-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-profile"
         phx-key="escape"
       >
         <div class="image-picker-header">
-          <span id="profile-modal-title" style="font-weight: 600; font-size: 14px;">Your profile</span>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile" aria-label="Close">×</button>
+          <span id="profile-modal-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Your profile") %></span>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="close-profile" aria-label={gettext("Close")}>×</button>
         </div>
         <form phx-submit="save-profile" phx-change="preview-profile" style="padding: 20px;">
           <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
@@ -931,28 +1052,65 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             </div>
             <div>
               <div style="font-weight: 600;"><%= @user_name %></div>
-              <div class="text-xs text-muted">This is how others see you</div>
+              <div class="text-xs text-muted"><%= gettext("This is how others see you") %></div>
+              <div :if={@account_label} class="text-xs text-muted" data-test-id="profile-account">
+                <%= gettext("Signed in as %{account}", account: @account_label) %>
+              </div>
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label">Name</label>
-            <input type="text" name="name" value={@user_name} class="form-input" autofocus phx-debounce="200" />
+            <label class="form-label" for="profile-name-input"><%= gettext("Name") %></label>
+            <input
+              type="text"
+              id="profile-name-input"
+              name="name"
+              value={if @user_name_fallback && @user_name == @user_name_fallback, do: "", else: @user_name}
+              placeholder={@user_name_fallback}
+              class="form-input"
+              maxlength="80"
+              autofocus
+              phx-debounce="200"
+              aria-describedby={
+                cond do
+                  @profile_error -> "profile-name-error"
+                  @account_label -> "profile-name-hint"
+                  true -> nil
+                end
+              }
+              aria-invalid={if @profile_error, do: "true"}
+            />
+            <div :if={@account_label && !@profile_error} id="profile-name-hint" class="text-xs text-muted">
+              <%= gettext("Saved to your account: others see it in Studio and on media you check out.") %>
+            </div>
+            <div :if={@profile_error} id="profile-name-error" class="text-xs" role="alert" data-test-id="profile-name-error">
+              <%= @profile_error %>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Color</label>
+          <%!-- task-5bf6b5e5074396db: the radios were display:none, so Tab
+                skipped the colour and a screen reader found no choices. They
+                are visually hidden but focusable now (the .form-switch input
+                technique), named by a colour word, and the swatch shows their
+                :focus-visible and :checked state. D14 exempt: the browser
+                never paints this control (bp_radio would draw a circle); the
+                approved swatch hex literals are D10-exempt. --%>
+          <fieldset class="form-group profile-color-fieldset">
+            <legend class="form-label"><%= gettext("Color") %></legend>
             <div class="profile-colors">
-              <%= for c <- ~w(#3b82f6 #ef4444 #10b981 #f59e0b #8b5cf6 #ec4899 #06b6d4 #f97316) do %>
-                <%!-- D14 exempt: this radio is display:none behind the custom
-                      color-swatch UI — the browser never paints the control, so
-                      it stays a raw <input> (bp_radio would render a visible
-                      circle). The approved swatch hex literals are D10-exempt. --%>
+              <%= for {c, word} <- profile_colors() do %>
                 <label class={"profile-color-option #{if c == @user_color, do: "selected"}"}>
-                  <input type="radio" name="color" value={c} checked={c == @user_color} style="display:none" />
-                  <span class="profile-color-swatch" style={"background: #{c}"}></span>
+                  <input
+                    type="radio"
+                    class="profile-color-input"
+                    name="color"
+                    value={c}
+                    checked={c == @user_color}
+                    aria-label={word}
+                  />
+                  <span class="profile-color-swatch" style={"background: #{c}"} aria-hidden="true"></span>
                 </label>
               <% end %>
             </div>
-          </div>
+          </fieldset>
           <div style="display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 8px;">
             <a
               :if={@account_path}
@@ -960,9 +1118,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               class="text-sm"
               style="margin-right: auto;"
               data-test-id="profile-account-link"
-            >Download or erase your data</a>
-            <button type="button" class="btn btn-sm" phx-click="close-profile">Cancel</button>
-            <button type="submit" class="btn btn-primary btn-sm">Save</button>
+            ><%= gettext("Download or erase your data") %></a>
+            <button type="button" class="btn btn-sm" phx-click="close-profile"><%= gettext("Cancel") %></button>
+            <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Save") %></button>
           </div>
         </form>
       </div>
@@ -986,6 +1144,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, default: ""
   attr :user_color, :string, default: ""
+  attr :user_name_fallback, :string, default: nil
   attr :account_path, :string, default: nil
 
   attr :image_picker_field, :string, default: nil
@@ -1003,14 +1162,19 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :delete_refs, :list, default: []
   attr :editor_doc, :map, default: nil
   attr :show_discard, :boolean, default: false
+  attr :account_label, :string, default: nil
+  attr :profile_error, :string, default: nil
 
   def studio_modals(assigns) do
     ~H"""
     <.profile_modal
       show_profile={@show_profile}
       user_name={@user_name}
+      user_name_fallback={@user_name_fallback}
       user_color={@user_color}
+      account_label={@account_label}
       account_path={@account_path}
+      profile_error={@profile_error}
     />
     <.image_picker_modal
       image_picker_field={@image_picker_field}
@@ -1035,11 +1199,28 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   # Human-readable copy for the client-side `allow_upload` validation errors
   # (see StudioLive.mount: accept ~w(.jpg .jpeg .png .gif .webp .svg),
   # max_entries: 1, max_file_size: 10 MB).
-  defp upload_error_to_string(:too_large), do: "That image is too large — the limit is 10 MB."
-  defp upload_error_to_string(:too_many_files), do: "You can only upload one image at a time."
+  defp upload_error_to_string(:too_large),
+    do: gettext("That image is too large — the limit is 10 MB.")
+
+  defp upload_error_to_string(:too_many_files),
+    do: gettext("You can only upload one image at a time.")
 
   defp upload_error_to_string(:not_accepted),
-    do: "That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG."
+    do: gettext("That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG.")
 
-  defp upload_error_to_string(_), do: "That image couldn't be uploaded."
+  defp upload_error_to_string(_), do: gettext("That image couldn't be uploaded.")
+
+  # The profile swatches and the word each is announced by.
+  defp profile_colors do
+    [
+      {"#3b82f6", pgettext("profile color", "Blue")},
+      {"#ef4444", pgettext("profile color", "Red")},
+      {"#10b981", pgettext("profile color", "Green")},
+      {"#f59e0b", pgettext("profile color", "Amber")},
+      {"#8b5cf6", pgettext("profile color", "Violet")},
+      {"#ec4899", pgettext("profile color", "Pink")},
+      {"#06b6d4", pgettext("profile color", "Cyan")},
+      {"#f97316", pgettext("profile color", "Orange")}
+    ]
+  end
 end

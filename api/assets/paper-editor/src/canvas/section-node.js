@@ -57,6 +57,7 @@
 // without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpSection` (avoids any StarterKit collision — StarterKit
 // ships no `section` node). Its portable-doc `bpType` stays "section" (run-convert.js
@@ -400,7 +401,7 @@ export const Section = Node.create({
           body.className = "bp-section__grid";
           body.style.setProperty("--bp-tracks", String(tracks));
           body.style.setProperty("--bp-grid-gap", gapVar(layout && layout.gap));
-          modeBtn.textContent = "grid";
+          modeBtn.textContent = t("grid");
           tracksLabel.textContent = `${tracks} col`;
           tracksLabel.style.display = "";
           tracksDec.style.display = "";
@@ -416,7 +417,7 @@ export const Section = Node.create({
           body.className = "bp-section__body";
           body.style.removeProperty("--bp-tracks");
           body.style.removeProperty("--bp-grid-gap");
-          modeBtn.textContent = "stack";
+          modeBtn.textContent = t("stack");
           // The tracks stepper is meaningless in stack mode — hide it.
           tracksLabel.style.display = "none";
           tracksDec.style.display = "none";

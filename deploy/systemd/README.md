@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: systemd-token-rotation | budget: 300tok -->
-# systemd units — `barkpark-rotate-public-token`
+# systemd units
 
-Rotates the weekly `public-read` API token consumed by the hosted demo at `barkpark.dev`. **Staged in-repo** — not installed by `git pull`.
+The weekly `public-read` token rotation is **no longer a systemd unit**. It is the core Oban job `Barkpark.Auth.PublicReadRotationWorker` (Mondays 03:00 UTC), off unless `BARKPARK_PUBLIC_READ_ROTATION=on`; manual run: `api/start.sh rotate-public-read`. See [Retired: `barkpark-rotate-public-token`](#retired-barkpark-rotate-public-token).
 
 For prod host identity (IP, paths, service name) see `docs/ops/PROD_OPS.md`.
 
@@ -35,21 +35,9 @@ Both units authenticate with the box's **own per-box agent token** — never the
 
 Installed by `deploy/site-runtime-install.sh`, which is streamed to the box as **exactly one file** by the cp-ops `site-runtime-install` operation — so it carries the units as inline heredocs rather than reading them from the repo. The files here are the canonical copies (placeholder `__PLATFORM__` intact — there is no token placeholder); `deploy/site-runtime-install_test.sh` byte-diffs script against staged file offline, so the two cannot drift. **Edit both sides or the gate goes red.**
 
-## What the units do
-
-`barkpark-rotate-public-token.service` (Type=oneshot) runs `api/start.sh rotate-public-read`, which:
-
-1. Generates a 32-byte random URL-safe base64 token.
-2. Inserts an `api_tokens` row with `["public-read"]` permissions + label `public-read-<ISO date>`.
-3. Writes the plaintext token to `/opt/barkpark/.env.public_token` (mode `0600`).
-4. If `VERCEL_DEPLOY_HOOK` is set, POSTs the new token to trigger a Vercel rebuild.
-5. Deletes any `public-read-*` row older than 8 days (24h grace window for the prior deploy).
-
-`barkpark-rotate-public-token.timer` — weekly Monday 03:00 (server local time; assumes UTC host), 600 s random jitter, `Persistent=true`.
-
 ## Failure handling — `barkpark-unit-failure-alert@`
 
-Both scheduled units carry `OnFailure=barkpark-unit-failure-alert@%n.service`. **On the `.service`, never the `.timer`**: a timer's `OnFailure=` fires only if the *timer* fails to activate — the job's failure lands on the service it triggered, so a timer-side handler is installed, looks right, and is silent for exactly these failures. One `@`-template serves both (same convention as `barkpark-slot@` / `barkpark-site@`); `%n` passes the failing unit's name in as `%i`. Neither guarded unit sets `Restart=`, so its first non-zero exit is final and the handler fires at once — with `Restart=`, systemd only enters `failed` after the restart budget is exhausted.
+The scheduled unit carries `OnFailure=barkpark-unit-failure-alert@%n.service`. **On the `.service`, never the `.timer`**: a timer's `OnFailure=` fires only if the *timer* fails to activate — the job's failure lands on the service it triggered, so a timer-side handler is installed, looks right, and is silent for exactly these failures. One `@`-template serves both (same convention as `barkpark-slot@` / `barkpark-site@`); `%n` passes the failing unit's name in as `%i`. Neither guarded unit sets `Restart=`, so its first non-zero exit is final and the handler fires at once — with `Restart=`, systemd only enters `failed` after the restart budget is exhausted.
 
 The handler runs `/usr/local/bin/barkpark-unit-failure-alert` (`barkpark-unit-failure-alert.sh`). It **always** records: journald at `err` under tag `barkpark-alert`, plus a stamp under `/var/lib/barkpark/failed-units/` (a weekly job's failure must outlive journal rotation). It **delivers** by POSTing to `$BARKPARK_ALERT_WEBHOOK` from `/etc/barkpark/alert.env` — and when that is unset or the POST fails it logs `ALERT NOT DELIVERED` at `err` rather than no-opping quietly. **No channel existed on either box before this**: the control host's `/etc/barkpark-provisioner.env` and the prod box's `/opt/barkpark/.env` carry no GitHub credential and no usable MTA, and the two units run on *different hosts*.
 
@@ -68,30 +56,9 @@ Verify a firing without waiting for a real failure: `sudo systemctl start barkpa
 
 `deploy/systemd-onfailure_test.sh` is the offline guard — every `.timer`'s target `.service` carries an `OnFailure=`, the handler it names exists here, and no scheduled service sets `Restart=` other than `no`. It proves it can fail on every run. **`deploy/cp-deploy.sh` does not yet install the handler** (it installs only the image-bake pair); until it does, the `OnFailure=` on the control host names a unit that is not there.
 
-## Install
+## Retired: `barkpark-rotate-public-token`
 
-```bash
-sudo cp deploy/systemd/barkpark-rotate-public-token.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now barkpark-rotate-public-token.timer
-```
-
-## Validate
-
-```bash
-sudo systemctl cat barkpark-rotate-public-token.service
-sudo systemctl list-timers --all | grep barkpark-rotate-public-token
-sudo systemd-analyze verify /etc/systemd/system/barkpark-rotate-public-token.{service,timer}
-sudo journalctl -u barkpark-rotate-public-token.service --since "7 days ago"
-```
-
-## One-shot manual rotation
-
-```bash
-sudo systemctl start barkpark-rotate-public-token.service
-```
-
-## Uninstall
+The `.service`/`.timer` pair was staged here and never installed, so the rotation never ran. The same work (mint `public-read-<date>`, write `/opt/barkpark/.env.public_token` 0600, POST `VERCEL_DEPLOY_HOOK`, purge rows past 8 days) is now `Barkpark.Auth.PublicRead.rotate/1`, run weekly by the core job when switched on. A box that did install the pair should remove it:
 
 ```bash
 sudo systemctl disable --now barkpark-rotate-public-token.timer

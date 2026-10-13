@@ -198,6 +198,36 @@ defmodule BarkparkWeb.Studio.StudioLiveDocActionsTest do
       refute html =~ "failed"
     end
 
+    # Draft wins (task-02e8a5799d4f35e8): bulk unpublish keeps an existing
+    # draft's edits, and creates a draft from the published content only when
+    # there is none.
+    test "bulk-unpublish keeps an existing draft and creates a missing one", %{conn: conn} do
+      {:ok, _} = Content.publish_document("p1", "post", @dataset)
+      {:ok, _} = Content.publish_document("p2", "post", @dataset)
+
+      {:ok, _} =
+        Content.upsert_document(
+          "post",
+          %{"doc_id" => "drafts.p1", "title" => "First", "content" => %{"body" => "edited"}},
+          @dataset
+        )
+
+      {:ok, view, _html} = live(admin_conn(conn), scoped_studio("/d/#{@dataset}/studio/post"))
+
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p1"})
+      _ = render_click(view, "toggle-doc-checkbox", %{"id" => "p2"})
+      _ = render_click(view, "bulk-unpublish", %{})
+
+      assert {:error, :not_found} = Content.get_document("p1", "post", @dataset)
+      assert {:error, :not_found} = Content.get_document("p2", "post", @dataset)
+
+      assert {:ok, %{content: %{"body" => "edited"}}} =
+               Content.get_document("drafts.p1", "post", @dataset)
+
+      assert {:ok, %{content: %{"body" => "two"}}} =
+               Content.get_document("drafts.p2", "post", @dataset)
+    end
+
     test "bulk-clear empties the selection set", %{conn: conn} do
       {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post"))
 

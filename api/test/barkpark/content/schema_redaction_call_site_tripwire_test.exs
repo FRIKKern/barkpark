@@ -82,7 +82,6 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     # -- unscoped (2-arity, or an explicit `[]`): scope_to_workspace_or_global/3
     #    with a nil workspace is the deliberate global read, so the global row
     #    already resolves and no fallback is needed.
-    "barkpark/media.ex:patch_asset_metadata" => "unscoped 2-arity existence check",
     "barkpark/tenancy.ex:pulled_schema_row" => "unscoped 2-arity provenance guard",
     "barkpark/tasks/board.ex:field_visibility_gate" => "explicit [] — unscoped global read",
     "barkpark/plugins/tasks.ex:task_schema_present?" => "unscoped 2-arity presence probe",
@@ -97,9 +96,15 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "unscoped arm only (document carries no scope), edge write path",
     "barkpark/content/encryption.ex:schema_for_write" =>
       "unscoped arm only (no stamped scope), WRITE-path cipher",
+    "barkpark/content/writer.ex:do_check_document_schema" =>
+      "server-side schema validation at the write chokepoint (task-3c085ff3fc199ba7) " <>
+        "-- the schema drives field-rule checks only and is never rendered to a " <>
+        "caller; the response carries validation findings/errors, never the schema",
     "barkpark/content/papers.ex:doc_scoped_schema" =>
       "unscoped arm only (document carries no scope), block synthesis",
-    "barkpark/content/writer.ex:validate_document" => "unscoped 2-arity, write validation",
+    "barkpark/content/writer.ex:validate_document_findings" =>
+      "unscoped 2-arity, write validation (task-1dac662bed153203 moved the get_schema call " <>
+        "here from validate_document/5, which now delegates to this function)",
     "barkpark/content/writer.ex:schema_for_create" =>
       "unscoped arm only (no stamped scope), write scaffold",
 
@@ -114,6 +119,15 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "serves the schema itself; a miss is a 404, not a render",
     "barkpark_web/controllers/document_ops_controller.ex:apply_op" =>
       "presence check before a block-op write; a miss is a 404, the schema is never rendered",
+    "barkpark_web/controllers/document_ops_controller.ex:apply_field_ops" =>
+      "presence check before a field block-op write; a miss is a 404, the schema is never rendered",
+    "barkpark_web/controllers/document_actions_controller.ex:load_doc_assigns" =>
+      "feeds DocActions.resolved_doc_actions/1's action registry (schema.actions / " <>
+        "desk.preview) — never Envelope field redaction; a miss is a 404 before any " <>
+        "document renders",
+    "barkpark/content/preview_locations.ex:preview_template" =>
+      "reads only desk.preview's URL template string to interpolate a backlink's " <>
+        "preview href — never a document field, so it never reaches Envelope redaction",
     "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
       "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/content.ex:get_schema" => "the facade delegate — this IS the raw lookup",
@@ -139,6 +153,11 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/live/sheets_reader_live.ex:seal",
                               "barkpark/media/delivery/asset_response.ex:asset_schema",
                               "barkpark_web/controllers/share_link_controller.ex:serve",
+                              # task-6812c3100d7aedbc — same "doc" redaction
+                              # shape as share_link_controller.ex:serve above,
+                              # one line up: public anonymous read, schema
+                              # resolved then Envelope.render'd.
+                              "barkpark_web/controllers/preview_link_controller.ex:show",
                               "barkpark_web/controllers/search_controller.ex:schema_resolver",
                               "barkpark_web/controllers/federated_search_controller.ex:schema_resolver",
                               "barkpark_web/channels/search_channel.ex:schema_resolver",
@@ -148,8 +167,9 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/tasks_controller.ex:seal_ctx",
                               "barkpark/content/export.ex:fetch_schema",
                               "barkpark/content/mutations.ex:echo_schema",
-                              "barkpark/tasks/query.ex:load_task_schema",
-                              "barkpark/tasks/query.ex:row_field_visibility_gate",
+                              # ctx-b6: row_field_visibility_gate and load_task_schema both read the
+                              # task schema through task_schema/3 (one read per render), which calls it.
+                              "barkpark/tasks/query.ex:task_schema",
                               # search facets: the schema feeds
                               # Envelope.field_readable?/3 to drop an author /
                               # category bucket the caller may not read

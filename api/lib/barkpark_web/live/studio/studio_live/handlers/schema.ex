@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Schema do
   Schema-declared document actions (modal action registry) + confirm-modal
   dry-run/real. Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -25,7 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Schema do
          )}
 
       _ ->
-        {:noreply, put_flash(socket, :info, "Action #{name} not yet wired")}
+        {:noreply, put_flash(socket, :info, gettext("Action %{name} not yet wired", name: name))}
     end
   end
 
@@ -57,14 +58,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Schema do
             {:noreply,
              socket
              |> assign(confirm_modal: nil)
-             |> put_flash(:info, "#{name} enqueued")
+             |> put_flash(:info, gettext("%{name} enqueued", name: name))
              |> Shared.rebuild_panes()}
 
           {:error, reason} ->
             {:noreply,
              socket
              |> assign(confirm_modal: nil)
-             |> put_flash(:error, "#{name} failed: #{DocActions.format_action_error(reason)}")}
+             |> put_flash(
+               :error,
+               gettext("%{name} failed: %{detail}",
+                 name: name,
+                 detail: DocActions.format_action_error(reason)
+               )
+             )}
 
           # Catch-all: a handler returning anything other than {:ok, _} /
           # {:error, _} (e.g. :ok, a bare map, nil) used to CaseClauseError
@@ -73,7 +80,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Schema do
             {:noreply,
              socket
              |> assign(confirm_modal: nil)
-             |> put_flash(:error, "#{name} failed: #{DocActions.format_action_error(other)}")}
+             |> put_flash(
+               :error,
+               gettext("%{name} failed: %{detail}",
+                 name: name,
+                 detail: DocActions.format_action_error(other)
+               )
+             )}
         end
 
       _ ->

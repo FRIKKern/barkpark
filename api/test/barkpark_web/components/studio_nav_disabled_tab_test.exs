@@ -73,6 +73,21 @@ defmodule BarkparkWeb.StudioComponents.NavDisabledTabTest do
 
       assert html =~ "aria-disabled=\"true\""
       assert html =~ "studio-tab-disabled"
+
+      # task-5907c5d41ac77c8b: aria-label is prohibited on a role-less span
+      # (axe aria-prohibited-attr), so the disabled tab carries role="link"
+      # and still no href or tabindex.
+      [tab] =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="top-menu-tab-disabled"]))
+        |> Enum.to_list()
+
+      assert LazyHTML.attribute(tab, "role") == ["link"]
+      assert LazyHTML.attribute(tab, "aria-disabled") == ["true"]
+      assert [_label] = LazyHTML.attribute(tab, "aria-label")
+      assert LazyHTML.attribute(tab, "href") == []
+      assert LazyHTML.attribute(tab, "tabindex") == []
       assert html =~ "ScopedNavTab"
       assert html =~ "Disabled in this workspace"
       assert html =~ enabling.name
@@ -89,6 +104,21 @@ defmodule BarkparkWeb.StudioComponents.NavDisabledTabTest do
 
       refute html =~ ~r/<a[^>]*top-menu-tab-disabled/,
              "the disabled tab must not render as an <a> at all"
+    end
+
+    # task-aa4f50a406951fae: the reason is built from the registry's
+    # `enabled_in` data in the viewer's language, not the English sentence.
+    test "in nb-NO the disabled tab's reason is Norwegian and names the enabling workspace", %{
+      disabling: disabling,
+      enabling: enabling
+    } do
+      Gettext.put_locale(BarkparkWeb.Gettext, "nb_NO")
+      on_exit(fn -> Gettext.put_locale(BarkparkWeb.Gettext, "en") end)
+
+      html = render_tabs(disabling)
+
+      assert html =~ "Slått av i dette arbeidsområdet — slått på i #{enabling.name}"
+      refute html =~ "Disabled in this workspace"
     end
 
     test "CONTROL: the enabling workspace renders a plain enabled link", %{enabling: enabling} do

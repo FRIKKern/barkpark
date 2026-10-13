@@ -21,16 +21,35 @@
 // it ships from BOTH the client entry (`index.ts`) and the RSC-safe entry
 // (`server.ts`) and drops into a Server Component untouched (charter D2/D3).
 
-import type { Block } from './inline'
+import { type Block, type InlineObjectRenderer, withInlineObjects } from './inline'
 import { renderBlocks } from './blocks/registry'
+import { type ChromeStrings, type RenderCtx, makeCtx } from './blocks/chrome'
 
-export type { Block, Inline } from './inline'
+export type { Block, Inline, InlineObjectRenderer } from './inline'
 
 export interface PortableDocProps {
   /** The type-keyed PortableDocument block array (Barkpark's block grammar). */
   value: Block[] | null | undefined
   /** Extra class(es) appended to the `bp-paper-surface` root. */
   className?: string
+  /**
+   * The renderer's chrome words in your language, keyed by the English text
+   * (e.g. `{ "Recommendation: ": "Anbefaling: " }`) — the same map Barkpark's
+   * renderer uses for a workspace locale. Omitted, chrome renders in English.
+   */
+  strings?: ChromeStrings
+  /**
+   * HTML renderers for inline objects (a schema's `blocks.inline` types), keyed
+   * by type. Each gets the stored node and returns HTML it has escaped. A type
+   * without one shows its text in a `bp-inline-object` span.
+   */
+  inlineObjects?: Record<string, InlineObjectRenderer>
+  /**
+   * Opt-in block emitters for types the core renderer does not ship, keyed by
+   * block type — e.g. `fieldBlocks` from `@barkpark/react/field-blocks` for the
+   * schema field blocks. They never replace a core type.
+   */
+  blocks?: RenderCtx['blocks']
 }
 
 /**
@@ -40,10 +59,10 @@ export interface PortableDocProps {
  * produces. Ship `@barkpark/react/paper-surface.css` (or your own copy of
  * `api/assets/paper-surface/paper-surface.css`) to skin it.
  */
-export function PortableDoc({ value, className }: PortableDocProps) {
-  const blocks = Array.isArray(value) ? value : []
+export function PortableDoc({ value, className, ...options }: PortableDocProps) {
   const cls = className ? `bp-paper-surface ${className}` : 'bp-paper-surface'
-  return <div className={cls} dangerouslySetInnerHTML={{ __html: renderBlocks(blocks) }} />
+  const html = renderPortableDocument(value, options)
+  return <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
 /**
@@ -52,6 +71,13 @@ export function PortableDoc({ value, className }: PortableDocProps) {
  * an Astro `set:html` / a non-React SSR surface can consume it directly, and the
  * cross-surface parity harness can compare it against the Elixir/Go golden.
  */
-export function renderPortableDocument(value: Block[] | null | undefined): string {
-  return renderBlocks(Array.isArray(value) ? value : [])
+export function renderPortableDocument(
+  value: Block[] | null | undefined,
+  options: Omit<PortableDocProps, 'value' | 'className'> = {},
+): string {
+  const ctx = makeCtx(options.strings)
+  ctx.blocks = options.blocks
+  return withInlineObjects(options.inlineObjects, () =>
+    renderBlocks(Array.isArray(value) ? value : [], ctx),
+  )
 }

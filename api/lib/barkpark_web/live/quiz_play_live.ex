@@ -20,14 +20,17 @@ defmodule BarkparkWeb.QuizPlayLive do
   anti-spoofing are P6 (`/papers/hyperquiz-risks`).
   """
   use Phoenix.LiveView
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Quiz
 
   @impl true
   def mount(%{"pin" => pin}, _session, socket) do
+    put_quiz_locale()
+
     if connected?(socket) do
       player_id = Ecto.UUID.generate()
-      name = "Player-" <> String.slice(player_id, 0, 4)
+      name = gettext("Player") <> "-" <> String.slice(player_id, 0, 4)
 
       case Quiz.join(pin, player_id, name) do
         {:ok, snapshot} ->
@@ -104,6 +107,14 @@ defmodule BarkparkWeb.QuizPlayLive do
       when phase in [:reveal, :leaderboard, :ended],
       do: {:noreply, assign(socket, locked: true)}
 
+  # The host removed THIS player (owner ruling #59): stop showing the question
+  # and say why. The room already dropped the player and refuses its id.
+  def handle_info(
+        {:quiz, _pin, {:player_kicked, player_id}},
+        %{assigns: %{player_id: player_id}} = socket
+      ),
+      do: {:noreply, assign(socket, error: :kicked, question: nil, player_id: nil)}
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
@@ -119,23 +130,34 @@ defmodule BarkparkWeb.QuizPlayLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="q-shell">
+    <%!-- The page's one main landmark (axe landmark-one-main / region). --%>
+    <main class="q-shell">
       <canvas
         class="quiz-cursor-canvas"
         data-quiz-pin={@pin}
         data-quiz-role="player"
         data-quiz-player-token={@player_token}
       ></canvas>
-      <p class="q-eyebrow">Hyperquiz · Player</p>
-      <p class="q-pin">Room <code>{@pin}</code></p>
+      <p class="q-eyebrow">{gettext("Hyperquiz · Player")}</p>
+      <p class="q-pin">{gettext("Room")} <code>{@pin}</code></p>
 
       <%= cond do %>
         <% @error == :no_room -> %>
           <p class="q-status">
-            Nobody is hosting this room right now — check the pin, or refresh once your host is up.
+            {gettext("Nobody is hosting this room right now — check the pin, or refresh once your host is up.")}
+          </p>
+        <% @error == :kicked -> %>
+          <p class="q-status">{gettext("The host removed you from this room.")}</p>
+        <% @error == :room_locked -> %>
+          <p class="q-status">
+            {gettext("The host has locked this room, so nobody new can join. Ask the host to unlock it.")}
+          </p>
+        <% @error == :join_rate_limited -> %>
+          <p class="q-status">
+            {gettext("Lots of players are joining this room right now. Refresh in a few seconds to join.")}
           </p>
         <% @error -> %>
-          <p class="q-status">This room is unavailable right now. Try again shortly.</p>
+          <p class="q-status">{gettext("This room is unavailable right now. Try again shortly.")}</p>
         <% @question -> %>
           <h1 class="q-question">{@question.prompt}</h1>
           <img :if={@question[:image]} src={@question[:image]} alt="" class="q-image" />
@@ -152,14 +174,22 @@ defmodule BarkparkWeb.QuizPlayLive do
               <span class="q-count"> · {Map.get(@tally, choice.id, 0)}</span>
             </button>
           </div>
-          <p :if={@locked} class="q-status">Answers are closed — look up at the host screen.</p>
+          <p :if={@locked} class="q-status">{gettext("Answers are closed — look up at the host screen.")}</p>
           <p :if={@picked != nil and not @locked} class="q-status">
-            Answer locked in — tap another to change it.
+            {gettext("Answer locked in — tap another to change it.")}
           </p>
         <% true -> %>
-          <p class="q-status">Connecting to the room…</p>
+          <p class="q-status">{gettext("Connecting to the room…")}</p>
       <% end %>
-    </div>
+    </main>
     """
   end
+
+  # The page speaks the quiz's workspace language, never the viewer's: this is
+  # an anonymous public door. Every quiz a room can bind resolves through
+  # `Content.get_public_document/3`, pinned to the seeded Default workspace
+  # (`Barkpark.Quiz.Content.load_question/2`), so that workspace IS the quiz's
+  # workspace; an unbound room runs the sample question under the same rule.
+  defp put_quiz_locale,
+    do: BarkparkWeb.StudioLocale.put(Barkpark.Tenancy.get_default_workspace())
 end

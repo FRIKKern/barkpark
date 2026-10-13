@@ -51,6 +51,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :dataset, :string, default: "production"
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document root, handed to each item's composite for `visibleWhen`
+  # (task-9905a69475b1ff3b); the item itself is the "parent" scope.
+  attr :root, :map, default: nil
   # Optional `phx-target` for the reorder/add/remove buttons. Defaults to nil —
   # buttons then bubble to the enclosing LiveView (StudioLive). When a
   # `Phoenix.LiveComponent.CID` is passed (e.g. `@myself` from PaperFieldBlock),
@@ -78,10 +81,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf"
+              id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}")}
               data-field-name={@field.name} data-ordered={@ordered? && "true"}>
       <legend class="bp-field-title">
         <%= @title %><%= if @progress do %>
-          <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= @progress.met %>/<%= @progress.total %> met</span>
+          <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= gettext("%{met}/%{total} met", met: @progress.met, total: @progress.total) %></span>
         <% end %>
       </legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
@@ -234,7 +238,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               # search its own scope, not the flat default.
               dataset: assigns[:dataset] || "production",
               scope_prefix: assigns[:scope_prefix] || "",
-              api_token_raw: assigns[:api_token_raw] || ""
+              api_token_raw: assigns[:api_token_raw] || "",
+              root: assigns[:root]
             })
         })
 
@@ -319,6 +324,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
           row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
+          row_label: row_label(assigns, idx),
           ref_type: ref_type_of(item),
           dataset: assigns[:dataset] || "production",
           scope_prefix: assigns[:scope_prefix] || "",
@@ -332,6 +338,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           input_id: "f-#{assigns.field.name}-#{idx}",
           input_name: row_path,
           row_value: row_value,
+          row_label: row_label(assigns, idx),
           on_change: assigns.on_change,
           readonly: assigns.readonly
         }
@@ -378,7 +385,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       pick(row, spec["title"]) ||
         first_text(row, subs) ||
         title_for(item) ||
-        "Item"
+        gettext("Item")
 
     %{
       title: title,
@@ -497,6 +504,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         ref-type={@ref_type}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
+        data-field-label={@row_label}
         data-bridge-target={"#{@wrap_id}-h"}
       ></bp-reference-picker>
     </div>
@@ -590,11 +598,17 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       id={@input_id}
       name={@input_name}
       value={leaf_display(@row_value)}
+      aria-label={@row_label}
       phx-change={@on_change}
       disabled={@readonly}
     />
     """
   end
+
+  # A row's own name: the fieldset legend names the group, not each input,
+  # so a screen reader heard only "edit text" per row.
+  defp row_label(assigns, idx),
+    do: gettext("%{field} %{n}", field: assigns.title, n: idx + 1)
 
   # Never let a structured row value crash the render: a map/list reaching the
   # leaf fallback (e.g. a block missing its `of` descriptor) has no
@@ -647,7 +661,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp subfield_attr(_, _), do: nil
 
   defp title_for(%{title: t}) when is_binary(t) and t != "", do: t
-  defp title_for(%{name: n}) when is_binary(n), do: humanize(n)
+
+  # The schema parser names an array's item "<array>[item]" (an internal key).
+  # Shown as-is it read "Choices[item]" on an empty row; an untitled item is
+  # just an "Item" to an editor (task-3630409f12d4a43b).
+  defp title_for(%{name: n}) when is_binary(n) do
+    if String.ends_with?(n, "[item]"), do: gettext("Item"), else: humanize(n)
+  end
+
   defp title_for(_), do: ""
 
   defp humanize(name) do

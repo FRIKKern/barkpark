@@ -726,11 +726,21 @@ jobs:
       # arm (b'), and arm (a) reads `git log <merge-base>..<base>` — a shallow
       # checkout gives it neither, and a truncated history can only make it MISS.
       # `fetch-depth: 0` is the only honest depth here.
+      #
+      # BLOBLESS, NOT SHALLOW (task-866fda6aaa3240f1; wave 3 of
+      # scripts/dispatch-blobless-proof.sh). `filter: blob:none` keeps every
+      # commit and tree, so the depth argument above is untouched; it only
+      # defers file CONTENTS. The script reads trees, not contents:
+      # `rev-parse <sha>:<path>` (a blob id, read from a tree), `diff
+      # --name-only`/`--diff-filter`, and `log -- <path>`. A blob it does need
+      # is fetched on demand, so a verdict cannot change, only its cost. The
+      # full checkout measured 27-33 s on every PR head.
       - name: Checkout the PR head (full history — the check walks ancestors)
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          filter: blob:none
 
       - name: Fetch the base branch so the merge-base resolves
         id: s1

@@ -296,6 +296,7 @@ function mountAtomRetarget({ dom, node, editor, getPos, bpType }) {
   picker.setAttribute("value", seed == null ? "" : String(seed));
   if (scope.dataset) picker.setAttribute("dataset", scope.dataset);
   if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
+  if (scope.referenceStrings) picker.setAttribute("data-strings", scope.referenceStrings);
   dom.appendChild(picker);
 
   // Write the new reference back onto the carried block. setNodeMarkup changes ONLY

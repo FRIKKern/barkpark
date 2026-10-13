@@ -424,12 +424,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
   # holds a REAL but plain `member` row in ws-B. A stranger to B would be denied
   # under BOTH candidate predicates and would prove nothing.
   #
-  # That shape is also why the predicate must be `workspace_admin?/2` and NEVER
-  # `Tenancy.Auth.authorize/3`: `authorize/3`'s api_token arm ORs the token's
-  # GLOBAL `permissions[]` with membership, so this actor PASSES
-  # `authorize(tok, B, :admin)` and FAILS `workspace_admin?(tok, B)`. Both are
-  # asserted in `token_preconditions!/3`, so swapping the handler's call for
-  # `authorize/3` turns the leak tests green on a leaking handler.
+  # Before owner ruling #2 `authorize/3`'s api_token arm admitted this actor on
+  # the token's GLOBAL `permissions[]` alone, so it PASSED
+  # `authorize(tok, B, :admin)` while FAILING `workspace_admin?(tok, B)`; that
+  # is why the handler's predicate is `workspace_admin?/2`. Since #2
+  # (task-6132833921b7dc36) `authorize/3` also reads the seat role, so both
+  # predicates refuse this actor; `token_preconditions!/3` pins both.
 
   defp instance_admin_token!(conn, ws_a, ws_b, default_ws) do
     raw = "shares-scope-tenancy-" <> Ecto.UUID.generate()
@@ -456,7 +456,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesScopeTenancyTest do
              "below could come from Caps.admin?/1 and would prove nothing"
 
     assert TenancyAuth.membership_role(token, ws_b.id) == "member"
-    assert TenancyAuth.authorize(token, ws_b.id, :admin) == :ok
+    assert TenancyAuth.authorize(token, ws_b.id, :admin) == {:error, :forbidden}
     refute TenancyAuth.workspace_admin?(token, ws_b.id)
 
     # The global bit the OLD foreign arm rode. Asserting it is what makes the

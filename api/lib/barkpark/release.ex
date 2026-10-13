@@ -211,6 +211,131 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  Confirm a user's email on the operator's word, for an account whose
+  confirmation mail cannot arrive (a seeded editor, a box with no SMTP):
+
+      bin/barkpark eval 'Barkpark.Release.confirm_email("editor@example.com")'
+
+  The release twin of `mix barkpark.user.confirm`. Boots the narrowed
+  one-shot tree (`Barkpark.OneShot.boot!/0`: no listener, no Oban), so it runs
+  beside the serving node. A confirmed account is invited, not reclaimed, when
+  an admin seats it (owner ruling #7), so its password survives member-add.
+  The password is kept: only confirm an account you created or whose owner
+  you know. Delegates to `Barkpark.Accounts.confirm_user_by_operator/1`.
+  """
+  @spec confirm_email(String.t(), keyword()) ::
+          {:ok, String.t()} | {:ok, String.t(), :already_confirmed} | {:error, :not_found}
+  def confirm_email(email, opts \\ []) when is_binary(email) do
+    Keyword.get(opts, :boot, &Barkpark.OneShot.boot!/0).()
+
+    case Barkpark.Accounts.confirm_user_by_operator(email) do
+      {:ok, user} -> {:ok, user.email}
+      {:ok, user, :already_confirmed} -> {:ok, user.email, :already_confirmed}
+      {:error, :not_found} = err -> err
+    end
+  end
+
+  @doc """
+  Hash the media files born before `media_files.sha1` (task-b6e57c37f6928344),
+  so upload dedupe and `GET /v1/media/:ds?sha1=` cover them too:
+
+      bin/barkpark eval 'Barkpark.Release.backfill_media_sha1(dry_run: true)'
+      bin/barkpark eval 'Barkpark.Release.backfill_media_sha1()'
+
+  The release twin of `mix barkpark.media.backfill_sha1` (mix tasks are not in
+  a release). Boots the narrowed one-shot tree like `confirm_email/2`, then
+  delegates to `Barkpark.Media.backfill_sha1/1`: re-runnable, writes only
+  `sha1`, counts an unreadable blob instead of failing. Options: `:dry_run`,
+  `:batch`. Prints and returns `%{hashed:, missing:, remaining:}`.
+  """
+  @spec backfill_media_sha1(keyword()) :: %{
+          hashed: non_neg_integer(),
+          missing: non_neg_integer(),
+          remaining: non_neg_integer()
+        }
+  def backfill_media_sha1(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    stats = Barkpark.Media.backfill_sha1(opts)
+    IO.puts("media sha1 backfill: #{inspect(stats)}")
+    stats
+  end
+
+  @doc """
+  The prepared data step for task-fa5ccc714ad4a939: stamp `media_files.dataset_id`
+  on legacy unstamped blobs (`Barkpark.Media.DatasetIdBackfill`). The OWNER runs
+  it; a dry run (the default) writes nothing and prints the census.
+
+      bin/barkpark eval 'Barkpark.Release.backfill_media_dataset_id()'
+      bin/barkpark eval 'Barkpark.Release.backfill_media_dataset_id(apply: true, journal: "/var/tmp/media-ds.json")'
+
+  Undo with `undo_media_dataset_id_backfill/1` and the same journal path.
+  """
+  def backfill_media_dataset_id(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    report = Barkpark.Media.DatasetIdBackfill.run(opts)
+    mode = if opts[:apply], do: "APPLIED (journal #{opts[:journal]})", else: "dry run"
+
+    IO.puts(
+      "media dataset_id backfill, #{mode}: null_rows=#{report.null_rows} " <>
+        "groups=#{length(report.groups)} datasets_to_create=#{length(report.to_create)} " <>
+        "unresolvable=#{length(report.unresolvable)} " <>
+        "split_readers=#{length(report.split_readers)} (rows=#{Enum.sum(Enum.map(report.split_readers, & &1.rows))}, left unstamped) " <>
+        "stamped=#{report.stamped} created=#{report.created}"
+    )
+
+    IO.puts("  positive control (one unstamped row): #{inspect(report.control)}")
+
+    Enum.each(report.groups, fn g ->
+      IO.puts(
+        "  ws=#{g.workspace_id} project=#{g.project_id} dataset=#{inspect(g.dataset)} rows=#{g.rows} " <>
+          "-> project=#{g.target_project_id} dataset_id=#{g.dataset_id || if(g.create?, do: "CREATE", else: "none")}" <>
+          if(g.split_readers?, do: " SPLIT-READERS (left unstamped)", else: "")
+      )
+    end)
+
+    Enum.each(report.skipped, &IO.puts("  skipped: #{inspect(&1)}"))
+    report
+  end
+
+  @doc "Reverse `backfill_media_dataset_id(apply: true, journal: path)` from its journal."
+  def undo_media_dataset_id_backfill(journal, opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    result = Barkpark.Media.DatasetIdBackfill.undo(journal, opts)
+    IO.puts("media dataset_id backfill undone: #{inspect(result)}")
+    result
+  end
+
+  @doc """
+  The reviewed data step for pds-bl-stray-keys-on-acceptance-criteria:
+  `Barkpark.Tasks.StrayCriterionKeys.run/1` behind the one-shot boot.
+
+      bin/barkpark eval 'Barkpark.Release.clean_stray_criterion_keys()'             # dry run
+      bin/barkpark eval 'Barkpark.Release.clean_stray_criterion_keys(apply: true)'
+
+  Prints the counts and every action (dropped, folded, moved, reported).
+  """
+  def clean_stray_criterion_keys(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    report = Barkpark.Tasks.StrayCriterionKeys.run(opts)
+
+    IO.puts(
+      "stray criterion keys (#{if opts[:apply], do: "APPLIED", else: "dry run"}): " <>
+        "scanned=#{report.scanned} changed=#{report.changed} stale=#{report.stale}"
+    )
+
+    Enum.each(report.actions, &IO.puts("  " <> inspect(&1)))
+    report
+  end
+
+  @doc """
   LOAD `:barkpark` without STARTING it.
 
   `Application.load/1` makes the app's environment (`:ecto_repos`, every

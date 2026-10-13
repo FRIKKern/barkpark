@@ -16,6 +16,12 @@ defmodule Barkpark.Auth.ApiToken do
     field :token_hash, :string
     field :label, :string
     field :dataset, :string, default: "production"
+    # true only when the mint request NAMED `dataset` (task-4418b517649a58ce).
+    # `dataset` defaults to "production" on every row, so the string alone
+    # cannot say whether the minter asked for a binding. NULL/false = unbound:
+    # the token keeps cross-dataset access within its workspace, as before.
+    # true = refused on any other dataset (`RequireToken.dataset_off_binding?/2`).
+    field :dataset_bound, :boolean
     field :permissions, {:array, :string}, default: ["read"]
     field :revoked_at, :utc_datetime
     field :expires_at, :utc_datetime
@@ -69,6 +75,7 @@ defmodule Barkpark.Auth.ApiToken do
       :token_hash,
       :label,
       :dataset,
+      :dataset_bound,
       :permissions,
       :workspace_id,
       :revoked_at,

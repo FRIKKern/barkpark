@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   (test-facing), and so does `default_dataset/0`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
@@ -133,8 +134,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   def ensure_presence_subscription(socket) do
     if connected?(socket) do
-      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
-      new_topic = PresenceState.topic(ws_id)
+      new_topic = presence_topic(socket)
       old_topic = socket.assigns[:presence_topic]
 
       if new_topic == old_topic do
@@ -151,6 +151,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     else
       socket
     end
+  end
+
+  # The room this socket's presence belongs to: workspace + project + dataset
+  # (owner ruling #30 Q7). A viewer of one project never hears who is editing
+  # what in another.
+  defp presence_topic(socket) do
+    ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+    project_id = socket.assigns[:current_project] && socket.assigns.current_project.id
+    PresenceState.topic(ws_id, project_id, socket.assigns[:dataset])
   end
 
   @doc false
@@ -200,20 +209,76 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         project_id: socket.assigns[:current_project] && socket.assigns.current_project.id,
         name: socket.assigns.user_name,
         color: socket.assigns.user_color,
-        joined_at: System.system_time(:second)
+        joined_at: System.system_time(:second),
+        # This socket's own id: two tabs of one browser share a user_id, and a
+        # tab must not draw its own caret (task-c522237b9f37de21).
+        session_id: socket.id
       }
 
-      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
-      topic = socket.assigns[:presence_topic] || PresenceState.topic(ws_id)
+      topic = socket.assigns[:presence_topic] || presence_topic(socket)
 
       case Presence.get_by_key(topic, socket.assigns.user_id) do
         [] -> Presence.track(self(), topic, socket.assigns.user_id, meta)
         _ -> Presence.update(self(), topic, socket.assigns.user_id, meta)
       end
 
-      assign(socket, presences: PresenceState.list(topic))
+      socket
+      |> assign(presences: PresenceState.list(topic))
+      |> push_remote_selections()
     else
       socket
+    end
+  end
+
+  @selection_max_bytes 512
+
+  @doc false
+  # The paper canvas's caret (task-c522237b9f37de21): `bp-canvas-selection`
+  # from the canvas, `{anchor, head}` or nil on blur, carried in this socket's
+  # presence meta so the other sessions on the paper draw it. A malformed or
+  # oversized selection is ignored, never stored.
+  def put_paper_selection(socket, selection) do
+    topic = socket.assigns[:presence_topic] || presence_topic(socket)
+
+    valid? =
+      is_nil(selection) or
+        (PresenceState.selection_shape?(selection) and
+           byte_size(Jason.encode!(selection)) <= @selection_max_bytes)
+
+    if connected?(socket) and is_binary(topic) and valid? do
+      Presence.update(self(), topic, socket.assigns.user_id, &Map.put(&1, :selection, selection))
+    end
+
+    socket
+  end
+
+  @doc false
+  # Push the other sessions' carets on the open paper to its canvases
+  # (`bp:remote-selections`, `setRemoteSelections`), only when the list changed.
+  # A departed session drops out of the next presence diff, so its caret clears.
+  def push_remote_selections(socket) do
+    with true <- connected?(socket),
+         "paper" <- socket.assigns[:editor_type],
+         %{doc_id: did} <- socket.assigns[:editor_doc] do
+      doc_id = Content.published_id(did)
+
+      list =
+        PresenceState.remote_selections(
+          socket.assigns[:presences] || [],
+          doc_id,
+          socket.assigns[:dataset],
+          socket.id
+        )
+
+      if socket.assigns[:remote_selections_pushed] == {doc_id, list} do
+        socket
+      else
+        socket
+        |> assign(:remote_selections_pushed, {doc_id, list})
+        |> push_event("bp:remote-selections", %{list: list})
+      end
+    else
+      _ -> socket
     end
   end
 
@@ -455,7 +520,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         socket
         |> put_flash(
           :error,
-          "This asset is checked out by another editor, so its metadata is read-only for you."
+          gettext(
+            "This asset is checked out by another editor, so its metadata is read-only for you."
+          )
         )
         |> assign(save_status: "Read-only")
 
@@ -530,10 +597,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           findings = validation_findings(schema, new_title, saved_doc.content, errs)
 
           panes =
-            PaneBuilder.update_title(
+            PaneBuilder.update_saved_row(
               socket.assigns.panes,
               Content.published_id(saved_doc.doc_id),
-              new_title
+              new_title,
+              saved_doc
             )
 
           # The cross-field rules read the WHOLE form, not just the posted
@@ -553,11 +621,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             cross_violations: compute_cross_violations(schema, form)
           )
           |> maybe_refresh_content_preview()
+          |> assign_page_title()
 
         {:error, {:halted, reason}} ->
           socket
           |> assign(save_status: "Save cancelled")
-          |> put_flash(:error, "Save cancelled: #{reason}")
+          |> put_flash(:error, gettext("Save cancelled: %{reason}", reason: reason))
 
         {:error, _} ->
           assign(socket, save_status: "Save failed")
@@ -659,7 +728,62 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def hook_opts(socket) do
-    [source: :studio, user_id: socket.assigns[:user_id]] ++ ScopeHelpers.scope_opts(socket)
+    [source: :studio, user_id: actor_user_id(socket)] ++ ScopeHelpers.scope_opts(socket)
+  end
+
+  @doc """
+  Opts for `Content.disconnect_references/3` from a Studio socket (r4a Q8,
+  task-651462bb70d1be7f). The LiveScope write gate checks only the event's
+  target — the open document — but a disconnect rewrites every document that
+  references it. A grant-graded socket therefore passes a `:source_guard` that
+  admits a referencer only inside its write grants (one fresh grant load, then
+  `Caps.grant_target_denied?/4` per referencer); any other socket is unchanged.
+  """
+  def disconnect_opts(socket) do
+    opts = ScopeHelpers.scope_opts(socket)
+
+    if Caps.grant_graded?(socket.assigns) do
+      assigns = socket.assigns
+
+      grants =
+        case assigns[:current_user] do
+          %{id: uid} when is_binary(uid) -> Barkpark.Access.list_active_grants_for_grantee(uid)
+          _ -> []
+        end
+
+      Keyword.put(opts, :source_guard, fn type, doc_id ->
+        not Caps.grant_target_denied?(assigns, grants, type, doc_id)
+      end)
+    else
+      opts
+    end
+  end
+
+  @doc "The flash for a disconnect refused by `disconnect_opts/1`'s guard."
+  def outside_grant_disconnect_message(denied, verb) do
+    n = length(denied)
+    noun = if n == 1, do: "document references", else: "documents reference"
+
+    "#{n} #{noun} this one outside your access grant, so the references can't be removed. " <>
+      "Nothing was #{verb}."
+  end
+
+  @doc """
+  The user a Studio write is credited to (owner ruling #51, RQ8,
+  task-6132833921b7dc36): the SIGNED-IN account, never `assigns.user_id`.
+
+  `assigns.user_id` comes from the browser's connect params (localStorage) and
+  exists for presence colour and cursor identity. It used to flow into
+  `hook_opts` and from there into `revisions.actor_user_id` and the audit
+  actor, so any browser could credit its edits to any id it chose. A
+  token-authenticated Studio has no account; it gets `nil` here, and the
+  revision still records the token through the caller context.
+  """
+  def actor_user_id(socket) do
+    case socket.assigns[:current_user] do
+      %{id: id} when not is_nil(id) -> to_string(id)
+      _ -> nil
+    end
   end
 
   @doc false
@@ -693,20 +817,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   def do_unpublish(socket) do
     opts = hook_opts(socket)
+    previous_rev = socket.assigns[:editor_doc] && socket.assigns.editor_doc.rev
 
-    do_action(
-      socket,
-      fn doc, type ->
-        Content.unpublish_document(
-          Content.published_id(doc.doc_id),
-          type,
-          socket.assigns.dataset,
-          opts
-        )
-      end,
-      "Unpublished"
-    )
+    {:noreply, socket} =
+      do_action(
+        socket,
+        fn doc, type -> unpublish_open_doc(doc, type, socket.assigns.dataset, opts) end,
+        gettext("Unpublished")
+      )
+
+    # Unpublish moves the revision outside the editors' save path, like
+    # Publish; announce it or the next edit pauses (task-494fc7f91abd01bd).
+    {:noreply, Paper.push_document_revision(socket, previous_rev)}
   end
+
+  # A sheet's cells live in its session, which persists on a debounce, and
+  # Unpublish is offered only while no draft row exists. Flushing first (as
+  # Publish does) would create that draft, and `unpublish_document` then
+  # overwrites an existing draft with the published content, losing the cells.
+  # So read the live cells, unpublish, and put them on the new draft when they
+  # differ; the session's next persist writes the same draft
+  # (task-3b3209373291e9fd).
+  defp unpublish_open_doc(doc, "sheet", dataset, opts) do
+    slug = Content.published_id(doc.doc_id)
+    scope = BarkparkWeb.Studio.SheetGrid.GridData.session_scope(%{doc: doc})
+
+    live =
+      case Barkpark.Plugins.Sheets.Session.peek(slug, dataset, scope) do
+        {:ok, %{} = content} -> content
+        _ -> nil
+      end
+
+    with {:ok, _} = ok <- Content.unpublish_document(slug, "sheet", dataset, opts) do
+      keep_live_cells(ok, slug, live, dataset, opts)
+    end
+  end
+
+  defp unpublish_open_doc(doc, type, dataset, opts),
+    do: Content.unpublish_document(Content.published_id(doc.doc_id), type, dataset, opts)
+
+  defp keep_live_cells(ok, _slug, nil, _dataset, _opts), do: ok
+  defp keep_live_cells({:ok, %{content: live}} = ok, _slug, live, _dataset, _opts), do: ok
+
+  defp keep_live_cells(_ok, slug, live, dataset, opts),
+    do: Content.upsert_document("sheet", %{"doc_id" => slug, "content" => live}, dataset, opts)
 
   @doc false
   def do_action(socket, action, msg) do
@@ -729,7 +883,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            socket |> put_flash(:info, with_advisories(msg, Warnings.drain())) |> rebuild_panes()}
 
         {:error, {:halted, reason}} ->
-          {:noreply, put_flash(socket, :error, "#{msg} cancelled: #{reason}")}
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             gettext("%{action} cancelled: %{reason}", action: msg, reason: reason)
+           )}
 
         # The publish wall (authoring-excellence D14): a label-spine rejection
         # must render its field/rule/fix detail, never degrade to the
@@ -737,21 +896,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         # and it has to read like documentation.
         {:error, {:label_spine, details}} ->
           {:noreply,
-           put_flash(socket, :error, "Publish blocked: #{format_wall_details(details)}")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Publish blocked: %{detail}", detail: format_wall_details(details))
+           )}
 
         # The E3 tag-registry wall (authoring-excellence D80): an unknown-tag
         # rejection names each unregistered tag with its nearest suggestion, so
         # the fix is one flash away — never the content-free "Action failed".
         {:error, {:unknown_tag, payload}} ->
           {:noreply,
-           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Publish blocked: %{detail}", detail: format_wall_details(payload))
+           )}
 
         # The E4 dedup wall (authoring-excellence D80/D81): a near-duplicate
         # rejection surfaces the incumbent's published id plus the fix, so the
         # author can extend that document instead of re-publishing a twin.
         {:error, {:duplicate_of, payload}} ->
           {:noreply,
-           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Publish blocked: %{detail}", detail: format_wall_details(payload))
+           )}
 
         # ── the four NON-WALL rejection shapes (ae-nonwall-rejection-render) ──
         #
@@ -770,8 +941,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            put_flash(
              socket,
              :error,
-             "That document is no longer there — it may have been discarded, or " <>
-               "already #{String.downcase(msg)} in another tab."
+             gettext(
+               "That document is no longer there — it may have been discarded, or already %{action} in another tab.",
+               action: String.downcase(msg)
+             )
            )}
 
         # 2. The rev fence (`mutations.ex:151`, `lifecycle.ex:149`). The most
@@ -784,7 +957,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            put_flash(
              socket,
              :error,
-             "The document changed since you loaded it — reload and retry."
+             gettext("The document changed since you loaded it — reload and retry.")
            )}
 
         # 3. The task lifecycle gate (`lifecycle.ex:349/352/365`,
@@ -809,14 +982,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            put_flash(
              socket,
              :error,
-             "#{msg} failed: " <>
-               (changeset
-                |> Ecto.Changeset.traverse_errors(&changeset_message/1)
-                |> format_field_errors())
+             gettext("%{action} failed: %{errors}",
+               action: msg,
+               errors:
+                 changeset
+                 |> Ecto.Changeset.traverse_errors(&changeset_message/1)
+                 |> format_field_errors()
+             )
            )}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Action failed")}
+          {:noreply, put_flash(socket, :error, gettext("Action failed"))}
       end
     else
       {:noreply, socket}
@@ -841,7 +1017,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     case length(fields) - length(shown) do
       0 -> line
-      n -> line <> " (+#{n} more)"
+      n -> line <> " " <> ngettext("(+1 more)", "(+%{count} more)", n)
     end
   end
 
@@ -849,10 +1025,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # style placeholders still in the message. Interpolating them here keeps the
   # whole render inside this module — no `to_envelope`, and nothing from the
   # changeset's `:data` is ever read.
-  defp changeset_message({message, opts}) do
-    Enum.reduce(opts, message, fn {key, value}, acc ->
-      String.replace(acc, "%{#{key}}", to_string(inspect_scalar(value)))
-    end)
+  defp changeset_message(error), do: translate_changeset_error(error)
+
+  @doc """
+  One changeset error in the Studio language. Ecto's own messages ("can't be
+  blank", "should be at least %{count} character(s)") are msgids of the
+  `errors` domain (`priv/gettext/errors.pot`), plural by `:count`; a message no
+  catalog carries comes back as written. Option values are summarised the way
+  `changeset_message/1` always did, never inspected in full.
+  """
+  def translate_changeset_error({message, opts}) do
+    bindings = Map.new(opts, fn {key, value} -> {key, inspect_scalar(value)} end)
+
+    case Keyword.get(opts, :count) do
+      count when is_integer(count) ->
+        Gettext.dngettext(BarkparkWeb.Gettext, "errors", message, message, count, bindings)
+
+      _ ->
+        Gettext.dgettext(BarkparkWeb.Gettext, "errors", message, bindings)
+    end
   end
 
   defp inspect_scalar(value) when is_binary(value) or is_number(value) or is_atom(value),
@@ -1198,20 +1389,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def create_error(%Ecto.Changeset{} = changeset, what) do
-    errors =
-      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {key, value}, acc ->
-          String.replace(acc, "%{#{key}}", to_string(value))
-        end)
-      end)
+    errors = Ecto.Changeset.traverse_errors(changeset, &translate_changeset_error/1)
 
     case errors |> Map.to_list() |> List.first() do
-      {field, [msg | _]} -> "Could not create #{what}: #{field} #{msg}"
-      _ -> "Could not create #{what}"
+      {field, [msg | _]} ->
+        gettext("Could not create %{what}: %{field} %{message}",
+          what: created_thing(what),
+          field: created_field(field),
+          message: msg
+        )
+
+      _ ->
+        gettext("Could not create %{what}", what: created_thing(what))
     end
   end
 
-  def create_error(_, what), do: "Could not create #{what}"
+  def create_error(_, what), do: gettext("Could not create %{what}", what: created_thing(what))
+
+  defp created_thing("workspace"), do: gettext("workspace")
+  defp created_thing("project"), do: gettext("project")
+  defp created_thing(what), do: what
+
+  # The fields a workspace or project is created from, as the form calls them.
+  defp created_field(:name), do: gettext("name")
+  defp created_field(:slug), do: gettext("slug")
+  defp created_field(field), do: to_string(field)
 
   @doc false
   def project_has_dataset?(%{} = project, slug) when is_binary(slug) do
@@ -1400,7 +1602,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     editor = redact_editor_for_viewer(editor, socket)
 
-    new_schema = editor && editor[:schema]
+    # A content plugin's schema chrome reads in the Studio language
+    # (task-0ded99e28e620ba5); every other schema is unchanged.
+    new_schema = editor && BarkparkWeb.Studio.PluginSchemaCopy.localize(editor[:schema])
     old_schema = socket.assigns[:editor_schema]
     nav_group = resolve_nav_group(socket.assigns[:nav_group], old_schema, new_schema)
 
@@ -1433,10 +1637,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         do: nil,
         else: socket |> empty_editor_state_for(panes) |> triage_not_found(socket)
 
+    # A newly opened document starts in the editor its type declares
+    # (`desk.editor`, task-d80fe8cbfdc9cbcc) when it can be edited as blocks.
     editor_mode =
-      if same_doc? and is_nil(editor_blocks_identity_error),
-        do: socket.assigns[:editor_mode] || :classic,
-        else: :classic
+      cond do
+        not is_nil(editor_blocks_identity_error) -> :classic
+        same_doc? -> socket.assigns[:editor_mode] || :classic
+        freeform_default?(new_schema) and editor_doc != nil and editor_blocks != [] -> :beta
+        true -> :classic
+      end
 
     socket =
       assign(socket,
@@ -1865,12 +2074,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         {Barkpark.Plugins.Sheets.Session.topic(
            doc.doc_id,
            socket.assigns.dataset,
-           doc.workspace_id
+           doc
          ),
          Barkpark.Plugins.Sheets.Session.presence_topic(
            doc.doc_id,
            socket.assigns.dataset,
-           doc.workspace_id
+           doc
          )}
       else
         {nil, nil}
@@ -1973,6 +2182,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   def next_form_gen(socket, true), do: (socket.assigns[:editor_form_gen] || 0) + 1
   def next_form_gen(socket, false), do: socket.assigns[:editor_form_gen] || 0
+
+  defp freeform_default?(%{desk: %{} = desk}),
+    do: Map.get(desk, "editor", Map.get(desk, :editor)) == "freeform"
+
+  defp freeform_default?(_schema), do: false
 
   @doc false
   def beta_editable?(socket) do
@@ -2329,10 +2543,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   ARMED ONLY FOR GRANT-DERIVED WRITE. A membership-derived socket carries no
   `caller_context` and no `write_gate?`, so `grant_graded?/1` is false and that
   arm returns `false` without looking at anything.
+
+  ## AND THE TARGET WALK READS FRESH GRANTS HERE (owner ruling #30 Q11)
+
+  The walk below used the grants CAPTURED in `caller_context` at mount. With a
+  second write grant still live, `write_capable_now?/1` stays true, so a grant
+  revoked mid-session on THIS sheet kept admitting writes until the socket
+  remounted. This seam is not a render, so it loads the grantee's active
+  grants (`Access.list_active_grants_for_grantee/1`) — only for a grant-graded
+  user socket; everything else pays nothing. The render snapshot below keeps
+  the captured list.
   """
   @spec sheet_write_capable?(map()) :: boolean
   def sheet_write_capable?(assigns) when is_map(assigns) do
-    Caps.write_capable_now?(assigns) and not sheet_grant_target_denied?(assigns)
+    Caps.write_capable_now?(assigns) and
+      not sheet_grant_target_denied?(assigns, fresh_sheet_grants(assigns))
   end
 
   @doc """
@@ -2362,7 +2587,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @spec sheet_write_capable_snapshot?(map()) :: boolean
   def sheet_write_capable_snapshot?(assigns) when is_map(assigns) do
     Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{}) and
-      not sheet_grant_target_denied?(assigns)
+      not sheet_grant_target_denied?(assigns, grant_ctx_grants(assigns))
   end
 
   @doc """
@@ -2398,10 +2623,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   #   * the leaf comes from the `:sheet_doc` assign, read totally by
   #     `Caps.doc_leaf/1`, so a sheet doc with no type or doc_id resolves to an
   #     unresolvable target and FAILS CLOSED for a grant-graded socket.
-  defp sheet_grant_target_denied?(assigns) do
+  defp sheet_grant_target_denied?(assigns, grants) do
     {type, doc_id} = Caps.doc_leaf(Map.get(assigns, :sheet_doc))
 
-    Caps.grant_target_denied?(assigns, grant_ctx_grants(assigns), type, doc_id)
+    Caps.grant_target_denied?(assigns, grants, type, doc_id)
+  end
+
+  # The write seam's grant list: a fresh active-grant load for a grant-graded
+  # user socket (the only socket whose walk reads grants at all), the captured
+  # list otherwise — no query for a membership-derived socket.
+  defp fresh_sheet_grants(assigns) do
+    case {grant_ctx_grants(assigns), Map.get(assigns, :current_user)} do
+      {[_ | _], %{id: uid}} when is_binary(uid) ->
+        Barkpark.Access.list_active_grants_for_grantee(uid)
+
+      {captured, _} ->
+        captured
+    end
   end
 
   defp grant_ctx_grants(assigns) do
@@ -2409,5 +2647,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       %{grants: grants} when is_list(grants) -> grants
       _ -> []
     end
+  end
+
+  # The browser tab names the open document (task-fee30130f015c416): every
+  # document tab read "Studio · Barkpark", and a screen reader's page
+  # announcement never said which document it was. The root layout's
+  # live_title adds the " · Barkpark" suffix.
+  # It is recomputed wherever the open document changes in place, not only on
+  # navigation: a save that renames it, and the block editor's sync
+  # (task-72e1de4c53c5ed9f).
+  # Same order as the document header names it (Editor's document_header):
+  # the stored title, else the schema's derived preview title (a titleless
+  # author is its name), else a singleton's schema title, else "Untitled".
+  def assign_page_title(socket) do
+    title =
+      case socket.assigns[:editor_doc] do
+        %{} = doc ->
+          BarkparkWeb.Studio.DocTitle.shown(Map.get(doc, :title)) ||
+            derived_title(doc, socket.assigns[:editor_schema])
+
+        _ ->
+          "Studio"
+      end
+
+    assign(socket, page_title: title)
+  end
+
+  defp derived_title(doc, schema) do
+    Barkpark.Content.TitleDerivation.preview_title(doc, schema) ||
+      (schema && Map.get(schema, :singleton) == true && Map.get(schema, :title)) ||
+      gettext("Untitled")
   end
 end

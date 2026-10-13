@@ -70,6 +70,11 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       assert Runner.preflight_rollback() == {:ok, @sha}
     end
 
+    test "exit 25 → :v2_seals_unreadable" do
+      put_cfg(rollback_preflight_command: {"bash", ["-c", "exit 25"]})
+      assert Runner.preflight_rollback() == {:error, :v2_seals_unreadable}
+    end
+
     test "exit 21 → :no_previous_slot" do
       put_cfg(rollback_preflight_command: {"bash", ["-c", "exit 21"]})
       assert Runner.preflight_rollback() == {:error, :no_previous_slot}

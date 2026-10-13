@@ -2,6 +2,7 @@ import { execa } from 'execa'
 import { rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import pc from 'picocolors'
+import { HOSTED_DEMO_AVAILABLE } from './constants.js'
 import type { PmInfo } from './pm.js'
 
 export interface PostInstallOptions {
@@ -89,8 +90,11 @@ export function printNextSteps(opts: PostInstallOptions): void {
       pc.dim('When you are ready for local data: re-run create-barkpark-app without --hosted-demo'),
     )
   } else {
+    // Owner ruling #60 (2026-10-03): lead with `bp setup`, not `docker compose up`.
+    // The compose file runs the published ghcr.io/barkpark/api image and needs a
+    // `.env` with the API's secrets; the starter README covers that path.
     lines.push(
-      `  ${pc.cyan('docker compose up -d')}        ${pc.dim('# Phoenix API + Postgres on :4000')}`,
+      `  ${pc.cyan('bp setup --target local --yes')}  ${pc.dim('# Barkpark API on :4000 (install bp: see README)')}`,
     )
     lines.push(
       `  ${pc.cyan(`${opts.pm.runCommand} codegen`)}  ${pc.dim('# generate types from schema')}`,
@@ -99,12 +103,14 @@ export function printNextSteps(opts: PostInstallOptions): void {
       `  ${pc.cyan(`${opts.pm.runCommand} dev`)}                ${pc.dim('# Next.js on :3000')}`,
     )
   }
-  lines.push('')
-  lines.push(
-    pc.dim(
-      'Want a free hosted API for prototyping? Pass --hosted-demo. (Defaults to local docker-compose.)',
-    ),
-  )
+  if (HOSTED_DEMO_AVAILABLE) {
+    lines.push('')
+    lines.push(
+      pc.dim(
+        'Want a free hosted API for prototyping? Pass --hosted-demo. (Defaults to a local API on :4000.)',
+      ),
+    )
+  }
   lines.push('')
   for (const line of lines) {
     console.log(line)

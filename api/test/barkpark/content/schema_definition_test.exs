@@ -83,6 +83,78 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
       assert {:error, {:array_ordered_must_be_boolean, "x"}} = SchemaDefinition.parse(schema)
     end
 
+    test "accepts arrayOf with several NAMED member types (task-b3ebbd3ab1575e2a)" do
+      schema = %{
+        "name" => "post",
+        "fields" => [
+          %{
+            "name" => "links",
+            "type" => "arrayOf",
+            "of" => [
+              %{
+                "name" => "externalLink",
+                "type" => "composite",
+                "fields" => [%{"name" => "url", "type" => "string"}]
+              },
+              %{
+                "name" => "docLink",
+                "type" => "composite",
+                "fields" => [%{"name" => "ref", "type" => "string"}]
+              }
+            ]
+          }
+        ]
+      }
+
+      assert {:ok, %Parsed{version: 2, fields: [field]}} = SchemaDefinition.parse(schema)
+      assert %Field{type: "arrayOf", of: nil, of_types: types} = field
+      assert Map.keys(types) |> Enum.sort() == ["docLink", "externalLink"]
+      assert %Field{type: "composite", fields: [%Field{name: "url"}]} = types["externalLink"]
+      assert %Field{type: "composite", fields: [%Field{name: "ref"}]} = types["docLink"]
+    end
+
+    test "rejects arrayOf with an empty list of member types" do
+      schema = %{
+        "name" => "post",
+        "fields" => [%{"name" => "links", "type" => "arrayOf", "of" => []}]
+      }
+
+      assert {:error, {:array_missing_of, "links"}} = SchemaDefinition.parse(schema)
+    end
+
+    test "rejects an arrayOf member type with no name" do
+      schema = %{
+        "name" => "post",
+        "fields" => [
+          %{
+            "name" => "links",
+            "type" => "arrayOf",
+            "of" => [%{"type" => "composite", "fields" => []}]
+          }
+        ]
+      }
+
+      assert {:error, {:array_of_type_missing_name, "links"}} = SchemaDefinition.parse(schema)
+    end
+
+    test "rejects arrayOf member types with a duplicate name" do
+      schema = %{
+        "name" => "post",
+        "fields" => [
+          %{
+            "name" => "links",
+            "type" => "arrayOf",
+            "of" => [
+              %{"name" => "externalLink", "type" => "string"},
+              %{"name" => "externalLink", "type" => "composite", "fields" => []}
+            ]
+          }
+        ]
+      }
+
+      assert {:error, {:array_of_type_names_not_unique, "links"}} = SchemaDefinition.parse(schema)
+    end
+
     test "accepts codelist with version: 73" do
       schema = %{
         "name" => "book",
@@ -565,14 +637,51 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
         name: "page",
         fields: [
           %{"name" => "title", "type" => "string"},
-          %{"name" => "body", "type" => "richText"}
+          %{"name" => "intro", "type" => "richText"}
         ]
       }
 
       assert SchemaDefinition.default_layout(schema) == [
                %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => false},
-               %{"kind" => "field", "name" => "body", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "intro", "max" => 1, "enforce" => false},
                %{"kind" => "region", "name" => "body"}
+             ]
+    end
+
+    # task-9f230ad6d5b50fb0: a field named like the region never binds
+    # content.body a second time.
+    test "a richText field named body is edited by the region alone" do
+      for schema <- [
+            %SchemaDefinition{
+              name: "publication",
+              fields: [
+                %{"name" => "title", "type" => "string"},
+                %{"name" => "body", "type" => "richText"}
+              ]
+            },
+            %{
+              "name" => "publication",
+              "fields" => [
+                %{"name" => "title", "type" => "string"},
+                %{"name" => "body", "type" => "richText"}
+              ]
+            }
+          ] do
+        assert SchemaDefinition.default_layout(schema) == [
+                 %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => false},
+                 %{"kind" => "region", "name" => "body"}
+               ]
+      end
+    end
+
+    test "a non-richText field named body keeps its entry and drops the region" do
+      schema = %SchemaDefinition{
+        name: "note",
+        fields: [%{"name" => "body", "type" => "text"}]
+      }
+
+      assert SchemaDefinition.default_layout(schema) == [
+               %{"kind" => "field", "name" => "body", "max" => 1, "enforce" => false}
              ]
     end
 

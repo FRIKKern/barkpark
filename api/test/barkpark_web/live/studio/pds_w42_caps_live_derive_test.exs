@@ -205,9 +205,27 @@ defmodule BarkparkWeb.Studio.PdsW42CapsLiveDeriveTest do
   # when one exists; with no session the stored row is the truth. Reading both
   # ways is what makes the assertion falsifiable in either direction — a write
   # that starts a session is caught, and so is one that never does.
+
+  # The live session for `slug` in `ws`, under whichever of the workspace's
+  # projects it runs (owner ruling #51, RQ7: the session key carries the
+  # project, so a workspace-only peek no longer finds a non-default project's
+  # session).
+  defp peek_in_workspace(slug, ws) do
+    scopes =
+      [ws.id] ++
+        Enum.map(Barkpark.Tenancy.list_projects(ws.id), &[workspace_id: ws.id, project_id: &1.id])
+
+    Enum.find_value(scopes, {:error, :no_session}, fn scope ->
+      case Session.peek(slug, @dataset, scope) do
+        {:ok, _} = hit -> hit
+        _ -> nil
+      end
+    end)
+  end
+
   defp persisted_a1(ws, sheet) do
     cells =
-      case Session.peek(sheet, @dataset, ws.id) do
+      case peek_in_workspace(sheet, ws) do
         {:ok, content} ->
           get_in(content, ["tabs", Access.at(0), "cells"]) || %{}
 

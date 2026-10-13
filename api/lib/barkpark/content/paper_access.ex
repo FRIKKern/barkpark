@@ -156,9 +156,15 @@ defmodule Barkpark.Content.PaperAccess do
       action: action,
       actor_kind: Map.get(actor, :kind) || "anonymous",
       actor_id: Map.get(actor, :id),
-      actor_label: Map.get(actor, :label)
+      actor_label: stored_label(actor)
     }
   end
+
+  # Owner ruling #32 item 1 (2026-10-03): a USER actor is stored by id only — no
+  # email at rest. `Accounts.Privacy.redact_actor_labels/1` resolves the label
+  # from the account at read time.
+  defp stored_label(%{kind: "user"}), do: nil
+  defp stored_label(actor), do: Map.get(actor, :label)
 
   @doc """
   List access rows for one paper, NEWEST FIRST.
@@ -168,10 +174,14 @@ defmodule Barkpark.Content.PaperAccess do
   takes, never "read every tenant's".
 
   `opts[:limit]` is clamped to #{@max_limit}; `opts[:dataset]` narrows further.
+  `opts[:offset]` (default 0) walks past that many rows on the SAME
+  `inserted_at`-then-`id` total order the limit is applied over, so a caller
+  paging with `limit: N, offset: k*N` sees a stable, non-overlapping walk.
   """
   @spec list(String.t(), keyword()) :: [PaperAccessLog.t()]
   def list(slug, opts \\ []) when is_binary(slug) do
     limit = opts |> Keyword.get(:limit, @default_limit) |> clamp_limit()
+    offset = opts |> Keyword.get(:offset, 0) |> max(0)
 
     PaperAccessLog
     |> where([r], r.slug == ^slug)
@@ -181,6 +191,7 @@ defmodule Barkpark.Content.PaperAccess do
     # come back in a stable, insert-ordered sequence.
     |> order_by([r], desc: r.inserted_at, desc: r.id)
     |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
   end
 

@@ -160,4 +160,45 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Settings do
 
   defp non_empty_binary?(v) when is_binary(v) and byte_size(v) > 0, do: true
   defp non_empty_binary?(_), do: false
+
+  @workspaces_env "BARKPARK_BOKBASEN_WORKSPACE_IDS"
+
+  @doc """
+  May a book from `workspace_id` be submitted to this instance's Bokbasen
+  account? Owner ruling #12 (task-803343b8cce8bfb7).
+
+  `#{@workspaces_env}` is a comma-separated workspace-id allowlist. Set, only
+  books in a listed workspace are submitted (auto-submit on publish AND the
+  manual "Publish to Bokbasen" action — both go through `PublishWorker`); a
+  book with no workspace is refused too. Unset, every workspace may submit,
+  which is today's behaviour and what a single-workspace install needs.
+  A box hosting several publishers MUST set it: the Bokbasen credential is
+  instance-wide, so without it one tenant's published book is sent under the
+  account of another.
+  """
+  @spec workspace_allowed?(binary() | nil) :: boolean()
+  def workspace_allowed?(workspace_id) do
+    case allowed_workspace_ids() do
+      nil -> true
+      ids -> is_binary(workspace_id) and workspace_id in ids
+    end
+  end
+
+  @doc "The parsed `#{@workspaces_env}` allowlist, or `nil` when unset or blank."
+  @spec allowed_workspace_ids() :: [String.t()] | nil
+  def allowed_workspace_ids do
+    case System.get_env(@workspaces_env) do
+      v when is_binary(v) ->
+        case v
+             |> String.split(",", trim: true)
+             |> Enum.map(&String.trim/1)
+             |> Enum.reject(&(&1 == "")) do
+          [] -> nil
+          ids -> ids
+        end
+
+      _ ->
+        nil
+    end
+  end
 end

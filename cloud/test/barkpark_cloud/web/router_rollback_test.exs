@@ -189,7 +189,7 @@ defmodule BarkparkCloud.Web.RouterRollbackTest do
 
       {:ok, token} = Accounts.create_user_session_token(user)
 
-      for code <- ["no_previous_slot", "already_running", "not_supported"] do
+      for code <- ["no_previous_slot", "already_running", "not_supported", "v2_seals_unreadable"] do
         StudioLinkFakeHttpClient.program([
           {:ok, %{status: 409, body: ~s({"error":{"code":"#{code}"}})}}
         ])

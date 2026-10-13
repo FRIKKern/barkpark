@@ -55,8 +55,9 @@ import { normalizeTone } from "./tone.js";
 // Internal-link marks (wikilink/blockref/tag) — schema registration only, so
 // the editor holds these nodes through a setContent->getJSON round-trip. Defined
 // in the DOM-free marks.js so the smoke harness can assert their schema.
-import { Wikilink, Blockref, Tag, Valueref } from "./marks.js";
+import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "./marks.js";
 import { CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } from "./contract.js";
+import { OpaqueMark } from "./opaque-mark.js";
 import "./canvas/index.js";
 
 const TableUnderline = Mark.create({
@@ -263,11 +264,14 @@ class BpPaperEditor extends HTMLElement {
         // ever hosts prose blocks (paragraph/heading/list — see convert.js), so
         // there is no code block to exclude.
         Typography,
+        // A stored flat mark with no editor (smallcaps, annotations) — carried verbatim.
+        OpaqueMark,
         // Internal-link marks — schema registration only (see top of file).
         Wikilink,
         Blockref,
         Tag,
         Valueref,
+        InlineOpaque,
       ],
       content: this._editorMode === "card-body"
         ? cardBodyProjection(block).doc

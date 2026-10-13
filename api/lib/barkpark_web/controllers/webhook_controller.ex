@@ -81,13 +81,36 @@ defmodule BarkparkWeb.WebhookController do
 
   @doc """
   List an endpoint's recent deliveries, newest-first, including per-row latency.
-  `?limit=` is clamped to 1..100 (default 25) inside the context.
+  `?limit=` is clamped to 1..100 (default 25).
+
+  ## Paging past the first N (task-fb4cf8323a9795e5)
+
+  The delivery log is unbounded, so a bounded top-N with no signal left a
+  caller holding a full page unable to tell it from the whole log. Every page
+  now carries `has_more` and `next_offset`, the same contract
+  `SecretController.audit/2` and `PaperAccessController.index/2` already give
+  their own unbounded trails: `has_more` is derived by fetching ONE row past
+  `limit` and dropping it (never a separate COUNT), and `next_offset` is
+  `nil` exactly when `has_more` is false. Walk with `?offset=<next_offset>`
+  until `has_more` is false.
   """
   def deliveries(conn, %{"dataset" => dataset, "id" => id} = params) do
     case fetch_scoped(conn, dataset, id) do
       {:ok, wh} ->
-        deliveries = Webhooks.list_deliveries(wh.id, limit: parse_limit(params["limit"]))
-        json(conn, %{deliveries: Enum.map(deliveries, &render_delivery/1)})
+        limit = parse_limit(params["limit"])
+        offset = parse_offset(params["offset"])
+
+        fetched = Webhooks.list_deliveries(wh.id, limit: limit + 1, offset: offset)
+        has_more = length(fetched) > limit
+        rows = Enum.take(fetched, limit)
+
+        json(conn, %{
+          deliveries: Enum.map(rows, &render_delivery/1),
+          limit: limit,
+          offset: offset,
+          has_more: has_more,
+          next_offset: if(has_more, do: offset + length(rows))
+        })
 
       :error ->
         webhook_not_found(conn)
@@ -229,8 +252,8 @@ defmodule BarkparkWeb.WebhookController do
   # only if auto-dispatch could have SELECTED it for that event. The dataset
   # must match, and a workspace-scoped event additionally requires the webhook
   # to live in the same workspace (and same project, when the event carries
-  # one); an unscoped (legacy/global) event may replay to any webhook in its
-  # dataset, exactly as dispatch fans it out. The dataset STRING alone is NOT a
+  # one); an unscoped (legacy) event replays only to a shared-layer webhook,
+  # exactly as dispatch selects it. The dataset STRING alone is NOT a
   # tenant boundary — "production" exists in every workspace and event ids are
   # global sequential integers, so without the workspace clause a wsB admin
   # could point a wsB webhook at their own URL and replay wsA's event ids into
@@ -243,10 +266,12 @@ defmodule BarkparkWeb.WebhookController do
   # agree, or an admin can hand-deliver what no automatic path would send.
   defp event_in_scope?(%MutationEvent{type: "listener"}, _wh), do: false
 
+  # A workspace-less event replays only to a shared-layer (NULL-workspace)
+  # webhook, the same fail-closed rule dispatch applies (owner ruling #51, RQ2).
   defp event_in_scope?(ev, wh) do
     ev.dataset == wh.dataset and
-      (is_nil(ev.workspace_id) or
-         (ev.workspace_id == wh.workspace_id and
+      ((is_nil(ev.workspace_id) and is_nil(wh.workspace_id)) or
+         (is_binary(ev.workspace_id) and ev.workspace_id == wh.workspace_id and
             (is_nil(ev.project_id) or is_nil(wh.project_id) or ev.project_id == wh.project_id)))
   end
 
@@ -271,20 +296,45 @@ defmodule BarkparkWeb.WebhookController do
   end
 
   # A garbage ?limit= is treated as absent so the context applies its default.
-  defp parse_limit(nil), do: nil
+  # Clamped and defaulted HERE, not left to the context: `deliveries/2` needs
+  # the USER-FACING page size itself (to compute `has_more`/`next_offset`
+  # from the `limit + 1` it asks the context to fetch), so the clamp can no
+  # longer live only inside `Webhooks.list_deliveries/2`'s own ceiling (which
+  # is now `@max_delivery_limit + 1`, one past this page size, on purpose —
+  # see that function's doc).
+  @default_delivery_limit 25
+  @max_delivery_limit 100
+
+  defp parse_limit(nil), do: @default_delivery_limit
 
   defp parse_limit(value) when is_binary(value) do
     case Integer.parse(value) do
-      {n, _} -> n
-      :error -> nil
+      {n, _} -> clamp_limit(n)
+      :error -> @default_delivery_limit
     end
   end
 
+  defp parse_limit(value) when is_integer(value), do: clamp_limit(value)
+
   # Catch-all: a list param (`?limit[]=5` -> Plug parses to `["5"]`) or any
-  # other non-scalar falls back to nil (== absent, so the context applies its
-  # default) instead of raising FunctionClauseError -> 500 (history_controller
-  # .ex:132 same idiom).
-  defp parse_limit(_), do: nil
+  # other non-scalar falls back to the default instead of raising
+  # FunctionClauseError -> 500 (the same idiom HistoryController's own limit
+  # parser carries).
+  defp parse_limit(_), do: @default_delivery_limit
+
+  defp clamp_limit(n), do: n |> max(1) |> min(@max_delivery_limit)
+
+  defp parse_offset(nil), do: 0
+
+  defp parse_offset(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, _} -> max(n, 0)
+      :error -> 0
+    end
+  end
+
+  defp parse_offset(value) when is_integer(value), do: max(value, 0)
+  defp parse_offset(_), do: 0
 
   defp ensure_secret(attrs) do
     if Dispatcher.blank_secret?(Map.get(attrs, "secret")) do

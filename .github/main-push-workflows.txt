@@ -5,6 +5,7 @@
 #
 #   ALWAYS       unfiltered push arm — every push to main owes it a run
 #   CONDITIONAL  paths-filtered push arm — owed-ness depends on the commit
+.github/workflows/api-image.yml	CONDITIONAL
 .github/workflows/architecture.yml	CONDITIONAL
 .github/workflows/astro-finder-drift.yml	CONDITIONAL
 .github/workflows/astro-finder-render-smoke.yml	ALWAYS
@@ -24,6 +25,7 @@
 .github/workflows/deploy.yml	CONDITIONAL
 .github/workflows/doc-gates.yml	CONDITIONAL
 .github/workflows/elixir.yml	ALWAYS
+.github/workflows/engine-release.yml	CONDITIONAL
 .github/workflows/gh-retry-selftest.yml	CONDITIONAL
 .github/workflows/go-format.yml	CONDITIONAL
 .github/workflows/go-tests.yml	CONDITIONAL
@@ -62,4 +64,5 @@
 .github/workflows/typedoc.yml	CONDITIONAL
 .github/workflows/vendored-assets.yml	CONDITIONAL
 .github/workflows/web-fork-drift.yml	CONDITIONAL
+.github/workflows/weekly-changelog.yml	CONDITIONAL
 .github/workflows/windows-smoke.yml	CONDITIONAL

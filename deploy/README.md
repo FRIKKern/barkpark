@@ -50,10 +50,41 @@ twice. A stretch of merges touching no listed tree still resolves to a no-op.
 | Target | Job flag | Script | Mechanism |
 |---|---|---|---|
 | Control plane | `cp` (trigger paths: the routing list above) | `deploy/cp-deploy.sh` | flock-serialized. Compose slots behind profiles: `blue`=:4100, `green`=:4101, one up at a time. Tag rollback image → `git pull` → headroom guard (refuses to build below a 5G floor, `BARKPARK_MIN_FREE_GB` — 2026-08-31: never-pruned images filled the box to 100% and Postgres 500'd the fleet list) → `docker compose build` → boot idle slot (auto-migrates on boot) → health-gate → flip Caddy → stop old slot (kept for `cp-deploy.sh --rollback`, which RECREATES it — never `docker start`, which would replay the env baked in at creation) → prune unreferenced images + build cache (only on a PROVEN flip; the kept slot's stopped container anchors the rollback image through the prune). Provisioner cross-built by the runner (`cmd/barkpark-provisioner`, linux/amd64) and shipped (Go is not on the box). |
-| Content instance | `instance` (trigger paths: the routing list above) | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → retire old slot + legacy `barkpark` unit. |
+| Content instance | `instance` (trigger paths: the routing list above) | `deploy/instance-deploy.sh` | flock-serialized (queued runs coalesce). systemd slots `barkpark-slot@blue`=:4000/`@green`=:4001, per-slot build roots (`api/_build_blue`/`_build_green` via `MIX_BUILD_ROOT`) of one checkout. Hook-suppressed `git pull` (the box's post-merge hook would rebuild+restart the live tree — the pre-blue/green outage) → backfill secret keys → clean-build idle slot's root (active slot serving its own, never rebuilt under the live BEAM) → `ecto.migrate` → boot idle slot → health-gate `/status.json` → flip Caddy → signal SSE retire on the OLD slot's own port (`POST /v1/internal/retire-sse`, loopback-only — ends every open listen/chat/presence stream there at once with a final `event: retire` instead of leaving it alive-but-deaf for the ~20-30s drain below; task-2bcada0faa01ebb2) → retire old slot + legacy `barkpark` unit. |
 
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
+
+**Ordinary HTTP requests drain too, separately from the SSE retire signal**
+(task-234799142dfd8559). The SSE retire signal above only covers long-lived
+listen/chat/presence streams, which must be told explicitly because they
+would otherwise sit alive-but-deaf for tens of seconds. A short-lived ordinary
+request (the vast majority of traffic) needs no such signal: `systemctl
+disable --now` sends SIGTERM, which is a graceful OTP application stop by
+default — Bandit's transport (ThousandIsland) stops ACCEPTING new connections
+immediately but keeps serving a connection it already holds, up to
+`thousand_island_options: [shutdown_timeout: 20_000]` (`api/config/runtime.exs`),
+so an in-flight request completes (2xx) instead of a reset/502 as long as it
+finishes within that 20s bound. `systemctl disable --now` BLOCKS on the stop
+(no `--no-block`), so the script only moves on once the slot is actually down
+— either it exited on its own (drained) or systemd's own deadline fired. That
+deadline is `TimeoutStopSec=60` on `barkpark-slot@.service`: `Barkpark.Application`
+stops children in reverse start order, and the Endpoint is explicitly
+"typically the last entry" there — so it stops FIRST (the 20s above), and
+`Oban` (its queue supervisor's own `:shutdown` childspec value, Oban's
+`shutdown_grace_period`, 15s by Oban's own unoverridden default) stops LATER,
+with a dozen smaller children in between. 60s is comfortable slack above that
+20+15 floor, not a number chosen to match it exactly — see the unit file's
+own comment for the full chain and where each figure comes from. Change one
+number without the other and this invariant silently breaks — grep both
+files for task-234799142dfd8559 before touching either.
+
+A changed `barkpark-slot@.service` reaches a box on its NEXT deploy, no
+manual step: `instance-deploy.sh` re-installs it unconditionally every run
+(`install -m 0644 ... /etc/systemd/system/barkpark-slot@.service`) and calls
+`systemctl daemon-reload` before building or flipping anything, so the slot
+that deploy starts already boots under the new unit — including a changed
+`TimeoutStopSec` the FIRST time that slot is later retired.
 
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
@@ -108,7 +139,7 @@ while the status-scoped form answers **404** — with two controls (an existing
 file → 200, the proxied path → 503) identical under both arms, so the difference
 is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 572 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 580 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
@@ -191,7 +222,7 @@ that the contention path was mute.
 what its idle slot holds. `instance-deploy.sh --rollback-preflight` (read-only)
 answers whether a rollback is possible: exit 0 prints `TARGET_SLOT=`/
 `TARGET_SHA=`; typed refusals — 21 `no_previous_slot`, 22 `not_supported`
-(pre-stamp box), 23 deploy lock held. `instance-deploy.sh --rollback` flips to
+(pre-stamp box), 23 deploy lock held, 25 `v2_seals_unreadable` (see below). `instance-deploy.sh --rollback` flips to
 the idle slot at its recorded sha: `git reset --hard <stamp>` first (a bare
 port flip lies — both slots share ONE checkout, so a slot restart would
 recompile NEW source into the old build root), reboot the slot, health-gate it
@@ -199,6 +230,14 @@ on its own port, flip Caddy only on green, rewrite `.instance-deploy-last`.
 Unhealthy = fail closed: slot re-disabled, Caddy untouched, checkout reset
 back, exit 24. Schema stays forward — rolling back code does NOT undo a
 migration; write a compensating one.
+
+**Rollback past bound field seals is one-way (e067ef7cd, ruling #18).** Since
+that commit, encrypted fields are sealed as `"_bpenc": 2` envelopes, which older
+code cannot open: a rollback to a sha before it leaves every v2-sealed field
+unrevealable until you roll forward again. The preflight refuses with exit 25
+`v2_seals_unreadable` when the target lacks v2 support AND `psql` counts v2
+seals on the box. When it cannot count, it only warns. Fix forward instead;
+`BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1` accepts the loss on purpose.
 
 **Slot memory peaks (`deploy/slot-memory-peaks.sh`).** systemd's `MemoryPeak`/
 `MemorySwapPeak` reset per unit invocation and read 0 on a stopped unit — both
@@ -437,8 +476,8 @@ Its TLS cert renews on its own schedule — see below.
 
 ## Smoke a box: read the Caddy upstream, or use the public URL
 
-**There is no repo-wide app port.** A single-checkout box (the `89.167.28.206`
-micro-block, `docs/ops/PROD_OPS.md`) serves one BEAM on `:4000`. A `.slots`
+**There is no repo-wide app port.** A single-checkout box serves one BEAM on
+`:4000` (the last one, barkpark-cms, was deleted 2026-10-03). A `.slots`
 blue/green host — guerrilla, and every host this pipeline deploys — runs
 `barkpark-slot@blue` on `:4000` and `@green` on `:4001`, and **only one of them
 is bound at a time**: whichever slot is live. The live port is not a constant
@@ -470,7 +509,7 @@ refuses, rc=7; `:4001` times out, rc=28), so neither failure distinguishes
 "wrong port" from "box down".
 
 `CLAUDE.md` Golden Rule 6 still reads `curl http://localhost:4000/api/schemas`.
-That is correct only on the micro-block, and Golden Rules are verbatim-exempt
+That is correct only on a single-checkout box, and Golden Rules are verbatim-exempt
 (an edit needs explicit owner sign-off), so read it as "smoke it after deploy",
 with the port taken from the Caddy upstream — or the public URL — on any other
 host.
@@ -592,8 +631,6 @@ deploys fully automatic.
 1. Put its IP in a new secret (e.g. `PROD_HOST`).
 2. If it's a content instance, reuse `instance-deploy.sh`; if a control plane,
    `cp-deploy.sh`. Add a job mirroring the matching one in `deploy.yml`.
-   (The CLAUDE.md prod box `89.167.28.206` is a candidate once the deploy key is
-   added to its `authorized_keys`.)
 
 ## Attaching a running box to Cloud (`bp barkparks adopt`)
 

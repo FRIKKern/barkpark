@@ -82,6 +82,11 @@ defmodule Barkpark.PortableDoc.Bpml do
       and only clients that want the new key need regenerate. This IS the
       deliberate decision the printer's comment asked someone to make; it is not
       a silent widening.
+    * `<stat dots>` (pe-bl-stat-tile-dots) — the stat's trial dots
+      (`%{"on" => 2, "of" => 10}`, drawn by `render/data_viz.ex` `dots_html/1`
+      and its JS and TUI mirrors) ride LAST in the `<stat>` row as `dots="2/10"`,
+      so an unedited round-trip keeps them. A widening: a dot-less stat prints
+      byte-identically.
     * The Run-4 round-trip matrix (`test/barkpark/round_trip_integrity_matrix_test.exs`)
       found an UNEDITED pull → push of the golden corpus rewriting stored data:
       a `lineage` node's `unit`/`value`, a `stat`'s `source`, the

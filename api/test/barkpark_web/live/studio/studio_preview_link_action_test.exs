@@ -135,6 +135,18 @@ defmodule BarkparkWeb.Studio.StudioPreviewLinkActionTest do
       assert new_tab?, "expected the Preview link to open in a new tab"
     end
 
+    test "the rendered href equals Barkpark.Content.PreviewLocations.interpolate/5's own " <>
+           "output for the same inputs (task-c5d5e045e7efcc96 dedup)" do
+      doc = fetch!("pv1", "previewable")
+
+      # `editor.ex`'s `do_interpolate_href/5` delegates to this function
+      # directly (no second substitution implementation) — this pins that
+      # the computation the LiveView test above renders and this call
+      # produce the SAME string, not merely a similar one.
+      assert Barkpark.Content.PreviewLocations.interpolate(@template, doc, @dataset) ==
+               "https://site.example/api/draft?path=/blog/hello-world"
+    end
+
     test "the resolved action is a link kind carrying the raw template, no secret", %{
       previewable: schema
     } do

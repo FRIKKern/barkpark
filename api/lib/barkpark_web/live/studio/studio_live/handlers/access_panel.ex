@@ -31,6 +31,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.AccessPanel do
   a function component reading PARENT-process assigns (`:access_grants` is a
   parent assign; a LiveComponent boundary would not carry it).
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView, only: [put_flash: 3]
 
@@ -97,7 +99,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.AccessPanel do
            access_workspace_view: workspace_view,
            access_error: nil
          )
-         |> put_flash(:info, "That grant is no longer active.")}
+         |> put_flash(:info, gettext("That grant is no longer active."))}
     end
   end
 

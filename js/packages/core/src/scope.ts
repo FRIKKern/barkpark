@@ -31,3 +31,15 @@ export function scopePrefix(config: BarkparkClientConfig): string {
   }
   return ''
 }
+
+/**
+ * `${scopePrefix}/v1/data/<route>/<dataset>`: the head of every `/v1/data`
+ * path. Built in one place so the path builders stay short; core sits on a hard
+ * gzipped size cap (js/CLAUDE.md "Bundle budget").
+ *
+ * @internal A path fragment for this package's own builders. Callers address
+ * routes through the named client methods.
+ */
+export function dataPath(config: BarkparkClientConfig, route: string): string {
+  return `${scopePrefix(config)}/v1/data/${route}/${encodeURIComponent(config.dataset)}`
+}

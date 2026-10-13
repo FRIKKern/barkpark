@@ -54,7 +54,7 @@ defmodule BarkparkWeb.WebhookProbeScheduleRenderTest do
       Jason.encode!(%{
         "name" => name,
         "url" => "http://example.test/hook",
-        "events" => ["patch"],
+        "events" => ["discardDraft"],
         "secret" => "s0"
       })
 

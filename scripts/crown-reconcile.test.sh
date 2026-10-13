@@ -182,7 +182,7 @@ runs_json() { # <name> <sha:created>...
     for spec in "$@"; do
       [ "$first" = 1 ] || printf ','
       first=0
-      printf '{"id":%d,"head_sha":"%s","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' \
+      printf '{"id":%d,"head_sha":"%s","head_branch":"main","conclusion":"success","status":"completed","created_at":"%s","updated_at":"%s"}' \
         "$n" "${spec%%:*}" "${spec#*:}" "$(iso_plus "${spec#*:}" "$RUN_SPAN_SECONDS")"
       n=$((n + 1))
     done
@@ -2032,6 +2032,18 @@ run_fake() { # <expected-rc> <label> <http> <via>
 run_fake 0 "the route answers 200 over the SSH transport" 200 route
 saw "READER: transport=ssh, answered by route" "the reader that answered is its own printed field, beside the verdict"
 saw "read by route" "and the green sentence names it too"
+
+# The live listing is fetched UNFILTERED (the branch-filtered index lagged by
+# days on 2026-10-05, task-e50f648581214974) and main is selected client-side.
+# The same delivery on another branch must not count as main's: the population
+# drops to zero and the read lands in SILENCE.
+RUNS_FAKE_MAIN="$RUNS_FAKE"
+RUNS_FAKE="$TMP/runs-fake-other-branch.json"
+sed 's/"head_branch":"main"/"head_branch":"feature"/' "$RUNS_FAKE_MAIN" > "$RUNS_FAKE"
+fixture_ok "$RUNS_FAKE"
+run_fake 2 "a deploy run on another branch is not counted as main's" 200 route
+saw "POPULATION: 0 completed deploy.yml run(s) on main" "the non-main run is filtered out client-side"
+RUNS_FAKE="$RUNS_FAKE_MAIN"
 
 # THE ROW THIS FIX EXISTS FOR. Pre-#14979 this same input exited 0 and said
 # `read by postgres-container`. It must now be a read that DID NOT HAPPEN.

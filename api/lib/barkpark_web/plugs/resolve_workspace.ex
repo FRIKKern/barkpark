@@ -67,6 +67,8 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.ScopeResolver
+  alias BarkparkWeb.StudioLocale
 
   def init(opts), do: opts
 
@@ -75,6 +77,20 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   # link would keep serving an archived workspace to anonymous readers.
   def call(%{assigns: %{share_public: true}} = conn, _opts), do: refuse_if_archived(conn)
 
+  # task-88e9094df76d31c6 — a VERIFIED, scope-matched Preview JWT has already
+  # resolved + assigned `:current_workspace` itself
+  # (`BarkparkWeb.Plugs.PreviewToken`'s `assign_claimed_scope/2`, reached
+  # only after that plug's OWN `check_workspace_scope/2` confirmed the
+  # claim's `workspace_id` equals THIS URL's `:workspace_slug`) — mirrors
+  # the `share_public` bypass immediately above. Without this, running the
+  # ordinary session/Bearer membership gate a second time here would refuse
+  # a bare Preview-JWT caller as `not_a_member` (it carries no `:api_token`
+  # and no `:current_user` at all), undoing the admission the Preview plug
+  # just granted. `:preview_claims` is set ONLY by that plug, and only once
+  # it has already verified signature, expiry, revocation AND the scope
+  # match — never by caller input.
+  def call(%{assigns: %{preview_claims: _}} = conn, _opts), do: refuse_if_archived(conn)
+
   def call(conn, opts) do
     slug = conn.path_params["workspace_slug"]
 
@@ -82,10 +98,11 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       %Tenancy.Workspace{} = workspace ->
         conn
         |> authorize(workspace, opts)
+        |> refuse_off_binding()
         |> refuse_if_archived()
 
       _ ->
-        halt_envelope(conn, unknown_workspace(slug))
+        refuse(conn, opts, unknown_workspace(slug))
     end
   end
 
@@ -124,6 +141,22 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
 
   defp refuse_if_archived(conn), do: conn
 
+  # DATASET-BOUND TOKENS (task-4418b517649a58ce). Every scoped pipeline
+  # resolves its credential (`OptionalToken` or `OptionalSessionToken`, bearer
+  # or session) before this plug. So the fence lives here once for all of
+  # `/w/:workspace_slug/p/:project_slug/...`: a token minted with an explicit
+  # `dataset` is refused on any other dataset. Unbound tokens (NULL — every
+  # legacy row) pass untouched. The predicate is `RequireToken`'s, so both
+  # doors refuse identically. It runs AFTER admission, like the archive check:
+  # a caller the membership gate refused keeps its own 403 reason.
+  defp refuse_off_binding(%Plug.Conn{halted: true} = conn), do: conn
+
+  defp refuse_off_binding(conn) do
+    if BarkparkWeb.Plugs.RequireToken.dataset_off_binding?(conn, conn.assigns[:api_token]),
+      do: halt_envelope(conn, {:error, :forbidden_dataset}),
+      else: conn
+  end
+
   defp authorize(conn, workspace, opts) do
     token = conn.assigns[:api_token]
     user = conn.assigns[:current_user]
@@ -153,6 +186,19 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
         do: grant_read_ctx(user, desk_scope(conn, workspace))
 
     cond do
+      # task-ce99fd602a697010 — `:member_user` is the ONE positive signal that
+      # a USER principal (a login session, cookie or bearer, no API token) was
+      # admitted here by MEMBERSHIP. The read gates that ask "is this caller
+      # authenticated?" (`QueryController.authed?/1`, `AnonPerspective`) used to
+      # look for an API token only, so a seated member reading with their login
+      # session was treated as anonymous: private types answered 404 and the
+      # perspective was pinned to published. Never set on the anonymous-default,
+      # grant or share admits below — only here, where membership decided.
+      member? and is_nil(token) and not is_nil(user) ->
+        conn
+        |> assign(:current_workspace, workspace)
+        |> assign(:member_user, true)
+
       member? ->
         assign(conn, :current_workspace, workspace)
 
@@ -196,10 +242,10 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       # An API token with no seat here: name the workspace and the remedy
       # (task-7d4d405e0ee4bcbf). Same 403 / `forbidden` / `not_a_member`.
       decision == {:error, :not_a_member} and match?(%ApiToken{}, token) ->
-        halt_envelope(conn, {:error, {:token_not_a_member, workspace.slug}})
+        refuse(conn, opts, {:error, {:token_not_a_member, workspace.slug}})
 
       true ->
-        halt_envelope(conn, {:error, refusal_envelope(decision)})
+        refuse(conn, opts, {:error, refusal_envelope(decision)})
     end
   end
 
@@ -302,6 +348,125 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     case Tenancy.get_default_workspace() do
       %{id: id} -> id == workspace.id
       _ -> false
+    end
+  end
+
+  # task-a0fcffbe8799abe5 — dispatch EVERY refusal this plug produces
+  # (unknown workspace, not-a-member, missing-capability, a token with no
+  # seat) through ONE door, so a signed-in browser visiting a Studio URL
+  # never sees the raw `{"error":{...}}` envelope.
+  #
+  # ONLY on the Studio browser pipelines (keyed on `allow_anonymous_default:
+  # :studio_demo` — the same flag `:scoped_browser` and `:shared_studio_browser`
+  # already pass; the paper reader's `:shared_paper_browser` passes `true`
+  # instead and is untouched), ONLY for an HTML request (`:accepts, ["html"]`
+  # runs before this plug on both of those pipelines), and ONLY for a
+  # SIGNED-IN user — an anonymous visitor keeps its existing behaviour
+  # (the Default-workspace demo allowance, or the :studio_demo redirect to
+  # `/login`, or the bare envelope on a non-Default anonymous request; none
+  # of those are the bug this task fixes).
+  #
+  # EVERY reason renders the SAME generic page (NO EXISTENCE LEAK, owner
+  # ruling): a workspace that does not exist and one the caller may not
+  # enter must be indistinguishable to this caller, so the page never names
+  # the workspace or the refusal reason — only the API envelope still
+  # carries that detail, for a caller who already knows to parse it.
+  defp refuse(conn, opts, reason) do
+    cond do
+      studio_html_refusal?(conn, opts) -> halt_studio_refusal_page(conn)
+      signed_out_studio_browser?(conn, opts) -> halt_to_login(conn)
+      true -> halt_envelope(conn, reason)
+    end
+  end
+
+  # task-c1ccdbfaa26876cb — a signed-out BROWSER opening a Studio URL got the
+  # raw JSON envelope; it is not refused, it is just not signed in yet. It goes
+  # to sign-in with the URL it asked for as `return_to`, and lands back there
+  # after signing in (SessionController's `sanitize_return_to/1` keeps only a
+  # same-origin relative path). Real and unknown workspaces redirect alike, so
+  # the redirect says nothing about which slugs exist. A JSON or token caller
+  # keeps its envelope.
+  defp signed_out_studio_browser?(conn, opts) do
+    Keyword.get(opts, :allow_anonymous_default) == :studio_demo and
+      Phoenix.Controller.get_format(conn) == "html" and
+      is_nil(conn.assigns[:current_user]) and is_nil(conn.assigns[:api_token])
+  end
+
+  defp halt_to_login(conn) do
+    path =
+      case conn.query_string do
+        "" -> conn.request_path
+        qs -> conn.request_path <> "?" <> qs
+      end
+
+    conn
+    |> Phoenix.Controller.redirect(to: "/login?return_to=#{URI.encode_www_form(path)}")
+    |> halt()
+  end
+
+  defp studio_html_refusal?(conn, opts) do
+    Keyword.get(opts, :allow_anonymous_default) == :studio_demo and
+      Phoenix.Controller.get_format(conn) == "html" and
+      not is_nil(conn.assigns[:current_user])
+  end
+
+  # Rendered through Phoenix's view/template pipeline (`put_view` + `render`),
+  # NOT a direct `Phoenix.Controller.html/2` call — see
+  # `BarkparkWeb.StudioRefusalHTML`'s moduledoc for why (Sobelow's XSS.HTML
+  # flags any non-literal body passed to `html/2` regardless of escaping).
+  defp halt_studio_refusal_page(conn) do
+    locale = refusal_locale(conn)
+    Gettext.put_locale(BarkparkWeb.Gettext, locale)
+
+    conn
+    |> put_status(403)
+    # Self-contained, no app shell — both Studio browser pipelines
+    # (`:scoped_browser`, `:shared_studio_browser`) `put_root_layout` to the
+    # app chrome (theme script, fonts, the real `<html lang>`), which would
+    # otherwise wrap this page and make its own `lang`/`<title>` dead: the
+    # mutation-proof of `refusal_locale/1` caught exactly this — the broken
+    # locale read "en" but the assertion read it off the SHELL's `<html>`,
+    # not this page's, and passed for the wrong reason until this was added.
+    |> Phoenix.Controller.put_root_layout(false)
+    |> Phoenix.Controller.put_layout(false)
+    |> Phoenix.Controller.put_view(BarkparkWeb.StudioRefusalHTML)
+    |> Phoenix.Controller.render("refusal.html",
+      invitation: pending_invitation(conn),
+      csrf_token: Plug.CSRFProtection.get_csrf_token()
+    )
+    |> halt()
+  end
+
+  # The signed-in user's own pending invitation to the workspace in the URL
+  # (task-5306379c9be40c89). Keyed by the CALLER's invitations, never by a
+  # workspace lookup: a caller with none gets nil whether or not the slug
+  # names a real workspace, so the page they see is the same for both.
+  defp pending_invitation(conn) do
+    with %{id: user_id} <- conn.assigns[:current_user],
+         slug when is_binary(slug) <- conn.path_params["workspace_slug"] do
+      user_id
+      |> Barkpark.Tenancy.Members.list_invitations_for_user()
+      |> Enum.find(&(&1.workspace == slug))
+    else
+      _ -> nil
+    end
+  end
+
+  # The refusal page's locale comes from the VIEWER, never the target
+  # workspace — using the target's `settings["locale"]` (the way the login
+  # page's `put_locale_for/1` does for a return_to it hasn't verified yet)
+  # would make the page itself leak whether that workspace exists: a real
+  # nb-NO workspace renders Norwegian, an unknown slug falls back to the
+  # platform default, and the difference IS the leak this page is built to
+  # not have. `ScopeResolver.resolve_scope/2` is the same lookup
+  # `StudioRedirectController.scoped_studio_target/2` uses for "go to your
+  # workspace" — the signed-in caller's OWN resolved workspace, independent
+  # of whatever URL they followed here. No resolvable workspace (a user with
+  # no membership anywhere) reads as the platform default, same as `nil`.
+  defp refusal_locale(conn) do
+    case ScopeResolver.resolve_scope(conn, ScopeResolver.principal(conn)) do
+      {:ok, workspace, _project} -> StudioLocale.resolve(workspace)
+      :error -> StudioLocale.resolve(nil)
     end
   end
 

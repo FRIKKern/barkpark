@@ -398,7 +398,7 @@ defmodule Barkpark.Plugins.Sheets.SessionHardeningTest do
       [{pid, _}] =
         Registry.lookup(
           Barkpark.Plugins.Sheets.SessionRegistry,
-          {@dataset, default_ws_id, "hd-flush-shutdown"}
+          {@dataset, default_ws_id, nil, "hd-flush-shutdown"}
         )
 
       # :shutdown via the supervisor — the trap_exit + terminate/2 path a

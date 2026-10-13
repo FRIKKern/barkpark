@@ -58,7 +58,15 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   @page_limit 200
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    # Owner ruling #4: operator-gated flat mount, workspace-clamped scoped mount.
+    case BarkparkWeb.OpsOperatorGate.mount(socket, session) do
+      {:ok, socket} -> mount_console(socket)
+      {:halt, socket} -> {:ok, socket}
+    end
+  end
+
+  defp mount_console(socket) do
     # d07 F2 mount gate: mount/3 runs TWICE — once for the discarded
     # disconnected HTTP render, once for the live WebSocket mount. Running
     # `load_submissions/1` unconditionally doubled the DB projection per console
@@ -67,7 +75,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     # subscribe to the loaded rows there; the dead render carries an empty page.
     {submissions, has_next?, subscribed} =
       if connected?(socket) do
-        {subs, has_next?} = load_submissions(0)
+        {subs, has_next?} = load_submissions(0, scope(socket))
         subscribed = resubscribe(MapSet.new(), subs)
         {subs, has_next?, subscribed}
       else
@@ -77,7 +85,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     {:ok,
      socket
      |> assign(
-       page_title: "Bokbasen Submissions",
+       page_title: gettext("Bokbasen Submissions"),
        all_submissions: submissions,
        page: 0,
        has_next_page: has_next?,
@@ -140,7 +148,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   def handle_event("retry", %{"doc_id" => doc_id}, socket) do
     case Enum.find(socket.assigns.all_submissions, &(&1.doc_id == doc_id)) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Document not found in current page")}
+        {:noreply, put_flash(socket, :error, gettext("Document not found in current page"))}
 
       sub ->
         if sub.state in @retryable_states do
@@ -166,13 +174,23 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
             {:ok, _job} ->
               {:noreply,
                socket
-               |> put_flash(:info, "Retry enqueued for #{sub.doc_id}")}
+               |> put_flash(:info, gettext("Retry enqueued for %{id}", id: sub.doc_id))}
 
             {:error, reason} ->
-              {:noreply, put_flash(socket, :error, "Retry failed: #{inspect(reason)}")}
+              {:noreply,
+               put_flash(
+                 socket,
+                 :error,
+                 gettext("Retry failed: %{reason}", reason: inspect(reason))
+               )}
           end
         else
-          {:noreply, put_flash(socket, :error, "Cannot retry from state #{inspect(sub.state)}")}
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             gettext("Cannot retry from state %{state}", state: inspect(sub.state))
+           )}
         end
     end
   end
@@ -223,12 +241,12 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
       |> assign(:visible_submissions, visible_submissions(assigns))
 
     ~H"""
-    <div class="bp-admin-bokbasen" data-test-id="bokbasen-admin">
-      <h1>Bokbasen Submissions</h1>
+    <main class="bp-admin-bokbasen" data-test-id="bokbasen-admin">
+      <h1>{gettext("Bokbasen Submissions")}</h1>
 
       <div class="bp-filters" data-test-id="bokbasen-filters">
         <fieldset>
-          <legend>State</legend>
+          <legend>{gettext("State")}</legend>
           <%= for state <- @all_states do %>
             <label>
               <input
@@ -240,50 +258,50 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
               <span data-test-state-filter={state}>{state}</span>
             </label>
           <% end %>
-          <button type="button" phx-click="clear_state_filter">Reset</button>
+          <button type="button" phx-click="clear_state_filter">{gettext("Reset")}</button>
         </fieldset>
 
         <form phx-change="set_date_range">
           <label>
-            From <input type="date" name="date_from" value={@date_from} />
+            {gettext("From")} <input type="date" name="date_from" value={@date_from} />
           </label>
           <label>
-            To <input type="date" name="date_to" value={@date_to} />
+            {gettext("To")} <input type="date" name="date_to" value={@date_to} />
           </label>
         </form>
       </div>
 
       <%= if Enum.empty?(@all_submissions) do %>
-        <p data-test-id="bokbasen-empty">No Bokbasen submissions yet.</p>
+        <p data-test-id="bokbasen-empty">{gettext("No Bokbasen submissions yet.")}</p>
       <% else %>
         <%= if Enum.empty?(@visible_submissions) do %>
-          <p data-test-id="bokbasen-no-matches">No submissions match your filters.</p>
+          <p data-test-id="bokbasen-no-matches">{gettext("No submissions match your filters.")}</p>
         <% else %>
           <table class="bp-table" data-test-id="bokbasen-table">
             <thead>
               <tr>
                 <th>
                   <button type="button" phx-click="sort" phx-value-field="title">
-                    Title{sort_marker(@sort_field, @sort_direction, :title)}
+                    {gettext("Title")}{sort_marker(@sort_field, @sort_direction, :title)}
                   </button>
                 </th>
                 <th>
                   <button type="button" phx-click="sort" phx-value-field="state">
-                    State{sort_marker(@sort_field, @sort_direction, :state)}
+                    {gettext("State")}{sort_marker(@sort_field, @sort_direction, :state)}
                   </button>
                 </th>
                 <th>
                   <button type="button" phx-click="sort" phx-value-field="submission_id">
-                    Submission ID{sort_marker(@sort_field, @sort_direction, :submission_id)}
+                    {gettext("Submission ID")}{sort_marker(@sort_field, @sort_direction, :submission_id)}
                   </button>
                 </th>
                 <th>
                   <button type="button" phx-click="sort" phx-value-field="last_action_at">
-                    Last action{sort_marker(@sort_field, @sort_direction, :last_action_at)}
+                    {gettext("Last action")}{sort_marker(@sort_field, @sort_direction, :last_action_at)}
                   </button>
                 </th>
-                <th>Last error</th>
-                <th>Actions</th>
+                <th>{gettext("Last error")}</th>
+                <th>{gettext("Actions")}</th>
               </tr>
             </thead>
             <tbody>
@@ -321,18 +339,18 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
                         phx-value-doc_id={sub.doc_id}
                         data-test-action="retry"
                       >
-                        Retry
+                        {gettext("Retry")}
                       </button>
                     <% else %>
                       <button type="button" disabled data-test-action="retry-disabled">
-                        Retry
+                        {gettext("Retry")}
                       </button>
                     <% end %>
                     <.link
                       navigate={book_editor_path(assigns, sub)}
                       data-test-action="view"
                     >
-                      View Document
+                      {gettext("View Document")}
                     </.link>
                   </td>
                 </tr>
@@ -343,27 +361,27 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
       <% end %>
 
       <%= if @page > 0 or @has_next_page do %>
-        <nav class="bp-pager" data-test-id="bokbasen-pager" aria-label="Submissions pages">
+        <nav class="bp-pager" data-test-id="bokbasen-pager" aria-label={gettext("Submissions pages")}>
           <button
             type="button"
             phx-click="prev_page"
             disabled={@page == 0}
             data-test-action="prev-page"
           >
-            ← Newer
+            ← {gettext("Newer")}
           </button>
-          <span data-test-id="bokbasen-page-number">Page {@page + 1}</span>
+          <span data-test-id="bokbasen-page-number">{gettext("Page %{page}", page: @page + 1)}</span>
           <button
             type="button"
             phx-click="next_page"
             disabled={not @has_next_page}
             data-test-action="next-page"
           >
-            Older →
+            {gettext("Older")} →
           </button>
         </nav>
       <% end %>
-    </div>
+    </main>
     """
   end
 
@@ -376,10 +394,15 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   # pages. `has_next_page?` is derived from the RAW row count (before the nil-state
   # reject) so a page whose last rows lack an export status still advertises the
   # next page correctly — never an unbounded `Repo.all`.
-  defp load_submissions(page) when is_integer(page) and page >= 0 do
+  #
+  # Owner ruling #4: `ws_id` is the mounted workspace on a SCOPED mount (the
+  # listing — and so every retry, which reads its row from this listing — is
+  # clamped to it); nil on the operator's flat mount.
+  defp load_submissions(page, ws_id) when is_integer(page) and page >= 0 do
     docs =
       Document
       |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
+      |> clamp_workspace(ws_id)
       |> order_by([d], desc: d.updated_at)
       |> limit(^@page_limit)
       |> offset(^(page * @page_limit))
@@ -393,13 +416,18 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     {rows, length(docs) == @page_limit}
   end
 
+  defp clamp_workspace(query, nil), do: query
+  defp clamp_workspace(query, ws_id), do: where(query, [d], d.workspace_id == ^ws_id)
+
+  defp scope(socket), do: BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket)
+
   # Move to `new_page`: re-project at the new OFFSET, hand the subscription
   # ledger to `resubscribe/2` (which unsubscribes the outgoing page's doc topics
   # and subscribes the incoming page's — no per-socket leak), and reset the
   # per-row expanded-error UI state, which is keyed on doc_ids that no longer
   # exist on the new page.
   defp change_page(socket, new_page) do
-    {rows, has_next?} = load_submissions(new_page)
+    {rows, has_next?} = load_submissions(new_page, scope(socket))
     subscribed = resubscribe(socket.assigns.subscribed, rows)
 
     assign(socket,

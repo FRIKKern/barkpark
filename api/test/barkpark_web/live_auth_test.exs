@@ -82,6 +82,49 @@ defmodule BarkparkWeb.LiveAuthTest do
     end
   end
 
+  describe "new revocable token-session path (ruling #16 rework half, task-57f23825b18ab55d)" do
+    # The legacy `"api_token"` injections throughout this file (above) pin the
+    # one-release transition fallback. These pin the CURRENT path: the
+    # `:ops`/`:admin` on_mount hooks must accept `session["api_token_session"]`
+    # too, and a dead session id must not silently grant anything.
+    test "grants access via the session id the same as the legacy raw token would", %{conn: conn} do
+      {:ok, api_token} = Auth.verify_token(@admin_token)
+      {:ok, session_id} = Auth.create_token_session(@admin_token, api_token)
+
+      conn = init_test_session(conn, %{"api_token_session" => session_id})
+      assert {:ok, _view, html} = live(conn, "/admin/onixedit/bokbasen")
+      assert html =~ "Bokbasen Submissions"
+    end
+
+    test "a REVOKED token-session no longer grants access", %{conn: conn} do
+      {:ok, api_token} = Auth.verify_token(@admin_token)
+      {:ok, session_id} = Auth.create_token_session(@admin_token, api_token)
+      {:ok, 1} = Auth.revoke_token_session(session_id)
+
+      conn = init_test_session(conn, %{"api_token_session" => session_id})
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/bokbasen")
+    end
+
+    test "an unknown session id grants nothing (no fallback to the dev token)", %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token_session" => "bpts_not-a-real-session"})
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/admin/onixedit/bokbasen")
+    end
+
+    # Deploy-safety guardrail: this deploy must not force-log-out every
+    # browser that is ALREADY signed in with the pre-deploy raw-cookie shape.
+    # A conn carrying ONLY the legacy `session["api_token"]` key (no
+    # `api_token_session` at all — exactly what a browser that signed in
+    # BEFORE this deploy still carries) must keep working, with no re-login,
+    # until it naturally expires or the user signs out.
+    test "a pre-existing legacy session cookie keeps working without forcing logout", %{
+      conn: conn
+    } do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      assert {:ok, _view, html} = live(conn, "/admin/onixedit/bokbasen")
+      assert html =~ "Bokbasen Submissions"
+    end
+  end
+
   describe "scoped /studio/settings — :admin on_mount hook (regression guard)" do
     test "ops alone is NOT enough for the admin-gated settings LV", %{conn: conn} do
       # Critical invariant: the WI5 `ops` role is *additive* and must not

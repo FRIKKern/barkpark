@@ -100,6 +100,10 @@ defmodule BarkparkWeb.AnonPerspective do
   def parse("raw"), do: :raw
   def parse(_), do: :published
 
-  defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
+  # A token, or a login session admitted by membership (`:member_user`,
+  # task-ce99fd602a697010) — never pinned like an anonymous caller.
+  defp authed?(conn),
+    do: not is_nil(conn.assigns[:api_token]) or conn.assigns[:member_user] == true
+
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 end

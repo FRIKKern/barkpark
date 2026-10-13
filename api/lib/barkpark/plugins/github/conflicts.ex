@@ -211,11 +211,20 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   Mark a conflict resolved (drops it out of `list/1`). Idempotent — resolving
   an already-resolved or missing row returns `{:error, :not_found}` only when
   the row does not exist; a re-resolve keeps the original `resolved_at`.
+
+  `workspace_id:` (owner ruling #4) confines the resolve to that workspace's
+  rows: another workspace's id answers `{:error, :not_found}`, the same as a
+  missing one.
   """
-  @spec resolve(integer()) :: {:ok, Conflict.t()} | {:error, :not_found}
-  def resolve(id) do
+  @spec resolve(integer(), keyword()) :: {:ok, Conflict.t()} | {:error, :not_found}
+  def resolve(id, opts \\ []) do
+    scope = Keyword.get(opts, :workspace_id)
+
     case Repo.get(Conflict, id) do
       nil ->
+        {:error, :not_found}
+
+      %Conflict{workspace_id: ws} when is_binary(scope) and ws != scope ->
         {:error, :not_found}
 
       %Conflict{resolved_at: %DateTime{}} = already ->

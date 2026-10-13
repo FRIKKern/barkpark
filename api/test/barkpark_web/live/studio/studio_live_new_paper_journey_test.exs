@@ -389,6 +389,25 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
 
       assert html =~ ~s(<span class="badge badge-published">paper</span>)
     end
+
+    # task-8de13afbe3a8371c: the pill printed the raw type, "paper", in an nb-NO
+    # Studio that calls the type "artikkel" everywhere else.
+    test "the header badge names the type in the Studio language", %{conn: conn} do
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@blank_slug}"))
+
+      badge =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="studio-paper-editor"] .editor-header .badge))
+        |> LazyHTML.text()
+        |> String.trim()
+
+      assert badge == "artikkel"
+    end
   end
 
   describe "arm 4 — a legacy HTML-only paper is NOT swallowed by the never-blank arm" do

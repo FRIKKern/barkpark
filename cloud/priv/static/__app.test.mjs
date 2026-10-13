@@ -19039,14 +19039,17 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
 // and every __preview__/*.mjs returned zero before this test existed, so the
 // string could be changed, or re-added, with no exit code anywhere).
 //
-// `Accounts.published_doc?/1` derives the step from an `AgentEvent` of type
-// "content" with `payload->>'published_count' > 0`. The four `record_event/3`
-// call sites in cloud/lib write "health" and "space" (the agent-report and
-// agent-space handlers in web/router.ex), "verify" (the verify-run handler) and
-// "status" (`Health.StalenessWorker`) — never "content" — and the agent's HTTP
-// surface has no content endpoint, so no producer exists and none was built
-// here. That is still true after cch-w55-bl (charter D902) and is pinned
-// server-side by `agent_event_producer_census_test.exs`.
+// `Accounts.published_doc?/1` used to derive the step from an `AgentEvent` of
+// type "content" with `payload->>'published_count' > 0`. The four
+// `record_event/3` call sites in cloud/lib write "health" and "space" (the
+// agent-report and agent-space handlers in web/router.ex), "verify" (the
+// verify-run handler) and "status" (`Health.StalenessWorker`) — never
+// "content" — and the agent's HTTP surface has no content endpoint, so no
+// producer ever existed. task-71a5ed0d3734d592 (2026-10-08) struck that dead
+// consumer entirely, and `content` followed it out of `AgentEvent.@types`
+// (same precedent as `backup`/`tls`) — pinned server-side by
+// `agent_event_test.exs`'s closed-vocabulary check now that the word is gone,
+// rather than by a per-type producer-backedness entry that no longer exists.
 //
 // cch-w55-bl — the SECOND half of the sentence above has since been fixed: the
 // manual ack (`Accounts.ack_onboarding_step/2`, via POST /v1/onboarding
@@ -31611,8 +31614,10 @@ test("gr-blk-a2fwire: disable rides the danger confirm modal — DELETE fires on
     await settleInteraction();
 
     const del = plainRequest(h.requests[0]);
+    // task-e4cdc0f2e7766e1a: the DELETE now carries the proof field (empty in
+    // this harness: nothing was typed into it).
     assert.deepEqual({ path: del.path, method: del.method, body: del.body },
-      { path: "/v1/account/two-factor", method: "DELETE", body: null });
+      { path: "/v1/account/two-factor", method: "DELETE", body: { current_password: "" } });
     // succeed() closes the confirm and reopens the ACCOUNT modal, whose model
     // now folds the server-confirmed OFF — the fresh panel offers Set up.
     assert.equal(h.modalRoot.hidden, false, "the account modal is open in its place");
@@ -33263,6 +33268,8 @@ const CCHW65_MUST_ANSWER = [
   // cch-w73-bl: the install return leg made this 422 human-reachable and paid it
   // with a curated sentence; pinned here so a later deletion is not invisible.
   "installation_not_found", "install_state_invalid",
+  // task-0cf611238d4ad597 CQ7a: the record POST's two user-authorization 422s.
+  "github_authorization_required", "github_authorization_failed",
   // task-71082f5541c13b53 (N-08): every /v1/sites/:id/forms route's 409 when
   // the instance has no forms plugin; the inbox paints this sentence as its
   // own state, so a deletion must red here.
@@ -35187,15 +35194,19 @@ test("cch-w73-bl: githubInstallReturnFromSearch reads GitHub's setup redirect, a
   assert.equal(typeof f, "function", "the parse rung must be node-pinned");
   // The shape GitHub actually sends after an install and after an update.
   assert.deepEqual(w73Plain(f("?installation_id=41234567&setup_action=install")),
-    { installation_id: "41234567", setup_action: "install" });
+    { installation_id: "41234567", setup_action: "install", code: "" });
   assert.deepEqual(w73Plain(f("?setup_action=update&installation_id=41234567")),
-    { installation_id: "41234567", setup_action: "update" });
+    { installation_id: "41234567", setup_action: "update", code: "" });
   // …beside other parameters, and with the leading ? absent.
   assert.deepEqual(w73Plain(f("?foo=1&installation_id=9&setup_action=install&bar=2")),
-    { installation_id: "9", setup_action: "install" });
+    { installation_id: "9", setup_action: "install", code: "" });
+  // CQ7a: GitHub's user-authorization code rides the same redirect when the App
+  // asks for authorization during install; the leg carries it to the plane.
+  assert.deepEqual(w73Plain(f("?code=abc123&installation_id=9&setup_action=install")),
+    { installation_id: "9", setup_action: "install", code: "abc123" });
   // setup_action=request: the org-approval shape, NO installation to record.
   // It is a VALUE, not a null — the leg has something honest to say about it.
-  assert.deepEqual(w73Plain(f("?setup_action=request")), { installation_id: "", setup_action: "request" });
+  assert.deepEqual(w73Plain(f("?setup_action=request")), { installation_id: "", setup_action: "request", code: "" });
   // Not a return leg at all.
   for (const s of ["", "?", "?checkout=success", "?billing=portal", null, undefined]) {
     assert.equal(f(s), null, "a non-install query must not arm the leg: " + JSON.stringify(s));
@@ -35239,7 +35250,7 @@ test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the 
   // stateful DELETE arm puts it there, exactly as a person who had disconnected
   // would be), so a card that ends up connected can only have got there through
   // this POST.
-  const { h, nodes, calls, box } = await w73Realm(null, "?installation_id=41234567&setup_action=install&state=sealed-abc");
+  const { h, nodes, calls, box } = await w73Realm(null, "?installation_id=41234567&setup_action=install&state=sealed-abc&code=gh-user-code");
   h.disconnectGithub();
   await w49s6Settle();
   assert.ok(nodes["#github-card"].innerHTML.includes("Connect GitHub"),
@@ -35256,8 +35267,9 @@ test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the 
     "EXACTLY one POST /v1/github/installations must reach the wire; got " + posts.length +
       " (paths seen: " + calls.map((c) => c.method + " " + c.path).join(", ") + ")");
   // r3b gh-install-bind: the team-bound state GitHub echoed rides back with it.
-  assert.deepEqual(posts[0].body, { installation_id: "41234567", state: "sealed-abc" },
-    "the id (and the install state) GitHub sent must be what the plane is asked to record");
+  // CQ7a: and GitHub's user-authorization code, which the plane checks the id against.
+  assert.deepEqual(posts[0].body, { installation_id: "41234567", state: "sealed-abc", code: "gh-user-code" },
+    "the id (and the install state and code) GitHub sent must be what the plane is asked to record");
 
   const card = nodes["#github-card"].innerHTML;
   assert.ok(card.includes("acme-engineering"), "the card must name the account the fixture connected: " + JSON.stringify(card.slice(0, 300)));
@@ -35268,7 +35280,7 @@ test("cch-w73-bl c1+c5 THE ROUND TRIP: an install redirect POSTs the id and the 
   assert.ok(!/can&#39;t confirm|can't confirm/.test(toasts), "…and is NOT told we could not confirm");
   // The site screen's one-shot readiness band learned the deployment fact for free.
   assert.equal(h.githubReadinessState(), "ready", "a 201 proves the deployment IS configured");
-  assert.equal(box.location.search, "?installation_id=41234567&setup_action=install&state=sealed-abc",
+  assert.equal(box.location.search, "?installation_id=41234567&setup_action=install&state=sealed-abc&code=gh-user-code",
     "…and with no history object the scrub degraded to a no-op rather than throwing");
 });
 
@@ -35333,7 +35345,7 @@ test("cch-w73-bl c6 CONTROL: removing the recording path reds this guard BY NAME
   // the one api() call that carries the installation back to the plane is turned
   // into a no-op that keeps every other rung — the parse, the scrub, the toast,
   // the repaint — intact. A guard that only watched the toast would stay green.
-  const anchor = 'return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState }).then(function (r) {';
+  const anchor = 'return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState, code: githubInstallCode }).then(function (r) {';
   assert.equal(APP_SRC.split(anchor).length, 2, "the mutation anchor must occur EXACTLY once");
   const mutant = APP_SRC.replace(anchor,
     'return Promise.resolve({ ok: true, status: 201, data: {} }).then(function (r) {');
@@ -36726,4 +36738,21 @@ test("N-08: a site with no content binding makes no read and paints no shell", a
   const { box, calls } = await formsMount(() => [200, {}], { id: "s3", slug: "c", bootstrap_dataset: null });
   assert.equal(calls.length, 0);
   assert.equal(box.innerHTML, "");
+});
+
+// task-e4cdc0f2e7766e1a: turning 2FA off now needs proof — the current password
+// OR a current authenticator code — and the console sends it.
+test("e4cd: twoFactorOffProof sends a password as password, and a six-digit entry as both", () => {
+  const j = (v) => JSON.stringify(hooks.twoFactorOffProof(v));
+  assert.equal(j("correct-horse"), JSON.stringify({ current_password: "correct-horse" }));
+  assert.equal(j(" 123456 "), JSON.stringify({ current_password: " 123456 ", otp: "123456" }));
+  assert.equal(j(undefined), JSON.stringify({ current_password: "" }));
+  assert.equal(hooks.twoFactorOffProof("12345").otp, undefined, "five digits is not a code");
+});
+
+test("e4cd: only a 401 reauth_failed turn-off is told as a wrong password or code", () => {
+  assert.ok(/password or code didn't match/.test(hooks.twoFactorOffReauthCopy(401, { error: "reauth_failed" })));
+  assert.equal(hooks.twoFactorOffReauthCopy(500, null), null, "a server fault keeps the account-write seam");
+  assert.equal(hooks.twoFactorOffReauthCopy(401, { error: "unauthorized" }), null,
+    "an expired session is not a wrong password");
 });

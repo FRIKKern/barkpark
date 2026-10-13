@@ -71,6 +71,7 @@ import { TextSelection } from "@tiptap/pm/state";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 // THE tokenizer, shared with the reader (plan #27): the highlight layer under the textarea.
 import { highlightHtml } from "../code-highlight.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpCode`, NOT `code` — `code` is already the StarterKit
 // INLINE code MARK (extension-code: name:'code', parses <code>), which the canvas
@@ -227,10 +228,10 @@ export const Code = Node.create({
       const langInput = document.createElement("input");
       langInput.type = "text";
       langInput.className = "bp-canvas-code-lang";
-      langInput.placeholder = "lang";
+      langInput.placeholder = t("lang");
       // Accessible name that survives the resting-chrome hide (a placeholder is
       // only a fallback name, and it's invisible while the control is hidden).
-      langInput.setAttribute("aria-label", "code language");
+      langInput.setAttribute("aria-label", t("code language"));
       langInput.setAttribute("contenteditable", "false");
 
       // The EDIT island: a textarea showing the code. Monospace, full-width,

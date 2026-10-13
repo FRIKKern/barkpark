@@ -131,13 +131,18 @@ defmodule BarkparkWeb.ScopedPluginSessionTest do
       assert redirected_to(default_conn) == "/studio"
       refute default_conn.resp_body =~ @body_marker
 
-      # Any NON-Default workspace: the membership gate still fails closed.
+      # Any NON-Default workspace: the membership gate still fails closed. A
+      # signed-out browser is sent to sign in (task-c1ccdbfaa26876cb) and never
+      # reaches the LV.
+      path = "/w/#{other_ws.slug}/p/#{other_proj.slug}/studio/onixedit/ping"
+
       other_conn =
         scoped_conn()
         |> init_test_session(%{})
-        |> get("/w/#{other_ws.slug}/p/#{other_proj.slug}/studio/onixedit/ping")
+        |> get(path)
 
-      assert other_conn.status == 403
+      assert redirected_to(other_conn) == "/login?return_to=" <> URI.encode_www_form(path)
+      refute other_conn.resp_body =~ @body_marker
     end
   end
 

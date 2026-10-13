@@ -131,7 +131,9 @@ defmodule Barkpark.Scim do
     with true <- is_binary(email) and email != "",
          {:ok, user} <- upsert_user(org, email) do
       attach_to_org(user, org)
-      audit(org, user, "user_provisioned", %{"email" => email})
+      # The user by id, never the email (owner ruling #32 item 2): the audit
+      # log is append-only and hash-chained, so an email here outlives erasure.
+      audit(org, user, "user_provisioned", %{"user_id" => user.id})
       {:ok, user}
     else
       false -> {:error, :missing_username}
@@ -192,6 +194,14 @@ defmodule Barkpark.Scim do
     hard_requested = Keyword.get(opts, :hard, false)
     ws_ids = org |> workspace_ids()
 
+    # The session teardown goes out after the revoke commits, so a client that
+    # reconnects on it meets a revoked row (owner ruling #35, item 8).
+    Accounts.with_session_teardown_after_commit(fn ->
+      deprovision_in_transaction(org, user, ws_ids, hard_requested)
+    end)
+  end
+
+  defp deprovision_in_transaction(org, user, ws_ids, hard_requested) do
     Repo.transaction(fn ->
       {:ok, sessions_revoked} = Accounts.revoke_all_user_sessions(user)
 

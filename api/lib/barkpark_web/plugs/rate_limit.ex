@@ -13,6 +13,25 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   — never `conn.remote_ip`, which behind the co-located Caddy is ALWAYS
   loopback and collapsed the whole anonymous internet into one shared bucket.
 
+  A caller with no Bearer but a valid SESSION COOKIE (`session["api_token"]`
+  or `session["user_session"]`) resolves its OWN bucket too, keyed distinctly
+  from both the Bearer and IP cases -- see `session_principal_id/1`
+  (task-2c31de0cf6597d32). That bucket's WRITE budget defaults to
+  `:session_write_per_minute` (180/min) rather than `:write_per_minute`
+  (60/min): a server-side proxy fronting many human editors through one
+  egress IP and/or one shared credential (Barkpark Studio) otherwise collapses
+  every editor into one 60/min bucket the moment two of them type at once.
+
+  A Bearer token whose `owner_user_id` names ONE human -- a personal PAT, or
+  an app token minted via `POST /v1/auth/app-tokens` (one per editor email,
+  `owner_user_id` always set) -- gets that SAME wider default too, keyed
+  `:owned` (task-2c31de0cf6597d32 follow-up): Studio's editors authenticate
+  to Barkpark with a per-editor Bearer, not a session cookie, so the session
+  branch alone left them on the flat 60/min default. A Bearer with no owner
+  (a shared/service credential) stays `:verified`, at 60/min, unchanged.
+  SCIM/anonymous budgets are untouched by either of these -- only a resolved
+  SESSION or OWNED principal ever sees the wider default.
+
   ## The `:browser` class — SHADOW ONLY (charter D2/D4 Gate A)
 
   A mount may pass `class: :browser` to meter a browser pipeline. That path is
@@ -22,8 +41,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   never a sixth class (charter D9). It refuses nobody unless a human sets
   `BARKPARK_RATE_LIMIT_BROWSER_ENFORCE=true` against observed shadow data.
   `BARKPARK_RATE_LIMIT_BROWSER_ENABLED=false` is the kill switch and skips the
-  bucket entirely. NOTHING mounts this class yet — the router edit is charter
-  D7 / slice 8 — so on this commit the class is reachable only from tests.
+  bucket entirely. The five HTML browser pipelines mount it (`:browser`,
+  `:scoped_browser`, `:shared_studio_browser`, `:shared_paper_browser`,
+  `:workspace_browser` — charter D7, slice 8).
   """
 
   import Plug.Conn
@@ -53,12 +73,12 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
-  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # Every option-less `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
+  # has `opts` `[]` here and falls to the method
   # clause below — byte-identical keys, budgets and refusals to what those
   # pipelines got before `:browser` existed. A browser pipeline opts IN with
-  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
-  # charter D7/slice 8 work and is deliberately NOT part of this change.
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`, as the five HTML
+  # browser pipelines in router.ex do (charter D7, slice 8).
   def call(conn, opts) do
     # ONE `RateLimiter.check/2` CALL SITE, DELIBERATELY.
     # `rate_limiter_scoped_key_coverage_test.exs` walks the AST of every module
@@ -83,15 +103,16 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
-  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # Every option-less `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
+  # has `opts` `[]` here and falls to the method
   # clause — byte-identical keys, budgets and refusals to what those pipelines
   # got before `:browser` existed. A browser pipeline opts IN with
-  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
-  # charter D7 / slice 8 work and is deliberately NOT part of this change.
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`, as the five HTML
+  # browser pipelines in router.ex do (charter D7, slice 8).
   defp plan(conn, opts) do
     case class_opt(opts) do
       :browser -> browser_plan(conn)
+      :presence_focus -> presence_focus_plan(conn)
       _ -> method_plan(conn)
     end
   end
@@ -103,16 +124,51 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp method_plan(conn) do
     class = method_class(conn.method)
     dataset = conn.path_params["dataset"]
-    per_minute = limit_per_minute(class, dataset)
-    {class, per_minute, bucket_key(conn, class, dataset)}
+    {principal_class, key} = bucket_key(conn, class, dataset)
+    per_minute = limit_per_minute(class, dataset, principal_class)
+    {class, per_minute, key}
   end
+
+  # task-db8de40bbc928c54 — a REAL enforced class, unlike :browser's
+  # shadow-only one: `limited/4`'s catch-all clause already refuses any
+  # non-:browser class with the standard JSON 429, so no new refusal path is
+  # needed. Its OWN key (bucket_key/3 embeds `class` into the key string for
+  # every principal kind already) means a focus burst can never debit, or be
+  # debited by, the write bucket the same principal's content saves use.
+  defp presence_focus_plan(conn) do
+    dataset = conn.path_params["dataset"]
+    {_principal_class, key} = bucket_key(conn, :presence_focus, dataset)
+    per_minute = limit_per_minute(:presence_focus, dataset, nil)
+    {:presence_focus, per_minute, key}
+  end
+
+  @doc false
+  # Gate B's seam (`BarkparkWeb.LiveMeter`, charter D4): the /live socket meter
+  # reads the SAME kill switch, per-minute budget and bucket shape as this
+  # plug's `:browser` class, so the two gates cannot drift apart. `:skip` when
+  # the class is switched off.
+  @spec browser_budget() :: :skip | {pos_integer(), keyword()}
+  def browser_budget do
+    cfg = Application.get_env(:barkpark, :rate_limits, [])
+
+    if browser_enabled?(cfg) do
+      per_minute = browser_per_minute(cfg)
+      {per_minute, bucket_opts(per_minute)}
+    else
+      :skip
+    end
+  end
+
+  @doc false
+  def shadow_event, do: @shadow_event
 
   defp browser_plan(conn) do
     cfg = Application.get_env(:barkpark, :rate_limits, [])
 
     if browser_enabled?(cfg) do
       per_minute = browser_per_minute(cfg)
-      {:browser, per_minute, bucket_key(conn, :browser, conn.path_params["dataset"])}
+      {_principal_class, key} = bucket_key(conn, :browser, conn.path_params["dataset"])
+      {:browser, per_minute, key}
     else
       :skip
     end
@@ -239,9 +295,20 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     end
   end
 
-  defp limit_per_minute(class, dataset) do
+  # `principal_class` (`:session` | `:owned` | `:verified` | `:anonymous`,
+  # from `bucket_key/3`) only ever widens the WRITE default, and only for a
+  # bucket keyed on an editor's OWN resolved session or OWN owned token
+  # (task-2c31de0cf6597d32 and its follow-up: Studio proxies many editors
+  # through one server-side credential/egress IP, so without this every
+  # editor shared one 60/min bucket). A dataset override, when set, still
+  # wins outright — an operator clamping a specific dataset's abuse ceiling
+  # means it regardless of who is asking. Plain Bearer/scim/anonymous(IP)
+  # traffic is UNCHANGED: default_per_minute/3 only branches on `:session`
+  # and `:owned`, so every other principal_class keeps the exact
+  # byte-identical :write_per_minute default this function always returned.
+  defp limit_per_minute(class, dataset, principal_class) do
     cfg = Application.get_env(:barkpark, :rate_limits, [])
-    default = default_per_minute(cfg, class)
+    default = default_per_minute(cfg, class, principal_class)
 
     case dataset_override(cfg, dataset, class) do
       nil -> default
@@ -250,8 +317,30 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     end
   end
 
-  defp default_per_minute(cfg, :read), do: Keyword.get(cfg, :read_per_minute, 300)
-  defp default_per_minute(cfg, :write), do: Keyword.get(cfg, :write_per_minute, 60)
+  defp default_per_minute(cfg, :read, _principal_class),
+    do: Keyword.get(cfg, :read_per_minute, 300)
+
+  # `:session` (a cookie-resolved editor, task-2c31de0cf6597d32) and `:owned`
+  # (a Bearer whose owner_user_id names that same ONE human, the follow-up)
+  # are the same interactive-editor budget by the same config knob — the
+  # distinction is HOW the principal was resolved, not what it should get.
+  defp default_per_minute(cfg, :write, class) when class in [:session, :owned] do
+    case Keyword.get(cfg, :session_write_per_minute, 180) do
+      n when is_integer(n) and n > 0 -> n
+      _ -> Keyword.get(cfg, :write_per_minute, 60)
+    end
+  end
+
+  defp default_per_minute(cfg, :write, _principal_class),
+    do: Keyword.get(cfg, :write_per_minute, 60)
+
+  # task-db8de40bbc928c54 — generous and fixed (no :session widening the way
+  # :write does): presence/focus churn is UI chrome, not a content write, so
+  # it never needed `session_write_per_minute`'s per-editor reasoning. 600/min
+  # = 10/sec, well above normal cursor/selection event cadence, bounded so a
+  # genuinely runaway client still cannot flood the presence room forever.
+  defp default_per_minute(cfg, :presence_focus, _principal_class),
+    do: Keyword.get(cfg, :presence_focus_per_minute, 600)
 
   defp dataset_override(_cfg, nil, _class), do: nil
 
@@ -268,10 +357,13 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     [capacity: per_minute, refill_per_sec: per_minute / 60.0]
   end
 
+  # Returns `{principal_class, key}` — the class feeds `limit_per_minute/3`
+  # (ONLY `:session` ever widens a budget; see there), the key is what
+  # `check/2` debits exactly as before.
   defp bucket_key(conn, class, dataset) do
     scope = dataset || "global"
 
-    key =
+    {principal_class, key} =
       case principal_id(conn) do
         nil ->
           # The trust boundary, NOT the raw peer. Every prod instance runs Caddy
@@ -281,10 +373,16 @@ defmodule BarkparkWeb.Plugs.RateLimit do
           # every other anonymous caller. `client_ip/1` believes the chain only
           # when the peer is a trusted front and takes the rightmost non-proxy
           # hop, so a direct caller still cannot pick its own key.
-          "ip:#{RateLimiter.client_ip(conn)}:#{class}:#{scope}"
+          {:anonymous, "ip:#{RateLimiter.client_ip(conn)}:#{class}:#{scope}"}
+
+        {:session, token_id} ->
+          {:session, "token:#{token_id}:#{class}:#{scope}"}
+
+        {:owned, token_id} ->
+          {:owned, "token:#{token_id}:#{class}:#{scope}"}
 
         token_id ->
-          "token:#{token_id}:#{class}:#{scope}"
+          {:verified, "token:#{token_id}:#{class}:#{scope}"}
       end
 
     # The per-test scope suffix used to be appended HERE, and this plug was the
@@ -293,7 +391,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     # exactly as the other seven sites apply it — so `bucket_key/3` returns the
     # production key and one helper owns the seam. The suffix is byte-identical
     # to what the clause removed from here produced.
-    key
+    {principal_class, key}
   end
 
   # THE BUCKET KEY MAY ONLY BE DERIVED FROM A VERIFIED PRINCIPAL — AND EVERY
@@ -358,20 +456,37 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # None of it runs for a request that presents no bearer, which is the whole
   # anonymous surface.
   @principal_resolvers [
-    # kind, {module, function} resolving a raw bearer to a stable id or nil.
-    # The kind is part of the bucket key, so ids from two credential tables can
-    # never collide into one bucket.
-    {"api", {Barkpark.Auth, :verify_token_id}},
+    # kind, {module, function} resolving a raw bearer to a stable id, an
+    # `{id, owner_user_id}` pair, or nil. The kind is part of the bucket key,
+    # so ids from two credential tables can never collide into one bucket.
+    # `Auth.verify_token_principal/1` returns the pair (api_token carries
+    # `owner_user_id`); `Scim.resolve_token_id/1` returns a bare id — a SCIM
+    # token has no owner concept, so it is never `:owned`.
+    {"api", {Barkpark.Auth, :verify_token_principal}},
     {"scim", {Barkpark.Scim, :resolve_token_id}}
   ]
 
+  # Returns a bare id/kind-string for a `:verified` (Bearer-resolved, no
+  # owner) principal, `{:owned, id}` for a Bearer-resolved principal whose
+  # `owner_user_id` names ONE human (task-2c31de0cf6597d32 follow-up),
+  # `{:session, id}` for a session-cookie-resolved one, or nil for anonymous.
+  # The wrappers are how `bucket_key/3` tells the three apart — a
+  # Bearer-presenting caller is `:verified`/`:owned` even if ITS token also
+  # happens to ride a cookie elsewhere, because the Bearer branch always wins
+  # here first (same precedence `OptionalSessionToken` documents for token
+  # resolution).
   defp principal_id(conn) do
     case conn.assigns[:api_token] do
       # Free path: a plug ahead of us already resolved this bearer. Nothing in
       # the tree mounts RateLimit after token resolution today, so this is a
-      # forward-compatibility branch, not the hot one.
-      %Barkpark.Auth.ApiToken{id: id} when is_binary(id) -> "api:" <> id
-      _ -> verified_bearer_id(conn)
+      # forward-compatibility branch, not the hot one. The struct already
+      # carries owner_user_id, so this path gets the same :owned treatment as
+      # the live resolver below, at zero extra cost.
+      %Barkpark.Auth.ApiToken{id: id, owner_user_id: owner} when is_binary(id) ->
+        if is_binary(owner), do: {:owned, "api:" <> id}, else: "api:" <> id
+
+      _ ->
+        verified_bearer_id(conn) || session_principal_id(conn)
     end
   end
 
@@ -382,12 +497,88 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     end
   end
 
+  # THE SESSION HALF OF THE SAME INVARIANT — task-2c31de0cf6597d32.
+  #
+  # Every `:scoped_mutate`-shaped pipeline mounts RateLimit BEFORE the plug
+  # that would actually resolve a session cookie (OptionalSessionToken /
+  # RequireBearerOrSessionToken), for the same cheapest-first reason Bearer
+  # resolution happens here instead of downstream. Left unresolved, a
+  # session-cookie-only caller fell to the anonymous IP bucket — harmless for
+  # one browser, but Barkpark Studio proxies MANY editors through one
+  # server-side egress IP (and, before #22180, one shared Bearer token), so
+  # every editor shared one write budget either way. Resolving the session
+  # here, exactly like the Bearer branch above, gives each editor's own
+  # credential its own bucket.
+  #
+  # Two session shapes, same precedence `OptionalSessionToken.call/2` already
+  # uses (token wins when present): `session["api_token"]` (Studio's
+  # token-sign-in cookie, `/login`) resolves through the SAME indexed
+  # `Auth.verify_token_id/1` the Bearer branch already pays for — no new cost
+  # shape. `session["user_session"]` (an account/SSO login, task-27006bc4)
+  # resolves through `Accounts.verify_user_session/1`, which also runs again
+  # downstream in `OptionalSessionToken` once that plug mounts — doubling one
+  # lookup, the same price the Bearer branch already pays when `:api`'s
+  # `OptionalToken` re-resolves the same token a few plugs later.
+  #
+  # `get_session/2` raises when `:fetch_session` has not run yet. Only the
+  # `:scoped_mutate`/`:scoped_media_mutate`-shaped pipelines that mount
+  # `:fetch_session` ahead of RateLimit can ever carry a session cookie worth
+  # reading, so a conn without one simply has nothing to read — rescued, not
+  # special-cased, so a pipeline ordering change can never 500 a request here.
+  defp session_principal_id(conn) do
+    case session_value(conn, "api_token") do
+      raw when is_binary(raw) and raw != "" ->
+        case Barkpark.Auth.verify_token_id(raw) do
+          id when is_binary(id) -> {:session, "api:" <> id}
+          _ -> session_user_principal_id(conn)
+        end
+
+      _ ->
+        session_user_principal_id(conn)
+    end
+  end
+
+  defp session_user_principal_id(conn) do
+    case session_value(conn, "user_session") do
+      raw when is_binary(raw) and raw != "" ->
+        case Barkpark.Accounts.verify_user_session(raw) do
+          {%Barkpark.Accounts.User{id: id}, _session} when is_binary(id) ->
+            {:session, "user:" <> id}
+
+          _ ->
+            nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp session_value(conn, key) do
+    get_session(conn, key)
+  rescue
+    # No :fetch_session upstream on this pipeline — nothing to read, same as
+    # an absent cookie. See the moduledoc comment above session_principal_id/1.
+    ArgumentError -> nil
+  end
+
   defp resolve(_raw, []), do: nil
 
   defp resolve(raw, [{kind, {mod, fun}} | rest]) do
     case apply(mod, fun, [raw]) do
-      id when is_binary(id) -> kind <> ":" <> id
-      _ -> resolve(raw, rest)
+      # `verify_token_principal/1`'s shape: owned iff owner_user_id is set.
+      {id, owner_user_id} when is_binary(id) and is_binary(owner_user_id) ->
+        {:owned, kind <> ":" <> id}
+
+      {id, _owner_user_id} when is_binary(id) ->
+        kind <> ":" <> id
+
+      # A bare-id resolver (e.g. Scim.resolve_token_id/1) — no owner concept.
+      id when is_binary(id) ->
+        kind <> ":" <> id
+
+      _ ->
+        resolve(raw, rest)
     end
   rescue
     # The limiter must never be the thing that 500s a request. A database blip

@@ -1,0 +1,220 @@
+name: api-image
+
+# Publishes the public, multi-arch Barkpark API image `ghcr.io/barkpark/api`
+# from main on every server release (owner ruling #60, 2026-10-03;
+# task-984d287af0689251). The starters' docker-compose.yml pulls
+# `ghcr.io/barkpark/api:latest`, which nothing published before this file.
+#
+# WHEN. A server release is a merge that changes VERSION (`chore(release):
+# VERSION x.y.z`), so this runs on push to main touching VERSION, plus
+# workflow_dispatch to (re)publish main's current VERSION by hand.
+#
+# TAGS. `<VERSION>`, `latest`, and `sha-<12 hex>` on one multi-arch manifest
+# (linux/amd64 + linux/arm64). Each arch builds on its own native runner and
+# pushes by digest; the manifest job stitches them, so no QEMU emulation.
+#
+# THE CREDENTIAL, AND WHY IT IS NOT GITHUB_TOKEN. This repository lives under
+# FRIKKern, and GITHUB_TOKEN can only push packages to its own owner's
+# namespace (ghcr.io/frikkern/...). `ghcr.io/barkpark/api` lives under the
+# `barkpark` GitHub organisation, so the push needs a token with
+# write:packages on that organisation:
+#   secrets.GHCR_TOKEN  — a classic PAT (or org-scoped token) with write:packages
+#   vars.GHCR_USER      — the account that token belongs to (optional; defaults
+#                         to github.actor)
+# The owner creates both, then sets the package's visibility to PUBLIC once
+# (a package's first push is private by default), so an anonymous
+# `docker pull ghcr.io/barkpark/api:latest` works.
+#
+# WITHOUT THE SECRET this workflow does not build or push anything: the gate job
+# ends green with a ::warning:: and a step-summary line that says the image was
+# NOT published and why. It does not red main on every release for a credential
+# only the owner can mint (task-dee226be3107a98b c4: no permanently-red workflow
+# on main), and it never claims a publish that did not happen.
+#
+# Build context and args mirror the root docker-compose.yml: repo-root context
+# (the release reads design/ and api/assets/ at compile time) and the three
+# BuildInfo args, so the image reports its real version and commit.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - VERSION
+  workflow_dispatch:
+
+concurrency:
+  # PER PUSH SHA ON MAIN (scripts/main-run-concurrency-check.sh): a flat group
+  # would let a later release evict a queued earlier one before a runner picks
+  # it up. Never cancels a main run.
+  group: api-image-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/barkpark/api
+
+jobs:
+  gate:
+    name: Decide (credential + version)
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.cred.outputs.publish }}
+      version: ${{ steps.ver.outputs.version }}
+      short_sha: ${{ steps.ver.outputs.short_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: VERSION
+          sparse-checkout-cone-mode: false
+      - name: Read VERSION
+        id: ver
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          case "$version" in
+            ''|*[!0-9.]*) echo "::error::VERSION is '$version', not a dotted version — refusing to tag an image with it"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+      - name: Is the publish credential configured?
+        id: cred
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          if [ -n "$GHCR_TOKEN" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+            echo "Publishing $IMAGE:${{ steps.ver.outputs.version }} (+ latest, sha-${{ steps.ver.outputs.short_sha }})." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            msg="NOT PUBLISHED: secrets.GHCR_TOKEN is not set, so $IMAGE:${{ steps.ver.outputs.version }} was not built or pushed. The owner adds a token with write:packages on the barkpark organisation (see the header of .github/workflows/api-image.yml), then re-runs this workflow."
+            echo "::warning::$msg"
+            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  # Two explicit jobs rather than a matrix: each renders one fixed check-run
+  # name (the .exclusions rows in .github/required-checks.json key on them), and
+  # each arch builds natively on its own runner, so there is no QEMU emulation.
+  build-amd64:
+    name: Build linux/amd64
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ vars.GHCR_USER || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: api/Dockerfile
+          platforms: linux/amd64
+          build-args: |
+            BARKPARK_BUILD_VERSION=${{ needs.gate.outputs.version }}
+            BARKPARK_BUILD_COMMIT=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.version }}
+            org.opencontainers.image.description=Barkpark API (Phoenix) — headless CMS server
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          case "$DIGEST" in sha256:*) ;; *) echo "::error::build produced no digest ('$DIGEST')"; exit 1 ;; esac
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-image-digest-amd64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  build-arm64:
+    name: Build linux/arm64
+    needs: gate
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ vars.GHCR_USER || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: api/Dockerfile
+          platforms: linux/arm64
+          build-args: |
+            BARKPARK_BUILD_VERSION=${{ needs.gate.outputs.version }}
+            BARKPARK_BUILD_COMMIT=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.gate.outputs.version }}
+            org.opencontainers.image.description=Barkpark API (Phoenix) — headless CMS server
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+      - name: Record the digest
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          case "$DIGEST" in sha256:*) ;; *) echo "::error::build produced no digest ('$DIGEST')"; exit 1 ;; esac
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: api-image-digest-arm64
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  manifest:
+    name: Tag the multi-arch manifest
+    needs: [gate, build-amd64, build-arm64]
+    if: needs.gate.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: api-image-digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ vars.GHCR_USER || github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+      - name: Create and push the manifest
+        working-directory: /tmp/digests
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+          SHORT_SHA: ${{ needs.gate.outputs.short_sha }}
+        run: |
+          refs=()
+          for f in *; do refs+=("$IMAGE@sha256:$f"); done
+          [ "${#refs[@]}" = "2" ] || { echo "::error::expected 2 per-arch digests, found ${#refs[@]}"; exit 1; }
+          docker buildx imagetools create \
+            -t "$IMAGE:$VERSION" \
+            -t "$IMAGE:latest" \
+            -t "$IMAGE:sha-$SHORT_SHA" \
+            "${refs[@]}"
+      - name: Verify the published manifest carries both architectures
+        run: |
+          docker buildx imagetools inspect "$IMAGE:${{ needs.gate.outputs.version }}" | tee /tmp/inspect.txt
+          grep -q "linux/amd64" /tmp/inspect.txt || { echo "::error::manifest is missing linux/amd64"; exit 1; }
+          grep -q "linux/arm64" /tmp/inspect.txt || { echo "::error::manifest is missing linux/arm64"; exit 1; }
+          echo "Published $IMAGE:${{ needs.gate.outputs.version }}, :latest and :sha-${{ needs.gate.outputs.short_sha }} (linux/amd64 + linux/arm64)." >> "$GITHUB_STEP_SUMMARY"

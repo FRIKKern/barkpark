@@ -94,7 +94,9 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           # Picker context for reference / image subfields (Gyldendal E1.6).
           dataset: Map.get(assigns, :dataset, "production"),
           scope_prefix: Map.get(assigns, :scope_prefix, ""),
-          api_token_raw: Map.get(assigns, :api_token_raw, "")
+          api_token_raw: Map.get(assigns, :api_token_raw, ""),
+          # The document a nested `visibleWhen` reads by default (task-9905a69475b1ff3b).
+          root: Map.get(assigns, :editor_form)
         })
 
       "arrayOf" ->
@@ -110,7 +112,9 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           # Picker context for reference rows (tsk-dossier-ref-picker).
           dataset: Map.get(assigns, :dataset, "production"),
           scope_prefix: Map.get(assigns, :scope_prefix, ""),
-          api_token_raw: Map.get(assigns, :api_token_raw, "")
+          api_token_raw: Map.get(assigns, :api_token_raw, ""),
+          # The document a nested `visibleWhen` reads by default (task-9905a69475b1ff3b).
+          root: Map.get(assigns, :editor_form)
         })
 
       "codelist" ->

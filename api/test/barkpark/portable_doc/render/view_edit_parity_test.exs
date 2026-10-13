@@ -560,15 +560,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     end
   end
 
-  test "View list keeps its bottom margin; Edit list omits it (documented divergence)" do
+  test "View list owns its top-only margin; Edit list omits it (documented divergence)" do
     view = view_css()
     edit = edit_css()
 
     view_ul = declarations_for(view, "bp-paper-surface", "ul")
     edit_ul = declarations_for(edit, "bp-paper-editor-body", "ul")
 
-    assert view_ul["margin"] == "0 0 24px",
-           "View list bottom-margin changed — update the parity doc + Edit divergence note."
+    assert view_ul["margin"] == "var(--bp-para-margin-top) 0 0",
+           "View list margin changed — update the parity doc + Edit divergence note."
 
     refute Map.has_key?(edit_ul, "margin"),
            """
@@ -827,7 +827,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # is three `~s|…| <> ~s|…|` fragments; strip the sigil delimiters + `<>` glue so a
   # `style="…"` that straddles a fragment boundary (the span's is split across L35/36)
   # reads as one attribute. Returns %{container: decls, mark: decls}, var()-fallbacks
-  # stripped so `var(--paper-rule, #dde7e2)` compares equal to the CSS `var(--paper-rule)`.
+  # stripped so `var(--paper-rule, #e2e6e5)` compares equal to the CSS `var(--paper-rule)`.
   defp figures_divider_decls do
     src = File.read!(@figures_ex)
 
@@ -849,11 +849,37 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
 
     [container_style, mark_style] = styles
 
+    # The reader's COLOURS are not inline (task-2c5d3da1b7f7db25): the rule keeps
+    # its width and style inline and paper-surface.css paints its colour, the
+    # mark's ground and its ink. The reader's paint is both halves, so overlay
+    # the surface rule on the inline decls, folding `border-top-color` back into
+    # the `border-top` shorthand the edit mirror writes.
+    surface = Stylesheet.css()
+
     %{
-      container: container_style |> parse_decls() |> strip_var_fallbacks(),
-      mark: mark_style |> parse_decls() |> strip_var_fallbacks()
+      container:
+        container_style
+        |> parse_decls()
+        |> Map.merge(declarations_for(surface, "bp-paper-surface", @divider_container_selector))
+        |> fold_border_top_color()
+        |> strip_var_fallbacks(),
+      mark:
+        mark_style
+        |> parse_decls()
+        |> Map.merge(declarations_for(surface, "bp-paper-surface", @divider_mark_selector))
+        |> strip_var_fallbacks()
     }
   end
+
+  defp fold_border_top_color(
+         %{"border-top" => width_style, "border-top-color" => colour} = decls
+       ),
+       do:
+         decls
+         |> Map.delete("border-top-color")
+         |> Map.put("border-top", "#{width_style} #{colour}")
+
+  defp fold_border_top_color(decls), do: decls
 
   # Normalise every value in a decl map so `var(--name, fallback)` -> `var(--name)`.
   # The reader carries light-only hex fallbacks; the CSS mirrors carry none. Comparing

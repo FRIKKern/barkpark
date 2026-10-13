@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Media do
   Image field events — picker open/close, media select, clear, upload.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -95,7 +97,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Media do
 
       _ ->
         {:noreply,
-         put_flash(socket, :error, "Image upload failed. Please try again with a supported file.")}
+         put_flash(
+           socket,
+           :error,
+           gettext("Image upload failed. Please try again with a supported file.")
+         )}
     end
   end
 end

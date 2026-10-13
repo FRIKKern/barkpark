@@ -24,6 +24,8 @@
 // the slash menu does (default_block parity, asserted in __smoke.mjs).
 
 import { SlashMenu } from "../slash-menu.js";
+import { t as tr, te } from "../i18n.js";
+import { topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 import { closeHistory } from "@tiptap/pm/history";
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 import {
@@ -79,8 +81,12 @@ export function insertSlashTypeAtSelection(editor, type, fieldName, opts) {
   if (fieldName && node && node.attrs) {
     node.attrs.fieldName = fieldName;
   }
+  // A code block can start from text (the Mod-Alt-c chord turns a paragraph into code).
+  if (type === "code" && node && node.attrs && typeof opts?.value === "string") {
+    node.attrs.value = opts.value;
+  }
 
-  return insertNodeAtSelection(editor, node);
+  return insertNodesAtSelection(editor, [node], null, opts);
 }
 
 // insertCompoundAtSelection(editor, kind) → insert a COMPOUND starter (a pre-composed
@@ -89,11 +95,11 @@ export function insertSlashTypeAtSelection(editor, type, fieldName, opts) {
 // honors the top-level-prose guard and lands exactly where a /section would. The whole
 // subtree is ONE node (runToOps emits ONE insert-after carrying the section + its
 // seeded children, minting every id). Returns true iff inserted (unknown kind → false).
-export function insertCompoundAtSelection(editor, kind) {
+export function insertCompoundAtSelection(editor, kind, opts) {
   if (!editor) return false;
   const node = compoundKindToNode(kind);
   if (!node) return false;
-  return insertNodeAtSelection(editor, node);
+  return insertNodesAtSelection(editor, [node], null, opts);
 }
 
 // insertSectionPresetAtSelection(editor, kind) → insert a SECTION PRESET (an ORDERED
@@ -121,23 +127,18 @@ const PRESET_OVERTYPE_NODES = new Set([
   "blockquote",
 ]);
 
-export function insertSectionPresetAtSelection(editor, kind) {
+export function insertSectionPresetAtSelection(editor, kind, opts) {
   if (!editor) return false;
   const nodes = sectionPresetNodes(kind);
   if (!nodes || nodes.length === 0) return false;
-  return insertNodesAtSelection(editor, nodes, sectionPresetCaretTarget(kind));
-}
-
-// The single-node entry point, kept as the thin wrapper the slash pick and the
-// per-type Insert commands call — behavior byte-identical to before the multi-node
-// generalization (one node in, caret target defaulted to that node).
-function insertNodeAtSelection(editor, node) {
-  return insertNodesAtSelection(editor, [node], null);
+  return insertNodesAtSelection(editor, nodes, sectionPresetCaretTarget(kind), opts);
 }
 
 // The SHARED node-landing seam: replace the enclosing top-level-prose block with
 // `nodes`, or degrade to an insert-after when the caret sits somewhere a replace would
-// corrupt. Factored from insertSlashTypeAtSelection (byte-identical behavior for a
+// corrupt. A block that holds text is replaced only when the caller says that text is
+// its own (`opts.replaceText`: the slash pick's "/query" line). Anything else lands
+// AFTER it, so an insert never destroys the author's text (task-089f8a89b1f274ce). Factored from insertSlashTypeAtSelection (byte-identical behavior for a
 // single node) so the single-node, compound AND preset insert paths land nodes
 // through ONE code path.
 //
@@ -145,7 +146,7 @@ function insertNodeAtSelection(editor, node) {
 // body for a textable node, NodeSelection on an atom). A preset passes
 // { block, placeholder }: the caret lands on that block, SELECTING `placeholder` when
 // the node exposes an inline text hole.
-function insertNodesAtSelection(editor, nodes, caretTarget) {
+function insertNodesAtSelection(editor, nodes, caretTarget, opts) {
   const { state, view } = editor;
   const $pos = state.selection.$from;
   const newNodes = nodes.map((n) => state.schema.nodeFromJSON(n));
@@ -155,7 +156,17 @@ function insertNodesAtSelection(editor, nodes, caretTarget) {
   let tr;
   let caretAnchor; // doc position the FIRST new node starts at (for caret placement)
 
-  if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name)) {
+  // `opts.value` is text the caller already moved into the new block (the Mod-Alt-c
+  // chord turns a paragraph into code, task-2a659a853f02c2cc), so the block may go too.
+  const replaceable = $pos.parent.content.size === 0 ||
+    (opts && (opts.replaceText === true || typeof opts.value === "string"));
+  if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name) && !replaceable) {
+    // TOP-LEVEL PROSE WITH THE AUTHOR'S TEXT (a palette Insert): keep the block and
+    // land the new nodes right after it.
+    const insertAt = $pos.after($pos.depth);
+    tr = state.tr.insert(insertAt, newNodes);
+    caretAnchor = insertAt;
+  } else if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name)) {
     // TOP-LEVEL PROSE: replace the whole enclosing block (identical to the slash
     // pick — start=$pos.before(depth), end=$pos.after(depth)).
     const start = $pos.before($pos.depth);
@@ -339,6 +350,7 @@ const INSERT_META = {
   "field-select": { label: "Select", hint: "▾" },
   "field-datetime": { label: "Date & time", hint: "◷" },
   "field-color": { label: "Color", hint: "●" },
+  "field-number": { label: "Number", hint: "#" },
   sheet: { label: "Sheet", hint: "▦" },
 };
 
@@ -378,6 +390,7 @@ const INSERT_ORDER = [
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
   "sheet",
 ];
 
@@ -426,17 +439,43 @@ export function buildCommandRegistry(editor, opts) {
     if (!meta) continue;
     cmds.push({
       id: `insert-${type}`,
-      label: `Insert ${meta.label}`,
+      label: tr("Insert %{block}", { block: tr(meta.label) }),
       group: "Insert",
       hint: meta.hint,
+      keys: type === "code" ? "Mod-Alt-c" : undefined,
       // Insert the default node EXACTLY like the slash pick. Honors the same top-
       // level-prose guard (degrades safely inside a callout body / list item).
       // Terminal and Stage are built by the SERVER (CANVAS_SERVER_INSERT_TYPES): the
       // canvas passes `opts.onServerInsert`, which hands the pick to the host.
-      run: CANVAS_SERVER_INSERT_TYPES.has(type) && opts && typeof opts.onServerInsert === "function"
-        ? () => opts.onServerInsert(type)
-        : (ed) => insertSlashTypeAtSelection(ed, type),
+      // A type the field DECLARES as its own object block (a declared `callout`)
+      // inserts the declared block through `opts.onObjectInsert`, never the
+      // built-in node of that name (task-441e0c1cc08acc5e).
+      run: opts && opts.declaredObjects && opts.declaredObjects.has(type) && typeof opts.onObjectInsert === "function"
+        ? () => opts.onObjectInsert(type)
+        : opts && typeof opts.onServerInsert === "function" &&
+          (typeof opts.serverBuilds === "function" ? opts.serverBuilds(type) : CANVAS_SERVER_INSERT_TYPES.has(type))
+          ? () => opts.onServerInsert(type)
+          : (ed) => {
+              const done = insertSlashTypeAtSelection(ed, type);
+              if (done && type === "image" && opts && typeof opts.onImageInserted === "function") opts.onImageInserted();
+              return done;
+            },
     });
+  }
+
+  // INLINE — one per declared inline object kind (a field's blocks.inline,
+  // task-85fee859cf3bfef6), inserted at the caret anywhere in prose, so a kind
+  // is keyboard-insertable mid-sentence (the slash menu opens at a line start).
+  if (opts && typeof opts.onInlineInsert === "function" && Array.isArray(opts.inlineObjects)) {
+    for (const o of opts.inlineObjects) {
+      cmds.push({
+        id: `inline-${o.name}`,
+        label: tr("Insert %{block}", { block: o.title }),
+        group: "Inline",
+        hint: "◦",
+        run: () => opts.onInlineInsert(o.name),
+      });
+    }
   }
 
   // STARTERS — compound inserts: ONE pre-composed subtree per CANVAS_COMPOUND_INSERTS
@@ -446,7 +485,7 @@ export function buildCommandRegistry(editor, opts) {
   for (const c of CANVAS_COMPOUND_INSERTS) {
     cmds.push({
       id: `compound-${c.kind}`,
-      label: `Insert ${c.label}`,
+      label: tr("Insert %{block}", { block: tr(c.label) }),
       group: "Starters",
       hint: c.hint,
       run: (ed) => insertCompoundAtSelection(ed, c.kind),
@@ -462,7 +501,7 @@ export function buildCommandRegistry(editor, opts) {
   for (const p of CANVAS_SECTION_PRESETS) {
     cmds.push({
       id: `preset-${p.kind}`,
-      label: `Insert ${p.label}`,
+      label: tr("Insert %{block}", { block: tr(p.label) }),
       group: "Presets",
       hint: p.hint,
       run: (ed) => insertSectionPresetAtSelection(ed, p.kind),
@@ -474,7 +513,7 @@ export function buildCommandRegistry(editor, opts) {
     if (!editorHasCommand(editor, f.cmd)) continue;
     cmds.push({
       id: f.id,
-      label: `Format ${f.label}`,
+      label: tr("Format %{mark}", { mark: tr(f.label) }),
       group: "Format",
       hint: f.hint,
       run: (ed) => ed.chain().focus()[f.cmd]().run(),
@@ -484,7 +523,7 @@ export function buildCommandRegistry(editor, opts) {
   if (editor && editorHasCommand(editor, "toggleUnderline")) {
     cmds.push({
       id: "format-underline",
-      label: "Format Underline",
+      label: tr("Format %{mark}", { mark: tr("Underline") }),
       group: "Format",
       hint: "U",
       run: (ed) => ed.chain().focus().toggleUnderline().run(),
@@ -493,7 +532,7 @@ export function buildCommandRegistry(editor, opts) {
   if (editor && editorHasCommand(editor, "toggleHighlight")) {
     cmds.push({
       id: "format-highlight",
-      label: "Format Highlight",
+      label: tr("Format %{mark}", { mark: tr("Highlight") }),
       group: "Format",
       hint: "H",
       run: (ed) => ed.chain().focus().toggleHighlight().run(),
@@ -503,7 +542,7 @@ export function buildCommandRegistry(editor, opts) {
   if (editorHasCommand(editor, "unsetAllMarks")) {
     cmds.push({
       id: "format-clear",
-      label: "Clear formatting",
+      label: tr("Clear formatting"),
       group: "Format",
       hint: "⌫",
       run: (ed) => ed.chain().focus().unsetAllMarks().run(),
@@ -519,16 +558,19 @@ export function buildCommandRegistry(editor, opts) {
     { id: "turn-h4", label: "Heading 4", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 4 }).run(), need: "toggleHeading" },
     { id: "turn-h5", label: "Heading 5", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 5 }).run(), need: "toggleHeading" },
     { id: "turn-h6", label: "Heading 6", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 6 }).run(), need: "toggleHeading" },
-    { id: "turn-bullet", label: "Bullet list", hint: "•", run: (ed) => ed.chain().focus().toggleBulletList().run(), need: "toggleBulletList" },
-    { id: "turn-ordered", label: "Ordered list", hint: "1.", run: (ed) => ed.chain().focus().toggleOrderedList().run(), need: "toggleOrderedList" },
+    { id: "turn-bullet", label: "Bullet list", hint: "•", keys: "Mod-Shift-8", run: (ed) => ed.chain().focus().toggleBulletList().run(), need: "toggleBulletList" },
+    { id: "turn-ordered", label: "Ordered list", hint: "1.", keys: "Mod-Shift-7", run: (ed) => ed.chain().focus().toggleOrderedList().run(), need: "toggleOrderedList" },
+    // Paragraph -> quote keeps the block id (turnTopLevelInto's same-id swap).
+    { id: "turn-quote", label: "Quote", hint: "❝", run: (ed) => turnTopLevelInto(ed, topLevelIndexAtSelection(ed), "quote"), need: "setParagraph" },
   ];
   for (const t of turnInto) {
     if (!editorHasCommand(editor, t.need)) continue;
     cmds.push({
       id: t.id,
-      label: `Turn into ${t.label}`,
+      label: tr("Turn into %{block}", { block: tr(t.label) }),
       group: "Turn into",
       hint: t.hint,
+      keys: t.keys,
       run: t.run,
     });
   }
@@ -540,7 +582,7 @@ export function buildCommandRegistry(editor, opts) {
   if (opts && typeof opts.onToggleSource === "function") {
     cmds.push({
       id: "view-toggle-source",
-      label: "Toggle Markdown source",
+      label: tr("Toggle Markdown source"),
       group: "View",
       hint: "</>",
       run: () => opts.onToggleSource(),
@@ -572,7 +614,10 @@ export function fuzzyMatch(query, hay) {
 export function fuzzyFilterCommands(commands, query) {
   const q = (query || "").trim();
   if (!q) return commands.slice();
-  return commands.filter((c) => fuzzyMatch(q, `${c.label || ""} ${c.group || ""}`));
+  // The group is matched in English and as shown (the label is built shown).
+  return commands.filter((c) =>
+    fuzzyMatch(q, `${c.label || ""} ${c.group || ""} ${c.group ? tr(c.group) : ""}`),
+  );
 }
 
 // ── the popup ────────────────────────────────────────────────────────────────
@@ -598,9 +643,9 @@ export class CommandPalette extends SlashMenu {
       extraClass: "bp-cmd-palette",
       emptyText: "No commands match",
       footHtml:
-        "<kbd>↵</kbd> run <span class=\"bp-slash-foot-sep\">·</span> " +
-        "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-        "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss",
+        `<kbd>↵</kbd> ${te("run")} <span class="bp-slash-foot-sep">·</span> ` +
+        `<kbd>↑</kbd><kbd>↓</kbd> ${te("navigate")} ` +
+        `<span class="bp-slash-foot-sep">·</span> <kbd>esc</kbd> ${te("dismiss")}`,
       // Fuzzy over the WHOLE registry by label+group (no doc text consumed).
       filter: (allItems, query) => fuzzyFilterCommands(allItems, query),
       // The palette's items are the static registry — never EXPECTED-augmented.
@@ -644,8 +689,8 @@ export class CommandPalette extends SlashMenu {
       const input = document.createElement("input");
       input.className = "bp-cmd-input";
       input.type = "text";
-      input.setAttribute("placeholder", "Type a command…");
-      input.setAttribute("aria-label", "Command palette filter");
+      input.setAttribute("placeholder", tr("Type a command…"));
+      input.setAttribute("aria-label", tr("Command palette filter"));
       input.autocomplete = "off";
       input.spellcheck = false;
       // Live fuzzy re-filter. Update the query, re-filter, re-render the rows. We
@@ -710,6 +755,16 @@ export class CommandPalette extends SlashMenu {
       this._input = input;
     }
     parentEl.appendChild(this._input);
+    // Focus lives in this input while the palette is open, so it (not the editor
+    // SlashMenu recorded on open) points at the active row.
+    if (this._open && this._owner !== this._input) {
+      if (this._owner) {
+        this._owner.removeAttribute("aria-activedescendant");
+        this._owner.removeAttribute("aria-controls");
+      }
+      this._owner = this._input;
+      this._owner.setAttribute("aria-controls", this._el.id);
+    }
   }
 
   // Drop the persistent input on destroy (the base destroy removes the popup root).

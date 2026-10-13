@@ -550,8 +550,32 @@ defmodule Barkpark.Plugins.Registry do
     publish_pre_write_transforms(plugins)
     publish_paper_task_resolvers(plugins)
     publish_mutate_door_fences(plugins)
+    publish_canonical_shape_exemptions(plugins)
 
     state
+  end
+
+  # Every registered plugin's owned types, into the content-owned holder that
+  # decides which types Studio writes in the canonical value shapes (owner
+  # rulings #42/#43/#44: plugin-owned types keep their stored shapes). A
+  # plugin whose `owned_schema_types/0` raises owns nothing here.
+  defp publish_canonical_shape_exemptions(plugins) do
+    plugins
+    |> Enum.flat_map(fn %{module: mod} -> safe_owned_types(mod) end)
+    |> Barkpark.Content.CanonicalShapes.publish_exempt_types()
+  end
+
+  defp safe_owned_types(mod) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :owned_schema_types, 0) do
+      case mod.owned_schema_types() do
+        types when is_list(types) -> Enum.filter(types, &is_binary/1)
+        _ -> []
+      end
+    else
+      []
+    end
+  rescue
+    _ -> []
   end
 
   # Publish every registered plugin's `pre_write_fences/0` declaration to the

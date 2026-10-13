@@ -178,8 +178,13 @@ defmodule Mix.Tasks.Barkpark.Workspace.ProvisionSchemas do
       {:ok, src} ->
         {verb, pulled?} =
           case Content.get_schema(name, dataset, target_scope) do
-            {:ok, existing} -> {"update", Tenancy.pulled_schema_row?(existing, dataset)}
-            _ -> {"create", false}
+            # A shared plugin row (workspace_id NULL) is read through, never
+            # written: the write inserts the target's own row.
+            {:ok, %{workspace_id: ws} = existing} when is_binary(ws) ->
+              {"update", Tenancy.pulled_schema_row?(existing, dataset)}
+
+            _ ->
+              {"create", false}
           end
 
         %{name: name, src: src, verb: verb, pulled?: pulled?, missing_source: nil}

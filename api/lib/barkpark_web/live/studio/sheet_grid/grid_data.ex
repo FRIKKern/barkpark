@@ -293,6 +293,22 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
     end
   end
 
+  @doc """
+  The session scope the grid hands `Sheets.Session`: the doc's workspace AND
+  project (owner ruling #51, RQ7). Two projects of one workspace may hold a
+  sheet with the same slug; keyed by workspace alone they shared one session
+  process. Same nil-safety as `session_workspace_id/1`.
+  """
+  @spec session_scope(Phoenix.LiveView.Socket.t() | map()) :: keyword() | nil
+  def session_scope(%{assigns: assigns}), do: session_scope(assigns)
+
+  def session_scope(assigns) when is_map(assigns) do
+    case Map.get(assigns, :doc) do
+      %{workspace_id: ws} = doc -> [workspace_id: ws, project_id: Map.get(doc, :project_id)]
+      _ -> nil
+    end
+  end
+
   # ── grid geometry ────────────────────────────────────────────────────────
 
   def tabs(socket), do: Map.get(socket.assigns.content || %{}, "tabs") || []

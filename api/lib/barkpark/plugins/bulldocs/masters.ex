@@ -207,6 +207,25 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   # ── linked instances (task-59f078a2fd248698) ────────────────────────────────
 
   @doc """
+  Insert a LINKED instance (a `master-ref` block that follows the master's
+  latest published revision) into paper `slug`, through the same
+  request-identified op path as `insert_detached/7`. Same contract: `opts`
+  pass straight through, the master is resolved inside the TARGET paper's
+  scope, and the return is `{:ok, receipt, :applied | :replayed}` or
+  `{:error, :paper_not_found | :master_not_found | reason}`.
+  """
+  def insert_linked(slug, master_id, after_id, dataset, request_id, principal_key, opts \\ [])
+      when is_binary(slug) and is_binary(master_id) and is_binary(dataset) do
+    with %Document{} = paper <- resolve_paper(slug, dataset, opts),
+         {:ok, op} <- linked_insert_op(paper, master_id, after_id, request_id) do
+      Content.apply_paper_block_ops_once(slug, [op], dataset, request_id, principal_key, opts)
+    else
+      nil -> {:error, :paper_not_found}
+      {:error, :master_not_found} = err -> err
+    end
+  end
+
+  @doc """
   The op that inserts a LINKED instance of master `master_id` into the
   already-resolved `paper`: ONE `master-ref` block carrying the master's
   published id and `version: nil` (follow latest), or
@@ -241,6 +260,25 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
   end
 
   @doc """
+  DETACH linked instance `block_id` of paper `slug`, through the same
+  request-identified op path as `insert_detached/7` and `insert_linked/7`.
+  Same contract: `opts` pass straight through, and the return is
+  `{:ok, receipt, :applied | :replayed}` or `{:error, :paper_not_found |
+  :block_not_found | :not_linked | :master_not_found | :master_unpublished |
+  reason}` — see `detach_op/3` for what each refusal means.
+  """
+  def detach(slug, block_id, dataset, request_id, principal_key, opts \\ [])
+      when is_binary(slug) and is_binary(block_id) and is_binary(dataset) do
+    with %Document{} = paper <- resolve_paper(slug, dataset, opts),
+         {:ok, op} <- detach_op(paper, block_id, request_id) do
+      Content.apply_paper_block_ops_once(slug, [op], dataset, request_id, principal_key, opts)
+    else
+      nil -> {:error, :paper_not_found}
+      {:error, _reason} = err -> err
+    end
+  end
+
+  @doc """
   DETACH: the op that replaces linked instance `block_id` of `paper` with a
   detached copy of what the PUBLIC reader shows for it — the pinned published
   revision, or the master's latest PUBLISHED row — fresh ids and
@@ -264,6 +302,26 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       seed = "#{canonical_request_id(request_id)}\u0000detach\u0000#{block_id}"
       copy = detached_copy(%{master | content: %{"node" => node}}, seed)
       {:ok, %{"op" => "replace-block", "id" => block_id, "block" => copy}}
+    end
+  end
+
+  @doc """
+  PIN (`pin? = true`) or UNPIN (`false`) linked instance `block_id` of paper
+  `slug`, through the same request-identified op path as `insert_detached/7`,
+  `insert_linked/7` and `detach/6`. Same contract: `opts` pass straight
+  through, and the return is `{:ok, receipt, :applied | :replayed}` or
+  `{:error, :paper_not_found | :block_not_found | :not_linked |
+  :master_not_found | :master_unpublished | reason}` — see `pin_op/3` for
+  what each refusal means.
+  """
+  def pin(slug, block_id, pin?, dataset, request_id, principal_key, opts \\ [])
+      when is_binary(slug) and is_binary(block_id) and is_boolean(pin?) and is_binary(dataset) do
+    with %Document{} = paper <- resolve_paper(slug, dataset, opts),
+         {:ok, op} <- pin_op(paper, block_id, pin?) do
+      Content.apply_paper_block_ops_once(slug, [op], dataset, request_id, principal_key, opts)
+    else
+      nil -> {:error, :paper_not_found}
+      {:error, _reason} = err -> err
     end
   end
 
@@ -342,6 +400,19 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       workspace_id: paper.workspace_id,
       project_id: paper.project_id
     )
+  end
+
+  @doc """
+  Same as `list_for_paper/1`, resolving paper `slug` first (same scope rule
+  as `insert_detached/7`). `{:ok, [%Document{}]}` or
+  `{:error, :paper_not_found}` — the HTTP seam, since a caller with an
+  already-resolved paper (the Studio socket) uses `list_for_paper/1` directly.
+  """
+  def list_for_paper(slug, dataset, opts) when is_binary(slug) and is_binary(dataset) do
+    case resolve_paper(slug, dataset, opts) do
+      %Document{} = paper -> {:ok, list_for_paper(paper)}
+      nil -> {:error, :paper_not_found}
+    end
   end
 
   @doc """

@@ -100,7 +100,10 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       body =
         conn
-        |> recycle()
+        # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+        # conn.private's rate-limit test scope, silently sharing the whole-suite
+        # IP bucket on this METERED route (RateLimit plug in its pipeline).
+        |> recycle_scoped()
         |> auth()
         |> delete("/v1/data/search/test/synonyms/#{id}")
         |> json_response(200)
@@ -115,7 +118,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       body =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> delete("/v1/media/test/search/synonyms/#{id}")
         |> json_response(200)
@@ -130,7 +133,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       resp =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> delete("/v1/media/test/search/synonyms/#{id}")
 
@@ -149,7 +152,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       resp =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> delete("/v1/data/search/test/synonyms/#{id}")
 
@@ -188,7 +191,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       body =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> delete("/v1/secrets/#{name}")
         |> json_response(200)
@@ -259,7 +262,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       body =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> put("/v1/secrets/#{name}", Jason.encode!(%{value: "second-4444"}))
         |> json_response(200)
@@ -324,7 +327,7 @@ defmodule BarkparkWeb.Contract.PDSGroupCReceiptDifferentialTest do
 
       body =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> delete("/v1/plugins/settings/#{name}")
         |> json_response(200)

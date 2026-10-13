@@ -281,6 +281,45 @@ defmodule Barkpark.Accounts.PrivacyTest do
       assert Repo.aggregate(from(i in SocialIdentity, where: i.user_id == ^user.id), :count) == 0
     end
 
+    test "deletes user_prefs rows -- a per-account search/filter history has nothing to pseudonymise" do
+      user = subject("erase-prefs@example.com")
+      ws = create_workspace!()
+
+      {:ok, _} =
+        Barkpark.UserPrefs.put(user.id, ws.id, "production", "recent_searches", %{
+          "queries" => ["a secret project name"]
+        })
+
+      assert {:ok, summary} = Privacy.erase_subject(user)
+      assert summary.user_prefs_deleted == 1
+
+      assert Repo.aggregate(
+               from(p in Barkpark.UserPrefs.UserPref, where: p.user_id == ^user.id),
+               :count
+             ) == 0
+    end
+
+    test "deletes a pending workspace invitation -- an erased identity accepting one later would be a ghost seat" do
+      user = subject("erase-invited@example.com")
+      ws = create_workspace!()
+
+      {:ok, _invitation} =
+        %Barkpark.Tenancy.Invitation{}
+        |> Barkpark.Tenancy.Invitation.changeset(
+          %{workspace_id: ws.id, user_id: user.id, role: "member", invited_by: "user:someone"},
+          Tenancy.Auth.valid_role_names(ws.id)
+        )
+        |> Repo.insert()
+
+      assert {:ok, summary} = Privacy.erase_subject(user)
+      assert summary.invitations_deleted == 1
+
+      assert Repo.aggregate(
+               from(i in Barkpark.Tenancy.Invitation, where: i.user_id == ^user.id),
+               :count
+             ) == 0
+    end
+
     test "grants addressed to the subject lose the email and cannot be claimed by a new account at it" do
       ws = create_workspace!()
       user = subject("grant-me@example.com")

@@ -33,7 +33,7 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
 
       # Outer shell + topbar
-      assert html =~ ~s|<div class="studio-shell">|
+      assert html =~ ~s|<div class="studio-shell"|
       # The topbar carries `id="studio-bar" phx-hook="PressAnswer"` (the press
       # answer moved off `#studio-panes`, which only StudioLive's desk renders —
       # task-66807dd8154e667d), so this asserts the CLASS, not a byte-exact tag.
@@ -81,7 +81,7 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
 
       # Studio chrome must be present (Boss revision: admin keeps chrome
       # so the Task #9 nav-disappears fix does not regress).
-      assert html =~ ~s|<div class="studio-shell">|
+      assert html =~ ~s|<div class="studio-shell"|
       # The topbar carries `id="studio-bar" phx-hook="PressAnswer"` (the press
       # answer moved off `#studio-panes`, which only StudioLive's desk renders —
       # task-66807dd8154e667d), so this asserts the CLASS, not a byte-exact tag.

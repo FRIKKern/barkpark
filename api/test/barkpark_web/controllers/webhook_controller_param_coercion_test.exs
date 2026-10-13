@@ -38,7 +38,7 @@ defmodule BarkparkWeb.WebhookControllerParamCoercionTest do
     body = %{
       "name" => "Hook",
       "url" => "http://example.test/hook",
-      "events" => ["patch"],
+      "events" => ["discardDraft"],
       "secret" => "s0"
     }
 

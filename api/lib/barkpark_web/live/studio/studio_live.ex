@@ -29,7 +29,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   require Logger
 
   alias Barkpark.Access
+  alias Barkpark.Content
   alias Barkpark.Content.CallerContext
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
@@ -231,7 +233,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       socket
     else
       socket
-      |> put_flash(:error, "Your access grant is no longer valid.")
+      |> put_flash(:error, gettext("Your access grant is no longer valid."))
       |> redirect(to: "/login")
     end
   end
@@ -276,6 +278,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # every handle_params — the workspace is resolved just above, and a
     # mid-session scope switch re-stamps it exactly like the log metadata.
     BarkparkWeb.StudioLocale.put(socket.assigns[:current_workspace])
+    socket = assign_type_labels(socket, dataset)
 
     # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
     # plug). Logger.metadata is per-process; the connected Studio runs on this
@@ -306,14 +309,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
         {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, slug, desk: desk))}
 
       :ok ->
+        # A desk search hit is a live navigation (a fresh mount, no socket
+        # state carried over), so it asks for the document header's focus in
+        # the URL: `?focus=doc` (task-4e10550394f87112). See focus_doc_header/5.
+        focus_doc? = params["focus"] == "doc"
+
         # spd-w18-bl-select-detects-dead-destination: the transition runs
         # INSIDE the navigation receipt `Scope.select/2` wrote, so a
         # destination that raises settles that receipt as a named failure
         # instead of killing the process silently. With no receipt open
         # (mount, back/forward, scope switch) this is a bare call.
-        Scope.settle_pending_select(socket, fn socket ->
+        socket
+        |> Scope.settle_pending_select(fn socket ->
           Lifecycle.finish_handle_params(socket, dataset, path, desk, uri, params)
         end)
+        |> focus_doc_header(focus_doc?, path, dataset, desk)
     end
   end
 
@@ -335,7 +345,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> schedule_access_expiry()
 
     {:noreply,
-     put_flash(socket, :info, "You've been granted access — check your email to claim it.")}
+     put_flash(
+       socket,
+       :info,
+       gettext("You've been granted access — check your email to claim it.")
+     )}
   end
 
   # Expiry tick (airdrop-grants / ag-liveview-read-liveness): a grant crossed its
@@ -412,6 +426,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Barkpark.Plugins.Enablement.forget(ws_id)
     {:noreply, socket}
   end
+
+  # The URL loses `?focus=doc` once the header has it (see handle_params/3).
+  def handle_info({:drop_focus_query, to}, socket),
+    do: {:noreply, push_patch(socket, to: to, replace: true)}
 
   def handle_info(_other, socket), do: {:noreply, socket}
 
@@ -624,6 +642,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-op", params, socket), do: Paper.paper_op(params, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
 
+  def handle_event("paper-selection", params, socket),
+    do: {:noreply, Shared.put_paper_selection(socket, Map.get(params, "selection"))}
+
   # Paper masters (task-3b6e562e916c8ce4): save a block as a master, insert a
   # detached copy from the slash picker. Both ride this socket (no HTTP route).
   def handle_event("paper-save-master", params, socket),
@@ -741,4 +762,72 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # assigns straight through.
   @impl true
   def render(assigns), do: studio_live_shell(assigns)
+
+  # The word each type in scope reads as in Studio copy — its plugin word or
+  # schema title (task-a3bedc86f8a6a517, the task-7b0c9b8ae4ac6f79 ruling).
+  # Stamped once on the shell for the client pickers; recomputed only when
+  # the scope or dataset (and so the language) changes, not per navigation.
+  defp assign_type_labels(socket, dataset) do
+    key = {
+      socket.assigns[:current_workspace] && socket.assigns.current_workspace.id,
+      socket.assigns[:current_project] && socket.assigns.current_project.id,
+      dataset
+    }
+
+    if socket.assigns[:type_labels_key] == key do
+      socket
+    else
+      # Plugin words first: the listed catalog leaves out a plugin's SHARED
+      # schema row outside the Default workspace, so `paper` read "paper" in
+      # every picker there (task-f1b5f9e279951791). Only for types a
+      # registered plugin owns: with no plugins the shell names none of them
+      # (plugin_free_boot_test).
+      owned = registered_plugin_types()
+
+      plugin_words =
+        for type <- PaneBuilder.plugin_type_word_types(),
+            MapSet.member?(owned, type),
+            into: %{},
+            do: {type, PaneBuilder.type_word(type)}
+
+      labels =
+        dataset
+        |> Content.list_schemas(BarkparkWeb.ScopeHelpers.scope_opts(socket))
+        |> Map.new(fn schema ->
+          {schema.name, PaneBuilder.type_word(schema.name, schema.title)}
+        end)
+        |> then(&Map.merge(plugin_words, &1))
+
+      assign(socket, type_labels: Jason.encode!(labels), type_labels_key: key)
+    end
+  rescue
+    _ -> socket
+  end
+
+  # Every document type a registered plugin owns (`owned_schema_types/0`).
+  defp registered_plugin_types do
+    for %{module: module} <- Barkpark.Plugins.Registry.all(),
+        Code.ensure_loaded?(module),
+        function_exported?(module, :owned_schema_types, 0),
+        type <- List.wrap(module.owned_schema_types()),
+        is_binary(type),
+        into: MapSet.new(),
+        do: type
+  end
+
+  # The connected mount asks the client to focus the opened document's header
+  # (the root layout's `bp:focus-doc-header` listener, which holds it through
+  # the join's re-renders), and to drop `?focus=doc` from the URL once it is up:
+  # a patch from inside the mount's own handle_params becomes a redirect. Only
+  # when the transition did not already send the browser somewhere else.
+  defp focus_doc_header({:noreply, %{redirected: nil} = socket}, true, path, dataset, desk) do
+    if connected?(socket) do
+      send(self(), {:drop_focus_query, Shared.studio_path(socket, path, dataset, desk: desk)})
+      {:noreply, push_event(socket, "bp:focus-doc-header", %{})}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  defp focus_doc_header(result, _focus_doc?, _path, _dataset, _desk), do: result
 end

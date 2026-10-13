@@ -22,6 +22,11 @@ defmodule BarkparkWeb.Studio.PageScroll do
   the caller's centred column rides INSIDE it, unchanged, so the reading measure
   is untouched.
 
+  It is also the page's `<main>`: everything a page renders through it is the
+  page content, and without it a screen reader had no main landmark to jump to
+  (axe landmark-one-main, task-48f34bf81564a082). A page using it must not mark
+  another main.
+
   The rule is inline rather than a class because the Studio stylesheet lives in
   `root.html.heex`, a single hotly-contended file — the whole point of this
   wrapper is that a page can honour the contract without editing it.
@@ -51,13 +56,13 @@ defmodule BarkparkWeb.Studio.PageScroll do
 
   def studio_page_scroll(assigns) do
     ~H"""
-    <div
+    <main
       class={["studio-page-scroll", @class]}
       style="flex: 1 1 auto; min-height: 0; overflow-y: auto;"
       {@rest}
     >
       {render_slot(@inner_block)}
-    </div>
+    </main>
     """
   end
 end

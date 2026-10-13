@@ -119,7 +119,11 @@ config :barkpark_cloud,
   # task-6f85554a4e0cbc4c: the platform-label check before a platform-zone
   # attach. Offline default = "nobody holds this name" (NXDOMAIN), so the
   # existing attach tests keep their meaning; the guard's own tests inject.
-  platform_label_dns: &BarkparkCloud.DomainStatusOfflineGuard.nxdomain/2
+  platform_label_dns: &BarkparkCloud.DomainStatusOfflineGuard.nxdomain/2,
+  # Owner ruling #29: the site-domain TXT proof. Offline default = no record,
+  # so nothing is proven unless a test installs an answer
+  # (DomainOwnership.put_txt_dns/1).
+  domain_txt_dns: &BarkparkCloud.DomainStatusOfflineGuard.no_txt/1
 
 # Speed up the test suite: the default 12 bcrypt log_rounds (~250ms/hash) is
 # overkill for tests. 1 round keeps register/verify cycles fast while still

@@ -11,7 +11,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.Storage.{Access, Checkout, MediaFile, Relations}
+  alias Barkpark.Media.Storage.{Access, Actor, Checkout, MediaFile, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.WhereUsed
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
@@ -32,8 +32,16 @@ defmodule BarkparkWeb.V1.MediaController do
     t0 = System.monotonic_time(:microsecond)
     opts = MediaSearchParams.parse(params) ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
     {files, total, facets, meta} = Media.search_files(dataset, opts)
-    docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
-    render_opts = render_opts(conn, params)
+    # Batched: one asset-doc pass and one schema per tenant, so the cost of a
+    # page does not grow with its size (task-55a32a11405d5e9b).
+    docs = Media.resolve_asset_docs(files, dataset, scope_opts(conn))
+
+    render_opts =
+      render_opts(conn, params) ++
+        [
+          asset_doc_resolved: true,
+          asset_schemas: AssetResponse.asset_schemas(Map.values(docs), dataset)
+        ]
 
     hits =
       Enum.map(files, fn file ->
@@ -303,6 +311,13 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def index(conn, %{"dataset" => dataset} = params) do
+    case media_type_filters(params) do
+      {:ok, type_opts} -> do_index(conn, dataset, params, type_opts)
+      {:error, message} -> bad_request(conn, message)
+    end
+  end
+
+  defp do_index(conn, dataset, params, type_opts) do
     t0 = System.monotonic_time(:microsecond)
 
     opts =
@@ -317,8 +332,11 @@ defmodule BarkparkWeb.V1.MediaController do
         offset: MediaSearchParams.clamp_offset(parse_int(params["offset"], 0)),
         mime_type: blank_to_nil(params["type"] || params["mimeType"]),
         kind: blank_to_nil(params["kind"]),
-        q: blank_to_nil(params["q"])
-      ] ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
+        q: blank_to_nil(params["q"]),
+        # task-b6e57c37f6928344 — exact content-hash lookup, so a client can
+        # skip the transfer. Same scope as every other filter on this list.
+        sha1: sha1_param(params["sha1"])
+      ] ++ type_opts ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
 
     {files, total} = Media.query_files(dataset, opts)
     docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
@@ -398,6 +416,7 @@ defmodule BarkparkWeb.V1.MediaController do
         file
         |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
         |> Map.put(:visibilityNotice, visibility_notice(conn, dataset))
+        |> put_checkout_label(doc, conn)
 
       json(conn, %{
         result: asset,
@@ -459,7 +478,25 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
     with :ok <- require_write(conn) do
-      case Media.upload(upload, dataset, scope_opts(conn)) do
+      case Media.upload(upload, dataset, [dedupe: true] ++ scope_opts(conn)) do
+        # task-b6e57c37f6928344 — the same bytes already live in this dataset
+        # and workspace: answer with that asset, 200 not 201, `existing: true`,
+        # and store nothing. The upload's inline metadata is NOT applied: it
+        # would overwrite an asset other documents already show.
+        {:existing, file} ->
+          conn
+          |> put_status(:ok)
+          |> json(%{
+            result:
+              AssetResponse.render(
+                file,
+                asset_doc(file, dataset),
+                render_opts(conn, params, dataset: dataset)
+              ),
+            existing: true,
+            syncTags: sync_tags(dataset, file.id)
+          })
+
         {:ok, file} ->
           # INLINE METADATA (task-57ee9fff4aae9217 #13). altText / caption /
           # tags / title / description used to cost one extra PATCH per FIELD
@@ -556,14 +593,30 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # Who holds the checkout, as THIS viewer may see it (task-36a302b2e981d5e1):
+  # "you", a token's label, or "another editor" — never an email or a raw
+  # "user:<id>". The Studio media panel renders this instead of checkedOutBy.
+  defp put_checkout_label(asset, doc, conn) do
+    holder =
+      case doc do
+        %{content: %{} = content} -> Map.get(content, "checkedOutBy")
+        _ -> nil
+      end
+
+    Map.put(asset, :checkoutLabel, Actor.display(holder, Actor.of(conn)))
+  end
+
   def checkout(conn, %{"dataset" => dataset, "id" => id} = params) do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         actor <- actor_label(conn),
+         actor <- Actor.of(conn),
          {:ok, doc} <- Checkout.checkout(file, actor, dataset) do
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        result:
+          file
+          |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+          |> put_checkout_label(doc, conn),
         syncTags: sync_tags(dataset, file.id)
       })
     else
@@ -579,11 +632,14 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         actor <- actor_label(conn),
+         actor <- Actor.of(conn),
          admin? <- admin?(conn),
          {:ok, doc} <- Checkout.undo_checkout(file, actor, dataset, admin?) do
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        result:
+          file
+          |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+          |> put_checkout_label(doc, conn),
         syncTags: sync_tags(dataset, file.id)
       })
     else
@@ -727,19 +783,6 @@ defmodule BarkparkWeb.V1.MediaController do
   # for an account session the equivalent human identity is the email, matching
   # `auth_controller.ex`'s existing `created_by: user.email`. "member" would name
   # nobody, which is strictly worse than the token path.
-  defp actor_label(conn) do
-    case conn.assigns[:api_token] do
-      %{label: label} when is_binary(label) and label != "" ->
-        label
-
-      _ ->
-        case conn.assigns[:current_user] do
-          %Barkpark.Accounts.User{email: email} when is_binary(email) and email != "" -> email
-          _ -> "api"
-        end
-    end
-  end
-
   # THE SIGNING SWITCH IS A PRINCIPAL TEST (task-d55b02001cf589f0).
   #
   # `appendRequestSecret` used to be the WHOLE condition, read straight off the
@@ -858,6 +901,68 @@ defmodule BarkparkWeb.V1.MediaController do
   # MediaSearchParams / BulldocsIngestController.
   defp blank_to_nil(v) when is_binary(v) and v != "", do: v
   defp blank_to_nil(_), do: nil
+
+  # task-774f99d9dd029e24 — the file picker's two filters, both server-side so
+  # they paginate and count like every other filter on this list:
+  #   * `mime=application/pdf,text/*` — any of these exact types or `type/*`
+  #     families;
+  #   * `exclude_type=image` (or `image,video`) — drop these top-level types.
+  # Each entry is validated; a bad one is a 400 that names it, never a silent
+  # drop that would widen the list.
+  @max_type_filter_entries 20
+  @mime_entry ~r{\A[a-z0-9][a-z0-9!#$&^_.+-]*/(\*|[a-z0-9][a-z0-9!#$&^_.+-]*)\z}
+  @top_type ~r{\A[a-z0-9][a-z0-9!#$&^_.+-]*\z}
+
+  defp media_type_filters(params) do
+    with {:ok, mimes} <- type_list(params["mime"], "mime", @mime_entry, "type/subtype or type/*"),
+         {:ok, excluded} <-
+           type_list(
+             params["exclude_type"],
+             "exclude_type",
+             @top_type,
+             "a top-level type such as image"
+           ) do
+      {:ok, [mime_types: mimes, exclude_types: excluded]}
+    end
+  end
+
+  defp type_list(nil, _name, _re, _want), do: {:ok, nil}
+  defp type_list("", _name, _re, _want), do: {:ok, nil}
+
+  defp type_list(raw, name, re, want) when is_binary(raw) do
+    entries = raw |> String.split(",") |> Enum.map(&(&1 |> String.trim() |> String.downcase()))
+
+    cond do
+      length(entries) > @max_type_filter_entries ->
+        {:error,
+         "#{name} takes at most #{@max_type_filter_entries} entries, got #{length(entries)}"}
+
+      bad = Enum.find(entries, &(not Regex.match?(re, &1))) ->
+        {:error, "#{name} entry #{inspect(bad)} is not #{want}"}
+
+      true ->
+        {:ok, Enum.uniq(entries)}
+    end
+  end
+
+  defp type_list(_raw, name, _re, want), do: {:error, "#{name} must be a comma list of #{want}"}
+
+  defp bad_request(conn, message) do
+    env =
+      {:error, :malformed}
+      |> Errors.to_envelope(conn)
+      |> Map.put(:message, message)
+
+    conn
+    |> put_status(:bad_request)
+    |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # Lower-cased, so an upper-case hex digest still matches. A present but
+  # malformed value is kept, never dropped: it matches nothing, so a typo
+  # answers an empty list instead of the whole unfiltered dataset.
+  defp sha1_param(v) when is_binary(v) and v != "", do: v |> String.trim() |> String.downcase()
+  defp sha1_param(_), do: nil
 
   defp metadata_params(%{"metadata" => metadata}) when is_map(metadata), do: metadata
 

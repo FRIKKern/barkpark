@@ -11,6 +11,8 @@
 // (Text / Basic fields / Media & reference / Structured). Every `type` here
 // resolves to a default_block/2 clause on the server.
 
+import { t, te } from "./i18n.js";
+
 export const SLASH_ITEMS = [
   // group: the optgroup label shown as a section header in the popup.
   // type:  the block type passed to default_block/2 on the server.
@@ -56,6 +58,7 @@ export const SLASH_ITEMS = [
   { group: "Basic fields", type: "field-select", label: "Select", hint: "▾", desc: "pick one option" },
   { group: "Basic fields", type: "field-datetime", label: "Date & time", hint: "◷", desc: "timestamp value" },
   { group: "Basic fields", type: "field-color", label: "Color", hint: "●", desc: "hex swatch value" },
+  { group: "Basic fields", type: "field-number", label: "Number", hint: "#", desc: "numeric value" },
 
   { group: "Media & reference", type: "field-image", label: "Image field", hint: "▣", desc: "upload or url" },
   { group: "Media & reference", type: "field-reference", label: "Reference", hint: "↗", desc: "link another document" },
@@ -102,6 +105,31 @@ function fieldAtCapLive(f) {
   const max = typeof f.max === "number" ? f.max : parseInt(f.max, 10);
   if (!Number.isInteger(max)) return false;
   return countBoundFieldBlocks(f.name) >= max;
+}
+
+// A row's `keys` ("Mod-Shift-8", Tiptap's spelling) shown in the viewer's keyboard words:
+// ⌘⇧8 on a Mac, Ctrl+Shift+8 elsewhere, the modifier names translated. Only the canvas
+// sets `keys`, on the rows whose chord it answers.
+export function isMacPlatform(nav = globalThis.navigator) {
+  const platform = nav?.userAgentData?.platform || nav?.platform || "";
+  return /mac|iphone|ipad/i.test(platform);
+}
+
+const MAC_GLYPH = { Mod: "⌘", Alt: "⌥", Shift: "⇧" };
+const PC_WORD = { Mod: "Ctrl", Alt: "Alt", Shift: "Shift" };
+
+export function chordLabel(spec, mac = isMacPlatform()) {
+  const parts = String(spec).split("-");
+  const key = parts.pop().toUpperCase();
+  if (mac) return parts.map((m) => MAC_GLYPH[m] || m).join("") + key;
+  return [...parts.map((m) => t(PC_WORD[m] || m)), key].join("+");
+}
+
+// The same chord for aria-keyshortcuts ("Control+Shift+8", "Meta+Alt+C").
+export function chordAria(spec, mac = isMacPlatform()) {
+  const parts = String(spec).split("-");
+  const key = parts.pop().toUpperCase();
+  return [...parts.map((m) => (m === "Mod" ? (mac ? "Meta" : "Control") : m)), key].join("+");
 }
 
 export function readExpectedItems(doc = document) {
@@ -184,6 +212,9 @@ export function readMasterItems(root = document) {
     });
 }
 
+// Unique per popup so two menus on one page never share option ids.
+let menuSeq = 0;
+
 export class SlashMenu {
   // `eyebrow`, `extraClass`, `footHtml`, and `filter` are OPTIONAL parameterization
   // seams (added for the Phase-5 command palette, which subclasses this popup). When
@@ -232,6 +263,9 @@ export class SlashMenu {
     this._active = 0; // index into the FLAT selectable (filtered) item list
     this._el = null; // popup root
     this._rowEls = []; // parallel to selectable items, for active styling
+    // The editable the menu was opened from. Focus stays there while the user
+    // arrows, so it carries aria-activedescendant → the active option.
+    this._owner = null;
 
     // Bound once so add/removeEventListener match.
     this._onDocPointer = (e) => this._handlePointer(e);
@@ -256,6 +290,11 @@ export class SlashMenu {
     this._applyFilter(); // → this._items (filtered view)
     if (!this._open) {
       this._open = true;
+      const active = document.activeElement;
+      const editable =
+        active && (active.isContentEditable || active.getAttribute?.("contenteditable") === "true");
+      this._owner = editable && !this._el.contains(active) ? active : null;
+      if (this._owner) this._owner.setAttribute("aria-controls", this._el.id);
       document.addEventListener("mousedown", this._onDocPointer, true);
       // Capture-phase Escape so the menu reliably closes even when the
       // keydown does not route through TipTap's editorProps.handleKeyDown
@@ -288,10 +327,13 @@ export class SlashMenu {
       this._items = this._allItems;
       return;
     }
+    // The haystack carries the English words AND the viewer's shown words, so
+    // "/heading" and "/overskrift" both find Heading in a Norwegian Studio.
+    const shown = (s) => (s ? t(s) : "");
     const matched = this._allItems.filter((it) => {
       const hay = `${it.label || ""} ${it.type || ""} ${it.desc || ""} ${
         it.group || ""
-      }`.toLowerCase();
+      } ${shown(it.label)} ${shown(it.desc)} ${shown(it.group)}`.toLowerCase();
       return hay.includes(q);
     });
     // Rank what matched so the block the author NAMED comes first: "/section" +
@@ -301,8 +343,9 @@ export class SlashMenu {
     // by its best row), and the original order breaks ties.
     const rank = (it) => {
       const label = (it.label || "").toLowerCase();
-      if (label.startsWith(q)) return 0;
-      if (label.includes(q)) return 1;
+      const label2 = shown(it.label).toLowerCase();
+      if (label.startsWith(q) || label2.startsWith(q)) return 0;
+      if (label.includes(q) || label2.includes(q)) return 1;
       if ((it.type || "").toLowerCase().includes(q)) return 2;
       return 3;
     };
@@ -326,6 +369,11 @@ export class SlashMenu {
     if (!this._open) return;
     this._open = false;
     if (this._el) this._el.style.display = "none";
+    if (this._owner) {
+      this._owner.removeAttribute("aria-activedescendant");
+      this._owner.removeAttribute("aria-controls");
+      this._owner = null;
+    }
     document.removeEventListener("mousedown", this._onDocPointer, true);
     document.removeEventListener("keydown", this._onDocKeydown, true);
   }
@@ -368,6 +416,7 @@ export class SlashMenu {
       ? `bp-slash-menu ${this._extraClass}`
       : "bp-slash-menu";
     el.setAttribute("role", "listbox");
+    el.id = `bp-slash-menu-${++menuSeq}`;
     el.style.display = "none";
     document.body.appendChild(el);
     this._el = el;
@@ -376,12 +425,15 @@ export class SlashMenu {
   _render() {
     this._el.innerHTML = "";
     this._rowEls = [];
+    // A listbox needs an accessible name (axe aria-input-field-name); the
+    // eyebrow already says what the list is, in the viewer's language.
+    this._el.setAttribute("aria-label", t(this._eyebrow || "Insert block"));
 
     // Eyebrow — uppercase, letter-spaced "Insert block" header (Portable-Doc
     // `.paper-slash-popover__head`). Sits above the scrollable row list.
     const eyebrow = document.createElement("div");
     eyebrow.className = "bp-slash-eyebrow";
-    eyebrow.textContent = this._eyebrow;
+    eyebrow.textContent = t(this._eyebrow);
     this._el.appendChild(eyebrow);
 
     // Optional query-input hook — a no-op for the slash menu (its query is the typed
@@ -396,10 +448,14 @@ export class SlashMenu {
     this._el.appendChild(list);
 
     // Empty state — a non-selectable row when the query matches nothing.
+    // It is a DISABLED option, so the listbox is never empty (axe
+    // aria-required-children, task-347897df84f96882) and a screen reader hears it.
     if (this._items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-slash-empty";
-      empty.textContent = this._emptyText || "No blocks match";
+      empty.setAttribute("role", "option");
+      empty.setAttribute("aria-disabled", "true");
+      empty.textContent = t(this._emptyText || "No blocks match");
       list.appendChild(empty);
     }
 
@@ -410,7 +466,7 @@ export class SlashMenu {
         lastGroup = item.group;
         const header = document.createElement("div");
         header.className = "bp-slash-group";
-        header.textContent = item.group;
+        header.textContent = t(item.group);
         // Stamp the EXPECTED group header so its CSS picks up the accent.
         if (isExpected) header.dataset.expected = "";
         list.appendChild(header);
@@ -420,6 +476,7 @@ export class SlashMenu {
       row.type = "button";
       row.className = "bp-slash-item";
       row.setAttribute("role", "option");
+      row.id = `${this._el.id}-opt-${idx}`;
       row.dataset.type = item.type;
       // EXPECTED-group rows carry the field name (for the bound insert) and a
       // data-expected marker so the ✦ hint + "expected" tag recolor to accent.
@@ -435,12 +492,15 @@ export class SlashMenu {
 
       const label = document.createElement("span");
       label.className = "bp-slash-label";
-      label.textContent = item.label;
+      label.textContent = t(item.label);
 
       // Right-aligned muted description.
       const desc = document.createElement("span");
       desc.className = "bp-slash-desc";
-      desc.textContent = item.desc || "";
+      desc.textContent = [item.desc ? t(item.desc) : "", item.keys ? chordLabel(item.keys) : ""]
+        .filter(Boolean)
+        .join(" · ");
+      if (item.keys) row.setAttribute("aria-keyshortcuts", chordAria(item.keys));
 
       row.appendChild(hint);
       row.appendChild(label);
@@ -467,21 +527,23 @@ export class SlashMenu {
     foot.className = "bp-slash-foot";
     foot.innerHTML =
       this._footHtml ||
-      "<kbd>↵</kbd> insert <span class=\"bp-slash-foot-sep\">·</span> " +
-        "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-        "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
+      `<kbd>↵</kbd> ${te("insert")} <span class="bp-slash-foot-sep">·</span> ` +
+        `<kbd>↑</kbd><kbd>↓</kbd> ${te("navigate")} ` +
+        `<span class="bp-slash-foot-sep">·</span> <kbd>esc</kbd> ${te("dismiss")}`;
     this._el.appendChild(foot);
   }
 
   _syncActive() {
     this._rowEls.forEach((row, idx) => {
-      if (idx === this._active) {
-        row.classList.add("is-active");
-        row.scrollIntoView({ block: "nearest" });
-      } else {
-        row.classList.remove("is-active");
-      }
+      const on = idx === this._active;
+      row.classList.toggle("is-active", on);
+      row.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) row.scrollIntoView({ block: "nearest" });
     });
+    if (!this._owner) return;
+    const row = this._rowEls[this._active];
+    if (row) this._owner.setAttribute("aria-activedescendant", row.id);
+    else this._owner.removeAttribute("aria-activedescendant");
   }
 
   // Place the popup just below the caret; flip above if it would overflow the

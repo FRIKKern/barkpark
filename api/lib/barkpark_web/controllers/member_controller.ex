@@ -52,18 +52,67 @@ defmodule BarkparkWeb.MemberController do
     end
   end
 
+  @doc "`GET /w/:ws/p/:proj/v1/invitations` — pending invitations (owner ruling #7)."
+  def invitations(conn, _params) do
+    case conn.assigns[:current_workspace] do
+      %{id: ws_id} -> json(conn, %{invitations: Members.list_invitations(ws_id)})
+      _ -> unresolved_workspace(conn)
+    end
+  end
+
+  @doc "`DELETE /w/:ws/p/:proj/v1/invitations/:id` — withdraw a pending invitation."
+  def cancel_invitation(conn, %{"id" => id}) do
+    with %{id: ws_id} <- conn.assigns[:current_workspace],
+         {:ok, invitation} <- Members.cancel_invitation(ws_id, id) do
+      json(conn, %{withdrawn: invitation})
+    else
+      {:error, :not_found} -> not_found(conn, "no such invitation in this workspace")
+      _ -> unresolved_workspace(conn)
+    end
+  end
+
+  # Owner ruling #7: an UNCONFIRMED account is reclaimed before it is seated
+  # (`Accounts.Privacy.reclaim_unconfirmed/1`). Whatever password and sessions
+  # it had stop working, which surprised every operator who seated an editor
+  # they had just registered (task-f583460d431d195c). The answer says so; `bp`
+  # prints top-level `warnings` on stderr.
+  @reclaimed_warning %{
+    code: "account_reclaimed",
+    severity: "warning",
+    message:
+      "this email's account was never confirmed, so it was reclaimed before seating " <>
+        "(owner ruling #7): its password was replaced and every session signed out. " <>
+        "No email was sent. The user signs in with a password reset or a magic link."
+  }
+
   @doc """
   `POST /w/:ws/p/:proj/v1/members` — seat a human.
 
   Body: `{"email": "person@example.com", "role": "member|admin|owner|<custom>"}`.
   `role` defaults to `member`; the membership changeset validates it against
   the built-ins plus this workspace's custom roles.
+
+  An EXISTING, confirmed account is not seated at once (owner ruling #7): the
+  answer is `202 {"invitation": …}` and the seat appears when the user
+  accepts (`POST /v1/auth/invitations/:id/accept`). A new e-mail is seated
+  directly (`201 {"member": …}`), as before. An existing UNCONFIRMED account
+  is reclaimed, then seated: `201 {"member": …, "reclaimed": true,
+  "warnings": [{"code": "account_reclaimed", …}]}`.
   """
   def create(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, email} <- fetch_string(params, "email", :missing_email),
          role <- Map.get(params, "role", @default_role) do
       case Members.add_user_member(ws_id, email, to_string(role), actor: caller(conn)) do
+        {:ok, {:invited, invitation}} ->
+          notify_invitee(conn, invitation)
+          conn |> put_status(:accepted) |> json(%{invitation: invitation})
+
+        {:ok, {:reclaimed, member}} ->
+          conn
+          |> put_status(:created)
+          |> json(%{member: member, reclaimed: true, warnings: [@reclaimed_warning]})
+
         {:ok, member} ->
           conn |> put_status(:created) |> json(%{member: member})
 
@@ -289,6 +338,15 @@ defmodule BarkparkWeb.MemberController do
               "token). To rotate this one anyway, pass --force."
         })
 
+      # Owner ruling #7: a user-owned token is rotated only by its owner.
+      {:error, :owner_only} ->
+        ErrorResponse.emit_fields(conn, :forbidden, %{
+          code: "owner_only",
+          message:
+            "this token belongs to a user; only that user can rotate it. Revoke it instead " <>
+              "(DELETE …/v1/tokens/:id) and ask the owner to mint a new one"
+        })
+
       {:error, :forbidden} ->
         conn
         |> ErrorResponse.emit_fields(:forbidden, %{
@@ -485,6 +543,14 @@ defmodule BarkparkWeb.MemberController do
           "otherwise the workspace would be left with nobody who can administer it"
       )
 
+  defp deny(conn, :already_invited),
+    do:
+      conflict(
+        conn,
+        "already_invited",
+        "that person already has a pending invitation to this workspace"
+      )
+
   # Owner ruling #5 (2026-10-03): the role ceiling.
   defp deny(conn, :owner_required),
     do:
@@ -549,4 +615,33 @@ defmodule BarkparkWeb.MemberController do
 
   defp unresolved_workspace(conn),
     do: unprocessable(conn, "workspace could not be resolved")
+
+  # The invitee learns of the invitation by mail (task-a3c4164ea2f56ccd): the
+  # workspace's name, who invited them, and a link to /invitations, in the
+  # workspace's language. Sent only when an invitation was CREATED, so a
+  # repeat invite of a pending invitee (409 already_invited) sends nothing.
+  # Fire-and-forget like every UserNotifier mail: the 202 never waits on SMTP.
+  defp notify_invitee(conn, %{email: email}) when is_binary(email) do
+    ws = conn.assigns[:current_workspace]
+
+    Barkpark.Accounts.UserNotifier.deliver_invitation(email, %{
+      workspace: Map.get(ws, :name) || Map.get(ws, :slug),
+      inviter: inviter_name(conn),
+      url: BarkparkWeb.Endpoint.url() <> "/invitations",
+      locale: Barkpark.Tenancy.workspace_locale(ws)
+    })
+  end
+
+  defp notify_invitee(_conn, _invitation), do: :ok
+
+  # A person is named by their email: the owner of a personal token (PAT). A
+  # service token is not named (its label can carry someone else's address).
+  defp inviter_name(conn) do
+    with %{owner_user_id: uid} when is_binary(uid) <- caller(conn),
+         %{email: email} when is_binary(email) <- Barkpark.Accounts.get_user(uid) do
+      email
+    else
+      _ -> nil
+    end
+  end
 end

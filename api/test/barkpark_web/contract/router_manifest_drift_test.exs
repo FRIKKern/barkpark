@@ -100,6 +100,32 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # state WHY — "no verb yet" is not a reason, it is the defect this guard
   # exists to find, and such a route belongs in @filed_gaps instead.
   @not_a_cli_surface %{
+    # ── Editor presence (task-32b73e85f89d4be7) ────────────────────────────
+    # A browser editing client holds the stream open while a document is on
+    # screen and posts the FIELD its cursor is in. A terminal has no open
+    # document and no focused field, so there is nothing for a verb to report.
+    {"GET", "/v1/data/presence/:*"} =>
+      "editor presence stream — an editing UI's live room, a terminal has no focused field",
+    {"POST", "/v1/data/presence/:*/focus"} =>
+      "editor field focus — moves an open presence stream's cursor; no CLI holds one",
+    {"DELETE", "/v1/data/presence/:*/leave"} =>
+      "editor presence leave (task-936472b77285df5b) — untracks the caller's own open stream; a terminal holds no stream to leave",
+    # ── Cloud member removal (owner ruling #26, 2026-10-03) ─────────────────
+    # The control plane calls this with the stored instance admin token when a
+    # person leaves the owning team: sessions revoked, seats dropped, owned
+    # tokens revoked. Its caller is Cloud's InstanceMemberDeprovisionWorker; a
+    # human removes a member with `bp cloud members`, never against the box.
+    {"POST", "/v1/auth/cloud-users/deprovision"} =>
+      "Cloud's member-removal door (ruling #26) — the control plane calls it, not a CLI verb",
+    # ── Deploy-flip SSE retire hook (task-2bcada0faa01ebb2) ─────────────────
+    # deploy/instance-deploy.sh POSTs here, on the RETIRING slot's own port
+    # (never through Caddy), right after a blue/green Caddy flip lands — so
+    # every open SSE stream on that slot ends at once instead of sitting
+    # alive-but-deaf through the drain. RequireLoopback-gated, same trust
+    # boundary as /v1/data/local/search above; no person or `bp` verb has any
+    # reason to retire a slot's streams from outside the box.
+    {"POST", "/v1/internal/retire-sse"} =>
+      "deploy-flip SSE retire signal — instance-deploy.sh calls it on the retiring slot, not a CLI verb",
     # ── The chat shell's open-session probe (wsc-steer-open-session-managed) ──
     # The TUI's agent detail asks this, for the task its agent↔task join already
     # resolved, before it offers "open session"; the answer is a session id the
@@ -221,7 +247,15 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/tickets/:*/attachments/:*"} =>
       "tickets submitter surface — ratified omission (charter D10/D11)",
     {"GET", "/v1/tickets/inbox/:*/attachments/:*"} =>
-      "operator attachment DOWNLOAD — a cookie-authed binary response, not a JSON verb"
+      "operator attachment DOWNLOAD — a cookie-authed binary response, not a JSON verb",
+    # ── Paper-canvas UI chrome strings (task-84fa11e11dacdc1b) ──────────────
+    # The locale map for a web component's own on-screen text (<bp-paper-
+    # canvas>'s buttons, placeholders, aria labels). A terminal renders no web
+    # component and has no chrome to translate, so there is nothing for a `bp`
+    # verb to fetch on its behalf — it exists for a non-LiveView BROWSER host
+    # (barkpark-studio) to stay in sync with the same map LiveView stamps.
+    {"GET", "/v1/i18n/paper_canvas"} =>
+      "paper-canvas web component's UI chrome strings — a browser host reads this, not a CLI verb"
   }
 
   # Routes a `bp` BUILT-IN already dials. These are reachable from the CLI
@@ -246,6 +280,10 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # only prose and stayed in @filed_gaps).
   @served_by_a_builtin %{
     {"GET", "/v1/data/listen/:*"} => "bp listen — apiclient Client.Listen",
+    # task-78dc25a4f117fa07 — the SAME ListenController.listen/2 action,
+    # mounted a second time under the preview-JWT pipeline instead of a
+    # bearer token's. Same CLI story as its bearer twin one line above.
+    {"GET", "/v1/preview/listen/:*"} => "bp listen — apiclient Client.Listen",
     {"GET", "/v1/data/export/:*"} => "bp export — apiclient Client.Export",
     {"GET", "/v1/structure/:*"} => "the desk tree — apiclient Client.LoadStructure",
     {"POST", "/v1/tasks/:*/labels"} => "bp task relabel — apiclient Client.TaskRelabel",
@@ -333,14 +371,29 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/plugins/settings/:*"} => @census_task,
     {"DELETE", "/v1/plugins/settings/:*"} => @census_task,
 
+    # BarkparkWeb.PreviewTokenController (2) — task-8f7cba7f65cb343c /
+    # task-88e9094df76d31c6 / task-49a6a686bb88d9e5. A site's server (or the
+    # Studio, handing a token to its preview frame) is the intended caller
+    # of the mint, not a terminal operator, but an operator plausibly wants
+    # `bp` to mint/revoke one for testing too — a real gap, not a "never"
+    # surface, same reasoning for both the flat mint and the scoped
+    # mint/revoke pair below.
+    {"POST", "/v1/preview-tokens"} => @census_task,
+    # The scoped-only DELETE (no flat twin — see PreviewTokenController's own
+    # moduledoc for why) collapses onto this canonical, scope-stripped
+    # spelling, same as the scoped mint collapses onto the flat mint's row
+    # above.
+    {"DELETE", "/v1/preview-tokens/:*"} => @census_task,
+
     # BarkparkWeb.PulseController (3)
     {"POST", "/v1/plugins/pulse/:*/events"} => @census_task,
     {"GET", "/v1/plugins/pulse/:*/recent"} => @census_task,
     {"GET", "/v1/plugins/pulse/:*/stats"} => @census_task,
 
-    # BarkparkWeb.QueryController (6)
+    # BarkparkWeb.QueryController (7)
     {"GET", "/v1/preview/backlinks/:*/:*"} => @census_task,
     {"GET", "/v1/preview/doc/:*/:*/:*"} => @census_task,
+    {"GET", "/v1/preview/locations/:*/:*"} => @census_task,
     {"GET", "/v1/preview/query/:*/:*"} => @census_task,
     {"GET", "/v1/preview/related/:*/:*"} => @census_task,
     {"GET", "/v1/preview/tags/:*"} => @census_task,

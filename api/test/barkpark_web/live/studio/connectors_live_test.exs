@@ -245,6 +245,38 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       assert html =~ ~s(data-test-id="connector-card-telegram")
     end
 
+    # task-9606fa7f7daaf674: the banner told every viewer to set a deploy secret
+    # and read an ops doc; only an installation admin can do either.
+    test "no secret: a workspace-only admin is told to ask the installation admin", %{
+      conn: conn,
+      ws: ws,
+      path: path,
+      admin_raw: raw
+    } do
+      configure(connect_secret: nil)
+
+      email = "conn-wsadmin-#{System.unique_integer([:positive])}@example.com"
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+      {:ok, session} = Barkpark.Accounts.create_user_session_token(user)
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "admin", "user")
+
+      {:ok, _view, html} =
+        live(Plug.Test.init_test_session(conn, %{"user_session" => session}), path)
+
+      assert html =~ "Connect is not configured on this instance"
+      assert html =~ ~s(data-test-id="connectors-readonly-ask-admin")
+      refute html =~ "CONNECTORS_CONNECT_SECRET"
+      refute html =~ "docs/ops/connectors-deploy.md"
+
+      # The installation admin still gets the operator sentence.
+      {:ok, _view, op_html} = live(as(conn, raw), path)
+      assert op_html =~ "docs/ops/connectors-deploy.md"
+      refute op_html =~ ~s(data-test-id="connectors-readonly-ask-admin")
+    end
+
     test "no secret + a forged open_connect event => flash, no dialog, no crash", %{
       conn: conn,
       path: path,
@@ -488,6 +520,93 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
 
       assert [%ApiToken{revoked_at: revoked}] = live_tokens(ws, "telegram", @telegram_key)
       refute is_nil(revoked)
+    end
+  end
+
+  # ── LAYOUT ─────────────────────────────────────────────────────────────────
+
+  # task-93b8a691113cec0d: minmax(380px, 1fr) kept one 380px column in a 321px
+  # phone container, so every card was clipped. A column may shrink to 100%.
+  test "the card grids never hold a column wider than their container", %{
+    conn: conn,
+    path: path,
+    admin_raw: raw,
+    ws: ws
+  } do
+    script(ws, %{})
+    {:ok, _view, html} = live(as(conn, raw), path)
+
+    grids =
+      Regex.scan(~r/style="[^"]*grid-template-columns: ([^;"]+)/, html)
+      |> Enum.map(&List.last/1)
+
+    assert grids != []
+    refute Enum.any?(grids, &(&1 =~ ~r/minmax\(\d+px/)), "fixed-px minimum in #{inspect(grids)}"
+  end
+
+  # ── KEYBOARD ───────────────────────────────────────────────────────────────
+
+  # task-bafeea95152b571a: Enter on Connect opened the dialog with focus still on
+  # the button behind it, and Escape did nothing; the disconnect confirmation was
+  # the same and had no accessible name.
+  describe "keyboard" do
+    defp dialog(html, id), do: html |> LazyHTML.from_fragment() |> LazyHTML.query("#" <> id)
+
+    test "the connect dialog takes focus on the token field and closes on Escape", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw,
+      ws: ws
+    } do
+      script(ws, %{})
+      {:ok, view, _html} = live(as(conn, raw), path)
+
+      d =
+        view
+        |> element(~s([data-test-id="connector-connect-telegram"]))
+        |> render_click()
+        |> dialog("connectors-connect-modal")
+
+      assert LazyHTML.attribute(d, "phx-hook") == ["ModalFocus"]
+      assert LazyHTML.attribute(d, "phx-window-keydown") == ["close_dialog"]
+      assert LazyHTML.attribute(d, "phx-key") == ["escape"]
+
+      assert LazyHTML.attribute(LazyHTML.query(d, "[data-modal-focus]"), "name") == ["credential"]
+
+      refute render_keydown(view, "close_dialog", %{"key" => "Escape"}) =~
+               ~s(id="connectors-connect-modal")
+    end
+
+    test "the disconnect confirmation is named, starts on Cancel and closes on Escape", %{
+      conn: conn,
+      path: path,
+      admin_raw: raw,
+      ws: ws
+    } do
+      script(ws, %{})
+      {:ok, view, _html} = live(as(conn, raw), path)
+      connect!(view)
+
+      d =
+        view
+        |> element(~s([data-test-id="connector-disconnect-telegram"]))
+        |> render_click()
+        |> dialog("connectors-disconnect-modal")
+
+      assert LazyHTML.attribute(d, "phx-hook") == ["ModalFocus"]
+      assert LazyHTML.attribute(d, "aria-labelledby") == ["connectors-disconnect-title"]
+
+      assert LazyHTML.text(LazyHTML.query(d, "#connectors-disconnect-title")) =~
+               "Disconnect Telegram?"
+
+      assert LazyHTML.attribute(LazyHTML.query(d, "[data-modal-focus]"), "phx-click") == [
+               "cancel_disconnect"
+             ]
+
+      refute render_keydown(view, "cancel_disconnect", %{"key" => "Escape"}) =~
+               ~s(id="connectors-disconnect-modal")
+
+      assert [%ApiToken{revoked_at: nil}] = live_tokens(ws, "telegram", @telegram_key)
     end
   end
 

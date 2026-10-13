@@ -15,7 +15,7 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
 
   ## Contract
 
-  Keyed by `{dataset, workspace_id, published_id}` (the session's own `key/3`
+  Keyed by `{dataset, workspace_id, project_id, published_id}` (the session's own `key/3`
   shape — the tenant token joined the key in PR #15215; this line said
   `{dataset, published_id}` until then). Each key holds a capped list of
   `{request_id, reply, monotonic_ms}` entries, newest first. `lookup/2`
@@ -133,7 +133,7 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRing do
   # per-write prune that already runs on every `put/3`.
   @sweep_every_ms div(@ttl_ms, 4)
 
-  @type key :: {String.t(), String.t() | nil, String.t()}
+  @type key :: {String.t(), String.t() | nil, String.t() | nil, String.t()}
 
   @doc false
   def start_link(opts) do

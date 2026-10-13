@@ -130,6 +130,11 @@ RESOLUTIONS = {
         why="module attribute, single literal binding in the same module",
         names=["BARKPARK_GITHUB_INTAKE_WORKSPACE_ID"],
     ),
+    ("api/lib/barkpark/plugins/onixedit/bokbasen/settings.ex", "@workspaces_env"): dict(
+        why="module attribute, single literal binding in the same module "
+        "(owner ruling #12 Bokbasen workspace allowlist, 2026-10-04)",
+        names=["BARKPARK_BOKBASEN_WORKSPACE_IDS"],
+    ),
     ("cloud/lib/barkpark_cloud/health/serving_memory.ex", "@env"): dict(
         why="module attribute, single literal binding in the same module "
         "(`@env \"BARKPARK_GIT_SHA\"`); ServingMemory.read/1 falls back to it "
@@ -187,6 +192,7 @@ EXEMPT = {
     "CI": "CI-only (2026-08-08)",
     "GITHUB_ACTIONS": "CI-only (2026-08-08)",
     "GITHUB_TOKEN": "CI-only (2026-08-08)",
+    "BARKPARK_HTTP_IP": "set by @barkpark/engine to bind loopback in the App shape; a container bound to loopback is unreachable through its port map, so compose must not pass it (2026-10-05)",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

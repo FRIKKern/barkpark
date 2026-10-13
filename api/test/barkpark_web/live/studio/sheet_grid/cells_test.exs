@@ -37,6 +37,15 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       refute Cells.display(%{"v" => 123_456_789.123}) =~ "e"
     end
 
+    # "cur" wiring (task-4fb1d8de887d8bc6): Fmt.display/3 itself is unit-
+    # locked in fmt_test.exs; this only proves the grid forwards a cell's
+    # "cur" to it rather than rendering the implicit USD unconditionally.
+    test "a currency cell's \"cur\" selects the matching symbol" do
+      assert Cells.display(%{"v" => 150, "fmt" => "currency"}) == "$150.00"
+      assert Cells.display(%{"v" => 150, "fmt" => "currency", "cur" => "NOK"}) == "150.00 kr"
+      assert Cells.display(%{"v" => 150, "fmt" => "currency", "cur" => "EUR"}) == "€150.00"
+    end
+
     test "extreme magnitudes keep exponent form, like Excel General" do
       assert Cells.display(%{"v" => 1.0e-7}) =~ "e"
       assert Cells.display(%{"v" => 1.0e21}) =~ "e"
@@ -390,6 +399,26 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
     test "names the function the engine could not evaluate" do
       cell = %{"f" => "=FOO(1)", "v" => 42, "t" => "n", "stale" => true, "stale_fn" => "FOO"}
       assert Cells.cell_title(cell) == "not evaluated: FOO is not supported"
+    end
+
+    # task-49f187aeb423153b: every engine error code is explained, in the
+    # Studio language, and the unsupported-function title is translated.
+    test "an error value is titled with what its code means, for every engine code" do
+      for code <- Cells.error_vocab() do
+        reason = Cells.error_reason(code)
+        assert is_binary(reason) and reason != "", "no explanation for #{code}"
+        assert Cells.cell_title(%{"v" => code}) == reason
+        assert Cells.spoken(code) == code <> " — " <> reason
+      end
+
+      assert Cells.spoken("42") == "42"
+
+      Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+        assert Cells.cell_title(%{"v" => "#DIV/0!"}) == "Deling på null"
+
+        assert Cells.cell_title(%{"v" => 42, "stale" => true, "stale_fn" => "FOO"}) ==
+                 "ikke beregnet: FOO støttes ikke"
+      end)
     end
 
     test "is nil for an ordinary cell, a bare stale cell, and a missing cell" do

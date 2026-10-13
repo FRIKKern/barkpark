@@ -112,9 +112,12 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_no_bare_required()
+    |> validate_inline_field_names()
+    |> validate_visible_when_scopes()
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
+    |> validate_desk_editor()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -129,6 +132,11 @@ defmodule Barkpark.Content.SchemaDefinition do
     # to a changeset error instead of a raised Ecto.ConstraintError.
     |> unique_constraint([:name, :dataset],
       name: :schema_definitions_name_dataset_null_dataset_id_index
+    )
+    # ...split by owner since 20261005210000: the index above now covers shared
+    # rows (workspace_id NULL) and this one each workspace's own rows.
+    |> unique_constraint([:name, :dataset],
+      name: :schema_definitions_ws_name_dataset_null_dataset_id_index
     )
     # FK-abort containment (Felix W16). `workspace_id/project_id/dataset_id` are
     # real Postgres FKs (schema_definitions_<col>_fkey, migration
@@ -171,6 +179,170 @@ defmodule Barkpark.Content.SchemaDefinition do
         changeset
     end
   end
+
+  # Inline object field names that collide with the node's own keys
+  # (task-85fee859cf3bfef6). An inline object is stored flat inside prose,
+  # `{type: name, ...fields}`, so a declared field named `type` would overwrite
+  # the discriminator, and `_type`/`_key` are the Sanity spellings an import
+  # maps or drops. Every renderer reads `children` as a wrapper's inline run,
+  # `content` as a block wrapper, and `marks` as a text leaf's marks, so a field
+  # with one of those names would be rendered as something else. `text` is NOT
+  # reserved: an inline object is never a text leaf (its `type` is its declared
+  # name), the built-in verdict chip already carries `text`, and so does the
+  # Sanity chip this feature exists for.
+  @inline_reserved_field_names ~w(type _type _key marks children content)
+
+  @doc "Field names an inline object (`blocks.inline`) may not declare."
+  def inline_reserved_field_names, do: @inline_reserved_field_names
+
+  defp validate_inline_field_names(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        Enum.reduce(inline_reserved_field_paths(fields, "/fields"), changeset, fn {path, name},
+                                                                                  cs ->
+          add_error(
+            cs,
+            :fields,
+            "#{path}: inline object field name `#{name}` is reserved; it collides with " <>
+              "the inline node's own keys (#{Enum.join(@inline_reserved_field_names, ", ")})",
+            validation: :inline_field_reserved
+          )
+        end)
+
+      _ ->
+        changeset
+    end
+  end
+
+  @doc false
+  # `{path, name}` for every reserved field name a `blocks.inline` entry declares,
+  # in any richText field, including one nested in a composite or arrayOf.
+  def inline_reserved_field_paths(fields, prefix) when is_list(fields) do
+    fields
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {%{} = f, i} ->
+        f = Map.new(f, fn {k, v} -> {to_string(k), v} end)
+        path = "#{prefix}/#{i}"
+
+        own =
+          case f["blocks"] do
+            %{} = b ->
+              for {%{} = entry, j} <- Enum.with_index(List.wrap(b["inline"] || b[:inline])),
+                  {%{} = field, k} <-
+                    Enum.with_index(List.wrap(entry["fields"] || entry[:fields])),
+                  name = field["name"] || field[:name],
+                  name in @inline_reserved_field_names,
+                  do: {"#{path}/blocks/inline/#{j}/fields/#{k}", name}
+
+            _ ->
+              []
+          end
+
+        nested_of =
+          case f["of"] do
+            %{} = one -> inline_reserved_field_paths([one], "#{path}/of")
+            list when is_list(list) -> inline_reserved_field_paths(list, "#{path}/of")
+            _ -> []
+          end
+
+        own ++ inline_reserved_field_paths(List.wrap(f["fields"]), "#{path}/fields") ++ nested_of
+
+      _ ->
+        []
+    end)
+  end
+
+  def inline_reserved_field_paths(_fields, _prefix), do: []
+
+  # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (default) or
+  # "parent". A top-level field has no parent, so "parent" there is refused with
+  # its path instead of silently reading the document root.
+  defp validate_visible_when_scopes(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        Enum.reduce(visible_when_scope_problems(fields, [], false), changeset, fn msg, cs ->
+          add_error(cs, :fields, msg)
+        end)
+
+      _ ->
+        changeset
+    end
+  end
+
+  @doc false
+  # One message per field whose `visibleWhen.scope` is not allowed where it sits.
+  def visible_when_scope_problems(fields, prefix, nested?) when is_list(fields) do
+    Enum.flat_map(fields, fn
+      field when is_map(field) ->
+        name = to_string(fget(field, "name") || "?")
+        path = Enum.join(prefix ++ [name], ".")
+        own = scope_problem(visible_when_of(field), path, nested?)
+
+        kids =
+          case fget(field, "fields") do
+            list when is_list(list) -> visible_when_scope_problems(list, prefix ++ [name], true)
+            _ -> []
+          end
+
+        of =
+          case fget(field, "of") do
+            %{} = d ->
+              # The single `of` descriptor has no name of its own: its predicate
+              # sits at the list path, its subfields under it.
+              item = prefix ++ [name <> "[]"]
+
+              scope_problem(visible_when_of(d), Enum.join(item, "."), true) ++
+                visible_when_scope_problems(List.wrap(fget(d, "fields")), item, true)
+
+            list when is_list(list) ->
+              visible_when_scope_problems(list, prefix ++ [name <> "[]"], true)
+
+            _ ->
+              []
+          end
+
+        own ++ kids ++ of
+
+      _ ->
+        []
+    end)
+  end
+
+  def visible_when_scope_problems(_fields, _prefix, _nested?), do: []
+
+  defp scope_problem(%{} = pred, path, nested?) do
+    path = String.trim_trailing(path, ".")
+
+    case Map.get(pred, "scope", Map.get(pred, :scope)) do
+      nil ->
+        []
+
+      "document" ->
+        []
+
+      "parent" when nested? ->
+        []
+
+      "parent" ->
+        [
+          ~s("#{path}": visibleWhen "scope": "parent" needs an enclosing object or array item, ) <>
+            ~s(and a top-level field has none; use "document" \(the default\) to read the document)
+        ]
+
+      other ->
+        [~s("#{path}": visibleWhen "scope" must be "document" or "parent", got #{inspect(other)})]
+    end
+  end
+
+  defp scope_problem(_, _, _), do: []
+
+  # `fget/2` falls back to `String.to_existing_atom/1`, which raises when no
+  # module has interned the atom yet; read the predicate by its string key and
+  # only use an atom key the map actually has.
+  defp visible_when_of(%{"visibleWhen" => pred}), do: pred
+  defp visible_when_of(%{visibleWhen: pred}), do: pred
+  defp visible_when_of(_), do: nil
 
   @doc false
   # Field paths (`seo.title`, `rows[].label`) whose definition carries the bare
@@ -281,6 +453,34 @@ defmodule Barkpark.Content.SchemaDefinition do
 
           other ->
             add_error(changeset, :desk, "orderings must be a list, got #{inspect(other)}")
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  # `desk.editor` — the editor a type's documents open in: "freeform" (the
+  # block editor) or "classic" (the schema form, also the default when absent).
+  # The toggle still switches either way (task-d80fe8cbfdc9cbcc).
+  @desk_editors ~w(freeform classic)
+
+  defp validate_desk_editor(changeset) do
+    case get_change(changeset, :desk) do
+      %{} = desk ->
+        case Map.get(desk, "editor", Map.get(desk, :editor)) do
+          nil ->
+            changeset
+
+          editor when editor in @desk_editors ->
+            changeset
+
+          other ->
+            add_error(
+              changeset,
+              :desk,
+              "editor must be \"freeform\" or \"classic\", got #{inspect(other)}"
+            )
         end
 
       _ ->
@@ -459,8 +659,17 @@ defmodule Barkpark.Content.SchemaDefinition do
       :options,
       # composite
       :fields,
-      # arrayOf
+      # arrayOf — single-shape (legacy, unchanged): :of is a %Field{}.
       :of,
+      # arrayOf — several NAMED member types (task-b3ebbd3ab1575e2a): a
+      # `name => %Field{}` map, mutually exclusive with :of (parse_field_type
+      # sets exactly one of the two, never both). nil/empty for every
+      # existing schema, so a schema that never used this stays
+      # byte-identical. Each array item is discriminated by its own
+      # `"_type"` key against this map's keys, mirroring Sanity's object
+      # arrays — the whole point of this field (post.links: externalLink |
+      # docLink).
+      :of_types,
       :ordered,
       # codelist
       :codelist_id,
@@ -615,19 +824,55 @@ defmodule Barkpark.Content.SchemaDefinition do
   the slash menu hides it at the cap but never blocks an insert), followed by
   one trailing `%{"kind" => "region", "name" => "body"}` free-content marker.
 
-  Fields without a usable string `name` are skipped (the region is always
-  appended regardless).
+  Fields without a usable string `name` are skipped. The region is appended
+  unless a non-`richText` field already owns its name (see below).
   """
+  #
+  # ONE BINDING PER KEY (task-9f230ad6d5b50fb0). A schema with a field named
+  # like the region (`body`) would otherwise bind `content.body` twice: a
+  # field row and the region below it, two editors writing two shapes. A
+  # `richText` body is edited by the region (the block editor; the stored
+  # value takes the `{html, blocks}` shape Classic already recognises), so its
+  # field entry is dropped. Any other `body` field keeps its entry and the
+  # region is dropped, so the stored value keeps the type the field declares.
   @spec default_layout(t() | Parsed.t() | map()) :: [map()]
   def default_layout(schema) do
+    names = field_names(schema)
+
+    region_field_type =
+      if @default_region_name in names, do: field_type(schema, @default_region_name)
+
     field_entries =
-      schema
-      |> field_names()
+      names
+      |> Enum.reject(&(&1 == @default_region_name and region_field_type == "richText"))
       |> Enum.map(fn name ->
         %{"kind" => "field", "name" => name, "max" => 1, "enforce" => false}
       end)
 
-    field_entries ++ [%{"kind" => "region", "name" => @default_region_name}]
+    region =
+      if region_field_type in [nil, "richText"],
+        do: [%{"kind" => "region", "name" => @default_region_name}],
+        else: []
+
+    field_entries ++ region
+  end
+
+  # The declared type of the top-level field `name`, as a string, or nil.
+  defp field_type(%__MODULE__{fields: fields}, name) when is_list(fields) do
+    Enum.find_value(fields, fn f ->
+      if (f["name"] || f[:name]) == name, do: to_string(f["type"] || f[:type] || "")
+    end)
+  end
+
+  defp field_type(%Parsed{fields: fields}, name) when is_list(fields) do
+    Enum.find_value(fields, fn f -> if f.name == name, do: to_string(f.type || "") end)
+  end
+
+  defp field_type(schema, name) when is_map(schema) do
+    case parse(schema) do
+      {:ok, parsed} -> field_type(parsed, name)
+      {:error, _} -> nil
+    end
   end
 
   @doc """
@@ -713,10 +958,15 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp parse_fields(fields, plugin) when is_list(fields) do
+  # `nested?` is true for every field inside a composite, an image/file's
+  # subfields or an array item: only those have a parent a `visibleWhen` with
+  # `"scope": "parent"` can read (task-9905a69475b1ff3b).
+  defp parse_fields(fields, plugin, nested? \\ false)
+
+  defp parse_fields(fields, plugin, nested?) when is_list(fields) do
     fields
     |> Enum.reduce_while({:ok, []}, fn raw_field, {:ok, acc} ->
-      case parse_field(raw_field, plugin) do
+      case parse_field(raw_field, plugin, nested?) do
         {:ok, f} -> {:cont, {:ok, [f | acc]}}
         {:error, _} = err -> {:halt, err}
       end
@@ -727,14 +977,15 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp parse_fields(_, _), do: {:error, :fields_must_be_list}
+  defp parse_fields(_, _, _), do: {:error, :fields_must_be_list}
 
-  defp parse_field(raw, plugin) when is_map(raw) do
+  defp parse_field(raw, plugin, nested?) when is_map(raw) do
     f = stringify(raw)
     name = Map.get(f, "name")
     type = Map.get(f, "type")
 
     with :ok <- validate_field_name(name, plugin),
+         :ok <- validate_visible_when_scope(Map.get(f, "visibleWhen"), name, nested?),
          {:ok, surface} <- parse_field_surface(Map.get(f, "surface")),
          {:ok, %Field{} = base} <- parse_field_type(type, f, plugin) do
       {:ok,
@@ -756,7 +1007,23 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp parse_field(_, _), do: {:error, :field_must_be_a_map}
+  defp parse_field(_, _, _), do: {:error, :field_must_be_a_map}
+
+  # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (the default — the
+  # path walks from the document root) or "parent" (the enclosing object or
+  # array item). A top-level field has no parent, so "parent" there is an error
+  # rather than a silent fallback.
+  @visible_when_scopes ~w(document parent)
+  defp validate_visible_when_scope(%{} = pred, name, nested?) do
+    case Map.get(pred, "scope", Map.get(pred, :scope)) do
+      nil -> :ok
+      "parent" when not nested? -> {:error, {:visible_when_parent_at_top_level, name}}
+      scope when scope in @visible_when_scopes -> :ok
+      scope -> {:error, {:visible_when_scope_invalid, name, scope}}
+    end
+  end
+
+  defp validate_visible_when_scope(_, _, _), do: :ok
 
   # sidebar-test classification (pd-doctrine t7, rule 4). Absent ⇒ nil
   # (unclassified — byte-compatible with every legacy schema). Only the two
@@ -786,13 +1053,18 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   # composite — recursive object with named subfields
   defp parse_field_type("composite", f, plugin) do
-    case parse_fields(Map.get(f, "fields", []), plugin) do
+    case parse_fields(Map.get(f, "fields", []), plugin, true) do
       {:ok, kids} -> {:ok, %Field{fields: kids}}
       err -> err
     end
   end
 
-  # arrayOf — `ordered: true|false` flag, single `of` shape descriptor
+  # arrayOf — `ordered: true|false` flag, plus EITHER a single `of` shape
+  # descriptor (legacy) OR a list of several NAMED member types
+  # (task-b3ebbd3ab1575e2a: `of: [{"name": "externalLink", ...}, {"name":
+  # "docLink", ...}]`, Sanity's object-array shape). The two are mutually
+  # exclusive by the cond's own ordering: a list routes to
+  # `parse_array_of_types/4` before the single-map branch is ever reached.
   defp parse_field_type("arrayOf", f, plugin) do
     of = Map.get(f, "of")
     ordered = Map.get(f, "ordered", false)
@@ -802,13 +1074,16 @@ defmodule Barkpark.Content.SchemaDefinition do
       not is_boolean(ordered) ->
         {:error, {:array_ordered_must_be_boolean, name}}
 
+      is_list(of) ->
+        parse_array_of_types(of, ordered, name, plugin)
+
       is_nil(of) or not is_map(of) ->
         {:error, {:array_missing_of, name}}
 
       true ->
         item_raw = Map.put(stringify(of), "name", name <> "[item]")
 
-        case parse_field(item_raw, plugin) do
+        case parse_field(item_raw, plugin, true) do
           {:ok, child} -> {:ok, %Field{ordered: ordered, of: child}}
           err -> err
         end
@@ -858,6 +1133,47 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
+  # image — a leaf, unless it declares `fields` (task-f0f51946d2de672d).
+  # Sanity puts an image's own fields (`alt`, a caption) on the image object
+  # beside `asset`/`hotspot`/`crop`; declared here, they are validated like a
+  # composite's subfields. `options` (e.g. `hotspot: true`) stays in `raw`.
+  defp parse_field_type("image", f, plugin) do
+    case Map.get(f, "fields") do
+      nil ->
+        {:ok, %Field{}}
+
+      kids when is_list(kids) ->
+        case parse_fields(kids, plugin, true) do
+          {:ok, parsed} -> {:ok, %Field{fields: parsed}}
+          err -> err
+        end
+
+      _ ->
+        {:error, {:image_fields_must_be_list, Map.get(f, "name")}}
+    end
+  end
+
+  # file (task-681df8da723386b8) — a leaf, unless it declares `fields`, exactly
+  # the same shape as `image` above: Sanity's `file` type is an asset
+  # reference that may carry its own siblings (a caption, an alt-text-like
+  # label) beside `asset`. No `image`-only concept (hotspot/crop) applies, so
+  # this clause is the SAME subfields branch without the options.hotspot leg.
+  defp parse_field_type("file", f, plugin) do
+    case Map.get(f, "fields") do
+      nil ->
+        {:ok, %Field{}}
+
+      kids when is_list(kids) ->
+        case parse_fields(kids, plugin, true) do
+          {:ok, parsed} -> {:ok, %Field{fields: parsed}}
+          err -> err
+        end
+
+      _ ->
+        {:error, {:file_fields_must_be_list, Map.get(f, "name")}}
+    end
+  end
+
   # any other binary type-tag (string, slug, text, richText, image, select,
   # boolean, datetime, color, reference, array, …) is treated as a v1
   # leaf — parsed permissively, preserved verbatim in `raw`.
@@ -867,10 +1183,84 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   defp parse_field_type(_, _, _), do: {:error, :field_type_must_be_string}
 
+  # The several-named-member-types `of: [...]` branch of
+  # parse_field_type("arrayOf", ...) above — kept out of that clause group so
+  # the `parse_field_type/3` clauses themselves stay contiguous.
+  #
+  # `of: []` is the SAME shape-less declaration `of: null`/`of: {}` already
+  # refuses — an array with no member type is not a valid descriptor either
+  # way, and treating an empty list as "no types" rather than silently
+  # parsing to an empty map keeps the error message's reason consistent.
+  defp parse_array_of_types([], _ordered, name, _plugin), do: {:error, {:array_missing_of, name}}
+
+  defp parse_array_of_types(list, ordered, name, plugin) do
+    with {:ok, pairs} <- parse_array_of_type_members(list, name, plugin),
+         :ok <- ensure_unique_member_names(pairs, name) do
+      {:ok, %Field{ordered: ordered, of_types: Map.new(pairs)}}
+    end
+  end
+
+  defp parse_array_of_type_members(list, array_name, plugin) do
+    Enum.reduce_while(list, {:ok, []}, fn entry, {:ok, acc} ->
+      case parse_array_of_type_member(entry, array_name, plugin) do
+        {:ok, pair} -> {:cont, {:ok, [pair | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      err -> err
+    end
+  end
+
+  defp parse_array_of_type_member(entry, array_name, plugin) when is_map(entry) do
+    case Map.get(entry, "name") || Map.get(entry, :name) do
+      member_name when is_binary(member_name) and member_name != "" ->
+        item_raw = Map.put(stringify(entry), "name", array_name <> "[" <> member_name <> "]")
+
+        case parse_field(item_raw, plugin, true) do
+          {:ok, child} -> {:ok, {member_name, child}}
+          err -> err
+        end
+
+      _ ->
+        {:error, {:array_of_type_missing_name, array_name}}
+    end
+  end
+
+  defp parse_array_of_type_member(_entry, array_name, _plugin),
+    do: {:error, {:array_of_type_missing_name, array_name}}
+
+  defp ensure_unique_member_names(pairs, array_name) do
+    names = Enum.map(pairs, &elem(&1, 0))
+
+    if length(Enum.uniq(names)) == length(names) do
+      :ok
+    else
+      {:error, {:array_of_type_names_not_unique, array_name}}
+    end
+  end
+
   defp parse_validations(v) when is_list(v), do: {:ok, v}
   defp parse_validations(_), do: {:error, :validations_must_be_list}
 
   defp v2_shape?(%Field{type: t}) when t in @v2_field_types, do: true
+  # An image with declared subfields (or Sanity's `options.hotspot`) has a
+  # structure the v2 walker checks; a bare image stays a v1 leaf.
+  defp v2_shape?(%Field{type: "image", fields: [_ | _]}), do: true
+  # file (task-681df8da723386b8) — same rule as image above, minus the
+  # options.hotspot leg (no such concept for a non-image asset).
+  defp v2_shape?(%Field{type: "file", fields: [_ | _]}), do: true
+  # A richText vocabulary declaring custom object blocks (`blocks.of` entries
+  # shaped `{name, fields}`) has block fields the v2 walker checks.
+  # Inline object types (`blocks.inline`, task-85fee859cf3bfef6) likewise: the
+  # v2 walker checks their fields and refuses undeclared inline types.
+  defp v2_shape?(%Field{type: "richText", raw: %{"blocks" => %{} = blocks} = raw}) do
+    (is_list(blocks["of"]) and Enum.any?(blocks["of"], &is_map/1)) or
+      Barkpark.PortableDoc.FieldVocabulary.declares_inline?(raw)
+  end
+
+  defp v2_shape?(%Field{type: "image", raw: %{"options" => %{"hotspot" => true}}}), do: true
   defp v2_shape?(_), do: false
 
   defp localized_format_atom("plain"), do: :plain

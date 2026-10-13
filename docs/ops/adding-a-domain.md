@@ -9,10 +9,10 @@ status: stub
 > certs while Phoenix serves plain HTTP on loopback; `Plug.SSL` was rejected —
 > terminate at the edge, forward `X-Forwarded-Proto`.
 
-**Two estates, two hosts.** Measured 2026-09-02: `api.barkpark.cloud` (and the
+**Two estates, two hosts.** Measured 2026-10-03: `api.barkpark.cloud` (and the
 apex, and `www`) resolves to `178.105.92.191` — the **Cloud control plane**
-(`deploy/README.md`), not the pull-deployed CMS at `89.167.28.206`. Nothing in
-the zone points at the CMS. Each step acts on one box; know which one first.
+(`deploy/README.md`); `guerrilla.barkpark.cloud` resolves to `157.180.90.121`,
+the content instance. Each step acts on one box; know which one first.
 
 ## Step 1 — DNS
 
@@ -59,7 +59,7 @@ repo-wide predicate). Then `caddy validate --config
 In `/opt/barkpark/.env`: `PHX_SCHEME=https`, `PHX_HOST=your-domain.example`;
 `systemctl restart barkpark.service`. `make domain-cutover DOMAIN=…` does this
 from a workstation (backs up `.env`, updates, restarts, verifies HTTP +
-websocket) — but `SSH_HOST` defaults to the CMS box; override it for any other.
+websocket); pass `SSH_HOST=root@<box>` — it has no default.
 
 ## Step 4 — Let's Encrypt
 
@@ -69,8 +69,8 @@ Auto-issued/renewed by Caddy on first HTTPS request. Watch:
 ## Step 5 — Firewall (owner-signed hardening, not a cutover step)
 
 `deploy.sh` **opens** the app port — its "10. Firewall" step runs `ufw allow
-"$APP_PORT"/tcp` — and measured 2026-09-02 both `89.167.28.206` and guerrilla
-still answer on `:4000`. Only the managed path closes it: `ufwDenyAppPortStep`
+"$APP_PORT"/tcp` — and measured 2026-09-02 guerrilla still answered on
+`:4000`. Only the managed path closes it: `ufwDenyAppPortStep`
 (`ufw deny 4000`) ends `CaddySteps`, leaving `:443` alone public.
 
 So `sudo ufw delete allow 4000/tcp` contradicts that `ufw allow` line and needs
@@ -91,9 +91,9 @@ Turning it on is a separate, owner-sign-off change; all four must hold first:
    (TLS live), and
 2. the same URL over `http://` → `30x` to `https://` — Caddy, not Phoenix, owns
    the redirect.
-3. No bare-HTTP ingress is left. The 7-day `http://89.167.28.206` block under
-   Pitfalls is a **blocker**: `force_ssl` would 301 it to
-   `https://89.167.28.206`, which has no certificate.
+3. No bare-HTTP ingress is left. A transitional bare-IP block (Pitfalls) is
+   a **blocker**: `force_ssl` would 301 it to `https://<ip>`, which has no
+   certificate.
 4. The Sobelow baseline row is re-fingerprinted in the same PR, or the security
    gate reds.
 
@@ -121,10 +121,9 @@ curl -sI "https://$D/studio" | head -3   # 200, or 30x to /login when gated
 - **Let's Encrypt rate limit: 5 duplicate certs per 7 days.** Past 5, issuance
   fails — wait it out or use the staging CA
   (`acme_ca https://acme-staging-v02.api.letsencrypt.org/directory`).
-- **7-day bare-IP grace window.** The CMS still serves `http://89.167.28.206`
-  on `:80` and `:4000` (measured 2026-09-02). Keep a transitional
-  `http://89.167.28.206 { reverse_proxy localhost:4000 }` block ≥7 days
-  post-cutover; drop it at zero bare-IP traffic. ACME HTTP-01 issuance *and*
+- **7-day bare-IP grace window.** If the box served `http://<ip>` before the
+  cutover, keep a transitional `http://<ip> { reverse_proxy localhost:4000 }`
+  block ≥7 days post-cutover; drop it at zero bare-IP traffic. ACME HTTP-01 issuance *and*
   renewal need port 80 — keep the HTTP path until one renewal completes.
 
 ## Rollback

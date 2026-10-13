@@ -79,6 +79,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # remedies, so if this row ever collapses into the one above, the envelope
       # has gone back to telling an insider it is a stranger.
       {"forbidden_capability", {:error, :forbidden_capability}, "forbidden", 403, [:reason]},
+      # A dataset-bound token on another dataset (task-4418b517649a58ce).
+      {"forbidden_dataset", {:error, :forbidden_dataset}, "forbidden", 403, [:reason]},
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
@@ -107,15 +109,23 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"searchable_text_too_large/unlocated",
        {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
        [:details]},
+      # Owner ruling #39: one document over the per-document size cap.
+      {"document_too_large", {:error, {:document_too_large, 10_000_000, 10_000_001}},
+       "document_too_large", 413, [:details]},
       # Owner ruling #47: publish refuses an empty list row.
       {"empty_list_members",
        {:error, {:empty_list_members, %{"keywords" => ["Keywords row 3 is empty"]}}},
        "validation_failed", 422, [:details]},
+      # Owner ruling #21: a body block binds a field the schema keeps private.
+      {"private_field_bound", {:error, {:private_field_bound, ["budget"]}}, "private_field_bound",
+       422, [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
       {"batch_too_large/mutate-gate", {:error, {:batch_too_large, 1001, 1000}}, "batch_too_large",
        422, [:details]},
+      {"batch_too_large/delete-gate", {:error, {:delete_batch_too_large, 600, 500}},
+       "batch_too_large", 422, [:details]},
       {"forbidden_origin", {:error, :forbidden_origin}, "cors_forbidden", 403, []},
       {"csrf_required", {:error, :csrf_required}, "csrf_required", 403, []},
       {"rev_mismatch", {:error, :rev_mismatch}, "rev_mismatch", 409, []},
@@ -142,6 +152,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"unknown_mutation_verb",
        {:error, {:unknown_mutation_verb, ["frobnicate"], ["create", "patch"]}}, "malformed", 400,
        [:details]},
+      # The mutate door's `dryRun` was neither true nor false
+      # (task-ca600d55736bc9ca): refused, never read as a real write.
+      {"invalid_dry_run", {:error, {:invalid_dry_run, "yes"}}, "malformed", 400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
@@ -154,9 +167,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "invalid_filter", 400, [:details]},
       {"invalid_filter/legacy", {:error, {:invalid_filter, "price>10"}}, "invalid_filter", 400,
        [:details]},
+      {"malformed_filter_param", {:error, {:malformed_filter_param, "filter[["}},
+       "invalid_filter", 400, [:details]},
       {"forbidden_field", {:error, {:forbidden_field, "secret"}}, "forbidden_field", 422,
        [:details]},
       {"conflict", {:error, :conflict}, "conflict", 409, []},
+      {"versions_id_not_supported", {:error, {:versions_id_not_supported, "versions.r1.post-02"}},
+       "versions_id_not_supported", 422, [:details]},
       {"idempotency_key_in_use", {:error, :idempotency_key_in_use}, "idempotency_key_in_use", 409,
        []},
       # THE VETO — deterministic, 409, and it must NOT move when the outage arm
@@ -214,6 +231,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"changeset", {:error, changeset()}, "validation_failed", 422, [:details]},
       {"invalid_task_content", {:error, {:invalid_task_content, %{"kind" => ["is required"]}}},
        "validation_failed", 422, [:details]},
+      # A non-admin write changed a schema `readOnly` field (owner ruling #35).
+      {"read_only_fields", {:error, {:read_only_fields, ["key_id"]}}, "validation_failed", 422,
+       [:details]},
       # The mutate-path schema check's ENFORCE arm (task-41a740fd6701ec28).
       # Only reachable for a dataset that opted in; the DEFAULT advises and
       # never renders an envelope at all. Shares `validation_failed` + 422 +
@@ -223,10 +243,21 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"schema_validation_failed",
        {:error, {:schema_validation_failed, %{"title" => ["Required"]}}}, "validation_failed",
        422, [:details]},
+      # Same arm, PLUS the structured `finding()` list (task-1dac662bed153203):
+      # `findings` rides as a purely additive sibling key — `details`/`code`/
+      # `status` are byte-identical to the 2-tuple row above, which is exactly
+      # why this needs its OWN row rather than reusing that one's assertion.
+      {"schema_validation_failed/findings",
+       {:error,
+        {:schema_validation_failed, %{"title" => ["Required"]},
+         [%{path: "/title", message: "Required", code: :required, params: %{}}]}},
+       "validation_failed", 422, [:details, :findings]},
       {"invalid_schema_fields", {:error, {:invalid_schema_fields, :missing_name}},
        "validation_failed", 422, [:details]},
       {"schema_has_documents", {:error, {:schema_has_documents, 3}}, "schema_has_documents", 409,
        [:details]},
+      {"document_referenced", {:error, {:document_referenced, "a1", [%{id: "p1", type: "post"}]}},
+       "document_referenced", 409, [:details]},
       {"rate_limited", {:error, :rate_limited}, "rate_limited", 429, []},
       {"storage_unavailable", {:error, :storage_unavailable}, "storage_unavailable", 503, []},
       {"unsupported_media_type", {:error, :unsupported_media_type}, "unsupported_media_type", 422,

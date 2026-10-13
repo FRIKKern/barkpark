@@ -23,6 +23,12 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionForkHealTest do
   alias Barkpark.Media
   alias Barkpark.Plugins.Media.Assets
 
+  # Each upload appends a unique trailer after IEND (still a valid PNG):
+
+  # the v1 upload door answers repeated bytes with the existing asset
+
+  # (task-b6e57c37f6928344), and these tests need distinct assets.
+
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
   setup do
@@ -76,7 +82,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionForkHealTest do
 
   defp upload!(conn) do
     path = Path.join(System.tmp_dir!(), "fork-heal-#{:rand.uniform(1_000_000)}.png")
-    File.write!(path, Base.decode64!(@png_b64))
+    File.write!(path, Base.decode64!(@png_b64) <> "#{System.unique_integer([:positive])}")
     upload = %Plug.Upload{path: path, filename: "pixel.png", content_type: "image/png"}
 
     conn

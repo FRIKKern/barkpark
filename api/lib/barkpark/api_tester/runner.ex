@@ -48,10 +48,49 @@ defmodule Barkpark.ApiTester.Runner do
     %{method: endpoint.method, url: url, headers: headers, body_text: body_text}
   end
 
+  # Each value fills ONE path segment: everything but unreserved characters is
+  # percent-encoded, so a `/` in a form value cannot add segments and steer the
+  # request at another route (owner ruling #30 Q14).
   defp interpolate_path(template, path_params, form_state) do
     Enum.reduce(path_params, template, fn %{name: name}, acc ->
       value = Map.get(form_state, name, "")
-      String.replace(acc, "{#{name}}", URI.encode(value))
+      String.replace(acc, "{#{name}}", URI.encode(value, &URI.char_unreserved?/1))
+    end)
+  end
+
+  # THE LOOPBACK-ONLY LANE (owner ruling #30 Q14, 2026-10-03). This runner
+  # fires from the node to its own loopback address, so every request it sends
+  # passes `BarkparkWeb.Plugs.RequireLoopback`. The `:api_local` routes
+  # (/v1/data/local/*, /v1/internal/*) skip auth because only the co-located
+  # site/deploy tooling can reach them; a Studio user steering the runner
+  # there would bypass that. Any path that is, or resolves (dot segments) to,
+  # one of these lanes is refused before a request is built.
+  # `runner_build_test.exs` pins every `:api_local` route — a NEW one added
+  # to the router under neither prefix reds that test, which is the point:
+  # add the new prefix here rather than widen the test's own expectation.
+  @loopback_only_prefixes ["/v1/data/local/", "/v1/internal/"]
+
+  @doc "True when `path` (query ignored, dot segments resolved) is in the loopback-only lane."
+  @spec loopback_only_path?(String.t()) :: boolean()
+  def loopback_only_path?(path) when is_binary(path) do
+    resolved =
+      path
+      |> String.split("?", parts: 2)
+      |> hd()
+      |> String.split("/")
+      |> Enum.reduce([], fn
+        ".", acc -> acc
+        "..", [] -> []
+        "..", [_ | rest] -> rest
+        seg, acc -> [seg | acc]
+      end)
+      |> Enum.reverse()
+      |> Enum.join("/")
+
+    normalized = "/" <> String.trim_leading(resolved, "/") <> "/"
+
+    Enum.any?(@loopback_only_prefixes, fn prefix ->
+      String.starts_with?(resolved <> "/", prefix) or String.starts_with?(normalized, prefix)
     end)
   end
 
@@ -105,6 +144,28 @@ defmodule Barkpark.ApiTester.Runner do
     url = base <> tc.path
     headers = tc.headers
 
+    if loopback_only_path?(tc.path) do
+      refuse_loopback_only(tc, url, headers, body)
+    else
+      send_case(tc, opts, url, headers, body)
+    end
+  end
+
+  defp refuse_loopback_only(tc, url, headers, body) do
+    %{
+      status: 0,
+      headers: [],
+      body_text: "",
+      body_json: nil,
+      duration_ms: 0,
+      verdict: :error,
+      verdict_reason:
+        "refused: #{tc.path} is in the loopback-only lane, which the API tester never calls",
+      request: %{method: tc.method, url: url, headers: headers, body_text: body || ""}
+    }
+  end
+
+  defp send_case(tc, opts, url, headers, body) do
     started = System.monotonic_time(:millisecond)
 
     # Tests thread extra Req options (e.g. `req_options: [plug: {Req.Test, Stub}]`)

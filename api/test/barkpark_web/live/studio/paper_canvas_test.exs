@@ -493,13 +493,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
              "expected composite to STAY a boundary"
     end
 
-    # ── S3.5: the 7 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
+    # ── S3.5: the 8 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
 
     test "S3.5: a native field block INSIDE prose keeps the run whole (was split by the field)" do
-      # All 7 native field-* types are canvas-eligible (control-atoms), so each rides
+      # All 8 native field-* types are canvas-eligible (control-atoms), so each rides
       # the prose run rather than splitting it.
       for type <-
-            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color field-number) do
         fld = %{"id" => "x1", "type" => type, "value" => ""}
         blocks = [para("p1"), fld, para("p2")]
 
@@ -758,10 +758,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # attrs, edited by a non-PM textarea island — mirrors the code shape).
       assert PaperCanvas.canvas?(diagram("g"))
 
-      # S3.5: each of the 7 NATIVE field-* types is canvas-eligible (a control-atom:
+      # S3.5: each of the 8 NATIVE field-* types is canvas-eligible (a control-atom:
       # value in an attr, edited by a native control, coerced by field type).
       for type <-
-            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color field-number) do
         assert PaperCanvas.canvas?(%{"id" => "f", "type" => type, "value" => ""}),
                "expected #{type} to be canvas-eligible"
       end
@@ -984,6 +984,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       )
     end
 
+    # The footer's own text. The editor root also carries the hooks' strings map
+    # (`data-paper-strings`, task-e8a5c972b7720591), a dictionary keyed by these
+    # same tokens, so a whole-component match would read the dictionary, not the
+    # status.
+    defp footer_text(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-test-id="bp-paper-footer-save"]))
+      |> LazyHTML.text()
+    end
+
     # THE non-vacuous guard: reverting the footer to the literal "✓ Auto-saved"
     # makes THIS fail — a "Save failed" write can only surface verbatim if the
     # footer actually reads @save_status.
@@ -991,22 +1002,22 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       html = save_footer("Save failed")
 
       assert html =~ ~s(data-test-id="bp-paper-footer-save")
-      assert html =~ "Save failed"
+      assert footer_text(html) =~ "Save failed"
       # the old hardcoded calm token must NOT appear when the write failed
-      refute html =~ "✓ Auto-saved"
+      refute footer_text(html) =~ "✓ Auto-saved"
     end
 
     test "the calm 'Auto-saved' token keeps its premium ✓ affix" do
       html = save_footer("Auto-saved")
-      assert html =~ "✓ Auto-saved"
+      assert footer_text(html) =~ "✓ Auto-saved"
     end
 
     test "a fresh pre-write open (unassigned save_status ⇒ \"\") shows an empty, non-lying save region" do
       html = save_footer("")
       # the region is present and accessible, but carries no false 'Auto-saved'
       assert html =~ ~s(data-test-id="bp-paper-footer-save")
-      refute html =~ "Auto-saved"
-      refute html =~ "Save failed"
+      refute footer_text(html) =~ "Auto-saved"
+      refute footer_text(html) =~ "Save failed"
     end
 
     test "the save region is an accessible live status (role=status, aria-live=polite)" do
@@ -1103,8 +1114,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     test "flag OFF (explicit opt-out): the shipped per-block list stays byte-free of any preview markup" do
       # The canvas is the default now (D7/D9), so OFF is an EXPLICIT opt-out —
-      # `delete_env` would leave the canvas ON. Pin the opt-out value.
-      System.put_env("BARKPARK_PAPER_CANVAS", "0")
+      # `delete_env` would leave the canvas ON. Pin the opt-out value, and
+      # RESTORE it on exit: this describe has no restoring setup, and a bare
+      # put_env left "0" behind for every later module (it red the boundary
+      # insert focus test under seed 601949).
+      BarkparkWeb.PaperEditorTestHelpers.pin_paper_canvas!("0")
 
       html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
       refute html =~ "paper-task-preview"
@@ -1329,12 +1343,42 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.paper_relations(nil) == []
     end
 
-    test "visibility is derived from publish status (papers publish to /papers/:slug)" do
-      assert PaperCanvas.visibility_label("published") == "Public"
+    test "visibility is derived from publish status AND whether the anonymous reader serves the scope" do
+      assert PaperCanvas.visibility_label("published", true) == "Public"
+      # task-352b1074aba3f434: published where no anonymous reader serves it.
+      assert PaperCanvas.visibility_label("published", false) == "Members only"
       # "Draft" only — never "not public": the public reader fetches by exact
       # doc_id with NO status filter, so a stronger claim could lie.
-      assert PaperCanvas.visibility_label("draft") == "Draft"
-      refute PaperCanvas.visibility_label("draft") =~ "public"
+      assert PaperCanvas.visibility_label("draft", true) == "Draft"
+      assert PaperCanvas.visibility_label("draft", false) == "Draft"
+      refute PaperCanvas.visibility_label("draft", true) =~ "public"
+    end
+
+    test "public_reader?/3: Default on the papers dataset, or a scope with a :papers share" do
+      {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      assert PaperCanvas.public_reader?(default_ws, default_proj, "production")
+
+      other_ws =
+        Barkpark.TenancyFixtures.create_workspace!("vis-#{System.unique_integer([:positive])}")
+
+      other_proj =
+        Barkpark.TenancyFixtures.create_project!(
+          other_ws,
+          "vis-p-#{System.unique_integer([:positive])}"
+        )
+
+      Barkpark.SharingFixtures.snapshot_shares!()
+      Barkpark.SharingFixtures.clear_shares!()
+      refute PaperCanvas.public_reader?(other_ws, other_proj, "production")
+
+      Barkpark.SharingFixtures.plant_shares!(
+        "#{other_ws.slug}/#{other_proj.slug}/production:papers:read"
+      )
+
+      assert PaperCanvas.public_reader?(other_ws, other_proj, "production")
+
+      refute PaperCanvas.public_reader?(nil, other_proj, "production")
+      refute PaperCanvas.public_reader?(other_ws, nil, "production")
     end
   end
 
@@ -1365,6 +1409,22 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       render_component(&Components.paper_metadata_sidebar/1, Map.merge(base, assigns))
     end
 
+    test "a published paper says Public only when the scope has an anonymous reader" do
+      published = draft_paper(%{status: "published"})
+
+      html = render_sidebar(%{paper_doc: published, public_reader: true})
+      assert html =~ ~r/data-test-id="sidebar-visibility"[^>]*>\s*Public\s*</
+      refute html =~ "sidebar-visibility-why"
+
+      html = render_sidebar(%{paper_doc: published, public_reader: false})
+      assert html =~ ~r/data-test-id="sidebar-visibility"[^>]*>\s*Members only\s*</
+      assert html =~ "only members and share-link holders can read it"
+
+      # Unthreaded callers never claim Public.
+      html = render_sidebar(%{paper_doc: published})
+      assert html =~ "Members only"
+    end
+
     test "renders all five sections, each with a tabbable aria-expanded toggle" do
       html = render_sidebar(%{})
       assert html =~ ~s(data-test-id="paper-metadata-sidebar")
@@ -1390,7 +1450,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "a PUBLISHED paper shows Public visibility" do
-      html = render_sidebar(%{paper_doc: draft_paper(%{status: "published"})})
+      # In a scope the anonymous reader serves (task-352b1074aba3f434 made the
+      # caller say so; unthreaded, the sidebar no longer claims Public).
+      html =
+        render_sidebar(%{paper_doc: draft_paper(%{status: "published"}), public_reader: true})
+
       assert html =~ "published"
       assert html =~ "Public"
     end

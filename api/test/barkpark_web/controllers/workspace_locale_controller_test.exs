@@ -77,6 +77,29 @@ defmodule BarkparkWeb.WorkspaceLocaleControllerTest do
     assert Tenancy.workspace_locale(Tenancy.get_workspace_by_id(ws.id)) == "en"
   end
 
+  test "a plain member CAN read the workspace locale (task-9a82d5dc67e5b7e0)", %{
+    ws: ws,
+    project: project,
+    admin_raw: admin_raw,
+    member_raw: member_raw
+  } do
+    patch(req(admin_raw), locale_path(ws, project), Jason.encode!(%{locale: "nb-NO"}))
+
+    conn = get(req(member_raw), locale_path(ws, project))
+    assert %{"locale" => "nb-NO", "known_locales" => known} = json_response(conn, 200)
+    assert "nb-NO" in known
+    assert "en" in known
+  end
+
+  test "reading the locale of a workspace with no locale set answers the default", %{
+    ws: ws,
+    project: project,
+    member_raw: raw
+  } do
+    conn = get(req(raw), locale_path(ws, project))
+    assert %{"locale" => "en"} = json_response(conn, 200)
+  end
+
   test "the login page speaks the return_to workspace's language", %{ws: ws, project: project} do
     {:ok, _} = Tenancy.set_workspace_locale(ws, "nb-NO")
 

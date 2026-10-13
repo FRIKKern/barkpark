@@ -20,6 +20,12 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { PortableDoc } from '@barkpark/react'
+// The opt-in schema field blocks (task-7375ba22758155fa), registered so their
+// goldens count here like every core type.
+import { fieldBlocks } from '@barkpark/react/field-blocks'
+import { embedBlocks } from '@barkpark/react/embed'
+
+const OPT_IN = { ...fieldBlocks, ...embedBlocks() }
 import type { Block } from '@barkpark/react'
 
 interface GoldenFixture {
@@ -56,7 +62,7 @@ export default function ParityGrid() {
       <h1>PortableDoc × Next static-export parity ({fixtures.length} blocks)</h1>
       {fixtures.map((fx) => (
         <div key={fx.type} data-pd-type={fx.type}>
-          <PortableDoc value={[fx.input]} />
+          <PortableDoc value={[fx.input]} blocks={OPT_IN} />
         </div>
       ))}
     </main>

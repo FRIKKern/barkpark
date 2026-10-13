@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang={BarkparkWeb.StudioLocale.html_lang()} data-theme="dark">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -44,8 +44,13 @@
          load-bearing game semantics (phones and projector must agree on
          them), the game's OWN identity, not Studio chrome — the same class of
          documented exception as the terminal traffic dots. The theme manifest
-         has no game palette; Decision E keeps these quiz-scoped. */
-      --c0: #e2483d; --c1: #2b7fff; --c2: #f5a524; --c3: #2bb673; /* lit-allow */
+         has no game palette; Decision E keeps these quiz-scoped.
+         Contrast (WCAG): the tiles carry DARK ink, not white. White failed on
+         all four (2.04-4.01); dark ink reads at 5.2+ on every fill, still
+         4.5+ at the disabled opacity, and each tile stands 3:1+ off the
+         ground and the tally track. Pinned by quiz_answer_contrast_test. */
+      --c0: #e55d53; --c1: #3686ff; --c2: #f5a524; --c3: #2bb673; /* lit-allow */
+      --c-ink: #0e1614; /* lit-allow: answer-tile ink, contrast-pinned */
       margin: 0; background: var(--bg); color: var(--ink);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
       min-height: 100vh;
@@ -68,7 +73,7 @@
     @media (max-width: 560px) { .q-grid { grid-template-columns: 1fr; } }
     .q-choice {
       appearance: none; border: 0; cursor: pointer; text-align: left;
-      color: #fff; font-size: 1.1rem; font-weight: 600; padding: 22px 20px; /* lit-allow: white-on-quadrant is game vocabulary */
+      color: var(--c-ink); font-size: 1.1rem; font-weight: 600; padding: 22px 20px;
       border-radius: 14px; min-height: 88px; transition: transform .08s ease, filter .12s ease;
       font-family: inherit; width: 100%;
     }
@@ -78,6 +83,23 @@
     .q-choice[disabled] { cursor: default; opacity: 0.92; }
     .c0 { background: var(--c0); } .c1 { background: var(--c1); }
     .c2 { background: var(--c2); } .c3 { background: var(--c3); }
+    /* The tally on a tile reads in the tile's ink (ink-soft was 1.07-1.65). */
+    .q-choice .q-count { color: inherit; }
+    /* Shape cue, so colour is never the only signal: the same shape marks a
+       choice on the phone tile and on the host's tally row. Decorative —
+       the "/ ''" alt text keeps it out of the accessible name. */
+    .q-choice::before, .q-bar-label > span:first-child::before {
+      display: inline-block; width: 1.4em; font-weight: 400;
+    }
+    .q-choice.c0::before, .q-bar-row:has(.c0) .q-bar-label > span:first-child::before { content: "▲"; content: "▲" / ""; }
+    .q-choice.c1::before, .q-bar-row:has(.c1) .q-bar-label > span:first-child::before { content: "◆"; content: "◆" / ""; }
+    .q-choice.c2::before, .q-bar-row:has(.c2) .q-bar-label > span:first-child::before { content: "●"; content: "●" / ""; }
+    .q-choice.c3::before, .q-bar-row:has(.c3) .q-bar-label > span:first-child::before { content: "■"; content: "■" / ""; }
+    /* On the projector the shape wears its tile's fill (each 4.5:1+ on the ground). */
+    .q-bar-row:has(.c0) .q-bar-label > span:first-child::before { color: var(--c0); }
+    .q-bar-row:has(.c1) .q-bar-label > span:first-child::before { color: var(--c1); }
+    .q-bar-row:has(.c2) .q-bar-label > span:first-child::before { color: var(--c2); }
+    .q-bar-row:has(.c3) .q-bar-label > span:first-child::before { color: var(--c3); }
     /* Host tally bars */
     .q-bar-row { margin: 0 0 14px; }
     .q-bar-label { display: flex; justify-content: space-between; font-weight: 600; margin: 0 0 6px; }

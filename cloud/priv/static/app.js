@@ -273,6 +273,11 @@
     // link was opened more than an hour ago, by another account, or for another
     // team. Permanent for that link, so no transience verb; names the one act.
     install_state_invalid: "That GitHub install link was started by another account or team, or more than an hour ago, so Barkpark didn't record it. Start the install from Settings \u2192 Providers, then come back.",
+    // task-0cf611238d4ad597 CQ7a — the 422s on POST /v1/github/installations when
+    // the install came back without GitHub's user authorization, or GitHub
+    // refused it. Barkpark checks the install against your own GitHub account.
+    github_authorization_required: "GitHub didn't send an authorization with this install, so Barkpark can't check that it's yours. Connect GitHub again from Settings \u2192 Providers and approve the authorization GitHub asks for.",
+    github_authorization_failed: "GitHub refused the authorization for this install \u2014 it may have expired. Connect GitHub again from Settings \u2192 Providers.",
     suspended: "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.",
     // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
     // PROVES. This key used to read "Only the team owner can manage billing."
@@ -1523,15 +1528,16 @@
   }
 
   // ======================================================= TWO-FACTOR (GR52/GR55/GR56)
-  // Five password-free routes; the live session IS the gate (that same session
-  // can already DELETE the factor, so a password reconfirm would be theatre).
+  // Four session-gated routes; DELETE additionally needs proof (the current
+  // password OR a current code) while 2FA is on (task-e4cdc0f2e7766e1a), so a
+  // stolen session alone can no longer strip the second factor.
   //
   //   POST   /v1/account/two-factor/enroll          → {otpauth_uri, secret}
   //   POST   /v1/account/two-factor/confirm {code}  → {recovery_codes:[8]}
   //                                                 | 422 invalid_otp
   //                                                 | 422 not_enrolled
   //   GET    /v1/account/two-factor                 → {enabled}   (unused: free on /v1/me)
-  //   DELETE /v1/account/two-factor                 → {ok:true}
+  //   DELETE /v1/account/two-factor {current_password | otp} → {ok:true} | 401 reauth_failed
   //   POST   /v1/account/two-factor/recovery-codes  → {recovery_codes:[8]}
   //
   // SEVEN states, and EXACTLY TWO honest server errors. There is NO
@@ -1588,6 +1594,27 @@
     }
     if (status === 422 && code === "not_enrolled") {
       return "That setup is no longer pending. Start again to get a fresh secret.";
+    }
+    return null;
+  }
+
+  // Pure (task-e4cdc0f2e7766e1a): the proof body for DELETE /v1/account/two-factor.
+  // One field takes the password or an authenticator code. A six-digit entry is
+  // sent as BOTH (the server tries the password first), anything else only as
+  // the password, so a real password never spends the code budget.
+  function twoFactorOffProof(value) {
+    var v = String(value == null ? "" : value);
+    var body = { current_password: v };
+    if (/^\d{6}$/.test(v.trim())) body.otp = v.trim();
+    return body;
+  }
+
+  // Pure: the sentence for a 2FA turn-off refused for its PROOF (401
+  // reauth_failed), else null so the caller keeps the account-write seam
+  // (an expired session is a 401 too, and it is not a wrong password).
+  function twoFactorOffReauthCopy(status, data) {
+    if (status === 401 && data && data.error === "reauth_failed") {
+      return "That password or code didn't match. Enter your account password, or the six digits your authenticator app shows right now.";
     }
     return null;
   }
@@ -1872,25 +1899,31 @@
     var off = $("#a2f-disable");
     if (off) off.addEventListener("click", function () {
       // Grave but reversible → the danger-no-echo tier: btn-danger weight, no
-      // typed echo. The live session is the gate; no password reconfirm.
+      // typed echo. task-e4cdc0f2e7766e1a: the server now needs PROOF, not just
+      // the session — the current password OR a current authenticator code
+      // (an OAuth-only account has no password). One field takes either: a
+      // six-digit entry is sent as both, and the server tries the password
+      // first, so a real password never spends the code budget.
       openConfirmModal({
         tier: "danger",
         title: "Turn off two-factor authentication?",
         confirmLabel: "Turn it off",
         busyLabel: "Turning off…",
         bodyHtml: "Sign-in drops back to <b>password only</b>, and your unused recovery " +
-          "codes stop working immediately.",
+          "codes stop working immediately." +
+          '<label class="label" for="a2f-off-proof">Your password, or the code from your authenticator app</label>' +
+          '<input class="form-input" id="a2f-off-proof" type="password" autocomplete="current-password" spellcheck="false">',
         // Named so the recovery arm can RE-ISSUE the request, exactly as
         // confirmDisconnectProvider / runRemoveMember do. A recovery handler
         // that only calls busy() would spin the button forever on a dead end.
         onConfirm: function run(ctl) {
-          api("DELETE", "/v1/account/two-factor", null, { noBounce: true }).then(function (r) {
+          api("DELETE", "/v1/account/two-factor", twoFactorOffProof(($("#a2f-off-proof") || {}).value), { noBounce: true }).then(function (r) {
             if (r.ok) {
               a2fSetEnabled(false);
               ctl.succeed();
               openAccountModal(); // straight back to the account screen, now Off
             } else {
-              ctl.fail(accountWriteFailureCopy(r.status, r.data, "Couldn't turn two-factor off."), "Try again",
+              ctl.fail(twoFactorOffReauthCopy(r.status, r.data) || accountWriteFailureCopy(r.status, r.data, "Couldn't turn two-factor off."), "Try again",
                 function (again) { again.busy(); run(again); });
             }
           });
@@ -4681,7 +4714,11 @@
     var action = (params.get("setup_action") || "").trim();
     var id = (params.get("installation_id") || "").trim();
     if (action === "" && id === "") return null;
-    return { installation_id: id, setup_action: action };
+    // CQ7a: with "Request user authorization (OAuth) during installation" on,
+    // GitHub adds a one-time `code`. The server exchanges it to check the
+    // install belongs to this person; an absent code is the server's to refuse.
+    var code = (params.get("code") || "").trim();
+    return { installation_id: id, setup_action: action, code: code };
   }
 
   // Drop ONLY the two GitHub keys from the address bar, preserving every other
@@ -4692,7 +4729,7 @@
     if (typeof history === "undefined" || !history.replaceState) return;
     var kept = (location.search || "").replace(/^\?/, "").split("&").filter(function (kv) {
       var k = kv.split("=")[0];
-      return kv !== "" && k !== "installation_id" && k !== "setup_action" && k !== "state";
+      return kv !== "" && k !== "installation_id" && k !== "setup_action" && k !== "state" && k !== "code";
     });
     var qs = kept.length ? "?" + kept.join("&") : "";
     history.replaceState(null, "", (location.pathname || "/") + qs + "#settings/providers");
@@ -4736,6 +4773,9 @@
   // Setup-URL redirect (the plane sealed it into install_url). Read once at boot
   // by handleGithubInstallReturn, BEFORE the scrub drops it from the address bar.
   var githubInstallState = "";
+  // CQ7a: the one-time user-authorization code from the same redirect. Read once
+  // at boot beside the state, before the scrub drops it from the address bar.
+  var githubInstallCode = "";
 
   function githubInstallStateFromSearch(search) {
     try { return (new URLSearchParams(search || "").get("state") || "").trim(); }
@@ -4743,7 +4783,7 @@
   }
 
   function recordGithubInstall(id) {
-    return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState }).then(function (r) {
+    return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState, code: githubInstallCode }).then(function (r) {
       toast(githubInstallOutcome(r));
       // The install just proved the deployment IS configured (a 503 arm cannot
       // mint a 201), so the site screen's one-shot readiness band learns it for
@@ -4848,6 +4888,7 @@
     var ret = githubInstallReturnFromSearch(location.search);
     if (!ret) return false;
     githubInstallState = githubInstallStateFromSearch(location.search);
+    githubInstallCode = ret.code || "";
     scrubGithubInstallParams();
     if (!ret.installation_id) {
       toast(githubInstallUnconfirmedToast());
@@ -9533,6 +9574,15 @@
   // producer, deliberately — ticking a checkbox you ticked yourself is an
   // honest self-report; inventing an agent endpoint to observe it is the
   // "build the actor before deciding the effect" trap this wave refuses.
+  //
+  // task-71a5ed0d3734d592 (2026-10-08) — THE NEVER-WRITTEN "content" EVENT IS
+  // GONE, NOT JUST UNFIRED. `Accounts.published_doc?/1` is deleted, the OR
+  // described two paragraphs up no longer exists, and `content` itself was
+  // struck from `AgentEvent.@types` (it follows `backup`/`tls` out of the
+  // allowlist for the same reason: neither a producer nor a consumer). The
+  // step is reached ONLY through the ack control this paragraph already
+  // describes — nothing here changes, because the ack path was already the
+  // one real way in.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },
@@ -12227,6 +12277,12 @@
     }
     if (code === "limit_reached") {
       return "You're at your plan's support-server limit.";
+    }
+    // Owner ruling #37: the per-team cap on provisioned support servers (403).
+    if (code === "support_cap_reached") {
+      var cap = data && typeof data.cap === "number" ? data.cap : null;
+      return (cap === null ? "Your team is at its support-server cap." : "Your team is at its cap of " + cap + " support server" + (cap === 1 ? "" : "s") + ".") +
+        " Remove one, or ask Barkpark support to raise the cap.";
     }
     return friendly(data, "Couldn't add the support server — please try again.");
   }
@@ -23494,7 +23550,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 2 of the 60 declared verbs have no entry here: they render
+    // 2 of the 61 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -23538,6 +23594,7 @@
     "barkpark.self_update_triggered": "triggered a self-update",
     "barkpark.rollback_triggered": "triggered a rollback",
     "barkpark.autoupdate_changed": "changed autoupdate",
+    "barkpark.autoupdate_paused": "paused autoupdate after an update did not land",
     "barkpark.agent_key_delivered": "delivered a model key to a support box",
     "barkpark.domain_attached": "attached a domain to a Barkpark",
     "barkpark.vercel_deploy_triggered": "triggered a Vercel deploy",
@@ -32067,6 +32124,8 @@
       accountTwoFactorPhase: accountTwoFactorPhase, a2fBadgeState: a2fBadgeState,
       accountTwoFactorQrHtml: accountTwoFactorQrHtml,
       accountTwoFactorErrorCopy: accountTwoFactorErrorCopy,
+      twoFactorOffProof: twoFactorOffProof,
+      twoFactorOffReauthCopy: twoFactorOffReauthCopy,
       // gr-blk-a2fwire-coverage: the 2FA DOM mount + repaint seam. IMPURE and
       // exported by the same explicit permission as openModal/closeModal below
       // — the click -> api -> repaint chain had zero coverage, and driving the

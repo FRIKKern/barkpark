@@ -64,18 +64,26 @@ class BpDocumentPreview extends HTMLElement {
     return this.getAttribute("schema-name") || "";
   }
 
+  // The host's words (data-strings, keyed by the English); English otherwise.
+  // Plain text: escape it wherever it lands in HTML.
+  _t(text) {
+    let strings = {};
+    try { strings = JSON.parse(this.getAttribute("data-strings") || "{}") || {}; } catch (_e) { strings = {}; }
+    return typeof strings[text] === "string" ? strings[text] : text;
+  }
+
   _render() {
     const doc = this._doc();
     const schema = this._schema();
 
     if (!doc) {
       this.innerHTML =
-        '<div class="bp-dp-empty">No document selected</div>';
+        '<div class="bp-dp-empty">' + this._esc(this._t("No document selected")) + "</div>";
       return;
     }
     if (doc._parseError) {
       this.innerHTML =
-        '<div class="bp-dp-error">Could not parse document JSON</div>' +
+        '<div class="bp-dp-error">' + this._esc(this._t("Could not parse document JSON")) + "</div>" +
         '<pre class="bp-dp-json"><code>' +
         this._esc(doc._raw || "") +
         "</code></pre>";
@@ -102,7 +110,7 @@ class BpDocumentPreview extends HTMLElement {
     const c = (doc && doc.content) || {};
 
     // Title — top-level (Document.title is mirrored above content)
-    const title = doc.title || c.title || "Untitled";
+    const title = doc.title || c.title || this._t("Untitled");
 
     // Contributors — composite arrayOf with name/role
     const contribs = Array.isArray(c.contributors) ? c.contributors : [];
@@ -114,9 +122,9 @@ class BpDocumentPreview extends HTMLElement {
     const blurb = c.blurb || c.textContent || c.shortBlurb || "";
 
     const parts = [];
-    parts.push(this._field("Title", this._esc(title)));
-    parts.push(this._field("Type", "book"));
-    if (doc._id) parts.push(this._field("Document ID", this._esc(doc._id)));
+    parts.push(this._field(this._t("Title"), this._esc(title)));
+    parts.push(this._field(this._t("Type"), "book"));
+    if (doc._id) parts.push(this._field(this._t("Document ID"), this._esc(doc._id)));
 
     if (contribs.length) {
       const items = contribs
@@ -138,7 +146,7 @@ class BpDocumentPreview extends HTMLElement {
         .join("");
       parts.push(
         this._field(
-          "Contributors",
+          this._t("Contributors"),
           '<ul class="bp-dp-list">' + items + "</ul>"
         )
       );
@@ -164,7 +172,7 @@ class BpDocumentPreview extends HTMLElement {
         .join("");
       parts.push(
         this._field(
-          "Identifiers",
+          this._t("Identifiers"),
           '<ul class="bp-dp-list">' + items + "</ul>"
         )
       );
@@ -174,14 +182,14 @@ class BpDocumentPreview extends HTMLElement {
       const text =
         typeof blurb === "string" ? blurb : this._stringifyLocalized(blurb);
       if (text) {
-        parts.push(this._field("Blurb", '<p class="bp-dp-blurb">' + this._esc(text) + "</p>"));
+        parts.push(this._field(this._t("Blurb"), '<p class="bp-dp-blurb">' + this._esc(text) + "</p>"));
       }
     }
 
     // Always show the full content as a collapsible JSON dump for
     // anything not covered by the curated fields above.
     parts.push(
-      '<details class="bp-dp-raw"><summary>Full content (JSON)</summary>' +
+      '<details class="bp-dp-raw"><summary>' + this._esc(this._t("Full content (JSON)")) + "</summary>" +
         this._renderJson(doc) +
         "</details>"
     );

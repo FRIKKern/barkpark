@@ -72,12 +72,91 @@ defmodule Barkpark.Content.Writer do
   write door.
   """
   def validate_document(type, title, content, dataset, opts \\ []) do
+    case validate_document_findings(type, title, content, dataset, opts) do
+      {:ok, content, _warning_findings} -> {:ok, content}
+      {:error, errors, _findings, _warning_findings} -> {:error, errors}
+    end
+  end
+
+  @doc """
+  Same contract as `validate_document/5`, PLUS the `finding()` list
+  (`%{path:, message:, code:, params:}`, task-1dac662bed153203) behind the
+  same errors map — so a caller that wants to put `code`/`params` on the
+  wire (the HTTP `validation_failed` envelope) can, without `validate_document/5`
+  itself changing shape for its two other callers (`content/forms.ex`,
+  the Studio doc handler), who keep reading the plain `{:error, errors}` they
+  always have.
+
+  Walks the schema TWICE (once for the legacy string-keyed `errors`, once for
+  `check_findings/3`'s structured list) rather than deriving one from the
+  other, so `validate_document/5`'s wire-facing `errors` map stays the exact
+  bytes `Validation.validate/3` has always produced — no new grouping logic
+  to get subtly wrong.
+  """
+  @spec validate_document_findings(
+          String.t(),
+          String.t() | nil,
+          map() | nil,
+          String.t(),
+          keyword()
+        ) ::
+          {:ok, map() | nil, [Barkpark.Content.Validation.finding()]}
+          | {:error, map(), [Barkpark.Content.Validation.finding()],
+             [Barkpark.Content.Validation.finding()]}
+  def validate_document_findings(type, title, content, dataset, opts \\ []) do
     scope = Keyword.take(opts, [:workspace_id, :project_id])
 
     case Content.get_schema(type, dataset, scope) do
-      {:ok, schema} -> Barkpark.Content.Validation.validate(content, title, schema)
-      _ -> {:ok, content}
+      {:ok, schema} -> findings_for_schema(schema, title, content)
+      _ -> {:ok, content, []}
     end
+  end
+
+  # The "a schema was found" half of `validate_document_findings/5`, pulled
+  # out so `do_check_document_schema/4` (task-3c085ff3fc199ba7) can run the
+  # SAME validation after its OWN `Content.get_schema` call, instead of
+  # paying for a second one by calling the public function above — which
+  # would ALSO hide which outcome ("schema found, content valid" vs "no
+  # schema at all") produced an empty findings list, the distinction this
+  # task's unknown_type advisory needs.
+  defp findings_for_schema(schema, title, content) do
+    # task-292d6677b94916ef — the ERROR-level `validate/3` call alone
+    # decided `:ok` vs `:error` and, on `:ok`, returned immediately
+    # WITHOUT ever reading `check_findings/3`'s `warnings` half — so a
+    # document whose ONLY violated rule is `"level": "warning"` (an array
+    # max/min, or any other rule the schema marks advisory-only) produced
+    # zero findings at ALL, errors or warnings, and
+    # `do_check_document_schema/4`'s `{:ok, _content} -> :ok` branch never
+    # called `emit_schema_advisories/4`. `warning_findings` now rides on
+    # BOTH outcomes so the caller can advise on them regardless of
+    # whether the write also has an error-level problem.
+    %{errors: error_findings, warnings: warning_findings} =
+      Barkpark.Content.Validation.check_findings(content, title, schema)
+
+    # task-9754deb160e95a80 — the schema's cross-field rules ride the same
+    # door: error-level ones join the errors (ADVISE, or 422 on an enforcing
+    # dataset), warning-level ones only ever advise.
+    %{errors: cross_errors, warnings: cross_warnings} =
+      Barkpark.Content.Validation.cross_findings(content, title, schema)
+
+    warnings = warning_findings ++ cross_warnings
+
+    case {Barkpark.Content.Validation.validate(content, title, schema), cross_errors} do
+      {{:ok, content}, []} ->
+        {:ok, content, warnings}
+
+      {{:ok, _content}, cross_errors} ->
+        {:error, errors_by_field(%{}, cross_errors), cross_errors, warnings}
+
+      {{:error, errors}, cross_errors} ->
+        {:error, errors_by_field(errors, cross_errors), error_findings ++ cross_errors, warnings}
+    end
+  end
+
+  defp errors_by_field(errors, findings) do
+    Enum.reduce(findings, errors, fn f, acc ->
+      Map.update(acc, top_level_field(f.path), [f.message], &(List.wrap(&1) ++ [f.message]))
+    end)
   end
 
   @doc """
@@ -105,17 +184,29 @@ defmodule Barkpark.Content.Writer do
       returned. The write lands with the SAME status and the SAME bytes it
       landed with before this function existed.
     * `Validation.enforce?(dataset)` true (per-dataset opt-in) — returns
-      `{:error, {:schema_validation_failed, errors}}`, which
+      `{:error, {:schema_validation_failed, errors, findings}}`, which
       `Content.Errors.build/1` renders as 422 `validation_failed` with the
-      per-field errors in `details`. Nothing is written: this runs BEFORE the
+      per-field errors in `details` (byte-identical to before
+      task-1dac662bed153203) plus a parallel `findings` list carrying
+      `code`/`params` per finding. Nothing is written: this runs BEFORE the
       changeset on every branch that calls it.
 
-  A type with no schema, a schema with no validation rules, and content that
-  satisfies its schema all return `:ok` having queued nothing — the advisory
-  and the refusal fire only on content that breaks a DECLARED rule.
+  A schema with no validation rules, and content that satisfies its schema,
+  both return `:ok` having queued nothing — the advisory and the refusal
+  fire only on content that breaks a DECLARED rule.
+
+  A type with NO SCHEMA AT ALL (task-3c085ff3fc199ba7 — sanity.imageAsset,
+  sanity.previewUrlSecret, any Sanity-internal or just-not-yet-modeled type)
+  is NOT silent either: it gets the same ADVISE/ENFORCE treatment under the
+  finding code `unknown_type` (the same code `Validation`'s own richText
+  block-member check already uses for an unknown block `_type`), naming the
+  type and the dataset. Before this, such a write landed forever with no
+  signal at all — the exact silent-acceptance gap task-41a740fd6701ec28
+  closed for a DECLARED rule, left open for a type with no declaration.
   """
   @spec check_document_schema(String.t(), map(), String.t()) ::
-          :ok | {:error, {:schema_validation_failed, map()}}
+          :ok
+          | {:error, {:schema_validation_failed, map(), [Barkpark.Content.Validation.finding()]}}
   def check_document_schema(type, attrs, dataset) when is_binary(type) and is_binary(dataset) do
     enforce? = Barkpark.Content.Validation.enforce?(dataset)
 
@@ -147,25 +238,119 @@ defmodule Barkpark.Content.Writer do
 
   defp stamped_scope(_attrs), do: []
 
+  # System-internal types BARKPARK ITSELF writes with no declared schema, by
+  # design — this check exists for a STRANGER's undeclared type
+  # (sanity.imageAsset, sanity.previewUrlSecret), never the platform's own
+  # bookkeeping rows. Found by grepping every create_document/
+  # upsert_document call site for a literal or module-attribute type with
+  # no matching `priv/plugins/*/schemas/*.json` entry (task-3c085ff3fc199ba7
+  # safety pass, 2026-10-10):
+  #
+  #   tag             — Studio's label/tag registry (TagRegistry,
+  #                      studio_live/shared/paper.ex register_label/4)
+  #   task            — Barkpark's OWN task ledger (Barkpark.Tasks) — `bp
+  #                      task` itself would refuse EVERY write on an
+  #                      enforcing dataset without this exemption
+  #   listener        — fleet listener tracking (Barkpark.Tasks.Fleet)
+  #   form_submission — Forms plugin intake (Plugins.Forms.Contract,
+  #                      Plugins.Forms.Intake.create/2)
+  #   form_endpoint   — Forms plugin's sibling type, same Contract module,
+  #                      same no-schema shape; exempted defensively even
+  #                      though no direct create/upsert call site was found
+  #   ticket          — Tickets plugin (Plugins.Tickets.Thread) — found not
+  #                      by the manual grep above but by
+  #                      `SystemTypeExemptionCoverageTest`'s mechanical
+  #                      re-derivation of it, the day this list shipped —
+  #                      priv/plugins/tickets/ has no schemas/ directory
+  #                      at all, so this one would have refused every
+  #                      ticket create/reply on an enforcing dataset
+  #
+  # A NEW entry here needs the same grep first — this list is the record of
+  # that audit, not a guess. `system_types/0` below exposes it to
+  # `SystemTypeExemptionCoverageTest`, which re-runs that same grep as a
+  # mechanical census on every test run — a list is a SNAPSHOT, and that
+  # test is what keeps a newly-introduced schemaless write from silently
+  # falling outside it again (it is also what caught `ticket` above).
+  @system_types ~w(tag task listener form_submission form_endpoint ticket)
+
+  @doc false
+  @spec system_types() :: [String.t()]
+  def system_types, do: @system_types
+
+  defp do_check_document_schema(type, _attrs, _dataset, _enforce?) when type in @system_types,
+    do: :ok
+
   defp do_check_document_schema(type, attrs, dataset, enforce?) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     title = Map.get(attrs, "title") || Map.get(attrs, :title)
+    scope = stamped_scope(attrs)
 
-    case validate_document(type, title, content, dataset, stamped_scope(attrs)) do
-      {:ok, _content} ->
-        :ok
-
-      {:error, errors} when is_map(errors) and map_size(errors) > 0 ->
-        if enforce? do
-          {:error, {:schema_validation_failed, errors}}
-        else
-          emit_schema_advisories(type, attrs, errors)
-          :ok
-        end
+    # task-3c085ff3fc199ba7 — `Content.get_schema/3` read ONCE here (not via
+    # `validate_document_findings/5`, which would hide "no schema at all"
+    # behind the same `{:ok, content, []}` an existing-but-satisfied schema
+    # also returns, and would cost a SECOND read to tell them apart). A type
+    # Barkpark has never declared a schema for (sanity.imageAsset,
+    # sanity.previewUrlSecret, any other Sanity-internal or just-not-yet-
+    # modeled type) used to write silently forever — no advisory, nothing to
+    # enforce against, ever. It now gets the same ADVISE/ENFORCE treatment
+    # every other schema violation already has, under the finding code
+    # `unknown_type` (the SAME code `Validation`'s own richText block-member
+    # check already uses for the analogous "unknown block _type" case).
+    case Content.get_schema(type, dataset, scope) do
+      {:ok, schema} ->
+        dispatch_schema_outcome(
+          type,
+          attrs,
+          findings_for_schema(schema, title, content),
+          enforce?
+        )
 
       _ ->
-        :ok
+        dispatch_schema_outcome(type, attrs, unknown_type_outcome(type, dataset), enforce?)
     end
+  end
+
+  defp dispatch_schema_outcome(type, attrs, {:ok, _content, warning_findings}, _enforce?) do
+    # task-292d6677b94916ef — a write with NO error-level violation used to
+    # stop here with nothing emitted; a warning-level-only violation (an
+    # array max/min, or any other rule the schema marks advisory) was lost.
+    emit_warning_advisories(type, attrs, warning_findings)
+    :ok
+  end
+
+  defp dispatch_schema_outcome(
+         type,
+         attrs,
+         {:error, errors, findings, warning_findings},
+         enforce?
+       ) do
+    emit_warning_advisories(type, attrs, warning_findings)
+
+    if is_map(errors) and map_size(errors) > 0 do
+      if enforce? do
+        {:error, {:schema_validation_failed, errors, findings}}
+      else
+        emit_schema_advisories(type, attrs, errors, findings)
+        :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  # A type with no declared schema in this dataset — same `{:error, errors,
+  # findings, warning_findings}` shape `findings_for_schema/3` produces for
+  # an ordinary schema violation, so `dispatch_schema_outcome/4` above
+  # ADVISEs or ENFORCEs it through the exact same door, no new dispatch
+  # logic. The finding's path is the field-grouping convention
+  # `top_level_field/1` reads (`"/" <> name`): there is no field to name, so
+  # it names the document's own `_type`.
+  defp unknown_type_outcome(type, dataset) do
+    message =
+      "unknown type #{inspect(type)} — no schema is declared for it in dataset #{inspect(dataset)}"
+
+    finding = %{path: "/_type", message: message, code: :unknown_type, params: %{type_name: type}}
+    {:error, %{"_type" => [message]}, [finding], []}
   end
 
   # One advisory per offending FIELD, each naming the field and every rule it
@@ -175,21 +360,80 @@ defmodule Barkpark.Content.Writer do
   # error: promotion is charter-forbidden (D5). `Warnings.put/3` drops silently
   # when no collector opened the queue, so a Studio LiveView calling the writer
   # directly never grows one.
-  defp emit_schema_advisories(type, attrs, errors) do
+  #
+  # `findings` (task-3f46241a2a9c3656) is the SAME check_findings/3-derived
+  # list the ENFORCE arm above already carries — grouped here by top-level
+  # field (its `path`'s first segment) and attached as each entry's additive
+  # `findings:` key, the same path/message/code/params shape
+  # task-1dac662bed153203 standardized for the 422 `details`/`findings` pair.
+  # `message`/`errors` grouping is UNCHANGED; only a new key is added.
+  defp emit_schema_advisories(type, attrs, errors, findings) do
     pid = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || "(new)"
 
     errors
     |> Enum.sort_by(fn {field, _} -> to_string(field) end)
     |> Enum.each(fn {field, messages} ->
+      field_findings =
+        findings
+        |> Enum.filter(&(top_level_field(&1.path) == to_string(field)))
+        |> Enum.map(&finding_wire/1)
+
       Barkpark.Content.Warnings.put(
         "schema_validation",
         "#{type}/#{pid}: #{field} — #{messages |> List.wrap() |> Enum.join("; ")} " <>
           "(schema advisory; this dataset does not enforce schema validation)",
-        "warning"
+        "warning",
+        %{findings: field_findings}
       )
     end)
 
     :ok
+  end
+
+  # task-292d6677b94916ef — the parallel advisory path for findings that never
+  # reach `emit_schema_advisories/4` because `errors` (ERROR-level only) is
+  # empty: a warning-level-only rule violation (array max/min today; any rule
+  # the schema marks `"level": "warning"`). Fires regardless of `enforce?`,
+  # since a warning-level rule never blocks a write either way — it only ever
+  # feeds the advisory channel. Same grouped-by-field, `findings:`-keyed shape
+  # `emit_schema_advisories/4` uses, so a consumer reads both the same way.
+  defp emit_warning_advisories(_type, _attrs, []), do: :ok
+
+  defp emit_warning_advisories(type, attrs, warning_findings) do
+    pid = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || "(new)"
+
+    warning_findings
+    |> Enum.group_by(&top_level_field(&1.path))
+    |> Enum.sort_by(fn {field, _} -> to_string(field) end)
+    |> Enum.each(fn {field, field_findings} ->
+      messages = field_findings |> Enum.map(& &1.message) |> Enum.join("; ")
+      wire_findings = Enum.map(field_findings, &finding_wire/1)
+
+      Barkpark.Content.Warnings.put(
+        "schema_validation",
+        "#{type}/#{pid}: #{field} — #{messages} (schema advisory; warning-level rule)",
+        "warning",
+        %{findings: wire_findings}
+      )
+    end)
+
+    :ok
+  end
+
+  # A finding's `path` is always `"/" <> top-level-field-name[<rest>]` —
+  # `Validation.run_findings/4`'s own convention for both flat and v2 schemas
+  # (`top_path = "/" <> field.name`, nested paths extend it). Splitting on "/"
+  # and taking the first segment reads the field name regardless of nesting.
+  defp top_level_field("/" <> rest), do: rest |> String.split("/") |> List.first()
+  defp top_level_field(_), do: nil
+
+  # `Validation.finding()` (`%{path:, message:, code:, params:}`) onto the
+  # wire — the same shape `Barkpark.Content.Errors`'s `finding_wire/1` builds
+  # for the 422 `findings` array (task-1dac662bed153203), duplicated here
+  # rather than exposed cross-module since both are tiny, one-line transforms
+  # owned by the door that renders them.
+  defp finding_wire(%{path: path, message: message, code: code, params: params}) do
+    %{path: path, message: message, code: Atom.to_string(code), params: params}
   end
 
   @doc """
@@ -214,6 +458,7 @@ defmodule Barkpark.Content.Writer do
     # createOrReplace / createIfNotExists / replace) funnel through this one
     # function, so both gates cover the family rather than one instance.
     with :ok <- refuse_bare_id(attrs, :create),
+         :ok <- refuse_versions_id(attrs),
          :ok <- refuse_orphan_top_level_keys(attrs),
          :ok <- refuse_colliding_status(attrs) do
       do_create_document_from_attrs(type, attrs, dataset, opts)
@@ -493,8 +738,12 @@ defmodule Barkpark.Content.Writer do
               # BEFORE encryption, so an enforcing dataset refuses on the
               # PLAINTEXT content the caller actually sent.
               with :ok <- check_document_schema(type, attrs, dataset),
-                   {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
-                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+                   {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, existing.doc_id) do
+                enc_attrs =
+                  enc_attrs
+                  |> maybe_render_paper_body_html(type, dataset)
+                  |> keep_row_owner(existing, opts)
 
                 # [acrc-publish-atomicity-txn-boundary] The doc write and its
                 # `mutation_events` row land or fail TOGETHER. Before this wrap
@@ -538,7 +787,8 @@ defmodule Barkpark.Content.Writer do
               # `required` rule, so checking the pre-scaffold attrs would warn
               # about fields the schema itself just filled in.
               with :ok <- check_document_schema(type, attrs, dataset),
-                   {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                   {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, Map.get(attrs, "doc_id")) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
                 inject_write_fault!(:insert)
 
@@ -581,26 +831,111 @@ defmodule Barkpark.Content.Writer do
 
   Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
   insert failure. Used by the Studio's "Duplicate" header action.
+
+  `:title_suffix` (task-141c0bba8070ef02) replaces the English `" (copy)"`
+  with the caller's own (the Studio passes it in the workspace language). A
+  caller that passes it also gets an untitled source copied as untitled,
+  instead of the English `"Untitled (copy)"`. Without it the title is
+  exactly as before.
   """
   @spec clone_document(map(), String.t(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
   def clone_document(doc, type, dataset, opts \\ [])
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
+    {suffix, opts} = Keyword.pop(opts, :title_suffix)
     new_id = generate_id(type)
-    src_title = Map.get(doc, :title) || "Untitled"
-    src_content = Map.get(doc, :content) || %{}
+    {src_title, new_title} = copy_title(Map.get(doc, :title), suffix)
+    src_content = doc |> clone_content(type, dataset) |> retitle_copy(src_title, new_title)
 
     create_document(
       type,
       %{
         "doc_id" => new_id,
-        "title" => "#{src_title} (copy)",
+        "title" => new_title,
         "status" => "draft",
         "content" => src_content
       },
       dataset,
       opts
     )
+  end
+
+  defp copy_title(title, nil) do
+    src = title || "Untitled"
+    {src, "#{src} (copy)"}
+  end
+
+  defp copy_title(title, suffix) when is_binary(suffix) do
+    case title && String.trim(title) do
+      blank when blank in [nil, "", "Untitled"] -> {title, nil}
+      _ -> {title, title <> suffix}
+    end
+  end
+
+  # The copy's own title source must carry the copy's title. The row's title is
+  # re-derived from `content["title"]` on the next write, and a block write
+  # projects `content["title"]` from the stored block list (a field block bound
+  # to `title`, or a paper's locked title block), so a copy whose content still said the source
+  # title reverted to it on its first edit, and the desk showed two documents
+  # with the same name (task-970a40d1a252e649). Only a value that still equals the
+  # source title is changed.
+  # An untitled copy (a :title_suffix caller) keeps the source's own empty
+  # title source untouched: there is no copy title to write into it.
+  defp retitle_copy(content, _src_title, nil), do: content
+
+  defp retitle_copy(%{} = content, src_title, new_title) do
+    content
+    |> then(fn c ->
+      if Map.get(c, "title") == src_title, do: Map.put(c, "title", new_title), else: c
+    end)
+    |> then(fn c ->
+      case Map.get(c, "blocks") do
+        blocks when is_list(blocks) ->
+          Map.put(c, "blocks", Enum.map(blocks, &retitle_block(&1, src_title, new_title)))
+
+        _ ->
+          c
+      end
+    end)
+  end
+
+  defp retitle_copy(content, _src_title, _new_title), do: content
+
+  defp retitle_block(%{"role" => "title", "text" => text} = block, src_title, new_title)
+       when text == src_title,
+       do: Map.put(block, "text", new_title)
+
+  # A document's stored Beta block list binds the title field with its own
+  # value, which projects back onto content["title"] on the next block write.
+  defp retitle_block(%{"fieldName" => "title", "value" => value} = block, src_title, new_title)
+       when value == src_title,
+       do: Map.put(block, "value", new_title)
+
+  defp retitle_block(block, _src_title, _new_title), do: block
+
+  # A sealed field is bound to its document (owner ruling #18 bind half), so a
+  # copy written under a new id would be refused. Open the source's sealed
+  # values; the create seals them again for the copy. A value that does not
+  # open is left as it is and the create's own check refuses it.
+  defp clone_content(doc, type, dataset) do
+    content = Map.get(doc, :content) || %{}
+
+    case {Map.get(doc, :doc_id), content} do
+      {src_id, %{} = content} when is_binary(src_id) ->
+        case Encryption.unseal_for_copy(
+               content,
+               type,
+               dataset,
+               Map.get(doc, :workspace_id),
+               src_id
+             ) do
+          {:ok, plain} -> plain
+          :error -> content
+        end
+
+      _ ->
+        content
+    end
   end
 
   # ── Initial values (Sanity-style schema-declared defaults) ────────────────
@@ -729,16 +1064,35 @@ defmodule Barkpark.Content.Writer do
         # in `create_document/4` runs BEFORE this step; `apply_initial_values`
         # can deep-merge a schema-declared `content["blocks"]` that lacks ids
         # AFTER it. Re-run the SAME chokepoint so the final block list is always
-        # id-bearing. (No projection on this v1 path, so there is no body-mirror
-        # to keep in sync.) Additive + idempotent.
+        # id-bearing. Additive + idempotent. A create that carries a block list
+        # then projects it, as a patch does: bound fields, body and preview are
+        # stored at birth, not after the first save (task-b43256e0d9d90733).
         attrs
         |> apply_initial_values(type, dataset)
         |> maybe_ensure_block_ids()
+        |> maybe_project_created_content(dataset)
     end
   end
 
   defp scaffold_or_initial_values(attrs, type, dataset),
     do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset))
+
+  # Project-on-create, with one difference from a patch: a `body` the caller
+  # sent is kept. An importer that carries a rendered body beside blocks the
+  # projection cannot render (Sanity-shaped `_type`/`children`) would otherwise
+  # lose its text at birth.
+  defp maybe_project_created_content(attrs, dataset) do
+    given_body = attrs |> Map.get("content") |> body_given()
+    attrs = maybe_project_document_content(attrs, dataset)
+
+    case given_body do
+      {:ok, body} -> put_in(attrs, ["content", "body"], body)
+      :error -> attrs
+    end
+  end
+
+  defp body_given(%{"body" => body}), do: {:ok, body}
+  defp body_given(_content), do: :error
 
   # Build the scaffold block list from the schema's Expectation + provided
   # values, persist it under content["blocks"], and project. The row title
@@ -755,6 +1109,51 @@ defmodule Barkpark.Content.Writer do
       |> Map.put_new("title", Map.get(attrs, "title"))
       |> drop_nil_values()
 
+    case Map.get(provided, "blocks") do
+      [_ | _] = given ->
+        keep_given_blocks(attrs, provided, given, values, layout, prefill, dataset, schema)
+
+      _ ->
+        scaffold_blocks(attrs, provided, values, layout, prefill, dataset, schema)
+    end
+  end
+
+  # A create that carries its own block list authored the document: keep it
+  # (task-ca8ea94527d39fa0 — the scaffold used to replace it). Prefill fills
+  # only the layout fields the create leaves empty: bound by no given block and
+  # absent from the given content.
+  defp keep_given_blocks(attrs, provided, given, values, layout, prefill, dataset, schema) do
+    bound = for %{"fieldName" => name} <- given, is_binary(name), into: MapSet.new(), do: name
+
+    fills =
+      for %{"kind" => "field", "name" => name} <- layout,
+          not MapSet.member?(bound, name),
+          not Map.has_key?(values, name),
+          Map.has_key?(prefill, name),
+          into: %{},
+          do: {name, Map.get(prefill, name)}
+
+    blocks =
+      given
+      |> BlockOps.ensure_block_ids()
+      |> BlockOps.normalize_render_shapes()
+
+    content =
+      provided
+      |> Map.merge(fills)
+      |> Map.put("blocks", blocks)
+      |> Projection.project(blocks, doc_render_opts(dataset, schema.name, attrs))
+
+    content =
+      case body_given(provided) do
+        {:ok, body} -> Map.put(content, "body", body)
+        :error -> content
+      end
+
+    Map.put(attrs, "content", content)
+  end
+
+  defp scaffold_blocks(attrs, provided, values, layout, prefill, dataset, schema) do
     # R2 chokepoint (id-less backfill). `Synthesis.scaffold` mints synth ids for
     # every bound field-block, but the body region can be a caller-provided
     # `%{"blocks" => [...]}` reused VERBATIM (see `scaffold_body_blocks/2`) whose
@@ -965,6 +1364,24 @@ defmodule Barkpark.Content.Writer do
       else: attrs
   end
 
+  # OWNER RULING 2026-10-03 #9 — no claim-on-edit. An UPDATE keeps the row's
+  # STORED owner: `put_scope_attrs` stamps the acting user on every non-admin
+  # write, so without this one member's patch to the shared unowned base made
+  # the row theirs and hid it from every other member. Only creates stamp the
+  # actor. An admin (see-all) caller may still reassign with an explicit
+  # `owner_id`, as on create.
+  defp keep_row_owner(attrs, %Document{owner_id: stored}, opts) do
+    case Keyword.get(opts, :caller_context) do
+      %Barkpark.Content.CallerContext{is_admin: true} when is_map_key(attrs, "owner_id") ->
+        attrs
+
+      _ ->
+        if Map.has_key?(attrs, "owner_id") or Map.has_key?(attrs, :owner_id),
+          do: attrs |> Map.delete(:owner_id) |> Map.put("owner_id", stored),
+          else: attrs
+    end
+  end
+
   defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
     ctx = WriteScope.build_ctx(opts)
 
@@ -1069,10 +1486,12 @@ defmodule Barkpark.Content.Writer do
             %Document{} = existing ->
               # Field-encryption chokepoint (mirror of create_document). Fail
               # closed: a marked field that cannot be sealed rejects the write.
-              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+              with {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, existing.doc_id) do
                 enc_attrs =
                   enc_attrs
                   |> keep_row_scope(existing)
+                  |> keep_row_owner(existing, opts)
                   |> maybe_render_paper_body_html(type, dataset)
 
                 # [acrc-publish-atomicity-txn-boundary] The doc write and its
@@ -1099,7 +1518,8 @@ defmodule Barkpark.Content.Writer do
               end
 
             _ ->
-              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+              with {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, Map.get(attrs, "doc_id")) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
                 # [acrc-publish-atomicity-txn-boundary] See the update branch:
@@ -1533,7 +1953,9 @@ defmodule Barkpark.Content.Writer do
   # type has no encrypted field, passes through byte-identical (additive +
   # idempotent — see `Barkpark.Content.Encryption`). Called immediately before
   # every `Document.changeset` in both create and upsert.
-  defp maybe_encrypt_marked_fields(attrs, type, dataset)
+  # `doc_id` is the id of the row being written (the existing row on an update):
+  # new seals bind to it (owner ruling #18 bind half, task-7cdf86a62a1d8c08).
+  defp maybe_encrypt_marked_fields(attrs, type, dataset, doc_id)
        when is_binary(type) and is_binary(dataset) do
     case Map.get(attrs, "content") do
       content when is_map(content) ->
@@ -1549,9 +1971,21 @@ defmodule Barkpark.Content.Writer do
         # unscoped write) → the NULL-workspace DEK.
         # The same stamped scope also picks the SCHEMA, so the type resolves
         # in the document's own workspace, never Default's.
-        case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs)) do
-          {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
-          {:error, _} = err -> err
+        # Owner ruling #21: the body may not bind a field the schema keeps
+        # private (`BoundFieldGuard`) — checked on the same stamped scope.
+        with :ok <-
+               Barkpark.Content.BoundFieldGuard.check(
+                 content,
+                 type,
+                 dataset,
+                 stamped_scope(attrs)
+               ) do
+          case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs),
+                 doc_id: doc_id
+               ) do
+            {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
+            {:error, _} = err -> err
+          end
         end
 
       _ ->
@@ -1564,7 +1998,7 @@ defmodule Barkpark.Content.Writer do
   # resolution (`WriteScope.put_scope_attrs` → `owner_scoped?` → `get_schema`)
   # already fails closed on a non-binary dataset, and the mutate route's
   # `:dataset` is a path param (always binary). So this is a plain no-op.
-  defp maybe_encrypt_marked_fields(attrs, _type, _dataset), do: {:ok, attrs}
+  defp maybe_encrypt_marked_fields(attrs, _type, _dataset, _doc_id), do: {:ok, attrs}
 
   # ── Envelope coercion + id/rev generation ─────────────────────────────────
 
@@ -1788,6 +2222,43 @@ defmodule Barkpark.Content.Writer do
   # Malformed op payloads (a non-map `setIfMissing`, say) are ignored rather
   # than fatal everywhere else in this path; keep that.
   def refuse_bare_id(_attrs, _door), do: :ok
+
+  # task-078175e759f71b73 — Sanity's Content Releases id convention,
+  # `versions.<releaseId>.<documentId>`, has no analog here: there is no
+  # release/version-set entity to resolve it against. `DraftId.draft_id/1`
+  # would otherwise prepend "drafts." onto the WHOLE string unmodified,
+  # storing `drafts.versions.r1.post-02` as an ordinary document — an
+  # address nobody asked for and nothing resolves back to the release or
+  # the real document id. Checked on the RAW caller-supplied id (before
+  # `DraftId.draft_id/1` prefixes it) and after stripping any `drafts.`
+  # prefix the caller already sent, so `versions.r1.post-02` and
+  # `drafts.versions.r1.post-02` are refused identically. Named-code error
+  # (not the generic `unknown_fields` shape `refuse_bare_id` above uses):
+  # see `Errors.build/1`'s `versions_id_not_supported` clause.
+  @doc false
+  def refuse_versions_id(attrs) do
+    # Checked BEFORE `from_envelope/2` runs (that call sits inside
+    # `do_create_document_from_attrs/4`, after every gate in the `with`
+    # chain `admitted_create_document/4` runs first) — so a caller's
+    # Sanity-style `"_id"` has not been promoted to `"doc_id"` yet. Read
+    # both, `doc_id` first, matching `from_envelope/2`'s own precedence for
+    # the shape it is about to apply.
+    id =
+      Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) ||
+        Map.get(attrs, "_id") || Map.get(attrs, :_id)
+
+    case id do
+      id when is_binary(id) ->
+        if String.starts_with?(DraftId.published_id(id), "versions.") do
+          {:error, {:versions_id_not_supported, id}}
+        else
+          :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
 
   # Same `validation_failed` / `unknown_fields` envelope the orphan-key refusal
   # uses, so a machine consumer keys on one field for both routing refusals.

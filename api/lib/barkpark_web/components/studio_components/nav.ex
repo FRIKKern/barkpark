@@ -24,14 +24,44 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :flash, :map, required: true
 
   def studio_flash(assigns) do
+    # Always rendered (task-51cc4c46e1076bd6): a flash that inserted its own
+    # node into .studio-shell landed before the id-keyed #studio-panes, the
+    # patch moved the panes to make room, and whatever was focused inside them
+    # (the Publiser button that raised the flash) lost focus to <body>. A
+    # stable container is filled instead, so the panes never move.
     ~H"""
-    <%= if Phoenix.Flash.get(@flash, :info) do %>
-      <div class="flash flash-info" role="status" aria-live="polite" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
-    <% end %>
-    <%= if Phoenix.Flash.get(@flash, :error) do %>
-      <div class="flash flash-error" role="alert" aria-live="assertive" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
-    <% end %>
+    <div id="studio-flash" class="studio-flash">
+      <%= if Phoenix.Flash.get(@flash, :info) do %>
+        <div class="flash flash-info" role="status" aria-live="polite" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
+      <% end %>
+      <%= if Phoenix.Flash.get(@flash, :error) do %>
+        <div class="flash flash-error" role="alert" aria-live="assertive" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
+      <% end %>
+    </div>
     """
+  end
+
+  # The update script's status words, keyed by the English it falls back to;
+  # %{slots} are left for the script to fill.
+  defp update_strings do
+    Jason.encode!(%{
+      "Updating…" => gettext("Updating…"),
+      "Starting update…" => gettext("Starting update…"),
+      "Update now" => gettext("Update now"),
+      "Taking longer than expected — reload to check." =>
+        gettext("Taking longer than expected — reload to check."),
+      "Updated to %{release} — reloading…" =>
+        gettext("Updated to %{release} — reloading…", release: "%{release}"),
+      "Update failed (exit %{code}) — check server logs." =>
+        gettext("Update failed (exit %{code}) — check server logs.", code: "%{code}"),
+      "Updated — reloading…" => gettext("Updated — reloading…"),
+      "Rebuilding…" => gettext("Rebuilding…"),
+      "Not authorised — sign in as an admin and retry." =>
+        gettext("Not authorised — sign in as an admin and retry."),
+      "Rebuilding & restarting…" => gettext("Rebuilding & restarting…"),
+      "One-click update isn't enabled on this instance." =>
+        gettext("One-click update isn't enabled on this instance.")
+    })
   end
 
   @doc """
@@ -77,12 +107,16 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         data-release={@update_status.latest_release}
         data-apply={to_string(@apply_enabled?)}
         data-token={@api_token_raw}
+        data-strings={update_strings()}
       >
         <div class="bp-update-bar-main">
           <span class="bp-update-dot" aria-hidden="true"></span>
           <span class="bp-update-msg">
-            New update available — Barkpark <strong><%= @update_status.latest_release %></strong>
-            <span class="bp-update-run">· you run <%= @update_status.running_release %></span>
+            <%= gettext("New update available — Barkpark") %>
+            <strong><%= @update_status.latest_release %></strong>
+            <span class="bp-update-run">
+              <%= gettext("· you run %{release}", release: @update_status.running_release) %>
+            </span>
           </span>
           <span class="bp-update-status" data-bp-update-status role="status" aria-live="polite"></span>
           <div class="bp-update-actions">
@@ -94,10 +128,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
                 data-bp-update-target="bp-update-changelog"
                 aria-expanded="false"
                 aria-controls="bp-update-changelog"
-              >What's changed</button>
+              ><%= gettext("What's changed") %></button>
             <% end %>
             <%= if @apply_enabled? do %>
-              <button type="button" class="bp-update-btn" data-bp-update-action="apply">Update now</button>
+              <button type="button" class="bp-update-btn" data-bp-update-action="apply"><%= gettext("Update now") %></button>
             <% else %>
               <button
                 type="button"
@@ -106,14 +140,14 @@ defmodule BarkparkWeb.StudioComponents.Nav do
                 data-bp-update-target="bp-update-howto"
                 aria-expanded="false"
                 aria-controls="bp-update-howto"
-              >How to update</button>
+              ><%= gettext("How to update") %></button>
             <% end %>
             <button
               type="button"
               class="bp-update-dismiss"
               data-bp-update-action="dismiss"
-              aria-label="Dismiss update notice"
-              title="Dismiss"
+              aria-label={gettext("Dismiss update notice")}
+              title={gettext("Dismiss")}
             >×</button>
           </div>
         </div>
@@ -137,21 +171,25 @@ defmodule BarkparkWeb.StudioComponents.Nav do
                 href={@update_status.notes_url}
                 target="_blank"
                 rel="noopener noreferrer"
-              >Full release notes ↗</a>
+              ><%= gettext("Full release notes ↗") %></a>
             <% end %>
           </div>
         <% end %>
         <%= unless @apply_enabled? do %>
           <div id="bp-update-howto" class="bp-update-changelog" hidden>
-            One-click update isn't enabled on this instance. Deploy it with <code>git pull</code>
-            on the server (the post-merge hook rebuilds &amp; restarts), or set
-            <code>BARKPARK_SELF_UPDATE_APPLY=1</code> to turn on the button here.
+            <%= gettext("One-click update isn't enabled on this instance. Deploy it with") %>
+            <code>git pull</code>
+            <%= gettext("on the server (the post-merge hook rebuilds & restarts), or set") %>
+            <code>BARKPARK_SELF_UPDATE_APPLY=1</code>
+            <%= gettext("to turn on the button here.") %>
           </div>
         <% end %>
         <%= if @update_status.canonical_release do %>
           <div class="bp-update-fork">
-            Your fork's upstream, open-source Barkpark, is further ahead at
-            <%= @update_status.canonical_release %> — consider syncing the fork.
+            <%= gettext(
+              "Your fork's upstream, open-source Barkpark, is further ahead at %{release} — consider syncing the fork.",
+              release: @update_status.canonical_release
+            ) %>
           </div>
         <% end %>
       </div>
@@ -160,8 +198,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       <div id="bp-update-fork-only" class="bp-update-bar bp-update-bar--muted">
         <div class="bp-update-bar-main">
           <span class="bp-update-msg bp-update-run">
-            Current with your fork — but open-source Barkpark is ahead at
-            <%= @update_status.canonical_release %>; consider syncing the fork.
+            <%= gettext(
+              "Current with your fork — but open-source Barkpark is ahead at %{release}; consider syncing the fork.",
+              release: @update_status.canonical_release
+            ) %>
           </span>
         </div>
       </div>
@@ -287,6 +327,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     ~H"""
     <div
       class="studio-footer"
+      role="contentinfo"
       style="flex: none; padding: 4px 16px; font-size: 11px; color: var(--fg-dim); border-top: 1px solid var(--border);"
     >
       <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span><%= render_slot(@vitals) %>
@@ -297,7 +338,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   @doc """
   Sign-out form for the Studio topbar. POSTs to `logout_path` (default
   `/logout`). Renders byte-identical to the legacy inline form in
-  `studio.html.heex`. Caller wraps with `:if={assigns[:api_token]}` —
+  `studio.html.heex`. Caller wraps with `:if={assigns[:api_token] || assigns[:current_user]}` —
   the component itself does NOT guard, so an empty `<div class="studio-bar-actions">`
   wrapper does not leak into the topbar when no api_token is set.
 
@@ -312,7 +353,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       <.form :let={_f} for={%{}} as={:session} action={@logout_path} method="post">
         <%!-- Icon-only (Sanity-style right rail); the accessible name and
               tooltip both say "Sign out". --%>
-        <button type="submit" class="btn btn-ghost btn-sm" aria-label="Sign out" title="Sign out">
+        <button type="submit" class="btn btn-ghost btn-sm" aria-label={gettext("Sign out")} title={gettext("Sign out")}>
           <.icon name="log-out" size={15} />
         </button>
       </.form>
@@ -340,8 +381,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         class="btn btn-ghost btn-sm theme-toggle"
         phx-hook="ThemeToggle"
         phx-update="ignore"
-        aria-label="Toggle dark / light theme"
-        title="Toggle dark / light theme"
+        aria-label={gettext("Toggle dark / light theme")}
+        title={gettext("Toggle dark / light theme")}
       >
         <span class="theme-toggle-sun"><.icon name="sun" size={16} /></span>
         <span class="theme-toggle-moon"><.icon name="moon" size={16} /></span>
@@ -381,6 +422,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :current_path, :string, default: nil
   attr :admin?, :boolean, default: false
   attr :workspace_id, :string, default: nil
+  # Whether the viewer passes the `:ops` gate (`LiveAuth.ops_access?/2`). A
+  # tab to an ops-gated route is left out for a viewer who would be bounced
+  # with "Operator access required" (task-f859c5f7f3a0f9f5). Defaults to true,
+  # so a caller that does not say keeps every tab.
+  attr :ops?, :boolean, default: true
 
   def studio_tabs(assigns) do
     # `:workspace_id` threads the current workspace into the resolver ctx so
@@ -410,10 +456,15 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         _, _ -> baseline
       end
 
+    tabs =
+      if assigns[:ops?] == false,
+        do: Enum.reject(tabs, &BarkparkWeb.LiveAuth.ops_gated_path?(&1[:path])),
+        else: tabs
+
     assigns = assign(assigns, :tabs, tabs)
 
     ~H"""
-    <div class="studio-bar-tabs">
+    <div class="studio-bar-tabs" role="navigation" aria-label={gettext("Studio sections")}>
       <%= for tab <- @tabs do %>
         <% active = plugin_tab_active?(tab, @current_path) %>
         <%!-- Icons-only top bar (sup-w1): the glyph carries the meaning, the
@@ -438,12 +489,17 @@ defmodule BarkparkWeb.StudioComponents.Nav do
               uses for its label. Anything without the flag renders exactly as
               before. --%>
         <%= if tab[:disabled] do %>
+          <%!-- role="link": it stands in for the tab's link, and aria-label
+                is prohibited on a role-less span (axe aria-prohibited-attr,
+                task-5907c5d41ac77c8b). No href or tabindex, so it stays a
+                non-link; assistive tech reads "link, unavailable" + reason. --%>
           <span
             class="studio-tab studio-tab-disabled"
+            role="link"
             aria-disabled="true"
             style="opacity:0.45;cursor:not-allowed;"
-            title={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
-            aria-label={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
+            title={"#{tab_label(tab.label)} — #{disabled_reason(tab)}"}
+            aria-label={"#{tab_label(tab.label)} — #{disabled_reason(tab)}"}
             data-test-id="top-menu-tab-disabled"
           ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></span>
         <% else %>
@@ -451,8 +507,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
             href={tab.path}
             class={"studio-tab #{if active, do: "active"}"}
             aria-current={if active, do: "page"}
-            title={tab.label}
-            aria-label={tab.label}
+            title={tab_label(tab.label)}
+            aria-label={tab_label(tab.label)}
             data-test-id="top-menu-tab"
           ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
         <% end %>
@@ -460,6 +516,37 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     </div>
     """
   end
+
+  @doc """
+  A top-menu tab's name in the viewer's Studio language. Tab labels are DATA
+  (the host's built-ins below and every plugin's `top_menu_entries/0`), kept
+  English so nav-parity checks compare one vocabulary; the name is translated
+  only where it is shown. A label this map does not know (a new plugin's)
+  reads as written.
+  """
+  @spec tab_label(String.t()) :: String.t()
+  def tab_label("Media"), do: gettext("Media")
+  def tab_label("API"), do: gettext("API")
+  def tab_label("Style"), do: gettext("Style")
+  def tab_label("Connectors"), do: gettext("Connectors")
+  def tab_label("Settings"), do: gettext("Settings")
+  def tab_label("Projects"), do: gettext("Projects")
+  def tab_label("Fleet"), do: gettext("Fleet")
+  def tab_label("Tickets"), do: gettext("Tickets")
+  def tab_label("Tasks"), do: gettext("Tasks")
+  def tab_label("Quizzes"), do: gettext("Quizzes")
+  def tab_label("Form submissions"), do: gettext("Form submissions")
+  def tab_label("chat"), do: gettext("chat")
+  def tab_label(label), do: label
+
+  # A disabled tab's reason in the viewer's language. The registry sends the
+  # enabling workspace as data (`enabled_in`, task-aa4f50a406951fae) beside its
+  # English `reason` sentence; the sentence is the fallback for an entry that
+  # carries no `enabled_in`.
+  defp disabled_reason(%{enabled_in: workspace}) when is_binary(workspace) and workspace != "",
+    do: gettext("Disabled in this workspace — enabled in %{workspace}", workspace: workspace)
+
+  defp disabled_reason(tab), do: tab[:reason] || gettext("Disabled in this workspace")
 
   @doc """
   The canonical Studio nav model: the host's built-in top-menu tabs in
@@ -761,6 +848,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   exactly one `.studio-bar` with 10 `.studio-tab` anchors in it.
 
   The `id` is required because LiveView refuses a `phx-hook` without one.
+
+  ## Why it is the banner
+
+  The bar is the page's site header, so it is `role="banner"`: the workspace
+  switcher, the tool tabs and the presence avatars then sit in a landmark, and a
+  screen reader jumps to them like any other region (task-6e6de3764438c5cf).
+  Studio renders no other banner.
   """
   slot :brand
   slot :tabs
@@ -768,7 +862,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   def studio_topbar(assigns) do
     ~H"""
-    <div class="studio-bar" id="studio-bar" phx-hook="PressAnswer">
+    <div
+      class="studio-bar"
+      id="studio-bar"
+      role="banner"
+      phx-hook="PressAnswer"
+      data-press-strings={press_answer_strings()}
+    >
       <%= render_slot(@brand) %>
       <%= render_slot(@tabs) %>
       <%= for a <- @actions do %><%= render_slot(a) %><% end %>
@@ -783,13 +883,38 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   caller needs a different shell (rare — kept as an escape hatch).
   """
   attr :class, :string, default: "studio-shell"
+  # JSON {type => word} for the client pickers (task-a3bedc86f8a6a517).
+  attr :type_labels, :string, default: nil
   slot :inner_block, required: true
 
   def studio_shell(assigns) do
     ~H"""
-    <div class={@class}>
+    <div class={@class} data-type-labels={@type_labels}>
       <%= render_slot(@inner_block) %>
     </div>
     """
+  end
+
+  # The press answer's words in the Studio's language (task-24a481a493ad60d7),
+  # keyed by the English the PressAnswer hook falls back to.
+  defp press_answer_strings do
+    Jason.encode!(%{
+      "Opened “%{name}”." => gettext("Opened “%{name}”.", name: "%{name}"),
+      "Opened." => gettext("Opened."),
+      "Selected “%{name}”." => gettext("Selected “%{name}”.", name: "%{name}"),
+      "Selected." => gettext("Selected."),
+      "Opening “%{name}”…" => gettext("Opening “%{name}”…", name: "%{name}"),
+      "Opening…" => gettext("Opening…"),
+      "That press did not reach the server — press it again." =>
+        gettext("That press did not reach the server — press it again."),
+      "Working on “%{name}”…" => gettext("Working on “%{name}”…", name: "%{name}"),
+      "Working…" => gettext("Working…"),
+      "Still working on your last press — that one was not sent." =>
+        gettext("Still working on your last press — that one was not sent."),
+      "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived." =>
+        gettext(
+          "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+        )
+    })
   end
 end

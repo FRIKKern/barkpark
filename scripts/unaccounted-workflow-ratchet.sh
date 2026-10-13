@@ -69,7 +69,7 @@
 # first moves at 8d94b7a00 (#20042, the absent-context census fires on producer
 # completion): `absent-context-census.yml` left the list because that PR gave its
 # job name a status in the spec. Good news, recorded here so the ratchet holds it.
-BASELINE=21
+BASELINE=20
 
 set -uo pipefail
 

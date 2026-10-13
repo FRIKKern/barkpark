@@ -86,6 +86,23 @@ test("formatDisplay: general path and mismatches fall back to displayValue", () 
   assert.equal(formatDisplay(null, "percent"), "");
 });
 
+test("formatDisplay: per-cell currency (cur) selects the matching symbol/placement (task-4fb1d8de887d8bc6)", () => {
+  // Prefix currencies — the pre-existing "$" shape.
+  assert.equal(formatDisplay(1234.5, "currency", "USD"), "$1,234.50");
+  assert.equal(formatDisplay(1234.5, "currency"), "$1,234.50"); // absent cur == USD
+  assert.equal(formatDisplay(1234.5, "currency", "EUR"), "€1,234.50");
+  assert.equal(formatDisplay(1234.5, "currency", "GBP"), "£1,234.50");
+  // Scandinavian currencies — suffix "kr", sign at the very front.
+  assert.equal(formatDisplay(1234.5, "currency", "NOK"), "1,234.50 kr");
+  assert.equal(formatDisplay(-2, "currency", "NOK"), "-2.00 kr");
+  assert.equal(formatDisplay(1234.5, "currency", "SEK"), "1,234.50 kr");
+  assert.equal(formatDisplay(1234.5, "currency", "DKK"), "1,234.50 kr");
+  // Unrecognized cur is the pre-existing implicit USD.
+  assert.equal(formatDisplay(1234.5, "currency", "XXX"), "$1,234.50");
+  // cur is ignored by every class but currency.
+  assert.equal(formatDisplay(0.25, "percent", "NOK"), "25.00%");
+});
+
 test("isHttpUrl: only a whole http(s) URL detects; hostile vectors reject", () => {
   // Positive: whole-string http(s) URLs (scheme case-insensitive).
   assert.equal(isHttpUrl("http://example.com"), true);

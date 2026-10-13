@@ -30,6 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
   alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
+  alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -72,23 +73,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   def editor_mode_toggle(assigns) do
     ~H"""
-    <div class="editor-mode-toggle" role="group" aria-label="Editor mode" data-test-id="editor-mode-toggle">
+    <div class="editor-mode-toggle" role="group" aria-label={gettext("Editor mode")} data-test-id="editor-mode-toggle">
       <button
         type="button"
         class={"btn btn-sm " <> if(@mode == :classic, do: "btn-primary", else: "btn-ghost")}
         phx-click="editor-set-mode"
         phx-value-mode="classic"
-        aria-pressed={@mode == :classic}
+        aria-pressed={to_string(@mode == :classic)}
         data-test-id="editor-mode-classic"
-      >Classic</button>
+      ><%= gettext("Classic") %></button>
       <button
         type="button"
         class={"btn btn-sm " <> if(@mode == :beta, do: "btn-primary", else: "btn-ghost")}
         phx-click="editor-set-mode"
         phx-value-mode="beta"
-        aria-pressed={@mode == :beta}
+        aria-pressed={to_string(@mode == :beta)}
         data-test-id="editor-mode-beta"
-      >Beta</button>
+      ><%= gettext("Beta") %></button>
     </div>
     """
   end
@@ -194,21 +195,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     >
       <p>{@notice}</p>
       <p>
-        Download the preserved canvas draft fragments before reloading. This recovery file preserves
-        the affected canvas data; it is not a complete document export.
+        <%= gettext("Download the preserved canvas draft fragments before reloading. This recovery file preserves the affected canvas data; it is not a complete document export.") %>
       </p>
       <button
         type="button"
         data-paper-canvas-export-draft
         data-paper-editor-target={"paper-editor-#{@slug}"}
       >
-        Download preserved canvas draft
+        <%= gettext("Download preserved canvas draft") %>
       </button>
       <details data-test-id="paper-canvas-recovery-controls">
-        <summary>Recovery options</summary>
-        <p>Reload only after reviewing the frozen draft; this permanently discards unsaved local edits.</p>
+        <summary><%= gettext("Recovery options") %></summary>
+        <p><%= gettext("Reload only after reviewing the frozen draft; this permanently discards unsaved local edits.") %></p>
         <button type="button" data-test-id="paper-canvas-reload-server">
-          Discard local edits and reload the server version
+          <%= gettext("Discard local edits and reload the server version") %>
         </button>
       </details>
     </div>
@@ -216,6 +216,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       id={"paper-editor-#{@slug}"}
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
+      data-paper-strings={BarkparkWeb.StudioLocale.component_strings(:paper_hooks)}
       data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@slug}"}
       data-paper-canvas-resume-halt="true"
       data-paper-canvas-resume-state={to_string(@canvas_resume_state)}
@@ -234,13 +235,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       id={"paper-editor-#{@slug}"}
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
+      data-paper-strings={BarkparkWeb.StudioLocale.component_strings(:paper_hooks)}
       data-paper-doc-key={@paper_doc_key}
       data-paper-rev={@doc_type == "paper" && @paper_rev}
       data-document-rev={@doc_type != "paper" && @document_rev}
     >
       <.paper_halt_banner reason={@paper_halt} />
       <p class="bp-paper-edit-readonly" data-test-id="paper-identity-readonly">
-        Duplicate authored identities must be repaired before editing; original content is preserved.
+        <%= gettext("Duplicate authored identities must be repaired before editing; original content is preserved.") %>
       </p>
     </div>
     """
@@ -308,6 +310,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       id={"paper-editor-#{@slug}"}
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
+      data-paper-strings={BarkparkWeb.StudioLocale.component_strings(:paper_hooks)}
       phx-hook="BarkparkPaperSortable"
       data-paper-doc-key={@paper_doc_key}
       data-paper-rev={@doc_type == "paper" && @paper_rev}
@@ -389,7 +392,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             faint grey the owner read as inert chrome (contrast raised in
             root.html.heex). --%>
       <p :if={@free_blocks == []} class="bp-paper-editor-empty">
-        This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Add one below.
+        {gettext("This %{type} (", type: @doc_type)}<code>{@slug}</code>{gettext(") has no body blocks yet. Add one below.")}
       </p>
 
       <%= if @canvas_on? do %>
@@ -475,13 +478,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               draggable={Map.get(block, "locked") != true && "true"}
               title={
                 if Map.get(block, "locked") == true,
-                  do: "Part of the document template",
-                  else: "Drag to reorder"
+                  do: gettext("Part of the document template"),
+                  else: gettext("Drag to reorder")
               }
               aria-label={
                 if Map.get(block, "locked") == true,
-                  do: "Part of the document template",
-                  else: "Drag to reorder block"
+                  do: gettext("Part of the document template"),
+                  else: gettext("Drag to reorder block")
               }
               tabindex={Map.get(block, "locked") == true && "0"}
               data-test-id="paper-drag-grip"
@@ -498,7 +501,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-ghost btn-sm"
-                title="Move up"
+                title={gettext("Move up")}
+                aria-label={move_block_label(block, :up)}
                 phx-click="paper-move-block"
                 phx-value-id={Map.get(block, "id")}
                 phx-value-dir="up"
@@ -512,7 +516,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-ghost btn-sm"
-                title="Move down"
+                title={gettext("Move down")}
+                aria-label={move_block_label(block, :down)}
                 phx-click="paper-move-block"
                 phx-value-id={Map.get(block, "id")}
                 phx-value-dir="down"
@@ -523,7 +528,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 :if={Map.get(block, "locked") != true}
                 type="button"
                 class="btn btn-destructive btn-sm"
-                title="Delete block"
+                title={gettext("Delete block")}
+                aria-label={delete_block_label(block)}
                 phx-click="paper-delete-block"
                 phx-value-id={Map.get(block, "id")}
                 data-test-id="paper-delete-block"
@@ -531,9 +537,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <span
                 :if={Map.get(block, "locked") == true}
                 class="bp-paper-lock-note"
-                title="Part of the document template"
+                title={gettext("Part of the document template")}
                 data-test-id="paper-locked-note"
-              >🔒 Locked</span>
+              >🔒 {gettext("Locked")}</span>
             </span>
           </div>
           <.paper_block_fields
@@ -570,10 +576,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         data-test-id="paper-add-block"
       >
         <label>
-          + Add block
+          <%= gettext("+ Add block") %>
           <.bp_select name="block-type" options={add_block_options()} />
         </label>
-        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Add") %></button>
       </form>
 
       <%!-- Doc footer (gap #4): live word + block count and a save affordance,
@@ -581,29 +587,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             from the server-side block list (beta_doc_stats/1), refreshed on each
             persisted block op. --%>
       <footer class="bp-paper-footer" data-test-id="bp-paper-footer">
-        <span><%= @doc_stats.words %> words</span>
+        <span><%= ngettext("1 word", "%{count} words", @doc_stats.words) %></span>
         <span class="bp-paper-footer-sep">·</span>
-        <span><%= @doc_stats.blocks %> blocks</span>
+        <span><%= ngettext("1 block", "%{count} blocks", @doc_stats.blocks) %></span>
         <span
           :if={@canvas_eligible and @doc_type == "paper"}
           class="bp-paper-history-controls"
           role="group"
-          aria-label="Content change history"
+          aria-label={gettext("Content change history")}
         >
           <button
             type="button"
             class="btn btn-ghost btn-sm"
             data-paper-history-action="undo"
-            aria-label="Undo content change"
+            aria-label={gettext("Undo content change")}
             disabled
-          >Undo</button>
+          ><%= gettext("Undo") %></button>
           <button
             type="button"
             class="btn btn-ghost btn-sm"
             data-paper-history-action="redo"
-            aria-label="Redo content change"
+            aria-label={gettext("Redo content change")}
             disabled
-          >Redo</button>
+          ><%= gettext("Redo") %></button>
           <span data-paper-history-status role="status" aria-live="polite"></span>
         </span>
         <%!-- sup-w5 — the save affordance now ECHOES the socket-owned
@@ -627,9 +633,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # sup-w5 — footer save label. The calm token keeps its premium ✓ affix; every
   # other server state ("Save failed", the empty pre-write open, …) is echoed
   # VERBATIM so the footer can never lie about a failed or vetoed write.
-  defp save_status_label("Auto-saved"), do: "✓ Auto-saved"
-  defp save_status_label(status) when is_binary(status), do: status
-  defp save_status_label(_), do: ""
+  # The known server tokens read in the Studio language; any other server text
+  # is still echoed verbatim. The hooks recognise the translated calm token as
+  # transient through the same `:paper_hooks` map (task-e8a5c972b7720591).
+  defp save_status_label(status), do: BarkparkWeb.Studio.SaveStatus.label(status)
 
   # The `+ Add block` menu, grouped by optgroup so the (long) list of creatable
   # portable-doc block types stays scannable. Each value resolves to
@@ -638,82 +645,82 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # `StudioComponents.Controls.bp_select/1`.
   defp add_block_options do
     [
-      {"Text",
+      {gettext("Text"),
        [
-         {"paragraph", "Paragraph"},
-         {"heading", "Heading"},
-         {"list", "List"},
-         {"callout", "Callout"},
-         {"code", "Code"},
-         {"blockquote", "Blockquote"},
-         {"divider", "Divider"},
-         {"section", "Section"},
-         {"expandable", "Expandable"},
-         {"steps", "Steps"},
-         {"tabs", "Tabs"}
+         {"paragraph", gettext("Paragraph")},
+         {"heading", gettext("Heading")},
+         {"list", gettext("List")},
+         {"callout", gettext("Callout")},
+         {"code", gettext("Code")},
+         {"blockquote", gettext("Blockquote")},
+         {"divider", gettext("Divider")},
+         {"section", gettext("Section")},
+         {"expandable", gettext("Expandable")},
+         {"steps", gettext("Steps")},
+         {"tabs", gettext("Tabs")}
        ]},
-      {"Article chrome",
+      {gettext("Article chrome"),
        [
-         {"eyebrow", "Eyebrow"},
-         {"byline", "Byline"},
-         {"ingress", "Ingress"},
-         {"pullquote", "Pullquote"}
+         {"eyebrow", gettext("Eyebrow")},
+         {"byline", gettext("Byline")},
+         {"ingress", gettext("Ingress")},
+         {"pullquote", gettext("Pullquote")}
        ]},
-      {"Visual",
+      {gettext("Visual"),
        [
-         {"action", "Action"},
-         {"card", "Card"},
-         {"table", "Table"},
-         {"terminal", "Terminal"},
-         {"stage", "Stage"},
-         {"note", "Note"},
-         {"diagram", "Diagram"},
-         {"figure", "Figure"},
-         {"equation", "Equation"},
-         {"route", "Route"},
-         {"toc", "Table of contents"},
-         {"criteria-progress", "Criteria progress"},
-         {"gauge-list", "Gauge list"},
-         {"bar-chart", "Bar chart"}
+         {"action", gettext("Action")},
+         {"card", gettext("Card")},
+         {"table", gettext("Table")},
+         {"terminal", gettext("Terminal")},
+         {"stage", gettext("Stage")},
+         {"note", gettext("Note")},
+         {"diagram", gettext("Diagram")},
+         {"figure", gettext("Figure")},
+         {"equation", gettext("Equation")},
+         {"route", gettext("Route")},
+         {"toc", gettext("Table of contents")},
+         {"criteria-progress", gettext("Criteria progress")},
+         {"gauge-list", gettext("Gauge list")},
+         {"bar-chart", gettext("Bar chart")}
        ]},
-      {"Technical",
+      {gettext("Technical"),
        [
-         {"diff", "Diff"},
-         {"filetree", "File tree"},
-         {"footnote", "Footnotes"},
-         {"code-tabs", "Code tabs"},
-         {"api-endpoint", "API endpoint"}
+         {"diff", gettext("Diff")},
+         {"filetree", gettext("File tree")},
+         {"footnote", gettext("Footnotes")},
+         {"code-tabs", gettext("Code tabs")},
+         {"api-endpoint", gettext("API endpoint")}
        ]},
-      {"Interactive",
+      {gettext("Interactive"),
        [
-         {"form", "Form"},
-         {"questionnaire", "Questionnaire"}
+         {"form", gettext("Form")},
+         {"questionnaire", gettext("Questionnaire")}
        ]},
-      {"Basic fields",
+      {gettext("Basic fields"),
        [
-         {"field-string", "String"},
-         {"field-slug", "Slug"},
-         {"field-text", "Long text"},
-         {"field-boolean", "Boolean"},
-         {"field-select", "Select"},
-         {"field-datetime", "Date & time"},
-         {"field-color", "Color"},
-         {"field-number", "Number"}
+         {"field-string", gettext("String")},
+         {"field-slug", gettext("Slug")},
+         {"field-text", gettext("Long text")},
+         {"field-boolean", gettext("Boolean")},
+         {"field-select", gettext("Select")},
+         {"field-datetime", gettext("Date & time")},
+         {"field-color", gettext("Color")},
+         {"field-number", gettext("Number")}
        ]},
-      {"Media & reference",
+      {gettext("Media & reference"),
        [
-         {"field-image", "Image"},
-         {"field-reference", "Reference"},
-         {"paper-links", "Paper links"},
-         {"video", "Video"}
+         {"field-image", gettext("Image")},
+         {"field-reference", gettext("Reference")},
+         {"paper-links", gettext("Paper links")},
+         {"video", gettext("Video")}
        ]},
-      {"Structured",
+      {gettext("Structured"),
        [
-         {"columns", "Columns"},
-         {"composite", "Composite"},
-         {"arrayOf", "Array of"},
-         {"codelist", "Code list"},
-         {"localizedText", "Localized text"}
+         {"columns", gettext("Columns")},
+         {"composite", gettext("Composite")},
+         {"arrayOf", gettext("Array of")},
+         {"codelist", gettext("Code list")},
+         {"localizedText", gettext("Localized text")}
        ]}
     ]
   end
@@ -939,6 +946,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-picker-browse={@picker_browse && "true" || "false"}
       data-canvas-locked-tail={@locked_tail && "true"}
       data-canvas-constraints={@constraints}
+      data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
+      data-canvas-media-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
+      data-canvas-reference-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
       data-paper-doc-key={@doc_key}
       data-paper-rev={@paper_rev}
       data-document-rev={@document_rev}
@@ -989,21 +999,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   end
 
   # Calm copy for each ghost kind — the affordance is chrome, not an error.
-  defp ghost_label("featured"), do: "Add a featured image"
-  defp ghost_label("ingress"), do: "Ingress — the lead paragraph"
-  defp ghost_label(kind), do: "Add #{kind}"
+  defp ghost_label("featured"), do: gettext("Add a featured image")
+  defp ghost_label("ingress"), do: gettext("Ingress — the lead paragraph")
+  defp ghost_label(kind), do: gettext("Add %{kind}", kind: kind)
 
-  defp ghost_hint("featured"), do: "Optional · sits above the article, after the title"
-  defp ghost_hint("ingress"), do: "Optional · the standfirst that opens the piece"
-  defp ghost_hint(_), do: "Optional"
+  defp ghost_hint("featured"), do: gettext("Optional · sits above the article, after the title")
+  defp ghost_hint("ingress"), do: gettext("Optional · the standfirst that opens the piece")
+  defp ghost_hint(_), do: gettext("Optional")
 
   defp ghost_glyph("featured"), do: "🖼"
   defp ghost_glyph("ingress"), do: "¶"
   defp ghost_glyph(_), do: "＋"
 
-  defp ghost_aria_label("featured"), do: "Add the optional featured image, after the title"
-  defp ghost_aria_label("ingress"), do: "Add the optional ingress lead paragraph, after the title"
-  defp ghost_aria_label(kind), do: "Add the optional #{kind}"
+  defp ghost_aria_label("featured"),
+    do: gettext("Add the optional featured image, after the title")
+
+  defp ghost_aria_label("ingress"),
+    do: gettext("Add the optional ingress lead paragraph, after the title")
+
+  defp ghost_aria_label(kind), do: gettext("Add the optional %{kind}", kind: kind)
 
   # The per-block edit row (toolbar + type-aware fields). Extracted verbatim from
   # paper_block_editor/1's block :for so BOTH the flag-OFF list render and the
@@ -1058,13 +1072,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           draggable={Map.get(@block, "locked") != true && "true"}
           title={
             if Map.get(@block, "locked") == true,
-              do: "Part of the document template",
-              else: "Drag to reorder"
+              do: gettext("Part of the document template"),
+              else: gettext("Drag to reorder")
           }
           aria-label={
             if Map.get(@block, "locked") == true,
-              do: "Part of the document template",
-              else: "Drag to reorder block"
+              do: gettext("Part of the document template"),
+              else: gettext("Drag to reorder block")
           }
           tabindex={Map.get(@block, "locked") == true && "0"}
           data-test-id="paper-drag-grip"
@@ -1078,7 +1092,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-ghost btn-sm"
-            title="Move up"
+            title={gettext("Move up")}
+            aria-label={move_block_label(@block, :up)}
             phx-click="paper-move-block"
             phx-value-id={Map.get(@block, "id")}
             phx-value-dir="up"
@@ -1089,7 +1104,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-ghost btn-sm"
-            title="Move down"
+            title={gettext("Move down")}
+            aria-label={move_block_label(@block, :down)}
             phx-click="paper-move-block"
             phx-value-id={Map.get(@block, "id")}
             phx-value-dir="down"
@@ -1104,8 +1120,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             :if={@masters_impl && @masters_impl.masterable?(@block)}
             type="button"
             class="btn btn-ghost btn-sm"
-            title="Save as master"
-            aria-label="Save block as master"
+            title={gettext("Save as master")}
+            aria-label={gettext("Save block as master")}
             phx-click="paper-save-master"
             phx-value-block_id={Map.get(@block, "id")}
             data-test-id="paper-save-master"
@@ -1120,28 +1136,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             :if={@masters_impl && @masters_impl.linked?(@block)}
             type="button"
             class="btn btn-ghost btn-sm"
-            title={if linked_pinned?(@block), do: "Unpin: follow the master's latest", else: "Pin to the master's published version"}
+            title={if linked_pinned?(@block), do: gettext("Unpin: follow the master's latest"), else: gettext("Pin to the master's published version")}
             phx-click="paper-pin-master"
             phx-value-block_id={Map.get(@block, "id")}
             phx-value-pin={if linked_pinned?(@block), do: "false", else: "true"}
             phx-value-if_rev={@paper_rev}
             data-test-id="paper-pin-master"
-          >{if linked_pinned?(@block), do: "Unpin", else: "Pin"}</button>
+          >{if linked_pinned?(@block), do: gettext("Unpin"), else: gettext("Pin")}</button>
           <button
             :if={@masters_impl && @masters_impl.linked?(@block)}
             type="button"
             class="btn btn-ghost btn-sm"
-            title="Detach: copy the published version readers see in as plain blocks"
+            title={gettext("Detach: copy the published version readers see in as plain blocks")}
             phx-click="paper-detach-master"
             phx-value-block_id={Map.get(@block, "id")}
             phx-value-if_rev={@paper_rev}
             data-test-id="paper-detach-master"
-          >Detach</button>
+          ><%= gettext("Detach") %></button>
           <button
             :if={Map.get(@block, "locked") != true}
             type="button"
             class="btn btn-destructive btn-sm"
-            title="Delete block"
+            title={gettext("Delete block")}
+            aria-label={delete_block_label(@block)}
             phx-click="paper-delete-block"
             phx-value-id={Map.get(@block, "id")}
             data-test-id="paper-delete-block"
@@ -1149,9 +1166,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <span
             :if={Map.get(@block, "locked") == true}
             class="bp-paper-lock-note"
-            title="Part of the document template"
+            title={gettext("Part of the document template")}
             data-test-id="paper-locked-note"
-          >🔒 Locked</span>
+          >🔒 {gettext("Locked")}</span>
         </span>
       </div>
       <.task_block_preview
@@ -1209,10 +1226,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <div class="bp-tasks bp-tasks--empty">{empty_note(@block)}</div>
         <% :error -> %>
           <div class="bp-tasks bp-tasks--empty">
-            Live task preview unavailable — the Tasks plugin may be off.
+            <%= gettext("Live task preview unavailable — the Tasks plugin may be off.") %>
           </div>
         <% :loading -> %>
-          <div class="bp-tasks bp-tasks--empty">Loading live tasks…</div>
+          <div class="bp-tasks bp-tasks--empty"><%= gettext("Loading live tasks…") %></div>
       <% end %>
     </div>
     """
@@ -1258,14 +1275,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # mirrors the canvas fleet hook's empty-paint fallback (root.html.heex).
   defp empty_note(block) do
     if Map.get(block, "type") in @task_preview_types,
-      do: "No matching tasks.",
-      else: "Nothing to show yet."
+      do: gettext("No matching tasks."),
+      else: gettext("Nothing to show yet.")
   end
 
   # task_detail_html renders "" for an empty/matchless task — surface that as
   # an explicit empty note instead of a silent blank strip.
   defp rendered_or_empty(block) do
-    case Render.render_block(block, %{style: :article}) do
+    case Render.render_block(block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article})) do
       html when html in ["", nil] -> :empty
       html -> if String.trim(html) == "", do: :empty, else: {:ok, html}
     end
@@ -1446,7 +1463,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       open
       data-test-id="studio-properties-panel"
     >
-      <summary class="bp-properties-summary">Properties</summary>
+      <summary class="bp-properties-summary"><%= gettext("Properties") %></summary>
 
       <div :for={{block, descriptor} <- @rows} class="bp-prop-row" data-prop-block-id={Map.get(block, "id")}>
         <div class="bp-prop-head">
@@ -1457,14 +1474,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <button
             type="button"
             class="btn btn-ghost btn-sm bp-prop-unbind"
-            title="Unbind property"
+            title={gettext("Unbind property")}
+            aria-label={gettext("Unbind %{prop}", prop: prop_label(block, descriptor))}
             phx-click="paper-unbind-property"
             phx-value-id={Map.get(block, "id")}
             data-test-id="paper-unbind-property"
           >×</button>
         </div>
         <.paper_block_fields
-          block={block}
+          block={with_picker_flags(block, descriptor)}
           dataset={@dataset}
           api_token_raw={@api_token_raw}
           scope_prefix={@scope_prefix}
@@ -1488,14 +1506,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         data-test-id="paper-add-property"
       >
         <label>
-          + Add property
+          <%= gettext("+ Add property") %>
           <.bp_select
             name="fieldName"
-            prompt="Choose a field…"
+            prompt={gettext("Choose a field…")}
             options={Enum.map(@unbound, &{&1.name, &1.label})}
           />
         </label>
-        <button type="submit" class="btn btn-primary btn-sm">Add</button>
+        <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Add") %></button>
       </form>
     </details>
     """
@@ -1523,6 +1541,67 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       _ -> :readonly
     end
   end
+
+  # The block kind in words, for the accessible names of its ▲ ▼ × controls
+  # ("Move paragraph block up"): the glyphs alone read as "up-pointing
+  # triangle" / "times" (task-e25d03d0a56be4b7).
+  defp block_kind(block) do
+    case Map.get(block, "type") do
+      type when is_binary(type) and type != "" -> kind_word(type)
+      _ -> nil
+    end
+  end
+
+  # The block controls name the block they act on ("Move paragraph block up").
+  # A block with no type reads "this block".
+  defp move_block_label(block, :up) do
+    case block_kind(block) do
+      nil -> gettext("Move this block up")
+      kind -> gettext("Move %{kind} block up", kind: kind)
+    end
+  end
+
+  defp move_block_label(block, :down) do
+    case block_kind(block) do
+      nil -> gettext("Move this block down")
+      kind -> gettext("Move %{kind} block down", kind: kind)
+    end
+  end
+
+  defp delete_block_label(block) do
+    case block_kind(block) do
+      nil -> gettext("Delete this block")
+      kind -> gettext("Delete %{kind} block", kind: kind)
+    end
+  end
+
+  # A block type in words, for the controls' names. Known types translate;
+  # any other reads as its type with dashes as spaces.
+  defp kind_word("paragraph"), do: gettext("paragraph")
+  defp kind_word("heading"), do: gettext("heading")
+  defp kind_word("list"), do: gettext("list")
+  defp kind_word("callout"), do: gettext("callout")
+  defp kind_word("code"), do: gettext("code")
+  defp kind_word("blockquote"), do: gettext("blockquote")
+  defp kind_word("divider"), do: gettext("divider")
+  defp kind_word("section"), do: gettext("section")
+  defp kind_word("expandable"), do: gettext("expandable")
+  defp kind_word("steps"), do: gettext("steps")
+  defp kind_word("tabs"), do: gettext("tabs")
+  defp kind_word("image"), do: gettext("image")
+  defp kind_word("table"), do: gettext("table")
+  defp kind_word("card"), do: gettext("card")
+  defp kind_word("figure"), do: gettext("figure")
+  defp kind_word("equation"), do: gettext("equation")
+  defp kind_word("diagram"), do: gettext("diagram")
+  defp kind_word("note"), do: gettext("note")
+  defp kind_word("video"), do: gettext("video")
+  defp kind_word("columns"), do: gettext("columns")
+  defp kind_word("ingress"), do: gettext("ingress")
+  defp kind_word("byline"), do: gettext("byline")
+  defp kind_word("eyebrow"), do: gettext("eyebrow")
+  defp kind_word("pullquote"), do: gettext("pullquote")
+  defp kind_word(type), do: String.replace(type, "-", " ")
 
   defp prop_label(_block, %{label: label}) when is_binary(label) and label != "", do: label
 
@@ -1587,8 +1666,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp card_image_trigger_label(block) do
     case get_in(block, ["slots", "media"]) do
-      [%{"alt" => alt}] when is_binary(alt) and alt != "" -> "Replace card image: " <> alt
-      _ -> "Replace card image"
+      [%{"alt" => alt}] when is_binary(alt) and alt != "" ->
+        gettext("Replace card image: %{alt}", alt: alt)
+
+      _ ->
+        gettext("Replace card image")
     end
   end
 
@@ -1660,7 +1742,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           type="button"
           class="bp-paper-card-title-paint"
           phx-click={JS.focus(to: "#" <> @dom_id)}
-          aria-label={if @title.text == "", do: "Edit card title", else: "Edit card title: " <> @title.text}
+          aria-label={if @title.text == "", do: gettext("Edit card title"), else: gettext("Edit card title: %{title}", title: @title.text)}
           aria-controls={@dom_id}
           data-paper-card-title-paint
         ><%= @title.text %></button>
@@ -1669,8 +1751,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           name="card-title"
           rows="1"
           class="bp-paper-inline-text bp-paper-card-title-input"
-          aria-label="Card title"
-          placeholder="Card title"
+          aria-label={gettext("Card title")}
+          placeholder={gettext("Card title")}
           phx-hook="BarkparkPaperAutoSize"
         ><%= @title.text %></textarea>
       </.dynamic_tag>
@@ -1699,7 +1781,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         type="button"
         class={@button_class}
         data-paper-card-action-paint
-        aria-label={"Edit card action label: " <> @state.action_label}
+        aria-label={gettext("Edit card action label: %{label}", label: @state.action_label)}
         aria-controls={@dom_id}
         phx-click={JS.focus(to: "#" <> @dom_id)}
       ><%= @state.action_label %></button>
@@ -1712,13 +1794,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         data-test-id="paper-card-action-label-form"
       >
         <input type="hidden" name="block_id" value={@block["id"]} />
-        <label class="sr-only" for={@dom_id}>Card action label</label>
+        <label class="sr-only" for={@dom_id}><%= gettext("Card action label") %></label>
         <textarea
           id={@dom_id}
           name="card-action-label"
           rows="1"
           class="bp-paper-inline-text bp-paper-card-action-label-input"
-          aria-label="Card action label"
+          aria-label={gettext("Card action label")}
           phx-hook="BarkparkPaperAutoSize"
         ><%= @state.action_label %></textarea>
       </form>
@@ -1754,7 +1836,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         type="button"
         class="bp-paper-section-title-paint"
         phx-click={JS.focus(to: "#" <> @title_dom_id)}
-        aria-label={"Edit section title: " <> @title}
+        aria-label={gettext("Edit section title: %{title}", title: @title)}
         aria-controls={@title_dom_id}
         data-paper-section-title-paint
       ><%= @title %></button>
@@ -1768,14 +1850,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         data-test-id="paper-section-config-editor"
       >
         <input type="hidden" name="block_id" value={@block["id"]} />
-        <label class="sr-only" for={@title_dom_id}>Section title</label>
+        <label class="sr-only" for={@title_dom_id}><%= gettext("Section title") %></label>
         <textarea
           id={@title_dom_id}
           name="title"
           rows="1"
           class="bp-paper-inline-text bp-paper-section-title-input"
-          aria-label="Section title"
-          placeholder="Section title"
+          aria-label={gettext("Section title")}
+          placeholder={gettext("Section title")}
           phx-hook="BarkparkPaperAutoSize"
           data-test-id="paper-field-title"
         ><%= @title %></textarea>
@@ -1848,11 +1930,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <section
           data-paper-links
           data-layout={@presentation.layout}
+          class={@presentation.section_class}
           aria-label={@presentation.title}
           style={@presentation.section_style}
         >
           <.paper_links_header_editor block={@block} presentation={@presentation} />
-          <div style={@presentation.grid_style}>
+          <div class={@presentation.grid_class} style={@presentation.grid_style}>
             <.paper_link_card_editor :for={card <- @cards} block={@block} card={card} />
           </div>
         </section>
@@ -1878,7 +1961,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-paper-links-header-empty={@empty && "true"}
     >
       <div
-        class="bp-paper-links-title-owner"
+        class={["bp-paper-links-title-owner", @presentation.title_class]}
         style={paper_links_title_owner_style(@presentation.title_style)}
         data-paper-links-title-default={@presentation.title_default? && "true"}
       >
@@ -1890,7 +1973,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <button
             type="button"
             phx-click={JS.focus(to: "#" <> @title_dom_id)}
-            aria-label={"Edit related papers heading: " <> @presentation.title}
+            aria-label={gettext("Edit related papers heading: %{title}", title: @presentation.title)}
             aria-controls={@title_dom_id}
             data-paper-links-title-paint
           ><%= @presentation.title %></button>
@@ -1904,13 +1987,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           data-test-id="paper-links-title-editor"
         >
           <input type="hidden" name="block_id" value={@block["id"]} />
-          <label class="sr-only" for={@title_dom_id}>Related papers heading</label>
+          <label class="sr-only" for={@title_dom_id}><%= gettext("Related papers heading") %></label>
           <textarea
             id={@title_dom_id}
             name="title"
             rows="1"
             class="bp-paper-inline-text bp-paper-links-title-input"
-            aria-label="Related papers heading"
+            aria-label={gettext("Related papers heading")}
             placeholder={@presentation.title}
             phx-hook="BarkparkPaperAutoSize"
             tabindex={@empty && "-1"}
@@ -1919,7 +2002,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </div>
 
       <div
-        class="bp-paper-links-description-owner"
+        class={["bp-paper-links-description-owner", @presentation.description_class]}
         style={@presentation.description_style}
         data-paper-links-description-empty={is_nil(@presentation.description) && "true"}
       >
@@ -1931,7 +2014,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <button
             type="button"
             phx-click={JS.focus(to: "#" <> @description_dom_id)}
-            aria-label="Edit related papers description"
+            aria-label={gettext("Edit related papers description")}
             aria-controls={@description_dom_id}
             data-paper-links-description-paint
           ><%= @presentation.description %></button>
@@ -1945,14 +2028,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           data-test-id="paper-links-description-editor"
         >
           <input type="hidden" name="block_id" value={@block["id"]} />
-          <label class="sr-only" for={@description_dom_id}>Related papers description</label>
+          <label class="sr-only" for={@description_dom_id}><%= gettext("Related papers description") %></label>
           <textarea
             id={@description_dom_id}
             name="description"
             rows="1"
             class="bp-paper-inline-text bp-paper-links-description-input"
-            aria-label="Related papers description"
-            placeholder="Add a description"
+            aria-label={gettext("Related papers description")}
+            placeholder={gettext("Add a description")}
             phx-hook="BarkparkPaperAutoSize"
             tabindex={@empty && "-1"}
           ><%= @presentation.description_source %></textarea>
@@ -2037,7 +2120,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     ~H"""
     <div
-      class="bp-paper-link-ref-card"
+      class={["bp-paper-link-ref-card", @card.card_class]}
       data-paper-link-card
       data-paper-link-card-editable
       data-paper-link-ref-index={@card.index}
@@ -2049,8 +2132,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         class="bp-paper-link-ref-open"
         data-paper-link-open
         href={@card.href}
-        aria-label={"Open paper: " <> @card.title}
-      ><span class="bp-paper-link-open-label">Open paper</span></a>
+        aria-label={gettext("Open paper: %{title}", title: @card.title)}
+      ><span class="bp-paper-link-open-label"><%= gettext("Open paper") %></span></a>
       <.paper_link_ref_eyebrow
         :if={Map.get(@card, :eyebrow_text)}
         block={@block}
@@ -2073,7 +2156,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% end %>
       <div
         :if={@card.kind == :chapters && @card.meta_text && @card.meta_admission}
-        class="bp-paper-link-ref-footer"
+        class={["bp-paper-link-ref-footer", @card.footer_class]}
         style={@card.footer_style}
       >
         <%= @card.footer_label %> · <.paper_link_ref_meta
@@ -2084,6 +2167,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </div>
       <span
         :if={@card.footer_text && !(@card.kind == :chapters && @card.meta_text && @card.meta_admission)}
+        class={@card.footer_class}
         style={@card.footer_style}
       >
         <%= @card.footer_text %> &nbsp;→
@@ -2104,7 +2188,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     <span class="bp-paper-link-ref-meta-owner"><span class="bp-paper-link-ref-meta-paint-wrapper"><button
           type="button"
           phx-click={JS.focus(to: "#" <> @dom_id)}
-          aria-label={"Edit related paper meta: " <> @card.meta_text}
+          aria-label={gettext("Edit related paper meta: %{meta}", meta: @card.meta_text)}
           aria-controls={@dom_id}
           data-paper-link-ref-meta-paint
         ><%= @card.meta_text %></button></span><.paper_link_ref_form
@@ -2128,13 +2212,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # `reasons` map (not this ref's own) stays plain text.
   defp paper_link_ref_reason(assigns) do
     ~H"""
-    <div class="bp-paper-link-ref-reason-owner" style={@card.reason_style}>
-      <strong>Why it matters:</strong>
+    <div class={["bp-paper-link-ref-reason-owner", @card.reason_class]} style={@card.reason_style}>
+      <strong><%= gettext("Why it matters:") %></strong>
       <span class="bp-paper-link-ref-reason-paint-wrapper"><button
           :if={@card.reason_authored? && @card.reason_admission}
           type="button"
           phx-click={JS.focus(to: "#" <> @dom_id)}
-          aria-label="Edit related paper reason"
+          aria-label={gettext("Edit related paper reason")}
           aria-controls={@dom_id}
           data-paper-link-ref-reason-paint
         ><%= @card.reason_text %></button><span :if={!@card.reason_authored? || !@card.reason_admission}><%= @card.reason_text %></span></span>
@@ -2159,7 +2243,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_link_ref_title(assigns) do
     ~H"""
     <div
-      class="bp-paper-link-ref-title-owner"
+      class={["bp-paper-link-ref-title-owner", @card.title_class]}
       data-paper-link-ref-title-empty={!@card.title_authored? && "true"}
       style={paper_link_ref_title_owner_style(@card)}
     >
@@ -2168,7 +2252,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           :if={@card.title_authored? && @card.title_admission}
           type="button"
           phx-click={JS.focus(to: "#" <> @dom_id)}
-          aria-label={"Edit related paper title: " <> @card.title}
+          aria-label={gettext("Edit related paper title: %{title}", title: @card.title)}
           aria-controls={@dom_id}
           data-paper-link-ref-title-paint
         ><%= @card.title %></button>
@@ -2199,7 +2283,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_link_ref_eyebrow(assigns) do
     ~H"""
     <div
-      class="bp-paper-link-ref-eyebrow-owner"
+      class={["bp-paper-link-ref-eyebrow-owner", @card.eyebrow_class]}
       data-paper-link-ref-eyebrow-default={is_nil(@card.eyebrow) && "true"}
       style={@card.eyebrow_style}
     >
@@ -2208,7 +2292,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           :if={@card.eyebrow && @card.eyebrow_admission}
           type="button"
           phx-click={JS.focus(to: "#" <> @dom_id)}
-          aria-label={"Edit related paper eyebrow: " <> @card.eyebrow_text}
+          aria-label={gettext("Edit related paper eyebrow: %{eyebrow}", eyebrow: @card.eyebrow_text)}
           aria-controls={@dom_id}
           data-paper-link-ref-eyebrow-paint
         ><%= @card.eyebrow_text %></button>
@@ -2235,7 +2319,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_link_ref_description(assigns) do
     ~H"""
     <div
-      class="bp-paper-link-ref-description-owner"
+      class={["bp-paper-link-ref-description-owner", @card.description_class]}
       data-paper-link-ref-description-empty={is_nil(@card.description) && "true"}
       style={@card.description_style}
     >
@@ -2244,7 +2328,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           :if={@card.description_authored? && @card.description_admission}
           type="button"
           phx-click={JS.focus(to: "#" <> @dom_id)}
-          aria-label="Edit related paper description"
+          aria-label={gettext("Edit related paper description")}
           aria-controls={@dom_id}
           data-paper-link-ref-description-paint
         ><%= @card.description %></button>
@@ -2258,7 +2342,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         field="description"
         source={@card.description_source}
         authored={@card.description_authored?}
-        placeholder={@card.description || "Add a description"}
+        placeholder={@card.description || gettext("Add a description")}
       />
     </div>
     """
@@ -2287,13 +2371,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <input type="hidden" name="paper-link-ref-slug" value={@card.admission.slug} />
       <input type="hidden" name="paper-link-ref-field" value={@field} />
       <input type="hidden" name="paper-link-ref-guard" value={@card.admission.guard} />
-      <label class="sr-only" for={@dom_id}>Related paper <%= @field %></label>
+      <label class="sr-only" for={@dom_id}><%= gettext("Related paper %{field}", field: @field) %></label>
       <textarea
         id={@dom_id}
         name="paper-link-ref-value"
         rows="1"
         class={"bp-paper-inline-text bp-paper-link-ref-#{@field}-input"}
-        aria-label={"Related paper #{@field}"}
+        aria-label={gettext("Related paper %{field}", field: @field)}
         placeholder={@placeholder}
         phx-hook="BarkparkPaperAutoSize"
         tabindex={!@authored && "-1"}
@@ -2426,9 +2510,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <bp-paper-editor data-editor-mode="table" data-block={Jason.encode!(projection)}></bp-paper-editor>
             <% :readonly -> %>
               <div data-test-id="paper-table-readonly">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
                 <p class="bp-paper-edit-readonly">
-                  This Table's authored structure is not yet supported for lossless editing; original content is preserved.
+                  <%= gettext("This Table's authored structure is not yet supported for lossless editing; original content is preserved.") %>
                 </p>
               </div>
           <% end %>
@@ -2456,20 +2540,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <input type="hidden" name="block_id" value={@id} />
           <select name="tone" class="bp-paper-edit-tone">
             <option :for={t <- ~w(info success warning danger neutral)} value={t} selected={Map.get(@block, "tone") == t}>
-              <%= t %>
+              <%= tone_word(t) %>
             </option>
           </select>
           <label class="bp-paper-edit-check">
-            <input type="checkbox" name="collapsible" checked={Map.get(@block, "collapsible") == true} /> Foldable
+            <input type="checkbox" name="collapsible" checked={Map.get(@block, "collapsible") == true} /> <%= gettext("Foldable") %>
           </label>
           <label class="bp-paper-edit-check">
-            <input type="checkbox" name="collapsed" checked={Map.get(@block, "collapsed") == true} /> Start collapsed
+            <input type="checkbox" name="collapsed" checked={Map.get(@block, "collapsed") == true} /> <%= gettext("Start collapsed") %>
           </label>
           <input
             type="text"
             name="title"
             class="bp-paper-edit-text"
-            placeholder="Title (optional)"
+            placeholder={gettext("Title (optional)")}
             value={Map.get(@block, "title", "")}
           />
         </form>
@@ -2496,7 +2580,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "code" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-code-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-code-preview">
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <form
             id={"code-form-" <> @id}
@@ -2527,7 +2611,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               class="bp-paper-contextual-controls"
               phx-mounted={JS.ignore_attributes("open")}
             >
-              <summary class="bp-paper-contextual-toggle">Emphasised lines</summary>
+              <summary class="bp-paper-contextual-toggle"><%= gettext("Emphasised lines") %></summary>
               <div class="bp-paper-contextual-panel" data-test-id="paper-code-emphasis-editor">
                 <input
                   type="hidden"
@@ -2540,17 +2624,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-code-emphasis-row"
                   data-emphasis-index={index}
                 >
-                  <legend>Range <%= index + 1 %></legend>
+                  <legend><%= gettext("Range %{n}", n: index + 1) %></legend>
                   <%= if is_map(range) do %>
-                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-from-#{@id}"}>First line</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-from-#{@id}"}><%= gettext("First line") %></label>
                     <input id={"emphasis-#{index}-from-#{@id}"} type="text" inputmode="numeric"
                            name={"emphasis-#{index}-from"} class="bp-paper-edit-text"
                            value={Blocks.form_value(Map.get(range, "from"))} />
-                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-to-#{@id}"}>Last line</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-to-#{@id}"}><%= gettext("Last line") %></label>
                     <input id={"emphasis-#{index}-to-#{@id}"} type="text" inputmode="numeric"
                            name={"emphasis-#{index}-to"} class="bp-paper-edit-text"
                            value={Blocks.form_value(Map.get(range, "to"))} />
-                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-tone-#{@id}"}>Tone</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-tone-#{@id}"}><%= gettext("Tone") %></label>
                     <select id={"emphasis-#{index}-tone-#{@id}"} name={"emphasis-#{index}-tone"}
                             class="bp-paper-edit-tone">
                       <option :for={tone <- Blocks.code_emphasis_tones()} value={tone}
@@ -2558,23 +2642,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     </select>
                   <% else %>
                     <p class="bp-paper-edit-readonly" data-test-id="paper-code-emphasis-legacy-row">
-                      Legacy range retained until explicitly removed.
+                      <%= gettext("Legacy range retained until explicitly removed.") %>
                     </p>
                   <% end %>
                   <div class="bp-paper-edit-actions">
                     <button type="submit" name="emphasis-action" value={"up:#{index}"}
-                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                            class="btn btn-ghost btn-sm" disabled={index == 0}><%= gettext("Move up") %></button>
                     <button type="submit" name="emphasis-action" value={"down:#{index}"}
                             class="btn btn-ghost btn-sm"
-                            disabled={index == length(Blocks.code_emphasis_ranges(@block)) - 1}>Move down</button>
+                            disabled={index == length(Blocks.code_emphasis_ranges(@block)) - 1}><%= gettext("Move down") %></button>
                     <button type="submit" name="emphasis-action" value={"remove:#{index}"}
                             class="btn btn-destructive btn-sm"
-                            data-test-id="paper-code-emphasis-remove">Remove range</button>
+                            data-test-id="paper-code-emphasis-remove"><%= gettext("Remove range") %></button>
                   </div>
                 </fieldset>
 
                 <button type="submit" name="emphasis-action" value="add" class="btn btn-ghost btn-sm"
-                        data-test-id="paper-code-emphasis-add">Add range</button>
+                        data-test-id="paper-code-emphasis-add"><%= gettext("Add range") %></button>
               </div>
             </details>
           </form>
@@ -2601,7 +2685,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="text"
             name="caption"
             class="bp-paper-edit-text"
-            placeholder="Caption (optional)"
+            placeholder={gettext("Caption (optional)")}
             value={Map.get(@block, "caption", "")}
             data-test-id="paper-field-caption"
           />
@@ -2611,7 +2695,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= case Blocks.action_form_state(@block) do %>
             <% {:ok, state} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <details
                 id={"action-controls-" <> @id}
@@ -2621,7 +2705,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 ]}
                 phx-mounted={JS.ignore_attributes("open")}
               >
-                <summary class="bp-paper-contextual-toggle">Configure action</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Configure action") %></summary>
                 <div class="bp-paper-contextual-panel">
                   <form
                     id={"action-form-" <> @id}
@@ -2632,11 +2716,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     data-test-id="paper-action-editor"
                   >
                     <input type="hidden" name="block_id" value={@id} />
-                    <label class="bp-paper-edit-fieldlabel" for={"action-label-" <> @id}>Button label</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"action-label-" <> @id}><%= gettext("Button label") %></label>
                     <input id={"action-label-" <> @id} type="text" name="action-label" class="bp-paper-edit-text" value={state.label} />
-                    <label class="bp-paper-edit-fieldlabel" for={"action-href-" <> @id}>Destination</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"action-href-" <> @id}><%= gettext("Destination") %></label>
                     <input id={"action-href-" <> @id} type="text" name="action-href" class="bp-paper-edit-text" value={state.href} />
-                    <label class="bp-paper-edit-fieldlabel" for={"action-priority-" <> @id}>Priority</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"action-priority-" <> @id}><%= gettext("Priority") %></label>
                     <select id={"action-priority-" <> @id} name="action-priority" class="bp-paper-edit-select">
                       <option
                         :for={{value, label} <- card_priority_options(state.priority)}
@@ -2649,23 +2733,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </details>
             <% {:error, :malformed_action} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <p class="bp-paper-edit-readonly">
-                This Action's authored fields are malformed and cannot be edited here; original content is preserved.
+                <%= gettext("This Action's authored fields are malformed and cannot be edited here; original content is preserved.") %>
               </p>
           <% end %>
         </div>
       <% "notes" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-notes-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-notes-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
           </div>
           <%= case Blocks.notes_form_state(@block) do %>
             <% {:ok, state} -> %>
               <details id={"notes-controls-" <> @id} class="bp-paper-contextual-controls"
                 phx-mounted={JS.ignore_attributes("open")}>
-                <summary class="bp-paper-contextual-toggle">Edit notes</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Edit notes") %></summary>
                 <div class="bp-paper-contextual-panel">
                   <form id={"notes-form-" <> @id} class="bp-paper-edit-form"
                     phx-submit="paper-edit-block" phx-change="paper-block-autosave"
@@ -2686,9 +2770,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <% {:error, _} -> %>
               <details id={"notes-controls-" <> @id} class="bp-paper-contextual-controls"
                 phx-mounted={JS.ignore_attributes("open")}>
-                <summary class="bp-paper-contextual-toggle">Read-only notes</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Read-only notes") %></summary>
                 <div class="bp-paper-contextual-panel">
-                  <p class="bp-paper-edit-readonly">These notes have content that cannot be edited safely here. Their original content is preserved.</p>
+                  <p class="bp-paper-edit-readonly"><%= gettext("These notes have content that cannot be edited safely here. Their original content is preserved.") %></p>
                 </div>
               </details>
           <% end %>
@@ -2696,13 +2780,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "note" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-note-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-note-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
           </div>
           <%= case Blocks.note_form_state(@block) do %>
             <% {:ok, state} -> %>
               <details id={"note-controls-" <> @id} class="bp-paper-contextual-controls"
                 phx-mounted={JS.ignore_attributes("open")}>
-                <summary class="bp-paper-contextual-toggle">Edit note</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Edit note") %></summary>
                 <div class="bp-paper-contextual-panel">
                   <form id={"note-form-" <> @id} class="bp-paper-edit-form"
                     phx-submit="paper-edit-block" phx-change="paper-block-autosave"
@@ -2720,9 +2804,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             <% {:error, _} -> %>
               <details id={"note-controls-" <> @id} class="bp-paper-contextual-controls"
                 phx-mounted={JS.ignore_attributes("open")}>
-                <summary class="bp-paper-contextual-toggle">Read-only note</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Read-only note") %></summary>
                 <div class="bp-paper-contextual-panel">
-                  <p class="bp-paper-edit-readonly">This note has content that cannot be edited safely here. Its original content is preserved.</p>
+                  <p class="bp-paper-edit-readonly"><%= gettext("This note has content that cannot be edited safely here. Its original content is preserved.") %></p>
                 </div>
               </details>
           <% end %>
@@ -2741,12 +2825,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     <div :if={parts.kind != ""} class="bp-pnode__k"><%= parts.kind %></div>
                     <div class="bp-pnode__t">
                       <textarea id={"stage-title-" <> @id} name="stage-title" rows="1"
-                        class="bp-paper-inline-text" aria-label="Stage title" placeholder="Stage title"
+                        class="bp-paper-inline-text" aria-label={gettext("Stage title")} placeholder={gettext("Stage title")}
                         phx-hook="BarkparkPaperAutoSize"><%= state.title %></textarea>
                     </div>
                     <div class="bp-pnode__d">
                       <textarea id={"stage-detail-" <> @id} name="stage-detail" rows="1"
-                        class="bp-paper-inline-text" aria-label="Stage detail" placeholder="Add detail"
+                        class="bp-paper-inline-text" aria-label={gettext("Stage detail")} placeholder={gettext("Add detail")}
                         phx-hook="BarkparkPaperAutoSize"><%= state.detail %></textarea>
                     </div>
                     <div :if={parts.files != ""} class="bp-pnode__f"><%= parts.files %></div>
@@ -2756,19 +2840,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <details id={"stage-controls-" <> @id}
                 class="bp-paper-contextual-controls bp-paper-contextual-controls--stage"
                 phx-mounted={JS.ignore_attributes("open")}>
-                <summary class="bp-paper-contextual-toggle">Configure stage</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Configure stage") %></summary>
                 <div class="bp-paper-contextual-panel">
                     <%= for {field, label, value} <- [{"kind", "Kind", state.kind}, {"files", "Files", state.files}] do %>
                       <label class="bp-paper-edit-fieldlabel" for={"stage-#{field}-#{@id}"}><%= label %></label>
                       <input id={"stage-#{field}-#{@id}"} type="text" name={"stage-" <> field}
                         class="bp-paper-edit-text" value={value} />
                     <% end %>
-                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-mode-" <> @id}>Source</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-mode-" <> @id}><%= gettext("Source") %></label>
                     <select id={"stage-source-mode-" <> @id} name="stage-source-mode" class="bp-paper-edit-select">
-                      <option :for={{mode, label} <- [{"none", "None"}, {"origin", "Origin stage"}, {"provenance", "Source reference"}]}
+                      <option :for={{mode, label} <- [{"none", gettext("None")}, {"origin", gettext("Origin stage")}, {"provenance", gettext("Source reference")}]}
                         value={mode} selected={mode == state.source_mode}><%= label %></option>
                     </select>
-                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-text-" <> @id}>Source reference</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"stage-source-text-" <> @id}><%= gettext("Source reference") %></label>
                     <input id={"stage-source-text-" <> @id} type="text" name="stage-source-text"
                       class="bp-paper-edit-text" value={state.source_text} />
                 </div>
@@ -2776,9 +2860,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </form>
             <% {:error, _} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
-              <p class="bp-paper-edit-readonly">This Stage's authored fields need an unambiguous shape before editing; original content is preserved.</p>
+              <p class="bp-paper-edit-readonly"><%= gettext("This Stage's authored fields need an unambiguous shape before editing; original content is preserved.") %></p>
           <% end %>
         </div>
       <% "terminal" -> %>
@@ -2809,8 +2893,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       name="title"
                       rows="1"
                       class="bp-paper-inline-text bp-paper-inline-copy bp-paper-inline-copy--inline"
-                      aria-label="Terminal title"
-                      placeholder="Terminal title"
+                      aria-label={gettext("Terminal title")}
+                      placeholder={gettext("Terminal title")}
                       phx-debounce="500"
                       phx-hook="BarkparkPaperAutoSize"
                     ><%= state.title %></textarea></span><%= raw(parts.live_html) %></div>
@@ -2860,8 +2944,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     name="footer"
                     rows="1"
                     class="bp-paper-inline-text bp-paper-inline-copy"
-                    aria-label="Terminal footer"
-                    placeholder="Terminal footer"
+                    aria-label={gettext("Terminal footer")}
+                    placeholder={gettext("Terminal footer")}
                     phx-debounce="500"
                     phx-hook="BarkparkPaperAutoSize"
                   ><%= state.footer %></textarea></div>
@@ -2871,7 +2955,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 class="bp-paper-contextual-controls bp-paper-contextual-controls--terminal"
                 phx-mounted={JS.ignore_attributes("open")}
               >
-                <summary class="bp-paper-contextual-toggle">Configure terminal</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Configure terminal") %></summary>
                 <div class="bp-paper-contextual-panel">
                   <form
                     id={"terminal-form-" <> @id}
@@ -2887,17 +2971,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       class="btn btn-ghost btn-sm"
                       phx-click={contextual_panel_focus("terminal-title-" <> @id)}
                       aria-controls={"terminal-title-" <> @id}
-                    >Edit title</button>
+                    ><%= gettext("Edit title") %></button>
                     <button
                       type="button"
                       class="btn btn-ghost btn-sm"
                       phx-click={contextual_panel_focus("terminal-footer-" <> @id)}
                       aria-controls={"terminal-footer-" <> @id}
-                    ><%= if state.footer == "", do: "Add footer", else: "Edit footer" %></button>
+                    ><%= if state.footer == "", do: gettext("Add footer"), else: gettext("Edit footer") %></button>
                     <label class="bp-paper-edit-check" for={"terminal-live-" <> @id}>
                       <input type="hidden" name="live" value="false" />
                       <input id={"terminal-live-" <> @id} type="checkbox" name="live" value="true" checked={state.live} />
-                      Live
+                      <%= gettext("Live") %>
                     </label>
                   </form>
                   <form
@@ -2921,15 +3005,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       name="terminal-action"
                       value="add"
                       class="btn btn-ghost btn-sm"
-                    >Add paragraph</button>
+                    ><%= gettext("Add paragraph") %></button>
                   </form>
                 </div>
               </details>
             <% {:error, _reason} -> %>
               <div data-test-id="paper-terminal-readonly">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
                 <p class="bp-paper-edit-readonly">
-                  This Terminal's authored body needs a canonical shape and stable identities before editing; original content is preserved.
+                  <%= gettext("This Terminal's authored body needs a canonical shape and stable identities before editing; original content is preserved.") %>
                 </p>
               </div>
           <% end %>
@@ -2965,13 +3049,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         data-test-id="paper-card-image-edit-trigger"
                       ></button>
                       <details class="bp-paper-figure-image-controls" data-test-id="paper-card-image-picker">
-                        <summary>Image options</summary>
+                        <summary><%= gettext("Image options") %></summary>
                         <div
                           id={card_image_dom_id(@id) <> "-picker"}
                           class="bp-paper-figure-image-picker"
                           phx-update="ignore"
                         >
                           <bp-media-picker
+                            data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
                             value={state.media_src}
                             dataset={@dataset}
                             scope-prefix={@scope_prefix}
@@ -3004,7 +3089,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 class="bp-paper-contextual-controls bp-paper-contextual-controls--card"
                 phx-mounted={JS.ignore_attributes("open")}
               >
-                <summary class="bp-paper-contextual-toggle">Configure card</summary>
+                <summary class="bp-paper-contextual-toggle"><%= gettext("Configure card") %></summary>
                 <div class="bp-paper-contextual-panel">
                   <form
                     id={"card-form-" <> @id}
@@ -3015,7 +3100,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     data-test-id="paper-card-editor"
                   >
                     <input type="hidden" name="block_id" value={@id} />
-                    <label class="bp-paper-edit-fieldlabel" for={"card-tone-" <> @id}>Tone</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"card-tone-" <> @id}><%= gettext("Tone") %></label>
                     <select id={"card-tone-" <> @id} name="card-tone" class="bp-paper-edit-select">
                       <option
                         :for={{value, label} <- card_tone_options(state.tone)}
@@ -3031,14 +3116,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           data-test-id="paper-card-title-focus"
                           aria-controls={card_title_dom_id(@id)}
                           phx-click={contextual_panel_focus(card_title_dom_id(@id))}
-                        >Edit title</button>
+                        ><%= gettext("Edit title") %></button>
                       <% :error -> %>
                         <%= if title_content_readonly do %>
                           <p class="bp-paper-edit-readonly" data-test-id="paper-card-title-readonly">
-                            This Card title uses rich content and remains reader-only here.
+                            <%= gettext("This Card title uses rich content and remains reader-only here.") %>
                           </p>
                         <% else %>
-                          <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}>Title</label>
+                          <label class="bp-paper-edit-fieldlabel" for={"card-title-" <> @id}><%= gettext("Title") %></label>
                           <input id={"card-title-" <> @id} type="text" name="card-title" class="bp-paper-edit-text" value={state.title} />
                         <% end %>
                     <% end %>
@@ -3049,12 +3134,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         data-test-id="paper-card-image-focus"
                         aria-controls={card_image_dom_id(@id) <> "-trigger"}
                         phx-click={contextual_panel_focus(card_image_dom_id(@id) <> "-trigger")}
-                      >Replace image</button>
+                      >{gettext("Replace image")}</button>
                     <% else %>
-                      <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
+                      <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}><%= gettext("Media source") %></label>
                       <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
                     <% end %>
-                    <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}>Media description</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"card-media-alt-" <> @id}><%= gettext("Media description") %></label>
                     <input id={"card-media-alt-" <> @id} type="text" name="card-media-alt" class="bp-paper-edit-text" value={state.media_alt} />
                     <%= if card_action_present?(@block) do %>
                       <button
@@ -3063,14 +3148,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         data-test-id="paper-card-action-label-focus"
                         aria-controls={card_action_label_dom_id(@id)}
                         phx-click={contextual_panel_focus(card_action_label_dom_id(@id))}
-                      >Edit action label</button>
+                      ><%= gettext("Edit action label") %></button>
                     <% else %>
-                      <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}>Action label</label>
+                      <label class="bp-paper-edit-fieldlabel" for={"card-action-label-" <> @id}><%= gettext("Action label") %></label>
                       <input id={"card-action-label-" <> @id} type="text" name="card-action-label" class="bp-paper-edit-text" value={state.action_label} />
                     <% end %>
-                    <label class="bp-paper-edit-fieldlabel" for={"card-action-href-" <> @id}>Action destination</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-href-" <> @id}><%= gettext("Action destination") %></label>
                     <input id={"card-action-href-" <> @id} type="text" name="card-action-href" class="bp-paper-edit-text" value={state.action_href} />
-                    <label class="bp-paper-edit-fieldlabel" for={"card-action-priority-" <> @id}>Action priority</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"card-action-priority-" <> @id}><%= gettext("Action priority") %></label>
                     <select id={"card-action-priority-" <> @id} name="card-action-priority" class="bp-paper-edit-select">
                       <option
                         :for={{value, label} <- card_priority_options(state.action_priority)}
@@ -3083,10 +3168,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </details>
             <% {:error, :malformed_card} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <p class="bp-paper-edit-readonly">
-                This Card's known slots are malformed and cannot be edited here; original content is preserved.
+                <%= gettext("This Card's known slots are malformed and cannot be edited here; original content is preserved.") %>
               </p>
           <% end %>
         </div>
@@ -3127,13 +3212,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       class="bp-paper-figure-image-controls"
                       data-test-id="paper-figure-image-picker"
                     >
-                      <summary>Image options</summary>
+                      <summary><%= gettext("Image options") %></summary>
                       <div
                         id={"paper-figure-image-picker-" <> child["id"]}
                         class="bp-paper-figure-image-picker"
                         phx-update="ignore"
                       >
                         <bp-media-picker
+                          data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
                           value={image_block_src(child)}
                           dataset={@dataset}
                           scope-prefix={@scope_prefix}
@@ -3194,14 +3280,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   class="bp-paper-figure-caption-add"
                   phx-click={JS.focus(to: "#figure-caption-" <> @id)}
                   data-paper-figure-caption-add
-                >Add caption</button>
+                ><%= gettext("Add caption") %></button>
                 <button
                   :if={caption != ""}
                   id={"figure-caption-paint-" <> @id}
                   type="button"
                   class="bp-paper-figure-caption-paint"
                   phx-click={JS.focus(to: "#figure-caption-" <> @id)}
-                  aria-label={"Edit figure caption: " <> caption}
+                  aria-label={gettext("Edit figure caption: %{caption}", caption: caption)}
                   aria-controls={"figure-caption-" <> @id}
                   data-paper-figure-caption-paint
                 ><%= raw(Figures.figcaption_inner(caption)) %></button>
@@ -3215,15 +3301,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 >
                   <input type="hidden" name="block_id" value={@id} />
                   <label class="sr-only" for={"figure-caption-" <> @id}>
-                    Caption
+                    <%= gettext("Caption") %>
                   </label>
                   <textarea
                     id={"figure-caption-" <> @id}
                     name="caption"
                     rows="1"
                     class="bp-paper-inline-text bp-paper-figure-caption-input"
-                    aria-label="Figure caption"
-                    placeholder="Add caption…"
+                    aria-label={gettext("Figure caption")}
+                    placeholder={gettext("Add caption…")}
                     phx-hook="BarkparkPaperAutoSize"
                   ><%= caption %></textarea>
                 </form>
@@ -3231,10 +3317,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </figure>
           <% else %>
             <div class="bp-paper-contextual-preview" data-test-id="paper-figure-preview">
-              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
             </div>
             <p class="bp-paper-edit-readonly">
-              This Figure's singular child needs a stable identity before it can be edited; original content is preserved.
+              <%= gettext("This Figure's singular child needs a stable identity before it can be edited; original content is preserved.") %>
             </p>
           <% end %>
         </div>
@@ -3242,11 +3328,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-route-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"route-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure route</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure route") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"route-form-" <> @id}
@@ -3257,22 +3343,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 data-test-id="paper-route-editor"
               >
                 <input type="hidden" name="block_id" value={@id} />
-                <label class="bp-paper-edit-fieldlabel" for={"route-polyline-" <> @id}>Encoded polyline</label>
+                <label class="bp-paper-edit-fieldlabel" for={"route-polyline-" <> @id}><%= gettext("Encoded polyline") %></label>
                 <textarea id={"route-polyline-" <> @id} name="polyline"
                           class="bp-paper-edit-textarea bp-paper-edit-code" rows="4"><%= Blocks.form_value(Map.get(@block, "polyline")) %></textarea>
-                <label class="bp-paper-edit-fieldlabel" for={"route-sport-" <> @id}>Sport</label>
+                <label class="bp-paper-edit-fieldlabel" for={"route-sport-" <> @id}><%= gettext("Sport") %></label>
                 <input id={"route-sport-" <> @id} type="text" name="sport"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "sport"))} />
-                <label class="bp-paper-edit-fieldlabel" for={"route-distance-" <> @id}>Distance</label>
+                <label class="bp-paper-edit-fieldlabel" for={"route-distance-" <> @id}><%= gettext("Distance") %></label>
                 <input id={"route-distance-" <> @id} type="text" name="distance"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "distance"))} />
-                <label class="bp-paper-edit-fieldlabel" for={"route-elevation-" <> @id}>Elevation</label>
+                <label class="bp-paper-edit-fieldlabel" for={"route-elevation-" <> @id}><%= gettext("Elevation") %></label>
                 <input id={"route-elevation-" <> @id} type="text" name="elevation"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "elevation"))} />
-                <label class="bp-paper-edit-fieldlabel" for={"route-duration-" <> @id}>Duration</label>
+                <label class="bp-paper-edit-fieldlabel" for={"route-duration-" <> @id}><%= gettext("Duration") %></label>
                 <input id={"route-duration-" <> @id} type="text" name="duration"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "duration"))} />
-                <label class="bp-paper-edit-fieldlabel" for={"route-caption-" <> @id}>Caption</label>
+                <label class="bp-paper-edit-fieldlabel" for={"route-caption-" <> @id}><%= gettext("Caption") %></label>
                 <input id={"route-caption-" <> @id} type="text" name="caption"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "caption"))} />
               </form>
@@ -3286,11 +3372,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-api-endpoint-preview"
             {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
           >
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--api-endpoint"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure API endpoint</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure API endpoint") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"api-endpoint-form-" <> @id}
@@ -3302,14 +3388,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               >
                 <input type="hidden" name="block_id" value={@id} />
                 <input type="hidden" name="param-count" value={length(Blocks.api_endpoint_params(@block))} />
-                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-method-" <> @id}>Method</label>
+                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-method-" <> @id}><%= gettext("Method") %></label>
                 <input id={"api-endpoint-method-" <> @id} type="text" name="method"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "method"))}
                        list={"api-endpoint-methods-" <> @id} />
                 <datalist id={"api-endpoint-methods-" <> @id}>
                   <option :for={method <- ~w(GET POST PUT PATCH DELETE HEAD OPTIONS)} value={method}></option>
                 </datalist>
-                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-path-" <> @id}>Path</label>
+                <label class="bp-paper-edit-fieldlabel" for={"api-endpoint-path-" <> @id}><%= gettext("Path") %></label>
                 <input id={"api-endpoint-path-" <> @id} type="text" name="path"
                        class="bp-paper-edit-text bp-paper-edit-code"
                        value={Blocks.form_value(Map.get(@block, "path"))} />
@@ -3320,21 +3406,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-api-endpoint-param-row"
                   data-param-index={index}
                 >
-                  <legend>Parameter <%= index + 1 %></legend>
+                  <legend><%= gettext("Parameter %{n}", n: index + 1) %></legend>
                   <%= if is_map(param) do %>
                     <label class="bp-paper-edit-fieldlabel">
-                      Name
+                      <%= gettext("Name") %>
                       <input type="text" name={"param-#{index}-name"} class="bp-paper-edit-text"
                              value={Blocks.api_endpoint_param_value(param, "name")} />
                     </label>
                     <label class="bp-paper-edit-fieldlabel">
-                      Location
+                      <%= gettext("Location") %>
                       <input type="text" name={"param-#{index}-in"} class="bp-paper-edit-text"
                              value={Blocks.api_endpoint_param_value(param, "in")}
                              list={"api-endpoint-locations-" <> @id} />
                     </label>
                     <label class="bp-paper-edit-fieldlabel">
-                      Type
+                      <%= gettext("Type") %>
                       <input type="text" name={"param-#{index}-type"} class="bp-paper-edit-text"
                              value={Blocks.api_endpoint_param_value(param, "type")} />
                     </label>
@@ -3342,23 +3428,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       <input type="hidden" name={"param-#{index}-required"} value="false" />
                       <input type="checkbox" name={"param-#{index}-required"} value="true"
                              checked={Blocks.api_endpoint_param_required?(param)} />
-                      Required
+                      <%= gettext("Required") %>
                     </label>
                   <% else %>
                     <p class="bp-paper-edit-readonly" data-test-id="paper-api-endpoint-legacy-param">
-                      Legacy parameter retained until explicitly removed.
+                      <%= gettext("Legacy parameter retained until explicitly removed.") %>
                     </p>
                   <% end %>
                   <div class="bp-paper-edit-actions">
                     <button type="submit" name="param-action" value={"up:#{index}"}
-                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                            class="btn btn-ghost btn-sm" disabled={index == 0}><%= gettext("Move up") %></button>
                     <button type="submit" name="param-action" value={"down:#{index}"}
                             class="btn btn-ghost btn-sm"
-                            disabled={index == length(Blocks.api_endpoint_params(@block)) - 1}>Move down</button>
+                            disabled={index == length(Blocks.api_endpoint_params(@block)) - 1}><%= gettext("Move down") %></button>
                   </div>
                   <button type="submit" name="param-action" value={"remove:#{index}"}
                           class="btn btn-destructive btn-sm" data-test-id="paper-api-endpoint-param-remove">
-                    Remove parameter
+                    <%= gettext("Remove parameter") %>
                   </button>
                 </fieldset>
 
@@ -3366,7 +3452,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <option :for={location <- ~w(path query header cookie body)} value={location}></option>
                 </datalist>
                 <button type="submit" name="param-action" value="add" class="btn btn-ghost btn-sm"
-                        data-test-id="paper-api-endpoint-param-add">Add parameter</button>
+                        data-test-id="paper-api-endpoint-param-add"><%= gettext("Add parameter") %></button>
               </form>
             </div>
           </details>
@@ -3374,11 +3460,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "toc" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-toc-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-toc-preview">
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"toc-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure table of contents</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure table of contents") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"toc-form-" <> @id}
@@ -3390,20 +3476,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               >
                 <input type="hidden" name="block_id" value={@id} />
                 <input type="hidden" name="toc-count" value={length(Blocks.toc_items(@block))} />
-                <label class="bp-paper-edit-fieldlabel" for={"toc-depth-" <> @id}>Visible depth</label>
+                <label class="bp-paper-edit-fieldlabel" for={"toc-depth-" <> @id}><%= gettext("Visible depth") %></label>
                 <input id={"toc-depth-" <> @id} type="text" inputmode="numeric" name="depth"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "depth"))} />
                 <label class="bp-paper-edit-check" for={"toc-numbered-" <> @id}>
                   <input type="hidden" name="numbered" value="false" />
                   <input id={"toc-numbered-" <> @id} type="checkbox" name="numbered" value="true"
                          checked={Blocks.strict_boolean_field?(@block, "numbered")} />
-                  Number entries
+                  <%= gettext("Number entries") %>
                 </label>
                 <label class="bp-paper-edit-check" for={"toc-sticky-" <> @id}>
                   <input type="hidden" name="sticky" value="false" />
                   <input id={"toc-sticky-" <> @id} type="checkbox" name="sticky" value="true"
                          checked={Blocks.strict_boolean_field?(@block, "sticky")} />
-                  Sticky in article view
+                  <%= gettext("Sticky in article view") %>
                 </label>
 
                 <fieldset
@@ -3412,37 +3498,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-toc-row"
                   data-toc-index={index}
                 >
-                  <legend>Entry <%= index + 1 %></legend>
+                  <legend><%= gettext("Entry %{n}", n: index + 1) %></legend>
                   <%= if is_map(item) do %>
-                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-text-#{@id}"}>Text</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-text-#{@id}"}><%= gettext("Text") %></label>
                     <input id={"toc-#{index}-text-#{@id}"} type="text" name={"toc-#{index}-text"}
                            class="bp-paper-edit-text" value={Blocks.form_value(Map.get(item, "text"))} />
-                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-level-#{@id}"}>Level</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-level-#{@id}"}><%= gettext("Level") %></label>
                     <input id={"toc-#{index}-level-#{@id}"} type="text" inputmode="numeric"
                            name={"toc-#{index}-level"} class="bp-paper-edit-text"
                            value={Blocks.form_value(Map.get(item, "level"))} />
-                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-anchor-#{@id}"}>Anchor</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-anchor-#{@id}"}><%= gettext("Anchor") %></label>
                     <input id={"toc-#{index}-anchor-#{@id}"} type="text" name={"toc-#{index}-anchor"}
                            class="bp-paper-edit-text bp-paper-edit-code"
                            value={Blocks.form_value(Map.get(item, "anchor"))} />
                   <% else %>
                     <p class="bp-paper-edit-readonly" data-test-id="paper-toc-legacy-row">
-                      Legacy entry retained until explicitly removed.
+                      <%= gettext("Legacy entry retained until explicitly removed.") %>
                     </p>
                   <% end %>
                   <div class="bp-paper-edit-actions">
                     <button type="submit" name="toc-action" value={"up:#{index}"}
-                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                            class="btn btn-ghost btn-sm" disabled={index == 0}><%= gettext("Move up") %></button>
                     <button type="submit" name="toc-action" value={"down:#{index}"}
                             class="btn btn-ghost btn-sm"
-                            disabled={index == length(Blocks.toc_items(@block)) - 1}>Move down</button>
+                            disabled={index == length(Blocks.toc_items(@block)) - 1}><%= gettext("Move down") %></button>
                     <button type="submit" name="toc-action" value={"remove:#{index}"}
-                            class="btn btn-destructive btn-sm">Remove entry</button>
+                            class="btn btn-destructive btn-sm"><%= gettext("Remove entry") %></button>
                   </div>
                 </fieldset>
 
                 <button type="submit" name="toc-action" value="add" class="btn btn-ghost btn-sm"
-                        data-test-id="paper-toc-add">Add entry</button>
+                        data-test-id="paper-toc-add"><%= gettext("Add entry") %></button>
               </form>
             </div>
           </details>
@@ -3454,11 +3540,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-criteria-progress-preview"
             {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
           >
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"criteria-progress-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure criteria progress</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure criteria progress") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"criteria-progress-form-" <> @id}
@@ -3471,7 +3557,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <input type="hidden" name="block_id" value={@id} />
                 <input type="hidden" name="criterion-count"
                        value={length(Blocks.criteria_progress_rows(@block))} />
-                <label class="bp-paper-edit-fieldlabel" for={"criteria-progress-detail-" <> @id}>Detail</label>
+                <label class="bp-paper-edit-fieldlabel" for={"criteria-progress-detail-" <> @id}><%= gettext("Detail") %></label>
                 <input id={"criteria-progress-detail-" <> @id} type="text" name="detail"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "detail"))}
                        list={"criteria-progress-detail-options-" <> @id} />
@@ -3486,38 +3572,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-criteria-progress-row"
                   data-criterion-index={index}
                 >
-                  <legend>Criterion <%= index + 1 %></legend>
+                  <legend><%= gettext("Criterion %{n}", n: index + 1) %></legend>
                   <%= if is_map(row) do %>
-                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-label-#{@id}"}>Label</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-label-#{@id}"}><%= gettext("Label") %></label>
                     <input id={"criterion-#{index}-label-#{@id}"} type="text"
                            name={"criterion-#{index}-label"} class="bp-paper-edit-text"
                            value={Blocks.form_value(Map.get(row, "label"))} />
-                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-met-#{@id}"}>Met</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-met-#{@id}"}><%= gettext("Met") %></label>
                     <input id={"criterion-#{index}-met-#{@id}"} type="text" inputmode="decimal"
                            name={"criterion-#{index}-met"} class="bp-paper-edit-text"
                            value={Blocks.form_value(Map.get(row, "met"))} />
-                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-total-#{@id}"}>Total</label>
+                    <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-total-#{@id}"}><%= gettext("Total") %></label>
                     <input id={"criterion-#{index}-total-#{@id}"} type="text" inputmode="decimal"
                            name={"criterion-#{index}-total"} class="bp-paper-edit-text"
                            value={Blocks.form_value(Map.get(row, "total"))} />
                   <% else %>
                     <p class="bp-paper-edit-readonly" data-test-id="paper-criteria-progress-legacy-row">
-                      Legacy row retained until explicitly removed.
+                      <%= gettext("Legacy row retained until explicitly removed.") %>
                     </p>
                   <% end %>
                   <div class="bp-paper-edit-actions">
                     <button type="submit" name="criterion-action" value={"up:#{index}"}
-                            class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                            class="btn btn-ghost btn-sm" disabled={index == 0}><%= gettext("Move up") %></button>
                     <button type="submit" name="criterion-action" value={"down:#{index}"}
                             class="btn btn-ghost btn-sm"
-                            disabled={index == length(Blocks.criteria_progress_rows(@block)) - 1}>Move down</button>
+                            disabled={index == length(Blocks.criteria_progress_rows(@block)) - 1}><%= gettext("Move down") %></button>
                     <button type="submit" name="criterion-action" value={"remove:#{index}"}
-                            class="btn btn-destructive btn-sm">Remove criterion</button>
+                            class="btn btn-destructive btn-sm"><%= gettext("Remove criterion") %></button>
                   </div>
                 </fieldset>
 
                 <button type="submit" name="criterion-action" value="add" class="btn btn-ghost btn-sm"
-                        data-test-id="paper-criteria-progress-add">Add criterion</button>
+                        data-test-id="paper-criteria-progress-add"><%= gettext("Add criterion") %></button>
               </form>
             </div>
           </details>
@@ -3532,7 +3618,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           data-test-id="paper-equation-editor"
         >
           <input type="hidden" name="block_id" value={@id} />
-          <label class="bp-paper-edit-fieldlabel" for={"equation-tex-" <> @id}>TeX source</label>
+          <label class="bp-paper-edit-fieldlabel" for={"equation-tex-" <> @id}><%= gettext("TeX source") %></label>
           <textarea
             id={"equation-tex-" <> @id}
             name="tex"
@@ -3543,7 +3629,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <label class="bp-paper-edit-check">
             <input type="checkbox" name="display" value="true"
                    checked={Map.get(@block, "display") == true} />
-            Display equation
+            <%= gettext("Display equation") %>
           </label>
         </form>
       <%!-- Article-chrome blocks. Eyebrow + byline remain flat scalar inputs;
@@ -3560,7 +3646,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="text"
             name="text"
             class="bp-paper-edit-text"
-            placeholder="Eyebrow (kicker) text"
+            placeholder={gettext("Eyebrow (kicker) text")}
             value={Map.get(@block, "text", "")}
             data-test-id="paper-field-eyebrow"
           />
@@ -3577,7 +3663,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="text"
             name="text"
             class="bp-paper-edit-text"
-            placeholder="By line — separate names with ·"
+            placeholder={gettext("By line — separate names with ·")}
             value={Enum.join(Map.get(@block, "items", []), " · ")}
             data-test-id="paper-field-byline"
           />
@@ -3604,8 +3690,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 name="cite"
                 rows="1"
                 class="bp-paper-inline-text"
-                aria-label="Quote attribution"
-                placeholder="Add author or source…"
+                aria-label={gettext("Quote attribution")}
+                placeholder={gettext("Add author or source…")}
                 phx-hook="BarkparkPaperAutoSize"
                 data-test-id="paper-field-blockquote-cite"
               ><%= Blocks.form_value(Blocks.blockquote_cite_value(@block)) %></textarea>
@@ -3676,38 +3762,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <% end %>
             </div>
             <details id={"section-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--section" phx-mounted={JS.ignore_attributes("open")}>
-              <summary class="bp-paper-contextual-toggle">Configure section</summary>
+              <summary class="bp-paper-contextual-toggle"><%= gettext("Configure section") %></summary>
               <div class="bp-paper-contextual-panel">
                 <div class="bp-paper-edit-form">
-                  <span class="bp-paper-edit-fieldlabel">Title</span>
+                  <span class="bp-paper-edit-fieldlabel"><%= gettext("Title") %></span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-sm bp-paper-section-title-panel-trigger"
                     phx-click={JS.focus(to: "#" <> section_title_dom_id(@id))}
                     aria-controls={section_title_dom_id(@id)}
                     data-paper-section-title-panel-trigger
-                  ><%= if Map.get(@block, "title") in [nil, ""], do: "Add title", else: "Edit title" %></button>
+                  ><%= if Map.get(@block, "title") in [nil, ""], do: gettext("Add title"), else: gettext("Edit title") %></button>
                 </div>
                 <form id={"section-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-section-structure-editor">
                   <input type="hidden" name="block_id" value={@id} />
                   <input type="hidden" name="section-child-count" value={length(@block["blocks"])} />
                   <input type="hidden" name="section-new-child-id" value={Blocks.new_block_id()} />
-                  <p :if={SectionLayout.grid(@block)} class="bp-paper-edit-readonly" data-test-id="paper-section-grid-order-note">Move changes source order; existing grid placement is retained.</p>
+                  <p :if={SectionLayout.grid(@block)} class="bp-paper-edit-readonly" data-test-id="paper-section-grid-order-note"><%= gettext("Move changes source order; existing grid placement is retained.") %></p>
                   <fieldset :for={{child, index} <- Enum.with_index(@block["blocks"])} class="bp-paper-edit-form">
-                    <legend>Child <%= index + 1 %> · <%= child["type"] %></legend>
+                    <legend><%= gettext("Child %{n} · %{type}", n: index + 1, type: child["type"]) %></legend>
                     <input type="hidden" name={"section-child-#{index}-id"} value={child["id"]} />
-                    <button type="submit" name="section-action" value={"up:" <> child["id"]} disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
-                    <button type="submit" name="section-action" value={"down:" <> child["id"]} disabled={index == length(@block["blocks"]) - 1} class="btn btn-ghost btn-sm">Move down</button>
-                    <button type="submit" name="section-action" value={"remove:" <> child["id"]} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm">Remove child</button>
-                    <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note">Locked content cannot be removed.</span>
+                    <button type="submit" name="section-action" value={"up:" <> child["id"]} disabled={index == 0} class="btn btn-ghost btn-sm"><%= gettext("Move up") %></button>
+                    <button type="submit" name="section-action" value={"down:" <> child["id"]} disabled={index == length(@block["blocks"]) - 1} class="btn btn-ghost btn-sm"><%= gettext("Move down") %></button>
+                    <button type="submit" name="section-action" value={"remove:" <> child["id"]} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm"><%= gettext("Remove child") %></button>
+                    <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note"><%= gettext("Locked content cannot be removed.") %></span>
                   </fieldset>
-                  <button type="submit" name="section-action" value="add" class="btn btn-ghost btn-sm">Add paragraph</button>
+                  <button type="submit" name="section-action" value="add" class="btn btn-ghost btn-sm"><%= gettext("Add paragraph") %></button>
                 </form>
               </div>
             </details>
           <% else %>
             <div :if={section_renderable?(@block)} class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
-            <p class="bp-paper-edit-readonly">This Section's child structure needs stable identities before editing; original content is preserved.</p>
+            <p class="bp-paper-edit-readonly"><%= gettext("This Section's child structure needs stable identities before editing; original content is preserved.") %></p>
           <% end %>
         </div>
       <% "columns" -> %>
@@ -3753,36 +3839,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               ]}
               phx-mounted={JS.ignore_attributes("open")}
             >
-              <summary class="bp-paper-contextual-toggle">Configure columns</summary>
+              <summary class="bp-paper-contextual-toggle"><%= gettext("Configure columns") %></summary>
               <div class="bp-paper-contextual-panel">
                 <form id={"columns-structure-form-" <> @id} class="bp-paper-edit-form" phx-submit="paper-edit-block" data-test-id="paper-columns-structure-editor">
                   <input type="hidden" name="block_id" value={@id} />
                   <input type="hidden" name="column-count" value={length(@block["columns"])} />
                   <input type="hidden" name="column-new-child-id" value={Blocks.new_block_id()} />
-                  <button type="submit" name="column-action" value="add-column" class="btn btn-ghost btn-sm">Add column</button>
+                  <button type="submit" name="column-action" value="add-column" class="btn btn-ghost btn-sm"><%= gettext("Add column") %></button>
                   <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form" data-column-index={column_index}>
-                    <legend>Column <%= column_index + 1 %></legend>
+                    <legend><%= gettext("Column %{n}", n: column_index + 1) %></legend>
                     <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
                     <% remove_reason = column_track_remove_reason(@block["columns"], column_index) %>
                     <% remove_reason_id = column_track_remove_reason_id(@id, column_index) %>
-                    <button type="submit" name="column-action" value={"remove-column:#{column_index}"} disabled={not is_nil(remove_reason)} aria-describedby={remove_reason && remove_reason_id} class="btn btn-destructive btn-sm">Remove column</button>
+                    <button type="submit" name="column-action" value={"remove-column:#{column_index}"} disabled={not is_nil(remove_reason)} aria-describedby={remove_reason && remove_reason_id} class="btn btn-destructive btn-sm"><%= gettext("Remove column") %></button>
                     <span :if={remove_reason} id={remove_reason_id} class="bp-paper-lock-note" data-test-id="paper-column-remove-reason"><%= remove_reason %></span>
                     <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
-                      <span>Child <%= child_index + 1 %> · <%= child["type"] %></span>
+                      <span><%= gettext("Child %{n} · %{type}", n: child_index + 1, type: child["type"]) %></span>
                       <input type="hidden" name={"column-#{column_index}-child-#{child_index}-id"} value={child["id"]} />
-                      <button type="submit" name="column-action" value={"up:#{column_index}:#{child["id"]}"} disabled={child_index == 0} class="btn btn-ghost btn-sm">Move up</button>
-                      <button type="submit" name="column-action" value={"down:#{column_index}:#{child["id"]}"} disabled={child_index == length(column) - 1} class="btn btn-ghost btn-sm">Move down</button>
-                      <button type="submit" name="column-action" value={"remove:#{column_index}:#{child["id"]}"} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm">Remove child</button>
-                      <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note">Locked content cannot be removed.</span>
+                      <button type="submit" name="column-action" value={"up:#{column_index}:#{child["id"]}"} disabled={child_index == 0} class="btn btn-ghost btn-sm"><%= gettext("Move up") %></button>
+                      <button type="submit" name="column-action" value={"down:#{column_index}:#{child["id"]}"} disabled={child_index == length(column) - 1} class="btn btn-ghost btn-sm"><%= gettext("Move down") %></button>
+                      <button type="submit" name="column-action" value={"remove:#{column_index}:#{child["id"]}"} disabled={Blocks.structure_child_locked?(child)} class="btn btn-destructive btn-sm"><%= gettext("Remove child") %></button>
+                      <span :if={Blocks.structure_child_locked?(child)} class="bp-paper-lock-note" data-test-id="paper-structure-locked-note"><%= gettext("Locked content cannot be removed.") %></span>
                     </div>
-                    <button type="submit" name="column-action" value={"add:#{column_index}"} class="btn btn-ghost btn-sm">Add paragraph</button>
+                    <button type="submit" name="column-action" value={"add:#{column_index}"} class="btn btn-ghost btn-sm"><%= gettext("Add paragraph") %></button>
                   </fieldset>
                 </form>
               </div>
             </details>
           <% else %>
             <div class="bp-paper-contextual-preview"><%= raw(Render.render_block(@block, %{style: :article, masters: @master_render})) %></div>
-            <p class="bp-paper-edit-readonly">This Columns block has malformed column data; original content is preserved.</p>
+            <p class="bp-paper-edit-readonly"><%= gettext("This Columns block has malformed column data; original content is preserved.") %></p>
           <% end %>
         </div>
       <% "paper-links" -> %>
@@ -3790,7 +3876,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <.paper_links_preview block={@block} paper_links={@paper_links} />
           <details id={"paper-links-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure related papers</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure related papers") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"paper-links-form-" <> @id}
@@ -3803,27 +3889,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <input type="hidden" name="block_id" value={@id} />
                 <input type="hidden" name="ref-count" value={length(Map.get(@block, "refs", []))} />
                 <div class="bp-paper-edit-form">
-                  <span class="bp-paper-edit-fieldlabel">Heading</span>
+                  <span class="bp-paper-edit-fieldlabel"><%= gettext("Heading") %></span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-sm"
                     phx-click={JS.focus(to: "#" <> paper_links_dom_id("title", @id))}
                     aria-controls={paper_links_dom_id("title", @id)}
                     data-paper-links-title-panel-trigger
-                  ><%= if paper_links_field_absent?(@block, "title"), do: "Add heading", else: "Edit heading" %></button>
+                  ><%= if paper_links_field_absent?(@block, "title"), do: gettext("Add heading"), else: gettext("Edit heading") %></button>
                 </div>
                 <div class="bp-paper-edit-form">
-                  <span class="bp-paper-edit-fieldlabel">Description</span>
+                  <span class="bp-paper-edit-fieldlabel"><%= gettext("Description") %></span>
                   <button
                     type="button"
                     class="btn btn-ghost btn-sm"
                     phx-click={JS.focus(to: "#" <> paper_links_dom_id("description", @id))}
                     aria-controls={paper_links_dom_id("description", @id)}
                     data-paper-links-description-panel-trigger
-                  ><%= if paper_links_field_absent?(@block, "description"), do: "Add description", else: "Edit description" %></button>
+                  ><%= if paper_links_field_absent?(@block, "description"), do: gettext("Add description"), else: gettext("Edit description") %></button>
                 </div>
                 <label class="bp-paper-edit-fieldlabel">
-                  Layout
+                  <%= gettext("Layout") %>
                   <input type="text" name="layout" class="bp-paper-edit-text"
                          value={Blocks.contextual_optional_value(@block, "layout")} />
                 </label>
@@ -3834,11 +3920,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-link-ref-row"
                   data-ref-index={index}
                 >
-                  <legend>Reference <%= index + 1 %></legend>
+                  <legend><%= gettext("Reference %{n}", n: index + 1) %></legend>
                   <% reference_copy_admission =
                     Blocks.paper_link_reference_copy_admission(@block, index) %>
                   <label class="bp-paper-edit-fieldlabel">
-                    Slug
+                    <%= gettext("Slug") %>
                     <input type="text" name={"ref-#{index}-slug"} class="bp-paper-edit-text"
                            value={Blocks.paper_link_ref_value(ref, "slug") || ""} />
                   </label>
@@ -3847,93 +3933,93 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       <%= case Blocks.paper_link_reference_copy_admission(@block, index, "title") do %>
                         <% {:ok, _field_admission} -> %>
                           <div class="bp-paper-edit-form">
-                            <span class="bp-paper-edit-fieldlabel">Authored title</span>
+                            <span class="bp-paper-edit-fieldlabel"><%= gettext("Authored title") %></span>
                             <button
                               type="button"
                               class="btn btn-ghost btn-sm"
                               phx-click={contextual_panel_focus(paper_link_ref_dom_id("title", @id, index, admission.guard))}
                               aria-controls={paper_link_ref_dom_id("title", @id, index, admission.guard)}
                               data-paper-link-ref-title-panel-trigger
-                            ><%= if paper_links_field_absent?(ref, "title"), do: "Add title", else: "Edit title" %></button>
+                            ><%= if paper_links_field_absent?(ref, "title"), do: gettext("Add title"), else: gettext("Edit title") %></button>
                           </div>
                         <% {:error, _reason} -> %>
                           <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
-                            Authored title has an unsupported shape and is preserved read-only.
+                            <%= gettext("Authored title has an unsupported shape and is preserved read-only.") %>
                           </p>
                       <% end %>
                       <%= case Blocks.paper_link_reference_copy_admission(@block, index, "description") do %>
                         <% {:ok, _field_admission} -> %>
                           <div class="bp-paper-edit-form">
-                            <span class="bp-paper-edit-fieldlabel">Authored description</span>
+                            <span class="bp-paper-edit-fieldlabel"><%= gettext("Authored description") %></span>
                             <button
                               type="button"
                               class="btn btn-ghost btn-sm"
                               phx-click={contextual_panel_focus(paper_link_ref_dom_id("description", @id, index, admission.guard))}
                               aria-controls={paper_link_ref_dom_id("description", @id, index, admission.guard)}
                               data-paper-link-ref-description-panel-trigger
-                            ><%= if paper_links_field_absent?(ref, "description"), do: "Add description", else: "Edit description" %></button>
+                            ><%= if paper_links_field_absent?(ref, "description"), do: gettext("Add description"), else: gettext("Edit description") %></button>
                           </div>
                         <% {:error, _reason} -> %>
                           <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
-                            Authored description has an unsupported shape and is preserved read-only.
+                            <%= gettext("Authored description has an unsupported shape and is preserved read-only.") %>
                           </p>
                       <% end %>
                     <% {:error, _reason} -> %>
                       <%= if paper_link_ref_field_representable?(ref, "title") do %>
                         <label class="bp-paper-edit-fieldlabel">
-                          Authored title
+                          <%= gettext("Authored title") %>
                           <input type="text" name={"ref-#{index}-title"} class="bp-paper-edit-text"
                                  value={Blocks.paper_link_ref_value(ref, "title") || ""} />
                         </label>
                       <% else %>
                         <p class="bp-paper-edit-readonly" data-paper-link-ref-title-readonly>
-                          Authored title has an unsupported shape and is preserved read-only.
+                          <%= gettext("Authored title has an unsupported shape and is preserved read-only.") %>
                         </p>
                       <% end %>
                       <%= if paper_link_ref_field_representable?(ref, "description") do %>
                         <label class="bp-paper-edit-fieldlabel">
-                          Authored description
+                          <%= gettext("Authored description") %>
                           <textarea name={"ref-#{index}-description"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "description") || "" %></textarea>
                         </label>
                       <% else %>
                         <p class="bp-paper-edit-readonly" data-paper-link-ref-description-readonly>
-                          Authored description has an unsupported shape and is preserved read-only.
+                          <%= gettext("Authored description has an unsupported shape and is preserved read-only.") %>
                         </p>
                       <% end %>
                   <% end %>
                   <label class="bp-paper-edit-fieldlabel">
-                    Eyebrow
+                    <%= gettext("Eyebrow") %>
                     <input type="text" name={"ref-#{index}-eyebrow"} class="bp-paper-edit-text"
                            value={Blocks.paper_link_ref_value(ref, "eyebrow") || ""} />
                   </label>
                   <label class="bp-paper-edit-fieldlabel">
-                    Meta
+                    <%= gettext("Meta") %>
                     <input type="text" name={"ref-#{index}-meta"} class="bp-paper-edit-text"
                            value={Blocks.paper_link_ref_value(ref, "meta") || ""} />
                   </label>
                   <label class="bp-paper-edit-fieldlabel">
-                    Reason
+                    <%= gettext("Reason") %>
                     <textarea name={"ref-#{index}-reason"} class="bp-paper-edit-textarea" rows="2"><%= Blocks.paper_link_ref_value(ref, "reason") || "" %></textarea>
                   </label>
                   <label class="bp-paper-edit-check">
                     <input type="checkbox" name={"ref-#{index}-prefer-authored-copy"} value="true"
                            checked={Blocks.paper_link_ref_value(ref, "prefer_authored_copy") == true} />
-                    Prefer authored copy
+                    <%= gettext("Prefer authored copy") %>
                   </label>
                   <label class="bp-paper-edit-check">
                     <input type="hidden" name={"ref-#{index}-featured"} value="false" />
                     <input type="checkbox" name={"ref-#{index}-featured"} value="true"
                            checked={Blocks.paper_link_ref_value(ref, "featured") == true} />
-                    Featured reference
+                    <%= gettext("Featured reference") %>
                   </label>
                   <button type="submit" name="ref-action" value={"remove:#{index}"}
                           class="btn btn-destructive btn-sm" data-test-id="paper-link-remove-ref">
-                    Remove reference
+                    <%= gettext("Remove reference") %>
                   </button>
                 </fieldset>
 
                 <button type="submit" name="ref-action" value="add" class="btn btn-ghost btn-sm"
-                        data-test-id="paper-link-add-ref">Add reference</button>
+                        data-test-id="paper-link-add-ref"><%= gettext("Add reference") %></button>
               </form>
             </div>
           </details>
@@ -3942,7 +4028,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-form-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
           </div>
           <%= if @tree_identity_safe and editable_form_questions?(@block) do %>
             <details
@@ -3950,7 +4036,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               class="bp-paper-contextual-controls bp-paper-contextual-controls--form"
               phx-mounted={JS.ignore_attributes("open")}
             >
-              <summary class="bp-paper-contextual-toggle">Configure questions</summary>
+              <summary class="bp-paper-contextual-toggle"><%= gettext("Configure questions") %></summary>
               <div class="bp-paper-contextual-panel">
                 <form
                   id={"form-editor-" <> @id}
@@ -3962,7 +4048,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 >
                   <input type="hidden" name="block_id" value={@id} />
                   <label class="bp-paper-edit-fieldlabel">
-                    Presentation
+                    <%= gettext("Presentation") %>
                     <select name="kind" class="bp-paper-edit-select">
                       <option
                         :for={kind <- form_kind_options(@block)}
@@ -3983,14 +4069,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     class="bp-paper-edit-form"
                     data-test-id="paper-form-question"
                   >
-                    <legend>Question <%= index + 1 %></legend>
+                    <legend><%= gettext("Question %{n}", n: index + 1) %></legend>
                     <input
                       type="hidden"
                       name={"question-#{index}-original-id"}
                       value={question["id"]}
                     />
                     <label class="bp-paper-edit-fieldlabel">
-                      Answer name
+                      <%= gettext("Answer name") %>
                       <input
                         type="text"
                         name={"question-#{index}-id"}
@@ -3999,7 +4085,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       />
                     </label>
                     <label class="bp-paper-edit-fieldlabel">
-                      Prompt
+                      <%= gettext("Prompt") %>
                       <input
                         type="text"
                         name={"question-#{index}-prompt"}
@@ -4008,7 +4094,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       />
                     </label>
                     <label class="bp-paper-edit-fieldlabel">
-                      Answer type
+                      <%= gettext("Answer type") %>
                       <select name={"question-#{index}-type"} class="bp-paper-edit-select">
                         <option
                           :for={type <- form_question_type_options(question)}
@@ -4018,7 +4104,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       </select>
                     </label>
                     <label class="bp-paper-edit-fieldlabel">
-                      Rationale
+                      <%= gettext("Rationale") %>
                       <input
                         type="text"
                         name={"question-#{index}-rationale"}
@@ -4027,7 +4113,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       />
                     </label>
                     <label class="bp-paper-edit-fieldlabel">
-                      Recommendation
+                      <%= gettext("Recommendation") %>
                       <input
                         type="text"
                         name={"question-#{index}-recommendation"}
@@ -4047,9 +4133,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         class="bp-paper-edit-form"
                         data-test-id="paper-form-option"
                       >
-                        <legend>Option <%= option_index + 1 %></legend>
+                        <legend><%= gettext("Option %{n}", n: option_index + 1) %></legend>
                         <label class="bp-paper-edit-fieldlabel">
-                          Label
+                          <%= gettext("Label") %>
                           <input
                             type="text"
                             name={"question-#{index}-option-#{option_index}"}
@@ -4064,20 +4150,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                             value={"up:#{question["id"]}:#{option_index}"}
                             disabled={option_index == 0}
                             class="btn btn-ghost btn-sm"
-                          >Move up</button>
+                          ><%= gettext("Move up") %></button>
                           <button
                             type="submit"
                             name="option-action"
                             value={"down:#{question["id"]}:#{option_index}"}
                             disabled={option_index == length(form_question_options(question)) - 1}
                             class="btn btn-ghost btn-sm"
-                          >Move down</button>
+                          ><%= gettext("Move down") %></button>
                           <button
                             type="submit"
                             name="option-action"
                             value={"remove:#{question["id"]}:#{option_index}"}
                             class="btn btn-destructive btn-sm"
-                          >Remove option</button>
+                          ><%= gettext("Remove option") %></button>
                         </div>
                       </fieldset>
                       <button
@@ -4085,13 +4171,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         name="option-action"
                         value={"add:" <> question["id"]}
                         class="btn btn-ghost btn-sm"
-                      >Add option</button>
+                      ><%= gettext("Add option") %></button>
                     <% end %>
 
                     <%= if form_question_type(question) == "scale" do %>
                       <div class="bp-paper-edit-actions" data-test-id="paper-form-scale">
                         <label class="bp-paper-edit-fieldlabel">
-                          Minimum
+                          <%= gettext("Minimum") %>
                           <input
                             type="text"
                             inputmode="numeric"
@@ -4102,7 +4188,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           />
                         </label>
                         <label class="bp-paper-edit-fieldlabel">
-                          Maximum
+                          <%= gettext("Maximum") %>
                           <input
                             type="text"
                             inputmode="numeric"
@@ -4122,20 +4208,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         value={"up:" <> question["id"]}
                         disabled={index == 0}
                         class="btn btn-ghost btn-sm"
-                      >Move up</button>
+                      ><%= gettext("Move up") %></button>
                       <button
                         type="submit"
                         name="question-action"
                         value={"down:" <> question["id"]}
                         disabled={index == length(editable_form_question_rows(@block)) - 1}
                         class="btn btn-ghost btn-sm"
-                      >Move down</button>
+                      ><%= gettext("Move down") %></button>
                       <button
                         type="submit"
                         name="question-action"
                         value={"remove:" <> question["id"]}
                         class="btn btn-destructive btn-sm"
-                      >Remove question</button>
+                      ><%= gettext("Remove question") %></button>
                     </div>
                   </fieldset>
                   <button
@@ -4143,13 +4229,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     name="question-action"
                     value="add"
                     class="btn btn-ghost btn-sm"
-                  >Add question</button>
+                  ><%= gettext("Add question") %></button>
                 </form>
               </div>
             </details>
           <% else %>
             <p class="bp-paper-edit-readonly">
-              Question identities or active answer data need repair before editing; original content is preserved.
+              <%= gettext("Question identities or active answer data need repair before editing; original content is preserved.") %>
             </p>
           <% end %>
         </div>
@@ -4213,7 +4299,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               class="bp-paper-contextual-controls bp-paper-contextual-controls--tabs"
               phx-mounted={JS.ignore_attributes("open")}
             >
-              <summary class="bp-paper-contextual-toggle">Configure tabs</summary>
+              <summary class="bp-paper-contextual-toggle"><%= gettext("Configure tabs") %></summary>
               <div class="bp-paper-contextual-panel">
                 <form
                   id={"tabs-form-" <> @id}
@@ -4228,10 +4314,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="panel-new-child-id" value={Blocks.new_block_id()} />
                   <fieldset :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
                             class="bp-paper-edit-form">
-                    <legend>Panel <%= index + 1 %></legend>
+                    <legend><%= gettext("Panel %{n}", n: index + 1) %></legend>
                     <input type="hidden" name={"panel-#{index}-id"} value={row["id"]} />
                     <label class="bp-paper-edit-fieldlabel">
-                      Label
+                      <%= gettext("Label") %>
                       <input
                         type="text"
                         name={"panel-#{index}-label"}
@@ -4245,48 +4331,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                       value={"up:" <> row["id"]}
                       disabled={index == 0}
                       class="btn btn-ghost btn-sm"
-                    >Move up</button>
+                    ><%= gettext("Move up") %></button>
                     <button
                       type="submit"
                       name="panel-action"
                       value={"down:" <> row["id"]}
                       disabled={index == length(editable_tab_rows(@block)) - 1}
                       class="btn btn-ghost btn-sm"
-                    >Move down</button>
+                    ><%= gettext("Move down") %></button>
                     <button
                       type="submit"
                       name="panel-action"
                       value={"remove:" <> row["id"]}
                       class="btn btn-destructive btn-sm"
-                    >Remove panel</button>
+                    ><%= gettext("Remove panel") %></button>
                     <button
                       :if={empty_tab_body?(row)}
                       type="submit"
                       name="panel-action"
                       value={"add-body:" <> row["id"]}
                       class="btn btn-ghost btn-sm"
-                    >Add paragraph</button>
+                    ><%= gettext("Add paragraph") %></button>
                   </fieldset>
                   <button type="submit" name="panel-action" value="add" class="btn btn-ghost btn-sm">
-                    Add panel
+                    <%= gettext("Add panel") %>
                   </button>
                 </form>
               </div>
             </details>
           <% else %>
             <div class="bp-paper-contextual-preview" data-test-id="paper-tabs-preview">
-              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
             </div>
             <p class="bp-paper-edit-readonly">
-              Panel identities or body data need repair before editing; original content is preserved.
+              <%= gettext("Panel identities or body data need repair before editing; original content is preserved.") %>
             </p>
           <% end %>
         </div>
       <% "steps" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-steps-editor">
           <%= if not editable_steps?(@block) do %>
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
-            <p class="bp-paper-edit-readonly">Step identities need repair before editing; original content is preserved.</p>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
+            <p class="bp-paper-edit-readonly"><%= gettext("Step identities need repair before editing; original content is preserved.") %></p>
           <% else %>
           <ol class="bp-steps">
             <li :for={{row, index} <- Enum.with_index(editable_step_rows(@block))} class="bp-steps__step" data-step-row-id={row["id"]}>
@@ -4302,8 +4388,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   name={"step-#{index}-title"}
                   rows="1"
                   class="bp-paper-inline-text bp-paper-inline-copy"
-                  aria-label={"Step #{index + 1} title"}
-                  placeholder="Step title"
+                  aria-label={gettext("Step %{n} title", n: index + 1)}
+                  placeholder={gettext("Step title")}
                   phx-debounce="500"
                   phx-hook="BarkparkPaperAutoSize"
                 ><%= step_title_text(row) %></textarea></div>
@@ -4340,7 +4426,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           </ol>
           <details id={"paper-steps-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--steps"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure steps</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure steps") %></summary>
             <div class="bp-paper-contextual-panel">
               <form id={"steps-form-" <> @id} class="bp-paper-edit-form"
                     phx-submit="paper-edit-block" phx-change="paper-block-autosave" phx-debounce="500">
@@ -4349,24 +4435,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <input type="hidden" name="step-new-row-id" value={Blocks.new_block_id()} />
                 <input type="hidden" name="step-new-child-id" value={Blocks.new_block_id()} />
                 <fieldset :for={{row, index} <- Enum.with_index(editable_step_rows(@block))}>
-                  <legend>Step <%= index + 1 %></legend>
+                  <legend><%= gettext("Step %{n}", n: index + 1) %></legend>
                   <input type="hidden" name={"step-#{index}-id"} value={row["id"]} />
                   <button type="button" class="btn btn-ghost btn-sm"
                           phx-click={contextual_panel_focus(step_title_dom_id(@id, row["id"]))}
                           aria-controls={step_title_dom_id(@id, row["id"])}
-                  ><%= if step_title_text(row) == "", do: "Add title", else: "Edit title" %></button>
+                  ><%= if step_title_text(row) == "", do: gettext("Add title"), else: gettext("Edit title") %></button>
                   <button type="submit" name="step-action" value={"up:" <> row["id"]}
-                          disabled={index == 0} class="btn btn-ghost btn-sm">Move up</button>
+                          disabled={index == 0} class="btn btn-ghost btn-sm"><%= gettext("Move up") %></button>
                   <button type="submit" name="step-action" value={"down:" <> row["id"]}
                           disabled={index == length(editable_step_rows(@block)) - 1}
-                          class="btn btn-ghost btn-sm">Move down</button>
+                          class="btn btn-ghost btn-sm"><%= gettext("Move down") %></button>
                   <button type="submit" name="step-action" value={"remove:" <> row["id"]}
-                          class="btn btn-destructive btn-sm">Remove step</button>
+                          class="btn btn-destructive btn-sm"><%= gettext("Remove step") %></button>
                   <button :if={empty_step_body?(row)}
                           type="submit" name="step-action" value={"add-body:" <> row["id"]}
-                          class="btn btn-ghost btn-sm">Add paragraph</button>
+                          class="btn btn-ghost btn-sm"><%= gettext("Add paragraph") %></button>
                 </fieldset>
-                <button type="submit" name="step-action" value="add" class="btn btn-ghost btn-sm">Add step</button>
+                <button type="submit" name="step-action" value="add" class="btn btn-ghost btn-sm"><%= gettext("Add step") %></button>
               </form>
             </div>
           </details>
@@ -4398,8 +4484,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 form={"expandable-summary-form-" <> @id}
                 rows="1"
                 class="bp-paper-inline-text"
-                aria-label="Expandable title"
-                placeholder="Add a section title…"
+                aria-label={gettext("Expandable title")}
+                placeholder={gettext("Add a section title…")}
                 phx-hook="BarkparkPaperAutoSize"
               ><%= Map.get(@block, "summary", "") %></textarea>
             </summary>
@@ -4479,7 +4565,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           </details>
           <details id={"paper-expandable-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure expandable</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure expandable") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"expandable-form-" <> @id}
@@ -4490,14 +4576,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               >
                 <input type="hidden" name="block_id" value={@id} />
                 <label class="bp-paper-edit-fieldlabel">
-                  Summary
+                  <%= gettext("Summary") %>
                   <input type="text" name="summary" class="bp-paper-edit-text"
                          value={Map.get(@block, "summary", "")} />
                 </label>
                 <label class="bp-paper-edit-check">
                   <input type="hidden" name="open" value="false" />
                   <input type="checkbox" name="open" value="true" checked={Map.get(@block, "open") == true} />
-                  Open by default
+                  <%= gettext("Open by default") %>
                 </label>
               </form>
             </div>
@@ -4507,72 +4593,71 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-gauge-list-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"gauge-list-controls-" <> @id}
                    class="bp-paper-contextual-controls bp-paper-contextual-controls--gauge-list"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure gauge list</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure gauge list") %></summary>
             <div class="bp-paper-contextual-panel">
               <form id={"gauge-list-form-" <> @id} class="bp-paper-edit-form"
                     phx-submit="paper-edit-block" phx-change="paper-block-autosave"
                     phx-debounce="500" data-test-id="paper-gauge-list-editor">
                 <input type="hidden" name="block_id" value={@id} />
-                <label class="bp-paper-edit-fieldlabel" for={"gauge-title-" <> @id}>Title</label>
+                <label class="bp-paper-edit-fieldlabel" for={"gauge-title-" <> @id}><%= gettext("Title") %></label>
                 <input id={"gauge-title-" <> @id} type="text" name="title"
                        class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "title"))} />
-                <label class="bp-paper-edit-fieldlabel" for={"gauge-mode-" <> @id}>Mode</label>
+                <label class="bp-paper-edit-fieldlabel" for={"gauge-mode-" <> @id}><%= gettext("Mode") %></label>
                 <select id={"gauge-mode-" <> @id} name="mode" class="bp-paper-edit-text">
-                  <option value="share" selected={Blocks.gauge_list_mode(@block) == "share"}>Shares</option>
-                  <option value="count" selected={Blocks.gauge_list_mode(@block) == "count"}>Counts from snapshot</option>
+                  <option value="share" selected={Blocks.gauge_list_mode(@block) == "share"}><%= gettext("Shares") %></option>
+                  <option value="count" selected={Blocks.gauge_list_mode(@block) == "count"}><%= gettext("Counts from snapshot") %></option>
                 </select>
                 <%= if Blocks.gauge_list_mode(@block) == "share" do %>
-                  <label class="bp-paper-edit-fieldlabel" for={"gauge-max-" <> @id}>Maximum</label>
+                  <label class="bp-paper-edit-fieldlabel" for={"gauge-max-" <> @id}><%= gettext("Maximum") %></label>
                   <input id={"gauge-max-" <> @id} type="text" inputmode="decimal" name="max"
                          class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "max"))}
-                         placeholder="Automatic: sum of values" />
+                         placeholder={gettext("Automatic: sum of values")} />
                   <%= if is_nil(Map.get(@block, "rows")) or
                          (is_list(Map.get(@block, "rows")) and Enum.all?(@block["rows"], &is_map/1)) do %>
                   <input type="hidden" name="gauge-count" value={length(Blocks.gauge_list_rows(@block))} />
                   <fieldset :for={{row, index} <- Enum.with_index(Blocks.gauge_list_rows(@block))}
                             class="bp-paper-edit-form" data-test-id="paper-gauge-list-row">
-                    <legend>Gauge <%= index + 1 %></legend>
-                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-label-#{@id}"}>Label</label>
+                    <legend><%= gettext("Gauge %{n}", n: index + 1) %></legend>
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-label-#{@id}"}><%= gettext("Label") %></label>
                       <input id={"gauge-#{index}-label-#{@id}"} type="text" name={"gauge-#{index}-label"}
                              class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "label"))} />
-                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-value-#{@id}"}>Value</label>
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-value-#{@id}"}><%= gettext("Value") %></label>
                       <input id={"gauge-#{index}-value-#{@id}"} type="text" inputmode="decimal"
                              name={"gauge-#{index}-value"} class="bp-paper-edit-text"
                              value={Blocks.form_value(Map.get(row, "value"))} />
-                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-note-#{@id}"}>Note</label>
+                      <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-note-#{@id}"}><%= gettext("Note") %></label>
                       <input id={"gauge-#{index}-note-#{@id}"} type="text" name={"gauge-#{index}-note"}
                              class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "note"))} />
                     <div class="bp-paper-edit-actions">
                       <button type="submit" name="gauge-action" value={"up:#{index}"}
-                              class="btn btn-ghost btn-sm" disabled={index == 0}>Move up</button>
+                              class="btn btn-ghost btn-sm" disabled={index == 0}><%= gettext("Move up") %></button>
                       <button type="submit" name="gauge-action" value={"down:#{index}"}
                               class="btn btn-ghost btn-sm"
-                              disabled={index == length(Blocks.gauge_list_rows(@block)) - 1}>Move down</button>
+                              disabled={index == length(Blocks.gauge_list_rows(@block)) - 1}><%= gettext("Move down") %></button>
                       <button type="submit" name="gauge-action" value={"remove:#{index}"}
-                              class="btn btn-destructive btn-sm">Remove gauge</button>
+                              class="btn btn-destructive btn-sm"><%= gettext("Remove gauge") %></button>
                     </div>
                   </fieldset>
-                  <button type="submit" name="gauge-action" value="add" class="btn btn-ghost btn-sm">Add gauge</button>
+                  <button type="submit" name="gauge-action" value="add" class="btn btn-ghost btn-sm"><%= gettext("Add gauge") %></button>
                   <% else %>
                     <p class="bp-paper-edit-readonly">
-                      Row data has a legacy shape; title, mode and maximum remain editable.
-                      Original rows are preserved.
+                      <%= gettext("Row data has a legacy shape; title, mode and maximum remain editable. Original rows are preserved.") %>
                     </p>
                   <% end %>
                 <% else %>
-                  <label class="bp-paper-edit-fieldlabel" for={"gauge-group-" <> @id}>Group by</label>
+                  <label class="bp-paper-edit-fieldlabel" for={"gauge-group-" <> @id}><%= gettext("Group by") %></label>
                   <input id={"gauge-group-" <> @id} type="text" name="groupBy"
                          class="bp-paper-edit-text" list={"gauge-groups-" <> @id}
                          value={Blocks.gauge_list_group_by(@block)} />
                   <datalist id={"gauge-groups-" <> @id}>
                     <option :for={group <- ["worker", "phase", "status", "priority", "epic"]} value={group}></option>
                   </datalist>
-                  <p class="bp-paper-edit-readonly">Snapshot data is preserved; grouping changes how it is displayed.</p>
+                  <p class="bp-paper-edit-readonly"><%= gettext("Snapshot data is preserved; grouping changes how it is displayed.") %></p>
                 <% end %>
               </form>
             </div>
@@ -4582,11 +4667,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-bar-chart-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-bar-chart-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"paper-chart-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
-            <summary class="bp-paper-contextual-toggle">Configure bar chart</summary>
+            <summary class="bp-paper-contextual-toggle"><%= gettext("Configure bar chart") %></summary>
             <div class="bp-paper-contextual-panel">
               <form
                 id={"bar-chart-form-" <> @id}
@@ -4599,40 +4684,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <input type="hidden" name="block_id" value={@id} />
           <input type="hidden" name="bar-count" value={length(Map.get(@block, "bars", []))} />
           <label class="bp-paper-edit-fieldlabel">
-            Maximum
+            <%= gettext("Maximum") %>
             <input type="number" name="max" class="bp-paper-edit-text" step="any"
                    value={Blocks.contextual_optional_value(@block, "max")} />
           </label>
           <label class="bp-paper-edit-check">
             <input type="hidden" name="values" value="false" />
             <input type="checkbox" name="values" value="true" checked={Blocks.strict_boolean_field?(@block, "values")} />
-            Show values
+            <%= gettext("Show values") %>
           </label>
           <div :for={{bar, index} <- Enum.with_index(Map.get(@block, "bars", []))}
                class="bp-paper-edit-form" data-test-id="paper-bar-chart-row" data-bar-index={index}>
             <label class="bp-paper-edit-fieldlabel">
-              Label
+              <%= gettext("Label") %>
               <input type="text" name={"bar-#{index}-label"} class="bp-paper-edit-text"
                      value={Map.get(bar, "label", "")} />
             </label>
             <label class="bp-paper-edit-fieldlabel">
-              Value
+              <%= gettext("Value") %>
               <input type="number" name={"bar-#{index}-value"} class="bp-paper-edit-text" step="any"
                      value={Map.get(bar, "value", 0)} />
             </label>
             <button type="submit" name="bar-action" value={"remove:#{index}"}
                     class="btn btn-destructive btn-sm" data-test-id="paper-bar-chart-remove">
-              Remove bar
+              <%= gettext("Remove bar") %>
             </button>
           </div>
                 <button type="submit" name="bar-action" value="add" class="btn btn-ghost btn-sm"
-                        data-test-id="paper-bar-chart-add">Add bar</button>
+                        data-test-id="paper-bar-chart-add"><%= gettext("Add bar") %></button>
               </form>
             </div>
           </details>
         </div>
       <% "divider" -> %>
-        <p class="bp-paper-edit-readonly">— divider —</p>
+        <p class="bp-paper-edit-readonly">{gettext("— divider —")}</p>
 
       <%!-- field-* LEAF blocks (P2.1). Each renders a labelled native control
             inside a stable phx-update="ignore" wrapper mounted with the
@@ -4705,10 +4790,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           data-test-id="paper-field-number-editor"
         >
           <input type="hidden" name="block_id" value={@id} />
-          <label class="bp-paper-edit-fieldlabel" for={"field-number-label-" <> @id}>Label</label>
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-label-" <> @id}><%= gettext("Label") %></label>
           <input id={"field-number-label-" <> @id} type="text" name="label"
                  class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "label"))} />
-          <label class="bp-paper-edit-fieldlabel" for={"field-number-value-" <> @id}>Value</label>
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-value-" <> @id}><%= gettext("Value") %></label>
           <input
             id={"field-number-value-" <> @id}
             type="number"
@@ -4719,28 +4804,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             aria-describedby={"field-number-hint-" <> @id}
             data-test-id="paper-field-field-number"
           />
-          <label class="bp-paper-edit-fieldlabel" for={"field-number-min-" <> @id}>Minimum</label>
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-min-" <> @id}><%= gettext("Minimum") %></label>
           <input id={"field-number-min-" <> @id} type="number" name="min"
                  class="bp-paper-edit-text" step="any"
                  value={Blocks.form_value(Map.get(@block, "min"))} />
-          <label class="bp-paper-edit-fieldlabel" for={"field-number-max-" <> @id}>Maximum</label>
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-max-" <> @id}><%= gettext("Maximum") %></label>
           <input id={"field-number-max-" <> @id} type="number" name="max"
                  class="bp-paper-edit-text" step="any"
                  value={Blocks.form_value(Map.get(@block, "max"))} />
-          <label class="bp-paper-edit-fieldlabel" for={"field-number-step-" <> @id}>Step</label>
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-step-" <> @id}><%= gettext("Step") %></label>
           <input id={"field-number-step-" <> @id} type="number" name="step"
                  class="bp-paper-edit-text" min="0" step="any"
                  value={Blocks.form_value(Map.get(@block, "step"))} />
-          <label class="bp-paper-edit-fieldlabel" for={"field-number-unit-" <> @id}>Unit</label>
+          <label class="bp-paper-edit-fieldlabel" for={"field-number-unit-" <> @id}><%= gettext("Unit") %></label>
           <input id={"field-number-unit-" <> @id} type="text" name="unit"
                  class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "unit"))} />
           <small id={"field-number-hint-" <> @id} class="bp-paper-edit-kind">
-            Enter a valid number<%= case Blocks.form_value(Map.get(@block, "unit")) do
-              "" -> ""
-              unit -> " in #{unit}"
-            end %>.
+            <%= case Blocks.form_value(Map.get(@block, "unit")) do
+              "" -> gettext("Enter a valid number.")
+              unit -> gettext("Enter a valid number in %{unit}.", unit: unit)
+            end %>
           </small>
-          <button type="submit" class="btn btn-primary btn-sm">Save number field</button>
+          <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Save number field") %></button>
         </form>
 
       <%!-- field-reference / field-image PICKER blocks (P2.2). The Edit control
@@ -4760,16 +4845,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
              data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <%= if @picker_browse do %>
+            <%!-- A bound block carries the stored value verbatim, and a reference
+                  is stored as {"_ref": id}: an HTML attribute cannot hold a map
+                  (the LiveView crashed on Beta, task-a6f50ddb9201e7b1), and the
+                  picker wants the bare id, as Classic passes it. --%>
             <bp-reference-picker
-              value={Map.get(@block, "value", "")}
+              value={FieldInputs.reference_id(Map.get(@block, "value", ""))}
               ref-type={Map.get(@block, "refType", "")}
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
               data-test-id="paper-field-field-reference"
             ></bp-reference-picker>
           <% else %>
             <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
-              {Map.get(@block, "value", "")}
+              {FieldInputs.reference_id(Map.get(@block, "value", ""))}
             </output>
           <% end %>
         </div>
@@ -4780,15 +4870,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <%= if @picker_browse do %>
             <bp-media-picker
-              value={Map.get(@block, "value", "")}
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
+              value={FieldInputs.image_form_value(Map.get(@block, "value", ""))}
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
               data-token={@api_token_raw}
+              hotspot={get_in(@block, [:__picker, :hotspot])}
+              alt={get_in(@block, [:__picker, :alt])}
               data-test-id="paper-field-field-image"
             ></bp-media-picker>
           <% else %>
             <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
-              {Map.get(@block, "value", "")}
+              {FieldInputs.image_form_value(Map.get(@block, "value", ""))}
             </output>
           <% end %>
         </div>
@@ -4804,29 +4897,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         >
           <input type="hidden" name="block_id" value={@id} />
           <input type="hidden" name="caption-count" value={length(Blocks.video_captions(@block))} />
-          <label class="bp-paper-edit-fieldlabel" for={"video-src-" <> @id}>Video source</label>
+          <label class="bp-paper-edit-fieldlabel" for={"video-src-" <> @id}><%= gettext("Video source") %></label>
           <input
             id={"video-src-" <> @id}
             type="text"
             name="src"
             class="bp-paper-edit-text"
             value={Blocks.form_value(Map.get(@block, "src"))}
-            placeholder="/media/video.mp4 or https://…"
+            placeholder={gettext("/media/video.mp4 or https://…")}
             data-test-id="paper-field-video-src"
           />
-          <label class="bp-paper-edit-fieldlabel" for={"video-poster-" <> @id}>Poster image</label>
+          <label class="bp-paper-edit-fieldlabel" for={"video-poster-" <> @id}><%= gettext("Poster image") %></label>
           <input
             id={"video-poster-" <> @id}
             type="text"
             name="poster"
             class="bp-paper-edit-text"
             value={Blocks.form_value(Map.get(@block, "poster"))}
-            placeholder="Optional poster URL"
+            placeholder={gettext("Optional poster URL")}
             data-test-id="paper-field-video-poster"
           />
           <label class="bp-paper-edit-check">
             <input type="checkbox" name="loop" value="true" checked={Map.get(@block, "loop") == true} />
-            Loop playback
+            <%= gettext("Loop playback") %>
           </label>
 
           <fieldset
@@ -4835,10 +4928,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-video-caption-row"
             data-caption-index={index}
           >
-            <legend>Caption track <%= index + 1 %></legend>
+            <legend><%= gettext("Caption track %{n}", n: index + 1) %></legend>
             <div :if={is_map(caption)} class="bp-paper-edit-form">
               <label class="bp-paper-edit-fieldlabel" for={"video-caption-lang-#{@id}-#{index}"}>
-                Language
+                <%= gettext("Language") %>
               </label>
               <input
                 id={"video-caption-lang-#{@id}-#{index}"}
@@ -4849,7 +4942,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 placeholder="en"
               />
               <label class="bp-paper-edit-fieldlabel" for={"video-caption-src-#{@id}-#{index}"}>
-                Caption file
+                <%= gettext("Caption file") %>
               </label>
               <input
                 id={"video-caption-src-#{@id}-#{index}"}
@@ -4861,7 +4954,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               />
             </div>
             <p :if={!is_map(caption)} class="bp-paper-edit-readonly">
-              This legacy caption entry is retained until removed.
+              <%= gettext("This legacy caption entry is retained until removed.") %>
             </p>
             <button
               type="submit"
@@ -4869,7 +4962,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               value={"remove:#{index}"}
               class="btn btn-destructive btn-sm"
               data-test-id="paper-video-caption-remove"
-            >Remove caption track</button>
+            ><%= gettext("Remove caption track") %></button>
           </fieldset>
 
           <button
@@ -4878,7 +4971,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             value="add"
             class="btn btn-ghost btn-sm"
             data-test-id="paper-video-caption-add"
-          >Add caption track</button>
+          ><%= gettext("Add caption track") %></button>
         </form>
 
       <%!-- IMAGE content blocks (t13, pd-doctrine rule 1). The seeded locked
@@ -4896,10 +4989,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div phx-update="ignore" id={"paper-fld-" <> @id} phx-hook="BarkparkFieldBlockBridge"
              data-block-id={@id} data-field-type="image" data-block-role={image_block_role(@block)} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel">
-            <%= if image_block_role(@block) == "featured", do: "Featured image", else: "Image" %>
+            <%= if image_block_role(@block) == "featured", do: gettext("Featured image"), else: gettext("Image") %>
           </label>
           <%= if @picker_browse do %>
             <bp-media-picker
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
               value={image_block_src(@block)}
               dataset={@dataset}
               scope-prefix={@scope_prefix}
@@ -4945,9 +5039,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         </div>
         <p class="bp-paper-edit-readonly" data-test-id="paper-master-ref-note">
           <%= if linked_pinned?(@block) do %>
-            Pinned to a published version of the master — readers see exactly this. Unpin to follow the master, or Detach to edit it here.
+            <%= gettext("Pinned to a published version of the master — readers see exactly this. Unpin to follow the master, or Detach to edit it here.") %>
           <% else %>
-            Linked master — it shows the master's content. Edit the master, or Detach to edit it here.
+            <%= gettext("Linked master — it shows the master's content. Edit the master, or Detach to edit it here.") %>
           <% end %>
         </p>
       <% _ -> %>
@@ -4958,10 +5052,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
              recorded transcripts): leaving the words out made Edit drop authored text
              the reader shows (r2b click-to-edit census). --%>
         <div class="bp-paper-contextual-preview" data-test-id="paper-readonly-preview">
-          <%= raw(Render.render_block(@block, %{style: :article})) %>
+          <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
         </div>
         <p class="bp-paper-edit-readonly">
-          <%= @type %> blocks are not editable yet (view/delete/reorder only).
+          <%= gettext("%{type} blocks are not editable yet (view/delete/reorder only).", type: @type) %>
         </p>
     <% end %>
     """
@@ -5033,19 +5127,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         nil
 
       {:error, {:minimum_column_count, 1}} ->
-        "At least one column is required."
+        gettext("At least one column is required.")
 
       {:error, {:column_not_rightmost, ^column_index}} ->
-        "Only the last column can be removed, so open drafts keep their column index."
+        gettext("Only the last column can be removed, so open drafts keep their column index.")
 
       {:error, {:locked_block, _id, "remove-column"}} ->
-        "Locked content must be removed before this column."
+        gettext("Locked content must be removed before this column.")
 
       {:error, {:column_not_empty, ^column_index}} ->
-        "Remove this column's children first."
+        gettext("Remove this column's children first.")
 
       {:error, _reason} ->
-        "This column cannot be removed."
+        gettext("This column cannot be removed.")
     end
   end
 
@@ -5118,10 +5212,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp editable_tabs?(block), do: Map.get(block, "tabs") == nil
 
   defp tab_label(%{"label" => label}, index) when is_binary(label) do
-    if String.trim(label) == "", do: "Tab #{index + 1}", else: label
+    if String.trim(label) == "", do: gettext("Tab %{n}", n: index + 1), else: label
   end
 
-  defp tab_label(_row, index), do: "Tab #{index + 1}"
+  defp tab_label(_row, index), do: gettext("Tab %{n}", n: index + 1)
 
   defp empty_tab_body?(row), do: Map.get(row, "blocks") in [nil, []]
 
@@ -5232,8 +5326,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     end
   end
 
-  defp form_kind_label("grill"), do: "Form"
-  defp form_kind_label("questionnaire"), do: "Questionnaire"
+  defp form_kind_label("grill"), do: gettext("Form")
+  defp form_kind_label("questionnaire"), do: gettext("Questionnaire")
   defp form_kind_label(kind), do: kind
 
   defp form_question_type(%{"type" => type}) when is_binary(type), do: type
@@ -5242,11 +5336,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp form_question_type_options(question),
     do: Enum.uniq([form_question_type(question) | ~w(text yesno single multi scale)])
 
-  defp form_question_type_label("text"), do: "Text"
-  defp form_question_type_label("yesno"), do: "Yes / no"
-  defp form_question_type_label("single"), do: "Single choice"
-  defp form_question_type_label("multi"), do: "Multiple choice"
-  defp form_question_type_label("scale"), do: "Scale"
+  defp form_question_type_label("text"), do: gettext("Text")
+  defp form_question_type_label("yesno"), do: gettext("Yes / no")
+  defp form_question_type_label("single"), do: gettext("Single choice")
+  defp form_question_type_label("multi"), do: gettext("Multiple choice")
+  defp form_question_type_label("scale"), do: gettext("Scale")
   defp form_question_type_label(type), do: type
 
   defp form_question_text(question, key) do
@@ -5307,9 +5401,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   defp figure_image_trigger_label(child) do
     case Map.get(child, "alt") do
-      "" -> "Replace figure image"
-      alt when is_binary(alt) -> "Replace figure image: " <> alt
-      _ -> "Replace figure image"
+      "" -> gettext("Replace figure image")
+      alt when is_binary(alt) -> gettext("Replace figure image: %{alt}", alt: alt)
+      _ -> gettext("Replace figure image")
     end
   end
 
@@ -5348,4 +5442,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       _ -> nil
     end
   end
+
+  # The schema field's picker controls ride the RENDER copy of a property row's
+  # block under an atom key, never the stored block (task-6f2b84a0e32688ad).
+  defp with_picker_flags(block, %{picker: %{} = flags}) when is_map(block),
+    do: Map.put(block, :__picker, flags)
+
+  defp with_picker_flags(block, _descriptor), do: block
+
+  # A callout tone's name in the Studio language; the stored value stays the
+  # English word, and English reads it unchanged.
+  defp tone_word("info"), do: pgettext("callout tone", "info")
+  defp tone_word("success"), do: pgettext("callout tone", "success")
+  defp tone_word("warning"), do: pgettext("callout tone", "warning")
+  defp tone_word("danger"), do: pgettext("callout tone", "danger")
+  defp tone_word("neutral"), do: pgettext("callout tone", "neutral")
+  defp tone_word(other), do: other
 end

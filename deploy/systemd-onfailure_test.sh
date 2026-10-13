@@ -78,7 +78,10 @@ set -uo pipefail
 # the /systemd suffix below and this reads an EMPTY corpus, which is exactly how
 # a relocated harness goes quietly green. Arm D is what refuses that.
 DIR="${SYSTEMD_DIR:-$(cd "$(dirname "$0")/systemd" && pwd)}"
-MIN_TIMERS="${MIN_TIMERS:-2}"
+# 1, lowered deliberately from 2: barkpark-rotate-public-token.timer was retired
+# when the weekly public-read rotation became the core Oban job
+# Barkpark.Auth.PublicReadRotationWorker (task-eaaf13ab768f34f6).
+MIN_TIMERS="${MIN_TIMERS:-1}"
 FAILED=0
 CHECKS=0
 

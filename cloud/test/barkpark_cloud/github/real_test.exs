@@ -223,4 +223,88 @@ defmodule BarkparkCloud.GitHub.RealTest do
       assert {:error, :not_configured} = Real.exchange_installation_token("5")
     end
   end
+
+  # task-0cf611238d4ad597 CQ7a: the user-authorization leg that proves an
+  # installation belongs to the person recording it.
+  describe "exchange_user_code/1 + list_user_installation_ids/1" do
+    test "the code exchange is a JSON POST to GitHub's OAuth token endpoint" do
+      req = Real.user_token_request("Iv1.abc", "s3cret", "code-123")
+      assert req.method == :post
+      assert req.url == "https://github.com/login/oauth/access_token"
+      assert {"Accept", "application/json"} in req.headers
+
+      assert Jason.decode!(req.body) == %{
+               "client_id" => "Iv1.abc",
+               "client_secret" => "s3cret",
+               "code" => "code-123"
+             }
+    end
+
+    test "the installation list is GET /user/installations with the user token" do
+      req = Real.user_installations_request("ghu_x", 2)
+      assert req.method == :get
+      assert req.url == "https://api.github.com/user/installations?per_page=100&page=2"
+      assert {"Authorization", "Bearer ghu_x"} in req.headers
+    end
+
+    test "no client id or secret → :not_configured, and nothing is sent" do
+      put_github_config(
+        client_id: nil,
+        client_secret: nil,
+        http_client: &GitHubFakeTransport.request/1
+      )
+
+      GitHubFakeTransport.program([])
+      assert {:error, :not_configured} = Real.exchange_user_code("code-123")
+      assert GitHubFakeTransport.requests() == []
+    end
+
+    test "a good code becomes a user token; a spent one is :bad_verification_code" do
+      put_github_config(
+        client_id: "Iv1.abc",
+        client_secret: "s3cret",
+        http_client: &GitHubFakeTransport.request/1
+      )
+
+      GitHubFakeTransport.program([
+        {:ok, %{status: 200, body: ~s({"access_token":"ghu_live","token_type":"bearer"})}},
+        # GitHub answers a bad code with 200 and an error body.
+        {:ok, %{status: 200, body: ~s({"error":"bad_verification_code"})}}
+      ])
+
+      assert {:ok, "ghu_live"} = Real.exchange_user_code("good")
+      assert {:error, :bad_verification_code} = Real.exchange_user_code("spent")
+    end
+
+    test "installation ids are collected across pages until total_count" do
+      put_github_config(http_client: &GitHubFakeTransport.request/1)
+
+      page1 = Enum.map(1..100, &%{"id" => &1})
+
+      GitHubFakeTransport.program([
+        {:ok,
+         %{status: 200, body: Jason.encode!(%{"total_count" => 101, "installations" => page1})}},
+        {:ok,
+         %{
+           status: 200,
+           body: Jason.encode!(%{"total_count" => 101, "installations" => [%{"id" => 4242}]})
+         }}
+      ])
+
+      assert {:ok, ids} = Real.list_user_installation_ids("ghu_live")
+      assert length(ids) == 101
+      assert "4242" in ids
+      assert length(GitHubFakeTransport.requests()) == 2
+    end
+
+    test "a refused user token surfaces as an error, never as an empty list" do
+      put_github_config(http_client: &GitHubFakeTransport.request/1)
+
+      GitHubFakeTransport.program([
+        {:ok, %{status: 401, body: ~s({"message":"Bad credentials"})}}
+      ])
+
+      assert {:error, {:github_http_error, 401, _}} = Real.list_user_installation_ids("ghu_dead")
+    end
+  end
 end

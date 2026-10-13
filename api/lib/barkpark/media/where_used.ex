@@ -1,6 +1,7 @@
 defmodule Barkpark.Media.WhereUsed do
   @moduledoc """
-  Which PUBLISHED documents reference a media blob by its delivery URL.
+  Which documents (draft or published, task-992eae89fc73b97e) reference a
+  media blob by its delivery URL.
 
   Papers (and every other content type) embed self-hosted media as a RAW URL
   STRING inside their block JSON — `/media/files/<path>` — never as a typed
@@ -17,10 +18,49 @@ defmodule Barkpark.Media.WhereUsed do
   and finds a broken image. Nothing on either delete path consulted usage.
 
   This module is the missing lookup: a `content::text` containment scan for the
-  blob's delivery path over PUBLISHED rows. It is deliberately TEXTUAL rather
-  than structural — the reference IS text, in an arbitrary position of a
-  schemaless block tree, so any structural walk would have to enumerate shapes
-  and would miss the next one someone invents.
+  blob's delivery path over every draft or published row. It is deliberately
+  TEXTUAL rather than structural — the reference IS text, in an arbitrary
+  position of a schemaless block tree, so any structural walk would have to
+  enumerate shapes and would miss the next one someone invents.
+
+  DRAFTS COUNT (task-992eae89fc73b97e, widening the scope task-5f6e7ae324334044
+  already gave the structural half below): a raw URL pasted into a draft-only
+  block — a paper draft nobody has published yet, or a draft edit of a
+  published paper with a NEW embed not yet live — used to delete clean, because
+  the scan's `where: d.status == "published"` excluded it. Nothing about that
+  exclusion was ever a reasoned decision; it was the same acknowledged gap the
+  moduledoc below used to describe. A draft losing its image is the same
+  unrecoverable data loss as a published page losing it, so the scan now reads
+  `status in ["published", "draft"]`. Every OTHER status (`archived`,
+  `active`, `planning`, `completed` — the task-workflow statuses `Document`
+  also carries) stays excluded: this guard is about content that could show a
+  blob to a reader or an editor, not every row the `status` column's enum
+  happens to cover.
+
+  ## The one shape the textual scan cannot see (task-5f6e7ae324334044)
+
+  A schema `image`/`file` FIELD never stores the delivery-path string: its
+  value is `{"asset": {"_ref": assetDocId}, ...}` (docs/contracts/schema-v2.md)
+  — a reference to the blob's companion `mediaAsset` DOCUMENT
+  (`Media.asset_doc_for_file/3`), whose own `doc_id` is a different string from
+  both `MediaFile.id` and `MediaFile.path`. An author who only ever uses the
+  schema-managed image/file picker, never pasting a bare URL into a block, is
+  therefore invisible to `scan/2` alone — even though the identical reference
+  shape is already visible to `Content.Query.list_reference_holders/3` (the
+  backlinks query). `referrers/1` now ALSO runs that structural lookup
+  (`structural_referrers/1`) and merges its hits into the same census, so an
+  image/file field reference is protected exactly like a raw URL embed is.
+  Scoped to the blob's OWN dataset (`file.dataset`) — unlike the cross-dataset
+  textual scan — because a document can only hold a `_ref` to an asset
+  document that lives in its OWN dataset's row space; there is no cross-
+  dataset structural case the way there is a cross-dataset URL-string one.
+
+  LIKE the textual scan (as of task-992eae89fc73b97e), the structural lookup
+  counts DRAFT references too (a draft edit's `_ref`, or a never-published
+  document's). Deleting a blob a draft references is the same unrecoverable
+  data loss as deleting one a published page references. So an author editing
+  a draft, or one who never published at all, is protected exactly as a live
+  page is, through either embed shape.
 
   ## The census that sets the urgency (measured 2026-09-01, guerrilla prod)
 
@@ -46,10 +86,11 @@ defmodule Barkpark.Media.WhereUsed do
 
   ## What it does NOT claim
 
-  A `false` from `referenced?/1` is not proof the blob is unused — an unpublished
-  draft, an external mirror, or a consumer outside this database can still hold
-  it. This answers one question only, and answers it conservatively: *does a
-  published document in this database contain this blob's delivery path?*
+  A `false` from `referenced?/1` is not proof the blob is unused — an external
+  mirror, or a consumer outside this database, can still hold it. This answers
+  one question only, and answers it conservatively: *does a draft or published
+  document in this database contain this blob's delivery path, or structurally
+  reference its companion asset document?*
   """
 
   import Ecto.Query, warn: false
@@ -76,30 +117,44 @@ defmodule Barkpark.Media.WhereUsed do
   def delivery_path(path) when is_binary(path), do: "/media/files/" <> path
 
   @doc """
-  Published documents whose `content` JSON contains this blob's delivery path.
+  Draft or published documents whose `content` JSON contains this blob's
+  delivery path, OR whose schema `image`/`file` field structurally `_ref`s the
+  blob's companion `mediaAsset` document (task-5f6e7ae324334044 — see the
+  moduledoc's "one shape the textual scan cannot see").
 
   Returns `%{count: non_neg_integer(), sample: [map()]}` — `count` is the exact
-  number of referring published documents, `sample` at most #{@sample_limit} of
+  number of referring documents, `sample` at most #{@sample_limit} of
   them as `%{doc_id:, type:, dataset:, title:}`.
 
-  A blob with no `path` (which cannot be referenced by URL at all) yields a zero
-  census rather than an error, so a caller never has to special-case it.
+  A blob with no `path` cannot be referenced by URL, but CAN still be
+  referenced structurally (its companion asset document exists independently
+  of whether the blob's own `path` is set) — so the nil-path arm still runs
+  the structural lookup rather than short-circuiting to zero.
   """
   # @canonical capability:media-where-used aka:where-used,media references,orphan blob,referenced?,referrers,silent erasure,media delete guard doc:docs/cards/search-media.md
   def referrers(file_or_path)
 
-  def referrers(%MediaFile{path: nil}), do: %{count: 0, sample: []}
+  def referrers(%MediaFile{path: nil} = file),
+    do: merge_censuses(%{count: 0, sample: []}, structural_referrers(file))
 
-  # A MediaFile carries its tenant: the census is confined to THAT workspace
-  # (plus the shared NULL-workspace layer) — see `scope_to_owner_tenant/2`.
+  # A MediaFile carries its tenant: the TEXTUAL census is confined to THAT
+  # workspace (plus the shared NULL-workspace layer) — see
+  # `scope_to_owner_tenant/2`. The structural census is confined to the blob's
+  # own DATASET instead (see the moduledoc) — a different axis, so both run
+  # and their hits are merged into one census.
   def referrers(%MediaFile{} = file),
-    do: file |> delivery_path() |> scan(Map.get(file, :workspace_id))
+    do:
+      merge_censuses(
+        file |> delivery_path() |> scan(Map.get(file, :workspace_id)),
+        structural_referrers(file)
+      )
 
-  # A bare path has no tenant to confine to: the legacy all-tenant read.
+  # A bare path has no tenant, no blob id and no dataset to resolve a
+  # companion asset document from — the legacy all-tenant TEXTUAL-only read.
   def referrers(path) when is_binary(path), do: path |> delivery_path() |> scan(nil)
 
   @doc """
-  True when at least one published document references the blob.
+  True when at least one draft or published document references the blob.
   """
   def referenced?(file_or_path), do: referrers(file_or_path).count > 0
 
@@ -116,6 +171,87 @@ defmodule Barkpark.Media.WhereUsed do
     Barkpark.Content.Scope.scope_to_workspace_including_global(query, workspace_id, nil)
   end
 
+  # A struct with no `id` (e.g. a caller re-probing the textual scan alone
+  # after the real row was already deleted — `%MediaFile{path: file.path}`,
+  # pre-existing in delete_file_where_used_policy_test.exs) has no blob id to
+  # resolve a companion asset document from at all.
+  defp structural_referrers(%MediaFile{id: nil}), do: %{count: 0, sample: []}
+
+  # task-5f6e7ae324334044 — the structural half: does any document (draft OR
+  # published) in the blob's own dataset hold a schema image/file field whose
+  # `{"asset": {"_ref": ...}}` names this blob's companion `mediaAsset`
+  # document?
+  #
+  # Admin/full-visibility context on purpose: this is an internal delete-guard
+  # read, not a client-facing one, and it must see a PRIVATE image/file field's
+  # reference exactly as readily as a public one — the blob is just as
+  # unrecoverable either way.
+  #
+  # DRAFTS COUNT HERE — and, as of task-992eae89fc73b97e, in `scan/2` too, so
+  # this is no longer an asymmetry between the two halves. Deleting a blob a
+  # draft references is the SAME unrecoverable data loss as deleting one a
+  # published page references.
+  #
+  # The blob's OWN tenancy scope rides into the backlinks read
+  # (task-fe13ea62be4a69e6). Without it `resolve_read_dataset_id/2` falls back
+  # to the Default project, and when that project holds a dataset of the same
+  # name (guerrilla's `e2e-freeform`) the schema catalog and the documents are
+  # both pinned to ITS dataset id: no `post` schema, no referrers, and a scoped
+  # delete answered 200 over live `_ref`s.
+  defp structural_referrers(%MediaFile{} = file) do
+    scope = MediaFile.scope_opts(file)
+
+    case Barkpark.Media.asset_doc_for_file(file, file.dataset, scope) do
+      nil ->
+        %{count: 0, sample: []}
+
+      asset_doc ->
+        # The upload mints the companion as a DRAFT (`drafts.asset-…`) while a
+        # field holds the bare `asset-…`; `list_reference_holders/3` matches the
+        # published id, so normalise here.
+        asset_doc_id = Barkpark.Content.published_id(asset_doc.doc_id)
+
+        ctx = %Barkpark.Content.CallerContext{
+          principal_type: :api_token,
+          is_admin: true,
+          roles: ["admin"]
+        }
+
+        rows =
+          Barkpark.Content.Query.list_reference_holders(
+            asset_doc_id,
+            file.dataset,
+            [caller_context: ctx] ++ scope
+          )
+
+        sample =
+          rows
+          |> Enum.map(fn row ->
+            %{doc_id: row.doc_id, type: row.type, dataset: file.dataset, title: row.title}
+          end)
+
+        %{count: length(sample), sample: Enum.take(sample, @sample_limit)}
+    end
+  end
+
+  # Unions the textual and structural censuses by `doc_id`. Each half's `count`
+  # is exact on its OWN query; de-duping a document hit by BOTH (a raw URL
+  # pasted into one field while another field also holds a structural `_ref`
+  # to the same blob) is only possible within the two capped samples — the
+  # same honest-approximation the pre-existing `sampleTruncated` flag already
+  # accepts for a count past `@sample_limit`. In practice a document uses one
+  # embed style per field, so an overlap big enough to matter is the rare
+  # case, not the modeled one.
+  defp merge_censuses(%{count: 0, sample: []}, structural), do: structural
+  defp merge_censuses(textual, %{count: 0, sample: []}), do: textual
+
+  defp merge_censuses(%{count: c1, sample: s1}, %{count: c2, sample: s2}) do
+    merged_sample = (s1 ++ s2) |> Enum.uniq_by(& &1.doc_id) |> Enum.take(@sample_limit)
+    overlap = length(s1) + length(s2) - length(Enum.uniq_by(s1 ++ s2, & &1.doc_id))
+
+    %{count: max(c1 + c2 - overlap, length(merged_sample)), sample: merged_sample}
+  end
+
   defp scan(url, workspace_id) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
@@ -126,7 +262,15 @@ defmodule Barkpark.Media.WhereUsed do
 
     query =
       from(d in Document,
-        where: d.status == "published",
+        where: d.status in ["published", "draft"],
+        # task-992eae89fc73b97e — excludes the blob's OWN companion mediaAsset
+        # document. Every upload's `Assets.create_draft/1` stamps
+        # `content.fileInfo.url` with this blob's OWN delivery path, and a
+        # mediaAsset row is ALWAYS a draft (never published) — so widening
+        # this scan to drafts made every blob with a companion asset doc
+        # match ITSELF, one false "referrer" that is really just the blob
+        # describing its own metadata, never a reader- or editor-visible use.
+        where: d.type != "mediaAsset",
         where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern),
         select: %{
           doc_id: d.doc_id,
@@ -164,7 +308,7 @@ defmodule Barkpark.Media.WhereUsed do
     %{
       code: "conflict",
       message:
-        "refusing to delete #{file.filename}: #{count} published " <>
+        "refusing to delete #{file.filename}: #{count} " <>
           "#{if count == 1, do: "document references", else: "documents reference"} " <>
           "#{delivery_path(file)}. Deleting it would blank the media in " <>
           "#{if count == 1, do: "that document", else: "those documents"} behind a 200 " <>
@@ -235,12 +379,9 @@ defmodule Barkpark.Media.WhereUsed do
     if count > length(ids), do: joined <> ",…(#{count - length(ids)} more)", else: joined
   end
 
-  # LOG-ONLY attribution, so it may carry the account arm that
-  # `Media.Storage.Access.actor_label/1` deliberately refuses. That sibling
-  # stamps `checkedOutBy`, which is USER-VISIBLE and compared for equality by
-  # `permission_set/2`, so guessing a human principal's label there would re-key
-  # existing lock comparisons. Nothing compares this string; it only has to name
-  # somebody to the operator reading the log.
+  # LOG-ONLY attribution, read by the operator, never compared. The lock stamp
+  # (`checkedOutBy`) is a different thing: `Media.Storage.Actor`, which names an
+  # account by "user:<id>", never by email (task-36a302b2e981d5e1).
   defp actor_label(%{assigns: assigns}) do
     case assigns[:api_token] do
       %{label: label} when is_binary(label) and label != "" ->

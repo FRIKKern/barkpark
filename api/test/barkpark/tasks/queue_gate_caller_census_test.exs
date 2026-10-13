@@ -69,13 +69,16 @@ defmodule Barkpark.Tasks.QueueGateCallerCensusTest do
   # point of pinning the count rather than the mere file name.
   @census %{
     "lib/barkpark/tasks.ex" => {1, :live},
+    # The close holder gate's wording (task-9da6b9544b747bba): "held by" only
+    # while the lease is live.
+    "lib/barkpark/tasks/close.ex" => {1, :live},
     "lib/barkpark/tasks/queue_gate.ex" => {2, :live},
     "lib/barkpark/tasks/mutate_guards.ex" => {1, :live},
     "lib/barkpark_web/controllers/tasks_controller.ex" => {5, :live},
     "lib/barkpark_web/controllers/tasks_controller/params.ex" => {2, :live}
   }
 
-  @expected_denominator 11
+  @expected_denominator 12
 
   @call_shape ~r/(execution_class|live_claim_worker|claim_lease_live\?)\s*\(/
   @definition ~r/^\s*defp?\s+(execution_class|live_claim_worker|claim_lease_live\?)/

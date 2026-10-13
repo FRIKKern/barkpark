@@ -161,6 +161,8 @@ x-control-plane: &control_plane
     - GITHUB_APP_PRIVATE_KEY
     - GITHUB_APP_WEBHOOK_SECRET
     - GITHUB_APP_SLUG
+    - GITHUB_APP_CLIENT_ID
+    - GITHUB_APP_CLIENT_SECRET
 
     # Bundle object storage on Hetzner (runtime.exs:206-209). Unset → bundle
     # upload is not configured; BARKPARK_BUNDLE_LOCATION defaults to fsn1.

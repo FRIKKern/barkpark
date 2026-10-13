@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Layouts.BulldocsLightboxContractTest do
   test "reader ships one semantic image dialog", %{source: source} do
     assert source =~ ~s|<dialog id="bp-image-lightbox"|
     assert source =~ ~s|class="bp-image-lightbox__image" src="" alt=""|
-    assert source =~ ~s|aria-label="Close enlarged image"|
+    assert source =~ ~s|aria-label={gettext("Close enlarged image")}|
     refute source =~ "onclick="
   end
 

@@ -15,7 +15,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
       between the surface copies).
     * SCOPE — the array is exactly the in-scope census (`EXPECTED_COUNT` in
       scripts/pd-parity-completeness.sh — do not hand-count here): both members
-      of all 3 alias pairs present, none of the 15 excluded, no `quiz`/`onix`.
+      of all 3 alias pairs present, none of the excluded, no `quiz`/`onix`.
 
   Regenerate with `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity` whenever
   this reds, then re-run `bash scripts/pd-parity-completeness.sh`.
@@ -49,7 +49,9 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type Tabs MARK:parity-count-test-tabs
     # jdf-bl-historiene-renderer-reconciliation: +duel +lineage
     # docgates-s27: +pre-gate-badge (#17199's compose.ex clause, goldenless until now)
-    assert length(GenPdParity.types()) == 65
+    # task-7375ba22758155fa: +14 schema field blocks (65 -> 79)
+    # rpu-backlog-field-embed-coverage: +embed (79 -> 80)
+    assert length(GenPdParity.types()) == 80
   end
 
   test "both members of all 3 alias pairs are present" do
@@ -59,7 +61,7 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     end
   end
 
-  test "none of the 15 excluded types (nor quiz/onix) are in the array" do
+  test "none of the excluded types (nor quiz/onix) are in the array" do
     for t <- GenPdParity.excluded() ++ ["quiz", "onix"] do
       refute t in GenPdParity.types(), "#{t} must not be in the kitchen-sink array"
     end
@@ -89,5 +91,62 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
       assert fx["shape"] != [],
              "#{@type_slug} rendered to an empty shape — check the authored input"
     end
+  end
+
+  # ── the locale golden (task-8e96278fc4ee7097) ────────────────────────────────
+
+  defp decode_locale!(dir, locale),
+    do: dir |> Path.join(GenPdParity.locale_filename(locale)) |> File.read!() |> Jason.decode!()
+
+  for locale <- GenPdParity.locales() do
+    @locale locale
+
+    test "#{locale} locale golden: committed api mirror equals a fresh build_locale/1" do
+      assert decode_locale!(@api_dir, @locale) == GenPdParity.build_locale(@locale),
+             "#{GenPdParity.locale_filename(@locale)} is stale — " <>
+               "run `MIX_ENV=test mix barkpark.portable_doc.gen_pd_parity`."
+    end
+
+    test "#{locale} locale golden: the two mirrors decode term-identical" do
+      assert decode_locale!(@api_dir, @locale) == decode_locale!(@js_dir, @locale)
+    end
+  end
+
+  test "nb-NO: the renderer's own words come out Norwegian, and the same inputs without :locale stay English" do
+    fx = decode_locale!(@api_dir, "nb-NO")
+
+    for word <- ~w(Ja Nei UTKAST Advarsel) ++ ["åpen", "pågår", "Kriterier · 1/2"] do
+      assert fx["expectedHtml"] =~ word, "nb golden lacks #{inspect(word)}"
+    end
+
+    english =
+      Enum.map_join(
+        fx["inputs"],
+        &Barkpark.PortableDoc.Render.render_block(&1, %{style: :article})
+      )
+
+    for word <- ~w(Yes No DRAFT Warning) ++ ["open", "Criteria · 1/2"] do
+      assert english =~ word, "default render lacks #{inspect(word)}"
+    end
+
+    refute english =~ "Nei"
+
+    assert english ==
+             Enum.map_join(
+               fx["inputs"],
+               &Barkpark.PortableDoc.Render.render_block(&1, %{style: :article, locale: "en"})
+             )
+  end
+
+  test "every word the nb golden hands the JS renderer is translated" do
+    fx = decode_locale!(@api_dir, "nb-NO")
+
+    # Words that are the same in both languages.
+    same = ~w(Info Papers Total)
+
+    untranslated =
+      for {en, nb} <- fx["strings"], en == nb, en not in same, do: en
+
+    assert untranslated == [], "nb msgstr missing for: #{inspect(untranslated)}"
   end
 end

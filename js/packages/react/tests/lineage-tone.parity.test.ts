@@ -19,6 +19,7 @@
 // while the Elixir leg stays green.
 import { describe, expect, it } from 'vitest'
 import { datavizEmitters } from '../src/blocks/dataviz'
+import { EN } from '../src/blocks/chrome'
 
 const lineage = datavizEmitters.lineage
 
@@ -36,7 +37,7 @@ const STRIP = {
 
 const emit = (block: unknown) => {
   if (!lineage) throw new Error('missing lineage emitter')
-  return lineage(block as never)
+  return lineage(block as never, EN)
 }
 
 describe('lineage tone — the clock strip’s per-stop verdict', () => {

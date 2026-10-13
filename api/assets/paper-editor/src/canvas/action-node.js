@@ -38,6 +38,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
 import { safeUrl } from "../safe-url.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpAction`. There is NO StarterKit collision (StarterKit
 // ships no action/button node), so — UNLIKE bpCode / divider — NO StarterKit node is
@@ -52,7 +53,7 @@ export const BP_ACTION_NODE_NAME = "bpAction";
 function applyLockCue(dom, node) {
   if (node && node.attrs && node.attrs.locked === true) {
     dom.setAttribute("data-bp-locked", "true");
-    dom.setAttribute("title", "Part of the document template");
+    dom.setAttribute("title", t("Part of the document template"));
   }
 }
 
@@ -228,9 +229,9 @@ export const Action = Node.create({
       labelBoundary.contentEditable = "false";
       const labelHost = document.createElement("span");
       labelHost.setAttribute("data-test-id", "paper-action-label");
-      labelHost.setAttribute("data-placeholder", "Button label");
+      labelHost.setAttribute("data-placeholder", t("Button label"));
       labelHost.setAttribute("role", "textbox");
-      labelHost.setAttribute("aria-label", "Action label");
+      labelHost.setAttribute("aria-label", t("Action label"));
       labelHost.setAttribute("aria-multiline", "false");
       labelHost.tabIndex = 0;
       labelHost.style.cursor = "text";
@@ -257,7 +258,7 @@ export const Action = Node.create({
       ]) {
         const o = document.createElement("option");
         o.value = value;
-        o.textContent = text;
+        o.textContent = t(text);
         prioritySelect.appendChild(o);
       }
 
@@ -298,7 +299,7 @@ export const Action = Node.create({
 
         // The read-only preview: the reader's anchor, class carries the reader
         // variant; href is display-only.
-        preview.textContent = label || "Button";
+        preview.textContent = label || t("Button");
         preview.className = variant;
         preview.setAttribute("href", safeUrl(href || "#"));
         preview.style.display = editable ? "none" : "";

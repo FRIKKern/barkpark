@@ -699,7 +699,7 @@ const failedBeforeF = failed;
 // un-ratcheted in silence. The map supplies the NUMBER; the directory listing
 // supplies the ROSTER. (Fixture themes are handed to derive() directly by tests
 // and never reach this loop, which reads design/themes/ off disk.)
-const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2, iris: 0 };
+const OVERRIDE_COUNT_FROZEN = { evergreen: 79, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
 // DISK — never the `tokens` singleton re-exported by emit.mjs. Since the w4 seam
@@ -1245,8 +1245,8 @@ if (failed === failedBeforeH)
     "--paper-bg-deep": "paper.surface.bg-deep",
   };
   const VERDICT_PAIRINGS = [
-    { sel: ".bp-paper-surface .bp-callout--loss",  surface: "--bp-verdict-loss-soft",  kind: "text", where: "paper-surface.css .bp-callout--loss — the card paints its own soft wash under the ink" },
-    { sel: ".bp-paper-surface .bp-callout--peace", surface: "--bp-verdict-peace-soft", kind: "text", where: "paper-surface.css .bp-callout--peace — the card paints its own soft wash under the ink" },
+    { sel: ".bp-paper-surface .bp-callout--loss",  surface: "--paper-bg",  kind: "text", where: "paper-surface.css .bp-callout--loss — the quiet card has no wash: the ink sits on the page (2026-10-05)" },
+    { sel: ".bp-paper-surface .bp-callout--peace", surface: "--paper-bg", kind: "text", where: "paper-surface.css .bp-callout--peace — the quiet card has no wash: the ink sits on the page (2026-10-05)" },
     { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
     { sel: ".bp-paper-surface .bp-stat__v--peace", surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
     { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg",              kind: "text", where: "paper-surface.css — a bare stat outside a tile falls back to the page ground" },
@@ -2046,10 +2046,11 @@ console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
   // The four article <figure> emitters carry the same pair inline. Counted, not
   // just found: three of the four live in figures.ex and one in compose.ex, and a
   // figure family that silently loses the breakout is exactly the regression the
-  // count catches.
+  // count catches. Any attribute may precede `style` (the diagram figure carries
+  // `class="bp-diagram"` first), so the match is on the tag, not its first byte.
   const figureBreakouts = consumerSources
     .filter(({ path }) => path.endsWith(".ex"))
-    .flatMap(({ text }) => text.split("\n").filter((l) => l.includes("<figure style=") && l.includes("--bp-evidence-width")));
+    .flatMap(({ text }) => text.split("\n").filter((l) => /<figure\b[^>]*\sstyle=/.test(l) && l.includes("--bp-evidence-width")));
   if (figureBreakouts.length !== 4)
     kFail(
       `  Part K FAIL: ${figureBreakouts.length} article <figure> emitter(s) carry the evidence breakout, expected 4\n` +

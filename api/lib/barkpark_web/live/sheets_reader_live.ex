@@ -50,6 +50,9 @@ defmodule BarkparkWeb.SheetsReaderLive do
         raise NotFound, message: "no published sheet #{inspect(slug)}"
 
       doc ->
+        # The page speaks the owning workspace's language (task-c84978a632220e1c).
+        BarkparkWeb.StudioLocale.put_owner(nil, doc.workspace_id)
+
         # Field-visibility seal (fail-closed): redact the published sheet's
         # content under the ANONYMOUS caller before ANY consumer (the preview
         # manifest AND SheetGrid) reads it.
@@ -149,9 +152,9 @@ defmodule BarkparkWeb.SheetsReaderLive do
     ~H"""
     <main class="bp-sheet-shell">
       <header class="bp-sheet-head" data-test-id="sheet-reader-head">
-        <p class="bp-sheet-eyebrow">Sheet</p>
+        <p class="bp-sheet-eyebrow"><%= gettext("Sheet") %></p>
         <h1 class="bp-sheet-title"><%= @doc.title || @slug %></h1>
-        <p class="bp-sheet-byline"><code><%= @slug %></code> · updates on publish</p>
+        <p class="bp-sheet-byline"><code><%= @slug %></code> · <%= gettext("updates on publish") %></p>
       </header>
       <.live_component
         module={BarkparkWeb.Studio.SheetGrid}

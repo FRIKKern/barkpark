@@ -876,6 +876,10 @@ defmodule Barkpark.Content do
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do: Papers.apply_document_block_op(doc_id, type, op, dataset, opts)
 
+  @doc "Apply a batch of portable-doc ops to a document in one write, all or none. See `Content.Papers`."
+  def apply_document_block_ops(doc_id, type, ops, dataset, opts \\ []),
+    do: Papers.apply_document_block_ops(doc_id, type, ops, dataset, opts)
+
   @doc "Request-identified exact-once document block op; see `Content.Papers`."
   def apply_document_block_op_once(
         doc_id,

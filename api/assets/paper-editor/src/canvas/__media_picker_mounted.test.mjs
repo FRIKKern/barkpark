@@ -97,6 +97,9 @@ const fetchMock = async (url, options = {}) => {
 globalThis.fetch = fetchMock;
 window.fetch = fetchMock;
 
+// The shared dialog focus manager the browser's trap() comes from; every
+// layout that loads the browser loads it first.
+await import("../../../../priv/static/assets/bp-modal-focus.js");
 await import("../../../../priv/static/assets/bp-asset-browser.js");
 await import("../../../../priv/static/assets/bp-media-picker.js");
 const { BpPaperCanvas } = await import("./index.js");
@@ -154,6 +157,10 @@ try {
   assert.ok(browser && !browser.hidden, "the placeholder opens the real asset browser");
   assert.equal(document.activeElement, browser.querySelector(".bp-ab-search"),
     "opening the library moves focus into its search field");
+  assert.equal(browser.querySelector('[role="dialog"]').getAttribute("aria-label"), "Media library",
+    "the library dialog is named");
+  assert.equal(browser.querySelector(".bp-ab-search").getAttribute("aria-label"), "Search assets",
+    "its search field is named, not only by a placeholder");
   document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", {
     key: "Escape", bubbles: true, cancelable: true,
   }));

@@ -7,10 +7,10 @@ One command, any agent. Point an AI at Barkpark — local or Cloud — and it go
 
 Every unit of work — build, research, plan, audit, spike — runs under a claimed task: if no row names it, create one and claim it FIRST, then work. Unregistered work is unrecoverable — a lost session is rebuilt only from the ledger, and "what has been going on lately" is answerable only from task events.
 
-Written as mechanism, not exhortation — an agent that *believes* it registered its work behaves exactly like one that did. Three ways a registration you think you made never landed:
+Written as mechanism, not exhortation — an agent that *believes* it registered its work behaves exactly like one that did. Before you trust a write:
 
-- A redirected or piped stdin makes `bp` REFUSE a mutating write — exit 2, `piped stdin is unused and <noun> <verb> does not accept --file`. In a heredoc-fed script every `claim`/`create`/`stamp` aborts **while the reads around them succeed**, so the run looks healthy. Pass arguments, never a pipe.
-- A write to a remote server without `--yes` aborts — exit 2, `prod write not confirmed`. It fires only *after* the stdin refusal clears, so fixing one can reveal the other.
+- A write to a remote server without `--yes` aborts — exit 2, `prod write not confirmed`.
+- A write never reads a piped stdin unless you pass `--file -`. Since #14994 `bp` ignores the pipe and proceeds (it used to abort), printing `piped stdin is unused` where the verb takes `--file`, so pass data as arguments.
 - A printed receipt is not persistence. Read the row back and match a string you wrote.
 
 One Go constant (`internal/cli/movement_doctrine.go`) feeds the `bp onramp agents-md` block, the `bp mcp serve` instructions and `bp task prime`'s lead line; `movement_doctrine_test.go` reds if a surface drops it. Repo-local mechanics (PR trailers, merge gates) stay out — that block lands in other people's repos — and live in [TASK-SYSTEM](TASK-SYSTEM.md).

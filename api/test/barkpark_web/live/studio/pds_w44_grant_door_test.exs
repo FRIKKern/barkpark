@@ -29,11 +29,10 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
   about. The narrowing travels into the DOOR instead: `grant_target_denied?/3`
   in `Shared.Paper`, armed ONLY when write descends from a GRANT.
 
-  WHY NOT `Access.admits_desk?/3`. access.ex:329-336 OVERWRITES the requested
+  WHY NOT `Access.admits_desk?/3`. Its body OVERWRITES the requested
   scope's `:type`/`:doc_id` with the GRANT'S OWN before validating — that is
   precisely what lets a doc-scoped grant self-satisfy against any desk. The
-  door calls `Access.validate/3` (access.ex:292) with the target doc's real
-  type + doc_id.
+  door calls `Access.validate/3` with the target doc's real type + doc_id.
 
   THE ORACLE IS STORED BYTES. Every assertion reads the persisted document back
   from the store — never a flash, never a "no session started" predicate (the

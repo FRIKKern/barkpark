@@ -108,6 +108,35 @@ defmodule Barkpark.Plugins.Sheets.XlsxExportTest do
       assert b1["v"] == "#NAME?"
     end
 
+    test "a per-cell currency (cur) exports with its OWN format code, not the bare $ canonical (task-4fb1d8de887d8bc6)" do
+      content = %{
+        "tabs" => [
+          %{
+            "name" => "Budsjett",
+            "cells" => %{
+              "A1" => %{"v" => 1234.5, "fmt" => "currency", "cur" => "NOK"},
+              "A2" => %{"v" => 1234.5, "fmt" => "currency"}
+            }
+          }
+        ]
+      }
+
+      assert {:ok, binary} = XlsxExport.to_binary(content)
+      imported = import!(binary)
+
+      a1 = get_in(imported, ["tabs", Access.at(0), "cells", "A1"])
+      a2 = get_in(imported, ["tabs", Access.at(0), "cells", "A2"])
+
+      # The round-trip classifier has no "cur" slot (a documented lossy edge —
+      # Fmt's own moduledoc), but BOTH cells still classify back to
+      # "currency": the NOK format's quoted " kr" suffix and the plain "$"
+      # one are both members of `Fmt.classify_format/1`'s currency-symbol set.
+      assert a1["fmt"] == "currency"
+      assert a2["fmt"] == "currency"
+      assert a1["v"] == 1234.5
+      assert a2["v"] == 1234.5
+    end
+
     test "date cell encodes without error and the value survives as a date" do
       content = %{
         "tabs" => [

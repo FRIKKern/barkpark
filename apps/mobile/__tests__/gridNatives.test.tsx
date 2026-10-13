@@ -312,7 +312,9 @@ describe('sheet — the TUI floor: head / rows / truncated', () => {
   it('the truncation note is byte-matched to the react AND Go sources, counting the rows SHOWN', () => {
     // A copied literal proves nothing, so the other two surfaces' own source is
     // the oracle: extract their format string and substitute the count.
-    const NOTE_RE = /Sheet truncated — showing the first (\$\{[^}]*\}|%d) rows/
+    // The react renderer keeps the English as its chrome key with a `%{n}` slot
+    // (task-8e96278fc4ee7097: the words are translatable); Go formats with %d.
+    const NOTE_RE = /Sheet truncated — showing the first (\$\{[^}]*\}|%\{\w+\}|%d) rows/
     const reactSrc = readFileSync(join(REPO, 'js/packages/react/src/blocks/sheet.ts'), 'utf8')
     const goSrc = readFileSync(join(REPO, 'internal/pdrender/sheet.go'), 'utf8')
     const reactNote = NOTE_RE.exec(reactSrc)
@@ -321,7 +323,7 @@ describe('sheet — the TUI floor: head / rows / truncated', () => {
     expect(goNote).not.toBeNull()
 
     const out = allText(render(sheetOf({ rows: [['a'], ['b']], truncated: true })))
-    expect(out).toContain(reactNote![0].replace(/\$\{[^}]*\}/, '2'))
+    expect(out).toContain(reactNote![0].replace(/\$\{[^}]*\}|%\{\w+\}/, '2'))
     expect(out).toContain(goNote![0].replace('%d', '2'))
     expect(out).toContain('Sheet truncated — showing the first 2 rows')
   })

@@ -129,6 +129,47 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
     assert fresh.autoupdate_paused, "contained (paused) for investigation"
   end
 
+  # The system pause used to leave only a Logger line, so an operator reading the
+  # audit trail saw the team's last `autoupdate_changed` (paused=false) and a box
+  # that was paused anyway, with no record of who paused it or why.
+  test "contain: the system pause writes a barkpark.autoupdate_paused audit row naming why" do
+    stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+    bp = live_behind(%{autoupdate_triggered_at: stale})
+
+    StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: check_body("behind")}}])
+
+    tick()
+
+    assert [event] = pause_audit_rows(bp)
+    assert event.actor_user_id == nil, "the rollout paused it, not a person"
+    assert event.team_id == bp.team_id
+    assert event.metadata["reason"] == "did_not_settle"
+    assert event.metadata["update_state"] == "behind"
+    assert event.metadata["running_release"] == "v0.2.24"
+    assert event.metadata["latest_release"] == "v0.3.0"
+    assert event.metadata["name"] == bp.name
+  end
+
+  test "past grace but UNREACHABLE: no pause, so no pause audit row" do
+    stale = DateTime.add(DateTime.utc_now(), -30 * 60, :second)
+    bp = live_behind(%{autoupdate_triggered_at: stale})
+
+    StudioLinkFakeHttpClient.program([{:error, :nxdomain}])
+
+    tick()
+
+    assert pause_audit_rows(bp) == []
+  end
+
+  defp pause_audit_rows(bp) do
+    import Ecto.Query
+
+    Repo.all(
+      from e in BarkparkCloud.Accounts.AuditEvent,
+        where: e.action == "barkpark.autoupdate_paused" and e.target_id == ^bp.id
+    )
+  end
+
   # ── task-a207d875e61a2e02: the settle timer stops latching a box it could not read ──
   #
   # The pin ABOVE is the MEASURED case and it is deliberately unchanged: the box

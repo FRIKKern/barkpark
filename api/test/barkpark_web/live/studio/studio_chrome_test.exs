@@ -129,6 +129,39 @@ defmodule BarkparkWeb.StudioChromeTest do
       assert html =~ ~s{phx-value-ds="#{@dataset}"}
     end
 
+    # task-384cfa5a40d91e7f: it declared role=menu but is walked with Tab and
+    # holds the create forms' text inputs. It is a disclosure; the current and
+    # previewed state the classes paint is in the markup too.
+    test "the switcher is a disclosure that exposes current and previewed state", %{
+      member_conn: conn,
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ws_b: ws_b
+    } do
+      {:ok, view, _html} = live(conn, media_url(ws_a, proj_a))
+      html = render_click(view, "scope-menu-toggle", %{})
+
+      assert has_element?(view, ~s{button[aria-controls="scope-menu"][aria-expanded="true"]})
+      assert has_element?(view, ~s{#scope-menu[role="group"]})
+      refute html =~ ~s{role="menu"}
+      refute html =~ ~s{role="menuitem"}
+      refute html =~ ~s{aria-haspopup="menu"}
+
+      ws_btn = fn ws -> ~s{#scope-menu button[phx-value-id="#{ws.id}"]} end
+      assert has_element?(view, ws_btn.(ws_a) <> ~s{[aria-current="true"][aria-pressed="true"]})
+      assert has_element?(view, ws_btn.(ws_b) <> ~s{[aria-pressed="false"]})
+      refute has_element?(view, ws_btn.(ws_b) <> "[aria-current]")
+
+      assert has_element?(
+               view,
+               ~s{#scope-menu button[phx-value-ds="#{@dataset}"][aria-current="true"]}
+             )
+
+      render_click(view, "scope-menu-ws", %{"id" => ws_b.id})
+      assert has_element?(view, ws_btn.(ws_b) <> ~s{[aria-pressed="true"]})
+      assert has_element?(view, ws_btn.(ws_a) <> ~s{[aria-current="true"][aria-pressed="false"]})
+    end
+
     test "previewing another workspace reloads the project/dataset columns without navigating",
          %{member_conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b} do
       {:ok, view, _html} = live(conn, media_url(ws_a, proj_a))

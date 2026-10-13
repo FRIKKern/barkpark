@@ -20,6 +20,18 @@ defmodule BarkparkCloud.GitHub do
   handle is stored ENCRYPTED (`Registry.Vault`), the account login plaintext for
   display. `record_installation/2` VALIDATES the id through the client seam
   (`get_installation/1`) before persisting — a forged/uninstalled id never lands.
+
+  ## One installation belongs to one team
+
+  GitHub allows one installation of the App per account or organisation, and
+  since #21132 the first team to record an installation id owns it: another
+  team recording the same id is refused `installation_not_found`, the answer an
+  unknown id gets, so the refusal does not reveal which ids other teams hold.
+  So two Barkpark teams cannot share one GitHub organisation's install. The
+  owner accepted this on 2026-10-03 (ruling #61): sharing would need per-repo
+  ownership proof that does not exist, and without it an install could leak
+  across teams. To work on one organisation's repos from Barkpark, use the
+  team that connected it.
   """
   import Ecto.Query, only: [from: 2]
 
@@ -185,6 +197,70 @@ defmodule BarkparkCloud.GitHub do
         {:error, :installation_not_found}
     end
   end
+
+  @doc """
+  Record `installation_id` for `team` ONLY after proving the person recording it
+  can access that installation on GitHub (task-0cf611238d4ad597 CQ7a, owner
+  ruling #36). The route calls this; `record_installation/2` stays the
+  unverified primitive for callers with no person behind them.
+
+  The `state` check binds the install to the team that started it, and
+  `held_by_other_team?/2` refuses an id another team already recorded. Neither
+  covers an install nobody has recorded yet: `get_installation/1` answers with
+  the App's own JWT for EVERY install of the App, so any team admin with a valid
+  state could record a stranger's install. This closes it with the user-to-server
+  OAuth check GitHub provides for exactly this: the install redirect carries a
+  `code` (the App must have "Request user authorization (OAuth) during
+  installation" on), the code becomes a user token, and `GET /user/installations`
+  must list the id.
+
+  One installation belongs to one team (ruling #61, CQ7b): a second team cannot
+  record an id the first already holds, whoever asks.
+
+  Returns what `record_installation/2` returns, plus:
+
+    * `{:error, :github_authorization_required}` — no code came back with the
+      install, so there is no user to check against.
+    * `{:error, :github_authorization_failed}` — GitHub refused the code (spent,
+      expired or forged) or the user token.
+    * `{:error, :user_authorization_not_configured}` — the App's OAuth client id
+      or secret is not wired on this control plane.
+    * `{:error, :installation_not_found}` — the user cannot access that id. The
+      same answer as an unknown id, so the refusal is no existence oracle.
+  """
+  @spec record_user_installation(Team.t() | binary(), String.t() | integer(), term()) ::
+          {:ok, Installation.t()}
+          | {:error,
+             :github_authorization_required
+             | :github_authorization_failed
+             | :user_authorization_not_configured
+             | :installation_not_found}
+          | {:error, Ecto.Changeset.t()}
+  def record_user_installation(team, installation_id, code) do
+    with :ok <- verify_user_installation(installation_id, code) do
+      record_installation(team, installation_id)
+    end
+  end
+
+  defp verify_user_installation(_installation_id, code)
+       when not is_binary(code) or code == "",
+       do: {:error, :github_authorization_required}
+
+  defp verify_user_installation(installation_id, code) do
+    with {:ok, token} <- client().exchange_user_code(code) |> user_auth_result(),
+         {:ok, ids} <- client().list_user_installation_ids(token) |> user_auth_result() do
+      if to_string(installation_id) in Enum.map(ids, &to_string/1),
+        do: :ok,
+        else: {:error, :installation_not_found}
+    end
+  end
+
+  defp user_auth_result({:ok, _} = ok), do: ok
+
+  defp user_auth_result({:error, :not_configured}),
+    do: {:error, :user_authorization_not_configured}
+
+  defp user_auth_result({:error, _reason}), do: {:error, :github_authorization_failed}
 
   defp write_installation(tid, login, installation_id) do
     attrs = %{

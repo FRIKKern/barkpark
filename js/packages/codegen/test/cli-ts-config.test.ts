@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { SUBPROCESS_TIMEOUT_MS } from './subprocess-timeout'
 
 const exec = promisify(execFile)
 const here = dirname(fileURLToPath(import.meta.url))
@@ -29,29 +30,33 @@ const cliPath = resolve(here, '../dist/cli.mjs')
  * branch on every supported Node: the enum is non-erasable, so not even a
  * type-stripping host can carry it.
  */
-describe('generate --config barkpark.config.ts (the advertised format, built CLI)', () => {
-  it('loads a .ts config carrying non-erasable syntax (enum) and writes the output it names', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'bp-codegen-tscfg-'))
-    const configPath = join(dir, 'barkpark.config.ts')
-    const out = join(dir, 'from-ts-config.types.ts')
-    writeFileSync(
-      configPath,
-      [
-        'enum Flavor {', // non-erasable TS — type-stripping cannot load this
-        "  Prod = 'production',",
-        '}',
-        'const config: { dataset: string; output: string } = {',
-        '  dataset: Flavor.Prod,',
-        `  output: ${JSON.stringify(out)},`,
-        '}',
-        'export default config',
-        '',
-      ].join('\n'),
-      'utf8',
-    )
-    await exec('node', [cliPath, 'generate', '--from', fixturePath, '--config', configPath])
-    const written = readFileSync(out, 'utf8')
-    expect(written).toContain('dataset "production"') // the enum VALUE reached the banner
-    expect(written).toContain('export interface')
-  })
-})
+describe(
+  'generate --config barkpark.config.ts (the advertised format, built CLI)',
+  { timeout: SUBPROCESS_TIMEOUT_MS },
+  () => {
+    it('loads a .ts config carrying non-erasable syntax (enum) and writes the output it names', async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'bp-codegen-tscfg-'))
+      const configPath = join(dir, 'barkpark.config.ts')
+      const out = join(dir, 'from-ts-config.types.ts')
+      writeFileSync(
+        configPath,
+        [
+          'enum Flavor {', // non-erasable TS — type-stripping cannot load this
+          "  Prod = 'production',",
+          '}',
+          'const config: { dataset: string; output: string } = {',
+          '  dataset: Flavor.Prod,',
+          `  output: ${JSON.stringify(out)},`,
+          '}',
+          'export default config',
+          '',
+        ].join('\n'),
+        'utf8',
+      )
+      await exec('node', [cliPath, 'generate', '--from', fixturePath, '--config', configPath])
+      const written = readFileSync(out, 'utf8')
+      expect(written).toContain('dataset "production"') // the enum VALUE reached the banner
+      expect(written).toContain('export interface')
+    })
+  },
+)

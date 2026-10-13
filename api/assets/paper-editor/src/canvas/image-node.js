@@ -23,6 +23,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
 import { safeUrl } from "../safe-url.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpImage`; the portable-doc `bpType` stays "image"
 // (run-convert.js maps a block.type "image" to this node and back).
@@ -141,7 +142,7 @@ export const Image = Node.create({
       img.draggable = false;
       const empty = document.createElement("div");
       empty.className = "bp-canvas-image-empty";
-      empty.textContent = "No image yet — paste or drop a picture, or enter a URL below";
+      empty.textContent = t("No image yet — paste or drop a picture, or enter a URL below");
       const badge = document.createElement("div");
       badge.className = "bp-canvas-image-badge";
       frame.appendChild(img);
@@ -170,6 +171,22 @@ export const Image = Node.create({
       chrome.appendChild(altInput);
       chrome.appendChild(srcInput);
       chrome.appendChild(widthInput);
+      // The host's picker (mediaPicker): shown only when the canvas has one
+      // (bp-paper-canvas[data-media-picker]); the canvas runs it for this node.
+      const pick = document.createElement("button");
+      pick.type = "button";
+      pick.className = "bp-canvas-image-pick";
+      pick.textContent = t("Select");
+      pick.setAttribute("contenteditable", "false");
+      pick.addEventListener("mousedown", (e) => e.preventDefault());
+      pick.addEventListener("click", (e) => {
+        e.preventDefault();
+        if (!editor.isEditable || typeof getPos !== "function") return;
+        const pos = getPos();
+        if (pos == null) return;
+        dom.dispatchEvent(new CustomEvent("bp-canvas-image-pick", { detail: { pos }, bubbles: true }));
+      });
+      chrome.appendChild(pick);
       dom.appendChild(chrome);
 
       let hovered = false;
@@ -206,13 +223,14 @@ export const Image = Node.create({
           img.style.display = "none";
           empty.style.display = "";
         }
-        if (a.uploading) { badge.textContent = "Uploading…"; badge.style.display = ""; badge.className = "bp-canvas-image-badge"; }
+        if (a.uploading) { badge.textContent = t("Uploading…"); badge.style.display = ""; badge.className = "bp-canvas-image-badge"; }
         else if (a.uploadError) { badge.textContent = "Upload failed: " + a.uploadError; badge.style.display = ""; badge.className = "bp-canvas-image-badge bp-canvas-image-badge--error"; }
         else { badge.style.display = "none"; }
         const locked = a.locked === true;
         dom.classList.toggle("bp-canvas-image--empty", !shown);
         dom.classList.toggle("bp-canvas-image--locked", locked);
         srcInput.readOnly = altInput.readOnly = widthInput.readOnly = !editor.isEditable;
+        pick.disabled = !editor.isEditable || !!a.uploading;
         syncChrome();
       };
       paint(node);

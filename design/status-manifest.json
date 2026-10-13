@@ -37,7 +37,7 @@
 
   "tones": {
     "info":   { "light": "#2563eb", "dark": "#60a5fa" },
-    "ok":     { "light": "#0d9488", "dark": "#2dd4bf" },
+    "ok":     { "light": "#0f766e", "dark": "#2dd4bf" },
     "warn":   { "light": "#d97706", "dark": "#fbbf24" },
     "danger": { "light": "#dc2626", "dark": "#f87171" },
     "violet": { "light": "#7c3aed", "dark": "#a78bfa" }

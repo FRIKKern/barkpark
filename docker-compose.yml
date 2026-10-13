@@ -90,9 +90,20 @@ services:
       - BARKPARK_OPERATOR_TOKEN_IDS
       # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
       - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
+      # Deleted-payload retention, off unless set (owner ruling #33; read in api/config/runtime.exs)
+      - BARKPARK_DELETED_PAYLOAD_RETENTION
+      - BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS
+      # Weekly public-read token rotation, off unless set (task-eaaf13ab768f34f6; read in api/config/runtime.exs)
+      - BARKPARK_PUBLIC_READ_ROTATION
       # Per-dataset schema ENFORCEMENT opt-in (comma-separated slugs or `all`; #16147,
       # read in api/config/runtime.exs). Unset = advise-only, the default.
       - BARKPARK_SCHEMA_ENFORCE_DATASETS
+      # Per-document size cap in bytes (owner ruling #39; read in api/config/runtime.exs).
+      # Unset = 10 MB; 0 turns the cap off.
+      - BARKPARK_MAX_DOCUMENT_BYTES
+      # Canonical value-shape writes (owner rulings #42/#43/#44; read in
+      # api/config/runtime.exs). Unset = off: Studio keeps each field's stored shape.
+      - BARKPARK_CANONICAL_SHAPE_WRITES
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST
@@ -101,6 +112,9 @@ services:
       - BARKPARK_AUTH_RATE_REGISTER
       - BARKPARK_HOST_EUR_MONTH
       - BARKPARK_PUBLIC_DEMO_STUDIO
+      # The publish wall (label spine, tag registry, dedup). Unset keeps it ON in
+      # prod; set a falsy value to run without it (task-8edd8e147c648a36).
+      - BARKPARK_AUTHORING_WALL
       - BARKPARK_RATE_LIMIT_BROWSER
       - BARKPARK_RATE_LIMIT_BROWSER_ENABLED
       - BARKPARK_RATE_LIMIT_BROWSER_ENFORCE
@@ -160,6 +174,7 @@ services:
       - INDX_USER_EMAIL
       - INDX_USER_PASSWORD
       # ONIX / Bokbasen
+      - BARKPARK_BOKBASEN_WORKSPACE_IDS
       - BARKPARK_ONIX_CODELIST_PATH
       - BOKBASEN_API_BASE
       - BOKBASEN_CLIENT_ID

@@ -3,12 +3,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   History panel + revision restore + profile edit. Behaviour-preserving
   extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   def show_history(socket) do
     doc = socket.assigns[:editor_doc]
@@ -44,12 +49,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
     if revision_of_open_doc?(rev_id, socket) do
       do_restore_revision(rev_id, socket)
     else
-      {:noreply, put_flash(socket, :error, "Failed to restore")}
+      {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
     end
   end
 
   def restore_revision(_params, socket),
-    do: {:noreply, put_flash(socket, :error, "Failed to restore")}
+    do: {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
 
   defp revision_of_open_doc?(rev_id, socket) do
     with %{doc_id: open_id} when is_binary(open_id) <- socket.assigns[:editor_doc],
@@ -65,37 +70,103 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   defp do_restore_revision(rev_id, socket) do
     type = socket.assigns[:editor_type]
 
-    case Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+    case restore_open_doc(socket, rev_id, type) do
       {:ok, _doc} ->
-        {:noreply,
-         socket
-         |> assign(show_history: false, revisions: [])
-         |> put_flash(:info, "Restored from history")
-         |> Shared.rebuild_panes()}
+        socket =
+          socket
+          |> assign(show_history: false, revisions: [])
+          |> put_flash(:info, gettext("Restored from history"))
+          |> Shared.rebuild_panes()
+
+        # The restore rewrote the draft's blocks and revision behind the open
+        # Beta editors (task-494fc7f91abd01bd).
+        {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
 
       {:error, {:halted, reason}} ->
-        {:noreply, put_flash(socket, :error, "Restore cancelled: #{reason}")}
+        {:noreply,
+         put_flash(socket, :error, gettext("Restore cancelled: %{reason}", reason: reason))}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to restore")}
+        {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
     end
   end
 
+  # A sheet's cells live in its session, which would overwrite a restored row
+  # on its next persist. Session.restore/4 discards it around the write and
+  # restarts it from the restored row (task-1eaa2c0dc6e60047).
+  defp restore_open_doc(socket, rev_id, "sheet") do
+    doc = socket.assigns.editor_doc
+
+    Session.restore(
+      Content.published_id(doc.doc_id),
+      socket.assigns.dataset,
+      GridData.session_scope(%{doc: doc}),
+      fn ->
+        Content.restore_revision(
+          rev_id,
+          "sheet",
+          socket.assigns.dataset,
+          Shared.hook_opts(socket)
+        )
+      end
+    )
+  end
+
+  defp restore_open_doc(socket, rev_id, type),
+    do: Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
+
   def show_profile(socket) do
-    {:noreply, assign(socket, show_profile: true)}
+    {:noreply, assign(socket, show_profile: true, profile_error: nil)}
   end
 
   def close_profile(socket) do
-    {:noreply, assign(socket, show_profile: false)}
+    {:noreply, assign(socket, show_profile: false, profile_error: nil)}
   end
 
   def preview_profile(%{"name" => name, "color" => color}, socket) do
-    {:noreply, assign(socket, user_name: name, user_color: color)}
+    {:noreply, assign(socket, user_name: shown_name(name, socket), user_color: color)}
   end
 
+  # A signed-in account saves the name as its display name (task-8d8dabe8b693031d),
+  # the same Accounts door PATCH /v1/auth/display-name uses, so it follows the
+  # account and names its media checkout locks. The browser keeps a copy either
+  # way: it is the name of a session without an account, and the color is
+  # per-browser only.
   def save_profile(%{"name" => name, "color" => color}, socket) do
-    socket = assign(socket, user_name: name, user_color: color, show_profile: false)
-    socket = push_event(socket, "save-identity", %{name: name, color: color})
-    {:noreply, Shared.track_presence(socket)}
+    case save_display_name(socket.assigns[:current_user], name) do
+      {:ok, user} ->
+        socket =
+          socket
+          |> assign(
+            user_name: shown_name(name, socket),
+            user_color: color,
+            show_profile: false,
+            profile_error: nil
+          )
+          |> then(fn s -> if user, do: assign(s, current_user: user), else: s end)
+          |> push_event("save-identity", %{name: name, color: color})
+
+        {:noreply, Shared.track_presence(socket)}
+
+      {:error, _changeset} ->
+        {:noreply,
+         assign(socket,
+           user_name: name,
+           user_color: color,
+           profile_error: gettext("Use at most 80 characters.")
+         )}
+    end
   end
+
+  # task-acae5df91728ca9d: the dialog shows the generated name as a
+  # placeholder, so an untouched field arrives blank. Blank saves no display
+  # name (Accounts stores nil) and the session keeps its generated name.
+  defp shown_name(name, socket) do
+    if String.trim(name) == "", do: socket.assigns[:user_name_fallback] || name, else: name
+  end
+
+  defp save_display_name(%Barkpark.Accounts.User{} = user, name),
+    do: Barkpark.Accounts.update_display_name(user, %{display_name: name})
+
+  defp save_display_name(_no_account, _name), do: {:ok, nil}
 end

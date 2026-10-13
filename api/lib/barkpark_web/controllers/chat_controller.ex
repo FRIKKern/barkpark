@@ -77,6 +77,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
+  alias Barkpark.Realtime.DrainSignal
   alias Barkpark.StudioChat
 
   alias Barkpark.StudioChat.{
@@ -541,6 +542,9 @@ defmodule BarkparkWeb.ChatController do
         conn = stable_snapshot(conn, id)
 
         try do
+          schedule_keepalive()
+          # task-2bcada0faa01ebb2 — see Barkpark.Realtime.DrainSignal.
+          DrainSignal.subscribe()
           stream_loop(conn)
         after
           # Ownership cleanup (D24): stop the helper. The forwarder is ALSO linked,
@@ -597,6 +601,9 @@ defmodule BarkparkWeb.ChatController do
     conn = emit_fleet_open(conn, mode, epoch, boundary, entries, scope)
 
     try do
+      schedule_keepalive()
+      # task-2bcada0faa01ebb2 — see Barkpark.Realtime.DrainSignal.
+      DrainSignal.subscribe()
       fleet_stream_loop(conn, scope, epoch, boundary)
     after
       send(forwarder, :stop)
@@ -647,11 +654,35 @@ defmodule BarkparkWeb.ChatController do
           fleet_stream_loop(conn, scope, epoch, boundary)
         end
 
+      # task-a0fcffbe8799abe5 — scheduled with `Process.send_after/3`, NOT a
+      # `receive ... after` timeout: an `after` clause's clock restarts on
+      # EVERY message `receive` handles, so a busy fleet topic (flips/
+      # heartbeats/titles for OTHER workspaces, dropped by the scope filter
+      # above but still recursing back into `fleet_stream_loop/4`) could
+      # starve the keepalive indefinitely — the exact bug found and fixed in
+      # `PresenceController`'s loop (task-936472b77285df5b). A timer fired by
+      # `self()` keeps its own schedule regardless of what else lands in
+      # this mailbox. MUST STAY ABOVE `_other` below: a bare wildcard clause
+      # matches EVERYTHING, including `:keepalive` itself.
+      :keepalive ->
+        schedule_keepalive()
+        fleet_chunk_or_stop(conn, sse_keepalive(), scope, epoch, boundary)
+
+      # task-2bcada0faa01ebb2 — this slot is retiring (DeployController.
+      # retire_sse/2, called by instance-deploy.sh right after the Caddy
+      # flip). End now with a distinguishable final frame instead of
+      # sitting alive-but-deaf until systemd's drain/SIGKILL — see
+      # Barkpark.Realtime.DrainSignal. MUST STAY ABOVE `_other` below for
+      # the same reason `:keepalive` does. Does NOT recurse: returning conn
+      # ends fleet_stream_loop/4 (and the controller action).
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
+          _ -> conn
+        end
+
       _other ->
         fleet_stream_loop(conn, scope, epoch, boundary)
-    after
-      30_000 ->
-        fleet_chunk_or_stop(conn, sse_keepalive(), scope, epoch, boundary)
     end
   end
 
@@ -807,13 +838,47 @@ defmodule BarkparkWeb.ChatController do
         # session can lazy-resume on the next send; viewers do not own runtimes.
         chunk_or_stop(conn, sse_exit_frame(status))
 
+      # task-a0fcffbe8799abe5 — scheduled with `Process.send_after/3`, NOT a
+      # `receive ... after` timeout: an `after` clause's clock restarts on
+      # EVERY message `receive` handles, including the `_other` catch-all
+      # below and every one of this session's own frequent frame types, so a
+      # busy turn could starve the keepalive indefinitely — the exact bug
+      # found and fixed in `PresenceController`'s loop
+      # (task-936472b77285df5b). A timer fired by `self()` keeps its own
+      # schedule regardless of what else lands in this mailbox. Scheduled
+      # BEFORE the write (not after, unlike `PresenceController`'s
+      # convention): if the write then fails the stream is ending anyway, so
+      # the one orphaned timer message lands on a process already gone —
+      # dropped, not a leak.
+      #
+      # MUST STAY ABOVE `_other` below: a bare wildcard clause matches
+      # EVERYTHING, including `:keepalive` itself, so this would never fire
+      # if it came after.
+      :keepalive ->
+        schedule_keepalive()
+        chunk_or_stop(conn, sse_keepalive())
+
+      # task-2bcada0faa01ebb2 — this slot is retiring (DeployController.
+      # retire_sse/2, called by instance-deploy.sh right after the Caddy
+      # flip). End now with a distinguishable final frame instead of
+      # sitting alive-but-deaf until systemd's drain/SIGKILL — see
+      # Barkpark.Realtime.DrainSignal. MUST STAY ABOVE `_other` below for
+      # the same reason `:keepalive` does. Does NOT recurse: returning conn
+      # ends stream_loop/1 (and the controller action).
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
+          _ -> conn
+        end
+
       _other ->
         stream_loop(conn)
-    after
-      30_000 ->
-        chunk_or_stop(conn, sse_keepalive())
     end
   end
+
+  defp schedule_keepalive, do: Process.send_after(self(), :keepalive, chat_keepalive_ms())
+
+  defp chat_keepalive_ms, do: Application.get_env(:barkpark, :chat_keepalive_ms, 30_000)
 
   defp chunk_or_stop(conn, data) do
     if sse_credential_live?(conn) do

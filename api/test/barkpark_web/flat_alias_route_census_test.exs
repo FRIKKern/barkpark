@@ -314,6 +314,20 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
          "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
+    # CloudUserController.deprovision
+    {"POST", "/v1/auth/cloud-users/deprovision"} =>
+      {:global,
+       "instance-global by design (owner ruling #26): Auth.deprovision_cloud_user/1 takes " <>
+         "the person OFF the whole instance — every user session, every workspace seat, every " <>
+         "token they own — because removal from the owning Cloud team ends ALL their access. " <>
+         "Gated like the email form of /v1/auth/login-tickets: admin bearer, plus the " <>
+         "platform-operator allowlist when armed. :current_workspace is never read."},
+    # TokenSelfController.show
+    {"GET", "/v1/auth/token"} =>
+      {:workspace_derived,
+       "credential-derived: describes the BEARER only — its own row, its own workspace " <>
+         "(token.workspace_id) and its own seat there (task-bc2541aca8541ff1). No other " <>
+         "token or tenant row is read."},
     # LoginTicketController.create
     {"POST", "/v1/auth/login-tickets"} =>
       {:global,
@@ -473,6 +487,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # QueryController.locations (task-c5d5e045e7efcc96) — same shape as backlinks
+    # above, one line down: backlinks/2's result feeds PreviewLocations.resolve/4
+    # under the identical scope_opts(conn) thread.
+    {"GET", "/v1/data/locations/:dataset/:id"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into Content.Graph.backlinks/2 and " <>
+         "PreviewLocations.resolve/4 exactly like its backlinks sibling above, so the " <>
+         "rows are the pipeline-derived :current_workspace's."},
     # QueryController.counts
     {"GET", "/v1/data/counts/:dataset"} =>
       {:workspace_derived,
@@ -510,12 +532,24 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # DisconnectController.create
+    {"POST", "/v1/data/disconnect/:dataset/:doc_id"} =>
+      {:workspace_derived,
+       "workspace-derived: ScopeHelpers.scope_opts(conn) scopes both the referencer scan " <>
+         "(Edges.referencing_fields/3) and Content.disconnect_references/3 to the caller's " <>
+         "workspace; grant-narrowed and share-link callers are refused (task-0bc05ce5cdefd8dc)."},
     # DocumentOpsController.apply_op
     {"POST", "/v1/data/doc/:dataset/:type/:doc_id/ops"} =>
       {:workspace_derived,
        "threads ScopeHelpers.scope_opts/1 into the schema read, the draft lookup and " <>
          "Content.apply_document_block_op/5, so the document it edits is the " <>
          "pipeline-derived :current_workspace's, the same as MutateController.mutate."},
+    # DocumentOpsController.apply_field_ops
+    {"POST", "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into the schema read, the draft lookup and " <>
+         "Content.apply_field_block_ops/6, so the document it edits is the " <>
+         "pipeline-derived :current_workspace's, the same as apply_op."},
     # QueryController.index
     {"GET", "/v1/data/query/:dataset/:type"} =>
       {:workspace_derived,
@@ -923,6 +957,26 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
       {:workspace_derived,
        "row-derived: every action resolves the link (or the named workspace) first and gates " <>
          "on Links.workspace_admin?/2 against THAT row's workspace_id — never " <>
+         ":current_workspace."},
+    # PreviewLinkController.list (task-6812c3100d7aedbc) — same confinement
+    # shape as ShareLinkController.list/mint/revoke above, one id vocabulary
+    # down: doc_id/ref_type instead of kind/ref_id/access.
+    {"GET", "/v1/shares/preview-links"} =>
+      {:workspace_derived,
+       "row-derived: every action resolves the link (or the named workspace) first and gates " <>
+         "on PreviewLinks.workspace_admin?/2 against THAT row's workspace_id — never " <>
+         ":current_workspace."},
+    # PreviewLinkController.mint
+    {"POST", "/v1/shares/preview-links"} =>
+      {:workspace_derived,
+       "row-derived: every action resolves the link (or the named workspace) first and gates " <>
+         "on PreviewLinks.workspace_admin?/2 against THAT row's workspace_id — never " <>
+         ":current_workspace."},
+    # PreviewLinkController.revoke
+    {"DELETE", "/v1/shares/preview-links/:id"} =>
+      {:workspace_derived,
+       "row-derived: every action resolves the link (or the named workspace) first and gates " <>
+         "on PreviewLinks.workspace_admin?/2 against THAT row's workspace_id — never " <>
          ":current_workspace."},
     # ShareController.list_tokens
     {"GET", "/v1/shares/tokens"} =>

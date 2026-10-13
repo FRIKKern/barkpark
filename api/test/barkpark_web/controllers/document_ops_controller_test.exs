@@ -151,4 +151,139 @@ defmodule BarkparkWeb.DocumentOpsControllerTest do
     assert error["code"] == "not_found"
     assert error["message"] =~ "no-such-type"
   end
+
+  describe "a batch under one ifRev" do
+    defp para_op(id, text) do
+      %{
+        "op" => "append-block",
+        "block" => %{
+          "id" => id,
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+    end
+
+    defp stored_block_ids(id) do
+      resp =
+        scoped_conn()
+        |> as("ops-write-token")
+        |> get("/v1/data/doc/test/post/#{id}?perspective=raw")
+
+      resp.resp_body |> Jason.decode!() |> get_in(["result", "blocks"]) |> Enum.map(& &1["id"])
+    end
+
+    test "three ops apply in order in one write and answer the new rev", %{conn: conn} do
+      rev = create_post!(conn, "ops-batch-1")
+
+      resp =
+        post_op(scoped_conn(), "ops-write-token", "post", "ops-batch-1", %{
+          "ops" => [
+            para_op("b1", "one"),
+            para_op("b2", "two"),
+            %{"op" => "move-block", "id" => "b2", "after" => "p1"}
+          ],
+          "ifRev" => rev
+        })
+
+      assert resp.status == 200, resp.resp_body
+      result = Jason.decode!(resp.resp_body)["result"]
+
+      assert Enum.map(result["results"], & &1["op_kind"]) ==
+               ~w(append-block append-block move-block)
+
+      assert Enum.map(result["results"], & &1["block_id"]) == ~w(b1 b2 b2)
+      assert result["rev"] == current_rev!(conn, "ops-batch-1")
+      refute result["rev"] == rev
+      assert stored_block_ids("ops-batch-1") == ~w(p1 b2 b1)
+    end
+
+    test "one invalid op rolls the whole batch back", %{conn: conn} do
+      rev = create_post!(conn, "ops-batch-2")
+
+      resp =
+        post_op(scoped_conn(), "ops-write-token", "post", "ops-batch-2", %{
+          "ops" => [
+            para_op("b1", "one"),
+            para_op("b2", "two"),
+            %{"op" => "move-block", "id" => "b1", "after" => "no-such-block"}
+          ],
+          "ifRev" => rev
+        })
+
+      assert resp.status == 422, resp.resp_body
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "invalid_op"
+      assert current_rev!(conn, "ops-batch-2") == rev
+      assert stored_block_ids("ops-batch-2") == ["p1"]
+    end
+
+    test "a stale ifRev answers 412 and writes nothing", %{conn: conn} do
+      rev = create_post!(conn, "ops-batch-3")
+
+      resp =
+        post_op(scoped_conn(), "ops-write-token", "post", "ops-batch-3", %{
+          "ops" => [para_op("b1", "one"), para_op("b2", "two")],
+          "ifRev" => rev <> "-stale"
+        })
+
+      assert resp.status == 412, resp.resp_body
+      assert Jason.decode!(resp.resp_body)["error"]["details"]["actual"] == rev
+      assert current_rev!(conn, "ops-batch-3") == rev
+    end
+
+    test "an empty batch, or op and ops together, is malformed", %{conn: conn} do
+      rev = create_post!(conn, "ops-batch-4")
+
+      for body <- [
+            %{"ops" => [], "ifRev" => rev},
+            %{"ops" => [append_op()], "op" => append_op(), "ifRev" => rev},
+            %{"ops" => [append_op(), "not an op"], "ifRev" => rev}
+          ] do
+        resp = post_op(scoped_conn(), "ops-write-token", "post", "ops-batch-4", body)
+        assert resp.status == 422, resp.resp_body
+        assert Jason.decode!(resp.resp_body)["error"]["code"] == "malformed_op"
+      end
+
+      assert current_rev!(conn, "ops-batch-4") == rev
+    end
+
+    test "a read-tier token is refused at the write gate", %{conn: conn} do
+      rev = create_post!(conn, "ops-batch-5")
+
+      resp =
+        post_op(scoped_conn(), "ops-read-token", "post", "ops-batch-5", %{
+          "ops" => [para_op("b1", "one")],
+          "ifRev" => rev
+        })
+
+      assert resp.status == 403, resp.resp_body
+      assert current_rev!(conn, "ops-batch-5") == rev
+    end
+
+    test "a write token from another workspace cannot reach the document", %{conn: conn} do
+      rev = create_post!(conn, "ops-batch-6")
+      other_ws = Barkpark.TenancyFixtures.create_workspace!()
+      other_proj = Barkpark.TenancyFixtures.create_project!(other_ws)
+
+      # The type exists over there too, so the refusal is the document lookup.
+      Content.upsert_schema(
+        %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+        "test",
+        workspace_id: other_ws.id,
+        project_id: other_proj.id
+      )
+
+      Barkpark.Auth.create_token("ops-foreign-token", "f", "test", ["read", "write"], other_ws.id)
+
+      resp =
+        post_op(scoped_conn(), "ops-foreign-token", "post", "ops-batch-6", %{
+          "ops" => [para_op("b1", "one")],
+          "ifRev" => rev
+        })
+
+      assert resp.status == 404, resp.resp_body
+      assert Jason.decode!(resp.resp_body)["error"]["message"] == "document not found"
+      assert current_rev!(conn, "ops-batch-6") == rev
+    end
+  end
 end

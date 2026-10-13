@@ -258,12 +258,12 @@
       "importance": 52
     },
     {
-      "path": "api/lib/barkpark/pulse/metrics.ex",
+      "path": "api/lib/barkpark/plugins/pulse/metrics.ex",
       "role": "",
       "importance": 55
     },
     {
-      "path": "api/lib/barkpark/pulse/sweep_worker.ex",
+      "path": "api/lib/barkpark/plugins/pulse/sweep_worker.ex",
       "role": "",
       "importance": 30
     },

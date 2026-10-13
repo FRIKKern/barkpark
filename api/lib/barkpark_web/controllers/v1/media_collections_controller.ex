@@ -126,6 +126,36 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
     end
   end
 
+  # The Media library's "New folder" (task-c09196a99fad3d3a). The answer is
+  # the folder as the store holds it after the write (Collections.create_folder/3
+  # reads it back), rendered like `show/2`.
+  def create(conn, %{"dataset" => dataset} = params) do
+    opts = scope_opts(conn)
+
+    with :ok <- require_write(conn),
+         {:ok, title} <- folder_title(params["title"]),
+         {:ok, doc} <- Collections.create_folder(title, dataset, opts) do
+      # 200, like the sibling collection writes (and what the OpenAPI entry
+      # generated from the capabilities registry declares).
+      json(conn, %{
+        result: Collections.render(doc, false, Collections.redaction_visibility(dataset, opts)),
+        syncTags: [
+          "bp:ds:#{dataset}:media:collections",
+          "bp:ds:#{dataset}:media:collections:#{doc.doc_id}"
+        ]
+      })
+    end
+  end
+
+  defp folder_title(title) when is_binary(title) do
+    case String.trim(title) do
+      "" -> {:error, :malformed}
+      trimmed -> {:ok, trimmed}
+    end
+  end
+
+  defp folder_title(_), do: {:error, :malformed}
+
   def share(conn, %{"dataset" => dataset, "id" => id} = params) do
     ttl = parse_int(params["ttl"], 60 * 60 * 24 * 7)
 

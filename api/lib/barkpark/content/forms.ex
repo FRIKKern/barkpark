@@ -20,8 +20,22 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, DraftId, Labels}
+
+  alias Barkpark.Content.{
+    CanonicalShapes,
+    Document,
+    DraftId,
+    Labels,
+    PatchLock,
+    PortableText,
+    SlugValue
+  }
+
   alias Barkpark.PortableDoc.{Projection, Synthesis}
+
+  # Set on a field of a plugin-owned type: keep the value's stored shape
+  # (owner rulings #42/#43 exempt them; `CanonicalShapes`).
+  @keep_shape "__keep_stored_shape"
 
   @doc """
   Build a form map from a document and its schema. Returns a map keyed
@@ -55,6 +69,11 @@ defmodule Barkpark.Content.Forms do
             Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field) ->
               raw
 
+            # A plain richText field stores Portable Text (owner ruling #44);
+            # the Classic contenteditable edits it as HTML.
+            plain_rich_text?(field) and PortableText.blocks?(raw) ->
+              PortableText.to_html(raw)
+
             # An `image` value decoded into a map at the save boundary rides
             # back to the picker as its JSON wire string (Gyldendal parity E1).
             field["type"] == "image" and is_map(raw) ->
@@ -68,6 +87,11 @@ defmodule Barkpark.Content.Forms do
             field["type"] == "datetime" and (is_binary(raw) or is_nil(raw)) ->
               datetime_form_value(raw)
 
+            # A `{current}` slug (the canonical shape, owner ruling #43) is
+            # edited as its text in the slug input.
+            field["type"] == "slug" and is_map(raw) and is_binary(SlugValue.text(raw)) ->
+              SlugValue.text(raw)
+
             true ->
               classic_form_value(raw, field, content, key)
           end
@@ -80,8 +104,13 @@ defmodule Barkpark.Content.Forms do
   end
 
   @doc """
-  The value a stored `datetime` shows in the Classic `datetime-local` input,
-  which accepts ONLY `YYYY-MM-DDTHH:MM` and renders anything else EMPTY.
+  The value a stored `datetime` hands the Classic datetime field's hidden
+  input (owner ruling #46). The browser hook `BarkparkDatetimeField` shows it
+  in the editor's local time and writes back a UTC instant ("...Z").
+
+  An instant (offset or `Z`) is handed over as its UTC instant with seconds,
+  so an untouched value posts back equal and is kept byte-identical. A value
+  with no zone (written before #46) keeps its wall time at minute precision.
 
   Stranger walk (2026-09-30): a datetime written as ISO-8601 with an offset —
   `2026-01-01T12:00:00Z`, what `bp seed`, the API and the SDK write — showed an
@@ -100,9 +129,12 @@ defmodule Barkpark.Content.Forms do
       Regex.match?(~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, raw) ->
         raw
 
+      # An instant (offset or Z) rides to the hidden input as its UTC
+      # instant; the browser hook shows it in the editor's local time (owner
+      # ruling #46). Seconds are kept so an untouched value posts back equal.
       match?({:ok, _, _}, DateTime.from_iso8601(raw)) ->
         {:ok, dt, _} = DateTime.from_iso8601(raw)
-        Calendar.strftime(dt, "%Y-%m-%dT%H:%M")
+        dt |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
       match?({:ok, _}, NaiveDateTime.from_iso8601(raw)) ->
         {:ok, ndt} = NaiveDateTime.from_iso8601(raw)
@@ -160,12 +192,11 @@ defmodule Barkpark.Content.Forms do
       # back. The save stored that bare string, so editing ONLY the title of a
       # seeded post rewrote `author: {"_ref": "seed-author-3"}` to
       # `"seed-author-3"` and every `post.author?._ref` reader dropped the post.
-      # Same rule as the clauses around it, and NO new value contract
-      # (task-fcb752b43e11df9b stays the owner's): an untouched reference keeps
-      # its stored value byte-identical; an EDITED one is written in the shape
-      # it was stored in (the object, `_ref` replaced, sibling keys kept). A
-      # bare-string or empty stored value, and a cleared ("") post, are left
-      # exactly as before.
+      # An untouched `{_ref}` reference keeps its stored value byte-identical;
+      # an EDITED one keeps its object (`_ref` replaced, sibling keys kept).
+      # A bare-id stored value is rewritten as `{_ref}` on this save (owner
+      # ruling #42: `coerce_field_value/2` + `restore_untouched/3`); a cleared
+      # ("") post is left exactly as before.
       %{"type" => "reference", "name" => key}, acc when is_binary(key) ->
         case {Map.fetch(acc, key), Map.get(base_content, key)} do
           {{:ok, posted}, %{"_ref" => ref} = stored} when is_binary(posted) and posted != "" ->
@@ -255,8 +286,51 @@ defmodule Barkpark.Content.Forms do
       coerced === stored ->
         stored
 
+      # Plain rich text stored as HTML becomes Portable Text blocks on its
+      # next save, touched or not (owner ruling #44).
+      plain_rich_text?(field) and is_binary(stored) and is_list(coerced) ->
+        coerced
+
+      # A reference stored as a bare id is rewritten in the canonical
+      # `{_ref}` shape on its next save, touched or not (owner ruling #42).
+      field["type"] == "reference" and is_binary(stored) and is_map(coerced) ->
+        coerced
+
+      # The same rule row by row for a reference list, so a `{_ref}` row keeps
+      # its sibling keys (`_key`) while a bare-id row is rewritten.
+      field["type"] == "arrayOf" and reference_descriptor?(field["of"]) and is_list(coerced) and
+        is_list(stored) and length(coerced) == length(stored) and
+          Enum.any?(stored, &is_binary/1) ->
+        coerced
+        |> Enum.zip(stored)
+        |> Enum.map(fn {p, s} -> restore_untouched(field["of"], p, s) end)
+
+      # A slug stored as a plain string is rewritten in the canonical
+      # `{current}` shape on its next save, touched or not (owner ruling #43).
+      field["type"] == "slug" and is_binary(stored) and is_map(coerced) ->
+        coerced
+
+      # An edited `{current}` slug keeps its sibling keys.
+      field["type"] == "slug" and is_map(stored) and is_map(coerced) and
+          coerced["current"] != SlugValue.text(stored) ->
+        Map.put(stored, "current", coerced["current"])
+
+      # A plugin-owned type keeps a `{current}` slug an object when edited
+      # (`@keep_shape`: its text was not coerced).
+      field["type"] == "slug" and is_map(stored) and is_binary(coerced) and coerced != "" and
+          coerced != SlugValue.text(stored) ->
+        Map.put(stored, "current", coerced)
+
       coerced === coerce_field_value(field, form_image(field, stored)) ->
         stored
+
+      # Edited Portable Text is rebuilt from the posted HTML against the
+      # stored blocks, so a block the edit did not touch is kept verbatim and
+      # a mark the editor has no UI for survives. A plugin-owned type
+      # (`@keep_shape`) posts HTML that was not coerced; it gets blocks too.
+      plain_rich_text?(field) and is_list(stored) and PortableText.blocks?(stored) and
+        is_binary(posted) and String.trim(posted) != "" ->
+        PortableText.from_html(posted, stored)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
         restore_composite(field, coerced, stored)
@@ -273,6 +347,9 @@ defmodule Barkpark.Content.Forms do
         coerced
     end
   end
+
+  defp reference_descriptor?(%{"type" => "reference"}), do: true
+  defp reference_descriptor?(_), do: false
 
   defp restore_composite(field, coerced, stored) do
     subs =
@@ -303,6 +380,12 @@ defmodule Barkpark.Content.Forms do
   # posts back when the author does not touch it.
   defp form_image(%{"type" => "reference"}, %{"_ref" => ref}) when is_binary(ref), do: ref
   defp form_image(%{"type" => "datetime"}, v) when is_binary(v), do: datetime_form_value(v)
+
+  defp form_image(%{"type" => "richText"} = field, v) when is_list(v) do
+    if plain_rich_text?(field) and PortableText.blocks?(v), do: PortableText.to_html(v), else: v
+  end
+
+  defp form_image(%{"type" => "slug"}, %{} = v), do: SlugValue.text(v) || ""
   defp form_image(_field, v) when is_number(v) or is_boolean(v), do: to_string(v)
   defp form_image(_field, nil), do: ""
   defp form_image(_field, v), do: v
@@ -392,6 +475,8 @@ defmodule Barkpark.Content.Forms do
   def build_content(_params, nil), do: %{}
 
   def build_content(params, schema) do
+    schema = CanonicalShapes.for_type(schema, nil)
+
     Enum.reduce(schema.fields, %{}, fn field, acc ->
       key = field["name"]
       val = Map.get(params, key, "")
@@ -499,7 +584,53 @@ defmodule Barkpark.Content.Forms do
     end)
   end
 
+  # A reference is stored as `{"_ref": id, "_type": "reference"}` (owner
+  # ruling #42, task-fcb752b43e11df9b). The Studio picker posts the bare id;
+  # this is the one place it becomes the canonical object, for a top-level
+  # field, an `arrayOf` row and a composite subfield alike. Readers still
+  # accept a bare id (`Edges.reference_target/1`, `FieldInputs.reference_id/1`,
+  # `?expand`). A plugin-owned type keeps its stored shape
+  # (`CanonicalShapes.exempt_types/0`; the field carries `@keep_shape`).
+  defp coerce_field_value(%{"type" => "reference"} = field, val)
+       when is_binary(val) and not is_map_key(field, @keep_shape) do
+    case String.trim(val) do
+      "" -> val
+      id -> %{"_ref" => id, "_type" => "reference"}
+    end
+  end
+
+  # A slug is stored as `{"_type": "slug", "current": text}` (owner ruling
+  # #43). The Studio slug input and Generate post the text; this is where it
+  # becomes the canonical object. Readers accept a plain string too
+  # (`Barkpark.Content.SlugValue.text/1`).
+  defp coerce_field_value(%{"type" => "slug"} = field, val)
+       when is_binary(val) and not is_map_key(field, @keep_shape) do
+    case String.trim(val) do
+      "" -> val
+      text -> SlugValue.canonical(text)
+    end
+  end
+
+  # A plain richText field is stored as Portable Text blocks (owner ruling
+  # #44, task-db56e998e0a5ab3b). The Classic contenteditable posts HTML; this
+  # is where it becomes blocks. A value already in block form passes through.
+  defp coerce_field_value(%{"type" => "richText"} = field, val)
+       when is_binary(val) and not is_map_key(field, @keep_shape) do
+    if plain_rich_text?(field) and String.trim(val) != "",
+      do: PortableText.from_html(val),
+      else: val
+  end
+
   defp coerce_field_value(_field, val), do: val
+
+  # The fields #44 covers: `richText` without the block editor, and not the
+  # PortableDoc body region (`body` / `blocks`), whose stored list is
+  # PortableDoc blocks read by `Projection.read_blocks/1`, not Portable Text.
+  defp plain_rich_text?(%{"type" => "richText", "name" => name} = field)
+       when name not in ["body", "blocks"],
+       do: not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+
+  defp plain_rich_text?(_), do: false
 
   # `%{"0" => a, "2" => c, "1" => b}` → `[a, b, c]`. Only a map whose EVERY key
   # is a non-negative integer string qualifies; anything else is returned
@@ -551,6 +682,8 @@ defmodule Barkpark.Content.Forms do
   def coerce_params(params, nil), do: params
 
   def coerce_params(params, schema) when is_map(params) do
+    schema = CanonicalShapes.for_type(schema, nil)
+
     Enum.reduce(schema.fields || [], params, fn field, acc ->
       key = field["name"]
 
@@ -814,10 +947,33 @@ defmodule Barkpark.Content.Forms do
   in StudioLive (`handle_event "autosave"`, `handle_info :autosave_form`,
   `save_doc/3`).
   """
+  # task-324b4d00706a6cfb: N callers racing the SAME never-yet-drafted
+  # published doc converge one at a time once the draft-fork retry (below)
+  # kicks in — each round, every loser re-reads the latest row and re-merges,
+  # so at most one of the remaining contenders can land per round. A bound of
+  # 5 (the old rev_mismatch-only budget, sized for ordinary contention between
+  # a couple of editors) starves a wider race before every field lands.
+  @max_attempts 30
+
   @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
-  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []),
-    do: upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, 5)
+  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
+    # The per-document advisory lock (task-324b4d00706a6cfb, shared with
+    # `mutations.ex`'s SDK `patch` ops — same lock class/key, so the two
+    # serialize against EACH OTHER too). Held for the whole read-merge-write
+    # sequence below, including every retry: the second caller racing this
+    # document waits here until the first commits or rolls back, so it always
+    # merges onto the real result, never a snapshot the first is still
+    # writing over. Without this, two callers can both see no draft, both
+    # merge onto the same published base, and the later write wins outright —
+    # or, if the race lands between THIS function's read and
+    # `Content.upsert_document`'s own internal re-read, the second caller's
+    # write can take an UNFENCED update branch and silently overwrite the
+    # first caller's fields with no error from either side.
+    PatchLock.with_lock(base_doc.doc_id, dataset, opts, fn ->
+      upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, @max_attempts)
+    end)
+  end
 
   # Read the CURRENT draft (else the published row, else the snapshot), merge
   # the author's changes onto it, and write fenced on the rev just read. A
@@ -831,9 +987,37 @@ defmodule Barkpark.Content.Forms do
       {:error, {:rev_mismatch, _}} when attempts > 1 ->
         upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
 
+      # The draft-fork race (task-324b4d00706a6cfb): `current` above read NO
+      # draft (a first patch on a published doc), so this attempt's INSERT
+      # carried the author's change merged onto the PUBLISHED snapshot. A
+      # second caller racing the SAME fork won the insert in between —
+      # `Content.upsert_document`'s unique-constraint error on `doc_id` is
+      # the only signal of that, there being no row to rev-fence against yet.
+      # Re-reading `current` now finds the winner's draft, so the retry
+      # re-merges this author's change ONTO IT (not a blind overwrite of it)
+      # via the SAME `classic_save_content` merge every retry already runs.
+      {:error, %Ecto.Changeset{} = changeset} when attempts > 1 ->
+        if draft_fork_conflict?(changeset) do
+          upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
+        else
+          {:error, changeset}
+        end
+
       other ->
         other
     end
+  end
+
+  # Whether a changeset's error is the `(doc_id, type, dataset_id)`
+  # unique constraint `Document.changeset/2` names
+  # (`documents_doc_id_type_dataset_id_index`) — the shape a losing
+  # concurrent draft fork produces, and the only one worth a merge-and-retry.
+  # Any other changeset error (a real validation failure) passes through.
+  defp draft_fork_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:doc_id, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
   end
 
   defp current_doc(base_doc, type, dataset, opts) do
@@ -873,7 +1057,7 @@ defmodule Barkpark.Content.Forms do
              base_doc,
              current,
              params,
-             schema,
+             CanonicalShapes.for_type(schema, type),
              dataset,
              Keyword.take(opts, [:workspace_id, :project_id])
            ) do

@@ -39,13 +39,17 @@ defmodule Barkpark.Content.Errors do
       "A single If-Match header can't fence a multi-op batch — drop the header and put an ifRevisionID (or ifMatch) inside each mutation instead.",
     "conflict" =>
       "The document already exists — use a createOrReplace/patch mutation instead of create.",
+    "versions_id_not_supported" =>
+      "This server has no release/version-set entity to resolve a versions.<release>.<id> address against — write the document under its plain id instead (drop the versions.<release>. prefix).",
     "duplicate_of" =>
       "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document — or, if this publish REPLACES it, declare content.supersedes with that id and republish.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
+    "document_referenced" =>
+      "Other documents still reference this one (details.referrers). Remove or repoint those references first, or repeat the delete with \"force\": true to delete anyway (the override is audited).",
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the delete with force to remove the schema and orphan them: `bp schema delete <name> --force`, or ?force=true over HTTP.",
     "invalid_filter" =>
-      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
+      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is, notContains, nhas, countEq, countNeq, countGt, countGte, countLt, countLte, nbetween) — check for a typo or wrong case.",
     "forbidden_field" =>
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
@@ -99,6 +103,9 @@ defmodule Barkpark.Content.Errors do
       "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
     # Postgres' per-tsvector 1 048 575-byte cap, hit by the generated
     # `documents.search_vector` column (task-655f368ae5c72120). Was a bare 500.
+    # Owner ruling #39 — `Barkpark.Content.DocumentSize`.
+    "document_too_large" =>
+      "One document may hold at most details.limit_bytes of JSON (title + content); this one is details.size_bytes. Split it into several documents, move large files to media assets, or ask the operator to raise BARKPARK_MAX_DOCUMENT_BYTES.",
     "searchable_text_too_large" =>
       "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
     # Reversible workspace archive (task-55474a106554e65a). 409, NOT the 404 a
@@ -108,6 +115,9 @@ defmodule Barkpark.Content.Errors do
       "This workspace is archived: its content is intact but it accepts no reads or writes until a workspace admin restores it (POST /api/workspaces/:workspace_slug/restore).",
     "default_workspace_not_archivable" =>
       "The instance-Default workspace cannot be archived — every unscoped route resolves to it. Archive a named workspace instead.",
+    # Owner ruling #21 (task-9a7298f03aad0c42) — `Content.BoundFieldGuard`.
+    "private_field_bound" =>
+      "The body is public, so it may not bind a field the schema keeps private (private, owner_only or readable_by). details.fields names them: remove those bound blocks (or unbind them), or make the field public in the schema.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -130,6 +140,13 @@ defmodule Barkpark.Content.Errors do
   # are kept separate from @hints rather than diluting it.
   @public_inline_codes MapSet.new([
                          "invalid_enrollment",
+                         # Owner ruling #7 — member_controller.ex rotate_token:
+                         # a user-owned token is rotated only by its owner (403).
+                         "owner_only",
+                         # Owner ruling #7 — auth_controller.ex create_token: a
+                         # user in several workspaces must name the PAT's
+                         # workspace (422, with the slugs listed).
+                         "workspace_required",
                          # Herd-s6 fenced state report (chat_host_controller.ex
                          # report_state): an off-vocabulary state or a
                          # missing/non-integer lease epoch — refused before the
@@ -333,7 +350,20 @@ defmodule Barkpark.Content.Errors do
                          # caller who is not the instance owner — permanent; the
                          # way out is the cloud profile or a registered host
                          # (task-6ca882967fd95dda, StudioChat.HostExecution).
-                         "host_execution_not_permitted"
+                         "host_execution_not_permitted",
+                         # Per-account prefs (task-7d2a48dbf7e4bf34) —
+                         # user_pref_controller.ex. `no_user_identity` (403): a
+                         # shared/admin-minted token with no owner has no
+                         # account to key a per-user pref by (its own
+                         # route-specific hint wins over any default here).
+                         # `invalid_pref` (422): the changeset's own field
+                         # errors, carried verbatim via emit_fields/3 (a map,
+                         # not a string — emit_custom's `message` guard
+                         # requires one). `bad_request` (422): the PUT body's
+                         # `value` key was missing or not an object.
+                         "no_user_identity",
+                         "invalid_pref",
+                         "bad_request"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)
@@ -506,6 +536,20 @@ defmodule Barkpark.Content.Errors do
         "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
     }
 
+  # A dataset-BOUND token (minted with an explicit `dataset`) presented on a
+  # request for another dataset (task-4418b517649a58ce). `code` and status match
+  # the two arms above; `reason` names the remedy, which is neither a seat nor
+  # a permission: use the bound dataset, or mint a token for this one.
+  defp build({:error, :forbidden_dataset}),
+    do: %{
+      code: "forbidden",
+      message: "this token is bound to another dataset",
+      status: 403,
+      reason: "dataset_not_bound",
+      hint:
+        "The token was minted with an explicit `dataset` and only works on that dataset. `GET /v1/auth/token` shows it (`dataset`, `dataset_bound`). Call the bound dataset, or mint a token for this one."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
@@ -646,6 +690,27 @@ defmodule Barkpark.Content.Errors do
       hint: "Split the batch into requests of at most #{max} mutations and resend."
     }
 
+  # task-c801daf4efd35a74 — a NARROWER sibling of the clause above, same
+  # code/status (still "your batch exceeds this endpoint's cap — split and
+  # resend"), but the overall-count cap's message would be WRONG here: a
+  # batch can sit well under `@max_mutations` (1000) while still carrying
+  # too many DELETE mutations specifically (each pays a per-op
+  # reference-integrity scan the overall cap cannot see — see
+  # `BarkparkWeb.Plugs.RequireWithinQuota`'s "## The delete cap"). `kind`
+  # in `details` lets a machine caller tell the two shapes apart without
+  # parsing the message.
+  defp build({:error, {:delete_batch_too_large, n, max}}) when is_integer(n) and is_integer(max),
+    do: %{
+      code: "batch_too_large",
+      message:
+        "the mutations list carries #{n} delete mutations; the cap is #{max} deletes per request",
+      status: 422,
+      details: %{count: n, max: max, kind: "delete"},
+      hint:
+        "Split the delete mutations into requests of at most #{max} and resend; " <>
+          "non-delete mutations in the same batch are unaffected by this cap."
+    }
+
   defp build({:error, :forbidden_origin}),
     do: %{code: "cors_forbidden", message: "origin not allowed for dataset", status: 403}
 
@@ -717,6 +782,16 @@ defmodule Barkpark.Content.Errors do
       details: %{received: received, supported: supported}
     }
   end
+
+  # `dryRun` on the mutate door must be a boolean; a value that is neither is
+  # refused rather than read as false, which would write for real.
+  defp build({:error, {:invalid_dry_run, value}}),
+    do: %{
+      code: "malformed",
+      message: "dryRun must be true or false, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "dryRun"}
+    }
 
   defp build({:error, {:malformed_blocks, details}}),
     do: %{
@@ -811,6 +886,21 @@ defmodule Barkpark.Content.Errors do
        when is_binary(message) and is_map(details),
        do: %{code: "invalid_filter", message: message, status: 400, details: details}
 
+  # A filter param the data query API cannot read at all (task-341a5d9e63ffdcc3):
+  # a broken bracket spelling (`?filter[[=x` decodes to a top-level "filter[["
+  # key nothing reads) or a blank/bracketed field. It used to run unfiltered and
+  # answer every document. Same registered "invalid_filter" code; `param` is the
+  # caller's own spelling, so echoing it reveals nothing they did not send.
+  defp build({:error, {:malformed_filter_param, param}}) when is_binary(param),
+    do: %{
+      code: "invalid_filter",
+      message:
+        "malformed filter parameter #{inspect(param)}; use filter[field][op]=value, " <>
+          "filter=field<op>value, or a repeated filter[]=field<op>value",
+      status: 400,
+      details: %{param: param}
+    }
+
   # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
   # string parser (LegacyController.parse_legacy_filter/1). A non-empty string
   # that doesn't split into a field=value pair (e.g. "price>10") used to fall
@@ -841,6 +931,23 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :conflict}),
     do: %{code: "conflict", message: "document already exists", status: 409}
 
+  # task-078175e759f71b73 — Sanity's Content Releases id convention,
+  # `versions.<release>.<id>`, has no analog here: there is no release/
+  # version-set entity to resolve it against. `DraftId.draft_id/1` would
+  # otherwise prepend "drafts." onto the WHOLE string unmodified, storing
+  # `drafts.versions.<release>.<id>` as an ordinary document — an address
+  # nobody asked for and nothing resolves back to the release or the real
+  # document id. Refused at the door instead (`Writer.refuse_versions_id/1`).
+  defp build({:error, {:versions_id_not_supported, raw_id}}),
+    do: %{
+      code: "versions_id_not_supported",
+      message:
+        "document id #{inspect(raw_id)} uses Sanity's Content Releases convention " <>
+          "(versions.<release>.<id>), which this server does not support",
+      status: 422,
+      details: %{id: raw_id}
+    }
+
   # Claim-first idempotency: a concurrent request already holds a fresh claim on
   # this Idempotency-Key. 409 so the client retries (Stripe-style) — the handler
   # never runs, so a non-idempotent mutation cannot double-apply.
@@ -857,6 +964,16 @@ defmodule Barkpark.Content.Errors do
   # MutateController used to emit a bare %{error: "halted", reason: reason}
   # here that carried no code/request_id and was invisible to every machine
   # consumer. The plugin's reason string becomes the message verbatim.
+  # Owner ruling #21: a block list bound a field the schema keeps private.
+  # 422 — the write is well-formed but its body would publish a hidden field.
+  defp build({:error, {:private_field_bound, names}}) when is_list(names),
+    do: %{
+      code: "private_field_bound",
+      message: Barkpark.Content.BoundFieldGuard.message(names),
+      status: 422,
+      details: %{fields: names}
+    }
+
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 
@@ -1130,20 +1247,13 @@ defmodule Barkpark.Content.Errors do
        }
 
   defp build({:error, %Ecto.Changeset{} = cs}) do
-    details =
-      Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {k, v}, acc ->
-          String.replace(acc, "%{#{k}}", to_string(v))
-        end)
-      end)
-
-    %{
-      code: "validation_failed",
-      message: "document failed validation",
-      status: 422,
-      details: details
-    }
+    case Barkpark.Content.DocumentSize.refusal(cs) do
+      {limit, size} -> document_too_large(limit, size)
+      nil -> changeset_validation_failed(cs)
+    end
   end
+
+  defp build({:error, {:document_too_large, limit, size}}), do: document_too_large(limit, size)
 
   # Task content validation (Content.validate_task_kind → Tasks.
   # validate_kind_content): a per-field errors map, e.g. %{"kind" => ["is
@@ -1167,6 +1277,22 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # Same ENFORCE arm, PLUS the structured findings list (task-1dac662bed153203):
+  # `details` is byte-identical to the 2-tuple clause above (same `errors` map,
+  # same key, same strings) — `findings` is a purely additive sibling a caller
+  # opts into reading for a per-code sentence (barkpark-studio), never a
+  # replacement for `details`.
+  defp build({:error, {:schema_validation_failed, errors, findings}})
+       when is_map(errors) and is_list(findings) do
+    %{
+      code: "validation_failed",
+      message: "document content failed schema validation",
+      status: 422,
+      details: errors,
+      findings: Enum.map(findings, &finding_wire/1)
+    }
+  end
+
   # Owner ruling #47: publish refuses a scalar or reference list holding an
   # empty row. `details` names each field with one message per empty row.
   defp build({:error, {:empty_list_members, errors}}) when is_map(errors) do
@@ -1175,6 +1301,26 @@ defmodule Barkpark.Content.Errors do
       message: "publish refused: a list field has an empty row; fill it in or remove it",
       status: 422,
       details: errors
+    }
+  end
+
+  # A non-admin client write changed a field the schema marks `readOnly`
+  # (`Barkpark.Content.ReadOnlyFields`, owner ruling #35). The canonical
+  # `validation_failed` code and per-field `details` map, so clients keying on
+  # `validation_failed` need no new branch.
+  defp build({:error, {:read_only_fields, fields}}) when is_list(fields) do
+    %{
+      code: "validation_failed",
+      message: "document changes read-only field(s): " <> Enum.join(fields, ", "),
+      status: 422,
+      details:
+        Map.new(fields, fn field ->
+          {field,
+           [
+             "is read-only: the server sets this field. Leave it out or send its " <>
+               "stored value; only an admin can change it."
+           ]}
+        end)
     }
   end
 
@@ -1207,6 +1353,20 @@ defmodule Barkpark.Content.Errors do
   # of those docs 404s, since `schema_public?` is false). 409 Conflict; the
   # caller either deletes the documents first or repeats with `?force=true`. The
   # orphan `count` rides in `details` so the caller can gauge the blast radius.
+  # A `delete` mutation refused because other documents still reference the
+  # target (task-c8c22ee8076535fe; Sanity refuses the same delete). 409; the
+  # referrers ride in `details` (`id` + `type`, capped at 50) so the caller can
+  # fix them, and `"force": true` on the op overrides.
+  defp build({:error, {:document_referenced, id, referrers}}) when is_list(referrers),
+    do: %{
+      code: "document_referenced",
+      message:
+        "#{id} is referenced by #{length(referrers)} document(s); " <>
+          "remove those references, or set \"force\": true on the delete",
+      status: 409,
+      details: %{id: id, referrers: referrers}
+    }
+
   defp build({:error, {:schema_has_documents, count}}) when is_integer(count),
     do: %{
       code: "schema_has_documents",
@@ -1343,6 +1503,14 @@ defmodule Barkpark.Content.Errors do
     %{code: "internal_error", message: "unknown error (#{descriptor})", status: 500}
   end
 
+  # `Validation.finding()` (`%{path:, message:, code:, params:}`) onto the
+  # wire: `code` is an atom internally (pinned to `Validation.known_codes/0`)
+  # and becomes its string name here, same convention as every other `code`
+  # this module emits.
+  defp finding_wire(%{path: path, message: message, code: code, params: params}) do
+    %{path: path, message: message, code: Atom.to_string(code), params: params}
+  end
+
   # Longest descriptor the envelope will carry. A pathological term (a deeply
   # nested tuple) can only cost this many graphemes of the message.
   @descriptor_max_chars 120
@@ -1440,5 +1608,34 @@ defmodule Barkpark.Content.Errors do
             nil
         end
     end
+  end
+
+  # Owner ruling #39: one document over the configured size cap. 413 (the
+  # request is too large for this door), named so a client can tell it from
+  # the transport-level `payload_too_large`.
+  defp document_too_large(limit, size) do
+    %{
+      code: "document_too_large",
+      message:
+        "the document is #{size} bytes of JSON (title + content), over this server's #{limit}-byte limit per document",
+      status: 413,
+      details: %{"limit_bytes" => limit, "size_bytes" => size}
+    }
+  end
+
+  defp changeset_validation_failed(cs) do
+    details =
+      Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {k, v}, acc ->
+          String.replace(acc, "%{#{k}}", to_string(v))
+        end)
+      end)
+
+    %{
+      code: "validation_failed",
+      message: "document failed validation",
+      status: 422,
+      details: details
+    }
   end
 end

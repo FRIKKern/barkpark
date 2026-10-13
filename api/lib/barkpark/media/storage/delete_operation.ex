@@ -10,7 +10,12 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
       when is_map(request) and is_function(delete_database_rows, 0) do
     result =
       Repo.transaction(fn ->
-        prepared = one!("SELECT public.prepare_media_delete_v1($1::jsonb)", [request])
+        prepared =
+          Repo
+          |> Ecto.Adapters.SQL.query!("SELECT public.prepare_media_delete_v1($1::jsonb)", [
+            request
+          ])
+          |> one!()
 
         case prepared["state"] do
           "prepared" ->
@@ -31,7 +36,8 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
 
             case delete_database_rows.() do
               {:ok, snapshots} ->
-                one!(
+                Repo
+                |> Ecto.Adapters.SQL.query!(
                   """
                   UPDATE public.media_delete_operations_v1 AS o
                   SET state='pending_cleanup', asset_documents=$2::jsonb, call_context=$3::jsonb, logical_deleted_at=clock_timestamp()
@@ -41,6 +47,7 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
                   """,
                   [request, snapshots, context]
                 )
+                |> one!()
 
               {:error, reason} ->
                 Repo.rollback(reason)
@@ -49,7 +56,8 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
           "pending_cleanup" ->
             if prepared["rowStillPresent"], do: Repo.rollback(:media_row_reappeared)
 
-            one!(
+            Repo
+            |> Ecto.Adapters.SQL.query!(
               """
               SELECT to_jsonb(o) FROM public.media_delete_operations_v1 o
               WHERE operation_id=($1::jsonb->>'operationId')::uuid AND call_context=$2::jsonb
@@ -59,6 +67,7 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
               """,
               [request, context]
             )
+            |> one!()
         end
       end)
 
@@ -81,8 +90,8 @@ defmodule Barkpark.Media.Storage.DeleteOperation do
     _e in Postgrex.Error -> {:error, :media_delete_conflict}
   end
 
-  defp one!(sql, params) do
-    case Ecto.Adapters.SQL.query!(Repo, sql, params).rows do
+  defp one!(%{rows: rows}) do
+    case rows do
       [[value]] when is_map(value) -> value
       _ -> Repo.rollback(:media_delete_postcondition_failed)
     end

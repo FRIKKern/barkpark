@@ -41,7 +41,11 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     assigns = socket_to_assigns(socket_or_assigns)
     ctx = doc_actions_ctx(assigns)
     baseline = default_doc_actions(assigns, ctx)
-    Barkpark.Plugins.Registry.collect_doc_actions(baseline: baseline, ctx: ctx)
+    disabled = disabled_action_names(ctx)
+
+    [baseline: baseline, ctx: ctx]
+    |> Barkpark.Plugins.Registry.collect_doc_actions()
+    |> Enum.reject(&MapSet.member?(disabled, &1["name"]))
   end
 
   defp socket_to_assigns(%{assigns: assigns}), do: assigns
@@ -58,6 +62,26 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       doc: assigns[:editor_doc],
       workspace_id: workspace_id_from_assigns(assigns)
     }
+  end
+
+  # The action names of plugins disabled where this doc is edited
+  # (task-a11fcaa6d46a5fa4). With no workspace in the assigns, that is the
+  # Default workspace, which a flat (workspace-less) surface acts on; with no
+  # Default seeded either, nothing is gated.
+  defp disabled_action_names(ctx) do
+    workspace_id = ctx[:workspace_id] || default_workspace_id()
+
+    Barkpark.Plugins.Registry.ResolverChain.disabled_action_names(%{
+      ctx
+      | workspace_id: workspace_id
+    })
+  end
+
+  defp default_workspace_id do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} -> id
+      _ -> nil
+    end
   end
 
   defp workspace_id_from_assigns(assigns) do
@@ -98,6 +122,14 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   # Diff toggle → Discard draft → Duplicate → Open another → View blast radius →
   # Delete (destructive, held to the TAIL — separated from the CTA so it is
   # out of the misclick zone) → schema actions.
+  # Owner ruling #58 (2026-10-03): publishing a sheet makes it public — the
+  # `/sheets/:slug` reader serves any published sheet to anyone, whatever the
+  # schema's visibility, the same way papers behave. The Publish control says
+  # so for sheets, so an author is not surprised after the click.
+  @doc false
+  def publish_label("sheet"), do: gettext("Publish — makes this sheet public")
+  def publish_label(_type), do: gettext("Publish")
+
   @doc false
   def default_doc_actions(assigns, _ctx) do
     assigns = socket_to_assigns(assigns)
@@ -127,7 +159,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if is_draft do
         %{
           "name" => "publish",
-          "label" => gettext("Publish"),
+          "label" => publish_label(assigns[:editor_type]),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -408,7 +440,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     content = Map.get(doc, :content) || %{}
 
     candidates = [
-      if(is_map(content), do: Map.get(content, "slug")),
+      if(is_map(content), do: Barkpark.Content.SlugValue.text(Map.get(content, "slug"))),
       Map.get(doc, :slug_text)
     ]
 
@@ -447,6 +479,16 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   def dispatch_action(socket, name, doc_id, dataset, mode) do
     ctx = action_handler_ctx(socket, doc_id, dataset)
 
+    # The plugin that owns this action is off in this workspace: not listed,
+    # so not dispatchable either (task-a11fcaa6d46a5fa4).
+    if MapSet.member?(disabled_action_names(ctx), name) do
+      {:error, {:plugin_disabled, name}}
+    else
+      dispatch_enabled(ctx, name, doc_id, dataset, mode)
+    end
+  end
+
+  defp dispatch_enabled(ctx, name, doc_id, dataset, mode) do
     handlers =
       Barkpark.Plugins.Registry.collect_action_handlers(
         baseline: default_action_handlers(ctx),
@@ -510,6 +552,8 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       doc_id: doc_id,
       doc_type: socket.assigns[:editor_type],
       doc: socket.assigns[:editor_doc],
+      # Whose plugin enablement gates the dispatch (task-a11fcaa6d46a5fa4).
+      workspace_id: workspace_id_from_assigns(socket.assigns),
       # barkpark-zdvi — the tenancy scope of the dispatching Studio session.
       # Resolver plugins (OnixEdit) close over this so a scope-aware action
       # (publish/dry-run) reads only THIS workspace/project's document and
@@ -540,14 +584,27 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
 
   @doc false
   def format_action_error({:xsd_invalid, reasons}) when is_list(reasons) do
-    "ONIX failed XSD validation: " <> Enum.join(Enum.take(reasons, 3), "; ")
+    gettext("ONIX failed XSD validation: %{reasons}",
+      reasons: Enum.join(Enum.take(reasons, 3), "; ")
+    )
   end
 
-  def format_action_error(:no_doc), do: "No document loaded"
+  def format_action_error(:no_doc), do: gettext("No document loaded")
 
-  def format_action_error({:unknown_action, name}), do: "Unknown action: #{name}"
+  def format_action_error(:not_a_book),
+    do: gettext("This action works on book documents only")
 
-  def format_action_error({:handler_raised, msg}), do: "Action failed: #{msg}"
+  def format_action_error({:plugin_disabled, name}),
+    do:
+      gettext("Action %{name} belongs to a plugin that is turned off in this workspace",
+        name: name
+      )
+
+  def format_action_error({:unknown_action, name}),
+    do: gettext("Unknown action: %{name}", name: name)
+
+  def format_action_error({:handler_raised, msg}),
+    do: gettext("Action failed: %{message}", message: msg)
 
   def format_action_error(other), do: inspect(other, limit: 100)
 end

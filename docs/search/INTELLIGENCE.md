@@ -15,6 +15,7 @@ rollups: `Barkpark.Search.Crystallizer`.
 3. **Search never blocks on analytics** — the record path must remain async-safe (Phase 9 makes this strict).
 4. **Every ranking change is measurable** — golden-query harness before/after (`mix search.eval`).
 5. **Admin promotes evidence, not hunches** — synonym candidates carry CTR, transitions, confidence.
+6. **Private fields stay unsearchable** — non-admins match `public_search_vector` (restricted fields removed, migration `20261003200000`); Indx is redacted too. Repair: `mix barkpark.search.reindex_public`.
 
 ## Analytics ops contract
 

@@ -772,8 +772,14 @@ defmodule Barkpark.Tasks.Close do
       {:ok, _arm} ->
         {:ok, nil}
 
+      # A claim map outlives its lease (task-9da6b9544b747bba): when the named
+      # worker's lease is dead the refusal carries `:lapsed`, so the 409 says
+      # nobody holds the row instead of "held by" a lane that left days ago.
+      # Same gate, same `not_holder` token, same override.
       {:error, {:not_holder, held}} when is_nil(override_reason) ->
-        {:error, {:not_holder, held}}
+        if Barkpark.Tasks.QueueGate.claim_lease_live?(doc.content),
+          do: {:error, {:not_holder, held}},
+          else: {:error, {:not_holder, held, :lapsed}}
 
       {:error, {:not_holder, held}} ->
         {:ok, %{"held_by" => held, "reason" => override_reason}}

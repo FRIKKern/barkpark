@@ -5,7 +5,7 @@
       NOT a color literal — it lives OUTSIDE the GENERATED tokens marker, so the
       Part-E exemption ledger is unaffected. Omitted entirely for the default
       (evergreen) theme, so a default page is byte-identical to before. --%>
-<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
+<html lang={BarkparkWeb.StudioLocale.html_lang()} data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -221,6 +221,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 98%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(142 72% 25.5%);
+      --warn-text: hsl(35 92% 29.5%);
+      --danger-text: hsl(0 68% 42%);
+      --info-text: hsl(217.2 91.2% 45.8%);
+      --primary-text: hsl(151.96 71.81% 25.72%);
       --bg-accent: hsl(240 4.8% 92%);
       --border-muted: var(--border);
       --fg-dim: hsl(240 4% 47%);
@@ -262,10 +267,19 @@
       --accent: hsl(33 92% 60%);
       --primary-hsl: 152.92 60% 52.94%;
       --primary-soft: hsl(var(--primary-hsl) / 0.2);
+      --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+      --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+      --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+      --warn-strong: hsl(var(--warn-hsl) / 0.34);
       --ok-fg: hsl(0 0% 100%);
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(142 52% 52%);
+      --warn-text: hsl(38 94% 56%);
+      --danger-text: hsl(0 82% 70%);
+      --info-text: hsl(217.2 91.2% 67.3%);
+      --primary-text: hsl(152.92 60% 52.94%);
       --bg-accent: hsl(240 3.7% 13%);
       --border-muted: hsl(240 3.7% 11%);
       --fg-dim: hsl(240 5% 51%);
@@ -288,7 +302,23 @@
         --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
         --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
         --warn-strong: hsl(var(--warn-hsl) / 0.34);
+        --ok-text: hsl(142 52% 52%);
+        --warn-text: hsl(38 94% 56%);
+        --danger-text: hsl(0 82% 70%);
+        --info-text: hsl(217.2 91.2% 67.3%);
+        --primary-text: hsl(152.92 60% 52.94%);
       }
+    }
+    html[data-theme="light"] {
+      --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+      --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+      --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+      --warn-strong: hsl(var(--warn-hsl) / 0.28);
+      --ok-text: hsl(142 72% 25.5%);
+      --warn-text: hsl(35 92% 29.5%);
+      --danger-text: hsl(0 68% 42%);
+      --info-text: hsl(217.2 91.2% 45.8%);
+      --primary-text: hsl(151.96 71.81% 25.72%);
     }
     /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
     html[data-bp-theme="evergreen"] {
@@ -313,6 +343,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 98%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(142 72% 25.5%);
+      --warn-text: hsl(35 92% 29.5%);
+      --danger-text: hsl(0 68% 42%);
+      --info-text: hsl(217.2 91.2% 45.8%);
+      --primary-text: hsl(151.96 71.81% 25.72%);
       --bg-accent: hsl(240 4.8% 92%);
       --border-muted: var(--border);
       --fg-dim: hsl(240 4% 47%);
@@ -342,6 +377,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(142 52% 52%);
+      --warn-text: hsl(38 94% 56%);
+      --danger-text: hsl(0 82% 70%);
+      --info-text: hsl(217.2 91.2% 67.3%);
+      --primary-text: hsl(152.92 60% 52.94%);
       --bg-accent: hsl(240 3.7% 13%);
       --border-muted: hsl(240 3.7% 11%);
       --fg-dim: hsl(240 5% 51%);
@@ -371,6 +411,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(137.37 45.8% 30.22%);
+      --warn-text: hsl(40.11 100% 26.39%);
+      --danger-text: hsl(4.01 48.12% 44.04%);
+      --info-text: hsl(221.09 46.48% 45.51%);
+      --primary-text: hsl(282.39 44.23% 40.78%);
       --bg-accent: hsl(279.91 9.75% 92%);
       --border-muted: var(--border);
       --fg-dim: hsl(279.98 2.03% 44.89%);
@@ -400,6 +445,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(133.37 34.29% 57.81%);
+      --warn-text: hsl(36.55 62.65% 53.72%);
+      --danger-text: hsl(5.58 76.29% 71.07%);
+      --info-text: hsl(220.48 78.3% 72.21%);
+      --primary-text: hsl(282.56 58.11% 71.98%);
       --bg-accent: hsl(281.67 8.5% 5.9%);
       --border-muted: hsl(281.68 9.75% 5.06%);
       --fg-dim: hsl(235.39 2.93% 56%);
@@ -429,6 +479,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(136.56 41.81% 31.01%);
+      --warn-text: hsl(40.11 100% 26.39%);
+      --danger-text: hsl(4.3 45.96% 43.52%);
+      --info-text: hsl(220.99 44.07% 45.23%);
+      --primary-text: hsl(19.33 71.29% 36.98%);
       --bg-accent: hsl(16.92 16.51% 91.79%);
       --border-muted: var(--border);
       --fg-dim: hsl(16.96 3.53% 44.65%);
@@ -458,6 +513,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(133.24 33.65% 58.01%);
+      --warn-text: hsl(36.39 61.56% 53.68%);
+      --danger-text: hsl(5.64 74.73% 69.52%);
+      --info-text: hsl(220.45 76.42% 71.58%);
+      --primary-text: hsl(19.01 75.53% 63.14%);
       --bg-accent: hsl(18.16 15.24% 5.74%);
       --border-muted: hsl(18.17 17.56% 4.9%);
       --fg-dim: hsl(18.06 4.14% 50.97%);
@@ -487,6 +547,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(133.06 24.42% 34.04%);
+      --warn-text: hsl(36.2 52.84% 32.67%);
+      --danger-text: hsl(5.71 33.01% 43.02%);
+      --info-text: hsl(220.42 30.54% 43.43%);
+      --primary-text: hsl(191.6 80.95% 27.82%);
       --bg-accent: hsl(195.15 15.67% 91.41%);
       --border-muted: var(--border);
       --fg-dim: hsl(195.12 3.58% 44.2%);
@@ -516,6 +581,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(131.84 26.28% 60%);
+      --warn-text: hsl(35.21 48.85% 57.57%);
+      --danger-text: hsl(6.23 56.9% 68.81%);
+      --info-text: hsl(220.18 55.98% 70.09%);
+      --primary-text: hsl(193.27 62.43% 64.51%);
       --bg-accent: hsl(194.23 16.15% 5.49%);
       --border-muted: hsl(194.22 18.78% 4.66%);
       --fg-dim: hsl(194.33 4.06% 50.41%);
@@ -545,6 +615,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(145.96 92.95% 23.26%);
+      --warn-text: hsl(40.11 100% 25.89%);
+      --danger-text: hsl(2.06 59.77% 43.81%);
+      --info-text: hsl(221.65 59.02% 47.36%);
+      --primary-text: hsl(248.75 63.72% 55.69%);
       --bg-accent: hsl(235.49 12.31% 92.3%);
       --border-muted: var(--border);
       --fg-dim: hsl(235.64 2.43% 45.25%);
@@ -574,6 +649,11 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --ok-text: hsl(134.5 39.04% 56.2%);
+      --warn-text: hsl(38.55 77.19% 47.99%);
+      --danger-text: hsl(5.1 88.03% 69.88%);
+      --info-text: hsl(220.68 92.97% 72.65%);
+      --primary-text: hsl(248.87 100% 77.45%);
       --bg-accent: hsl(243.27 9.27% 6.12%);
       --border-muted: hsl(243.33 10.58% 5.27%);
       --fg-dim: hsl(242.78 2.72% 51.82%);
@@ -726,7 +806,7 @@
     .btn-primary { background: var(--primary); border-color: var(--primary); color: var(--primary-fg); }
     .btn-primary:hover { background: var(--primary-hover); }
     .btn-destructive { background: transparent; border-color: var(--border); color: var(--destructive); }
-    .btn-destructive:hover { background: var(--danger-soft); border-color: var(--destructive); }
+    .btn-destructive:hover { background: var(--danger-soft); border-color: var(--destructive); color: var(--danger-text); }
     .btn-ghost { border: none; background: transparent; color: var(--fg-muted); }
     .btn-ghost:hover { background: var(--bg-accent); color: var(--fg); }
     .btn-sm { height: 28px; padding: 0 10px; font-size: var(--text-xs); }
@@ -952,11 +1032,11 @@
       border-radius: 999px; font-size: var(--text-2xs); font-weight: 600;
       letter-spacing: 0.02em;
     }
-    .badge-published { background: var(--ok-soft); color: var(--success); }
-    .badge-draft { background: var(--warn-soft); color: var(--warning); }
-    .badge-public { background: var(--ok-soft); color: var(--success); }
-    .badge-private { background: var(--warn-soft); color: var(--warning); }
-    .badge-active { background: var(--primary-soft); color: var(--primary); }
+    .badge-published { background: var(--ok-soft); color: var(--ok-text); }
+    .badge-draft { background: var(--warn-soft); color: var(--warn-text); }
+    .badge-public { background: var(--ok-soft); color: var(--ok-text); }
+    .badge-private { background: var(--warn-soft); color: var(--warn-text); }
+    .badge-active { background: var(--primary-soft); color: var(--primary-text); }
     /* Neutral "off/none" badge — a dimmed pill for an inactive status. */
     .badge-muted { background: var(--bg-muted); color: var(--fg-muted); }
     /* Studio Claude chat — session lifecycle pills (studio-claude-chat w1/w2).
@@ -965,9 +1045,9 @@
        approval pill is FILLED warn (not soft) so the one row that needs the
        admin right now reads loudest (slice scc-w2-approvals). */
     .badge-chat-approval { background: var(--warn); color: var(--warn-fg); }
-    .badge-chat-working { background: var(--primary-soft); color: var(--primary); }
-    .badge-chat-idle { background: var(--ok-soft); color: var(--success); }
-    .badge-chat-offline { background: var(--warn-soft); color: var(--warning); }
+    .badge-chat-working { background: var(--primary-soft); color: var(--primary-text); }
+    .badge-chat-idle { background: var(--ok-soft); color: var(--ok-text); }
+    .badge-chat-offline { background: var(--warn-soft); color: var(--warn-text); }
     .badge::before {
       content: ''; width: 6px; height: 6px; border-radius: 50%;
       background: currentColor;
@@ -1130,10 +1210,10 @@
     }
     .mode-tab:hover { color: var(--fg); }
     .mode-tab.active { background: var(--bg-card); color: var(--fg); box-shadow: 0 1px 2px hsl(var(--bp-shadow-hsl) / 0.2); }
-    .mode-tab-plan.active { background: var(--info-soft); color: var(--info); }
-    .mode-tab-autopilot.active { background: var(--ok-soft); color: var(--ok); }
-    .mode-tab-other.active { background: var(--warn-soft); color: var(--warn); cursor: default; }
-    .mode-tab-bypass.active { background: var(--danger-soft); color: var(--danger); cursor: default; }
+    .mode-tab-plan.active { background: var(--info-soft); color: var(--info-text); }
+    .mode-tab-autopilot.active { background: var(--ok-soft); color: var(--ok-text); }
+    .mode-tab-other.active { background: var(--warn-soft); color: var(--warn-text); cursor: default; }
+    .mode-tab-bypass.active { background: var(--danger-soft); color: var(--danger-text); cursor: default; }
 
     /* ── Media grid ───────────────────────────────────────────────────── */
     .media-grid {
@@ -1163,8 +1243,8 @@
       padding: 10px 16px; margin-bottom: 16px;
       border-radius: var(--radius-sm); font-size: var(--text-sm); font-weight: 500;
     }
-    .flash-info { background: var(--info-soft); border: 1px solid var(--info-soft); color: var(--info); }
-    .flash-error { background: var(--danger-soft); border: 1px solid var(--danger-soft); color: var(--destructive); }
+    .flash-info { background: var(--info-soft); border: 1px solid var(--info-soft); color: var(--info-text); }
+    .flash-error { background: var(--danger-soft); border: 1px solid var(--danger-soft); color: var(--danger-text); }
 
     /* ── Empty state ──────────────────────────────────────────────────── */
     .empty-state {
@@ -1798,9 +1878,25 @@
       font-size: var(--text-2xs); line-height: 1.45;
     }
     .bp-pane-notice-error {
-      color: var(--destructive);
+      color: var(--danger-text);
       background: var(--danger-soft);
     }
+
+    /* A field canvas save that did not land (task-fcbf22671c0c82df): the paper
+       editor's conflict-banner classes, styled in Studio's tokens (the paper's
+       --paper-* tokens only exist inside the paper editor). */
+    .bp-field-canvas [data-field-save-state] {
+      display: block; margin: 0 0 8px; padding: 10px 12px;
+      border: 1px solid var(--border); border-inline-start: 3px solid var(--warn-text);
+      border-radius: 6px; background: var(--warn-soft); color: var(--fg);
+      font-size: var(--text-sm); overflow-wrap: anywhere;
+    }
+    .bp-field-canvas [data-field-save-state="refused"] {
+      border-inline-start-color: var(--danger-text); background: var(--danger-soft);
+    }
+    .bp-field-canvas [data-field-save-state] .bp-conflict-title { display: block; font-weight: 600; }
+    .bp-field-canvas [data-field-save-state] .bp-conflict-description { display: block; color: var(--fg-muted); }
+    .bp-field-canvas [data-field-save-state] .bp-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 
     /* A desk row is a real <button> (panes.ex pane_item/1) so it is
        Tab-reachable. ORDER IS LOAD-BEARING: the UA reset's `border: 0` must
@@ -1897,12 +1993,19 @@
       flex-shrink: 0;
     }
     .bp-desk-search-icon { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; }
+    /* The clear button is a 24px target; as a flex item beside the input it
+       shrank to 19-21px wide. */
+    .bp-desk-search .pane-add-btn { flex-shrink: 0; }
     .bp-desk-search-input {
       flex: 1 1 auto; min-width: 0;
       background: transparent; border: 0; box-shadow: none;
       padding: 2px 0; font-size: var(--text-sm); color: var(--fg);
     }
     .bp-desk-search-input:focus { outline: none; box-shadow: none; }
+    /* The input stays borderless (a pane row, not a form), so keyboard focus
+       shows on the row instead: its hairline takes the focus colour, doubled
+       by an inset line so it reads as a state, not a border (WCAG 2.4.7). */
+    .bp-desk-search:focus-within { border-bottom-color: var(--ring); box-shadow: inset 0 -1px 0 var(--ring); }
     .bp-desk-search-input::placeholder { color: var(--fg-muted); }
     /* The pane's own clear button is the one clear control; hide the native
        type="search" cancel glyph that rendered a second x beside it. */
@@ -2184,6 +2287,17 @@
        opting it out costs nothing and removes the only real casualty.
        Re-visit if Sheets ever grows a container-queried child. */
     .editor-panel.sheet-editor { container-type: normal; }
+    /* …which is why the narrow two-row header below never reached the sheet:
+       its six text actions spilled LEFT out of a flex-end row, off-screen and
+       over the title (task-5d4f085dff4dd8ea). Keyed on the width bucket instead
+       of the panel container the sheet opts out of; the wide desk is unchanged. */
+    html:not([data-width-bucket="wide"]) .editor-panel.sheet-editor > .editor-header {
+      display: grid; grid-template-columns: minmax(0, 1fr);
+      height: auto; flex-shrink: 0; gap: 8px; padding-block: 8px;
+    }
+    html:not([data-width-bucket="wide"]) .editor-panel.sheet-editor > .editor-header > div:last-child {
+      flex-wrap: wrap;
+    }
     .editor-header { justify-content: space-between; background: var(--bg); }
     /* Paper actions are direct links/buttons, not the classic overflow menu.
        Give them their own row when the pane is narrow: flex-end overflow would
@@ -2305,7 +2419,7 @@
        manifest (ok/warn/danger/info); scoped locally since --st-* only cascade
        under .bp-paper-surface. Light + dark, media-query and data-theme. */
     .bp-doc-sidebar {
-      --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-info: #2563eb;
+      --st-ok: #0f766e; --st-warn: #d97706; --st-danger: #dc2626; --st-info: #2563eb;
       display: flex; flex-direction: column;
       background: var(--bg-card);
       border-left: 1px solid var(--border-muted);
@@ -2314,7 +2428,7 @@
     @media (prefers-color-scheme: dark) {
       .bp-doc-sidebar { --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-info: #60a5fa; }
     }
-    html[data-theme="light"] .bp-doc-sidebar { --st-ok: #0d9488; --st-warn: #d97706; --st-danger: #dc2626; --st-info: #2563eb; }
+    html[data-theme="light"] .bp-doc-sidebar { --st-ok: #0f766e; --st-warn: #d97706; --st-danger: #dc2626; --st-info: #2563eb; }
     html[data-theme="dark"] .bp-doc-sidebar { --st-ok: #2dd4bf; --st-warn: #fbbf24; --st-danger: #f87171; --st-info: #60a5fa; }
     .bp-doc-sidebar.is-open { flex: 0 0 300px; min-width: 0; }
     .bp-doc-sidebar.is-collapsed { flex: 0 0 auto; }
@@ -2779,12 +2893,16 @@
     .bp-draft-diff-table td.bp-diff-col-name { width: 22%; }
     .bp-draft-diff-table th.bp-diff-col-status,
     .bp-draft-diff-table td.bp-diff-col-status,
-    .bp-draft-diff-table td.bp-diff-status { width: 56px; text-align: center; }
+    .bp-draft-diff-table td.bp-diff-status { width: 96px; text-align: center; }
+    .bp-diff-field-key {
+      display: block; font-family: var(--font-mono); font-size: var(--text-2xs);
+      color: var(--fg-dim);
+    }
     .bp-diff-row.bp-diff-unchanged { color: var(--fg-dim); }
     .bp-diff-row.bp-diff-changed   { background: hsl(var(--warn-hsl) / 0.06); }
     .bp-diff-row.bp-diff-added     { background: hsl(var(--ok-hsl) / 0.06); }
     .bp-diff-row.bp-diff-removed   { background: hsl(var(--danger-hsl) / 0.06); }
-    .bp-diff-status { font-family: var(--font-mono); }
+    .bp-diff-status { font-size: var(--text-xs); }
     .bp-diff-draft, .bp-diff-published {
       margin: 0; padding: 0;
       font-family: var(--font-mono); font-size: var(--text-2xs);
@@ -2868,7 +2986,12 @@
     .item-share-access-edit { color: var(--primary); }
     .item-share-url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-2xs); }
     .item-share-revoke { color: var(--destructive); }
-    .item-share-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
+    .item-share-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
+    /* The note shares the row on a wide dialog and takes its own above the
+       buttons on a narrow one; nowrap clipped the primary button at phone
+       width (task-27f26cb43a3c59c7). */
+    .item-share-footer > .shares-note { flex: 1 1 12rem; min-width: 0; }
+    .item-share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 
     /* Access panel (airdrop-grants slice 3) — read/revoke view of scoped grants. */
     .access-panel { width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
@@ -2889,6 +3012,11 @@
     .media-explorer-panel {
       display: flex; flex-direction: column; min-height: 0;
     }
+    /* The explorer reflows by the width it is GIVEN (it also sits in narrow
+       panes), so a container query on its host, not a viewport media query.
+       The host, not the element: <bp-asset-explorer> is itself .bp-ae-root,
+       and a container query cannot restyle its own container. */
+    .bp-ae-host { container: bp-ae / inline-size; }
     .media-explorer-panel bp-asset-explorer {
       flex: 1; display: flex; min-height: 0; width: 100%;
     }
@@ -2904,16 +3032,22 @@
       font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--fg-dim); margin-bottom: 12px;
     }
-    .bp-ae-filters { display: flex; flex-direction: column; gap: 4px; }
-    .bp-ae-filter {
+    .bp-ae-filters,
+    .bp-ae-collections { display: flex; flex-direction: column; gap: 4px; }
+    /* Collection buttons (bp-asset-explorer.js) read as the filter list does;
+       they had no rule and showed the browser's default button. */
+    .bp-ae-filter,
+    .bp-ae-collection {
       text-align: left; padding: 8px 10px; border-radius: var(--radius-sm);
       border: none; background: transparent; color: var(--fg-muted);
       font-size: var(--text-sm); cursor: pointer;
     }
-    .bp-ae-filter:hover { background: var(--bg-subtle); color: var(--fg); }
-    .bp-ae-filter.is-active {
+    .bp-ae-filter:hover,
+    .bp-ae-collection:hover { background: var(--bg-subtle); color: var(--fg); }
+    .bp-ae-filter.is-active,
+    .bp-ae-collection.is-active {
       background: var(--primary-soft);
-      color: var(--primary); font-weight: 600;
+      color: var(--primary-text); font-weight: 600;
     }
     .bp-ae-main {
       flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0;
@@ -3000,6 +3134,24 @@
       width: 300px; flex-shrink: 0; border-left: 1px solid var(--border-muted);
       padding: 16px; overflow-y: auto; display: flex; flex-direction: column;
     }
+    /* Phone width: one column — library lists on top (wrapping), then the
+       toolbar and grid at full width, then the inspector — and the explorer
+       scrolls as a whole instead of crushing the grid between two rails. */
+    @container bp-ae (width <= 640px) {
+      .bp-ae-root { flex-direction: column; overflow-y: auto; }
+      .bp-ae-sidebar {
+        width: auto; border-right: 0; border-bottom: 1px solid var(--border-muted);
+        overflow: visible;
+      }
+      .bp-ae-filters,
+      .bp-ae-collections { flex-direction: row; flex-wrap: wrap; }
+      .bp-ae-main { flex: none; min-height: 60vh; }
+      .bp-ae-search-wrap { flex-basis: 100%; min-width: 0; max-width: none; }
+      .bp-ae-inspector {
+        width: auto; border-left: 0; border-top: 1px solid var(--border-muted);
+        overflow: visible;
+      }
+    }
     .bp-ae-inspector-img {
       width: 100%; max-height: 200px; object-fit: contain; border-radius: var(--radius-sm);
       background: var(--bg-subtle); margin-bottom: 12px;
@@ -3053,7 +3205,7 @@
     .bp-ae-facet:hover { background: var(--bg-subtle); color: var(--fg); }
     .bp-ae-facet.is-active {
       background: var(--primary-soft);
-      color: var(--primary); font-weight: 600;
+      color: var(--primary-text); font-weight: 600;
     }
     .bp-ae-facet-count {
       font-size: var(--text-2xs); color: var(--fg-dim); font-variant-numeric: tabular-nums;
@@ -3253,7 +3405,7 @@
     /* History */
     .history-modal {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 520px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
+      width: min(520px, calc(100vw - 24px)); max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
     }
     .history-list { overflow-y: auto; flex: 1; }
@@ -3270,15 +3422,15 @@
       font-size: var(--text-3xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
       padding: 2px 6px; border-radius: 4px;
     }
-    .history-action-create { background: var(--primary-soft); color: var(--primary); }
+    .history-action-create { background: var(--primary-soft); color: var(--primary-text); }
     .history-action-update { background: var(--muted-surface); color: var(--fg-muted); }
-    .history-action-publish { background: var(--ok-soft); color: var(--success); }
-    .history-action-unpublish { background: var(--warn-soft); color: var(--warning); }
+    .history-action-publish { background: var(--ok-soft); color: var(--ok-text); }
+    .history-action-unpublish { background: var(--warn-soft); color: var(--warn-text); }
 
     /* Delete modal */
     .delete-modal {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 480px; background: var(--bg-card); border: 1px solid var(--border);
+      width: min(480px, calc(100vw - 24px)); background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
     }
     .delete-modal-header {
@@ -3370,11 +3522,16 @@
     /* Profile modal */
     .profile-modal {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 360px; background: var(--bg-card); border: 1px solid var(--border);
+      width: min(360px, calc(100vw - 24px)); background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
     }
     .profile-colors { display: flex; gap: 8px; flex-wrap: wrap; }
-    .profile-color-option { cursor: pointer; }
+    .profile-color-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .profile-color-fieldset > legend { padding: 0; }
+    .profile-color-option { position: relative; cursor: pointer; }
+    .profile-color-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .profile-color-input:checked + .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
+    .profile-color-input:focus-visible + .profile-color-swatch { outline: 2px solid var(--ring); outline-offset: 2px; }
     .profile-color-option.selected .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
     .profile-color-swatch {
       display: block; width: 28px; height: 28px; border-radius: 50%;
@@ -3448,6 +3605,16 @@
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
+    /* Skip link (task-50c06dba12b3e908): off-screen until focused, then a
+       visible pill over the top-left of the bar. Its target is a zero-size
+       anchor, so it takes no room in the shell's flex column. */
+    .bp-skip-link {
+      position: absolute; left: 8px; top: -100px; z-index: 1000;
+      padding: 8px 12px; border-radius: var(--radius-sm);
+      background: var(--bg-card); color: var(--fg); border: 1px solid var(--border);
+    }
+    .bp-skip-link:focus { top: 8px; }
+    .bp-skip-target { display: block; height: 0; overflow: hidden; outline: none; }
     .scope-menu {
       position: absolute; top: calc(100% + 6px); left: 0; z-index: 80;
       display: flex; align-items: stretch;
@@ -3569,6 +3736,12 @@
          `safe` keeps the first line. */
       justify-content: safe flex-end;
     }
+    /* Items keep their own width. Allowed to shrink, the doc actions squeezed
+       from 32px to 23.8px at 390px (Publish from 46px) instead of overflowing,
+       so `scrollWidth` never passed `clientWidth`, the ••• trigger never
+       appeared, and every action sat below the 24px target size. With shrink
+       off the row overflows and the priority+ collapse does its job. */
+    bp-overflow-menu > * { flex-shrink: 0; }
     bp-overflow-menu > [data-overflowed] { display: none !important; }
     .bp-overflow-trigger {
       appearance: none; background: transparent;
@@ -3805,7 +3978,7 @@
     .bp-array-btn:hover:not(:disabled) { background: var(--bg-accent); color: var(--fg); border-color: var(--border); }
     .bp-array-btn:disabled { opacity: 0.4; cursor: not-allowed; }
     .bp-array-btn-remove:hover:not(:disabled) {
-      color: var(--destructive); border-color: var(--destructive);
+      color: var(--danger-text); border-color: var(--destructive);
       background: hsl(var(--danger-hsl) / 0.1);
     }
     .bp-array-btn-add {
@@ -3813,7 +3986,10 @@
       background: transparent; border: 1px dashed var(--border);
       color: var(--primary); font-weight: 500;
     }
+    /* The hover tint puts the primary label on primary: it takes the
+       text-on-tint voice (task-f6a066642fcac678). */
     .bp-array-btn-add:hover:not(:disabled) {
+      color: var(--primary-text);
       background: hsl(var(--primary-hsl) / 0.08);
       border-color: var(--primary); border-style: solid;
     }
@@ -3821,7 +3997,7 @@
     /* LocalizedText rows */
     .bp-localized-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
     .bp-localized-warning {
-      display: inline-block; font-size: var(--text-2xs); color: var(--warning);
+      display: inline-block; font-size: var(--text-2xs); color: var(--warn-text);
       background: hsl(var(--warn-hsl) / 0.08);
       padding: 4px 8px; border-radius: var(--radius-sm); margin-bottom: 6px;
     }
@@ -4016,10 +4192,12 @@
     }
     .bp-secondary-candidate {
       display: flex; align-items: center; justify-content: space-between;
+      width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left;
       padding: 8px 10px; border-radius: 4px; cursor: pointer;
       transition: background var(--dur-1);
     }
-    .bp-secondary-candidate:hover { background: var(--bg-muted); }
+    .bp-secondary-candidate:hover,
+    .bp-secondary-candidate:focus-visible { background: var(--bg-muted); }
     .bp-secondary-candidate-id {
       font-size: var(--text-2xs); color: var(--fg-dim); font-family: var(--font-mono);
     }
@@ -4067,7 +4245,7 @@
       display: flex; align-items: center; justify-content: space-between;
       gap: 12px;
     }
-    .bp-plugin-card-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .bp-plugin-card-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; margin: 0; font: inherit; }
     .bp-plugin-card-title strong { font-size: 15px; } /* off-ladder: card title between sm (13) and lg (16), the same deliberate half-step as .bp-ae-inspector-title */
     .bp-plugin-card-version {
       font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--fg-dim);
@@ -4311,7 +4489,7 @@
        Scoped to .bp-paper-shell so the public reader keeps plain text. */
     .bp-paper-shell [data-valueref] {
       cursor: pointer;
-      border-bottom: 1px dotted var(--paper-ink-faint, #8a8278);
+      border-bottom: 1px dotted var(--paper-ink-faint-line, #8a8278);
     }
 
     /* The page — a single centered serif column on warm paper. The
@@ -4417,23 +4595,13 @@
        editor View surface only, with `!important` to beat inline. The values
        map to the paper tokens — in light mode `--paper-ink` ≈ #1f1a14 and the
        container bg goes transparent over the same cream page, so the light
-       View is visually unchanged; in dark it becomes warm ink on warm paper. */
+       View is visually unchanged; in dark it becomes warm ink on warm paper.
+       Only the container rule is left: the renderer no longer emits #111827
+       ink, #1d4ed8 links or a #f3f4f6 inline-code ground (task-d9bd9d91ba2be654),
+       but two themes still paint paper #ffffff. */
     .bp-paper-surface [data-block-id] div[style*="background:#ffffff"],
     .bp-paper-surface article div[style*="background:#ffffff"] {
       background: transparent !important;
-      color: var(--paper-ink) !important;
-    }
-    .bp-paper-surface [data-block-id] span[style*="color:#111827"],
-    .bp-paper-surface article span[style*="color:#111827"] {
-      color: var(--paper-ink) !important;
-    }
-    .bp-paper-surface [data-block-id] a[style*="color:#1d4ed8"],
-    .bp-paper-surface article a[style*="color:#1d4ed8"] {
-      color: var(--paper-accent) !important;
-    }
-    .bp-paper-surface [data-block-id] code[style*="background:#f3f4f6"],
-    .bp-paper-surface article code[style*="background:#f3f4f6"] {
-      background: var(--paper-bg-deep) !important;
       color: var(--paper-ink) !important;
     }
 
@@ -4617,6 +4785,8 @@
       display: flex; align-items: center; gap: 2px;
       padding: 4px 12px; border-top: 1px solid var(--border); overflow-x: auto;
     }
+    /* The tablist holds only the tabs; the strip lays it out as one item. */
+    .sheet-tab-list { display: flex; align-items: center; gap: 2px; flex: none; }
     /* flex:none + max-width keeps a long tab name from squishing its siblings
        or stretching the strip — it ellipsizes and the strip scrolls (20 tabs). */
     .sheet-tab {
@@ -5081,6 +5251,9 @@
         LiveView hook that consumes them, so — like bp-sheet-grid.js — they
         are NON-DEFER and load first. Bottom-of-body keeps Golden Rule #4
         (no blocking scripts in head) intact. --%>
+  <%!-- The shared modal-dialog focus manager (Hooks.ModalFocus): NON-DEFER so
+        window.BarkparkModalFocus exists when the hook map below is built. --%>
+  <script src="/assets/bp-modal-focus.js"></script>
   <script src="/assets/bp-sheet-formula.js"></script>
   <script src="/assets/bp-sheet-pointing.js"></script>
   <script src="/assets/bp-sheet-grid.js"></script>
@@ -5116,6 +5289,16 @@
         } catch (e) {}
       }
 
+      // The bar's data-strings map holds the Studio-language words, keyed by
+      // the English; %{name} slots are filled from vars.
+      function t(el, text, vars) {
+        var map = {};
+        try { map = JSON.parse(el.dataset.strings || "{}"); } catch (e) {}
+        var out = typeof map[text] === "string" ? map[text] : text;
+        if (vars) out = out.replace(/%\{(\w+)\}/g, function (slot, k) { return k in vars ? String(vars[k]) : slot; });
+        return out;
+      }
+
       function setStatus(el, msg) {
         var s = el.querySelector("[data-bp-update-status]");
         if (s) s.textContent = msg || "";
@@ -5138,17 +5321,17 @@
         var sawDrop = false;   // a connection drop = the box is restarting
         var sawActive = false; // observed OUR run go "running" at least once
 
-        if (btn) { btn.disabled = true; btn.textContent = "Updating…"; }
-        setStatus(el, "Starting update…");
+        if (btn) { btn.disabled = true; btn.textContent = t(el, "Updating…"); }
+        setStatus(el, t(el, "Starting update…"));
 
         function fail(msg) {
           setStatus(el, msg);
-          if (btn) { btn.disabled = false; btn.textContent = "Update now"; }
+          if (btn) { btn.disabled = false; btn.textContent = t(el, "Update now"); }
         }
 
         function poll() {
           if (Date.now() - startedAt > MAX_MS) {
-            return fail("Taking longer than expected — reload to check.");
+            return fail(t(el, "Taking longer than expected — reload to check."));
           }
           fetch("/v1/admin/self-update", { headers: authed, credentials: "same-origin" })
             .then(function (r) {
@@ -5162,7 +5345,7 @@
               // Server came back after a restart on a release that's no longer
               // behind → the update landed.
               if (sawDrop && check.state && check.state !== "behind") {
-                setStatus(el, "Updated to " + (check.running_release || target) + " — reloading…");
+                setStatus(el, t(el, "Updated to %{release} — reloading…", { release: check.running_release || target }));
                 return setTimeout(function () { location.reload(); }, 1200);
               }
               // A clean finish WITHOUT a restart drop (rare: e.g. a container
@@ -5171,29 +5354,29 @@
               // a first-poll "done" is stale, not us.
               if (runner === "done" && (sawActive || sawDrop)) {
                 if (data.exit_code && data.exit_code !== 0) {
-                  return fail("Update failed (exit " + data.exit_code + ") — check server logs.");
+                  return fail(t(el, "Update failed (exit %{code}) — check server logs.", { code: data.exit_code }));
                 }
-                setStatus(el, "Updated — reloading…");
+                setStatus(el, t(el, "Updated — reloading…"));
                 return setTimeout(function () { location.reload(); }, 1200);
               }
-              setStatus(el, sawActive || sawDrop ? "Rebuilding…" : "Updating…");
+              setStatus(el, t(el, sawActive || sawDrop ? "Rebuilding…" : "Updating…"));
               setTimeout(poll, POLL_MS);
             })
             .catch(function (err) {
               if (err && err.message === "unauthorized") {
-                return fail("Not authorised — sign in as an admin and retry.");
+                return fail(t(el, "Not authorised — sign in as an admin and retry."));
               }
               // Connection refused mid-rebuild is the EXPECTED restart window.
               sawDrop = true;
-              setStatus(el, "Rebuilding & restarting…");
+              setStatus(el, t(el, "Rebuilding & restarting…"));
               setTimeout(poll, POLL_MS);
             });
         }
 
         fetch("/v1/admin/self-update", { method: "POST", headers: authed, credentials: "same-origin" })
           .then(function (r) {
-            if (r.status === 401 || r.status === 403) return fail("Not authorised — sign in as an admin and retry.");
-            if (r.status === 503) return fail("One-click update isn't enabled on this instance.");
+            if (r.status === 401 || r.status === 403) return fail(t(el, "Not authorised — sign in as an admin and retry."));
+            if (r.status === 503) return fail(t(el, "One-click update isn't enabled on this instance."));
             // 202 started, or 409 already-running — either way, poll to completion.
             poll();
           })
@@ -5267,6 +5450,19 @@
         before the inline script below folds it into Hooks and connects the
         LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). --%>
   <script src="/assets/bp-paper-editor-hooks.js"></script>
+  <%!-- Array fields keep keyboard focus on the row a button acted on
+        (task-278c7992ed05a30b): a document-level listener, no phx-hook
+        (array fields stay a pure round-trip, Decision 13). Bottom of
+        <body>, never <head> (Golden Rule #4). --%>
+  <script src="/assets/bp-array-focus.js"></script>
+  <%!-- Arrow keys for the editor's group tab bar (task-9bf415c3d78b42d6), the
+        same document-level listener shape. Bottom of <body> (Golden Rule #4). --%>
+  <script src="/assets/bp-tab-keys.js"></script>
+  <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
+        nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
+        delegates to `window.BarkparkDatetimeFieldHook` and waits for
+        DOMContentLoaded, which fires only after deferred scripts have run. --%>
+  <script src="/assets/bp-datetime-field.js" defer></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -5296,12 +5492,169 @@
       else delete document.documentElement.dataset.inspectorPref;
     });
 
+    // task-92e2615cf6ec27e6: the server pushes `bp:focus-new-doc` after a "+"
+    // create. The editor for that id renders on the patch that follows, so
+    // wait for it (up to 4s), then focus its first field: a Classic input
+    // (`doc-field-<id>-<field>`) or a paper's title block. A paper canvas can
+    // re-mount its editor just after the first render and restore focus with
+    // its own default caret, so the caret is re-placed for a further second.
+    // Any key or pointer press from the user ends all of it.
+    window.bpFocusNewDoc = function (id) {
+      const prefix = "doc-field-" + id + "-";
+      const field = Array.from(document.querySelectorAll('[id^="doc-field-"]')).find(
+        (el) =>
+          el.id.startsWith(prefix) &&
+          /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) &&
+          el.type !== "hidden" &&
+          !el.disabled &&
+          !el.readOnly &&
+          !el.closest("[hidden]")
+      );
+      if (field) {
+        field.focus();
+        return true;
+      }
+      const paper =
+        document.getElementById("paper-editor-drafts." + id) ||
+        document.getElementById("paper-editor-" + id);
+      if (!paper) return false;
+      // A bare focus() keeps ProseMirror's own caret, which sits in the body
+      // block; the canvas's focusBlock puts it in the title.
+      const title = paper.querySelector('[data-bp-role="title"][data-bp-id]');
+      const canvas = title && title.closest("bp-paper-canvas");
+      if (canvas && typeof canvas.focusBlock === "function") {
+        return canvas.focusBlock(title.dataset.bpId) === true;
+      }
+      const editable = paper.querySelector('[contenteditable="true"]');
+      if (!editable) return false;
+      editable.focus();
+      return true;
+    };
+    // After a document is deleted its editor is gone; focus the row that took
+    // its place in the list, else the pane's New button (task-bad96a2a1c3da132).
+    // The first patch may still carry the deleted row, so it is skipped by id,
+    // and the attempt repeats briefly in case a later patch replaces the rows.
+    window.addEventListener("phx:bp:focus-after-delete", (e) => {
+      const d = e.detail || {};
+      const type = String(d.type || "");
+      const gone = String(d.id || "");
+      const sameDoc = (id) => id === gone || id === "drafts." + gone;
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const until = Date.now() + 1500;
+      const attempt = () => {
+        if (interrupted) return;
+        const add = Array.from(document.querySelectorAll("button.pane-add-btn"))
+          .find((b) => b.getAttribute("phx-value-type") === type);
+        const column = add && add.closest(".pane-column, .pane");
+        if (column) {
+          const rows = Array.from(column.querySelectorAll('button[phx-click="select"][phx-value-id]'))
+            .filter((b) => !sameDoc(b.getAttribute("phx-value-id")));
+          const target = rows.length ? rows[Math.min(d.index || 0, rows.length - 1)] : add;
+          const active = document.activeElement;
+          if (target && (!active || active === document.body || !active.isConnected)) target.focus();
+        }
+        if (Date.now() < until) setTimeout(attempt, 100);
+      };
+      setTimeout(attempt, 0);
+    });
+    window.addEventListener("phx:bp:focus-new-doc", (e) => {
+      const id = e.detail && e.detail.id;
+      if (!id) return;
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const waitUntil = Date.now() + 4000;
+      let settleUntil = 0;
+      const attempt = () => {
+        if (interrupted) return;
+        if (window.bpFocusNewDoc(id) && !settleUntil) settleUntil = Date.now() + 1000;
+        const until = settleUntil || waitUntil;
+        if (Date.now() < until) {
+          setTimeout(attempt, 100);
+        } else {
+          document.removeEventListener("keydown", interrupt, { capture: true });
+          document.removeEventListener("pointerdown", interrupt, { capture: true });
+        }
+      };
+      attempt();
+    });
+
+    // task-4e10550394f87112: a desk search hit is a live navigation, which
+    // remounts the desk with focus on <body>. The server pushes
+    // `bp:focus-doc-header` for it, and the opened document's header takes
+    // focus: the target a desk row open uses. The join re-renders the panes
+    // once the width bucket arrives, which moves the header and blurs it, so
+    // keep it focused for a second while focus is idle on <body>; a key or a
+    // press means the user has moved on.
+    window.addEventListener("phx:bp:focus-doc-header", () => {
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const until = Date.now() + 1000;
+      const settle = () => {
+        if (interrupted) return;
+        const header = document.querySelector(".pane-header.editor-header");
+        const idle = !document.activeElement || document.activeElement === document.body;
+        if (header && idle) header.focus();
+        if (Date.now() < until) {
+          setTimeout(settle, 50);
+        } else {
+          document.removeEventListener("keydown", interrupt, { capture: true });
+          document.removeEventListener("pointerdown", interrupt, { capture: true });
+        }
+      };
+      settle();
+    });
+
+    // task-e73be8429cfa08af: picking a dataset in the scope switcher navigates
+    // (push_navigate), and the new view left focus on <body>. A pick arms a
+    // one-shot flag; once the navigation lands, the scope trigger (now naming
+    // the new scope) takes focus. An ordinary page load never sees the flag.
+    const BP_SCOPE_FOCUS_KEY = "bp:focus-scope-after-switch";
+    document.addEventListener("click", (e) => {
+      if (!(e.target instanceof Element)) return;
+      if (!e.target.closest('#scope-menu [phx-click="scope-open"]')) return;
+      try { sessionStorage.setItem(BP_SCOPE_FOCUS_KEY, "1"); } catch (_) {}
+    }, true);
+    window.bpFocusScopeAfterSwitch = function () {
+      let armed = false;
+      try {
+        armed = sessionStorage.getItem(BP_SCOPE_FOCUS_KEY) === "1";
+        sessionStorage.removeItem(BP_SCOPE_FOCUS_KEY);
+      } catch (_) {}
+      if (!armed) return false;
+      // The navigation stops twice ("redirect", then the new view's "initial"
+      // join) and the header is re-rendered between them, so a trigger focused
+      // on the first is thrown away. Keep the CURRENT trigger focused for a
+      // second, but only while focus sits on <body>: a user who has moved on
+      // is never pulled back.
+      const until = Date.now() + 1000;
+      const settle = () => {
+        const trigger = document.querySelector(".scope-title");
+        const idle = !document.activeElement || document.activeElement === document.body;
+        if (trigger && idle) trigger.focus();
+        if (Date.now() < until) setTimeout(settle, 50);
+      };
+      settle();
+      return true;
+    };
+    window.addEventListener("phx:page-loading-stop", () => window.bpFocusScopeAfterSwitch());
+
     let Hooks = {};
 
     // SheetGrid — the Studio sheet grid editor's thin client half
     // (keyboard map, clipboard TSV, resize drag, scroll keep). Defined in
     // /assets/bp-sheet-grid.js (loaded non-defer just above).
     Hooks.SheetGrid = window.BarkparkSheetGrid;
+    // SheetTabRename — focus into and back out of the inline tab rename.
+    Hooks.SheetTabRename = window.BarkparkSheetTabRename;
+    // SheetToolbar — the formatting bar as one Tab stop with arrow keys.
+    Hooks.SheetToolbar = window.BarkparkSheetToolbar;
 
     // GraphPane — the Studio blast-radius graph client half (self-contained
     // Canvas2D + hand-rolled force sim, no Cytoscape). Defined in
@@ -5335,6 +5688,38 @@
     // Escape — which it stops before the global interrupt listener sees it.
     if (window.BarkparkChatKeys) Hooks.ChatKeys = window.BarkparkChatKeys;
     if (window.BarkparkChatPalette) Hooks.ChatPalette = window.BarkparkChatPalette;
+
+    // LocalTime — a server time in the viewer's own clock (task-7a12da688a06f880).
+    // The server renders <time datetime=ISO> whose text says UTC, so a page
+    // without this hook is never silently wrong. Here each time[data-local-time]
+    // is rewritten with Intl.DateTimeFormat in the page language and the
+    // browser's zone, and each [data-local-label] gets its aria-label from its
+    // template with {time} filled the same way.
+    Hooks.LocalTime = {
+      mounted() { this.localize(); },
+      updated() { this.localize(); },
+      localize() {
+        var fmt;
+        try {
+          fmt = new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
+            day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit", second: "2-digit"
+          });
+        } catch (_e) { return; }
+        var local = function (iso) {
+          var d = new Date(iso);
+          return isNaN(d.getTime()) ? null : fmt.format(d);
+        };
+        this.el.querySelectorAll("time[datetime][data-local-time]").forEach(function (t) {
+          var text = local(t.getAttribute("datetime"));
+          if (text) t.textContent = text;
+        });
+        this.el.querySelectorAll("[data-local-label][data-datetime]").forEach(function (el) {
+          var text = local(el.getAttribute("data-datetime"));
+          if (text) el.setAttribute("aria-label", el.getAttribute("data-local-label").replace("{time}", text));
+        });
+      }
+    };
 
     Hooks.PresenceIdentity = {
       mounted() {
@@ -5388,6 +5773,13 @@
     // Pushes on mount and on bucket TRANSITIONS ONLY: resize fires continuously
     // and the CSS already tracks it, so a per-resize pushEvent would be pure
     // jank. The listener is rAF-throttled and removed in destroyed().
+    // task-0ad7fed4370a5978: every Studio role=dialog (modals.ex) is
+    // aria-modal, yet none took focus: Tab walked the page behind it. On
+    // mount, focus [data-modal-focus] / [autofocus] or the first control;
+    // keep Tab and Shift+Tab inside; on close, give focus back to the trigger.
+    // The hook lives in /assets/bp-modal-focus.js, shared with the paper layout.
+    Hooks.ModalFocus = window.BarkparkModalFocus;
+
     Hooks.WidthBucket = {
       _compute() {
         var fn = window.bpWidthBucket || window.__bpWidthBucket;
@@ -5413,6 +5805,27 @@
         this._sync();
         window.addEventListener("resize", this._onResize);
       },
+      // KEEP THE KEYBOARD USER'S PLACE (task-6d3bd0c5d673c16f). Opening a
+      // document collapses the root pane into its strip, a <div> becoming a
+      // <button> under the same id (frozen markup, charter D55). morphdom
+      // cannot morph across tags, so it re-inserts the next pane column, and
+      // a moved node loses focus: Enter on a desk row left focus on <body>.
+      // Record the focused element before a patch and give it back after,
+      // only when it is still in the page and focus fell to <body>, so the
+      // deliberate phx-mounted focus targets (the document header at
+      // narrow/phone, a pane after expand-pane) are never overridden.
+      beforeUpdate() {
+        var a = document.activeElement;
+        this._focused = a && a !== document.body && this.el.contains(a) ? a : null;
+      },
+      updated() {
+        var f = this._focused;
+        this._focused = null;
+        var active = document.activeElement;
+        if (f && f.isConnected && (!active || active === document.body)) {
+          f.focus({ preventScroll: true });
+        }
+      },
       destroyed() {
         window.removeEventListener("resize", this._onResize);
         if (this._raf) window.cancelAnimationFrame(this._raf);
@@ -5424,6 +5837,16 @@
     // host this, is on `#studio-panes` and StudioLive's desk is the only route
     // that has one.
     Hooks.PressAnswer = {
+      // The answer's words in the Studio's language (task-24a481a493ad60d7): the
+      // bar carries them as data-press-strings, keyed by the English, with
+      // %{name} filled from vars. A bar without the map speaks English.
+      _paT(text, vars) {
+        let map = {};
+        try { map = JSON.parse((this.el && this.el.dataset.pressStrings) || "{}"); } catch (_e) {}
+        let out = typeof map[text] === "string" ? map[text] : text;
+        if (vars) out = out.replace(/%\{(\w+)\}/g, (slot, k) => (k in vars ? String(vars[k]) : slot));
+        return out;
+      },
       // ── THE PRESS ANSWER (spd-w19 / charter D263) ────────────────────────
       //
       // WHY IT IS ITS OWN HOOK, AND WHY THAT IS A CORRECTION. The only press
@@ -5567,9 +5990,12 @@
 
       // The accessible name of the pressed control, or null. NOTHING is
       // invented: an unnamed control gets "Working…", never a guess at what it
-      // does.
+      // does. A control may name ITSELF for the answer with `data-press-name`:
+      // a desk row's aria-label is "<title>, <status>, Updated <ago>", which
+      // made the answer "Opened “<title>, published, Updated 3m …”."
+      // (task-7271a3724e34f2ee); the row hands over its title instead.
       _paName(el) {
-        var n = el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || "";
+        var n = el.getAttribute("data-press-name") || el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || "";
         n = n.replace(/\s+/g, " ").trim();
         if (!n) return null;
         return n.length > 60 ? n.slice(0, 59) + "…" : n;
@@ -5705,9 +6131,9 @@
           return (n.textContent || "").replace(/\s+/g, " ").trim();
         }).join(" | ");
         if (flash && flash !== (p.flash || "")) return flash.length > 80 ? flash.slice(0, 79) + "…" : flash;
-        if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
-        if (this._paCurrentSig(p.root) !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
-        if (this._paPressedChanged(p.pressed, p.root)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (location.href !== p.url) return p.name ? this._paT("Opened “%{name}”.", { name: p.name }) : this._paT("Opened.");
+        if (this._paCurrentSig(p.root) !== p.sig) return p.name ? this._paT("Selected “%{name}”.", { name: p.name }) : this._paT("Selected.");
+        if (this._paPressedChanged(p.pressed, p.root)) return p.name ? this._paT("Selected “%{name}”.", { name: p.name }) : this._paT("Selected.");
         return null;
       },
 
@@ -5830,7 +6256,7 @@
         if (to.href === location.href) { this._paRelease(""); return; }
         // Present tense on purpose: the navigation is IN FLIGHT. "Opened" is
         // reserved for a URL that has already moved.
-        this._paRelease(name ? "Opening “" + name + "”…" : "Opening…");
+        this._paRelease(name ? this._paT("Opening “%{name}”…", { name }) : this._paT("Opening…"));
       },
 
       _paOnPress(ev) {
@@ -5856,7 +6282,7 @@
           // "type":"click" frames on the socket). Say so, and do NOT stamp a
           // second pending or restart the ceiling — the FIRST press is still
           // the one in flight, and its settle owns the region.
-          this._paSay("Still working on your last press — that one was not sent.");
+          this._paSay(this._paT("Still working on your last press — that one was not sent."));
           return;
         }
 
@@ -5899,7 +6325,7 @@
         // Within this same task, so the words are on screen at the next paint —
         // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
         // faster (the root-cause slice is filed separately).
-        this._paSay(p.name ? "Working on “" + p.name + "”…" : "Working…");
+        this._paSay(p.name ? this._paT("Working on “%{name}”…", { name: p.name }) : this._paT("Working…"));
 
         this._paProbe = window.setTimeout(() => {
           this._paProbe = 0;
@@ -5935,7 +6361,7 @@
                 p.sawRef = true;
                 return;
               }
-              this._paRelease("That press did not reach the server — press it again.");
+              this._paRelease(this._paT("That press did not reach the server — press it again."));
             }, this._PA_WITNESS_GRACE);
             return;
           }
@@ -5946,7 +6372,7 @@
             this._paRelease("");
             return;
           }
-          this._paRelease("That press did not reach the server — press it again.");
+          this._paRelease(this._paT("That press did not reach the server — press it again."));
         }, this._PA_PROBE);
 
         this._paPoll = window.setInterval(() => this._paTick(p), this._PA_POLL);
@@ -5958,7 +6384,7 @@
           // purpose: it fires on a slow-but-alive server too, and this hook
           // cannot tell that from a press that never arrived.
           this._paRelease(
-            "No answer from the server after 8 seconds. It may be slow, or the press may not have arrived."
+            this._paT("No answer from the server after 8 seconds. It may be slow, or the press may not have arrived.")
           );
         }, this._PA_CEILING);
       },
@@ -6270,6 +6696,9 @@
         const active = this.active;
         this.el.querySelectorAll(":scope > .bp-obj-tabs > .bp-obj-tab").forEach((t) => {
           t.setAttribute("aria-selected", String(t.dataset.group === active));
+          // Roving tabindex: only the active group is a Tab stop; bp-tab-keys.js
+          // moves between them on the arrow keys.
+          t.tabIndex = t.dataset.group === active ? 0 : -1;
         });
         this.el.querySelectorAll(":scope > .bp-subfield").forEach((f) => {
           const g = f.dataset.group;
@@ -6277,6 +6706,30 @@
         });
       },
     };
+
+    // BarkparkDatetimeField — a datetime field shows local wall time and
+    // saves a UTC instant ("...Z"). The logic lives in the deferred
+    // /assets/bp-datetime-field.js; this entry delegates to it, waiting for
+    // DOMContentLoaded (after every deferred script) if it is not there yet.
+    Hooks.BarkparkDatetimeField = (() => {
+      const call = (name, self) => {
+        const run = () => {
+          const impl = window.BarkparkDatetimeFieldHook;
+          if (!impl || !impl[name]) return;
+          // The implementation's private helpers (`_sync`, `_hidden`, …)
+          // ride on `this`, as they would for a directly registered hook.
+          for (const k of Object.keys(impl)) if (k.startsWith("_")) self[k] = impl[k];
+          impl[name].call(self);
+        };
+        if (window.BarkparkDatetimeFieldHook || document.readyState !== "loading") run();
+        else document.addEventListener("DOMContentLoaded", run, { once: true });
+      };
+      return {
+        mounted() { call("mounted", this); },
+        updated() { call("updated", this); },
+        destroyed() { call("destroyed", this); }
+      };
+    })();
 
     // BarkparkColorField — keeps an OPTIONAL color field from autosaving a
     // phantom hex. Mounted on the wrapper holding a hidden <input> (the only
@@ -6336,6 +6789,9 @@
           if (ds != null) el.setAttribute("data-dataset", ds);
           if (tok != null) el.setAttribute("data-token", tok);
           if (vocab != null) el.setAttribute("data-vocabulary", vocab);
+          // The canvas holds each batch until the server answers it (below), so
+          // a refused or conflicting save is never silently counted as saved.
+          el.acknowledgedSaves = true;
           const raw = this.el.dataset.canvasBlocks;
           if (!raw) return;
           try {
@@ -6349,15 +6805,98 @@
           seed(this.el.querySelector("bp-paper-canvas"));
         });
 
+        // task-fcbf22671c0c82df: FieldBlocks.field_block_ops applies ops only at a
+        // known revision (if_rev) and answers each request by id. This hook sent
+        // neither, so every batch from a browser-session canvas was refused while
+        // the canvas counted it saved. Each batch now carries the revision the
+        // field last saw and a request id, and its answer settles the batch:
+        //   saved     → the canvas advances; the reply's rev is the next if_rev
+        //   conflict  → someone else saved first. The batch stays held, unsaved,
+        //               and a banner says so; the field keeps its OLD revision, so
+        //               no later edit can land over the other save by accident.
+        //               Only "Keep mine" sends it again, at the current revision;
+        //               "Use latest" reloads to show the other save.
+        //   refused   → the batch is dropped so later edits still flow (they carry
+        //               the change again), and "Not saved" stays up until a save lands
+        this._rev = this.el.dataset.documentRev || null;
+        this._requests = 0;
+        let words = {};
+        try { words = JSON.parse(this.el.dataset.saveStrings || "{}"); } catch (_e) {}
+        const w = (text) => words[text] || text;
+        const banner = (kind, actions) => {
+          this._banner?.remove();
+          const el = document.createElement("div");
+          el.dataset.fieldSaveState = kind;
+          el.setAttribute("role", "alert");
+          const title = document.createElement("strong");
+          title.className = "bp-conflict-title";
+          title.textContent = w(kind === "conflict" ? "Save paused" : "Not saved");
+          const desc = document.createElement("span");
+          desc.className = "bp-conflict-description";
+          desc.textContent = w(kind === "conflict"
+            ? "This document changed elsewhere. Your edits are still here."
+            : "This edit was not saved. Your text is still here.");
+          el.append(title, desc);
+          if (actions.length) {
+            const row = document.createElement("div");
+            row.className = "bp-conflict-actions";
+            for (const [action, label, run] of actions) {
+              const button = document.createElement("button");
+              button.type = "button";
+              button.className = action === "keep" ? "btn btn-sm btn-primary" : "btn btn-sm";
+              button.dataset.action = action;
+              button.textContent = w(label);
+              button.addEventListener("click", run);
+              row.append(button);
+            }
+            el.append(row);
+          }
+          this.el.prepend(el);
+          this._banner = el;
+        };
+        const clearBanner = () => {
+          this._banner?.remove();
+          this._banner = null;
+        };
+        const send = (ops, seq) => {
+          const requestId = `field-${field}-${Date.now().toString(36)}-${++this._requests}`;
+          const wc = this.el.querySelector("bp-paper-canvas");
+          this.pushEvent("field-block-ops", { field, ops, if_rev: this._rev, request_id: requestId }, (reply) => {
+            if (!reply || reply.request_id !== requestId) return;
+            if (reply.saved === true) {
+              if (reply.rev) this._rev = reply.rev;
+              clearBanner();
+              if (seq != null) wc?.acknowledgeOps?.(seq, true);
+              return;
+            }
+            if (reply.conflict === true) {
+              const current = reply.current_rev;
+              banner("conflict", [
+                ["keep", "Keep mine", () => {
+                  if (current) this._rev = current;
+                  clearBanner();
+                  send(ops, seq);
+                }],
+                ["latest", "Use latest", () => window.location.reload()],
+              ]);
+              return;
+            }
+            banner("refused", []);
+            // The validation reason (path + message, never a stored value) lets
+            // the canvas show it on the field an inline object dialog saved.
+            if (seq != null) wc?.discardInflightOps?.(seq, reply.reason ? { reason: reply.reason } : undefined);
+          });
+        };
         this._onCanvasOps = (e) => {
           const ops = e.detail && e.detail.ops;
           if (!Array.isArray(ops) || ops.length === 0) return;
-          this.pushEvent("field-block-ops", { field, ops });
+          send(ops, e.detail.seq);
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
 
         this._onUpdate = (payload) => {
           if (!payload || payload.field !== field || payload.doc_key !== docKey) return;
+          if (payload.rev) this._rev = payload.rev;
           const wc = this.el.querySelector("bp-paper-canvas");
           if (!wc || typeof wc.applyServerBlocks !== "function") return;
           wc.applyServerBlocks(payload.blocks || []);
@@ -6608,7 +7147,11 @@
       ev.stopImmediatePropagation();
       var region = document.getElementById("bp-press-answer");
       if (!region || !blocked.closest("#studio-panes, .studio-bar")) return;
-      var say = "Still working on your last press — that one was not sent.";
+      // The Studio bar carries the press answer's words in the Studio language
+      // (task-24a481a493ad60d7); English when it has none.
+      var words = {};
+      try { words = JSON.parse(((document.getElementById("studio-bar") || {}).dataset || {}).pressStrings || "{}"); } catch (_e) {}
+      var say = words["Still working on your last press — that one was not sent."] || "Still working on your last press — that one was not sent.";
       if (region.textContent !== say) region.textContent = say;
     }, true);
     // BP-INFLIGHT-GUARD-END

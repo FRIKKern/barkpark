@@ -505,3 +505,31 @@ is not a property of the workflow, and the sentence above should be read as
 describing #18922's shape, not the general one. Folding them remains the same
 class of work as folding the required four, and is filed separately — this
 amendment changes no trigger and moves no workflow.
+
+## RE-MEASURED 2026-10-07: `security.yml` (task-7d13174d1e8ef0a9)
+
+The table row above reads 42.5 s from a 2026-09 sample of mostly non-api heads.
+Re-measured on the 15 most recently merged PR heads (#21938..#21987), as the sum
+of non-skipped step seconds over every job of the head's latest `security.yml`
+`pull_request` run:
+
+| heads | median | range | of which the guard + reconcile |
+|---|---|---|---|
+| 14 that touch `api/**` | **320 s** | 247 to 458 s | median 168.5 s (121 to 265 s) |
+| 1 that does not (#21985) | 35 s | | 0 s |
+
+**Verdict re-applied under the 60 s rule: `move-to-push`.** It cannot block a
+merge (`Security gate` is held out of the required set), it is over 60 s, and its
+dispatcher's `api` set fires on 14 of 15 heads, so it is not narrowing. The move
+stays blocked by the mechanism in "NOT MOVED" above: `required-checks.test.sh`
+uses this workflow as its live fixture.
+
+**What changed instead.** The fresh-finding guard (step `s5`) and the baseline
+reconcile (`s3`) re-prove the gate's own configuration. They now run only when
+the dispatcher's new `sobelow_gate` set fires: the skip baseline, a
+`.sobelow-conf`, `api/mix.exs`, `api/mix.lock`, the probe path, the three Sobelow
+scripts, this workflow and `breaker-capture.sh`, plus every non-PR event. The
+reconcile also runs whenever the Sobelow step fails, since that is when a
+reviewer needs it. A skip prints a `::notice::` naming the inputs. On these 15
+heads that leaves a median of 156 s per api head (after removing 121 to 265 s each): still
+over 60 s, so the verdict above does not change.

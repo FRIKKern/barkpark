@@ -267,7 +267,7 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
     "paragraph", "heading", "list", "checklist", "callout", "blockquote", "note", "code", "divider", "diagram",
     "action", "figure", "columns", "section", "terminal", "table", "stage", "card",
     "field-string", "field-slug", "field-text", "field-boolean",
-    "field-select", "field-datetime", "field-color",
+    "field-select", "field-datetime", "field-color", "field-number",
   ]) {
     assert.ok(CANVAS_SLASH_TYPES.has(t), `${t} must be insertable`);
   }
@@ -286,21 +286,25 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   ]) {
     assert.ok(!CANVAS_SLASH_TYPES.has(t), `${t} must NOT be insertable`);
   }
-  assert.equal(CANVAS_SLASH_TYPES.size, 34, "exactly 34 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs, + equation, + footnotes, + contents, + video, + sheet)");
+  assert.equal(CANVAS_SLASH_TYPES.size, 35, "exactly 35 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs, + equation, + footnotes, + contents, + video, + sheet, + number)");
   // A sheet inserts as an empty reference; its atom mounts the reference picker.
   assert.deepEqual(canvasDefaultBlock("sheet"), { id: null, type: "sheet", ref: "" });
   // Of the 34, Terminal and Stage are built by the SERVER (owner ruling 2026-10-03 #56,
   // task-f3c8acd1e09a0eda): the canvas fence refuses a canvas batch that introduces
-  // one, so a pick routes to `paper-slash-insert` like "+ Add block". The other 32 are
-  // inserted as canvas nodes. Both groups stay in the menu and the palette.
-  assert.deepEqual([...CANVAS_SERVER_INSERT_TYPES].sort(), ["stage", "terminal"]);
+  // one, so a pick routes to `paper-slash-insert` like "+ Add block". Image and equation
+  // joined them (task-f92354b415b486f5): they are boundary blocks too, and a canvas
+  // node of either re-rendered as a boundary editor, dropping what was typed. The
+  // other 31 are inserted as canvas nodes. Both groups stay in the menu and the palette.
+  // The server builds them only for a host that marks `data-server-insert`; any other
+  // host gets the canvas node (task-d170de40027ea448).
+  assert.deepEqual([...CANVAS_SERVER_INSERT_TYPES].sort(), ["equation", "image", "stage", "terminal"]);
   for (const t of CANVAS_SERVER_INSERT_TYPES) {
     assert.ok(CANVAS_SLASH_TYPES.has(t), `${t} is still offered`);
   }
   assert.equal(
     [...CANVAS_SLASH_TYPES].filter((t) => !CANVAS_SERVER_INSERT_TYPES.has(t)).length,
-    32,
-    "32 types insert as canvas nodes; 2 are inserted by the server",
+    31,
+    "31 types insert as canvas nodes; 4 are inserted by the server",
   );
 });
 
@@ -447,7 +451,7 @@ check("P5 palette: one Insert command per CANVAS_SLASH_TYPES entry", () => {
   );
 });
 
-check("P5 palette: Insert Terminal / Insert Stage route to the server insert", () => {
+check("P5 palette: Insert Terminal / Stage / Image / Equation route to the server insert", () => {
   const picked = [];
   const registry = buildCommandRegistry(undefined, { onServerInsert: (type) => picked.push(type) });
   for (const type of CANVAS_SERVER_INSERT_TYPES) {
@@ -455,10 +459,11 @@ check("P5 palette: Insert Terminal / Insert Stage route to the server insert", (
     assert.ok(cmd, `Insert command for ${type} present`);
     cmd.run(null);
   }
-  assert.deepEqual(picked.sort(), ["stage", "terminal"], "both hand the type to the host");
+  const serverTypes = ["equation", "image", "stage", "terminal"];
+  assert.deepEqual(picked.sort(), serverTypes, "each hands the type to the host");
   const heading = registry.find((c) => c.id === "insert-heading");
   heading.run(null);
-  assert.deepEqual(picked.sort(), ["stage", "terminal"], "a canvas-node type does not");
+  assert.deepEqual(picked.sort(), serverTypes, "a canvas-node type does not");
 });
 
 check("P5 palette: Format + Turn-into commands present (canvas StarterKit set)", () => {
@@ -485,7 +490,7 @@ check("P5 palette: Insert command default block == slash-menu default block (par
     "paragraph", "heading", "list", "callout", "code", "divider", "diagram",
     "action", "figure", "columns", "terminal", "table", "card",
     "field-string", "field-slug", "field-text", "field-boolean",
-    "field-select", "field-datetime", "field-color",
+    "field-select", "field-datetime", "field-color", "field-number",
   ]) {
     // The slash-menu path: slashTypeToNode(type) → runToOps reconstructs the block.
     const slashBlock = reconstructDefault(type);

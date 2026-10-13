@@ -117,7 +117,11 @@ export async function verifyWebhookSignature(opts: VerifyWebhookOptions): Promis
  * The mutation that fired a webhook — the server's present-tense verbs
  * (`@valid_events`), matching {@link ListenEvent.mutation}. The `(string & {})`
  * arm keeps autocomplete on the known kinds while staying forward-compatible
- * with any verb a newer server adds.
+ * with any verb a newer server adds. No `'patch'` arm: a patch mutation is
+ * dispatched with the generic storage-shaped action it actually took
+ * ("update"/"create"), never a verb naming the API-level mutation —
+ * `@valid_events` on the server refuses a subscription to `patch` for the
+ * same reason (task-2195336df2daf576).
  */
 export type WebhookEventKind =
   | 'create'
@@ -126,7 +130,6 @@ export type WebhookEventKind =
   | 'publish'
   | 'unpublish'
   | 'discardDraft'
-  | 'patch'
   | (string & {})
 
 /**

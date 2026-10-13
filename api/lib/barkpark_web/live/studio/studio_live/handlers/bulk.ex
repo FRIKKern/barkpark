@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Bulk do
   Bulk publish/unpublish + list-pane multi-select. Behaviour-preserving
   extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView, only: [put_flash: 3]
 
@@ -20,7 +22,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Bulk do
         {:noreply, assign(socket, selected_doc_ids: MapSet.delete(current, id))}
 
       MapSet.size(current) >= @max_selected ->
-        {:noreply, put_flash(socket, :error, "Selection limit reached (#{@max_selected})")}
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext("Selection limit reached (%{max_selected})", max_selected: @max_selected)
+         )}
 
       true ->
         {:noreply, assign(socket, selected_doc_ids: MapSet.put(current, id))}

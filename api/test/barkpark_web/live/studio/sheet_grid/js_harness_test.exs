@@ -142,7 +142,7 @@ defmodule BarkparkWeb.Live.Studio.SheetGrid.JsHarnessTest do
       file: "__hook.test.mjs",
       verdict: ~r/all bp-sheet-grid hook checks PASS \x{2014} (\d+) checks/u,
       floor: 160,
-      measured: 175,
+      measured: 202,
       subject:
         "the sheet-grid client hook — keyboard routing, clipboard TSV, fill, " <>
           "drag-to-select, and the read-mode `_push` seam that is the whole " <>

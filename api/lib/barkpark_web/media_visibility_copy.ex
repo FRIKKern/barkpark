@@ -26,20 +26,31 @@ defmodule BarkparkWeb.MediaVisibilityCopy do
   THE REMEDY IS THE SHARE, NEVER THE LABEL. Nothing here offers to flip
   `bp_visibility`; `remedy/0` names the one verb and the one Studio action that
   create the `:media` `:read` share (`Barkpark.Sharing.publish_media/1`).
+
+  ## Language
+
+  The copy stays English here, and the API returns it as written. The strings
+  Studio shows are marked for extraction (`gettext_noop/1`), and Studio
+  translates them at render with `translate/1`: the same sentence, in the
+  viewer's language.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Sharing
 
-  @public_label "Public — within this scope's sharing"
+  @public_label gettext_noop("Public — within this scope's sharing")
 
-  @public_copy "Public means readable within this scope's sharing, not world-readable. " <>
-                 "Anonymous readers (a website's bare <img>) reach this asset only while " <>
-                 "the scope carries a :media share; marking an asset public opens no door " <>
-                 "on its own."
+  @public_copy gettext_noop(
+                 "Public means readable within this scope's sharing, not world-readable. Anonymous readers (a website's bare <img>) reach this asset only while the scope carries a :media share; marking an asset public opens no door on its own."
+               )
 
-  @shared_state "shared — this scope carries a :media share, so anonymous reads of its public assets resolve"
+  @shared_state gettext_noop(
+                  "shared — this scope carries a :media share, so anonymous reads of its public assets resolve"
+                )
 
-  @unshared_state "not shared — this scope carries NO :media share, so anonymous reads get 403 even for a public asset"
+  @unshared_state gettext_noop(
+                    "not shared — this scope carries NO :media share, so anonymous reads get 403 even for a public asset"
+                  )
 
   @remedy "Publish this scope's media (Studio media library) / `bp share publish-media <scope>` — it creates the :media :read share. Never flip an asset's visibility to fix this."
 
@@ -50,6 +61,13 @@ defmodule BarkparkWeb.MediaVisibilityCopy do
   @doc "What `public` actually promises — the copy the label carries with it."
   @spec public_copy() :: String.t()
   def public_copy, do: @public_copy
+
+  @doc """
+  A copy string in the viewer's Studio language. Studio calls this at render;
+  the API never does, so `bp media get` keeps the English.
+  """
+  @spec translate(String.t()) :: String.t()
+  def translate(text) when is_binary(text), do: Gettext.gettext(BarkparkWeb.Gettext, text)
 
   @doc "The one remedy. Names the share, never the visibility field."
   @spec remedy() :: String.t()

@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
   Item (per-document) share popover (P7) + jump-to-user. Same admin gate as the
   section panel, re-checked per handler. Behaviour-preserving extraction.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -41,7 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
          item_share_links: Shared.load_item_links(socket, item, %{})
        )}
     else
-      {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
+      {:noreply, put_flash(socket, :error, gettext("Admin access required to share items."))}
     end
   end
 
@@ -54,7 +56,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
     cond do
       not Caps.admin?(socket) ->
-        {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
+        {:noreply, put_flash(socket, :error, gettext("Admin access required to share items."))}
 
       is_nil(item) or is_nil(socket.assigns[:current_workspace]) ->
         {:noreply, assign(socket, item_share_error: "No item / workspace in context.")}
@@ -141,7 +143,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ItemShare do
 
       {:noreply, if(receipt, do: put_flash(socket, :info, receipt), else: socket)}
     else
-      {:noreply, put_flash(socket, :error, "Admin access required to share items.")}
+      {:noreply, put_flash(socket, :error, gettext("Admin access required to share items."))}
     end
   end
 

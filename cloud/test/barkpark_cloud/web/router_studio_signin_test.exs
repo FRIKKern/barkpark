@@ -103,6 +103,21 @@ defmodule BarkparkCloud.Web.RouterStudioSigninTest do
   defp ticket(t), do: {:ok, %{status: 201, body: ~s({"ticket":"#{t}","expires_in":60})}}
 
   describe "POST /v1/auth/studio-signin — the happy door" do
+    test "a plain team MEMBER's ticket asks the instance for a member seat, never owner (ruling #26)" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      host = URI.parse(bp.url).host
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+      {:ok, token} = Accounts.create_user_session_token(member)
+
+      StudioLinkFakeHttpClient.program([ticket("bplt_signin-member")])
+
+      assert signin(host, token).status == 200
+      assert [req] = StudioLinkFakeHttpClient.requests()
+      assert Jason.decode!(req.body) == %{"email" => member.email, "role" => "member"}
+    end
+
     test "a member signing in by the instance's provisioning host lands on a ticket URL" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -120,7 +135,8 @@ defmodule BarkparkCloud.Web.RouterStudioSigninTest do
       # is the JIT provisioning, and it is the only identity that travels.
       assert [req] = StudioLinkFakeHttpClient.requests()
       assert req.url == bp.url <> "/v1/auth/login-tickets"
-      assert Jason.decode!(req.body) == %{"email" => user.email}
+      # Owner ruling #26: the ticket carries the TEAM role it seats.
+      assert Jason.decode!(req.body) == %{"email" => user.email, "role" => "owner"}
 
       assert {"Authorization", "Bearer " <> @instance_admin_token} =
                List.keyfind(req.headers, "Authorization", 0)

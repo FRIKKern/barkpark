@@ -116,7 +116,7 @@ defmodule BarkparkWeb.StudioLiveSecondaryPaneDomTest do
     end
 
     test "every candidate row is inside the card and fires select-secondary with its id" do
-      rows = picker_html() |> query(~s(.modal-card li[phx-click="select-secondary"]))
+      rows = picker_html() |> query(~s(.modal-card button[phx-click="select-secondary"]))
 
       assert Enum.count(rows) == length(@candidates)
       assert LazyHTML.attribute(rows, "phx-value-id") == Enum.map(@candidates, & &1.id)
@@ -130,6 +130,28 @@ defmodule BarkparkWeb.StudioLiveSecondaryPaneDomTest do
 
       assert html =~ "bp-secondary-empty"
       refute html =~ ~s(phx-click="select-secondary")
+    end
+  end
+
+  describe "the picker works from the keyboard" do
+    # `autofocus` does not fire on markup LiveView patches in, and a `<li>`
+    # with phx-click is not focusable: Enter on the opener left focus outside
+    # the dialog, and no row could be reached or chosen without a mouse.
+    test "the card carries the ModalFocus hook under a stable id" do
+      card = picker_html() |> query(".modal-card")
+
+      assert LazyHTML.attribute(card, "phx-hook") == ["ModalFocus"],
+             "without the hook focus stays on the opener, outside the dialog"
+
+      assert LazyHTML.attribute(card, "id") == ["secondary-picker-dialog"]
+    end
+
+    test "every candidate is a button, so Tab reaches it and Enter chooses it" do
+      rows = picker_html() |> query(~s([phx-click="select-secondary"]))
+
+      assert Enum.count(rows) == length(@candidates)
+      assert Enum.map(rows, &LazyHTML.tag/1) |> List.flatten() |> Enum.uniq() == ["button"]
+      assert LazyHTML.attribute(rows, "type") == List.duplicate("button", length(@candidates))
     end
   end
 

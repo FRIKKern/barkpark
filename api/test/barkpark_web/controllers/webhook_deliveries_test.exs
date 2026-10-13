@@ -63,7 +63,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       %{
         "name" => "Hook",
         "url" => "http://example.test/hook",
-        "events" => ["patch"],
+        "events" => ["discardDraft"],
         "secret" => "s0"
       }
       |> Map.merge(Map.delete(attrs, "dataset"))
@@ -86,6 +86,10 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
         Map.merge(
           %{
             dataset: "test",
+            # The flat routes stamp the webhook with the Default workspace, and
+            # a workspace-less event replays only to a shared-layer webhook
+            # (owner ruling #51, RQ2), so the fixture event lives in Default.
+            workspace_id: Barkpark.TenancyFixtures.default_workspace_id!(),
             type: "widget",
             doc_id: "doc-#{System.unique_integer([:positive])}",
             mutation: "publish",
@@ -138,18 +142,18 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
   end
 
   describe "list_deliveries/2 limit clamp (context boundary)" do
-    test "clamps absent/negative/zero/huge to 1..100" do
+    test "clamps absent/negative/zero/huge to 1..101" do
       {:ok, wh} =
         Webhooks.create_webhook(%{
           "name" => "Clamp",
           "url" => "http://example.test/hook",
           "dataset" => "test",
-          "events" => ["patch"]
+          "events" => ["discardDraft"]
         })
 
-      # 101 deliveries so 25 (default) and 100 (max) are both strictly below the
+      # 102 deliveries so 25 (default) and 101 (max) are both strictly below the
       # total — the clamp is observable, not masked by a small row count.
-      for i <- 1..101 do
+      for i <- 1..102 do
         ev = make_event()
         {:ok, d} = Webhooks.claim_delivery(wh.id, ev.id)
         {:ok, _} = Webhooks.mark_delivered(d, 200, 1, i)
@@ -161,8 +165,12 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       assert length(Webhooks.list_deliveries(wh.id, limit: -5)) == 1
       # Zero → clamped up to 1.
       assert length(Webhooks.list_deliveries(wh.id, limit: 0)) == 1
-      # Huge → clamped down to 100.
-      assert length(Webhooks.list_deliveries(wh.id, limit: 100_000)) == 100
+      # Huge → clamped down to 101, not 100: the ceiling is ONE PAST the
+      # user-facing max page size (100) on purpose (task-fb4cf8323a9795e5) —
+      # WebhookController fetches `limit: 100 + 1` to probe `has_more` at the
+      # page-size ceiling, and a context clamp back down to 100 would erase
+      # that signal exactly there. See list_deliveries/2's own doc.
+      assert length(Webhooks.list_deliveries(wh.id, limit: 100_000)) == 101
     end
   end
 
@@ -327,6 +335,20 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
     end
   end
 
+  describe "a workspace-less event (owner ruling #51, RQ2)" do
+    test "cannot be replayed to a workspace's webhook → 404, nothing POSTed", %{conn: conn} do
+      wh = make_webhook(conn, %{"dataset" => "test"})
+      assert is_binary(wh.workspace_id)
+      orphan = make_event(%{workspace_id: nil})
+
+      resp =
+        conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{orphan.id}/replay")
+
+      assert resp.status == 404
+      refute_receive {:webhook_post, _, _, _}, 200
+    end
+  end
+
   describe "workspace-scoped route mirror (/w/:ws/p/:proj/v1/webhooks)" do
     setup %{conn: conn, token: token} do
       ws = create_workspace!()
@@ -345,7 +367,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
           Jason.encode!(%{
             "name" => "Scoped hook",
             "url" => "http://example.test/scoped",
-            "events" => ["patch"],
+            "events" => ["discardDraft"],
             "secret" => "scoped-secret"
           })
         )

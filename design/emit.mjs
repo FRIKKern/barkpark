@@ -385,7 +385,7 @@ const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
 // for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
 export const PAPER_ROLES = [
-  "bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule",
+  "bg", "bg-deep", "ink", "ink-soft", "ink-faint", "ink-faint-line", "rule",
   "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border",
 ];
 // Callout tones in the SAME order util.ex tone_palette/1 clauses read them, so
@@ -1049,6 +1049,15 @@ function onStatusVars(theme, indent, t = tokens) {
   const os = t.color.onStatus;
   return STATUS_FG.map((r) => indent + `--${r}: ${hsl(os[r][theme])};`).join("\n");
 }
+// Text-on-tint voices (color.onTint): a status hue as TEXT on its own -soft tint,
+// a darker step in light so it clears AA there (task-98bc0a831eecc140). Studio-only
+// like onStatus; its dark value rides the same prefers-color-scheme block as the
+// status roles it shadows, so --warn-text and --warn always flip together.
+const ON_TINT = ["ok-text", "warn-text", "danger-text", "info-text", "primary-text"];
+function onTintVars(theme, indent, t = tokens) {
+  const ot = t.color.onTint;
+  return ON_TINT.map((r) => indent + `--${r}: ${hsl(ot[r][theme])};`).join("\n");
+}
 function chromeVars(theme, indent, t = tokens) {
   const ch = t.color.studioChrome;
   return CHROME_ALIASES.map((r) => indent + `--${r}: ${chromeVal(ch[r][theme])};`).join("\n");
@@ -1089,6 +1098,7 @@ const studioThemeBlock = (name, t) => {
     primaryVars("light", ind + "  ", t),
     statusVars("light", ind + "  ", t),
     onStatusVars("light", ind + "  ", t),
+    onTintVars("light", ind + "  ", t),
     chromeVars("light", ind + "  ", t),
     ind + "}",
     ind + `html[data-bp-theme="${name}"][data-theme="dark"] {`,
@@ -1096,6 +1106,7 @@ const studioThemeBlock = (name, t) => {
     primaryVars("dark", ind + "  ", t),
     statusVars("dark", ind + "  ", t),
     onStatusVars("dark", ind + "  ", t),
+    onTintVars("dark", ind + "  ", t),
     chromeVars("dark", ind + "  ", t),
     ind + "}",
   ].join("\n");
@@ -1109,6 +1120,7 @@ function studioBlock(themes = loadThemes()) {
     primaryVars("light", ind + "  "),
     statusVars("light", ind + "  "),
     onStatusVars("light", ind + "  "),
+    onTintVars("light", ind + "  "),
     chromeVars("light", ind + "  "),
     chromeTypeVars(ind + "  "),
     motionVars(ind + "  "),
@@ -1117,14 +1129,28 @@ function studioBlock(themes = loadThemes()) {
     ind + 'html[data-theme="dark"] {',
     baseVars("dark", ind + "  "),
     primaryVars("dark", ind + "  "),
+    // The status hues follow the explicit theme too (task-9dfa7ee60e6b0589):
+    // before, they flipped only on the OS media query, so the theme the user
+    // picked set the ground and the OS set the status colours.
+    statusVars("dark", ind + "  "),
     onStatusVars("dark", ind + "  "),
+    onTintVars("dark", ind + "  "),
     chromeVars("dark", ind + "  "),
     lifeVars("dark", ind + "  "),
     ind + "}",
     ind + "@media (prefers-color-scheme: dark) {",
     ind + "  :root {",
     statusVars("dark", ind + "    "),
+    onTintVars("dark", ind + "    "),
     ind + "  }",
+    ind + "}",
+    // An explicit light theme re-asserts the light status hues, so a dark-mode
+    // OS cannot repaint them (paper-surface's four-block shape: bare light,
+    // prefers-dark, explicit light, explicit dark). html[data-theme] outranks
+    // the media query's :root by specificity.
+    ind + 'html[data-theme="light"] {',
+    statusVars("light", ind + "  "),
+    onTintVars("light", ind + "  "),
     ind + "}",
   ];
   const themed = themeBlocks(themes, studioThemeBlock);
@@ -1845,8 +1871,8 @@ function pdrenderGo(themes = loadThemes()) {
     "",
     "// GenAirRowSplit is the collapse threshold (a ratio at or above it earns a",
     "// SECOND blank row). GenAirRowsDefault is the air a block that is not on the",
-    "// ladder opens with. GenSectionGapRows is space.section.beat (4.18 air beats ≈",
-    "// 92px, the benchmark artifact's section margin) rounded to whole rows: the air",
+    "// ladder opens with. GenSectionGapRows is space.section.beat (2.2 air beats ≈",
+    "// 48px of section air) rounded to whole rows: the air",
     "// that says one section ENDED, the half of the boundary device the rule glyph",
     "// completes. GenSectionHeadGapRows is space.section.gap (the artifact's 16px",
     "// .sec-head padding-top) in rows: the air between the rule and the words.",
@@ -2296,7 +2322,7 @@ function elixirTokensGen(themes = loadThemes()) {
     // ── Paper EMAIL surface skin (theme-system Wave 1 CAPTURE — tokens.json
     // paperEmail). Verbatim hand values, NOT derived from color.primary/border:
     // those HSL-round-tripped brand/rule slots ABOVE (#1e5243/#e4e4e7) are drifted
-    // from the live email hexes (#1e5347/#dde7e2), so palettes.ex / data_viz.ex
+    // from the live email hexes (#1e5347/#e2e6e5), so palettes.ex / data_viz.ex
     // consume THESE instead — zero email-golden retint. RATIFIED 2026-09-11; the
     // decision record is tokens.json paperEmail._note (do not restate it here).
     "  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).",
@@ -2509,6 +2535,12 @@ function sessionAuthBlock(themes = loadThemes()) {
 // switch). De-literalized WITHOUT becoming theme-aware: a single fixed-dark
 // :root carrying color.errorPage (bg/fg/muted, single values). Indented 10
 // spaces to sit inside the heredoc <style>.
+//
+// Shared verbatim by `studio_refusal_html.ex` (task-47ab98b3226672ef) — the
+// Studio membership-refusal page is the SAME self-contained, always-dark
+// card family as the 404/500 page (no layout, no theme switch), so it reuses
+// this exact builder + the same color.errorPage token rather than inventing
+// a second palette for one more error-shaped page.
 function errorPageBlock() {
   const e = tokens.color.errorPage;
   const ind = "          ";
@@ -2679,6 +2711,7 @@ const bulldocsThemeBlock = (name, t) => {
     ].map((l) => "        " + l);
   const darkExtra = [
     `--paper-ink-faint: ${rd["ink-faint"]};`,
+    `--paper-ink-faint-line: ${rd["ink-faint-line"]};`,
     `--paper-chrome-bg: ${rd["chrome-bg"]};`,
     `--paper-chrome-border: ${rd["chrome-border"]};`,
     `--bp-tone-info-bg: ${cd.info.bg}; --bp-tone-info-fg: ${cd.info.fg};`,
@@ -2698,6 +2731,7 @@ const bulldocsThemeBlock = (name, t) => {
   const cl = t.color.paperCallout.light;
   const lightExtra = [
     `--paper-ink-faint: ${sf["ink-faint"].light};`,
+    `--paper-ink-faint-line: ${sf["ink-faint-line"].light};`,
     `--paper-chrome-bg: ${sf["chrome-bg"].light};`,
     `--paper-chrome-border: ${sf["chrome-border"].light};`,
     `--bp-tone-info-bg: ${cl.info.bg}; --bp-tone-info-fg: ${cl.info.fg};`,
@@ -2755,7 +2789,7 @@ function bulldocsBlock(themes = loadThemes()) {
   const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
   const cl = tokens.color.paperCallout.light; // light re-stamps for [data-theme="light"]
   const sfl = Object.fromEntries(
-    ["ink-faint", "chrome-bg", "chrome-border"].map((r) => [r, tokens.color.paper.surface[r].light])
+    ["ink-faint", "ink-faint-line", "chrome-bg", "chrome-border"].map((r) => [r, tokens.color.paper.surface[r].light])
   );
   // S7 stub: the warm reading accent (color.reading-accent), UNCONSUMED until S8.
   const ra = (theme) => hslToHex(tokens.color["reading-accent"][theme]);
@@ -2782,7 +2816,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "       `bp-paper-surface`) so they WIN over the shared source's fallback",
     "       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline",
     "       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on",
-    "       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,",
+    "       the reader on the bp-theme (a shared ink #15211d, rule #e2e6e5,",
     "       etc.). Dark-mode note: the reader stamps `html[data-theme]` only via",
     "       its pre-paint toggle script (localStorage `barkpark_theme`, shared",
     "       with Studio); before that script runs — and with JS off — the",
@@ -2860,6 +2894,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "           stamp data-theme and get those directly; this is the reader's",
     "           prefers-color-scheme companion. */",
     `        --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `        --paper-ink-faint-line: ${rd["ink-faint-line"]};`,
     `        --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `        --paper-chrome-border: ${rd["chrome-border"]};`,
     `        --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
@@ -2909,6 +2944,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "         scheme keeps dark callout tones / faint ink / chrome (the mirror",
     "         image of the #1217 bug). Values match the un-stamped light path. */",
     `      --paper-ink-faint:    ${sfl["ink-faint"]};`,
+    `      --paper-ink-faint-line: ${sfl["ink-faint-line"]};`,
     `      --paper-chrome-bg:    ${sfl["chrome-bg"]};`,
     `      --paper-chrome-border: ${sfl["chrome-border"]};`,
     `      --bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
@@ -2928,6 +2964,7 @@ function bulldocsBlock(themes = loadThemes()) {
     `      --paper-accent-soft: ${rd["accent-soft"]};`,
     `      --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
     `      --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `      --paper-ink-faint-line: ${rd["ink-faint-line"]};`,
     `      --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `      --paper-chrome-border: ${rd["chrome-border"]};`,
     `      --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
@@ -2954,6 +2991,7 @@ function bulldocsBlock(themes = loadThemes()) {
       `--paper-accent-soft: ${rl["accent-soft"]};`,
       `--paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
       `--paper-ink-faint:    ${sfl["ink-faint"]};`,
+      `--paper-ink-faint-line: ${sfl["ink-faint-line"]};`,
       `--paper-chrome-bg:    ${sfl["chrome-bg"]};`,
       `--paper-chrome-border: ${sfl["chrome-border"]};`,
       `--bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
@@ -3221,6 +3259,7 @@ export const ARTIFACTS = [
   { name: "Elixir Studio categorical tokens", path: "api/lib/barkpark_web/studio/tokens_gen.ex", kind: "elixir", build: studioTokensGen },
   { name: "login (session_html)", path: "api/lib/barkpark_web/controllers/session_html.ex", kind: "css", build: sessionAuthBlock },
   { name: "error page (error_html)", path: "api/lib/barkpark_web/controllers/error_html.ex", kind: "css", build: errorPageBlock },
+  { name: "studio refusal page (studio_refusal_html)", path: "api/lib/barkpark_web/plugs/studio_refusal_html.ex", kind: "css", build: errorPageBlock },
   { name: "status page chrome", path: "api/lib/barkpark_web/controllers/status_controller.ex", kind: "css", build: statusChromeBlock },
   { name: "/sheets reader", path: "api/lib/barkpark_web/layouts/sheets.html.heex", kind: "css", build: sheetsBlock },
   { name: "living styleguide swatches", path: "cloud/priv/static/styleguide.html", kind: "html", build: styleguideSwatches },

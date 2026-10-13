@@ -81,6 +81,7 @@ defmodule Barkpark.Plugins.BootstrapTest do
       books =
         SchemaDefinition
         |> where([s], s.name == "book" and s.dataset == "production")
+        |> where([s], not is_nil(s.workspace_id))
         |> Repo.all()
 
       assert length(books) == 1
@@ -109,12 +110,26 @@ defmodule Barkpark.Plugins.BootstrapTest do
 
       count =
         Repo.aggregate(
-          from(s in SchemaDefinition, where: s.name == "book" and s.dataset == "production"),
+          from(s in SchemaDefinition,
+            where: s.name == "book" and s.dataset == "production" and not is_nil(s.workspace_id)
+          ),
           :count,
           :id
         )
 
       assert count == 1
+
+      # ...and exactly one shared copy, also refreshed in place.
+      shared =
+        Repo.aggregate(
+          from(s in SchemaDefinition,
+            where: s.name == "book" and s.dataset == "production" and is_nil(s.workspace_id)
+          ),
+          :count,
+          :id
+        )
+
+      assert shared == 1
     end
 
     test "register_all_schemas/0 normalizes mixed atom/string keys before upsert" do
@@ -140,7 +155,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
         SchemaDefinition
         |> where(
           [s],
-          s.name == ^MixedKeyStub.schema_name() and s.dataset == "production"
+          s.name == ^MixedKeyStub.schema_name() and s.dataset == "production" and
+            not is_nil(s.workspace_id)
         )
         |> Repo.one()
 

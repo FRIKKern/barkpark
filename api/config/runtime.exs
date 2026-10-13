@@ -153,6 +153,16 @@ if config_env() == :prod do
          System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO") in ["1", "true"]
 end
 
+# The publish wall is ON for every prod node unless the installing door
+# declares it off with a falsy BARKPARK_AUTHORING_WALL (task-8edd8e147c648a36):
+# guerrilla, the control plane's boxes and compose installs keep it;
+# @barkpark/engine passes BARKPARK_AUTHORING_WALL=off.
+if config_env() == :prod do
+  config :barkpark,
+         :authoring_wall,
+         System.get_env("BARKPARK_AUTHORING_WALL") not in ["0", "false", "no", "off"]
+end
+
 # staging-barkpark identity tag: BARKPARK_ENV names WHICH instance this is
 # ("staging", "prod", …) so the Studio chrome renders an unmissable banner.
 # This is an IDENTITY label, NOT MIX_ENV — a prod-compiled release runs on the
@@ -652,6 +662,36 @@ case System.get_env("BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS") do
       _ ->
         IO.warn(
           "BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
+# Weekly public-read token rotation (task-eaaf13ab768f34f6). Off unless
+# switched on here; see config.exs.
+if System.get_env("BARKPARK_PUBLIC_READ_ROTATION") in ~w(1 true yes on) do
+  config :barkpark, :public_read_rotation, enabled: true
+end
+
+# Deleted-payload retention (owner ruling #33). Off unless switched on here;
+# the window keeps config.exs's 90 days unless overridden. Same
+# positive-int-or-warn shape as the access-log window above.
+if System.get_env("BARKPARK_DELETED_PAYLOAD_RETENTION") in ~w(1 true yes on) do
+  config :barkpark, :deleted_payload_retention, enabled: true
+end
+
+case System.get_env("BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 ->
+        config :barkpark, :deleted_payload_retention, days: days
+
+      _ ->
+        IO.warn(
+          "BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS=#{inspect(raw)} is not a positive integer — " <>
             "keeping the compiled default"
         )
     end
@@ -1399,15 +1439,58 @@ if config_env() == :prod do
       _ -> if scheme == "https", do: 443, else: 80
     end
 
+  # The address the HTTP listener binds. Unset keeps every interface, IPv6 and
+  # IPv4, which every prod box needs behind its proxy. BARKPARK_HTTP_IP narrows
+  # it: @barkpark/engine sets 127.0.0.1 so a Barkpark inside an app on a
+  # person's machine cannot be reached from the local network. An address that
+  # does not parse refuses the boot rather than silently binding everywhere.
+  http_ip =
+    case System.get_env("BARKPARK_HTTP_IP") do
+      value when is_binary(value) and value != "" ->
+        case :inet.parse_address(String.to_charlist(value)) do
+          {:ok, address} ->
+            address
+
+          {:error, _} ->
+            raise "BARKPARK_HTTP_IP=#{inspect(value)} is not an IP address. Use an address such as 127.0.0.1 or ::1, or unset it to bind every interface."
+        end
+
+      _ ->
+        {0, 0, 0, 0, 0, 0, 0, 0}
+    end
+
   config :barkpark, BarkparkWeb.Endpoint,
     url: [host: host, port: url_port, scheme: scheme],
     check_origin: check_origin,
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
-      # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      # See https://hexdocs.pm/bandit/Bandit.html#t:options/0 for the options.
+      ip: http_ip,
+      # task-234799142dfd8559: a blue/green deploy's SIGTERM to the retiring
+      # slot (deploy/instance-deploy.sh's `systemctl disable --now`) is a
+      # GRACEFUL OTP application stop by default — ThousandIsland (Bandit's
+      # transport) stops ACCEPTING new connections immediately but waits up
+      # to this bound for connections it already holds to finish naturally,
+      # so an ordinary in-flight request completes (2xx) instead of a
+      # reset/502. Measured directly (Supervisor.stop/3 on a real,
+      # OTP-application-registered Bandit child, not a synthetic signal
+      # trap): a 3s-sleeping request survived a graceful stop with this
+      # option unset (ThousandIsland's own undocumented-in-our-config
+      # default, 15_000ms) and was cut (curl exit 52, empty reply) the
+      # instant the bound was set below the request's own duration — the
+      # bound is real, not a theory. Pinned here EXPLICITLY, rather than
+      # left to ThousandIsland's default, so a future thousand_island bump
+      # cannot silently change it out from under us, and so it is one
+      # number this config and the slot unit's TimeoutStopSec (see
+      # deploy/systemd/barkpark-slot@.service) can both cite. 20s, not
+      # ThousandIsland's 15s default: config.exs's :export_pool_size
+      # comment documents a 9s COPY hold against its own 15s budget
+      # elsewhere in this app, so 15s is already close to a real response
+      # duration this app serves; 20s gives that headroom rather than
+      # matching it exactly. Long-lived listen/chat/presence SSE streams
+      # are NOT covered by this bound at all — they get the explicit,
+      # proactive `DrainSignal`/`POST /v1/internal/retire-sse` signal
+      # instead (task-2bcada0faa01ebb2), sent well before this slot stops.
+      thousand_island_options: [shutdown_timeout: 20_000]
     ],
     secret_key_base: secret_key_base
 
@@ -1666,6 +1749,15 @@ if config_env() == :prod do
   # the `rewrite_on` form above.
 end
 
+# Canonical value-shape writes (owner rulings #42/#43/#44): default OFF in
+# config.exs. The owner turns them on per box once its consumers read both
+# shapes (Gyldendal's site first). `Barkpark.Content.CanonicalShapes`.
+case System.get_env("BARKPARK_CANONICAL_SHAPE_WRITES") do
+  v when v in ["1", "true", "on"] -> config :barkpark, canonical_shape_writes: true
+  v when v in ["0", "false", "off"] -> config :barkpark, canonical_shape_writes: false
+  _ -> :ok
+end
+
 # Ephemeral dev database override (CREATE-quickstart smoke, agent-onramps D24).
 # `config/dev.exs` hardcodes the dev Repo to `barkpark_dev`; DATABASE_URL is only
 # honored under :prod (above). The CREATE-quickstart smoke boots a THROWAWAY
@@ -1708,6 +1800,20 @@ case System.get_env("BARKPARK_SCHEMA_ENFORCE_DATASETS") do
       |> Enum.reject(&(&1 == ""))
 
     config :barkpark, Barkpark.Content.Validation, enforce_datasets: slugs
+
+  _ ->
+    :ok
+end
+
+# PER-DOCUMENT SIZE CAP (owner ruling #39, task-923e630674853500). Every save
+# copies the whole document into history and the event log, so one document is
+# capped: 10 MB of JSON-encoded title + content by default
+# (`Barkpark.Content.DocumentSize`). Raise or lower it per box with a restart:
+#
+#   BARKPARK_MAX_DOCUMENT_BYTES=20000000
+case System.get_env("BARKPARK_MAX_DOCUMENT_BYTES") do
+  value when is_binary(value) and value != "" ->
+    config :barkpark, :max_document_bytes, String.to_integer(String.trim(value))
 
   _ ->
     :ok

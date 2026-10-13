@@ -77,7 +77,10 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Tasks, TenancyFixtures}
+  alias Barkpark.Content.{MutationEvent, PaperAccess}
   alias Barkpark.Plugins.Capabilities
+  alias Barkpark.Repo
+  alias Barkpark.Webhooks
 
   @token "barkpark-test-pagination-continuation"
   @dataset "production"
@@ -567,11 +570,9 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
     "BarkparkWeb.QueryController.related" =>
       {:top_n, "a ranked related-documents head, not a set"},
     "BarkparkWeb.PaperAccessController.index" =>
-      {:top_n,
-       "most-recent-N access rows, NO page two and NO signal — undecided, task-fb4cf8323a9795e5"},
+      {:probed, "has_more + next_offset over a total order (task-fb4cf8323a9795e5); probed below"},
     "BarkparkWeb.WebhookController.deliveries" =>
-      {:top_n,
-       "most-recent-N deliveries, NO page two and NO signal — undecided, task-fb4cf8323a9795e5"}
+      {:probed, "has_more + next_offset over a total order (task-fb4cf8323a9795e5); probed below"}
   }
 
   # The positive control: routes the derivation MUST find. The two this row
@@ -771,6 +772,83 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
     assert MapSet.disjoint?(one, two), "#{label}: next_offset re-served rows from page one"
   end
 
+  # ── task-fb4cf8323a9795e5's two decided endpoints ───────────────────────────
+
+  @paper_access_label "paper.access (GET /v1/papers/:slug/access)"
+  @webhook_deliveries_label "webhook.deliveries (GET /v1/webhooks/:dataset/:id/deliveries)"
+
+  defp seed_paper_access!(slug, workspace_id, n) do
+    for i <- 1..n//1 do
+      :ok =
+        PaperAccess.record_now(%{
+          slug: slug,
+          dataset: @dataset,
+          workspace_id: workspace_id,
+          action: "view",
+          actor_kind: "anonymous",
+          actor_id: nil,
+          actor_label: nil
+        })
+
+      # record_now has no explicit inserted_at; a tight loop can write several
+      # rows in the same microsecond, which is exactly the tie the `id` half of
+      # the total order exists to break — nothing to sleep for.
+      _ = i
+    end
+
+    slug
+  end
+
+  defp paper_access_page(conn, slug, offset) do
+    get_json(conn, "/v1/papers/#{slug}/access", %{"limit" => "#{@page}", "offset" => "#{offset}"})
+  end
+
+  defp make_pagination_event! do
+    {:ok, ev} =
+      %MutationEvent{}
+      |> Ecto.Changeset.change(%{
+        dataset: @search_dataset,
+        workspace_id: TenancyFixtures.default_workspace_id!(),
+        type: "widget",
+        doc_id: "pgc-wh-#{System.unique_integer([:positive])}",
+        mutation: "publish",
+        rev: "rev-#{System.unique_integer([:positive])}",
+        document: %{"_id" => "doc", "title" => "pgc"},
+        inserted_at: DateTime.utc_now()
+      })
+      |> Repo.insert()
+
+    ev
+  end
+
+  defp seed_webhook_deliveries!(scope, n) do
+    {:ok, wh} =
+      Webhooks.create_webhook(
+        %{
+          "name" => "pgc-#{System.unique_integer([:positive])}",
+          "url" => "http://example.test/pgc-hook",
+          "dataset" => @search_dataset,
+          "events" => ["discardDraft"]
+        },
+        scope
+      )
+
+    for i <- 1..n//1 do
+      ev = make_pagination_event!()
+      {:ok, d} = Webhooks.claim_delivery(wh.id, ev.id)
+      {:ok, _} = Webhooks.mark_delivered(d, 200, 1, i)
+    end
+
+    wh.id
+  end
+
+  defp webhook_deliveries_page(conn, wh_id, offset) do
+    get_json(conn, "/v1/webhooks/#{@search_dataset}/#{wh_id}/deliveries", %{
+      "limit" => "#{@page}",
+      "offset" => "#{offset}"
+    })
+  end
+
   describe "(d) the router-arm endpoints this row decided" do
     test "audit and history: has_more ⇒ next_offset ⇒ a real page two, and the run is non-vacuous",
          %{conn: conn} do
@@ -797,6 +875,52 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
         [
           observe(@audit_label, @corpus, length(a1["audit"])),
           observe(@history_label, h_corpus, length(h1["revisions"]))
+        ],
+        2
+      )
+    end
+
+    test "paper.access and webhook.deliveries: has_more ⇒ next_offset ⇒ a real page two, and the run is non-vacuous",
+         %{conn: conn, scope: scope} do
+      slug = "pgc-paper-#{System.unique_integer([:positive])}"
+      seed_paper_access!(slug, Keyword.get(scope, :workspace_id), @corpus)
+      p1 = paper_access_page(conn, slug, 0)
+
+      assert_signal_honest!(
+        observe(@paper_access_label, @corpus, length(p1["access"])),
+        p1["has_more"]
+      )
+
+      assert_continuation!(
+        @paper_access_label,
+        "next_offset",
+        {p1["has_more"], p1["next_offset"]}
+      )
+
+      p2 = paper_access_page(conn, slug, p1["next_offset"] || @page)
+      assert_page_two!(@paper_access_label, p1["access"], p2["access"], "id")
+
+      wh_id = seed_webhook_deliveries!(scope, @corpus)
+      w1 = webhook_deliveries_page(conn, wh_id, 0)
+
+      assert_signal_honest!(
+        observe(@webhook_deliveries_label, @corpus, length(w1["deliveries"])),
+        w1["has_more"]
+      )
+
+      assert_continuation!(
+        @webhook_deliveries_label,
+        "next_offset",
+        {w1["has_more"], w1["next_offset"]}
+      )
+
+      w2 = webhook_deliveries_page(conn, wh_id, w1["next_offset"] || @page)
+      assert_page_two!(@webhook_deliveries_label, w1["deliveries"], w2["deliveries"], "event_id")
+
+      assert_observed_truncation!(
+        [
+          observe(@paper_access_label, @corpus, length(p1["access"])),
+          observe(@webhook_deliveries_label, @corpus, length(w1["deliveries"]))
         ],
         2
       )

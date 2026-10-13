@@ -12,6 +12,16 @@ defmodule Barkpark.Accounts.Privacy do
   append-only, tamper-evident audit trail (`Barkpark.Audit`) stays intact — the
   balance GDPR strikes between erasure of personal data and the integrity of a
   security log. Every erasure emits an audit event.
+
+  ## The security-log exemption
+
+  `audit_events` is append-only and its hash chain covers `metadata`, so a row
+  cannot be rewritten or redacted at read without breaking external
+  verification. Since owner ruling #32 item 2 (2026-10-03) no emitter writes a
+  raw email into `metadata` — users are named by id (`grant.minted`,
+  SCIM `user_provisioned`, `app_token_minted`). Rows written BEFORE that may
+  still hold the subject's email; they are kept as written, under this
+  exemption, as the integrity record of a security log.
   """
   import Ecto.Query, warn: false
 
@@ -22,66 +32,115 @@ defmodule Barkpark.Accounts.Privacy do
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, UserSession, UserEmailToken, WebauthnCredential}
   alias Barkpark.Sso.SocialIdentity
-  alias Barkpark.Tenancy.Membership
+  alias Barkpark.Tenancy.{Invitation, Membership}
+  alias Barkpark.UserPrefs.UserPref
   alias Barkpark.Audit.Event
 
   @erased_domain "erased.invalid"
 
   @doc """
-  Redact the `actor_label` of rows written by a since-ERASED user.
+  Resolve the `actor_label` of `"user"` rows from the account, at READ time.
 
-  A signed-in user's writes and paper views stamp `actor_label` with their
-  EMAIL on `revisions` and `paper_access_log`. Both are append-only by design
-  (the history trail; the 90-day access trail), so erasure cannot rewrite the
-  stored rows — but the subject's email must not stay READABLE. Every read that
-  serves those rows maps them through here: a `"user"` actor whose account has
-  been erased is shown under its pseudonymised account email. Any other row —
-  a live user, a token, an anonymous reader — is returned unchanged.
+  Since owner ruling #32 item 1 (2026-10-03) a signed-in user's writes and paper
+  views stamp `revisions` / `paper_access_log` with the user id only — no email
+  at rest. Rows written before that still hold the email they were stamped
+  with, and both tables are append-only (the history trail; the 90-day access
+  trail), so erasure cannot rewrite them. Every read that serves those rows
+  maps them through here: a `"user"` actor is shown under its account's
+  CURRENT email — the pseudonymised one once the account is erased, so an old
+  stamp never stays readable. Any other row (a token, a share, an anonymous
+  reader) and a user row whose account no longer exists are returned unchanged.
 
   Takes and returns a list of maps/structs carrying `:actor_kind`, `:actor_id`,
   `:actor_label`. One query, however many rows.
+
+  Prefers the account's `display_name` (task-cfb6ca3f5ffaf099, #22161) over
+  its email — the same J15/J16 attribution preference Studio's own account
+  settings exist to let a person set. An account with no display name (the
+  pre-#22161 default, and `display_name_changeset/2`'s own trimmed-blank-to-
+  nil normalization) falls back to email exactly as this function always
+  resolved before #22161 existed.
   """
+  #
+  # An `"api_token"` row is named the same way through the token's owner
+  # (`owner_user_id`): a member's app token writes history as that member
+  # (task-d0c6a847e2a4658e). A token with no owner (a service token) stays
+  # unlabelled.
   @spec redact_actor_labels([map()]) :: [map()]
   def redact_actor_labels(rows) when is_list(rows) do
-    ids =
-      rows
-      |> Enum.flat_map(fn row ->
-        case {Map.get(row, :actor_kind), Map.get(row, :actor_id)} do
-          {"user", id} when is_binary(id) -> [id]
-          _ -> []
-        end
-      end)
-      |> Enum.uniq()
-      |> Enum.flat_map(fn id -> List.wrap(Repo.uuid_or_nil(id)) end)
+    token_owners = token_owner_ids(actor_ids(rows, "api_token"))
+    user_ids = Enum.uniq(actor_ids(rows, "user") ++ Map.values(token_owners))
 
-    erased =
-      case ids do
+    labels =
+      case user_ids do
         [] ->
           %{}
 
         ids ->
-          from(u in User,
-            where: u.id in ^ids and like(u.email, ^("%@" <> @erased_domain)),
-            select: {u.id, u.email}
-          )
+          from(u in User, where: u.id in ^ids, select: {u.id, {u.display_name, u.email}})
           |> Repo.all()
-          |> Map.new()
+          |> Map.new(fn {id, {display_name, email}} ->
+            {id, preferred_label(display_name, email)}
+          end)
       end
 
-    if erased == %{} do
+    if labels == %{} do
       rows
     else
       Enum.map(rows, fn row ->
-        with "user" <- Map.get(row, :actor_kind),
-             id when is_binary(id) <- Map.get(row, :actor_id),
-             {:ok, pseudonym} <- Map.fetch(erased, id) do
-          Map.put(row, :actor_label, pseudonym)
-        else
-          _ -> row
+        case label_owner(row, token_owners) do
+          id when is_binary(id) ->
+            case Map.fetch(labels, id) do
+              {:ok, label} -> Map.put(row, :actor_label, label)
+              :error -> row
+            end
+
+          _ ->
+            row
         end
       end)
     end
   end
+
+  defp preferred_label(display_name, email) when is_binary(display_name) do
+    case String.trim(display_name) do
+      "" -> email
+      trimmed -> trimmed
+    end
+  end
+
+  defp preferred_label(_display_name, email), do: email
+
+  defp actor_ids(rows, kind) do
+    rows
+    |> Enum.flat_map(fn row ->
+      case {Map.get(row, :actor_kind), Map.get(row, :actor_id)} do
+        {^kind, id} when is_binary(id) -> List.wrap(Repo.uuid_or_nil(id))
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp token_owner_ids([]), do: %{}
+
+  defp token_owner_ids(token_ids) do
+    from(t in ApiToken,
+      where: t.id in ^token_ids and not is_nil(t.owner_user_id),
+      select: {t.id, t.owner_user_id}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  # The account whose email names this row: the user itself, or the owner of the
+  # token it was written with.
+  defp label_owner(%{actor_kind: "user", actor_id: id}, _owners) when is_binary(id), do: id
+
+  defp label_owner(%{actor_kind: "api_token", actor_id: id}, owners) when is_binary(id),
+    do: Map.get(owners, id)
+
+  defp label_owner(_row, _owners), do: nil
 
   @doc """
   Assemble the subject's complete, machine-readable data bundle. Deliberately
@@ -194,8 +253,75 @@ defmodule Barkpark.Accounts.Privacy do
             occurred_at: e.occurred_at,
             metadata: e.metadata
           }
-        end)
+        end),
+      # Owner ruling #32 item 7 (2026-10-03): three more kinds of row that name
+      # the subject. METADATA ONLY — what, where and when. A revision snapshot's
+      # content is the workspace's data, not the subject's, and a grant's link
+      # token hash is credential material.
+      revisions: export_revisions(user),
+      access_grants: export_grants(user),
+      paper_access: export_paper_access(user)
     }
+  end
+
+  # Revisions the subject authored: stamped `actor_kind "user"` + their id, or
+  # (history written before the kind/id columns) the legacy `actor_user_id`.
+  defp export_revisions(%User{id: id}) do
+    from(r in Barkpark.Content.Revision,
+      where: (r.actor_kind == "user" and r.actor_id == ^id) or r.actor_user_id == ^id,
+      order_by: [asc: r.inserted_at],
+      select: %{
+        id: r.id,
+        workspace_id: r.workspace_id,
+        project_id: r.project_id,
+        dataset: r.dataset,
+        type: r.type,
+        doc_id: r.doc_id,
+        action: r.action,
+        rev: r.rev,
+        created_at: r.inserted_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  # Grants made TO the subject — claimed (grantee_user_id) or addressed to their
+  # email and not yet claimed.
+  defp export_grants(%User{id: id, email: email}) do
+    from(g in Grant,
+      where: g.grantee_user_id == ^id or g.grantee_email == ^email,
+      order_by: [asc: g.inserted_at],
+      select: %{
+        id: g.id,
+        workspace_id: g.workspace_id,
+        project_id: g.project_id,
+        dataset: g.dataset,
+        type: g.type,
+        doc_id: g.doc_id,
+        capabilities: g.capabilities,
+        created_at: g.inserted_at,
+        expires_at: g.expires_at,
+        claimed_at: g.claimed_at,
+        revoked_at: g.revoked_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  # The subject's entries in the 90-day paper access trail.
+  defp export_paper_access(%User{id: id}) do
+    from(a in Barkpark.Content.PaperAccessLog,
+      where: a.actor_kind == "user" and a.actor_id == ^id,
+      order_by: [asc: a.inserted_at],
+      select: %{
+        workspace_id: a.workspace_id,
+        dataset: a.dataset,
+        slug: a.slug,
+        action: a.action,
+        at: a.inserted_at
+      }
+    )
+    |> Repo.all()
   end
 
   @doc """
@@ -218,9 +344,12 @@ defmodule Barkpark.Accounts.Privacy do
       linked account with no email check, so it would log straight back in.
 
   `api_tokens.created_by` holds the email of whoever minted the token; rows
-  naming the subject are rewritten to the pseudonym. Machine tokens the subject
-  minted for a workspace (no `owner_user_id`) are the workspace's credentials
-  and are not revoked.
+  naming the subject are rewritten to the pseudonym, and so are app-token labels
+  (`app:<email>`). An app token minted FOR the subject carries their
+  `owner_user_id` and is revoked; one minted before the mint stamped the owner
+  is recognised by its `app:<email>` label (owner ruling #32 item 3). Machine
+  tokens the subject minted for a workspace (no `owner_user_id`) are the
+  workspace's credentials and are not revoked.
   """
   @spec erase_subject(User.t()) :: {:ok, map()} | {:error, term()}
   def erase_subject(%User{} = user) do
@@ -255,10 +384,34 @@ defmodule Barkpark.Accounts.Privacy do
     {social_identities, _} =
       Repo.delete_all(from i in SocialIdentity, where: i.user_id == ^user.id)
 
+    # task-7d2a48dbf7e4bf34 (#22013) postdates this function: a per-account
+    # prefs row (`value`, a caller-chosen JSON blob -- "recent_searches",
+    # list filters, ...) can hold genuinely personal/behavioural data, and
+    # unlike `workspace_memberships` above this table has NO pseudonymised
+    # alternative to fall back to. Deleted outright, same as the other
+    # per-account rows above it (sessions, email tokens, passkeys,
+    # social-login links) that have nothing worth pseudonymising either.
+    {user_prefs, _} = Repo.delete_all(from p in UserPref, where: p.user_id == ^user.id)
+
+    # Same reasoning, for a PENDING seat (OWNER RULING 2026-10-03 #7): it is
+    # not a real membership (never read by any authorization check), but it
+    # is still a live `user_id` reference this function left untouched. An
+    # erased account accepting an invite later would seat a pseudonymised
+    # identity into a workspace an admin meant for the real person who no
+    # longer exists under that id -- deleted outright, same as `memberships`
+    # below it.
+    {invitations, _} = Repo.delete_all(from i in Invitation, where: i.user_id == ^user.id)
+
     erased_email = "erased-#{user.id}@#{@erased_domain}"
 
     Repo.update_all(from(t in ApiToken, where: t.created_by == ^user.email),
       set: [created_by: erased_email]
+    )
+
+    # The app-token mint's default label carries the email; the revoked rows
+    # keep their history under the pseudonym instead.
+    Repo.update_all(from(t in ApiToken, where: t.label == ^("app:" <> user.email)),
+      set: [label: "app:" <> erased_email]
     )
 
     grants_pseudonymised = pseudonymise_grants(user, erased_email)
@@ -279,7 +432,14 @@ defmodule Barkpark.Accounts.Privacy do
         totp_enabled: false,
         recovery_codes_hashed: [],
         last_totp_at: nil,
-        confirmed_at: nil
+        confirmed_at: nil,
+        # task-cfb6ca3f5ffaf099/#22161 postdates this function: a display
+        # name is free-text a person sets (often their real name), and
+        # `redact_actor_labels/1` now PREFERS it over email. Leaving it
+        # standing here would un-pseudonymise exactly the row this function
+        # exists to pseudonymise — erasure clears it the same way it already
+        # clears every other re-identifying field.
+        display_name: nil
       })
       |> Repo.update!()
 
@@ -297,7 +457,9 @@ defmodule Barkpark.Accounts.Privacy do
         "passkeys_deleted" => passkeys,
         "social_identities_deleted" => social_identities,
         "grants_pseudonymised" => grants_pseudonymised,
-        "memberships_deleted" => memberships
+        "memberships_deleted" => memberships,
+        "user_prefs_deleted" => user_prefs,
+        "invitations_deleted" => invitations
       }
     })
 
@@ -309,6 +471,8 @@ defmodule Barkpark.Accounts.Privacy do
       social_identities_deleted: social_identities,
       grants_pseudonymised: grants_pseudonymised,
       memberships_deleted: memberships,
+      user_prefs_deleted: user_prefs,
+      invitations_deleted: invitations,
       revoked_token_ids: revoked_token_ids
     }
   end
@@ -407,8 +571,61 @@ defmodule Barkpark.Accounts.Privacy do
     end
   end
 
-  defp revoke_owned_tokens!(%User{id: user_id}) do
-    from(t in ApiToken, where: t.owner_user_id == ^user_id and is_nil(t.revoked_at))
+  @doc """
+  Remove the credentials a session thief could have ADDED to an account:
+  every passkey, every social login link, and every live personal API token
+  the user owns (`kind: "api"`, `owner_user_id` = the user). Runs inside the
+  caller's transaction; a failed token revoke rolls it back. Returns the
+  revoked token ids so the caller can tear their sockets down AFTER commit
+  (`Auth.broadcast_socket_teardown/1`).
+
+  Owner ruling #13 (task-f4cfc3e2ab4bd6b8): a forgot-password reset calls this,
+  so a passkey or personal token an attacker added with a stolen session does
+  not survive the owner's recovery. Tokens nobody owns (machine tokens, the
+  credential Barkpark Cloud holds for the instance) are never touched, and
+  ticket keys stay with the outsiders they were issued to.
+  """
+  @spec strip_added_credentials!(User.t()) :: %{
+          passkeys: non_neg_integer(),
+          social_links: non_neg_integer(),
+          revoked_token_ids: [binary()]
+        }
+  def strip_added_credentials!(%User{id: user_id} = user) do
+    {passkeys, _} = Repo.delete_all(from c in WebauthnCredential, where: c.user_id == ^user_id)
+    {links, _} = Repo.delete_all(from i in SocialIdentity, where: i.user_id == ^user_id)
+
+    %{
+      passkeys: passkeys,
+      social_links: links,
+      revoked_token_ids: revoke_owned_tokens!(user, kind: "api")
+    }
+  end
+
+  # The subject's credentials: tokens they own, plus LEGACY app tokens minted
+  # for them before the mint stamped `owner_user_id` (owner ruling #32 item 3,
+  # 2026-10-03) — recognised by the mint's own default label, `app:<email>`,
+  # with no owner. A custom-labelled legacy token cannot be told apart from a
+  # workspace credential and is left alone. `kind:` narrows the set (the reset
+  # path of ruling #13 revokes personal `api` tokens only).
+  defp revoke_owned_tokens!(user, opts \\ [])
+
+  defp revoke_owned_tokens!(%User{id: user_id, email: email}, opts) do
+    app_label = "app:" <> email
+
+    base =
+      from(t in ApiToken,
+        where:
+          is_nil(t.revoked_at) and
+            (t.owner_user_id == ^user_id or (is_nil(t.owner_user_id) and t.label == ^app_label))
+      )
+
+    query =
+      case Keyword.get(opts, :kind) do
+        nil -> base
+        kind -> from(t in base, where: t.kind == ^kind)
+      end
+
+    query
     |> Repo.all()
     |> Enum.map(fn token ->
       case Auth.revoke_token(token) do

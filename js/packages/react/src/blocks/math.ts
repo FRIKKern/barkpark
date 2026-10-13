@@ -10,8 +10,9 @@
 // data_viz.ex's tex_to_mathml/1, same macro table and grammar.
 
 import { type Block, escapeHtml, str, isMap } from '../inline'
+import type { RenderCtx } from './chrome'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 const MACROS: Record<string, string> = {
   '\\alpha': 'α',
@@ -203,9 +204,9 @@ export function texToMathMlRow(tex: string): string {
   return parseRow({ tokens: tokenize(tex), pos: 0 })
 }
 
-const equation: Emit = (block) => {
+const equation: Emit = (block, ctx) => {
   const tex = isMap(block) ? str(block.tex).trim() : ''
-  if (tex === '') return `<div class="bp-equation bp-equation--empty">equation — no tex source</div>`
+  if (tex === '') return `<div class="bp-equation bp-equation--empty">${ctx.t('equation — no tex source')}</div>`
   const display = isMap(block) && block.display === true
   const row = texToMathMlRow(tex)
   const displayAttr = display ? ' display="block"' : ''

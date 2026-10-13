@@ -381,26 +381,22 @@ defmodule BarkparkWeb.Studio.CapsMountReachabilityTest do
              end)
     end
 
-    test "shape A can mount the flat chrome, but the shares navigation it fires is DENIED",
+    test "shape A is turned away from the flat chrome, and the shares destination is DENIED",
          %{conn: _conn, default_ws: ws, default_proj: proj} = ctx do
-      # Shape A holds global admin permissions, so LiveAuth :admin admits it to
-      # the flat chrome — this is precisely the socket the phantom affordance
-      # renders on. Follow the affordance to its end and it dies at the scoped
-      # route's guard.
+      # Shape A holds global admin permissions but no seat. Before owner ruling
+      # #2 (task-6132833921b7dc36) LiveAuth :admin admitted it to the flat
+      # chrome on the permission bit alone; it now needs an admin seat in the
+      # token's workspace, so the mount redirects.
       {raw, token} = admin_token!("caps-reach-flat-shape-a")
       {deleted, _} = Repo.delete_all(from(m in Membership, where: m.principal_id == ^token.id))
       assert deleted == 1
       conn = session(ctx.conn, raw)
 
-      {:ok, view, _html} = live(conn, "/studio/org-admin")
-      assert :sys.get_state(view.pid).socket.assigns[:caps] == nil
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(conn, "/studio/org-admin")
 
-      assert {:error, {:live_redirect, %{to: to}}} = render_hook(view, "shares-open", %{})
-      assert to == studio_url(ws, proj) <> "?shares=open"
-
-      # The destination dead-renders 403 for this principal: ResolveWorkspace
-      # halts before any Caps-bearing socket exists.
-      assert get(conn, to).status == 403
+      # The shares destination dead-renders 403 for this principal:
+      # ResolveWorkspace halts before any Caps-bearing socket exists.
+      assert get(conn, studio_url(ws, proj) <> "?shares=open").status == 403
     end
   end
 end

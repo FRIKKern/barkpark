@@ -113,7 +113,7 @@ export function createStubServer({ onUnknown = () => {} } = {}) {
     // The pre-bake token guard in next.config.mjs. The smoke passes no token,
     // so this is answered for completeness (and so a future tokened run of this
     // harness does not hard-fail on an unverifiable credential).
-    if (p === '/v1/capabilities') return sendJson(res, { auth_tier: 'read' })
+    if (p === '/v1/capabilities') return sendJson(res, { auth_tier: 'read', token: { public_read: true } })
 
     if (/^\/v1\/data\/search\/[^/]+\/suggestions$/.test(p)) {
       return sendJson(res, { result: { popular: [], nohits: [] } })

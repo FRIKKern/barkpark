@@ -73,6 +73,7 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   require Logger
 
+  alias Barkpark.SelfUpdate.FailureReport
   alias Barkpark.Sites.BuildLogScrub
 
   @default_command {"bash", ["scripts/self-update.sh"]}
@@ -180,13 +181,20 @@ defmodule Barkpark.SelfUpdate.Runner do
     * `{:error, :no_previous_slot}` — exit 21
     * `{:error, :not_supported}` — exit 22 (box has no `.slots` machinery)
     * `{:error, :already_running}` — exit 23 (script flock held)
+    * `{:error, :v2_seals_unreadable}` — exit 25: the target predates bound
+      field seals (owner ruling #18) and this box holds some, which the
+      target could not open
     * `{:error, {:preflight_failed, code}}` — any other outcome (incl. an
       exit 0 with no parseable sha) → the caller FAILS CLOSED, never flips.
   """
   @spec preflight_rollback() ::
           {:ok, String.t()}
           | {:error,
-             :no_previous_slot | :not_supported | :already_running | {:preflight_failed, term()}}
+             :no_previous_slot
+             | :not_supported
+             | :already_running
+             | :v2_seals_unreadable
+             | {:preflight_failed, term()}}
   def preflight_rollback do
     {exe, args} =
       Keyword.get(config(), :rollback_preflight_command, @default_rollback_preflight_command)
@@ -216,6 +224,9 @@ defmodule Barkpark.SelfUpdate.Runner do
 
       {_output, 23} ->
         {:error, :already_running}
+
+      {_output, 25} ->
+        {:error, :v2_seals_unreadable}
 
       {_output, code} ->
         {:error, {:preflight_failed, code}}
@@ -316,8 +327,23 @@ defmodule Barkpark.SelfUpdate.Runner do
         {:reply, {:error, :already_running}, state}
 
       true ->
+        # Captured BEFORE open_port spawns the child: deploy-rebuild's own
+        # flight record carries a `ts` stamped the instant it reaches a
+        # phase, which can be microseconds after exec, and
+        # `matching_deploy_status/1` requires `ts >= started_at`. A
+        # `started_at` taken after the spawn can land later than that `ts`
+        # even though the child started after it.
+        started_at = DateTime.utc_now()
+
         case open_port(mode, env) do
-          {:ok, port} ->
+          # `os_pid` rides the spawn itself: `Port.info(port, :os_pid)`
+          # returns `nil` once the child has already exited (confirmed: a
+          # trivial/fast child can die before this process is scheduled
+          # again), so it must be read here, not later (task-5ce2d1ba1fc78838).
+          # Even here a child can beat us on a loaded box; a `nil` os_pid then
+          # matches on `ts` alone (`matching_deploy_status/1`,
+          # task-fe3e406164766598) instead of falling back to "exit_code".
+          {:ok, port, os_pid} ->
             # Watchdog: force-close a run that outlives the deadline so `running?`
             # can't wedge true (and block every future trigger) until a BEAM restart.
             schedule_run_deadline(port)
@@ -328,10 +354,10 @@ defmodule Barkpark.SelfUpdate.Runner do
                 port: port,
                 mode: mode,
                 log: [],
-                started_at: DateTime.utc_now(),
+                started_at: started_at,
                 finished_at: nil,
                 run_id: new_run_id(),
-                os_pid: port_os_pid(port),
+                os_pid: os_pid,
                 orphan?: false
             }
 
@@ -469,7 +495,10 @@ defmodule Barkpark.SelfUpdate.Runner do
             ]
           )
 
-        {:ok, port}
+        # Read right away: `Port.info/2` goes `nil` for `:os_pid` once the
+        # child has exited, and a fast/short-lived child can beat the
+        # caller back to this line if it's read any later.
+        {:ok, port, port_os_pid(port)}
     end
   rescue
     # Port.open raises on e.g. a missing cd — degrade to a start failure.
@@ -743,6 +772,19 @@ defmodule Barkpark.SelfUpdate.Runner do
     end
   end
 
+  # The child exited before `Port.info/2` could name its pid (a fast failure on
+  # a loaded box: task-fe3e406164766598). Only one run exists at a time, so a
+  # record stamped no earlier than this run's start is this run's.
+  defp matching_deploy_status(%{os_pid: nil, started_at: %DateTime{} = started_at}) do
+    with %{"ts" => ts} = record <- read_deploy_status(),
+         {:ok, at, _} <- DateTime.from_iso8601(to_string(ts)),
+         true <- DateTime.compare(at, DateTime.truncate(started_at, :second)) != :lt do
+      record
+    else
+      _ -> nil
+    end
+  end
+
   defp matching_deploy_status(_state), do: nil
 
   # sobelow_skip ["Traversal.FileModule"]
@@ -804,14 +846,33 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp render_status(state) do
+    log = Enum.reverse(state.log)
+
     %{
       state: run_state(state.run),
       mode: state.mode,
       exit_code: run_exit_code(state.run),
-      log: Enum.reverse(state.log),
+      log: log,
       started_at: state.started_at,
-      finished_at: state.finished_at
+      finished_at: state.finished_at,
+      failure: failure(state, log)
     }
+  end
+
+  # The failing phase + a redacted tail for a finished non-zero run, so the
+  # control plane reads WHY an update failed without SSH (FailureReport).
+  defp failure(%{run: {:done, code}} = state, log) when is_integer(code) and code != 0 do
+    FailureReport.build(code, log, safe_deploy_status(state))
+  rescue
+    _ -> FailureReport.build(code, log, nil)
+  end
+
+  defp failure(_state, _log), do: nil
+
+  defp safe_deploy_status(state) do
+    matching_deploy_status(state)
+  rescue
+    _ -> nil
   end
 
   defp run_state(:idle), do: :idle

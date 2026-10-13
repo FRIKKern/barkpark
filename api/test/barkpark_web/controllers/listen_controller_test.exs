@@ -423,6 +423,77 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert replay_json["previousRev"] == live_json["previousRev"]
   end
 
+  # task-0951e10cb60b409c: SSE syncTags carry the webhook's tag set, scoped and
+  # flat, so a consumer that tags scoped reads can revalidate from the stream.
+  test "syncTags match the webhook sync_tags for the same mutation, on both legs" do
+    {:ok, ws} =
+      Barkpark.Tenancy.create_workspace(%{name: "Tags WS", slug: "tags-ws-0951"})
+
+    {:ok, project} =
+      Barkpark.Tenancy.create_project(ws, %{name: "Tags P", slug: "tags-p-0951"})
+
+    webhook_tags =
+      Barkpark.Webhooks.Dispatcher.build_payload("update", "post", "t1", %{}, @dataset,
+        workspace_id: ws.id,
+        project_id: project.id
+      ).sync_tags
+
+    msg = %{
+      event_id: 7,
+      mutation: "update",
+      type: "post",
+      doc_id: "drafts.t1",
+      rev: "r2",
+      previous_rev: "r1",
+      workspace_id: ws.id,
+      project_id: project.id,
+      document: %{"_id" => "drafts.t1"}
+    }
+
+    live =
+      msg
+      |> ListenController.live_event(msg.document)
+      |> ListenController.format_event(@dataset)
+      |> frame_data()
+
+    replay =
+      %MutationEvent{
+        id: 7,
+        mutation: "update",
+        type: "post",
+        doc_id: "drafts.t1",
+        rev: "r2",
+        previous_rev: "r1",
+        workspace_id: ws.id,
+        project_id: project.id,
+        document: msg.document
+      }
+      |> ListenController.format_event(@dataset)
+      |> frame_data()
+
+    # doc: names the PUBLISHED id on both channels (webhook-realtime.md).
+    assert live["syncTags"] == webhook_tags
+    assert replay["syncTags"] == webhook_tags
+    assert "bp:ws:tags-ws-0951:p:tags-p-0951:ds:#{@dataset}:doc:t1" in live["syncTags"]
+  end
+
+  test "an event with no scope ids carries the default-scoped tags, as webhooks do" do
+    replay =
+      %MutationEvent{
+        id: 8,
+        mutation: "create",
+        type: "post",
+        doc_id: "t2",
+        rev: "r1",
+        document: %{}
+      }
+      |> ListenController.format_event(@dataset)
+      |> frame_data()
+
+    assert replay["syncTags"] ==
+             Barkpark.Webhooks.Dispatcher.build_payload("create", "post", "t2", %{}, @dataset).sync_tags
+  end
+
   # ---------------------------------------------------------------------------
   # Listener egress guard (PDF-D18): a `type:"listener"` presence broadcast NEVER
   # rides the SSE fan-out — not even to an unscoped (nil-workspace) subscriber,

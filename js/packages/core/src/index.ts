@@ -77,6 +77,7 @@ export {
   deleteWebhook,
 } from './webhooks'
 export { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
+export { applyDocOp, publishPaper, applyPaperOps, proposePaperEdits } from './ops'
 export { fetchRawDoc } from './fetchRaw'
 export { createListenHandle } from './listen'
 export type { ListenOptions } from './listen'
@@ -228,6 +229,7 @@ export type {
   AssetSearchSuggestions,
   AssetSearchSuggestionsOptions,
   MediaAsset,
+  MediaAssetDocument,
   MediaAssetPage,
   AssetOptions,
   ListAssetsOptions,
@@ -286,6 +288,14 @@ export type {
   // The advisory's own type. It had never been exported — a consumer could
   // receive `warnings` on the envelope but could not name what it held.
   MutateWarning,
+  PaperOp,
+  DocOpResult,
+  PaperPublishInput,
+  PaperPublishReceipt,
+  PaperOpsOptions,
+  PaperOpsReceipt,
+  PaperProposal,
+  PaperProposalReceipt,
   OrderDirection,
   OrderField,
   OrderSpec,

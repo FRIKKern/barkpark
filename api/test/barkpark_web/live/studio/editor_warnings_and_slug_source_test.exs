@@ -130,7 +130,8 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
 
       expected = Barkpark.Tenancy.slugify("Lars Mytting")
       assert render(view) =~ expected
-      assert stored(scope).content["slug"] == expected
+      # `{current}` is the canonical slug shape (owner ruling #43).
+      assert stored(scope).content["slug"] == %{"_type" => "slug", "current" => expected}
       refute expected == Barkpark.Tenancy.slugify("Forfatter")
     end
 
@@ -162,7 +163,7 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
       |> element(~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
       |> render_click()
 
-      assert stored(scope).content["slug"] == "kjaere-ase-ovrebo",
+      assert stored(scope).content["slug"]["current"] == "kjaere-ase-ovrebo",
              "æ/å/ø must fold to ae/a/o, not collapse to hyphens (was kj-re-se-vreb)"
     end
   end

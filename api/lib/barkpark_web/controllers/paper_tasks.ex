@@ -37,7 +37,7 @@ defmodule BarkparkWeb.PaperTasks do
   # title was invisible on the dark reader — the #1217 dark-token bug class).
   @ink "var(--paper-ink, #15211d)"
   @muted "var(--paper-ink-soft, #55635e)"
-  @rule "var(--paper-rule, #dde7e2)"
+  @rule "var(--paper-rule, #e2e6e5)"
   @accent "var(--paper-accent, #1e5347)"
 
   @doc """

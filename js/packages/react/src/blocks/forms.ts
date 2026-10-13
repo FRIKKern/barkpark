@@ -9,8 +9,9 @@
 // row (compose.ex field_number_text twin) — see its section below.
 
 import { type Block, escapeHtml, escapeAttr, str, asList, isMap } from '../inline'
+import type { RenderCtx } from './chrome'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 function scaleBound(v: unknown, def: number): number {
   if (typeof v === 'number' && Number.isInteger(v)) return v
@@ -21,23 +22,28 @@ function scaleBound(v: unknown, def: number): number {
   return def
 }
 
-function choiceGroup(id: string, labels: string[], inputType: string): string {
+// An option is its own value, or a [value, label] pair when the shown label is
+// translated chrome and the submitted value must not move (task-8e96278fc4ee7097).
+type Choice = string | [string, string]
+
+function choiceGroup(id: string, labels: Choice[], inputType: string): string {
   return labels
+    .map((c) => (Array.isArray(c) ? c : ([c, c] as [string, string])))
     .map(
-      (label) =>
-        `<label class="bp-form-opt"><input type="${inputType}" name="${escapeAttr(id)}" value="${escapeAttr(label)}"> <span>${escapeHtml(label)}</span></label>`,
+      ([value, label]) =>
+        `<label class="bp-form-opt"><input type="${inputType}" name="${escapeAttr(id)}" value="${escapeAttr(value)}"> <span>${escapeHtml(label)}</span></label>`,
     )
     .join('')
 }
 
-function radioGroup(id: string, labels: string[]): string {
+function radioGroup(id: string, labels: Choice[]): string {
   return choiceGroup(id, labels, 'radio')
 }
 
-function controlHtml(type: string, id: string, q: Record<string, unknown>): string {
+function controlHtml(type: string, id: string, q: Record<string, unknown>, ctx: RenderCtx): string {
   switch (type) {
     case 'yesno':
-      return radioGroup(id, ['Yes', 'No'])
+      return radioGroup(id, [['Yes', ctx.t('Yes')], ['No', ctx.t('No')]])
     case 'single':
       return radioGroup(id, asList(q.options).map((o) => str(o)))
     case 'multi':
@@ -63,15 +69,15 @@ function mutedLine(text: unknown, prefix: string): string {
   return `<p class="bp-form-note">${escapeHtml(prefix)}${escapeHtml(text)}</p>`
 }
 
-function questionHtml(q: unknown): string {
+function questionHtml(q: unknown, ctx: RenderCtx): string {
   if (!isMap(q)) return ''
   const id = str(q.id)
   const prompt = str(q.prompt)
   const type = str(q.type) || 'text'
   const legend = `<legend>${escapeHtml(prompt)}</legend>`
   const rationale = mutedLine(q.rationale, '')
-  const recommendation = mutedLine(q.recommendation, 'Recommendation: ')
-  const control = `<div class="bp-form-opts">${controlHtml(type, id, q)}</div>`
+  const recommendation = mutedLine(q.recommendation, ctx.t('Recommendation: '))
+  const control = `<div class="bp-form-opts">${controlHtml(type, id, q, ctx)}</div>`
   // FAIL-CLOSED type-class slug (defense-in-depth, charter D23/D26 pattern —
   // mirrors core.ts apiEndpoint's methodSlug): escapeAttr already made attribute
   // breakout impossible, but an unslugified `type` with a space would inject an
@@ -85,16 +91,16 @@ function questionHtml(q: unknown): string {
   return `<fieldset class="bp-form-question${typeClass}">${legend}${rationale}${recommendation}${control}</fieldset>`
 }
 
-const form: Emit = (b) => {
+const form: Emit = (b, ctx) => {
   const kind = str(b.kind) || 'grill'
   const kindClass = kind === 'questionnaire' ? 'bp-form-questionnaire' : 'bp-form-grill'
-  const questions = asList(b.questions).map(questionHtml).join('')
+  const questions = asList(b.questions).map((q) => questionHtml(q, ctx)).join('')
   return `<section class="bp-form ${kindClass}">${questions}</section>`
 }
 
 // `questionnaire` aliases `form` with the kind defaulting to "questionnaire".
-const questionnaire: Emit = (b) =>
-  form({ ...b, type: 'form', kind: b.kind ?? 'questionnaire' } as Block)
+const questionnaire: Emit = (b, ctx) =>
+  form({ ...b, type: 'form', kind: b.kind ?? 'questionnaire' } as Block, ctx)
 
 // ── field-number (B085) — the JS twin of compose.ex field_number_text/1 and
 // pdrender fieldNumberRenderer (internal/pdrender/fields.go). A labelled

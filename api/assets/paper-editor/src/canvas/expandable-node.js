@@ -19,6 +19,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { BP_SECTION_CONTENT } from "./section-node.js";
+import { t } from "../i18n.js";
 
 export const BP_EXPANDABLE_NODE_NAME = "bpExpandable";
 const BP_TYPE = "expandable";
@@ -64,7 +65,13 @@ export const Expandable = Node.create({
   },
 
   parseHTML() {
-    return [{ tag: "details[data-bp-type='expandable']" }, { tag: "div[data-bp-type='expandable']" }];
+    // The children live in the body; the <summary> is the summary ATTR, not content
+    // (pasted, it used to come back as a body paragraph — task-d175b72aba4d5cd6).
+    const body = (dom) => dom.querySelector(":scope > .bp-expandable__body") || dom;
+    return [
+      { tag: "details[data-bp-type='expandable']", contentElement: body },
+      { tag: "div[data-bp-type='expandable']", contentElement: body },
+    ];
   },
 
   // Schema-level fallback render: the reader's own markup, open, with the body hole.
@@ -97,10 +104,10 @@ export const Expandable = Node.create({
       const summaryEl = document.createElement("input");
       summaryEl.type = "text";
       summaryEl.className = "bp-expandable__summary";
-      summaryEl.placeholder = "Summary";
+      summaryEl.placeholder = t("Summary");
       summaryEl.spellcheck = false;
       summaryEl.setAttribute("data-test-id", "paper-expandable-summary");
-      summaryEl.setAttribute("aria-label", "toggle summary");
+      summaryEl.setAttribute("aria-label", t("toggle summary"));
       summaryEl.setAttribute("contenteditable", "false");
 
       const body = document.createElement("div");

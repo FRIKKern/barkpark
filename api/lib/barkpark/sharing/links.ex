@@ -207,12 +207,21 @@ defmodule Barkpark.Sharing.Links do
   defp principal_admin?(_principal, _ws_id), do: false
 
   @doc """
-  Revoke a link only when `principal` administers the link ROW's OWN workspace.
+  Revoke a link only when `principal` administers the link ROW's OWN workspace
+  AND (task-4ad625842939ae8f) is not `dataset_bound` to some OTHER dataset than
+  the row's own. The id is the only thing the request names — there is no
+  "requested dataset" to refuse against the way `mint`/`list` have — so a
+  bound-token mismatch here is NOT a distinguishable denial: it folds into the
+  SAME `{:error, :not_found}` every other refusal already collapses to, rather
+  than a named `:forbidden_dataset` that would tell a probing caller "a link
+  with this id exists, just not in your dataset" (an existence leak this
+  function's own docstring already disclaims).
 
-  DENIAL SHAPE: a non-castable id, a missing row, a foreign row, and a row with
-  a nil `workspace_id` ALL collapse to the same `{:error, :not_found}`, so a
-  caller's 404 arm is ONE call site and a foreign row is byte-identical to a
-  missing one. No existence oracle, and no 500 from an uncast `:binary_id`.
+  DENIAL SHAPE: a non-castable id, a missing row, a foreign row, a row with a
+  nil `workspace_id`, and now a dataset_bound token's wrong-dataset row ALL
+  collapse to the same `{:error, :not_found}`, so a caller's 404 arm is ONE
+  call site and a foreign row is byte-identical to a missing one. No existence
+  oracle, and no 500 from an uncast `:binary_id`.
 
   `revoke/1` keeps its arity and its unauthorized behaviour: it has non-HTTP
   callers with no actor to authorize. Anything reachable by a REQUEST should
@@ -221,13 +230,19 @@ defmodule Barkpark.Sharing.Links do
   @spec revoke_scoped(term(), term()) :: {:ok, ShareLink.t()} | {:error, :not_found}
   def revoke_scoped(principal, id) do
     with row_id when is_binary(row_id) <- Repo.uuid_or_nil(id),
-         %ShareLink{workspace_id: ws_id} <- Repo.get(ShareLink, row_id),
-         true <- workspace_admin?(principal, ws_id) do
+         %ShareLink{workspace_id: ws_id, dataset: row_dataset} <- Repo.get(ShareLink, row_id),
+         true <- workspace_admin?(principal, ws_id),
+         true <- dataset_in_bounds?(principal, row_dataset) do
       revoke(row_id)
     else
       _ -> {:error, :not_found}
     end
   end
+
+  defp dataset_in_bounds?(%{dataset_bound: true, dataset: bound}, row_dataset),
+    do: bound == row_dataset
+
+  defp dataset_in_bounds?(_principal, _row_dataset), do: true
 
   @doc """
   Create an item link. `attrs` must carry `:workspace_id`, `:project_id`,

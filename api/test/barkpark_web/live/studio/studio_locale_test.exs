@@ -130,4 +130,311 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     assert html =~ "Structure"
     assert Tenancy.workspace_locale(default_ws) == "en"
   end
+
+  # task-33bcb0b4415bc528: the top bar, panes and profile chrome stayed English
+  # around the translated parts.
+  test "the nb-NO top bar, profile and presence chrome are Norwegian", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, editor(ws, proj))
+
+    assert html =~ ~s(aria-label="Logg ut")
+    assert html =~ ~s(aria-label="Bytt mellom mørkt og lyst tema")
+    assert html =~ "Bytt arbeidsområde — Locale Twin"
+    assert html =~ "— åpne profilen din"
+    assert html =~ "Tilbake til Struktur"
+    # The media picker's broken-image card reads the stamped strings too.
+    assert html =~ "Bildet er ikke tilgjengelig — slipp en fil her, eller klikk for å bytte"
+    assert html =~ "Bytt bilde"
+    refute html =~ ~s(aria-label="Sign out")
+    refute html =~ "Switch scope —"
+    refute html =~ "open your profile"
+  end
+
+  # task-462c98e4f1abdf92: each desk pane column is a landmark named in the
+  # Studio's language, and no landmark nests inside a pane.
+  test "the desk's pane columns are regions named in the workspace's language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, desk(ws, proj))
+    doc = LazyHTML.from_document(html)
+    panes = LazyHTML.query(doc, ~s(div.pane-column[role="region"]))
+
+    assert Enum.count(panes) >= 1
+    assert "Struktur" in LazyHTML.attribute(LazyHTML.query(doc, "#pane-structure"), "aria-label")
+
+    nested =
+      LazyHTML.query(
+        doc,
+        ".pane-column main, .pane-column [role=main], .pane-column [role=region], .pane-column nav, .pane-column aside"
+      )
+
+    assert Enum.count(nested) == 0, "a landmark nests inside a pane column"
+  end
+
+  # task-24a481a493ad60d7: the press answer (the live region that tells a screen
+  # reader what a press did) spoke English; the bar now carries its words.
+  test "the Studio bar carries the press answer's words in the workspace's language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    press_strings = fn html ->
+      [json] =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#studio-bar")
+        |> LazyHTML.attribute("data-press-strings")
+
+      Jason.decode!(json)
+    end
+
+    {:ok, _view, nb} = live(conn, desk(ws, proj))
+    assert press_strings.(nb)["Opened “%{name}”."] == "Åpnet «%{name}»."
+    assert press_strings.(nb)["Opening…"] == "Åpner …"
+
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {:ok, _view, en} = live(conn, desk(default_ws, default_proj))
+    assert press_strings.(en)["Opened “%{name}”."] == "Opened “%{name}”."
+  end
+
+  test "the default workspace keeps the English top bar", %{conn: conn} do
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {:ok, _view, html} = live(conn, desk(default_ws, default_proj))
+
+    assert html =~ ~s(aria-label="Sign out")
+    assert html =~ "Switch scope —"
+  end
+
+  # task-f2d81f691f447ed9: the sheet editor's toolbar, menus and grid
+  # instructions stayed English in an nb-NO workspace.
+  test "the nb-NO sheet editor is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "sheet",
+          "title" => "Sheets",
+          "visibility" => "private",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => "sheet-loc",
+          "content" => %{"tabs" => [%{"name" => "Data", "cells" => %{"A1" => %{"v" => 1}}}]}
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/sheet/sheet-loc")
+
+    assert html =~ ~s(aria-label="Arkformatering")
+    assert html =~ ~s(aria-label="Valutaformat")
+    assert html =~ "Slå sammen"
+    assert html =~ ~s(aria-label="Meny for kolonne A")
+    assert html =~ "Trykk Escape og så Tab for å forlate rutenettet."
+    assert html =~ "Gul"
+    assert html =~ ~s(aria-label="Fet")
+    refute html =~ ~s(aria-label="Sheet formatting")
+    refute html =~ "Press Escape then Tab"
+  end
+
+  # task-c227351a938bcf9c: the page was declared English whatever the chrome
+  # spoke, so a screen reader read Norwegian Studio with an English voice.
+  test "the page language follows the workspace's Studio language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    nb = conn |> get(desk(ws, proj)) |> html_response(200)
+    assert nb =~ ~s(<html lang="nb-NO")
+
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    en =
+      conn
+      |> get("/w/#{default_ws.slug}/p/#{default_proj.slug}/d/#{@dataset}/studio")
+      |> html_response(200)
+
+    assert en =~ ~s(<html lang="en")
+  end
+
+  # task-623e30911e8ff328: the Studio dialogs stayed English in an nb-NO
+  # workspace, and history times read "Oct 06, 2026 at 07:25:45".
+  test "the nb-NO history dialog is Norwegian, with a Norwegian time", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+    html = render_click(view, "show-history", %{})
+
+    assert html =~ "Dokumenthistorikk"
+    assert html =~ "Opprettet"
+    assert html =~ "Gjenopprett"
+    assert html =~ "Gjenopprette denne versjonen? Gjeldende endringer blir overskrevet."
+
+    assert html =~
+             ~r/\d\d\. (jan\.|feb\.|mars|apr\.|mai|juni|juli|aug\.|sep\.|okt\.|nov\.|des\.) \d{4} kl\. \d\d:\d\d:\d\d/
+
+    refute html =~ "Document history"
+    refute html =~ ~r/[A-Z][a-z]{2} \d\d, \d{4} at \d\d:/
+  end
+
+  # task-7a12da688a06f880: history printed the stored UTC time with no zone, so
+  # an Oslo editor saw their own edit as two hours old. The server render now
+  # says UTC and carries the instant, for Hooks.LocalTime to show the viewer's
+  # own clock (its jsdom test covers that side).
+  #
+  # task-79119da840602833: this test paired the FIRST <time> with the Opprettet
+  # button, but the first row is the newest revision, so main went red whenever
+  # the seed's revisions landed in different seconds. Each button is now read
+  # against the time in its OWN row; the test below pins that straddle.
+  test "nb-NO history times say UTC and carry the instant for the viewer's clock", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+    html = render_click(view, "show-history", %{})
+
+    assert has_element?(view, ~s(#history-list[phx-hook="LocalTime"]))
+
+    rows = history_rows(html)
+    assert length(rows) >= 2
+    assert_rows_pair_their_own_time(rows)
+
+    assert Enum.any?(
+             rows,
+             &(&1.local_label == "Gjenopprett versjonen fra {time} (Opprettet)")
+           )
+  end
+
+  test "each history row's restore button names its own row's time, a second apart" do
+    revisions = [
+      %{id: "rev-2", action: "update", title: "Ny tittel", inserted_at: ~U[2026-10-06 07:25:46Z]},
+      %{id: "rev-1", action: "create", title: "Utkast", inserted_at: ~U[2026-10-06 07:25:45Z]}
+    ]
+
+    html =
+      Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+        render_component(&BarkparkWeb.StudioComponents.Modals.history_modal/1,
+          show_history: true,
+          revisions: revisions
+        )
+      end)
+
+    rows = history_rows(html)
+    assert Enum.map(rows, & &1.iso) == ["2026-10-06T07:25:46Z", "2026-10-06T07:25:45Z"]
+    assert_rows_pair_their_own_time(rows)
+    assert Enum.at(rows, 1).label =~ "kl. 07:25:45 UTC (Opprettet)"
+  end
+
+  defp history_rows(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("#history-list .history-item")
+    |> Enum.map(fn row ->
+      time = LazyHTML.query(row, "time[data-local-time]")
+      button = LazyHTML.query(row, "button[phx-click=restore-revision]")
+
+      %{
+        iso: time |> LazyHTML.attribute("datetime") |> hd(),
+        text: time |> LazyHTML.text() |> String.trim(),
+        label: button |> LazyHTML.attribute("aria-label") |> hd(),
+        local_label: button |> LazyHTML.attribute("data-local-label") |> hd(),
+        datetime: button |> LazyHTML.attribute("data-datetime") |> hd()
+      }
+    end)
+  end
+
+  defp assert_rows_pair_their_own_time(rows) do
+    for row <- rows do
+      assert {:ok, instant, 0} = DateTime.from_iso8601(row.iso)
+      hms = instant |> DateTime.to_time() |> Time.truncate(:second) |> Time.to_string()
+      assert row.text =~ ~r/kl\. #{hms} UTC$/
+      assert row.label =~ ~r/^Gjenopprett versjonen fra .*kl\. #{hms} UTC \(\w+\)$/
+      assert row.datetime == row.iso
+    end
+  end
+
+  # task-42df0e13a6a35ff3: the Classic editor's save region read "Saved" in an
+  # nb-NO workspace; the paper footer already translated the same tokens.
+  test "the nb-NO classic editor's save status is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+
+    html = render_hook(view, "autosave", %{"doc" => %{"title" => "Over My Dead Body"}})
+
+    assert html =~ ~s(class="save-status" role="status" aria-live="polite">Lagret<)
+    refute html =~ ~s(aria-live="polite">Saved<)
+  end
+
+  test "the save status echoes a server text it has no word for" do
+    Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+      assert BarkparkWeb.Studio.SaveStatus.label("Saved") == "Lagret"
+      assert BarkparkWeb.Studio.SaveStatus.label("Halted by plugin X") == "Halted by plugin X"
+      assert BarkparkWeb.Studio.SaveStatus.label(nil) == ""
+    end)
+  end
+
+  # task-d4c382b7aa8ad9ef: the document panel beside a paper stayed English in
+  # an nb-NO workspace, around a half-translated Studio.
+  test "the nb-NO document panel is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "paper",
+          "title" => "Papers",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "loc-paper",
+          "title" => "Fjellet",
+          "dataset" => @dataset,
+          "blocks" => [
+            %{
+              "id" => "p1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Ein stad i fjellet."}]
+            }
+          ],
+          "workspace_id" => ws.id,
+          "project_id" => proj.id
+        })
+      )
+
+    {:ok, _view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/paper/loc-paper")
+
+    assert html =~ ~s(aria-label="Dokumentmetadata")
+    assert html =~ ">Synlighet<"
+    assert html =~ ">Datasett<"
+    assert html =~ "Relasjoner"
+    assert html =~ "Bare medlemmer"
+    assert html =~ "publisert"
+    refute html =~ ">Visibility<"
+    refute html =~ "Members only"
+    refute html =~ ~s(aria-label="Document metadata")
+  end
 end

@@ -11,6 +11,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldBlocks do
   uses; a `phx-update="ignore"` wrapper cannot be re-rendered into).
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
@@ -67,15 +69,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldBlocks do
                current_rev: current_revision(current_rev)
              }, socket}
 
+          # `why` is the vocabulary check's path and message
+          # ("paragraph/content/1/tone: must be one of positive, caution") — never
+          # a stored value. It rides the reply so the canvas can show it on the
+          # field an inline object dialog saved (task-85fee859cf3bfef6).
           {:error, {:out_of_vocabulary, why}} ->
+            {:reply, payload, socket} =
+              reply(
+                Phoenix.LiveView.put_flash(
+                  socket,
+                  :error,
+                  gettext("Not allowed in this field: %{why}", why: why)
+                ),
+                params,
+                false
+              )
+
+            {:reply, Map.put(payload, :reason, why), socket}
+
+          {:error, _reason} ->
             reply(
-              Phoenix.LiveView.put_flash(socket, :error, "Not allowed in this field: #{why}"),
+              Phoenix.LiveView.put_flash(socket, :error, gettext("Edit failed")),
               params,
               false
             )
-
-          {:error, _reason} ->
-            reply(Phoenix.LiveView.put_flash(socket, :error, "Edit failed"), params, false)
         end
     end
   end

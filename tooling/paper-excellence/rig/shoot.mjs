@@ -150,12 +150,13 @@ const BREAKOUT_SELECTOR = ".bp-table, .bp-stats, .bp-chart, .bp-diff, .bp-filetr
 // section opened at 51.3px with no rule at all — 1.9em of the h2's own font size,
 // which is prose rhythm wearing a section's job.
 //
-// The numbers are PINNED to the artifact rather than read back out of the CSS.
-// Reading `--bp-section-beat` and comparing the render to it would pass for any
-// value the token happened to hold; pinning 92 means shrinking the token reds
-// here, which is the only version of this assertion worth having.
-const SECTION_BEAT_PX = 92;
-// Sub-pixel layout rounding plus the ~0.04px the 4.18 ratio leaves against 92.
+// The numbers are PINNED rather than read back out of the CSS. Reading
+// `--bp-section-beat` and comparing the render to it would pass for any value
+// the token happened to hold; pinning means moving the token reds here, which is
+// the only version of this assertion worth having. 2026-10-05: the owner judged
+// the artifact's 92px a shout; the beat is 2.2 air beats (48.4px) since then.
+const SECTION_BEAT_PX = 48;
+// Sub-pixel layout rounding plus the ~0.4px the 2.2 ratio leaves against 48.
 const SECTION_BEAT_TOL_PX = 2;
 const SECTION_RULE_MIN_PX = 1;
 

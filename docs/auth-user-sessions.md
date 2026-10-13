@@ -23,6 +23,29 @@ reset also revokes every live session of that user, and the JSON door reports
 the count: `POST /v1/auth/reset` answers `{ok: true, sessionsRevoked: n}`
 (`AuthController`, PDS-D503) — a receipt, not a promise; `n` is what the revoke
 actually stamped.
+The reset also deletes the user's passkeys and social links and revokes every
+personal API token they own (`Privacy.strip_added_credentials!/1`, owner ruling
+#13), so nothing a session thief added survives recovery. Tokens nobody owns,
+such as the credential Barkpark Cloud holds, are untouched. Minting a personal
+token (`POST /v1/auth/tokens`) needs `current_password` in the body or a
+session that presented an MFA factor within the step-up window; otherwise it
+answers 401 `reauth_required`.
+
+**Seat consent (ruling #7, 2026-10-03).** `POST /w/:ws/p/:p/v1/members` for a
+confirmed existing account stores a `workspace_invitations` row and answers
+`202 {invitation}`; nothing is seated until the user accepts
+(`GET /v1/auth/invitations`, `POST …/:id/accept`, `DELETE …/:id` declines;
+admins list/withdraw at `…/v1/invitations`). New emails and unconfirmed
+accounts are still seated at once. An unconfirmed one is reclaimed first, by
+design (`Privacy.reclaim_unconfirmed/1`): password replaced, sessions deleted,
+no mail sent. The `201` says so (`reclaimed: true` plus an `account_reclaimed`
+warning, which `bp` prints). To keep a seeded editor's password, confirm it
+first: `mix barkpark.user.confirm <email>`, or in a release
+`bin/barkpark eval 'Barkpark.Release.confirm_email("<email>")'`
+(`Accounts.confirm_user_by_operator/1`). A user-owned token is rotated only by its
+owner (`403 owner_only`); admins revoke instead. `POST /v1/auth/tokens` takes
+`workspace` (slug/id); a user in several workspaces without it gets `422
+workspace_required` listing them.
 
 ## Sessions
 
@@ -35,6 +58,18 @@ actually stamped.
   `is_nil(expires_at) or expires_at > now` — the only expiry check on the read
   path.
 - **Liveness.** `last_used_at` is refreshed on every successful verify.
+- **A bearer too.** The `/v1/auth/login` token works as `Authorization: Bearer`
+  on the data API. `x-requested-with` (CSRF) guards the session COOKIE only;
+  `OptionalSessionToken` records `:current_user_via` so the hard gate can tell.
+  `GET /v1/auth/token` answers a session bearer with `kind: "session"` and every
+  seat (`can.read/write/publish/admin`, `publish` = `write`). A member seat
+  writes, as in LiveView Studio; a member's self-minted PAT stays `["read"]`
+  (`Auth.max_pat_permissions_for_role/1`, a minting policy). The scoped
+  listen and presence streams take it too, from a member only and as the
+  bearer only (`RequireTokenOrMemberSession`); listen re-checks the session
+  and the seat mid-stream. The flat listen stays API-token only. The switcher's
+  lists (`GET /api/workspaces`, `…/projects`, `…/datasets`) take it too, as the
+  bearer, listing only what its user is seated in.
 - **Kill switch.** `revoked_at` is set by `revoke_user_session_token/1`
   (single logout) and `revoke_all_user_sessions/1` (sign-out-everywhere).
 
@@ -139,13 +174,22 @@ governed, factor-less user still logs in (the body adds
 `403 mfa_enrolment_required` except `/me`, `/logout`, and the TOTP/passkey
 enrolment endpoints (`RequireOrgMfaEnrolment` in the `:require_user` pipeline).
 Enrolling any factor opens the gate. Flag unset everywhere → byte-identical.
+An enrolled governed user must PRESENT the factor at sign-in (owner ruling
+#14, `SessionIssuer.org_factor_required?/2`): password and magic-link
+sign-ins need the TOTP code, a passkey-only member signs in at the passkey
+door, and a social sign-in (which carries no factor) is refused with 401
+`mfa_required` naming those doors.
 
 ## Field encryption (at rest)
 
 `Barkpark.Crypto.FieldCipher` wraps a value in an AES-256-GCM envelope
-`%{"_bpenc" => 1, "k" => version, "v" => base64}`. The DEK scope is the GCM AAD;
+`%{"_bpenc" => 1 | 2, "k" => version, "v" => base64}`. The DEK scope is the GCM AAD;
 content fields encrypt under scope `"dataset:" <> dataset`. `DataKeys` manages
-the active DEK, versioned rotation, and rewrap.
+the active DEK, versioned rotation, and rewrap. A content write seals version 2,
+whose AAD also binds the type, the published doc id and the top-level field, so
+an envelope copied to another document or field is refused (422
+`validation_failed`). Version 1 (bare scope) envelopes still decrypt; a clone
+re-seals for its own id.
 
 **Ciphertext-at-rest is never auto-decrypted on read.** Normal reads — search,
 drafts, broadcasts, export — keep ciphertext and never see plaintext.
@@ -178,7 +222,10 @@ the legacy `render/1`.
 `owner_scoped` field types let a document carry an owner principal; a non-admin
 caller sees only rows they own on the surfaces threaded through the visibility
 chokepoint. Like everything above it is opt-in: declare nothing and ownership is
-inert.
+inert. Ruling #9 (2026-10-03): a token with `owner_user_id` (PAT) acts as that
+user (service tokens keep see-all), updates keep the stored owner, Studio
+account sockets act as the signed-in user, and history/restore follow the
+document's owner rule.
 
 ## HTTP surface & manifest
 

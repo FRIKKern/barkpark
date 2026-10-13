@@ -245,7 +245,8 @@ defmodule Barkpark.ContentClassicSaveGuardTest do
 
       # Old behavior: content rebuilt from the form map, no blocks introduced.
       refute Map.has_key?(saved.content, "blocks")
-      assert saved.content["slug"] == "legacy-2"
+      # `{current}` is the canonical slug shape (owner ruling #43).
+      assert saved.content["slug"] == %{"_type" => "slug", "current" => "legacy-2"}
     end
   end
 

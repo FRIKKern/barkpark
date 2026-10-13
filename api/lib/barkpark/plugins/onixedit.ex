@@ -93,6 +93,9 @@ defmodule Barkpark.Plugins.OnixEdit do
     end
   end
 
+  # OnixEdit's document actions, which act on `book` documents only.
+  @book_only_actions ["export_onix", "publish_to_bokbasen"]
+
   @impl Barkpark.Plugin
   def action_handlers do
     %{
@@ -122,12 +125,19 @@ defmodule Barkpark.Plugins.OnixEdit do
     scope = scope_from_ctx(ctx)
 
     handler =
-      if scope == [] do
-        &Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3
-      else
-        fn doc_id, dataset, mode ->
-          Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode, scope)
-        end
+      cond do
+        # Bokbasen takes books only: on another type say so, instead of the
+        # book lookup's "No document loaded" for a document that is right there.
+        not_a_book?(ctx) ->
+          fn _doc_id, _dataset, _mode -> {:error, :not_a_book} end
+
+        scope == [] ->
+          &Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen/3
+
+        true ->
+          fn doc_id, dataset, mode ->
+            Barkpark.Plugins.OnixEdit.Actions.publish_to_bokbasen(doc_id, dataset, mode, scope)
+          end
       end
 
     Map.put(prev, "publish_to_bokbasen", handler)
@@ -314,9 +324,14 @@ defmodule Barkpark.Plugins.OnixEdit do
   `accepted` or `rejected`, the button comes back so the publisher can
   re-publish (e.g. after a metadata fix).
 
-  Only filters when `doc_type == "book"`; non-book documents are
-  untouched. The companion `action_handlers/0` entry stays registered
-  — the handler still runs whenever the action is NOT hidden.
+  OnixEdit's actions act on `book` documents only (`Actions` loads a
+  `book`; the ONIX export enforces `_type == "book"`). A schema of another
+  type that declares one (a fixture `volume` declares `publish_to_bokbasen`)
+  does not get it listed: on a non-book document both `export_onix` and
+  `publish_to_bokbasen` are dropped. A direct dispatch on a non-book gets the
+  handler `resolve_action_handlers/2` resolves for it, which answers
+  `{:error, :not_a_book}` (a 422 over HTTP), never a preview. The companion
+  `action_handlers/0` entry stays registered.
 
   This is the concrete proof of the Goal `barkpark-cjs` resolver
   refactor: a plugin conditionally removes a host-baseline action from
@@ -325,12 +340,21 @@ defmodule Barkpark.Plugins.OnixEdit do
   """
   @impl Barkpark.Plugin
   def resolve_doc_actions(prev, ctx) do
-    if hide_publish_action?(ctx) do
-      Enum.reject(prev, fn action -> action["name"] == "publish_to_bokbasen" end)
-    else
-      prev
+    cond do
+      not_a_book?(ctx) ->
+        Enum.reject(prev, fn action -> action["name"] in @book_only_actions end)
+
+      hide_publish_action?(ctx) ->
+        Enum.reject(prev, fn action -> action["name"] == "publish_to_bokbasen" end)
+
+      true ->
+        prev
     end
   end
+
+  # A document whose type is known and is not `book`: OnixEdit's actions can't act on it.
+  defp not_a_book?(%{doc_type: type}) when is_binary(type), do: type != "book"
+  defp not_a_book?(_), do: false
 
   # `bp_export_status` lives under the doc's `content` map. The doc may arrive
   # as a `%Document{}` struct (atom `:content` field), a plain map with an atom

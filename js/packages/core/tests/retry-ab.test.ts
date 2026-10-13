@@ -192,7 +192,7 @@ async function interleave(
 // ---------------------------------------------------------------------------
 
 describe.skipIf(!RUN)('A/B arm A — live box', () => {
-  const BASE = process.env.BARKPARK_API_URL ?? 'http://89.167.28.206'
+  const BASE = process.env.BARKPARK_API_URL ?? 'https://guerrilla.barkpark.cloud'
   const URL = `${BASE}/v1/data/query/production/post?query=${encodeURIComponent('*[_type=="post"][0..2]')}`
 
   it(
@@ -438,7 +438,7 @@ describe('recorded A/B measurement — shelf-life pin', () => {
     // The prod-facing arm stays behind the env gate, unconditionally. This
     // asserts the gate expression itself rather than trusting the comment: with
     // BARKPARK_RETRY_AB unset (CI), RUN is false and arm A is skipped, so no
-    // request is issued to BARKPARK_API_URL / the default 89.167.28.206.
+    // request is issued to BARKPARK_API_URL / the default guerrilla box.
     expect(RUN).toBe(process.env.BARKPARK_RETRY_AB === '1')
     if (process.env.BARKPARK_RETRY_AB !== '1') expect(RUN).toBe(false)
   })

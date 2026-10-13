@@ -107,11 +107,41 @@ defmodule Barkpark.PortableDoc.Projection do
   string/slug/text/select/datetime/color/image/reference, a real boolean for
   field-boolean, a structured map/list for composite/arrayOf/localizedText, a
   scalar code for codelist). So projection is a verbatim copy of `"value"` —
-  no transformation, no loss. A bound block with no `"value"` projects `nil`,
+  no transformation, no loss (but see the image exception below). A bound block with no `"value"` projects `nil`,
   which clears the index entry for that field.
   """
+  #
+  # ONE exception, the image picker (task-7d500331aeb7aed2): `bp-media-picker`
+  # emits its value as a JSON STRING `{url, assetId, alt?, …}`. Classic's save
+  # decodes it into a map (`Content.Forms`), so a Beta edit must too, or the
+  # stored image becomes a string-in-a-string that consumers re-parse and the
+  # v2 walker reads as a bare URL (its subfields, e.g. a typed `alt`, missing).
+  # A bare URL stays a string; a string that only looks like JSON stays as is.
   @spec projected_value(block()) :: term()
+  def projected_value(%{"type" => "field-image", "value" => value}) when is_binary(value),
+    do: decode_image_value(value)
+
   def projected_value(block) when is_map(block), do: Map.get(block, "value")
+
+  @doc """
+  An image value as stored: a string holding a JSON object is that object
+  (the picker's `{url, assetId, alt, ...}`); any other value is returned
+  as is. Shared by the block-op save path and the repair of values saved
+  before it (`Barkpark.Content.ShapeMigrations.StringifiedImages`).
+  """
+  @spec decode_image_value(term()) :: term()
+  def decode_image_value(value) when not is_binary(value), do: value
+
+  def decode_image_value(value) do
+    trimmed = String.trim(value)
+
+    with true <- String.starts_with?(trimmed, "{"),
+         {:ok, %{} = map} <- Jason.decode(trimmed) do
+      map
+    else
+      _ -> value
+    end
+  end
 
   @doc """
   Project a freshly-written block list into `content`, the SOLE writer of

@@ -60,4 +60,38 @@ defmodule Barkpark.Content.SchemaNullDatasetIdUniqueTest do
                "fields" => []
              })
   end
+
+  # 20261005210000: the index is split by owner. Shared rows (workspace_id NULL)
+  # keep the one-per-(name, dataset) rule above; each workspace gets its own.
+  describe "NULL-dataset_id rows owned by a workspace" do
+    setup do
+      ws_a = Barkpark.TenancyFixtures.create_workspace!()
+      ws_b = Barkpark.TenancyFixtures.create_workspace!()
+      %{a: ws_a.id, b: ws_b.id}
+    end
+
+    defp owned(ws_id, title) do
+      %{
+        "name" => "null-ds-owned",
+        "title" => title,
+        "dataset" => "production",
+        "fields" => [],
+        "workspace_id" => ws_id
+      }
+    end
+
+    test "a shared row and two workspaces' rows of the same name coexist", ctx do
+      assert {:ok, %{workspace_id: nil}} = insert_schema(owned(nil, "Shared"))
+      assert {:ok, %{workspace_id: a}} = insert_schema(owned(ctx.a, "A"))
+      assert {:ok, %{workspace_id: b}} = insert_schema(owned(ctx.b, "B"))
+      assert {a, b} == {ctx.a, ctx.b}
+    end
+
+    test "one workspace cannot hold two", ctx do
+      assert {:ok, _} = insert_schema(owned(ctx.a, "A"))
+      assert {:error, changeset} = insert_schema(owned(ctx.a, "A again"))
+      assert {_, opts} = changeset.errors[:name]
+      assert opts[:constraint_name] == "schema_definitions_ws_name_dataset_null_dataset_id_index"
+    end
+  end
 end

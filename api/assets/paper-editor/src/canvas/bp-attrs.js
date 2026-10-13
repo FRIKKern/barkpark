@@ -23,6 +23,7 @@
 // inert until mounted in an Editor, so it imports cleanly.
 
 import { Extension } from "@tiptap/core";
+import { t } from "../i18n.js";
 
 // The block node types runToTiptap stamps as top-level run-nodes. A heading and
 // a paragraph project to themselves; a `list` block projects to a bulletList or
@@ -72,7 +73,7 @@ export const BpAttrs = Extension.create({
               attrs.locked === true
                 ? {
                     "data-bp-locked": "true",
-                    title: "Part of the document template",
+                    title: t("Part of the document template"),
                   }
                 : {},
           },

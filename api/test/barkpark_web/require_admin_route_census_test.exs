@@ -394,6 +394,31 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "ensure_workspace_admin",
        "ShareLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
 
+    # task-6812c3100d7aedbc — same confinement shape as /v1/shares/links above,
+    # UNTIL task-0548f06277c4712e.
+    #
+    # {:get, "/v1/shares/preview-links"} and
+    # {:delete, "/v1/shares/preview-links/:id"} REMOVED (task-0548f06277c4712e):
+    # both moved off `[:api, :require_admin]` onto the SAME
+    # `[:api, :require_token, :flat_within_quota, :require_write]` scope
+    # `:post` already lives on (see the {:post, ...} removal note below), so
+    # neither falls in THIS census's population any more. A write-capable
+    # member now reaches both -- list sees only the links THEY minted
+    # (`ensure_can_list/2`), revoke only lets them revoke their own
+    # (`PreviewLinks.revoke_scoped/2`'s creator check); an admin keeps
+    # list-all/revoke-all through the same functions. See
+    # preview_link_own_list_revoke_test.exs for the refusal-case coverage.
+    #
+    # {:post, "/v1/shares/preview-links"} REMOVED (task-9cfe08fe1e91b6c9):
+    # mint/2 moved off `[:api, :require_admin]` onto its own
+    # `[:api, :require_token, :flat_within_quota, :require_write]` scope, so
+    # it no longer falls in THIS census's population at all (this file only
+    # tracks routes gated by `RequireAdmin`, per the moduledoc). Its
+    # workspace-specific confinement is now `ensure_can_mint/2` (admin OR a
+    # write-capable member) -- a stronger requirement than `RequireAdmin`
+    # ever was; see preview_link_member_mint_test.exs for its own
+    # refusal-case coverage.
+
     # ── /api/workspaces/:workspace_slug/media ──
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path"} =>
       {:tenant_bound, "TenancyAuth.workspace_admin?",
@@ -477,6 +502,16 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "scope_opts(conn)", "Content.upsert_schema/3 stamps the scope."},
     {:delete, "/v1/schemas/:dataset/:name"} =>
       {:tenant_bound, "scope_opts(conn)", "Content.delete_schema under scope_opts/1."},
+
+    # ── :flat_admin_api — preview JWT mint (task-8f7cba7f65cb343c) ──
+    {:post, "/v1/preview-tokens"} =>
+      {:tenant_bound, "scope_opts(conn)",
+       "PreviewTokenController.mint/2 signs workspace_id/project_id from scope_opts/1 (the " <>
+         "ADMIN's own token-derived scope) into the minted JWT -- never from the caller's " <>
+         "`dataset` string or any other param, so the token can only ever read within the " <>
+         "minting admin's own tenant. No DELETE /v1/preview-tokens/:jti route exists: " <>
+         "preview_token_jti carries no workspace column to fence a bare-jti selector with " <>
+         "(see that controller's moduledoc)."},
 
     # ── :flat_admin_api — fleet support tokens ──
     {:post, "/v1/fleet/support-tokens"} =>

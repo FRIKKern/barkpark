@@ -152,6 +152,9 @@ defmodule Barkpark.Media.Delivery.Search do
     )
     |> scope_media_to_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_filter_sha1(Keyword.get(opts, :sha1))
+    |> maybe_filter_mime_list(Keyword.get(opts, :mime_types))
+    |> maybe_exclude_types(Keyword.get(opts, :exclude_types))
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
     |> maybe_filter_text(dataset, opts)
@@ -589,8 +592,11 @@ defmodule Barkpark.Media.Delivery.Search do
     |> exclude(:order_by)
     |> exclude(:limit)
     |> exclude(:offset)
-    |> group_by([_m, d], fragment("?->>'bp_visibility'", d.content))
-    |> select([m, d], {fragment("?->>'bp_visibility'", d.content), count(m.id, :distinct)})
+    |> group_by([_m, d], fragment("COALESCE(?->>'bp_visibility', 'public')", d.content))
+    |> select(
+      [m, d],
+      {fragment("COALESCE(?->>'bp_visibility', 'public')", d.content), count(m.id, :distinct)}
+    )
     |> Repo.all()
     |> facet_values()
   end
@@ -747,7 +753,8 @@ defmodule Barkpark.Media.Delivery.Search do
            idx + 1}
 
         {:visibility, value}, {parts, params, idx} ->
-          {parts ++ ["AND d.content->>'bp_visibility' = $#{idx}"], params ++ [value], idx + 1}
+          {parts ++ ["AND COALESCE(d.content->>'bp_visibility', 'public') = $#{idx}"],
+           params ++ [value], idx + 1}
 
         {:collection, value}, {parts, params, idx} ->
           {parts ++ ["AND d.content->>'collection' = $#{idx}"], params ++ [value], idx + 1}
@@ -1132,8 +1139,16 @@ defmodule Barkpark.Media.Delivery.Search do
   defp maybe_filter_visibility(query, nil), do: query
   defp maybe_filter_visibility(query, ""), do: query
 
+  # An asset with no stored visibility IS public (`Access.visibility/1`), so the
+  # filter and the facet below read the same COALESCE the clamp does
+  # (task-f6f3e95109f87705). Read bare, `visibility=public` matched nothing on a
+  # dataset whose assets predate the field.
   defp maybe_filter_visibility(query, visibility) when is_binary(visibility) do
-    where(query, [_m, d], fragment("?->>? = ?", d.content, "bp_visibility", ^visibility))
+    where(
+      query,
+      [_m, d],
+      fragment("COALESCE(?->>?, 'public') = ?", d.content, "bp_visibility", ^visibility)
+    )
   end
 
   # THE UNAUTHENTICATED READ CLAMP (task-27d5fdba100d2bc6 item 3).
@@ -1165,6 +1180,39 @@ defmodule Barkpark.Media.Delivery.Search do
   end
 
   defp maybe_clamp_visibility(query, _), do: query
+
+  # task-b6e57c37f6928344 — exact content-hash match (`?sha1=`).
+  defp maybe_filter_sha1(query, sha1) when is_binary(sha1),
+    do: where(query, [m], m.sha1 == ^sha1)
+
+  defp maybe_filter_sha1(query, _), do: query
+
+  # task-774f99d9dd029e24 — `mime=a/b,c/*`: any exact type or `type/*` family.
+  # Entries arrive validated (MediaController), so `*` only ever ends a family.
+  defp maybe_filter_mime_list(query, [_ | _] = entries) do
+    {families, exact} = Enum.split_with(entries, &String.ends_with?(&1, "/*"))
+
+    prefixes =
+      Enum.map(families, &(&1 |> String.trim_trailing("*") |> escape_like() |> Kernel.<>("%")))
+
+    where(
+      query,
+      [m],
+      fragment("lower(?)", m.mime_type) in ^exact or
+        fragment("lower(?) LIKE ANY(?)", m.mime_type, ^prefixes)
+    )
+  end
+
+  defp maybe_filter_mime_list(query, _), do: query
+
+  # `exclude_type=image,video`: drop these top-level types. A row with no mime
+  # type is kept (it is not an image).
+  defp maybe_exclude_types(query, [_ | _] = types) do
+    prefixes = Enum.map(types, &(escape_like(&1) <> "/%"))
+    where(query, [m], not fragment("coalesce(lower(?), '') LIKE ANY(?)", m.mime_type, ^prefixes))
+  end
+
+  defp maybe_exclude_types(query, _), do: query
 
   defp maybe_filter_mime(query, nil), do: query
   defp maybe_filter_mime(query, ""), do: query

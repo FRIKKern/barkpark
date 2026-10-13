@@ -45,16 +45,19 @@ defmodule BarkparkWeb.LiveAuth do
       closed). Runs in the scoped + admin + plugin Studio live_sessions
       (router.ex).
 
-  Both hooks read `session["api_token"]` (the raw bearer token), verify it
-  via `Barkpark.Auth`, and halt with a redirect to `/studio` on failure.
+  Both hooks resolve the browser credential via `Barkpark.Auth.
+  resolve_session_credential/2`, which tries `session["api_token_session"]`
+  (a revocable session row, ruling #16 rework half, task-57f23825b18ab55d)
+  then falls back to the legacy `session["api_token"]` raw bearer for one
+  release, and halt with a redirect to `/studio` on failure.
 
   Tests inject the session token with `Plug.Test.init_test_session/2`.
 
   Browser sessions are bootstrapped at `GET /login` (see
   `BarkparkWeb.SessionController`), where a human pastes their raw API
-  token. The controller stores it under `session["api_token"]` after
-  verifying via `Barkpark.Auth.verify_token/1`. `POST /logout` clears
-  the session.
+  token. The controller mints a `Barkpark.Auth.TokenSession` and stores only
+  its opaque id under `session["api_token_session"]`. `POST /logout` deletes
+  that row and clears the session.
 
   A failed `on_mount` redirects to `/studio` with an error flash. To
   recover, the user navigates to `/login` and pastes a valid token.
@@ -63,8 +66,11 @@ defmodule BarkparkWeb.LiveAuth do
   import Phoenix.LiveView
   import Phoenix.Component, only: [assign: 3]
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias Barkpark.Auth
   alias BarkparkWeb.Studio.ReturnTo
+  alias BarkparkWeb.StudioLocale
 
   # A chat-session deep link (`/studio/chat/:id`) — the shape the notifier emails
   # point at (charter D69). ONLY these earn a `return_to` round-trip; the bare
@@ -72,8 +78,11 @@ defmodule BarkparkWeb.LiveAuth do
   # admin surface keep the `/studio` funnel, so the gate suite stays byte-stable.
   @chat_deep_link ~r{^/studio/chat/[^/?#]+$}
 
-  def on_mount(:admin, _params, session, socket) do
-    authorize(socket, session, ["admin"], "Admin access required")
+  def on_mount(:admin, params, session, socket) do
+    authorize(socket, session, ["admin"], fn ->
+      put_denial_locale(params, session)
+      gettext("Admin access required")
+    end)
   end
 
   # W26 (charter D219-D222) — authorize against the workspace IN THE URL, not a
@@ -107,8 +116,11 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
-  def on_mount(:ops, _params, session, socket) do
-    authorize(socket, session, ["ops", "admin"], "Operator access required")
+  def on_mount(:ops, params, session, socket) do
+    authorize(socket, session, ["ops", "admin"], fn ->
+      put_denial_locale(params, session)
+      gettext("Operator access required")
+    end)
   end
 
   def on_mount(:require_org_mfa, _params, session, socket) do
@@ -129,19 +141,21 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   def on_mount(:fetch_api_token, _params, session, socket) do
-    raw =
-      case session["api_token"] do
-        token when is_binary(token) and token != "" -> token
-        _ -> dev_browser_token_fallback()
-      end
+    session_id = session["api_token_session"]
+    legacy_raw = session["api_token"]
+    explicit_present? = Auth.session_credential_present?(session_id, legacy_raw)
 
     # Server-only provenance: a failed/revoked effective credential must not be
     # indistinguishable from a genuinely anonymous Studio mount. This includes
-    # both an explicit session bearer and the configured dev-browser fallback.
-    # Most public Studio remains intentionally open in demo posture, but a
-    # reconnect that still attempts an invalidated bearer may never inherit
-    # that authority.
-    token_credential_present? = is_binary(raw) and raw != ""
+    # both an explicit session credential and the configured dev-browser
+    # fallback. Most public Studio remains intentionally open in demo posture,
+    # but a reconnect that still attempts an invalidated bearer may never
+    # inherit that authority. The dev fallback is only even TRIED when no
+    # explicit session credential was presented — a presented-but-dead
+    # explicit credential must not silently fall through to it.
+    token_credential_present? =
+      explicit_present? or
+        (is_binary(dev_browser_token_fallback()) and dev_browser_token_fallback() != "")
 
     socket =
       socket
@@ -149,29 +163,38 @@ defmodule BarkparkWeb.LiveAuth do
       |> assign(:api_token_credential_present?, token_credential_present?)
       |> arm_session_teardown(session)
 
-    case raw do
-      nil ->
-        {:cont,
-         socket
-         |> assign(:api_token, nil)
-         |> assign(:api_token_raw, "")}
+    resolved =
+      if explicit_present? do
+        Auth.resolve_session_credential(session_id, legacy_raw)
+      else
+        Auth.resolve_session_credential(nil, dev_browser_token_fallback())
+      end
 
-      token ->
-        case Auth.verify_token(token) do
-          {:ok, api_token} ->
-            {:cont,
-             socket
-             |> assign(:api_token, api_token)
-             |> assign(:api_token_raw, token)
-             |> arm_revocation_teardown(api_token)}
+    {:cont, socket} =
+      case resolved do
+        {:ok, api_token, raw} ->
+          {:cont,
+           socket
+           |> assign(:api_token, api_token)
+           |> assign(:api_token_raw, raw)
+           |> arm_revocation_teardown(api_token)}
 
-          _ ->
-            {:cont,
-             socket
-             |> assign(:api_token, nil)
-             |> assign(:api_token_raw, "")}
-        end
-    end
+        :error ->
+          {:cont,
+           socket
+           |> assign(:api_token, nil)
+           |> assign(:api_token_raw, "")}
+      end
+
+    # Whether this viewer passes the `:ops` gate, once per mount, so the
+    # Studio chrome can leave out the links that gate refuses
+    # (task-f859c5f7f3a0f9f5).
+    {:cont,
+     assign(
+       socket,
+       :ops_access?,
+       ops_access?(socket.assigns[:api_token], socket.assigns[:current_user])
+     )}
   end
 
   # studio-user-login: resolve the account session (`user_session` cookie,
@@ -227,20 +250,69 @@ defmodule BarkparkWeb.LiveAuth do
 
   # Dev token first: the host running Barkpark locally always gets
   # admin+ops, even if the browser is carrying a stale/insufficient
-  # `session["api_token"]` from earlier manual testing. In non-dev envs
+  # session credential from earlier manual testing. In non-dev envs
   # `dev_browser_token_fallback/0` is nil, so this is a no-op there and
-  # the real session token (or the user_session path) decides.
+  # the real session credential (or the user_session path) decides.
+  # OWNER RULING 2026-10-03 #2, the LiveView twin of `RequireAdmin`: the
+  # `:admin` gate (flat admin LiveViews: settings, plugin settings, …) also
+  # needs the token's holder to still have admin authority where it acts — a
+  # demoted or removed seat no longer opens them. The `:ops` gate is untouched.
+  defp admin_seat_ok?(["admin"], api_token),
+    do: BarkparkWeb.Plugs.RequireAdmin.admin_seat?(%{assigns: %{}}, api_token)
+
+  defp admin_seat_ok?(_allowed_perms, _api_token), do: true
+
+  # task-7efa49ea242a3e04 — `:admin`/`:ops` run FIRST in the on_mount chain,
+  # before `StudioChrome.on_mount` ever sets the workspace locale, so a
+  # denial flash from either hook used to be hardcoded English for every
+  # member regardless of their workspace's language. Both hooks also front
+  # some `/w/:workspace_slug/...` live_sessions (`:scoped_plugin_ops`,
+  # `:scoped_admin_studio_dataset`, router.ex) alongside the pure-global ones
+  # (`/studio/settings`), so `scoped_target_workspace/1` — the SAME resolver
+  # `:scoped_admin` uses — is tried first; a route with no workspace_slug
+  # param (and the actual authorization decision in `authorize_user/3`,
+  # unchanged, still checks the DEFAULT workspace, not this one) takes the
+  # locale of the caller's OWN workspace — the one `ScopeResolver` lands them
+  # in, which is where the denial redirect sends them (task-d8e3d76ad251bf73:
+  # an nb member opening /studio/tickets was told "Admin access required" in
+  # Default's English). Default answers only when nothing resolves (anonymous,
+  # or no membership).
+  #
+  # Called from the denial flash builder, so this runs only on a denial: an
+  # admin who passes pays for no extra lookup.
+  defp put_denial_locale(params, session) do
+    ws =
+      scoped_target_workspace(params) ||
+        BarkparkWeb.Studio.ScopeResolver.resolve_workspace(denial_principal(session))
+
+    StudioLocale.put(ws)
+  end
+
+  # The same precedence `ScopeResolver.principal/1` uses: a verified session
+  # token wins over the account session.
+  defp denial_principal(session) do
+    case Auth.resolve_session_credential(session["api_token_session"], session["api_token"]) do
+      {:ok, api_token, _raw} -> api_token
+      _ -> user_from_session(session)
+    end
+  end
+
   defp authorize(socket, session, allowed_perms, denial_flash) do
-    candidates = Enum.filter([dev_browser_token_fallback(), session["api_token"]], &is_binary/1)
+    candidates = [
+      Auth.resolve_session_credential(nil, dev_browser_token_fallback()),
+      Auth.resolve_session_credential(session["api_token_session"], session["api_token"])
+    ]
 
     granted =
-      Enum.find_value(candidates, fn token ->
-        with {:ok, api_token} <- Auth.verify_token(token),
-             true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) do
-          api_token
-        else
-          _ -> nil
-        end
+      Enum.find_value(candidates, fn
+        {:ok, api_token, _raw} ->
+          if Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) and
+               admin_seat_ok?(allowed_perms, api_token) do
+            api_token
+          end
+
+        :error ->
+          nil
       end)
 
     case granted do
@@ -309,13 +381,19 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
+  # task-7efa49ea242a3e04 — unlike the on_mount denial flashes above, these
+  # two need NO locale resolution of their own: `handle_info` runs in the
+  # SAME long-lived LiveView process as the `mount`/`handle_params` that got
+  # this far, which only happens after `StudioChrome.on_mount` already put
+  # the workspace's locale into THIS process's Gettext dictionary. `gettext/1`
+  # here reads whatever that earlier call set.
   defp revocation_teardown(
          %Phoenix.Socket.Broadcast{event: "disconnect", topic: "user_socket:user_session:" <> _},
          socket
        ) do
     {:halt,
      socket
-     |> put_flash(:error, "You were signed out — sign in again")
+     |> put_flash(:error, gettext("You were signed out — sign in again"))
      |> redirect(to: "/login")}
   end
 
@@ -325,7 +403,7 @@ defmodule BarkparkWeb.LiveAuth do
        ) do
     {:halt,
      socket
-     |> put_flash(:error, "Your access token was revoked — sign in again")
+     |> put_flash(:error, gettext("Your access token was revoked — sign in again"))
      |> redirect(to: "/login")}
   end
 
@@ -347,7 +425,7 @@ defmodule BarkparkWeb.LiveAuth do
       _ ->
         {:halt,
          socket
-         |> put_flash(:error, denial_flash)
+         |> put_flash(:error, denial_flash.())
          |> redirect(to: denial_target(socket, session))}
     end
   end
@@ -371,13 +449,12 @@ defmodule BarkparkWeb.LiveAuth do
   # outside :dev, so the exemption is inert in test/prod.
   defp scoped_admin_authorize(socket, session, ws) do
     granted =
-      Enum.find_value(scoped_admin_candidates(session), fn {kind, raw} ->
-        with {:ok, api_token} <- Auth.verify_token(raw),
-             true <- scoped_admin_grant?(kind, api_token, ws) do
-          api_token
-        else
-          _ -> nil
-        end
+      Enum.find_value(scoped_admin_candidates(session), fn
+        {kind, {:ok, api_token, _raw}} ->
+          if scoped_admin_grant?(kind, api_token, ws), do: api_token
+
+        {_kind, :error} ->
+          nil
       end)
 
     case granted do
@@ -418,10 +495,11 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   defp scoped_admin_candidates(session) do
-    Enum.filter(
-      [dev_root: dev_browser_token_fallback(), session: session["api_token"]],
-      fn {_kind, raw} -> is_binary(raw) end
-    )
+    [
+      {:dev_root, Auth.resolve_session_credential(nil, dev_browser_token_fallback())},
+      {:session,
+       Auth.resolve_session_credential(session["api_token_session"], session["api_token"])}
+    ]
   end
 
   defp scoped_admin_grant?(:dev_root, api_token, _ws),
@@ -442,14 +520,25 @@ defmodule BarkparkWeb.LiveAuth do
          true <- Barkpark.Tenancy.Auth.workspace_admin?(user, ws.id) do
       {:cont, socket |> assign(:current_user, user) |> arm_session_teardown(session)}
     else
-      _ -> scoped_admin_deny(socket)
+      # The TARGET workspace is already resolved here (it is this function's
+      # own `ws` argument) — a denied member still gets the denial in THEIR
+      # workspace's language, not English, before StudioChrome ever mounts.
+      _ -> scoped_admin_deny(socket, ws)
     end
   end
 
-  defp scoped_admin_deny(socket) do
+  # `ws` is `nil` from the two call sites where the URL's workspace_slug
+  # never resolved at all (task-7efa49ea242a3e04) — an unknown workspace has
+  # no locale to put, so those stay on whatever the process already carries
+  # (English, same as before this fix). The one call site that DOES hold a
+  # resolved target workspace (`scoped_admin_authorize_user/3` above) passes
+  # it, and that is the real-world case the task's repro hits.
+  defp scoped_admin_deny(socket, ws \\ nil) do
+    if ws, do: StudioLocale.put(ws)
+
     {:halt,
      socket
-     |> put_flash(:error, "Admin access required")
+     |> put_flash(:error, gettext("Admin access required"))
      |> redirect(to: "/studio")}
   end
 
@@ -505,7 +594,8 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   defp anonymous?(session) do
-    blank?(session["api_token"]) and blank?(session["user_session"])
+    blank?(session["api_token_session"]) and blank?(session["api_token"]) and
+      blank?(session["user_session"])
   end
 
   defp blank?(value), do: not (is_binary(value) and value != "")
@@ -522,4 +612,48 @@ defmodule BarkparkWeb.LiveAuth do
 
   defp query_suffix(query) when is_binary(query) and query != "", do: "?" <> query
   defp query_suffix(_query), do: ""
+
+  @doc """
+  Whether a viewer would pass the `:ops` gate (`on_mount(:ops, …)`): a bearer holding `ops` or
+  `admin`, or an account that administers the Default workspace. The same two
+  arms as `authorize/4` + `authorize_user/3`, read from the credentials the
+  Studio already holds, so its chrome can leave out a link the gate refuses
+  (task-f859c5f7f3a0f9f5).
+  """
+  @spec ops_access?(Auth.ApiToken.t() | nil, Barkpark.Accounts.User.t() | nil) :: boolean()
+  def ops_access?(api_token, user) do
+    token_ops?(api_token) or default_workspace_admin?(user)
+  end
+
+  defp token_ops?(%Auth.ApiToken{} = token),
+    do: Enum.any?(["ops", "admin"], &Auth.has_permission?(token, &1))
+
+  defp token_ops?(_token), do: false
+
+  defp default_workspace_admin?(%Barkpark.Accounts.User{} = user) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} -> Barkpark.Tenancy.Auth.authorize(user, ws_id, :admin) == :ok
+      _ -> false
+    end
+  end
+
+  defp default_workspace_admin?(_user), do: false
+
+  @doc """
+  Whether `path` is a LiveView route behind the `:ops` gate, read from the
+  router's own live_session `on_mount` list, so any plugin's ops console
+  answers without a list of paths to keep in step.
+  """
+  @spec ops_gated_path?(String.t()) :: boolean()
+  def ops_gated_path?(path) when is_binary(path) do
+    case Phoenix.Router.route_info(BarkparkWeb.Router, "GET", path, "") do
+      %{phoenix_live_view: {_view, _action, _opts, %{extra: %{on_mount: hooks}}}} ->
+        Enum.any?(hooks, &match?(%{id: {BarkparkWeb.LiveAuth, :ops}}, &1))
+
+      _ ->
+        false
+    end
+  end
+
+  def ops_gated_path?(_path), do: false
 end

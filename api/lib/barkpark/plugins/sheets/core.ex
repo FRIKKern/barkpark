@@ -317,7 +317,7 @@ defmodule Barkpark.Plugins.Sheets.Core do
   """
   @spec display_value(map()) :: String.t()
   def display_value(%{"v" => v} = cell) when is_binary(v),
-    do: Fmt.display(v, Map.get(cell, "fmt"))
+    do: Fmt.display(v, Map.get(cell, "fmt"), Map.get(cell, "cur"))
 
   # Near-ceiling floats overflow Fmt's numeric-class pre-format multiply
   # (percent v*100; currency/fixed/thousands 10^decimals) and Erlang floats
@@ -330,7 +330,7 @@ defmodule Barkpark.Plugins.Sheets.Core do
     do: number_to_display(v)
 
   def display_value(%{"v" => v} = cell) when is_number(v),
-    do: Fmt.display(v, Map.get(cell, "fmt"))
+    do: Fmt.display(v, Map.get(cell, "fmt"), Map.get(cell, "cur"))
 
   # Booleans render TRUE/FALSE — the Studio grid (`SheetGrid.display/1`) and
   # the engine's own text coercion (`TRUE&""` → `"TRUE"`) both speak Excel's

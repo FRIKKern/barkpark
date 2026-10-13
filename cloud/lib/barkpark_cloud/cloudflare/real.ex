@@ -130,6 +130,28 @@ defmodule BarkparkCloud.Cloudflare.Real do
   end
 
   @impl true
+  def lookup_dns_name(token, zone_id, name) when is_binary(zone_id) and is_binary(name) do
+    with {:ok, token} <- present_token(token),
+         {:zone, {:ok, %{"result" => %{"name" => zone_name}}}} when is_binary(zone_name) <-
+           {:zone, request(get_zone_request(token, zone_id))},
+         {:records, {:ok, %{"result" => records}}} when is_list(records) <-
+           {:records, request(list_dns_records_request(token, zone_id, name))} do
+      {:ok,
+       %{
+         zone_name: zone_name,
+         records:
+           for %{"id" => id} = r <- records do
+             %{id: id, type: r["type"], content: r["content"], name: r["name"]}
+           end
+       }}
+    else
+      {:error, _} = err -> err
+      {_step, {:error, _} = err} -> err
+      _ -> {:error, :unexpected_response}
+    end
+  end
+
+  @impl true
   def create_origin_ca_cert(hostnames, csr) when is_list(hostnames) and is_binary(csr) do
     with {:ok, key} <- origin_ca_key(),
          {:ok, decoded} <- request(create_origin_ca_cert_request(key, hostnames, csr)) do
@@ -175,6 +197,22 @@ defmodule BarkparkCloud.Cloudflare.Real do
       })
 
     build_request(method, path, token, body, "application/json")
+  end
+
+  @doc "`GET /zones/:zone` — the zone's own record, whose `name` is the apex. PURE."
+  def get_zone_request(token, zone_id) do
+    build_request(:get, "/zones/" <> URI.encode(zone_id), token, "", "application/json")
+  end
+
+  @doc "`GET /zones/:zone/dns_records?name=<name>` — every record for one name. PURE."
+  def list_dns_records_request(token, zone_id, name) do
+    build_request(
+      :get,
+      "/zones/" <> URI.encode(zone_id) <> "/dns_records?" <> URI.encode_query(%{"name" => name}),
+      token,
+      "",
+      "application/json"
+    )
   end
 
   @doc """

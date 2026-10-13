@@ -2161,6 +2161,7 @@ defmodule BarkparkWeb.TasksController.Params do
   # `inspect/1` on the tuple would leak Elixir syntax (`{:not_holder, "w"}`) into
   # a JSON `reason` field that the bp CLI and the pr-task gate both string-match.
   def reason_to_string({:not_holder, held}), do: "not_holder:#{held || "?"}"
+  def reason_to_string({:not_holder, held, :lapsed}), do: "not_holder:#{held || "?"}"
 
   def reason_to_string({:criteria_unmet, indices}) when is_list(indices),
     do: "criteria_unmet:#{Enum.join(indices, ",")}"
@@ -2424,6 +2425,17 @@ defmodule BarkparkWeb.TasksController.Params do
         ~s|task is the normal case), say so and it lands, recorded: | <>
         ~s|--set holder_override="<why you are closing someone else's claim>". | <>
         ~s|This is an HONESTY gate, not authorization — it stops accidents and makes deliberate foreign closes auditable.|
+
+  # The same gate on a claim whose lease has run out (task-9da6b9544b747bba): the
+  # map still names a worker, but nobody holds the row, so "held by" would send
+  # a lane to ask another lane for a row nobody has.
+  def criteria_hint({:not_holder, held, :lapsed}, :close),
+    do:
+      ~s|this task's claim map names "#{held || "someone else"}", but that lease has expired, so nobody | <>
+        ~s|holds the row now. Closing it as the worker you named would still record a close of THEIR claim. | <>
+        ~s|If that is what you mean, say so and it lands, recorded: | <>
+        ~s|--set holder_override="<why you are closing a lapsed claim>". | <>
+        ~s|Or claim it first (`bp task claim <id> <worker>`) and close it as yours.|
 
   def criteria_hint({:criteria_unmet, indices}, :close) when is_list(indices),
     do:

@@ -42,6 +42,8 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 
 await import("../index.js");
 const { insertSlashTypeAtSelection } = await import("./command-palette.js");
+// The block holds the slash's own "/query", so the pick replaces it.
+const SLASH_PICK = { replaceText: true };
 
 const tick = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
 const canvases = [];
@@ -65,7 +67,7 @@ try {
   // ── heading: the default text is selected, so typing overtypes it ──
   {
     const { canvas, editor } = await mount();
-    assert.equal(insertSlashTypeAtSelection(editor, "heading"), true);
+    assert.equal(insertSlashTypeAtSelection(editor, "heading", undefined, SLASH_PICK), true);
     const { selection } = editor.state;
     const picked = editor.state.doc.textBetween(selection.from, selection.to);
     assert.equal(picked, "New heading",
@@ -88,7 +90,7 @@ try {
   };
   for (const [type, selector] of Object.entries(expected)) {
     const { canvas, editor } = await mount();
-    assert.equal(insertSlashTypeAtSelection(editor, type), true, `${type} is insertable`);
+    assert.equal(insertSlashTypeAtSelection(editor, type, undefined, SLASH_PICK), true, `${type} is insertable`);
     await tick(40);
     const active = document.activeElement;
     const blockDom = editor.view.nodeDOM(editor.state.selection.from);
@@ -105,7 +107,7 @@ try {
   // ── a divider: the caret lands on the line below, so typing keeps the divider ──
   {
     const { canvas, editor } = await mount();
-    assert.equal(insertSlashTypeAtSelection(editor, "divider"), true);
+    assert.equal(insertSlashTypeAtSelection(editor, "divider", undefined, SLASH_PICK), true);
     await tick(40);
     editor.commands.insertContent("After the rule");
     const types = [];

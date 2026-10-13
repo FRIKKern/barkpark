@@ -182,6 +182,9 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
     end
 
     test "the label add affordance writes one complete weighted-tag entry", %{conn: conn} do
+      # A label must be registered (task-3a5b9cda74564d1c: a non-admin cannot
+      # register one from the sidebar), as the walk below also arranges.
+      register_tag!(@tag_name)
       create_draft_paper!("affordance-label", skeleton_blocks())
       {:ok, view, html} = open_paper(conn, "affordance-label")
 

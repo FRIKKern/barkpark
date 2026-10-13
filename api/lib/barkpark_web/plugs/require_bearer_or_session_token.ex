@@ -4,7 +4,10 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
 
     * `Authorization: Bearer …` — API clients and Web Components that
       receive `data-token` from LiveView, or
-    * `session["api_token"]` — browser Studio after `POST /login`.
+    * `session["api_token_session"]` — browser Studio after `POST /login`
+      (a revocable session id resolved via `Barkpark.Auth.
+      resolve_session_credential/2`, which also tolerates the legacy
+      `session["api_token"]` raw-bearer shape for one release).
 
   Requires `:fetch_session` upstream. Used by `/media/upload` and
   `/media/:id` DELETE so same-origin browser uploads work with the
@@ -23,7 +26,7 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
 
   The Studio uploaders (`bp-asset-explorer`, `bp-media-picker`) authenticate
   with `Authorization: Bearer <data-token>` — the raw token LiveAuth derives
-  from `session["api_token"]` — so they take the bearer branch and never hit
+  from the session credential — so they take the bearer branch and never hit
   this check. Bearer (API/external) callers are unaffected: APIs don't use
   cookies and aren't a CSRF target.
   """
@@ -38,18 +41,18 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
     |> assign_from_bearer()
     |> case do
       {:ok, conn} ->
-        conn
+        refuse_off_binding(conn)
 
       {:error, conn} ->
         conn
         |> assign_from_session()
         |> case do
           {:ok, conn} ->
-            require_csrf_header(conn)
+            conn |> require_csrf_header() |> refuse_off_binding()
 
           {:error, conn} ->
             case account_session?(conn) do
-              true -> require_csrf_header(conn)
+              true -> require_account_csrf(conn)
               false -> unauthorized(conn)
             end
         end
@@ -108,6 +111,19 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
       match?(%{id: id} when is_binary(id), conn.assigns[:current_workspace])
   end
 
+  # The account arm's CSRF guard applies to the COOKIE door only
+  # (task-a89ef18ee88ba6a0). A login session presented as `Authorization:
+  # Bearer` (`OptionalSessionToken` records `:current_user_via, :bearer`) is
+  # not an ambient credential — a cross-site form or image cannot attach that
+  # header — so it is exempt exactly like the API-token bearer above. Anything
+  # else, including a missing marker, is treated as the cookie: fail closed.
+  defp require_account_csrf(conn) do
+    case conn.assigns[:current_user_via] do
+      :bearer -> conn
+      _ -> require_csrf_header(conn)
+    end
+  end
+
   # CSRF guard for the cookie branch only. Bearer callers return above and
   # never reach here. A same-origin custom header proves the request came
   # from first-party JS rather than a forged cross-site form/img submit.
@@ -129,12 +145,12 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
   end
 
   defp assign_from_session(conn) do
-    case get_session(conn, "api_token") do
-      raw when is_binary(raw) and raw != "" ->
-        verify_and_assign(conn, raw)
-
-      _ ->
-        {:error, conn}
+    case Auth.resolve_session_credential(
+           get_session(conn, "api_token_session"),
+           get_session(conn, "api_token")
+         ) do
+      {:ok, token, _raw} -> {:ok, assign(conn, :api_token, token)}
+      :error -> {:error, conn}
     end
   end
 
@@ -143,6 +159,18 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
       {:ok, token} -> {:ok, assign(conn, :api_token, token)}
       _ -> {:error, conn}
     end
+  end
+
+  # A token minted with an explicit `dataset` is refused on any other dataset
+  # (task-9d76210585fa665b). This plug is the only credential door on the flat
+  # `:media_mutate` pipeline, which runs no `ResolveWorkspace`, so the shared
+  # predicate is applied here too.
+  defp refuse_off_binding(%Plug.Conn{halted: true} = conn), do: conn
+
+  defp refuse_off_binding(conn) do
+    if BarkparkWeb.Plugs.RequireToken.dataset_off_binding?(conn, conn.assigns[:api_token]),
+      do: halt_with(conn, {:error, :forbidden_dataset}),
+      else: conn
   end
 
   defp unauthorized(conn) do

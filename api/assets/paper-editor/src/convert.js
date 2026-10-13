@@ -36,7 +36,8 @@ function coerceInlineText(value) {
 // reader folds in inline.ex apply_mark/3) → the TipTap mark the canvas edits. A mark
 // the canvas has no editor for returns null and is left out of the projection.
 function flatMarkToTiptap(mark) {
-  const type = mark && typeof mark === "object" ? mark.type : null;
+  // BPML stores a mark as a bare string ("code"); the editor stores {type}.
+  const type = typeof mark === "string" ? mark : mark && typeof mark === "object" ? mark.type : null;
   switch (type) {
     case "bold": case "strong": return { type: "bold" };
     case "italic": case "em": return { type: "italic" };
@@ -55,6 +56,19 @@ function flatMarkToTiptap(mark) {
   }
 }
 
+// An unknown flat mark rides as a bpOpaqueMark (./opaque-mark.js) holding the stored
+// mark and its leaf's whole `marks` array verbatim, so a save writes both back.
+const OPAQUE_MARK = "bpOpaqueMark";
+// A mark object may name itself `_type` (Portable Text's spelling) instead of `type`;
+// it is carried the same way (task-87c8c9503e4f6028).
+function opaqueMarkToTiptap(mark, leafMarks) {
+  const nameOf = (m) => (typeof m.type === "string" && m.type !== "" ? m.type : m._type);
+  const named = typeof mark === "string" ? mark !== "" :
+    mark && typeof mark === "object" && !Array.isArray(mark) && typeof nameOf(mark) === "string" && nameOf(mark) !== "";
+  if (!named) return null;
+  return { type: OPAQUE_MARK, attrs: { mark: deepCloneJson(mark), leaf: deepCloneJson(leafMarks) } };
+}
+
 // Walk one portable-doc inline node, accumulating active marks, and push the
 // resulting flat TipTap text nodes into `out`.
 function inlineToTiptapNodes(node, marks, out) {
@@ -67,7 +81,8 @@ function inlineToTiptapNodes(node, marks, out) {
       // touched block keeps — what the reader paints.
       const text = coerceInlineText(node.value) || coerceInlineText(node.text);
       if (text.length === 0) return;
-      const own = Array.isArray(node.marks) ? node.marks.map(flatMarkToTiptap).filter(Boolean) : [];
+      const own = Array.isArray(node.marks)
+        ? node.marks.map((m) => flatMarkToTiptap(m) || opaqueMarkToTiptap(m, node.marks)).filter(Boolean) : [];
       const all = [...marks, ...own];
       const tnode = { type: "text", text };
       if (all.length) tnode.marks = all.map((m) => ({ ...m }));
@@ -75,10 +90,14 @@ function inlineToTiptapNodes(node, marks, out) {
       return;
     }
     case "code": {
-      // inline code is a leaf in portable-doc; in TipTap it is a `code` mark.
+      // inline code is a leaf in portable-doc; in TipTap it is a `code` mark. The
+      // leaf's own flat `marks` ride like a text leaf's, so typing inside the code
+      // writes them back (task-87c8c9503e4f6028).
       const text = node.value || "";
       if (text.length === 0) return;
-      out.push({ type: "text", text, marks: [...marks, { type: "code" }] });
+      const own = Array.isArray(node.marks)
+        ? node.marks.map((m) => flatMarkToTiptap(m) || opaqueMarkToTiptap(m, node.marks)).filter(Boolean) : [];
+      out.push({ type: "text", text, marks: [...marks, { type: "code" }, ...own].map((m) => ({ ...m })) });
       return;
     }
     case "strong": {
@@ -181,11 +200,30 @@ function inlineToTiptapNodes(node, marks, out) {
       });
       return;
     }
+    // `chip` is a reader-known inline (render/inline.ex) the editor has no UI
+    // for yet (inline objects: task-85fee859cf3bfef6): carried verbatim.
+    case "chip":
+      out.push(inlineOpaqueNode(node, marks));
+      return;
     default:
-      // Unknown inline type: render its children if any, else drop.
+      // Any other typed inline node the editor does not know is carried VERBATIM
+      // as an inert atom (task-a110126ce9111388). It used to render its children
+      // or, childless, DROP — and the first save of its paragraph then deleted it
+      // from the stored document. Only a node with no type at all still falls
+      // back to its children.
+      if (typeof node.type === "string" && node.type !== "") {
+        out.push(inlineOpaqueNode(node, marks));
+        return;
+      }
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, marks, out));
       return;
   }
+}
+
+function inlineOpaqueNode(node, marks) {
+  const atom = { type: "bpInlineOpaque", attrs: { node: deepCloneJson(node) } };
+  if (marks.length) atom.marks = marks.map((m) => ({ ...m }));
+  return atom;
 }
 
 // Match the list readers: arrays, encoded arrays, content-first maps, then text.
@@ -321,9 +359,10 @@ const LEAF_KINDS = ["code", "blockref", "tag", "valueref"];
 // value-leaf (if any), then wrap the remaining marks from inner to outer.
 function tiptapTextNodeToPd(tnode) {
   const text = tnode.text || "";
+  const { flat, rest } = opaqueLeafMarks(tnode.marks || []);
   // Collect wrappers, ordered outer→inner per MARK_ORDER.
   const wrappers = [];
-  (tnode.marks || []).forEach((m) => {
+  rest.forEach((m) => {
     const w = markToPd(m);
     if (w) wrappers.push(w);
   });
@@ -337,6 +376,7 @@ function tiptapTextNodeToPd(tnode) {
   const nestW = wrappers.filter((w) => !LEAF_KINDS.includes(w.kind));
 
   let node = leafNode(leaf, text);
+  if (flat) node.marks = flat;
 
   // Wrap from inner-most non-leaf mark outward.
   for (let i = nestW.length - 1; i >= 0; i--) {
@@ -352,6 +392,32 @@ function tiptapTextNodeToPd(tnode) {
     }
   }
   return node;
+}
+
+// A run holding bpOpaqueMarks came from a text leaf whose flat `marks` named a mark
+// the canvas has no editor for. Rebuild that leaf's `marks` in its stored order and
+// spelling: each opaque mark verbatim, and each known one the run still carries.
+// The run's other marks (outer wrappers, marks added since) wrap as usual.
+function opaqueLeafMarks(marks) {
+  const opaque = marks.filter((m) => m.type === OPAQUE_MARK && m.attrs && m.attrs.mark);
+  if (!opaque.length) return { flat: null, rest: marks };
+  const stored = opaque.map((m) => m.attrs.leaf).find(Array.isArray) || [];
+  const same = (run, known) => run.type === known.type &&
+    (known.type !== "link" || ((run.attrs && run.attrs.href) || "") === known.attrs.href);
+  const used = new Set();
+  const flat = [];
+  stored.forEach((entry) => {
+    const known = flatMarkToTiptap(entry);
+    const hit = known ? marks.find((m) => same(m, known))
+      : opaque.find((m) => jsonEqual(m.attrs.mark, entry));
+    if (!hit) return;
+    flat.push(deepCloneJson(entry));
+    used.add(hit);
+  });
+  opaque.forEach((m) => {
+    if (!used.has(m)) flat.push(deepCloneJson(m.attrs.mark));
+  });
+  return { flat, rest: marks.filter((m) => !used.has(m) && m.type !== OPAQUE_MARK) };
 }
 
 // The value-leaf node for a flat text run: `code` → value from text; `blockref`
@@ -402,8 +468,35 @@ function pdKindToMark(kind) {
 // round-trips through these two, never a reinvented inline serializer.
 export function tiptapInlineToPd(content) {
   return (content || [])
-    .filter((n) => n.type === "text" || n.type === "hardBreak")
-    .map(n => tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n));
+    .filter((n) => n.type === "text" || n.type === "hardBreak" || n.type === "bpInlineOpaque")
+    .map((n) => {
+      if (n.type === "bpInlineOpaque") return inlineOpaqueToPd(n);
+      return tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n);
+    });
+}
+
+// The stored node back, byte-exact, inside the wrappers its marks name (the
+// same wrapping tiptapTextNodeToPd gives a text run).
+function inlineOpaqueToPd(atom) {
+  let node = deepCloneJson((atom.attrs && atom.attrs.node) || {});
+  const wrappers = (atom.marks || []).map(markToPd).filter((w) => w && !LEAF_KINDS.includes(w.kind));
+  wrappers.sort(
+    (a, b) => MARK_ORDER.indexOf(pdKindToMark(a.kind)) - MARK_ORDER.indexOf(pdKindToMark(b.kind)),
+  );
+  for (let i = wrappers.length - 1; i >= 0; i--) {
+    const w = wrappers[i];
+    if (w.kind === "link") {
+      node = { type: "link", href: w.href, children: [node] };
+    } else if (w.kind === "wikilink") {
+      const wrapped = { type: "wikilink", target: w.target, children: [node] };
+      if (w.alias != null) wrapped.alias = w.alias;
+      if (w.docId != null) wrapped.docId = w.docId;
+      node = wrapped;
+    } else {
+      node = { type: w.kind, children: [node] };
+    }
+  }
+  return node;
 }
 
 // ── block ⇄ TipTap document ────────────────────────────────────────────────

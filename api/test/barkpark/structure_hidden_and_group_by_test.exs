@@ -97,6 +97,47 @@ defmodule Barkpark.StructureHiddenAndGroupByTest do
     refute Enum.any?(rest.items, &(&1.type_name == "catalogueRow"))
   end
 
+  # task-9df0043eb4ecf3cc — hidden is a DISPLAY opt-out. A direct link to the
+  # type's list or to one of its documents still opens, through the ungated
+  # resolution tree, like any other off-desk type (#1851). It used to answer
+  # "this desk has no section named catalogueRow".
+  test "desk.hidden keeps a type off the desk but its list and documents open from a direct URL" do
+    {_panes, editor} = PaneBuilder.build(@dataset, ["catalogueRow", "cr-1"])
+
+    assert is_map(editor), "the hidden type's document must open from its URL"
+    assert editor.type == "catalogueRow"
+    assert Content.published_id(editor.doc.doc_id) == "cr-1"
+
+    {panes, _editor} = PaneBuilder.build(@dataset, ["catalogueRow"])
+    list = List.last(panes)
+
+    assert list.type_name == "catalogueRow",
+           "the hidden type's list must open: #{inspect(Enum.map(panes, & &1[:id]))}"
+
+    refute "catalogueRow" in all_type_names(Structure.build(@dataset)),
+           "the desk itself still leaves the type out"
+  end
+
+  # Follow-up (found on guerrilla): opened by URL, the hidden type is walked
+  # through the RESOLUTION tree, and the group pane drawn beside it listed every
+  # type of that tree, the hidden one included. A rendered list pane draws only
+  # what the displayed desk lists; the walk still finds the hidden node.
+  test "a hidden type opened by URL is not listed in any pane beside it" do
+    {panes, editor} = PaneBuilder.build(@dataset, ["catalogueRow", "cr-1"])
+    assert is_map(editor), "the hidden type's document still opens"
+
+    listed =
+      for pane <- panes,
+          item <- pane[:items] || [],
+          Map.get(item, :type) == :item,
+          do: Map.get(item, :type_name) || item.id
+
+    refute "catalogueRow" in listed,
+           "a rendered pane lists the hidden type: #{inspect(Enum.map(panes, & &1[:title]))}"
+
+    assert "publication" in listed, "the visible types still list beside it"
+  end
+
   test "groupBy declares one child list per `over` document, filtered on the `by` path" do
     schema!("deskStructure", "Desk", %{
       "singleton" => true,

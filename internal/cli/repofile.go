@@ -32,6 +32,10 @@ type repoFile struct {
 	Workspace string `json:"workspace,omitempty"`
 	Project   string `json:"project,omitempty"`
 	Dataset   string `json:"dataset,omitempty"`
+	// Goal narrows `bp tasks` to one task id and its descendants, for a repo
+	// that works one goal inside a shared workspace. Only the board reads it;
+	// every other command ignores it, and an older bp ignores the key.
+	Goal string `json:"goal,omitempty"`
 
 	// Path is where the file was found (attribution for error/receipt text);
 	// never serialized.

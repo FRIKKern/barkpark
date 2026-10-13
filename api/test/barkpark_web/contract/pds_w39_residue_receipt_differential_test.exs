@@ -153,7 +153,10 @@ defmodule BarkparkWeb.Contract.PDSW39ResidueReceiptDifferentialTest do
 
       second =
         conn
-        |> recycle()
+        # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+        # conn.private's rate-limit test scope, silently sharing the whole-suite
+        # IP bucket on this METERED route (RateLimit plug in its pipeline).
+        |> recycle_scoped()
         |> auth()
         |> put(
           "/v1/plugins/settings/#{name}",
@@ -221,7 +224,7 @@ defmodule BarkparkWeb.Contract.PDSW39ResidueReceiptDifferentialTest do
 
       second =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> auth()
         |> put("/v1/secrets/#{name}", Jason.encode!(%{value: "w39r-secret-6666"}))
         |> json_response(200)

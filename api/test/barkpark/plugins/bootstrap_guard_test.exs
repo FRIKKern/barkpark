@@ -79,8 +79,23 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
     Bootstrap.install_for_plugin(plugin_entry(), {ws.id, project.id})
   end
 
+  # The tenant-owned rows. Bootstrap also installs a shared copy
+  # (workspace_id and dataset_id both NULL, task-be5eaec4a5b9e524); it is
+  # counted on its own in the "shared copy" test below.
   defp rows do
-    from(s in SchemaDefinition, where: s.name == ^GuardStub.schema_name()) |> Repo.all()
+    from(s in SchemaDefinition,
+      where: s.name == ^GuardStub.schema_name(),
+      where: not (is_nil(s.workspace_id) and is_nil(s.dataset_id))
+    )
+    |> Repo.all()
+  end
+
+  defp shared_rows do
+    from(s in SchemaDefinition,
+      where: s.name == ^GuardStub.schema_name(),
+      where: is_nil(s.workspace_id) and is_nil(s.dataset_id)
+    )
+    |> Repo.all()
   end
 
   defp ensure_dataset!(project, slug) do
@@ -295,5 +310,23 @@ defmodule Barkpark.Plugins.BootstrapGuardTest do
     # The Default-scoped duplicate still gets inserted — the guard changed
     # nothing on this path (the read never matched the foreign row).
     assert length(rows()) == 2
+  end
+
+  # The shared copy is never pulled data, so the guard does not hold it back:
+  # a workspace outside Default still reads the plugin's own declaration.
+  test "a STAMPED Default slot still gets the shared copy", ctx do
+    insert_pulled_row!(%{
+      workspace_id: ctx.default_ws.id,
+      project_id: ctx.default_project.id,
+      dataset_id: ctx.default_ds.id
+    })
+
+    {:ok, _} = Tenancy.set_pull_provenance(ctx.default_ws.id, @dataset, @stamp)
+
+    capture_log(fn -> assert {:ok, 1} = run_bootstrap() end)
+
+    assert [shared] = shared_rows()
+    assert shared.title == "Plugin Title"
+    assert_all_eight_pulled(hd(rows()))
   end
 end

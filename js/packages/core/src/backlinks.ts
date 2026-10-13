@@ -6,7 +6,7 @@
 // `GET /v1/data/backlinks/:dataset/:id`, which is fail-closed server-side:
 // referencing sources the caller can't see are dropped, never leaked.
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { assertSegment } from './util/guards'
 import { request } from './transport'
 import type { BarkparkClientConfig, BacklinksResult, BacklinksOptions } from './types'
@@ -22,7 +22,7 @@ export async function getBacklinks(
   opts?: BacklinksOptions,
 ): Promise<BacklinksResult> {
   assertSegment(id, 'id')
-  const path = `${scopePrefix(config)}/v1/data/backlinks/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
+  const path = `${dataPath(config, 'backlinks')}/${encodeURIComponent(id)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<BacklinksResult & { result?: BacklinksResult }>(

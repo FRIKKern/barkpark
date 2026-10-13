@@ -92,7 +92,7 @@
   --bp-img-margin: 0 0 22px;
   --bp-img-radius: 3px;
   --st-info: #2563eb;
-  --st-ok: #0d9488;
+  --st-ok: #0f766e;
   --st-warn: #d97706;
   --st-danger: #dc2626;
   --st-violet: #7c3aed;
@@ -100,13 +100,14 @@
   --paper-bg-deep: #eaf1ee;
   --paper-ink: #15211d;
   --paper-ink-soft: #55635e;
-  --paper-ink-faint: #82918b;
-  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-ink-faint: #62706b;
+  --paper-ink-faint-line: #82918b;
+  --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(21, 33, 29, 0.08);
   --paper-accent: #1e5347;
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
-  --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-chrome-border: rgba(0, 0, 0, 0.09);
   --paper-reading-accent: #a23925;
   --tok-reading-font: "Iowan Old Style", "Palatino Linotype", Palatino, Charter, Georgia, "Source Serif 4", serif;
   --tok-reading-heading-weight: 600;
@@ -129,9 +130,9 @@
   --tok-air-callout: calc(var(--tok-air-beat) * 1.55);
   --tok-air-stats: calc(var(--tok-air-beat) * 1.64);
   --tok-air-figure: calc(var(--tok-air-beat) * 1.82);
-  --tok-section-beat: calc(var(--tok-air-beat) * 4.18);
+  --tok-section-beat: calc(var(--tok-air-beat) * 2.2);
   --tok-section-rule: 2px;
-  --tok-section-gap: 16px;
+  --tok-section-gap: 12px;
   --tok-rule-hairline: 1px;
   --tok-evidence-band: 1040px;
   --tok-evidence-band-max: 1240px;
@@ -185,13 +186,14 @@
   --paper-bg-deep: #131d19;
   --paper-ink: #e7ede9;
   --paper-ink-soft: #9aaaa3;
-  --paper-ink-faint: #6c7a74;
-  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-ink-faint: #788680;
+  --paper-ink-faint-line: #6c7a74;
+  --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(231, 237, 233, 0.09);
   --paper-accent: #45b394;
   --paper-accent-soft: rgba(70, 179, 148, 0.16);
   --paper-chrome-bg: #131d19;
-  --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-chrome-border: rgba(255, 255, 255, 0.10);
   --paper-reading-accent: #d98a6a;
   --ok-hsl: 142 52% 52%;
   --warn-hsl: 38 94% 56%;
@@ -222,13 +224,14 @@
   --paper-bg-deep: #eaf1ee;
   --paper-ink: #15211d;
   --paper-ink-soft: #55635e;
-  --paper-ink-faint: #82918b;
-  --paper-rule: rgba(21, 33, 29, 0.09);
+  --paper-ink-faint: #62706b;
+  --paper-ink-faint-line: #82918b;
+  --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(21, 33, 29, 0.08);
   --paper-accent: #1e5347;
   --paper-accent-soft: rgba(30, 83, 71, 0.10);
   --paper-chrome-bg: #f6faf9;
-  --paper-chrome-border: rgba(21, 33, 29, 0.12);
+  --paper-chrome-border: rgba(0, 0, 0, 0.09);
   --paper-reading-accent: #a23925;
   --ok-hsl: 142 72% 26%;
   --warn-hsl: 35 92% 38%;
@@ -254,13 +257,14 @@
   --paper-bg-deep: #131d19;
   --paper-ink: #e7ede9;
   --paper-ink-soft: #9aaaa3;
-  --paper-ink-faint: #6c7a74;
-  --paper-rule: rgba(231, 237, 233, 0.10);
+  --paper-ink-faint: #788680;
+  --paper-ink-faint-line: #6c7a74;
+  --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(231, 237, 233, 0.09);
   --paper-accent: #45b394;
   --paper-accent-soft: rgba(70, 179, 148, 0.16);
   --paper-chrome-bg: #131d19;
-  --paper-chrome-border: rgba(231, 237, 233, 0.13);
+  --paper-chrome-border: rgba(255, 255, 255, 0.10);
   --paper-reading-accent: #d98a6a;
   --ok-hsl: 142 52% 52%;
   --warn-hsl: 38 94% 56%;
@@ -286,13 +290,14 @@
   --paper-bg-deep: #f0ecf3;
   --paper-ink: #241e27;
   --paper-ink-soft: #565059;
-  --paper-ink-faint: #7e7a81;
-  --paper-rule: rgba(36, 30, 39, 0.09);
+  --paper-ink-faint: #6e6a71;
+  --paper-ink-faint-line: #7e7a81;
+  --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(36, 30, 39, 0.08);
   --paper-accent: #7b3a96;
   --paper-accent-soft: rgba(123, 58, 150, 0.10);
   --paper-chrome-bg: #fcf9fd;
-  --paper-chrome-border: rgba(36, 30, 39, 0.12);
+  --paper-chrome-border: rgba(0, 0, 0, 0.09);
   --paper-reading-accent: #302ba5;
   --ok-hsl: 137.37 45.8% 35.72%;
   --warn-hsl: 40.11 100% 29.89%;
@@ -318,13 +323,14 @@
   --paper-bg-deep: #151117;
   --paper-ink: #e1dde3;
   --paper-ink-soft: #a29da4;
-  --paper-ink-faint: #6f6b70;
-  --paper-rule: rgba(225, 221, 227, 0.10);
+  --paper-ink-faint: #807c81;
+  --paper-ink-faint-line: #6f6b70;
+  --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(225, 221, 227, 0.09);
   --paper-accent: #c78ae0;
   --paper-accent-soft: rgba(199, 138, 224, 0.16);
   --paper-chrome-bg: #151117;
-  --paper-chrome-border: rgba(225, 221, 227, 0.13);
+  --paper-chrome-border: rgba(255, 255, 255, 0.10);
   --paper-reading-accent: #8480ea;
   --ok-hsl: 133.37 34.29% 57.81%;
   --warn-hsl: 36.55 62.65% 53.22%;
@@ -350,13 +356,14 @@
   --paper-bg-deep: #f4ece9;
   --paper-ink: #291d19;
   --paper-ink-soft: #5b504c;
-  --paper-ink-faint: #827a76;
-  --paper-rule: rgba(41, 29, 25, 0.09);
+  --paper-ink-faint: #726a66;
+  --paper-ink-faint-line: #827a76;
+  --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(41, 29, 25, 0.08);
   --paper-accent: #b34e1e;
   --paper-accent-soft: rgba(179, 78, 30, 0.10);
   --paper-chrome-bg: #fef9f7;
-  --paper-chrome-border: rgba(41, 29, 25, 0.12);
+  --paper-chrome-border: rgba(0, 0, 0, 0.09);
   --paper-reading-accent: #bf321d;
   --ok-hsl: 136.56 41.81% 36.51%;
   --warn-hsl: 40.11 100% 29.89%;
@@ -382,13 +389,14 @@
   --paper-bg-deep: #18110e;
   --paper-ink: #e5ddd9;
   --paper-ink-soft: #a69d99;
-  --paper-ink-faint: #726b68;
-  --paper-rule: rgba(229, 221, 217, 0.10);
+  --paper-ink-faint: #837c79;
+  --paper-ink-faint-line: #726b68;
+  --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(229, 221, 217, 0.09);
   --paper-accent: #e8875a;
   --paper-accent-soft: rgba(232, 135, 90, 0.16);
   --paper-chrome-bg: #18110e;
-  --paper-chrome-border: rgba(229, 221, 217, 0.13);
+  --paper-chrome-border: rgba(255, 255, 255, 0.10);
   --paper-reading-accent: #f5855c;
   --ok-hsl: 133.24 33.65% 58.01%;
   --warn-hsl: 36.39 61.56% 53.68%;
@@ -414,13 +422,14 @@
   --paper-bg-deep: #e7f0f2;
   --paper-ink: #162327;
   --paper-ink-soft: #495559;
-  --paper-ink-faint: #747e81;
-  --paper-rule: rgba(22, 35, 39, 0.09);
+  --paper-ink-faint: #646e71;
+  --paper-ink-faint-line: #747e81;
+  --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(22, 35, 39, 0.08);
   --paper-accent: #0e6e85;
   --paper-accent-soft: rgba(14, 110, 133, 0.10);
   --paper-chrome-bg: #f6fbfd;
-  --paper-chrome-border: rgba(22, 35, 39, 0.12);
+  --paper-chrome-border: rgba(0, 0, 0, 0.09);
   --paper-reading-accent: #0f8299;
   --ok-hsl: 133.06 24.42% 40.04%;
   --warn-hsl: 36.2 52.84% 37.17%;
@@ -446,13 +455,14 @@
   --paper-bg-deep: #0c1417;
   --paper-ink: #d8e0e3;
   --paper-ink-soft: #97a1a4;
-  --paper-ink-faint: #666e70;
-  --paper-rule: rgba(216, 224, 227, 0.10);
+  --paper-ink-faint: #777f81;
+  --paper-ink-faint-line: #666e70;
+  --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(216, 224, 227, 0.09);
   --paper-accent: #6cc4dd;
   --paper-accent-soft: rgba(108, 196, 221, 0.16);
   --paper-chrome-bg: #0c1417;
-  --paper-chrome-border: rgba(216, 224, 227, 0.13);
+  --paper-chrome-border: rgba(255, 255, 255, 0.10);
   --paper-reading-accent: #53d6ea;
   --ok-hsl: 131.84 26.28% 60%;
   --warn-hsl: 35.21 48.85% 57.57%;
@@ -478,13 +488,14 @@
   --paper-bg-deep: #ecedf5;
   --paper-ink: #1f1f2a;
   --paper-ink-soft: #51525b;
-  --paper-ink-faint: #7a7b83;
-  --paper-rule: rgba(31, 31, 42, 0.09);
+  --paper-ink-faint: #6a6b73;
+  --paper-ink-faint-line: #7a7b83;
+  --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(31, 31, 42, 0.08);
   --paper-accent: #5b46d6;
   --paper-accent-soft: rgba(91, 70, 214, 0.10);
   --paper-chrome-bg: #f9fafe;
-  --paper-chrome-border: rgba(31, 31, 42, 0.12);
+  --paper-chrome-border: rgba(0, 0, 0, 0.09);
   --paper-reading-accent: #3692e6;
   --ok-hsl: 145.96 92.95% 27.76%;
   --warn-hsl: 40.11 100% 29.89%;
@@ -510,13 +521,14 @@
   --paper-bg-deep: #121219;
   --paper-ink: #dedee5;
   --paper-ink-soft: #9e9ea6;
-  --paper-ink-faint: #6c6c72;
-  --paper-rule: rgba(222, 222, 229, 0.10);
+  --paper-ink-faint: #7d7d83;
+  --paper-ink-faint-line: #6c6c72;
+  --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(222, 222, 229, 0.09);
   --paper-accent: #9d8cff;
   --paper-accent-soft: rgba(157, 140, 255, 0.16);
   --paper-chrome-bg: #121219;
-  --paper-chrome-border: rgba(222, 222, 229, 0.13);
+  --paper-chrome-border: rgba(255, 255, 255, 0.10);
   --paper-reading-accent: #8cc8ff;
   --ok-hsl: 134.5 39.04% 56.2%;
   --warn-hsl: 38.55 77.19% 47.99%;
@@ -583,7 +595,7 @@
 .bp-paper-editor-body > h2,
 .bp-paper-editor-body > .ProseMirror > h2 {
   margin-top: var(--bp-section-beat);
-  border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
+  border-top: var(--bp-section-rule) solid var(--paper-rule);
   padding-top: var(--bp-section-gap);
   margin-inline: var(--bp-evidence-pull, 0px);
   width: var(--bp-evidence-width, 100%);
@@ -664,7 +676,7 @@
 .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
 .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
 .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
-.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
+.bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
 /* editable-table: the three reader table class rules, mirrored byte-for-byte from
  * paper-surface.css `.bp-paper-surface .bp-table*` (the embedder sink — the standalone
  * bundle has no `.bp-paper-surface` ancestor, so it carries the hand-copied mirror).
@@ -923,11 +935,20 @@ article code[style*="background:#f3f4f6"] {
  * even though it lives outside any .bp-paper-surface ancestor. */
 
 /* Pre-paint / no-theme fallback — warm light defaults. */
+/* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
+   (task-387501f9ce96c335): the accent colour, underlined so it is not told
+   apart by colour alone. Its hover card's Open goes to the linked paper. */
+.bp-paper-editor span[data-wikilink] {
+  color: var(--paper-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .bp-wikilink-menu {
   --paper-bg:           #fbfaf6;
   --paper-ink:          #1f1a14;
   --paper-ink-soft:     #5b524a;
-  --paper-ink-faint:    #8a8278;
+  --paper-ink-faint:    #787067;
   --paper-rule:         rgba(31, 26, 20, 0.08);
   --paper-rule-soft:    rgba(31, 26, 20, 0.04);
   --paper-accent:       #a23925;
@@ -954,7 +975,7 @@ html[data-theme="dark"] .bp-wikilink-menu {
   --paper-bg:           #1b1815;
   --paper-ink:          #ece6dc;
   --paper-ink-soft:     #b8ad9e;
-  --paper-ink-faint:    #7f7568;
+  --paper-ink-faint:    #908679;
   --paper-rule:         rgba(236, 230, 220, 0.10);
   --paper-rule-soft:    rgba(236, 230, 220, 0.05);
   --paper-accent:       #d97a5f;
@@ -1001,6 +1022,10 @@ html[data-theme="dark"] .bp-wikilink-menu {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   max-width: 100px;
 }
+/* The faint badge on the tinted active/hover row fell under AA; it steps up to
+ * the soft ink there, as .bp-slash-desc does (task-be754bd628311c5f). */
+.bp-wikilink-item:hover .bp-wikilink-type-badge,
+.bp-wikilink-item.is-active .bp-wikilink-type-badge { color: var(--paper-ink-soft); }
 /* Non-selectable "Searching…" / "No matching pages" row. */
 .bp-wikilink-empty {
   padding: 6px 8px;
@@ -1043,12 +1068,15 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * the reader rules via the surface cascade) — this is the blessed standalone-
  * host extra pattern. view_edit_parity_test.exs §"callout tone mirror" locks it
  * byte-for-byte to the reader. Tokens `--bp-tone-*` are defined above. */
-.bp-paper-editor-body .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 16px; border-left: 4px solid transparent; }
-.bp-paper-editor-body .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
-.bp-paper-editor-body .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
-.bp-paper-editor-body .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
-.bp-paper-editor-body .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
-.bp-paper-editor-body .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+.bp-paper-editor-body .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 18px 22px 20px; border: 1px solid var(--paper-rule); border-radius: 12px; background: transparent; color: var(--paper-ink); }
+.bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong, .bp-paper-editor-body .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
+.bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child { display: block; margin: 0 0 6px; }
+.bp-paper-editor-body .bp-callout > strong:first-child::before, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint-line)); vertical-align: middle; }
+.bp-paper-editor-body .bp-callout--info    { --bp-callout-dot: var(--bp-tone-info-fg); }
+.bp-paper-editor-body .bp-callout--success { --bp-callout-dot: var(--bp-tone-success-fg); }
+.bp-paper-editor-body .bp-callout--warning { --bp-callout-dot: var(--bp-tone-warning-fg); }
+.bp-paper-editor-body .bp-callout--danger  { --bp-callout-dot: var(--bp-tone-danger-fg); }
+.bp-paper-editor-body .bp-callout--neutral { --bp-callout-dot: var(--paper-ink-faint-line); }
 /* The two SEMANTIC VERDICT tones ride the SAME mirror but a DIFFERENT token
  * family: `--bp-verdict-{loss,peace}` + its `-soft` wash, not `--bp-tone-*`
  * (design/tokens.json color.verdict — pe-bl-verdict-accent-tokens). Byte-copied
@@ -1057,9 +1085,9 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * resolves them without a `.bp-paper-surface` ancestor. Without these two rules
  * an authored verdict callout fell through to the bare `.bp-callout` default and
  * the embedder painted no rail at all where /papers paints terracotta/green. */
-.bp-paper-editor-body .bp-callout--loss  { background: var(--bp-verdict-loss-soft);  color: var(--bp-verdict-loss);  border-left-color: var(--bp-verdict-loss); }
-.bp-paper-editor-body .bp-callout--peace { background: var(--bp-verdict-peace-soft); color: var(--bp-verdict-peace); border-left-color: var(--bp-verdict-peace); }
-.bp-paper-editor-body .bp-callout__summary { cursor: pointer; font-weight: bold; }
+.bp-paper-editor-body .bp-callout--loss  { color: var(--bp-verdict-loss);  --bp-callout-dot: var(--bp-verdict-loss); }
+.bp-paper-editor-body .bp-callout--peace { color: var(--bp-verdict-peace); --bp-callout-dot: var(--bp-verdict-peace); }
+.bp-paper-editor-body .bp-callout__summary { cursor: pointer; }
 .bp-paper-editor-body .bp-callout__body { margin-top: 8px; }
 
 /* ── STEP 4 card WIDGET mirror (embedder only) ────────────────────────────────
@@ -1070,11 +1098,13 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * typography + the bp-button mirror below paint them), so ONLY the container +
  * tone rules are mirrored; the model-A slot-chrome rules are GONE (S10,
  * parity2-bug-card-slot-chrome). bp-canvas-card* is the thin edit-only hook. */
-.bp-paper-editor-body .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-left: 3px solid var(--paper-chrome-border); }
-.bp-paper-editor-body .bp-card--info { border-left-color: var(--st-info); }
-.bp-paper-editor-body .bp-card--ok { border-left-color: var(--st-ok); }
-.bp-paper-editor-body .bp-card--warn { border-left-color: var(--st-warn); }
-.bp-paper-editor-body .bp-card--danger { border-left-color: var(--st-danger); }
+.bp-paper-editor-body .bp-card { position: relative; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-editor-body .bp-card[class*="bp-card--"] { padding-right: 30px; }
+.bp-paper-editor-body .bp-card[class*="bp-card--"]::before { content: ""; position: absolute; top: 14px; right: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--bp-card-dot); }
+.bp-paper-editor-body .bp-card--info { --bp-card-dot: var(--st-info); }
+.bp-paper-editor-body .bp-card--ok { --bp-card-dot: var(--st-ok); }
+.bp-paper-editor-body .bp-card--warn { --bp-card-dot: var(--st-warn); }
+.bp-paper-editor-body .bp-card--danger { --bp-card-dot: var(--st-danger); }
 .bp-canvas-card__media-paint {
   position: absolute; padding: 0; margin: 0; border: 0;
   border-radius: 0; background: transparent; color: transparent;
@@ -1123,8 +1153,8 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * `.bp-pnode*` — keep BYTE-ALIGNED with those reader rules. Inputs are transparent so
  * they read as the cell's own text, edited in place. */
 .bp-paper-editor-body .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
-.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-accent); }
-.bp-paper-editor-body .bp-canvas-stage__k, .bp-paper-editor-body .bp-canvas-stage__t, .bp-paper-editor-body .bp-canvas-stage__d, .bp-paper-editor-body .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
+.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-ink-faint-line); }
+.bp-paper-editor-body .bp-canvas-stage__k, .bp-paper-editor-body .bp-canvas-stage__t, .bp-paper-editor-body .bp-canvas-stage__d, .bp-paper-editor-body .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; font-family: inherit; line-height: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
 .bp-paper-editor-body .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
 .bp-paper-editor-body .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
 .bp-paper-editor-body .bp-canvas-stage__d { font-size: 0.78rem; color: var(--paper-ink-soft); margin-top: 5px; line-height: 1.45; }
@@ -1212,6 +1242,16 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-weight: 500;
   line-height: 1.2;
 }
+/* A declared object block (Sanity's block object row): full width, an icon, the kind
+ * title and a preview line, each its own element for a host to style. The chip's
+ * text keeps "Title · value" for its name; the separator is not shown. */
+.bp-canvas-object-row .bp-canvas-readonly-chip { display: flex; width: 100%; box-sizing: border-box; gap: 10px; padding: 8px 12px; font-weight: 400; }
+.bp-canvas-object-icon { flex: none; position: relative; width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; }
+.bp-canvas-object-icon::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 1.5px solid currentColor; }
+.bp-canvas-object-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.bp-canvas-object-title { color: var(--paper-ink); font-weight: 600; }
+.bp-canvas-object-sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bp-canvas-object-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper-ink-soft); }
 
 /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
  * <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
@@ -1280,6 +1320,10 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 /* find matches (canvas/find-replace.js): the host's bar drives them. */
 .bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
 .bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
+/* shared carets (canvas/remote-selections.js): another session's caret, name and range, in its color. */
+.bp-remote-caret { position: relative; display: inline-block; width: 0; height: 1.2em; vertical-align: text-bottom; border-left: 2px solid var(--bp-remote-color); margin-left: -1px; margin-right: -1px; pointer-events: none; user-select: none; }
+.bp-remote-caret__label { position: absolute; bottom: 100%; left: -2px; padding: 0 4px; border-radius: 3px 3px 3px 0; background: var(--bp-remote-color); color: var(--paper-bg); font-family: var(--paper-font-sans, inherit); font-size: smaller; font-weight: 600; line-height: normal; white-space: nowrap; }
+.bp-remote-selection { background: color-mix(in srgb, var(--bp-remote-color) 22%, transparent); box-decoration-break: clone; }
 /* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
    row that hides at rest once the block has data. */
 .bp-canvas-island { position: relative; margin: 1rem 0 0; }
@@ -1302,12 +1346,15 @@ textarea.bp-canvas-island__input { resize: vertical; }
 .bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
 .bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
 .bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-pick { display: none; flex: none; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 10px; cursor: pointer; }
+bp-paper-canvas[data-media-picker] .bp-canvas-image-pick { display: inline-block; }
 .bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
 .bp-canvas-image-chrome .bp-canvas-image-width { flex: 0 0 90px; }
 .bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
 .bp-canvas-image-badge--error { color: var(--bp-tone-danger-fg); border-color: var(--bp-tone-danger-fg); }
 .ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
 .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
+input.bp-canvas-diagram-caption,
 .bp-canvas-figure-caption-input {
   display: block; width: 100%; box-sizing: border-box;
   border: none; background: transparent; padding: 0; margin: 0;
@@ -1422,6 +1469,23 @@ textarea.bp-canvas-island__input { resize: vertical; }
    right-click opens the media picker. All colour rides the --paper-* tokens so it is
    dark/light safe (light defaults here; the host's [data-theme="dark"] overrides
    the tokens). */
+/* Canvas field block (field-node.js), laid out as the reader's `.bp-field`
+ * row: a small mono label beside the value in the Paper's own type. The value
+ * control was a browser-default input (Arial 13px on white); it now inherits
+ * the page and shows only a faint hairline on hover and focus. Checkbox and
+ * colour controls keep their native shape. Values mirror paper-surface.css
+ * `.bp-field` / `.bp-field__l` / `.bp-field__v`. */
+.bp-canvas-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; padding: 0.36rem 0; }
+.bp-canvas-field-label { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); }
+/* The label is its own editing surface (role=textbox, tabindex 0): a keyboard
+   user needs to see they are on it (WCAG 2.4.7). Same cue as the scaffold control. */
+.bp-canvas-field-label[role="textbox"]:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select) { box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--paper-ink); font-family: inherit; font-size: 0.98rem; line-height: 1.5; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
+.bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):hover { border-bottom-color: var(--paper-rule); }
+.bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):focus { outline: none; border-bottom-color: var(--paper-ink-soft); }
+textarea.bp-canvas-field-control { resize: vertical; field-sizing: content; min-height: 1.5em; }
+.bp-canvas-field-control:is(input[type="checkbox"], input[type="color"]) { justify-self: start; }
+@media (max-width: 560px) { .bp-canvas-field { grid-template-columns: 1fr; row-gap: 2px; } }
 .bp-canvas-field-image-empty {
   display: flex;
   flex-direction: column;
@@ -1464,6 +1528,14 @@ textarea.bp-canvas-island__input { resize: vertical; }
   font-size: 12px;
   font-weight: 500;
   color: var(--paper-ink-faint, #82918b);
+}
+/* field-number's unit, after its number input: quiet text, not chrome. The
+ * input and unit share the field row's value column. */
+.bp-canvas-field-value { display: flex; align-items: baseline; min-width: 0; }
+.bp-canvas-field-value > .bp-canvas-field-control { flex: 1 1 auto; min-width: 0; }
+.bp-canvas-field-unit {
+  margin-inline-start: 0.4em;
+  color: var(--paper-ink-faint);
 }
 
 /* ── canvas action node-view (editable-action: the CTA button) ────────────────
@@ -1606,22 +1678,31 @@ bp-paper-canvas .ProseMirror :is(.bp-table__th, .bp-table__td) { white-space: pr
    edit chrome. It SHARES these rules with the diagram editor rather than restating
    them — one declaration block, so the two attr-atom families can never drift and no
    new hand-stamped type literal enters the design ratchet. */
-.bp-canvas-diagram, .bp-canvas-technical { position: relative; }
+.bp-canvas-diagram, .bp-canvas-technical, .bp-canvas-field:has(> .bp-canvas-field-settings) { position: relative; }
 /* A diff/file tree paints the reader's evidence pull: never clip it at the column (its lines edit in place). */
 .bp-canvas-technical { overflow-x: visible; }
-.bp-canvas-diagram-editor, .bp-canvas-technical-editor { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
+.bp-canvas-diagram-editor, .bp-canvas-technical-editor, .bp-canvas-field-settings { position: absolute; top: 0; right: 0; z-index: 3; max-width: 100%; color: var(--paper-ink-soft); font-family: var(--paper-font-ui, system-ui, sans-serif); font-size: 0.78rem; opacity: 0; pointer-events: none; }
 .bp-canvas-diagram:hover .bp-canvas-diagram-editor,
 .bp-canvas-diagram:focus-within .bp-canvas-diagram-editor,
 .bp-canvas-diagram-editor[open],
 .bp-canvas-technical:hover .bp-canvas-technical-editor,
 .bp-canvas-technical:focus-within .bp-canvas-technical-editor,
-.bp-canvas-technical-editor[open] { opacity: 1; pointer-events: auto; }
-.bp-canvas-diagram-editor-toggle, .bp-canvas-technical-editor-toggle { cursor: pointer; width: max-content; margin-left: auto; background: var(--paper-bg); padding: 2px 6px; border-radius: 4px; }
-.bp-canvas-diagram-fields, .bp-canvas-technical-fields { display: grid; gap: 0.65rem; width: min(32rem, 75vw); max-width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem; background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px; }
-.bp-canvas-diagram-field, .bp-canvas-technical-field { display: grid; gap: 0.3rem; min-width: 0; }
-.bp-canvas-diagram-area, .bp-canvas-diagram-caption, .bp-canvas-technical-area, .bp-canvas-technical-meta { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
+.bp-canvas-technical-editor[open],
+.bp-canvas-field:hover .bp-canvas-field-settings,
+.bp-canvas-field:focus-within .bp-canvas-field-settings,
+.bp-canvas-field-settings[open] { opacity: 1; pointer-events: auto; }
+.bp-canvas-diagram-editor-toggle, .bp-canvas-technical-editor-toggle, .bp-canvas-field-settings-toggle { cursor: pointer; width: max-content; margin-left: auto; background: var(--paper-bg); padding: 2px 6px; border-radius: 4px; }
+.bp-canvas-diagram-fields, .bp-canvas-technical-fields, .bp-canvas-field-settings-fields { display: grid; gap: 0.65rem; width: min(32rem, 75vw); max-width: 100%; box-sizing: border-box; margin-top: 0.55rem; padding: 0.75rem; background: var(--paper-bg); border: 1px solid var(--paper-rule); border-radius: 4px; }
+.bp-canvas-diagram-field, .bp-canvas-technical-field, .bp-canvas-field-setting, .bp-canvas-field-settings-options { display: grid; gap: 0.3rem; min-width: 0; }
+.bp-canvas-diagram-area, .bp-canvas-technical-area, .bp-canvas-technical-meta, .bp-canvas-field-setting-input { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
+/* Diagram source reads as the reader's code block: same mono face, size, leading and ground. */
+.bp-canvas-diagram-area { font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh); letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; background: var(--paper-bg-deep); }
 .bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible,
-.bp-canvas-technical-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-technical-editor :is(summary, input, textarea):focus-visible,
+.bp-canvas-field-settings :is(summary, input, button):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
+.bp-canvas-field-setting-option { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; align-items: center; }
+.bp-canvas-field-setting-button { justify-self: start; cursor: pointer; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.bp-canvas-field-setting-input[aria-invalid="true"] { border-color: var(--bp-tone-danger-fg); }
 /* Recovery is editor chrome, never a replacement document. */
 [data-bp-paper-conflict],
 [data-test-id="paper-canvas-resume-warning"] {
@@ -1666,8 +1747,13 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-block-handle__btn:hover { background: var(--paper-edit-hover); color: var(--paper-ink); }
 .bp-block-handle__grip { cursor: grab; font-size: 14px; }
 .bp-block-handle--dragging .bp-block-handle__grip { cursor: grabbing; }
+/* Touch (task-be754bd628311c5f): the handle follows the caret to the block's
+   top-right corner, and every target is 44px; the block menu rows too. */
+.bp-block-handle--touch { height: 44px; gap: 0; opacity: 1; }
+.bp-block-handle--touch .bp-block-handle__btn { width: 44px; height: 44px; }
+@media (hover: none), (max-width: 768px) { .bp-block-menu__item { min-height: 44px; } }
 .bp-block-drop { position: absolute; height: 2px; background: var(--paper-accent); border-radius: 1px; pointer-events: none; z-index: 6; }
-.bp-block-menu { position: absolute; z-index: 30; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-block-menu { position: fixed; z-index: 200; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
 .bp-block-menu__group { font-size: 10px; text-transform: uppercase; color: var(--paper-ink-soft); padding: 6px 8px 2px; }
 .bp-block-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .bp-block-menu__item:hover, .bp-block-menu__item:focus-visible { background: var(--paper-edit-hover); outline: 0; }
@@ -1691,3 +1777,46 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
 
 [data-bp-paste-notice]::-webkit-scrollbar { display: none; }
 [data-bp-paste-notice]:focus-visible { outline: 2px solid var(--paper-ink-soft, currentColor); outline-offset: 2px; }
+
+/* An inline node the editor carries verbatim but cannot edit (a `chip`, or a
+ * type from a newer writer; task-a110126ce9111388). Inert: one selectable unit,
+ * shown with its own label, kept byte-exact on save. */
+.bp-inline-opaque {
+  display: inline-block;
+  padding: 0 0.4em;
+  border: 1px solid var(--paper-rule);
+  border-radius: 999px;
+  background: var(--paper-bg-deep);
+  color: var(--paper-ink-soft);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+.ProseMirror-selectednode.bp-inline-opaque {
+  outline: 2px solid var(--paper-accent);
+  outline-offset: 1px;
+}
+
+/* ── Inline object field dialog (canvas/inline-object.js). ───────────────────
+ * Portaled to <body> like the menus above; it reads the host's --paper-*
+ * tokens when they reach it and otherwise the CSS system colours, so it stays
+ * legible in both themes without a literal of its own. */
+.bp-inline-object-dialog {
+  position: fixed; z-index: 210;
+  width: min(300px, calc(100vw - 16px));
+  padding: 12px;
+  background: var(--paper-chrome-bg, Canvas);
+  color: var(--paper-ink, CanvasText);
+  border: 1px solid var(--paper-chrome-border, ButtonBorder);
+  border-radius: 6px;
+  font-family: var(--paper-font-sans, system-ui, sans-serif);
+}
+.bp-inline-object-dialog__title { margin: 0 0 8px; font-size: inherit; font-weight: 600; }
+.bp-inline-object-dialog__row { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.bp-inline-object-dialog__row input:not([type="checkbox"]),
+.bp-inline-object-dialog__row select,
+.bp-inline-object-dialog__row textarea { font: inherit; padding: 4px 6px; }
+.bp-inline-object-dialog [aria-invalid="true"] { outline: 2px solid var(--paper-accent, Highlight); }
+.bp-inline-object-dialog__msg,
+.bp-inline-object-dialog__error { color: var(--paper-accent, LinkText); margin: 0; }
+.bp-inline-object-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }

@@ -229,6 +229,20 @@ defmodule Barkpark.Accounts do
     end
   end
 
+  @doc """
+  Set (or clear, with `nil`/blank) an account's display name
+  (task-cfb6ca3f5ffaf099). Not security-sensitive — no reauth, no session
+  revocation. `Media.Storage.Actor.display/2` reads it to name another
+  account's checkout-lock holder instead of the generic "another editor".
+  """
+  @spec update_display_name(User.t(), map()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_display_name(%User{} = user, attrs) do
+    user
+    |> User.display_name_changeset(attrs)
+    |> Repo.update()
+  end
+
   # Owner ruling #34 item 1 (2026-10-03, task-d9e8f02056e39763): ONE per-user
   # budget for every door that re-checks a signed-in user's current password —
   # erase (JSON and Studio), password change, TOTP enrol/verify/disable, passkey
@@ -439,7 +453,67 @@ defmodule Barkpark.Accounts do
   # every open Studio tab reading and writing until it reconnected.
   # `BarkparkWeb.LiveAuth` subscribes each mounted LiveView to its session's
   # topic. Best-effort: a broadcast failure never fails the revoke.
+  #
+  # AFTER COMMIT when a caller asks for it (owner ruling #35, item 8). Inside
+  # `with_session_teardown_after_commit/1` the ids are queued and sent only
+  # once the caller's transaction has committed; a client that reconnects on
+  # the teardown then re-authenticates against a revoked row. Without that
+  # wrapper the teardown goes out at once, as before.
+  @session_teardown_queue :barkpark_deferred_session_teardown
+
   defp broadcast_session_teardown(ids) when is_list(ids) do
+    case Process.get(@session_teardown_queue) do
+      queued when is_list(queued) ->
+        if Repo.in_transaction?(),
+          do: Process.put(@session_teardown_queue, queued ++ ids),
+          else: send_session_teardown(ids)
+
+      _ ->
+        send_session_teardown(ids)
+    end
+  end
+
+  @doc """
+  Run `fun` so that every session teardown its transaction triggers is sent
+  only AFTER the transaction commits.
+
+  `revoke_all_user_sessions/1` (and the other session revokes) broadcast a
+  disconnect to each revoked session's sockets. Called inside a
+  `Repo.transaction`, that broadcast used to go out before the revoke
+  committed: a client reconnecting in that window re-authenticated on the
+  still-valid row and stayed signed in.
+
+  Inside `fun`, a teardown raised while a transaction is open is queued. It is
+  sent when `fun` returns `{:ok, _}` and dropped on any other result, a raise,
+  a throw or an exit, so a rolled-back revoke sends nothing. A teardown raised
+  outside any transaction is sent at once. Nesting runs `fun` as is; the
+  outermost call sends. Same contract as `Barkpark.Content.Broadcast.with_deferred_queue/1`
+  for content broadcasts.
+  """
+  @spec with_session_teardown_after_commit((-> term())) :: term()
+  def with_session_teardown_after_commit(fun) when is_function(fun, 0) do
+    if is_list(Process.get(@session_teardown_queue)) do
+      fun.()
+    else
+      Process.put(@session_teardown_queue, [])
+
+      try do
+        fun.()
+      else
+        {:ok, _} = ok ->
+          queued = Process.delete(@session_teardown_queue) || []
+          send_session_teardown(queued)
+          ok
+
+        other ->
+          other
+      after
+        Process.delete(@session_teardown_queue)
+      end
+    end
+  end
+
+  defp send_session_teardown(ids) do
     Enum.each(ids, fn id ->
       try do
         BarkparkWeb.Endpoint.broadcast(
@@ -658,6 +732,66 @@ defmodule Barkpark.Accounts do
   def confirm_provisioned_user(%User{} = user),
     do: Repo.update!(User.confirm_changeset(user))
 
+  # The password-reset-confirms-account step (task-5adb9639803f4fb7, see
+  # `reset_user_password_counting/2`). An already-confirmed account is
+  # returned untouched — a reset must never move `confirmed_at` backwards or
+  # re-stamp it, and a confirmed account's later member-add must stay a
+  # no-op reclaim (`Privacy.reclaim_unconfirmed/1`'s own first clause reads
+  # the SAME field this sets).
+  defp confirm_if_unconfirmed!(%User{confirmed_at: nil} = user),
+    do: Repo.update!(User.confirm_changeset(user))
+
+  defp confirm_if_unconfirmed!(%User{} = user), do: user
+
+  @doc """
+  Confirm an account's email on an OPERATOR's word, with no token
+  (task-bb41f3a2f5a843a7). The doors are `mix barkpark.user.confirm <email>`
+  and `Barkpark.Release.confirm_email/1`, both run on the box: there is no HTTP
+  route, so only someone with shell access can vouch for an address.
+
+  Seating an UNCONFIRMED account in a workspace reclaims it (owner ruling #7,
+  `Members.add_user_member/4`): its password is replaced and its sessions
+  deleted. A seeded editor at an address with no mailbox, or any account on a
+  box with no SMTP, can never confirm by mail, so an operator confirms it here
+  first and the seat becomes an invitation instead. The password is KEPT: the
+  operator is vouching that the person who set it owns the address. Do not run
+  it for an account you did not create or cannot vouch for.
+
+  Pending confirm tokens are deleted. An already-confirmed account is returned
+  as `{:ok, user, :already_confirmed}` and not touched.
+  """
+  @spec confirm_user_by_operator(String.t()) ::
+          {:ok, User.t()} | {:ok, User.t(), :already_confirmed} | {:error, :not_found}
+  def confirm_user_by_operator(email) when is_binary(email) do
+    case get_user_by_email(String.trim(email)) do
+      nil ->
+        {:error, :not_found}
+
+      %User{confirmed_at: %DateTime{}} = user ->
+        {:ok, user, :already_confirmed}
+
+      %User{} = user ->
+        {:ok, confirmed} =
+          Repo.transaction(fn ->
+            Repo.delete_all(
+              from t in UserEmailToken, where: t.user_id == ^user.id and t.context == "confirm"
+            )
+
+            Repo.update!(User.confirm_changeset(user))
+          end)
+
+        Audit.emit_best_effort(%{
+          category: "auth",
+          action: "email_confirmed_by_operator",
+          subject: user.id,
+          actor_type: "system",
+          metadata: %{}
+        })
+
+        {:ok, confirmed}
+    end
+  end
+
   @doc """
   Reset a password from a `"reset"` token plaintext, then revoke all sessions.
 
@@ -694,8 +828,25 @@ defmodule Barkpark.Accounts do
         Repo.transaction(fn ->
           case do_reset_password(user, attrs, reset_mfa: true, keep_token_id: tok.id) do
             {:ok, reset_user, revoked} ->
+              # The reset link proved mailbox control, and every credential a
+              # prior holder set is about to be stripped below, so the address
+              # is confirmed now (task-5adb9639803f4fb7). Without this, an
+              # account that lost its confirm mail could reset its password
+              # and still be refused at login (`email_unconfirmed`) — and a
+              # LATER member-add would still see `confirmed_at: nil` and
+              # reclaim it (`Privacy.reclaim_unconfirmed/1`), replacing the
+              # password this reset just set. An already-confirmed account is
+              # untouched (`confirm_if_unconfirmed!/1`'s second clause).
+              reset_user = confirm_if_unconfirmed!(reset_user)
+
+              # Owner ruling #13 (task-f4cfc3e2ab4bd6b8): recovery also removes
+              # every passkey, social link and owned personal token — whatever a
+              # thief added with a stolen session. Same transaction: a failed
+              # revoke keeps the old password and the reset link.
+              stripped = Barkpark.Accounts.Privacy.strip_added_credentials!(reset_user)
+
               case Repo.delete(tok, stale_error_field: :id) do
-                {:ok, _} -> {reset_user, revoked}
+                {:ok, _} -> {reset_user, revoked, stripped}
                 {:error, _cs} -> Repo.rollback(:stale)
               end
 
@@ -705,9 +856,32 @@ defmodule Barkpark.Accounts do
         end)
 
       case txn do
-        {:ok, {reset_user, revoked}} -> {:ok, reset_user, revoked}
-        {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
-        {:error, :stale} -> :error
+        {:ok, {reset_user, revoked, stripped}} ->
+          Enum.each(
+            stripped.revoked_token_ids,
+            &Barkpark.Auth.broadcast_socket_teardown(%Barkpark.Auth.ApiToken{id: &1})
+          )
+
+          Barkpark.Audit.emit(%{
+            category: "auth",
+            action: "reset_credentials_cleared",
+            subject: reset_user.id,
+            actor_type: "user",
+            actor_id: reset_user.id,
+            metadata: %{
+              "passkeys" => stripped.passkeys,
+              "social_links" => stripped.social_links,
+              "api_tokens_revoked" => length(stripped.revoked_token_ids)
+            }
+          })
+
+          {:ok, reset_user, revoked}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, changeset}
+
+        {:error, :stale} ->
+          :error
       end
     else
       _ -> :error

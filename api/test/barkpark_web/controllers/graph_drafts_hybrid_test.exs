@@ -121,6 +121,23 @@ defmodule BarkparkWeb.GraphDraftsHybridTest do
     :ok
   end
 
+  # Publish WITHOUT projecting the doc's edges -- the state the window exists
+  # for. Since #22591 a publish projects its own edges inline, so a plain
+  # `publish_document/4` no longer leaves an unprojected write behind. Arm the
+  # projector's test fault seam for this one publish: the inline upsert falls
+  # back to the debounced job, which Oban (`testing: :manual`) never runs here.
+  defp publish_unprojected!(doc_id, scope) do
+    Application.put_env(:barkpark, :edge_projector_upsert_fault, {:error, :held_for_window_test})
+
+    try do
+      {:ok, _} = Content.publish_document(doc_id, "post", @dataset, scope)
+    after
+      Application.delete_env(:barkpark, :edge_projector_upsert_fault)
+    end
+
+    :ok
+  end
+
   defp graph(conn, root), do: conn |> bearer() |> get("/v1/graph/#{root}?drafts=true")
 
   defp body!(resp) do
@@ -274,7 +291,7 @@ defmodule BarkparkWeb.GraphDraftsHybridTest do
 
       # The write the projector has not seen. No re-projection follows.
       mk_draft!(mid, scope, %{"related" => target})
-      {:ok, _} = Content.publish_document(mid, "post", @dataset, scope)
+      publish_unprojected!(mid, scope)
       backdate!(root, 3600)
 
       body = graph(conn, root) |> body!()
@@ -302,7 +319,7 @@ defmodule BarkparkWeb.GraphDraftsHybridTest do
       project!(scope)
 
       mk_draft!(mid, scope, %{"related" => target})
-      {:ok, _} = Content.publish_document(mid, "post", @dataset, scope)
+      publish_unprojected!(mid, scope)
 
       backdate!(root, 3600)
       backdate!(mid, 3600)

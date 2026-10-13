@@ -15,11 +15,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   `Paper.clear_paper_view/1` from `rebuild_panes/1`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
   alias Barkpark.Access
   alias Barkpark.Content
+  alias Barkpark.Content.BoundFieldGuard
   alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.PortableDoc.Render.SectionLayout
@@ -321,12 +323,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       true ->
         {:ok, if_rev} = paper_revision(op["if_rev"])
 
-        case Content.apply_paper_block_op(
-               slug,
-               Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
-               dataset,
-               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
-             ) do
+        slug
+        |> Content.apply_paper_block_op(
+          Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
+          dataset,
+          BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+        )
+        # Owner ruling #21: a private field bound into the body is refused with
+        # the same banner as a lifecycle halt.
+        |> BoundFieldGuard.as_halt()
+        |> case do
           {:ok, result} ->
             socket
             |> resync_pane_after_op()
@@ -374,7 +380,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
           {:error, _reason} ->
             socket
-            |> put_flash(:error, "Edit failed")
+            |> put_flash(:error, gettext("Edit failed"))
             |> assign(save_status: "Save failed")
             |> assign(last_paper_save_ok?: false)
             |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
@@ -473,7 +479,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             )
           end
 
-        case result do
+        case BoundFieldGuard.as_halt(result) do
           {:ok, receipt, outcome} ->
             socket =
               socket
@@ -532,7 +538,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           {:error, _reason} ->
             {:error,
              socket
-             |> put_flash(:error, "Edit failed")
+             |> put_flash(:error, gettext("Edit failed"))
              |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
         end
     end
@@ -630,7 +636,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           socket =
             socket
             |> assign(paper_masters: paper_masters(socket, paper))
-            |> put_flash(:info, "Saved as master: #{master.title}")
+            |> put_flash(:info, gettext("Saved as master: %{title}", title: master.title))
 
           {:ok, socket, %{id: impl.master_id(master), title: master.title}}
 
@@ -927,7 +933,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     rejected = history_step_rejection(reason)
 
     socket
-    |> put_flash(:error, "History step failed")
+    |> put_flash(:error, gettext("History step failed"))
     |> assign(save_status: "Save failed", last_paper_save_ok?: false)
     |> assign(
       last_paper_save_result: %{
@@ -1127,25 +1133,86 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       cond do
         tag == "" ->
-          put_flash(socket, :error, "A label needs a tag name.")
+          put_flash(socket, :error, gettext("A label needs a tag name."))
 
         not (is_integer(strength) and strength in 1..100) ->
-          put_flash(socket, :error, "A label's strength must be a whole number from 1 to 100.")
+          put_flash(
+            socket,
+            :error,
+            gettext("A label's strength must be a whole number from 1 to 100.")
+          )
 
         String.length(rationale) < 20 ->
           put_flash(
             socket,
             :error,
-            "A label needs a rationale of at least 20 characters — say why this tag fits."
+            gettext(
+              "A label needs a rationale of at least 20 characters — say why this tag fits."
+            )
           )
 
         true ->
-          content = doc_field(paper, :content) || %{}
-          existing = if is_list(content["tags"]), do: content["tags"], else: []
-          entry = %{"tag" => tag, "strength" => strength, "rationale" => rationale}
-          persist_paper_meta(socket, paper, Map.put(content, "tags", existing ++ [entry]))
+          case ensure_label_registered(socket, tag) do
+            {:ok, socket} ->
+              content = doc_field(paper, :content) || %{}
+              existing = if is_list(content["tags"]), do: content["tags"], else: []
+              entry = %{"tag" => tag, "strength" => strength, "rationale" => rationale}
+              persist_paper_meta(socket, paper, Map.put(content, "tags", existing ++ [entry]))
+
+            {:error, message} ->
+              put_flash(socket, :error, message)
+          end
       end
     end)
+  end
+
+  # task-3a5b9cda74564d1c (ruling: option b). A label must be a registered tag
+  # or the publish wall refuses it later. A registered one is added as it is; a
+  # workspace admin registers a new one inline (publishes a `type:tag` document
+  # named by it, the registry's own write); a member is told to pick from the
+  # suggestions or ask an admin, and nothing is added.
+  @label_name ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/
+  defp ensure_label_registered(socket, tag) do
+    dataset = socket.assigns.dataset
+    opts = Shared.hook_opts(socket)
+
+    cond do
+      Barkpark.Content.TagRegistry.registered?(tag, dataset, opts) ->
+        {:ok, socket}
+
+      not BarkparkWeb.Studio.Caps.admin_affordance?(socket.assigns[:caps]) ->
+        {:error,
+         gettext(
+           "“%{tag}” is not a label in this workspace yet. Pick one from the suggestions, or ask an admin to add it.",
+           tag: tag
+         )}
+
+      not Regex.match?(@label_name, tag) ->
+        {:error,
+         gettext(
+           "A new label name uses lowercase letters, numbers and hyphens, like “product-news”."
+         )}
+
+      true ->
+        register_label(socket, tag, dataset, opts)
+    end
+  end
+
+  defp register_label(socket, tag, dataset, opts) do
+    with {:ok, _draft} <-
+           Content.create_document("tag", %{"doc_id" => tag, "title" => tag}, dataset, opts),
+         {:ok, _published} <- Content.publish_document(tag, "tag", dataset, opts) do
+      {:ok,
+       socket
+       |> assign_label_suggestions()
+       |> put_flash(:info, gettext("Registered “%{tag}” as a label in this workspace.", tag: tag))}
+    else
+      _ ->
+        {:error,
+         gettext("Could not register “%{tag}” as a label. Try again, or ask another admin.",
+           tag: tag
+         )}
+    end
   end
 
   @doc false
@@ -1171,39 +1238,119 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           socket
           |> put_flash(
             :info,
-            Shared.with_advisories("Published", Barkpark.Content.Warnings.drain())
+            Shared.with_advisories(gettext("Published"), Barkpark.Content.Warnings.drain())
           )
           |> push_patch(
             to: Shared.studio_path(socket, ["open", type, pid], socket.assigns.dataset)
           )
 
         {:error, {:halted, reason}} ->
-          put_flash(socket, :error, "Publish blocked: #{reason}")
+          put_flash(socket, :error, gettext("Publish blocked: %{reason}", reason: reason))
 
         {:error, {:label_spine, details}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(details)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: paper_wall_copy(details))
+          )
 
         {:error, {:unknown_tag, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: unknown_label_copy(payload, socket))
+          )
 
         {:error, {:duplicate_of, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: Shared.format_wall_details(payload))
+          )
 
         {:error, {:dedup_unavailable, _}} ->
           put_flash(
             socket,
             :error,
-            "Publish blocked: the duplicate check is unavailable right now — try again in a moment."
+            gettext(
+              "Publish blocked: the duplicate check is unavailable right now — try again in a moment."
+            )
           )
 
         {:error, {:invalid_epic_paper_quality, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: Shared.format_wall_details(payload))
+          )
 
         {:error, _} ->
-          put_flash(socket, :error, "Publish failed")
+          put_flash(socket, :error, gettext("Publish failed"))
       end
     end)
   end
+
+  # The wall's tag refusals in the sidebar's own words (task-3a5b9cda74564d1c):
+  # the UI calls them Labels and has no `{tag, strength, rationale}` anywhere.
+  # Every other refusal keeps the shared plain-language formatter.
+  @doc false
+  def paper_wall_copy(details) when is_list(details),
+    do: details |> Enum.map(&paper_wall_copy/1) |> Enum.join(" · ")
+
+  def paper_wall_copy(%{} = detail) do
+    field = Map.get(detail, :field) || Map.get(detail, "field")
+    rule = to_string(Map.get(detail, :rule) || Map.get(detail, "rule") || "")
+
+    cond do
+      field != "tags" ->
+        Shared.format_wall_details(detail)
+
+      rule =~ ~r/requires a `tags` array|at least \d+ tag/ ->
+        "a paper needs at least one label. Add one in the Labels section: a registered label, a strength from 1 to 100 and a short reason."
+
+      rule =~ "at most" ->
+        "Labels — " <> labels_words(rule) <> " Remove the weakest in the Labels section."
+
+      true ->
+        "Labels — " <> labels_words(rule)
+    end
+  end
+
+  def paper_wall_copy(other), do: Shared.format_wall_details(other)
+
+  defp labels_words(text) do
+    text
+    |> String.replace("`", "")
+    |> String.replace("{tag, strength, rationale}", "label with a strength and a reason")
+    |> String.replace("rationale", "reason")
+    |> String.replace(~r/\btags\b/, "labels")
+    |> String.replace(~r/\btag\b/, "label")
+  end
+
+  @doc false
+  def unknown_label_copy(%{unknown: unknown} = payload, socket) when is_list(unknown) do
+    suggestions = Map.get(payload, :suggestions, %{})
+
+    remedy =
+      if BarkparkWeb.Studio.Caps.admin_affordance?(socket.assigns[:caps]),
+        do: "register it from the Labels section, or pick a registered one",
+        else: "pick a registered one from the Labels suggestions, or ask an admin to add it"
+
+    names =
+      Enum.map_join(unknown, " · ", fn name ->
+        case Map.get(suggestions, name, []) do
+          [] ->
+            "“#{name}” is not a registered label"
+
+          near ->
+            "“#{name}” is not a registered label (did you mean #{Enum.map_join(near, ", ", &"“#{&1}”")}?)"
+        end
+      end)
+
+    names <> " — " <> remedy <> "."
+  end
+
+  def unknown_label_copy(payload, _socket), do: Shared.format_wall_details(payload)
 
   # One writer for both sidebar metadata fields: whole-content upsert on the
   # draft row, rev-fenced against a concurrent canvas save (the fence surfaces
@@ -1228,14 +1375,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> sync_paper_edit_doc()
         |> put_flash(
           :error,
-          "The paper changed while you were editing — that metadata change was not saved; try again."
+          gettext(
+            "The paper changed while you were editing — that metadata change was not saved; try again."
+          )
         )
 
       {:error, {:halted, reason}} ->
-        put_flash(socket, :error, "Save cancelled: #{reason}")
+        put_flash(socket, :error, gettext("Save cancelled: %{reason}", reason: reason))
 
       {:error, _} ->
-        put_flash(socket, :error, "Save failed")
+        put_flash(socket, :error, gettext("Save failed"))
     end
   end
 
@@ -1321,6 +1470,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       current_rev: socket.assigns[:paper_rev],
       runs: canvas_resync_runs(socket)
     }
+  end
+
+  @doc """
+  After Publish moves the open document to a new revision outside the editor's
+  save path, tell the open Beta editors that revision (task-904659f0c8145633).
+
+  A non-paper document's editors base every save on `data-document-rev`, which
+  the client's exit coordinator reads once and then advances only from save
+  replies. Publish changes the revision without a reply, so the next edit was
+  sent against the old one and paused for review. `bp:document-revision`
+  carries the new revision and the editor's `data-paper-doc-key`; with nothing
+  unsaved the coordinator adopts it, with unsaved edits it shows the usual
+  conflict.
+
+  A paper bases its saves on the streaming `paper_rev` counter instead, which
+  Publish does not move, so a paper gets nothing. No-op unless the revision
+  actually moved.
+  """
+  @spec push_document_revision(Phoenix.LiveView.Socket.t(), String.t() | nil) ::
+          Phoenix.LiveView.Socket.t()
+  def push_document_revision(socket, previous_rev) do
+    doc = socket.assigns[:editor_doc]
+    rev = doc_field(doc, :rev)
+    type = doc_field(doc, :type)
+
+    if is_binary(rev) and rev != previous_rev and is_binary(type) and type != "paper" do
+      key = "#{socket.assigns.dataset}:#{type}:#{Content.published_id(doc.doc_id)}"
+      push_event(socket, "bp:document-revision", %{rev: rev, document_key: key})
+    else
+      socket
+    end
   end
 
   @doc """
@@ -1498,15 +1678,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
-  # A block that paints through the fleet channel: a component-fleet kind OR a
-  # data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same bp:block-html
-  # push, same render_block(:article) producer).
-  defp fleet_block?(block) when is_map(block),
+  @doc """
+  A block that paints through the fleet channel: a component-fleet kind OR a
+  data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same
+  bp:block-html push, same render_block(:article) producer).
+
+  Made public for `BarkparkWeb.PaperFleetBlocksController`
+  (task-4feb8efa46a0ed33), which filters a paper's top-level blocks to this
+  set before calling `fleet_render/2` over HTTP — the same filter
+  `push_block_renders/1` applies for the connected Studio canvas. Behaviour
+  unchanged.
+  """
+  def fleet_block?(block) when is_map(block),
     do:
       Map.get(block, "type") in @fleet_render_types or
         Map.get(block, "type") in @dataviz_render_types
 
-  defp fleet_block?(_), do: false
+  def fleet_block?(_), do: false
 
   defp figure_block?(block) when is_map(block),
     do: Map.get(block, "type") in @figure_render_types
@@ -1533,7 +1721,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     html =
       case Map.get(block, "child") do
         child when is_map(child) ->
-          case Render.render_block(child, %{style: :article}) do
+          case Render.render_block(child, BarkparkWeb.StudioLocale.pd_opts(%{style: :article})) do
             html when is_binary(html) -> html
             _ -> ""
           end
@@ -1578,7 +1766,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         _ -> block
       end
 
-    case Render.render_block(resolved, %{style: :article}) do
+    case Render.render_block(resolved, BarkparkWeb.StudioLocale.pd_opts(%{style: :article})) do
       html when is_binary(html) -> html
       _ -> ""
     end
@@ -1607,17 +1795,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         TaskResolver.unavailable_previews(blocks)
 
       resolver ->
-        TaskResolver.preview(
-          blocks,
-          # The preview path NEVER stamps `dataset` into the block query, so the
-          # visibility gate MUST be threaded the session dataset explicitly (the
-          # same `socket.assigns.dataset` the agg fetcher below already carries) —
-          # deriving it from the raw query map would seal against the wrong
-          # (production default) schema on a cross-dataset preview. Charter W-one
-          # decision 10.
-          fn query -> resolver.rows_for_query(query, scope, dataset: dataset) end,
-          fn query -> resolver.agg_for_query(query, scope, dataset: dataset) end
-        )
+        # One RenderCache per preview, as in Papers.resolve_tasks_in_blocks/3.
+        Barkpark.Content.RenderCache.with_cache(fn cache ->
+          TaskResolver.preview(
+            blocks,
+            # The preview path NEVER stamps `dataset` into the block query, so the
+            # visibility gate MUST be threaded the session dataset explicitly (the
+            # same `socket.assigns.dataset` the agg fetcher below already carries) —
+            # deriving it from the raw query map would seal against the wrong
+            # (production default) schema on a cross-dataset preview. Charter W-one
+            # decision 10.
+            fn query ->
+              resolver.rows_for_query(query, scope, dataset: dataset, render_cache: cache)
+            end,
+            fn query ->
+              resolver.agg_for_query(query, scope, dataset: dataset, render_cache: cache)
+            end
+          )
+        end)
     end
   end
 
@@ -1750,6 +1945,70 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       index -> List.insert_at(ids, index + if(side == :after, do: 1, else: 0), id)
     end
   end
+
+  @doc """
+  After Discard draft in Beta, put the published version back into the open
+  block editors (task-a7a40aa124dd3c36). See `push_stored_doc/3`.
+  """
+  def push_published_blocks(socket, published_id, type) do
+    with :beta <- socket.assigns[:editor_mode],
+         true <- is_binary(type) and type != "paper",
+         {:ok, published} <-
+           Content.get_document(
+             published_id,
+             type,
+             socket.assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+      push_stored_doc(socket, published, type)
+    else
+      _ -> socket
+    end
+  end
+
+  @doc """
+  Put a document a header action just rewrote (Discard draft, history Restore)
+  into the open Beta editors: its blocks and its revision
+  (task-a7a40aa124dd3c36, task-494fc7f91abd01bd).
+
+  The per-block editors are `phx-update="ignore"`, so the re-render after the
+  action leaves them on the old text and their save lane on the old revision:
+  the next edit is refused as stale, and "Keep mine" would bring the old text
+  back. One `bp:block-update` per block, carrying the stored revision and no
+  request id, is an external update: with nothing unsaved the editors adopt
+  both. `bp:document-revision` also carries the revision, for a document whose
+  editors are all fields and get no block update.
+
+  A paper's blocks ride `paper_rev` and the canvas, not this path, so a paper
+  gets nothing; nor does Classic, which mounts no block editors.
+  """
+  def push_stored_doc(socket, %{doc_id: doc_id, rev: rev} = doc, type) do
+    dataset = socket.assigns.dataset
+
+    with :beta <- socket.assigns[:editor_mode],
+         true <- is_binary(type) and type != "paper",
+         {raw, _synth?} when is_list(raw) <- Content.resolve_blocks_for_edit(doc, type, dataset),
+         {blocks, _synth?, nil, _table_ids} <- resolve_editor_blocks(doc, type, dataset) do
+      blocks
+      |> Enum.reject(&(&1["type"] == "table"))
+      |> Enum.reduce(push_table_echo(socket, raw, rev), fn block, acc ->
+        push_event(acc, "bp:block-update", %{
+          block_id: block["id"],
+          block: block,
+          rev: rev,
+          request_id: nil
+        })
+      end)
+      |> push_event("bp:document-revision", %{
+        rev: rev,
+        document_key: "#{dataset}:#{type}:#{Content.published_id(doc_id)}"
+      })
+    else
+      _ -> socket
+    end
+  end
+
+  def push_stored_doc(socket, _doc, _type), do: socket
 
   @doc false
   def push_table_echo(socket, raw_blocks, rev, request_id \\ nil) do
@@ -2053,9 +2312,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               }
             )
 
+          {:error, {:private_field_bound, names}} ->
+            document_bound_field_refused(socket, op, names)
+
           {:error, _reason} ->
             socket
-            |> put_flash(:error, "Edit failed")
+            |> put_flash(:error, gettext("Edit failed"))
             |> assign(last_paper_save_ok?: false)
             |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
         end
@@ -2117,12 +2379,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       {:error, {:rev_mismatch, current_rev}} ->
         document_conflict(socket, op["request_id"], current_rev)
 
+      {:error, {:private_field_bound, names}} ->
+        document_bound_field_refused(socket, op, names)
+
       {:error, _reason} ->
         socket
-        |> put_flash(:error, "Edit failed")
+        |> put_flash(:error, gettext("Edit failed"))
         |> assign(last_paper_save_ok?: false)
         |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
     end
+  end
+
+  # Owner ruling #21: the document editor names the refused binding instead of
+  # a bare "Edit failed".
+  defp document_bound_field_refused(socket, op, names) do
+    socket
+    |> put_flash(:error, BoundFieldGuard.message(names))
+    |> assign(save_status: "Save failed")
+    |> assign(last_paper_save_ok?: false)
+    |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
   end
 
   defp document_table_confirmation(socket, result, %{"op" => kind} = op)
@@ -2242,11 +2517,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         editor_mode:
           if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
-        editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema])
+        editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema]),
+        editor_is_draft: Content.draft?(fresh.doc_id)
       )
+      |> assign_published_twin(doc, fresh)
+      |> Shared.assign_page_title()
       |> push_document_table_echo(request_id)
     else
       _ -> socket
+    end
+  end
+
+  # The first edit of a published document writes its draft. The header picks
+  # Publish and Discard draft from `editor_is_draft` and the published twin, as
+  # it does after a Classic save; without them a Beta author saw "draft" in the
+  # status and only Unpublish in the actions until a reload
+  # (task-904659f0c8145633).
+  defp assign_published_twin(socket, previous, fresh) do
+    if Content.draft?(fresh.doc_id) and not Content.draft?(previous.doc_id) do
+      assign(socket, editor_has_published: true, published_doc: previous)
+    else
+      socket
     end
   end
 
@@ -2367,7 +2658,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{content: content} = fresh when is_map(content) ->
         blocks = Projection.read_blocks(content) || []
 
-        assign(socket,
+        socket
+        |> refresh_pane_title(paper, fresh)
+        |> assign(
           paper_doc: fresh,
           paper_canvas_retained:
             PaperCanvas.refresh_retained(socket.assigns[:paper_canvas_retained], slug, blocks),
@@ -2380,6 +2673,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         socket
     end
   end
+
+  # A canvas op can change the paper's title (the title block). The desk row
+  # was built by `rebuild_panes/1`, which an op does not run (it would reset
+  # the paper view), so the row kept the old title until a reload. Patch the
+  # one row in place (task-23bff317e617928e).
+  defp refresh_pane_title(socket, %{title: same}, %{title: same}), do: socket
+
+  defp refresh_pane_title(socket, _previous, %{doc_id: doc_id} = fresh) do
+    id = Content.published_id(doc_id)
+    title = BarkparkWeb.Studio.PaneBuilder.display_title(fresh)
+
+    panes =
+      Enum.map(socket.assigns[:panes] || [], fn
+        %{items: items} = pane when is_list(items) ->
+          %{pane | items: Enum.map(items, &retitle_row(&1, id, title))}
+
+        pane ->
+          pane
+      end)
+
+    assign(socket, panes: panes)
+  end
+
+  defp retitle_row(%{type: :doc, id: id} = row, id, title), do: %{row | title: title}
+  defp retitle_row(row, _id, _title), do: row
 
   @doc false
   def paper_top_level_blocks(socket) do
@@ -2733,8 +3051,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # connected render only swaps `.is-open`-painted-as-strip for `.is-collapsed`,
   # which is the same geometry. The pref reaches the socket only via
   # connect_params (Mount.init), so on the static render it is always false.
-  defp assign_sidebar(socket, paper),
-    do: assign(socket, sidebar_assigns(paper, socket.assigns[:inspector_pref_closed] == true))
+  defp assign_sidebar(socket, paper) do
+    socket
+    |> assign(sidebar_assigns(paper, socket.assigns[:inspector_pref_closed] == true))
+    |> assign_label_suggestions()
+  end
+
+  # The registered labels the Labels editor offers (task-3a5b9cda74564d1c).
+  # Fail-open to no suggestions: a registry read error must not break the pane.
+  defp assign_label_suggestions(socket) do
+    names =
+      try do
+        Barkpark.Content.TagRegistry.registered_names(
+          socket.assigns.dataset,
+          Shared.hook_opts(socket)
+        )
+      rescue
+        _ -> []
+      end
+
+    assign(socket, sidebar_label_suggestions: names)
+  end
 
   defp sidebar_assigns(paper, pref_closed?) do
     # NORMALISED through `published_id/1`, and that is not cosmetic. Since the
@@ -2927,6 +3264,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       # leak into shared caches or anonymous HTML.
       valueref_accept: true
     }
+
+    # The renderer's own words in the workspace locale (task-8e96278fc4ee7097).
+    opts = BarkparkWeb.StudioLocale.pd_opts(opts)
 
     blocks
     |> Enum.with_index()

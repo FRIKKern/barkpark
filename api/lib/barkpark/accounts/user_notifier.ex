@@ -61,6 +61,56 @@ defmodule Barkpark.Accounts.UserNotifier do
     """)
   end
 
+  @doc """
+  Tell an existing account it was invited to a workspace (task-a3c4164ea2f56ccd).
+
+  `invite` carries `:workspace` (its name), `:inviter` (a person's email, or
+  nil when a token or an unnamed principal invited), `:url` (the
+  `/invitations` page, where the invitee accepts or declines) and `:locale`
+  (the inviting workspace's, `"nb-NO"` for Norwegian; anything else is
+  English). The mail carries no token: accepting needs the invitee's own
+  sign-in. One invitation, one mail: a second invite of a pending invitee is
+  refused before this is called, and the per-recipient budget below still
+  meters it.
+  """
+  def deliver_invitation(email, %{workspace: workspace, url: url} = invite) do
+    workspace = one_line(workspace)
+    inviter = one_line(invite[:inviter])
+
+    case invite[:locale] do
+      "nb-NO" ->
+        deliver(email, "Du er invitert til #{workspace} på Barkpark", """
+        #{inviter || "En administrator"} har invitert deg til arbeidsområdet #{workspace} på Barkpark.
+
+        Se invitasjonen og godta eller avslå den her:
+
+        #{url}
+
+        Vil du ikke bli med, kan du avslå invitasjonen eller se bort fra denne e-posten.
+        """)
+
+      _ ->
+        deliver(email, "You're invited to #{workspace} on Barkpark", """
+        #{inviter || "A workspace admin"} invited you to join the workspace #{workspace} on Barkpark.
+
+        See the invitation and accept or decline it here:
+
+        #{url}
+
+        If you don't want to join, decline the invitation or ignore this message.
+        """)
+    end
+  end
+
+  # A name goes into the subject line: no line breaks, so it can never start a
+  # header of its own.
+  defp one_line(nil), do: nil
+
+  defp one_line(text) when is_binary(text),
+    do: text |> String.replace(~r/[\r\n]+/, " ") |> String.trim()
+
+  defp one_line(other), do: other |> to_string() |> one_line()
+
   # task-7943350f12d1d5e1: THE PER-RECIPIENT BUDGET. The browser reset and
   # magic-link doors mount no RateLimit, and the JSON twins are metered per IP
   # only, so nothing bounded how many of these mails one ADDRESS received.

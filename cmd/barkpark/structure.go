@@ -183,16 +183,73 @@ func buildDesk(ds *DataStore) bool {
 	return true
 }
 
-// terminalIcon keeps an icon only when the terminal can draw it: emoji and
-// other non-ASCII glyphs pass, Lucide icon NAMES ("book", "history") — which
-// Studio resolves to SVGs — would render as stray words, so they drop.
+// lucideGlyphs maps the Lucide icon NAMES that schemas and desk nodes declare
+// (Studio resolves them to SVGs) to a glyph a terminal can draw. The keys are
+// the names Barkpark's own schemas and plugins ship today.
+var lucideGlyphs = map[string]string{
+	"book":            "📖",
+	"terminal":        "⌨",
+	"file":            "📄",
+	"file-text":       "📄",
+	"folder":          "📁",
+	"folder-tree":     "📁",
+	"image":           "🖼",
+	"user":            "👤",
+	"users":           "👥",
+	"tag":             "🏷",
+	"settings":        "⚙",
+	"home":            "⌂",
+	"inbox":           "📥",
+	"mailbox":         "📬",
+	"send":            "✉",
+	"megaphone":       "📣",
+	"ticket":          "🎫",
+	"clock":           "◷",
+	"history":         "◷",
+	"zap":             "⚡",
+	"activity":        "∿",
+	"package":         "📦",
+	"puzzle":          "🧩",
+	"palette":         "🎨",
+	"link":            "🔗",
+	"external-link":   "🔗",
+	"github":          "⎇",
+	"git-fork":        "⎇",
+	"git-compare":     "⇄",
+	"messages-square": "💬",
+	"clipboard-list":  "📋",
+	"layout-list":     "☰",
+	"columns":         "▥",
+	"check-circle":    "✓",
+	"shield":          "🛡",
+	"building":        "🏢",
+	"compass":         "🧭",
+	"help-circle":     "?",
+	"flag":            "⚑",
+	"eye":             "◉",
+}
+
+// iconFallback stands in for an icon name with no mapping, so the desk never
+// prints the raw name as if it were part of the title.
+const iconFallback = "▪"
+
+// terminalIcon returns an icon the terminal can draw. Emoji and other
+// non-ASCII glyphs pass unchanged. A Lucide icon NAME ("book", "terminal")
+// maps through lucideGlyphs, and an unmapped name becomes iconFallback.
+// An empty icon stays empty.
 func terminalIcon(icon string) string {
+	if icon == "" {
+		return ""
+	}
 	for _, r := range icon {
 		if r > 127 {
 			return icon
 		}
 	}
-	return ""
+	if g, ok := lucideGlyphs[strings.ToLower(strings.TrimSpace(icon))]; ok {
+		return g
+	}
+	return iconFallback
 }
 
 // opensTo is what selecting a desk row opens. The schema-built desk wraps every

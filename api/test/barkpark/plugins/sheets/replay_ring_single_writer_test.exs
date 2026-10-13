@@ -163,7 +163,7 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRingSingleWriterTest do
       arm_trace!()
 
       rid = "sw-offsession-req"
-      key = {@dataset, nil, "sw-no-such-session"}
+      key = {@dataset, nil, nil, "sw-no-such-session"}
 
       {:ok, task_pid} = Task.start(fn -> ReplayRing.put(key, rid, %{"ok" => true}) end)
 
@@ -361,7 +361,7 @@ defmodule Barkpark.Plugins.Sheets.Session.ReplayRingSingleWriterTest do
         _ -> nil
       end
 
-    {@dataset, ws, Content.published_id(slug)}
+    {@dataset, ws, nil, Content.published_id(slug)}
   end
 
   defp stop_all_sessions do
@@ -549,7 +549,7 @@ if System.get_env("SHEETS_REPLAY_RING_RACE") == "1" do
     defp race(writers) do
       lost =
         for round <- 1..@rounds do
-          key = {"race", nil, "sheet-#{round}"}
+          key = {"race", nil, nil, "sheet-#{round}"}
           parent = self()
 
           pids =

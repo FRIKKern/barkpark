@@ -338,6 +338,14 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :apply_arming, :string
     field :apply_arming_checked_at, :utc_datetime_usec
 
+    # The box's LAST FAILED self-update run, mirrored from the `failure` key of
+    # `GET /v1/admin/self-update` on the same hourly 200 body: `phase` (build,
+    # migrate, restart, merge, fetch, ...), `source` (deploy_status | exit_code),
+    # `exit_code`, `tail` (at most 40 redacted log lines, re-scrubbed here by
+    # `FailureCopy`) and `finished_at`. NULL = no failed run on file. It answers
+    # "did Gyldendal's update die in the build or the migration?" without SSH.
+    field :update_last_failure, :map
+
     # deploy-reliability W21 (S2) — the DERIVED freshness verdict, deliberately
     # NOT a fifth `update_state` rung (a fifth rung excludes the row from the
     # rollout that would fix it and can freeze the staging gate fail-CLOSED).
@@ -877,7 +885,8 @@ defmodule BarkparkCloud.Registry.Barkpark do
       :update_checked_at,
       :update_unavailable_reason,
       :apply_arming,
-      :apply_arming_checked_at
+      :apply_arming_checked_at,
+      :update_last_failure
     ])
     |> validate_inclusion(:update_state, @update_states)
     |> validate_inclusion(:update_unavailable_reason, @update_unavailable_reasons)

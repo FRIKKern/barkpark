@@ -480,7 +480,11 @@ defmodule Barkpark.Plugins.Github.RelationsTest do
     end
 
     test "the projection renders the parent marker from a hydrated key" do
-      doc = %{"doc_id" => "child-deep", "content" => %{"description" => "Human context."}}
+      doc = %{
+        "doc_id" => "child-deep",
+        "content" => %{"description" => "Human context.", "labels" => ["public"]}
+      }
+
       flat = Map.put(doc, "parent_marker", "p")
 
       issue = Projection.task_to_issue(flat)

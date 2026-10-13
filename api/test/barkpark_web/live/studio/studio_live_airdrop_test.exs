@@ -99,7 +99,8 @@ defmodule BarkparkWeb.Studio.StudioLiveAirdropTest do
       view |> render_hook("airdrop-open", %{"type" => "post"})
       sheet = render(view)
       assert sheet =~ "Share access"
-      assert sheet =~ "· post"
+      # task-7b0c9b8ae4ac6f79: the type is named by its schema title.
+      assert sheet =~ "· Post"
     end
 
     test "the workspace surface opens WITHOUT a type (workspace scope)", %{conn: conn} do

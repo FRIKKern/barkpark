@@ -101,6 +101,7 @@ defmodule Barkpark.PortableDoc.Patch do
   """
 
   alias Barkpark.PortableDoc.Constraints
+  alias Barkpark.PortableDoc.FieldNumber
 
   @figure_child_constraint "figure must contain exactly one child"
 
@@ -197,6 +198,52 @@ defmodule Barkpark.PortableDoc.Patch do
     end)
   end
 
+  @doc """
+  The set of block ids a batch of `ops` WRITES — inserts a new block under,
+  or overwrites the content of. For a caller that only needs to re-check the
+  blocks a batch actually changed (task-bbd13e5a46240cc1 — a field's
+  declared vocabulary check, which must not refuse a batch over an untouched
+  block it never read or wrote), this is the set to check against, in place
+  of the whole result.
+
+  `"append-block"` / `"insert-after"` contribute the NEW block's own id.
+  `"patch-block"` / `"replace-block"` contribute the id they target — their
+  block's CONTENT changes, so it is re-checked exactly like a fresh insert.
+
+  `"remove-block"` and `"move-block"` contribute NOTHING: a removed block is
+  gone from the result (nothing left to check), and a moved block's content
+  is byte-identical to before — only its position shifted (see this module's
+  op-dispatch clauses) — so a block already sitting in the tree stays
+  "untouched" by this definition even when a batch moves it.
+
+  Pure, like every other function here: reads the ops, performs no lookup
+  against any particular block list. A malformed/unrecognised op (no
+  `"op"` key, or one outside the six `apply_to_blocks/2` knows) contributes
+  nothing — `apply_patches/3` already halts the whole batch on one before a
+  caller would ever reach this with the failing op's result.
+  """
+  @spec touched_block_ids([op()]) :: MapSet.t()
+  def touched_block_ids(ops) when is_list(ops) do
+    Enum.reduce(ops, MapSet.new(), &add_touched_ids/2)
+  end
+
+  defp add_touched_ids(%{"op" => op, "block" => block}, acc)
+       when op in ["append-block", "insert-after"],
+       do: put_touched_id(acc, block)
+
+  defp add_touched_ids(%{"op" => op, "id" => id}, acc)
+       when op in ["patch-block", "replace-block"] and is_binary(id),
+       do: MapSet.put(acc, id)
+
+  defp add_touched_ids(_op, acc), do: acc
+
+  defp put_touched_id(acc, block) do
+    case block_id(block) do
+      id when is_binary(id) -> MapSet.put(acc, id)
+      _ -> acc
+    end
+  end
+
   # ── op dispatch — one clause per discriminator ─────────────────────────────
 
   defp apply_to_blocks(blocks, %{"op" => "append-block", "block" => block}) do
@@ -225,32 +272,31 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp apply_to_blocks(blocks, %{"op" => "patch-block", "id" => id, "patch" => patch})
        when is_map(patch) do
-    # Track a type mismatch out-of-band: transform_at_id can only signal
-    # found / not-found, so the merge fn records the conflict and leaves the
-    # target untouched, and we inspect the flag after the walk — a captured
-    # `type_mismatch?` flag threaded out of the closure.
-    {result, mismatch?} =
+    # Track a refusal out-of-band: transform_at_id can only signal found /
+    # not-found, so the merge fn records the conflict (`:type_mismatch` or
+    # `:invalid_value`) and leaves the target untouched, and we inspect the flag
+    # after the walk.
+    {result, refusal} =
       transform_with_flag(blocks, id, fn target ->
         # `patch.type` present and differing from the target's type is a
         # mismatch (contract §5); omitting `type` is the common case. A literal
         # `null` is treated as "absent" — it can never re-key the type.
-        case Map.get(patch, "type") do
-          nil ->
-            {[merge_block(target, coerce_field_patch(target, strip_template_keys(patch)))], false}
+        patch_type = Map.get(patch, "type")
 
-          patch_type ->
-            if patch_type != Map.get(target, "type") do
-              {[target], true}
-            else
-              {[merge_block(target, coerce_field_patch(target, strip_template_keys(patch)))],
-               false}
-            end
+        if patch_type != nil and patch_type != Map.get(target, "type") do
+          {[target], :type_mismatch}
+        else
+          case coerce_field_patch(target, strip_template_keys(patch)) do
+            {:ok, coerced} -> {[merge_block(target, coerced)], false}
+            :error -> {[target], :invalid_value}
+          end
         end
       end)
 
     cond do
       result == nil -> {:error, {:block_not_found, id, "patch-block"}}
-      mismatch? -> {:error, {:type_mismatch, id, "patch-block"}}
+      refusal == :type_mismatch -> {:error, {:type_mismatch, id, "patch-block"}}
+      refusal == :invalid_value -> {:error, {:invalid_op, op_for_error(id, patch)}}
       true -> {:ok, result}
     end
   end
@@ -811,20 +857,59 @@ defmodule Barkpark.PortableDoc.Patch do
   defp block_locked?(block) when is_map(block), do: Map.get(block, "locked") == true
   defp block_locked?(_block), do: false
 
-  # Minimal per-type coercion for field-* LEAF blocks (P2.1). Only the
-  # `"value"` key is touched, and only for field-boolean (string "true"/"false"
-  # → real bool) so a stringy checkbox value can never land in the store as a
-  # binary. All other field types (string/slug/text/select/datetime/color) keep
-  # their value as-is — string values are already the right shape. Non-field
+  # Minimal per-type coercion for field-* LEAF blocks (P2.1). For field-boolean
+  # only the `"value"` key is touched (string "true"/"false" → real bool) so a
+  # stringy checkbox value can never land in the store as a binary. A
+  # field-number patch that touches value/min/max/step goes through
+  # `FieldNumber.validate/2`: numeric text becomes a number, "" becomes nil, and
+  # a value the Paper editor's number form would refuse (not a number, outside
+  # min..max) is refused here too (`:error`). All other field types
+  # (string/slug/text/select/datetime/color) keep their value as-is. Non-field
   # blocks (rich text, callout, …) are returned untouched, so the P1 path is
-  # byte-identical. Full per-type schema validation is a later slice.
+  # byte-identical.
   defp coerce_field_patch(%{"type" => "field-boolean"}, patch) do
     case Map.fetch(patch, "value") do
-      {:ok, "true"} -> Map.put(patch, "value", true)
-      {:ok, "false"} -> Map.put(patch, "value", false)
-      _ -> patch
+      {:ok, "true"} -> {:ok, Map.put(patch, "value", true)}
+      {:ok, "false"} -> {:ok, Map.put(patch, "value", false)}
+      _ -> {:ok, patch}
     end
   end
 
-  defp coerce_field_patch(_target, patch), do: patch
+  defp coerce_field_patch(%{"type" => "field-number"} = target, patch) do
+    numbers = Map.take(patch, FieldNumber.number_keys())
+
+    if numbers == %{} do
+      {:ok, patch}
+    else
+      case FieldNumber.validate(target, numbers) do
+        {:ok, parsed} -> {:ok, Map.merge(patch, parsed)}
+        {:error, _reason} -> :error
+      end
+    end
+  end
+
+  # A field-select patch that carries `options` (the canvas settings disclosure
+  # edits the list) must send a list of `%{"value" => text}` with an optional text
+  # `"label"` and no repeated value: the reader looks each option up by value.
+  defp coerce_field_patch(%{"type" => "field-select"}, %{"options" => options} = patch) do
+    if select_options?(options), do: {:ok, patch}, else: :error
+  end
+
+  defp coerce_field_patch(_target, patch), do: {:ok, patch}
+
+  defp select_options?(options) when is_list(options) do
+    Enum.all?(options, fn
+      %{"value" => value} = option when is_binary(value) and value != "" ->
+        Map.keys(option) -- ["value", "label"] == [] and
+          is_binary(Map.get(option, "label", ""))
+
+      _ ->
+        false
+    end) and
+      length(Enum.uniq_by(options, & &1["value"])) == length(options)
+  end
+
+  defp select_options?(_options), do: false
+
+  defp op_for_error(id, patch), do: %{"op" => "patch-block", "id" => id, "patch" => patch}
 end

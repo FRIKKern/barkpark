@@ -57,7 +57,18 @@ defmodule Barkpark.Webhooks.Webhook do
     timestamps(type: :utc_datetime_usec)
   end
 
-  @valid_events ~w(create update publish unpublish delete discardDraft patch)
+  # `patch` is deliberately ABSENT (task-2195336df2daf576): the dispatcher
+  # never emits it. A patch mutation lands in Content.Writer exactly like any
+  # other document save and is reported with the generic storage-shaped
+  # action it actually took — "update" for an existing draft, "create" for a
+  # fresh fork — never a verb naming the API-level mutation that caused it
+  # (see `active_webhooks_for/4`'s exact `events @> ARRAY[event]` match and
+  # the Studio API playground's own note that the revision `action` field
+  # "reflects the underlying storage operation, not the API mutation").
+  # A hook subscribed to `events: ["patch"]` was therefore accepted and could
+  # never fire — refusing it at creation surfaces that dead configuration
+  # instead of silently swallowing deliveries forever.
+  @valid_events ~w(create update publish unpublish delete discardDraft)
   # Mirrors Barkpark.Audit.Event.categories/0 — kept in sync so a subscription
   # can't name a category the audit bus never emits.
   @valid_audit_categories ~w(content_mutation auth membership secret plugin_settings token)

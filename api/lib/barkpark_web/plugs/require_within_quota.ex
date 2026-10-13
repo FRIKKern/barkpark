@@ -44,6 +44,46 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
       `workspace.quota_exceeded` audit line so the wall being hit is observable.
     * oversize batch → 422 `batch_too_large` (see below), written BEFORE the
       quota is consulted so an absurd batch is refused on shape, not on money.
+    * too many DELETES → 422 `batch_too_large` (see "## The delete cap" below),
+      checked alongside the overall cap, also before the quota and before the
+      transaction opens.
+
+  ## The delete cap (task-c801daf4efd35a74)
+
+  `delete` consumes ZERO quota room (see below), so the `@max_mutations`
+  (1000) cap alone let a batch of 250 plain deletes through — reported by
+  barkpark-studio's scale scout: that request answered 500 `DBConnection`
+  while 50 worked. The cost a quota check cannot see is
+  `Content.Mutations.ensure_unreferenced/5`, run inside the transaction once
+  PER delete: it loads every reference-typed field across every schema in the
+  dataset (`Content.Edges.find_referencing_docs/3`) and queries each one, so
+  one delete's reference-integrity check costs O(reference fields in the
+  dataset's schema) queries, and a batch of N deletes costs O(N × fields) —
+  unbounded by `@max_mutations`, which only bounds N, never the per-op
+  multiplier. Measured locally (empty corpus, 8 reference fields): ~33ms per
+  delete; a real dataset's schema, corpus size and infra push that higher,
+  which is the gap between "50 works" and "250 500s" on barkpark-studio's box.
+
+  WHY 500 NOW (task-6b5e4b3e572d38c9), RAISED FROM 50 WITH EVIDENCE.
+  `ensure_unreferenced/5`'s query-per-field-per-delete cost is now BATCHED
+  (`ReferenceIntegrity.referrers_for_ids/3`, `Content.Mutations.apply_all/4`)
+  across a whole consecutive run of deletes — one pass per reference field
+  for the WHOLE run, not per delete — so the multiplier this cap originally
+  existed to bound is gone for the realistic "bulk delete N things" shape.
+  What is left is the remaining PER-DELETE work (the write itself, hooks,
+  broadcast, audit, and the still-unbatched `delete_target/4` existence
+  lookup) — linear in N, not multiplied by field count. Measured locally
+  (near-empty corpus, no concurrent load, so a BEST case exactly like the
+  50-cap's own measurement): 250 deletes / 4 reference fields ~1-1.5s, 500
+  deletes / 8 reference fields ~2.6s, 1000 deletes / 8 reference fields
+  ~6.4s. The candidate timeouts are unchanged (Postgres `statement_timeout`
+  30s per statement; Ecto/Postgrex client `:timeout` 15_000ms per call,
+  neither bounding a transaction's CUMULATIVE time) — 500 gives roughly
+  5.7× headroom under the 15s figure even on this best-case measurement,
+  comfortably past the 250 that previously 500'd, without reaching for
+  1000 (measured ~6.4s, real dataset/corpus/load headroom less comfortable)
+  or dropping the cap altogether (this gate still cannot see the dataset's
+  schema/corpus size without a query of its own).
 
   ## Room for the WHOLE batch, not room for one
 
@@ -115,6 +155,15 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   # plugin's module — so the number is restated here with its owner named.
   @max_mutations 1_000
 
+  # task-c801daf4efd35a74 (originally 50) / task-6b5e4b3e572d38c9 (raised to
+  # 500) — see "## The delete cap" above. `delete` costs ZERO quota room but
+  # the per-delete work `@max_mutations` never bounds. 500 is evidence-backed
+  # headroom under both candidate timeouts (Postgres `statement_timeout`
+  # 30s, Ecto/Postgrex client `:timeout` 15_000ms) now that the
+  # reference-integrity query no longer multiplies by field count — see the
+  # measurements above.
+  @max_delete_mutations 500
+
   # Ops that can add a `documents` row. Everything else (delete, discardDraft,
   # patch) consumes ZERO room; see the moduledoc.
   @room_consuming_ops ~w(create createOrReplace createIfNotExists replace publish unpublish)
@@ -124,6 +173,13 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   """
   @spec max_mutations() :: pos_integer()
   def max_mutations, do: @max_mutations
+
+  @doc """
+  The per-request DELETE-mutation cap enforced by this gate (422
+  `batch_too_large`, `details.kind == "delete"`). See "## The delete cap".
+  """
+  @spec max_delete_mutations() :: pos_integer()
+  def max_delete_mutations, do: @max_delete_mutations
 
   def init(opts), do: opts
 
@@ -144,6 +200,9 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
     case batch_demand(conn) do
       {:error, {:batch_too_large, n}} ->
         halt_with(conn, {:error, {:batch_too_large, n, @max_mutations}})
+
+      {:error, {:delete_batch_too_large, n}} ->
+        halt_with(conn, {:error, {:delete_batch_too_large, n, @max_delete_mutations}})
 
       {:ok, needed} ->
         quota_gate(conn, ws, opts, needed)
@@ -174,8 +233,14 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
     case conn.body_params do
       %{"mutations" => mutations} when is_list(mutations) ->
         case length(mutations) do
-          n when n > @max_mutations -> {:error, {:batch_too_large, n}}
-          _ -> {:ok, count_room_consuming(mutations)}
+          n when n > @max_mutations ->
+            {:error, {:batch_too_large, n}}
+
+          _ ->
+            case count_deletes(mutations) do
+              d when d > @max_delete_mutations -> {:error, {:delete_batch_too_large, d}}
+              _ -> {:ok, count_room_consuming(mutations)}
+            end
         end
 
       _ ->
@@ -186,6 +251,18 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   defp count_room_consuming(mutations) do
     Enum.count(mutations, fn
       m when is_map(m) -> Enum.any?(@room_consuming_ops, &Map.has_key?(m, &1))
+      _ -> false
+    end)
+  end
+
+  # task-c801daf4efd35a74 — `delete` is the ONE op shape whose cost this gate
+  # cannot read off room consumed; see "## The delete cap". Counts
+  # `"delete"` only (not `deleteExactDraft`, `discardDraft`, `unpublish`):
+  # `Content.Mutations.ensure_unreferenced/5` runs only from the plain
+  # `"delete"` clause.
+  defp count_deletes(mutations) do
+    Enum.count(mutations, fn
+      m when is_map(m) -> Map.has_key?(m, "delete")
       _ -> false
     end)
   end

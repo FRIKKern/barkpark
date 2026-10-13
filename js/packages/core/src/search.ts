@@ -7,7 +7,7 @@
 //   { documents, count, query, highlights, correctedTo, ... }
 // We read it tolerantly (accepting an enveloped shape too).
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { request } from './transport'
 import { assertPaging, assertNoCommaEntries } from './filter-builder'
 import { BarkparkValidationError } from './errors'
@@ -58,7 +58,7 @@ export async function searchDocuments<T = BarkparkDocument>(
   const perspective = opts?.perspective ?? config.perspective
   if (perspective !== undefined) params.set('perspective', perspective)
 
-  const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}?${params.toString()}`
+  const path = `${dataPath(config, 'search')}?${params.toString()}`
 
   const reqOpts: { kind: 'read'; signal?: AbortSignal; headers?: Record<string, string> } = {
     kind: 'read',
@@ -110,7 +110,7 @@ export async function getSearchSuggestions(
   if (prefix) params.set('q', prefix)
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
   const qs = params.toString()
-  const path = `${scopePrefix(config)}/v1/data/search/${encodeURIComponent(config.dataset)}/suggestions${qs ? `?${qs}` : ''}`
+  const path = `${dataPath(config, 'search')}/suggestions${qs ? `?${qs}` : ''}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal; headers?: Record<string, string> } = {
     kind: 'read',
   }

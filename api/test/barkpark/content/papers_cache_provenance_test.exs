@@ -143,6 +143,55 @@ defmodule Barkpark.Content.PapersCacheProvenanceTest do
     end
   end
 
+  # task-8e96278fc4ee7097: the renderer's own words follow the workspace locale,
+  # a render input the stamp does not carry. A workspace that switches language
+  # leaves its stored bodies in the old words under a CURRENT stamp.
+  describe "locale drift" do
+    defp form_blocks do
+      [
+        %{
+          "id" => "f1",
+          "type" => "form",
+          "kind" => "grill",
+          "questions" => [%{"id" => "q1", "type" => "yesno", "prompt" => "Ship it?"}]
+        }
+      ]
+    end
+
+    test "a body rendered in another locale under a current stamp is stale, not a 422" do
+      blocks = form_blocks()
+      nb_html = render(blocks, %{style: :article, locale: "nb-NO"})
+      refute nb_html == render(blocks, %{style: :article}), "the nb render must move the bytes"
+
+      # A bare paper reads as the Default workspace's, which is English.
+      paper =
+        bare_paper(%{
+          "blocks" => blocks,
+          "body_html" => nb_html,
+          "body_html_sv" => Render.body_html_render_version()
+        })
+
+      assert {:blocks, ^blocks} = Papers.reader_source(paper, @dataset, [])
+      assert {:ok, html} = Papers.reader_html(paper, @dataset, [])
+      assert html =~ "<span>Yes</span>"
+      refute html =~ "<span>Ja</span>"
+    end
+
+    test "the locale arm is narrow: other-locale words plus foreign content still 422" do
+      blocks = form_blocks()
+
+      paper =
+        bare_paper(%{
+          "blocks" => blocks,
+          "body_html" =>
+            render(blocks, %{style: :article, locale: "nb-NO"}) <> "<p>Prose in no block.</p>",
+          "body_html_sv" => Render.body_html_render_version()
+        })
+
+      assert {:error, :ambiguous_source} = Papers.reader_source(paper, @dataset, [])
+    end
+  end
+
   describe "legacy" do
     # Superseded by pe-w2-reader-stamp-guard: an absent stamp claims nothing
     # about the CURRENT renderer, so a byte mismatch cannot contradict it. The

@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Secondary do
   Secondary pane (read-only second editor) + blast-radius graph open.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -22,7 +23,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Secondary do
         )
         |> Enum.map(fn d ->
           pub = Content.published_id(d.doc_id)
-          %{id: pub, title: d.title || "Untitled", type: type}
+          %{id: pub, title: d.title || gettext("Untitled"), type: type}
         end)
         |> Enum.reject(fn c ->
           socket.assigns[:editor_doc] &&
@@ -128,7 +129,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Secondary do
 
     case Content.fetch_doc_with_draft(type, doc_id, dataset, ScopeHelpers.scope_opts(socket)) do
       {nil, _, _} ->
-        {:noreply, put_flash(socket, :error, "Document not found")}
+        {:noreply, put_flash(socket, :error, gettext("Document not found"))}
 
       {doc, _, _} ->
         schema =

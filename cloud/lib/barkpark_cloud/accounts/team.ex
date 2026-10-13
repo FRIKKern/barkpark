@@ -64,6 +64,12 @@ defmodule BarkparkCloud.Accounts.Team do
     field :trial_notice_3d_sent_at, :utc_datetime_usec
     field :trial_notice_1d_sent_at, :utc_datetime_usec
 
+    # Owner ruling #37 (2026-10-03): the per-team ceiling on CP-PROVISIONED
+    # support boxes (paid servers). NULL = the platform default
+    # (`Registry.support_box_cap/1`); an operator raises it per team through
+    # PUT /v1/operator/teams/:id/support-cap. Never written by a team member.
+    field :support_box_cap, :integer
+
     has_many :team_memberships, BarkparkCloud.Accounts.TeamMembership
     has_many :users, through: [:team_memberships, :user]
 
@@ -90,6 +96,17 @@ defmodule BarkparkCloud.Accounts.Team do
     )
     |> validate_exclusion(:slug, @reserved_slugs, message: "is reserved")
     |> unique_constraint(:slug)
+  end
+
+  @doc """
+  Operator-only changeset for the support-box ceiling (owner ruling #37). Casts
+  ONLY `support_box_cap`; `nil` returns the team to the platform default.
+  """
+  def support_cap_changeset(team, attrs) do
+    team
+    |> cast(attrs, [:support_box_cap])
+    |> validate_number(:support_box_cap, greater_than_or_equal_to: 0, less_than_or_equal_to: 1000)
+    |> check_constraint(:support_box_cap, name: :teams_support_box_cap_non_negative)
   end
 
   @doc """

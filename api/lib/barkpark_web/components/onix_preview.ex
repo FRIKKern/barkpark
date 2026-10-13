@@ -34,13 +34,14 @@ defmodule BarkparkWeb.Components.OnixPreview do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   attr :rendered, :any,
     required: true,
     doc: "pre-rendered iodata from Plugins.Registry.collect_content_renderer/3"
 
   attr :type, :string, required: true, doc: "doc type discriminator (data-bp-type attr)"
-  attr :title, :string, default: "Preview"
+  attr :title, :string, default: nil
 
   def content_preview(assigns) do
     binary = if assigns.rendered, do: IO.iodata_to_binary(assigns.rendered), else: nil
@@ -49,14 +50,14 @@ defmodule BarkparkWeb.Components.OnixPreview do
     ~H"""
     <aside class="bp-onix-preview" data-test-id="onix-preview" data-bp-type={@type}>
       <header class="bp-onix-preview-header">
-        <span class="bp-onix-preview-title"><%= @title %></span>
+        <span class="bp-onix-preview-title"><%= @title || gettext("Preview") %></span>
         <span :if={@binary} class="bp-onix-preview-meta">
-          <%= byte_size(@binary) %> bytes
+          <%= ngettext("1 byte", "%{count} bytes", byte_size(@binary)) %>
         </span>
       </header>
       <pre :if={@binary} class="bp-onix-preview-body"><code><%= @binary %></code></pre>
       <div :if={!@binary} class="bp-onix-preview-empty">
-        Start editing to see preview
+        <%= gettext("Start editing to see preview") %>
       </div>
     </aside>
     """
@@ -77,15 +78,15 @@ defmodule BarkparkWeb.Components.OnixPreview do
     ~H"""
     <aside class="bp-onix-preview" data-test-id="onix-preview" data-bp-type={@type}>
       <header class="bp-onix-preview-header">
-        <span class="bp-onix-preview-title">ONIX 3.0 preview</span>
-        <span :if={@error} class="bp-onix-preview-error" title={inspect(@error)}>export failed</span>
+        <span class="bp-onix-preview-title"><%= gettext("ONIX 3.0 preview") %></span>
+        <span :if={@error} class="bp-onix-preview-error" title={inspect(@error)}><%= gettext("export failed") %></span>
         <span :if={!@error && @xml} class="bp-onix-preview-meta">
-          <%= byte_size(@xml) %> bytes
+          <%= ngettext("1 byte", "%{count} bytes", byte_size(@xml)) %>
         </span>
       </header>
       <pre :if={@xml} class="bp-onix-preview-body"><code><%= @xml %></code></pre>
       <div :if={!@xml && !@error} class="bp-onix-preview-empty">
-        Start editing to see ONIX
+        <%= gettext("Start editing to see ONIX") %>
       </div>
     </aside>
     """

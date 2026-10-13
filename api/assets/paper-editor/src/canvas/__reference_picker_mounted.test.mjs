@@ -99,6 +99,8 @@ try {
 
   const input = picker.querySelector(".bp-ref-search-input");
   assert.ok(input, "the picker offers its real typeahead input");
+  // A user types into a focused search (the list closes when focus leaves).
+  input.focus();
   input.value = "target";
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
 
@@ -107,9 +109,12 @@ try {
   const result = picker.querySelector(".bp-ref-dropdown-item");
   assert.ok(result, "the mocked scoped search result renders as a picker option");
   assert.match(result.textContent, /Target paper/);
+  // A real mouse press: mousedown keeps focus in the picker, click selects
+  // (task-06efa9925540f212 moved selection to click so Enter/Space work).
   result.dispatchEvent(
     new window.MouseEvent("mousedown", { bubbles: true, cancelable: true })
   );
+  result.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
 
   canvas.flushPendingChanges();
 

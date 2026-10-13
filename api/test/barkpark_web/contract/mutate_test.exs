@@ -166,20 +166,31 @@ defmodule BarkparkWeb.Contract.MutateTest do
     assert after_doc.content["c"] == 3
   end
 
-  test "patch unset cannot remove promoted/system fields (title survives)", %{conn: conn} do
+  # The title is a promoted column, but clearing it was always allowed through
+  # `set {title: ""}`; `unset` now clears it the same way (task-a50bcf53bee78a53),
+  # as Sanity-style clients unset an emptied field. The system fields stay put.
+  test "patch unset clears the title like set \"\"; system fields survive", %{conn: conn} do
     {:ok, doc} =
-      Content.create_document("post", %{"_id" => "unset-3", "title" => "keep-me"}, "test")
+      Content.create_document("post", %{"_id" => "unset-3", "title" => "clear-me"}, "test")
 
     resp =
       do_mutate(conn, %{
         "mutations" => [
-          %{"patch" => %{"id" => doc.doc_id, "type" => "post", "unset" => ["title"]}}
+          %{
+            "patch" => %{
+              "id" => doc.doc_id,
+              "type" => "post",
+              "unset" => ["title", "_id", "_type", "_rev"]
+            }
+          }
         ]
       })
 
     assert resp.status == 200
     {:ok, after_doc} = Content.get_document(doc.doc_id, "post", "test")
-    assert after_doc.title == "keep-me"
+    assert after_doc.title in [nil, ""]
+    assert after_doc.doc_id == doc.doc_id
+    assert after_doc.type == "post"
   end
 
   test "patch inc increments a numeric field; a missing field starts from 0 (Phase-1B)", %{

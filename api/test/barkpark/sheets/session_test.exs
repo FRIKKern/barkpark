@@ -660,6 +660,37 @@ defmodule Barkpark.Plugins.Sheets.SessionTest do
       assert [%{index: 0, code: "invalid_name"}, %{index: 1, code: "invalid_name"}] = errors
     end
 
+    # task-12b3b4e250901169: the cross-tab rewrite was guarded on
+    # `function_exported?/3`, which is false until the VM loads Structure. Under
+    # interactive loading (dev, mix test) a rename then left other tabs'
+    # formulas on the old name. Unload Structure first to reproduce that state.
+    test "rename_tab rewrites other tabs' refs even before Structure is loaded" do
+      create_sheet("st-rename-xtab", %{"A1" => %{"v" => 150}})
+
+      {:ok, %{applied: 3, errors: []}} =
+        Session.apply_ops("st-rename-xtab", @dataset, [
+          %{"op" => "rename_tab", "tab" => 0, "name" => "Inntekt 2027"},
+          %{"op" => "add_tab", "name" => "Sum"},
+          %{"op" => "set_cell", "tab" => 1, "ref" => "A1", "raw" => "='Inntekt 2027'!A1*2"}
+        ])
+
+      structure = Barkpark.Plugins.Sheets.Structure
+      on_exit(fn -> Code.ensure_loaded(structure) end)
+      :code.purge(structure)
+      :code.delete(structure)
+      refute function_exported?(structure, :rename_refs, 3)
+
+      {:ok, %{applied: 1, errors: []}} =
+        Session.apply_ops("st-rename-xtab", @dataset, [
+          %{"op" => "rename_tab", "tab" => 0, "name" => "Inntekter"}
+        ])
+
+      {:ok, content} = Session.peek("st-rename-xtab", @dataset)
+      a1 = get_in(content, ["tabs", Access.at(1), "cells", "A1"])
+      assert a1["f"] == "Inntekter!A1*2"
+      assert a1["v"] == 300
+    end
+
     test "add_tab appends an empty tab that immediately accepts ops" do
       doc = create_sheet("st-addtab", %{"A1" => %{"v" => "t0"}})
 

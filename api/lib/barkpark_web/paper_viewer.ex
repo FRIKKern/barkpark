@@ -12,9 +12,10 @@ defmodule BarkparkWeb.PaperViewer do
 
     * `:current_user` — the `%Barkpark.Accounts.User{}` behind a
       `session["user_session"]` cookie, or `nil`;
-    * `:api_token` — the verified `%Barkpark.Auth.ApiToken{}` behind
-      `session["api_token"]` (or, in dev only, the seeded
-      `:dev_browser_token`), or `nil`;
+    * `:api_token` — the verified `%Barkpark.Auth.ApiToken{}` behind the
+      session credential (`session["api_token_session"]`, a revocable
+      session id, or the legacy `session["api_token"]` raw bearer for one
+      release — or, in dev only, the seeded `:dev_browser_token`), or `nil`;
     * `:api_token_raw` — the RAW string behind that verified token, or `""`.
       Mirrors `BarkparkWeb.LiveAuth.on_mount(:fetch_api_token, …)`: the
       client-side editor bridges (`data-token=…`) need the raw credential the
@@ -407,17 +408,19 @@ defmodule BarkparkWeb.PaperViewer do
   # `{nil, ""}` for every absent / unverifiable credential, so the raw value is
   # never echoed back for a token the server did not accept.
   defp token_from_session(session) do
-    raw =
-      case session["api_token"] do
-        raw when is_binary(raw) and raw != "" -> raw
-        _ -> dev_browser_token_fallback()
+    session_id = session["api_token_session"]
+    legacy_raw = session["api_token"]
+
+    resolved =
+      if Auth.session_credential_present?(session_id, legacy_raw) do
+        Auth.resolve_session_credential(session_id, legacy_raw)
+      else
+        Auth.resolve_session_credential(nil, dev_browser_token_fallback())
       end
 
-    with raw when is_binary(raw) <- raw,
-         {:ok, %ApiToken{} = token} <- Auth.verify_token(raw) do
-      {token, raw}
-    else
-      _ -> {nil, ""}
+    case resolved do
+      {:ok, %ApiToken{} = token, raw} -> {token, raw}
+      :error -> {nil, ""}
     end
   end
 

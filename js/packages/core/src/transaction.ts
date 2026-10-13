@@ -10,7 +10,7 @@ import type {
   BarkparkDocument,
 } from './types'
 import { request } from './transport'
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { FORBIDDEN_SET_KEYS, requireItems, selectorField } from './patch'
 import { BarkparkValidationError } from './errors'
 
@@ -289,7 +289,7 @@ export function createTransaction(config: BarkparkClientConfig): TransactionBuil
       }
       const { data } = await request<MutateEnvelope>(
         config,
-        `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
+        `${dataPath(config, 'mutate')}`,
         {
           method: 'POST',
           body: { mutations },

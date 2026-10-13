@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   Pane navigation + workspace/project/dataset scope switch + switcher create
   affordances. Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -35,9 +36,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
         # spd-bl-focus-after-select — THE DECISION, bucket by bucket (full
         # write-up in studio_focus_after_select_test.exs):
-        #   wide/standard  -> nothing. The clicked row survives the patch
-        #                     (it re-renders wearing aria-current), so the
-        #                     browser never moves activeElement.
+        #   wide/standard  -> the clicked row survives the patch (it
+        #                     re-renders wearing aria-current), but its pane
+        #                     column is re-inserted when the root pane
+        #                     collapses into its strip, and a moved node
+        #                     loses focus. The #studio-panes hook
+        #                     (WidthBucket) gives it back after the patch
+        #                     (task-6d3bd0c5d673c16f), so nothing here.
         #   narrow/phone   -> the clicked row is DESTROYED (the pane strips
         #                     at narrow and hides at phone), so focus falls
         #                     to <body>. The strip is refused as a target —
@@ -188,7 +193,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
           is_nil(Shared.initial_project(workspace)) ->
             {:noreply,
-             put_flash(socket, :error, "Workspace has no projects yet — create one first")}
+             put_flash(
+               socket,
+               :error,
+               gettext("Workspace has no projects yet — create one first")
+             )}
 
           true ->
             project = Shared.initial_project(workspace)
@@ -271,7 +280,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def create_workspace(%{"name" => name}, socket) do
     case principal(socket) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Sign in to create a workspace")}
+        {:noreply, put_flash(socket, :error, gettext("Sign in to create a workspace"))}
 
       principal ->
         case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
@@ -291,7 +300,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
                scope_menu: nil
              )
              |> Shared.sync_scope_prefix()
-             |> put_flash(:info, "Workspace created")
+             |> put_flash(:info, gettext("Workspace created"))
              |> Shared.rescope_dataset_for_project(project)}
 
           {:error, changeset} ->
@@ -307,7 +316,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
     cond do
       is_nil(principal(socket)) ->
-        {:noreply, put_flash(socket, :error, "Sign in to create a project")}
+        {:noreply, put_flash(socket, :error, gettext("Sign in to create a project"))}
 
       is_nil(ws) ->
         {:noreply, socket}
@@ -329,7 +338,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
                scope_menu: nil
              )
              |> Shared.sync_scope_prefix()
-             |> put_flash(:info, "Project created")
+             |> put_flash(:info, gettext("Project created"))
              |> Shared.rescope_dataset_for_project(project)}
 
           {:error, changeset} ->
@@ -356,7 +365,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def expand_pane(%{"idx" => idx_str}, socket) do
     case Integer.parse(idx_str) do
       {idx, ""} when idx >= 0 ->
-        new_path = Enum.take(socket.assigns.nav_path, idx)
+        # Pane `idx`'s own address, as select/2 uses it (#35b): on a
+        # `/<type>/<id>` path the pane stack is longer than the URL, and a
+        # slice of the raw URL by index sent the type-list crumb back to the
+        # document it was on.
+        new_path =
+          case Enum.at(socket.assigns[:panes] || [], idx) do
+            %{path: path} when is_list(path) -> path
+            _ -> Enum.take(socket.assigns.nav_path, idx)
+          end
 
         {:noreply,
          socket

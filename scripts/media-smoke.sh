@@ -3,7 +3,7 @@
 #
 # PRINCIPAL GATE (task-226f1718bb56d489, 2026-09-11). Until this slice the only
 # thing between `bash scripts/media-smoke.sh` and a REAL write on the PROD box
-# was the operator's shell: BASE defaults to http://89.167.28.206 and TOKEN to
+# was the operator's shell: BASE defaulted to the old prod box and TOKEN to
 # whatever $BARKPARK_TOKEN happens to hold. The FIRST judgement this script made
 # was the upload POST's own status — by which time the write had landed. A
 # stale-but-valid token wrote prod media, silently and successfully.
@@ -11,11 +11,12 @@
 # So before the first write the run now asserts, in this order:
 #
 #   1. the PARSED hostname of $BASE equals the host this smoke DECLARES
-#      ($MEDIA_SMOKE_EXPECT_HOST, default 89.167.28.206 — the same box $BASE
-#      defaults to, so the default pairing is coherent and any OTHER target must
-#      be named deliberately on BOTH variables). Asserted BEFORE any request, so
-#      an undeclared host is never even probed. A substring match would not do:
-#      `case $BASE in *89.167*` also accepts http://89.167.28.206.evil.example.
+#      ($MEDIA_SMOKE_EXPECT_HOST). Since 2026-10-03, when that default box
+#      (89.167.28.206) was deleted, neither variable has a default: the target
+#      is named deliberately on BOTH, or the run stops with usage (exit 2).
+#      Asserted BEFORE any request, so an undeclared host is never even probed.
+#      A substring match would not do: `case $BASE in *guerrilla*` also accepts
+#      http://guerrilla.evil.example.
 #   2. the credential's auth_tier, read off GET $BASE/v1/capabilities with the
 #      very bearer the writes will carry, is a WRITING tier. /v1/capabilities
 #      answers a read-only caller perfectly well, so the refusal is made on the
@@ -43,13 +44,12 @@ case "${1:-}" in
 esac
 
 TOKEN="${BARKPARK_TOKEN:-barkpark-dev-token}"
-BASE="${BARKPARK_BASE:-http://89.167.28.206}"
+BASE="${BARKPARK_BASE:-}"
 AUTH=(-H "Authorization: Bearer $TOKEN")
 
-# The host this smoke DECLARES. Overridable so a local or staging box can be
-# named — but never silently: an unset override means the prod media box, and a
-# mismatch is a refusal, not a warning.
-EXPECT_HOST="${MEDIA_SMOKE_EXPECT_HOST:-89.167.28.206}"
+# The host this smoke DECLARES. No default (the old default box was deleted
+# 2026-10-03): name it, and a mismatch with BASE is a refusal, not a warning.
+EXPECT_HOST="${MEDIA_SMOKE_EXPECT_HOST:-}"
 
 refuse()      { printf 'REFUSED: %s\n' "$*" >&2; exit 3; }
 cannot_read() { printf 'CANNOT READ: %s\n' "$*" >&2; exit 4; }
@@ -167,6 +167,10 @@ fi
 # THE PRINCIPAL GATE — mandatory, and FIRST. Nothing below it has written yet:
 # the first write is the upload POST in the "=== Upload ===" block.
 # =============================================================================
+if [ -z "$BASE" ] || [ -z "$EXPECT_HOST" ]; then
+  echo "usage: BARKPARK_BASE=https://<box> MEDIA_SMOKE_EXPECT_HOST=<box> $0 — both are required; there is no default target. Nothing has been written." >&2
+  exit 2
+fi
 echo "=== Principal gate ==="
 pg_host_matches "$EXPECT_HOST" "$BASE" || refuse "BARKPARK_BASE is '$BASE' (host '$(pg_url_host "$BASE")'), but this smoke declares host '$EXPECT_HOST'. It uploads media, mutates production documents, mints a share link and checks an asset out — it will not do that to a server it was not pointed at. Set BARKPARK_BASE and MEDIA_SMOKE_EXPECT_HOST together, deliberately. Nothing has been written."
 GATE_TIER="$(pg_capabilities_tier "$BASE" "$TOKEN")" || cannot_read "GET $BASE/v1/capabilities did not answer with a parseable receipt, so this run cannot know whose media library it is about to write. Nothing has been written."

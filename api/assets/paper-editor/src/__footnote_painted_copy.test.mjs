@@ -37,6 +37,9 @@ let hosts = [...el.querySelectorAll("li")];
 assert.deepEqual(hosts.map(h => h.contentEditable), ["plaintext-only", "plaintext-only"], "every painted note edits where it reads");
 assert.deepEqual(hosts.map(h => h.getAttribute("aria-label")), ["Footnote 1", "Footnote 2"]);
 assert.deepEqual(hosts.map(h => h.className), ["bp-footnote__note", "bp-footnote__note"], "the reader's row markup is kept");
+// task-29401c3d732311ff: rows that are text fields are no longer list items,
+// so the <ol> stops claiming a list (axe aria-required-children).
+assert.equal(el.querySelector("ol").getAttribute("role"), "group", "the painted <ol> becomes a group of text fields");
 
 const field = document.querySelector('[name="note-3-text"]');
 const changes = [];
@@ -80,7 +83,8 @@ partial.destroyed();
 
 // A multiline host (a code-tabs panel) takes Enter as a newline; a one-line host
 // in the same preview still commits on Enter.
-el.innerHTML = `<div class="bp-code-tabs"><div class="bp-code-tabs__strip"><button class="bp-code-tabs__tab">JS</button></div>` +
+// The reader paints a real tablist (role=tablist, role=tab, aria-selected).
+el.innerHTML = `<div class="bp-code-tabs"><div class="bp-code-tabs__strip" role="tablist"><button class="bp-code-tabs__tab" role="tab" aria-selected="true">JS</button></div>` +
   `<div class="bp-code-tabs__panels"><div class="bp-code-tabs__panel"><pre>console.log(1)</pre></div></div></div>`;
 el.dataset.paintedCopy = ".bp-code-tabs__tab, .bp-code-tabs__panel > pre";
 el.dataset.paintedCopyNames = "note-0-text,note-3-text";
@@ -91,6 +95,12 @@ const code = { ...window.BarkparkPaperEditorHooks.BarkparkPaperPaintedCopy, el }
 code.mounted();
 const [tab, pre] = [el.querySelector("button"), el.querySelector("pre")];
 assert.equal(tab.getAttribute("aria-multiline"), "false");
+// task-29401c3d732311ff: a tab label that is a text field is not a tab: no
+// aria-selected (axe aria-allowed-attr), and the strip stops being a tablist
+// that owns textboxes (axe aria-required-children).
+assert.equal(tab.getAttribute("role"), "textbox");
+assert.equal(tab.hasAttribute("aria-selected"), false, "a textbox carries no aria-selected");
+assert.equal(el.querySelector(".bp-code-tabs__strip").getAttribute("role"), "group", "the strip is a group of text fields, not a tablist");
 assert.equal(pre.getAttribute("aria-multiline"), "true", "a code panel is a multiline host");
 const codeEnter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
 pre.dispatchEvent(codeEnter);

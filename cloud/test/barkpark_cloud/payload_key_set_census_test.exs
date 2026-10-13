@@ -1717,7 +1717,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # population (+3), exactly as the pressure pair does for its vitals. MEASURED
   # by the PIN CO-EDIT arm on this branch off origin/main 70e354593
   # ("@emitted_pinned 176 -> 180"), never summed.
-  @emitted_pinned 180
+  # 180 -> 181 (task-92b443a2c78a914f, a failed self-update's phase + tail): `barkpark_json/6` emits ONE new
+  # top-level key, `update_last_failure` (the mirrored failed run). MEASURED by
+  # the PIN CO-EDIT arm on this branch off origin/main ("180 -> 181").
+  @emitted_pinned 181
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2103,7 +2106,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # existing names and move the SITE register instead. MEASURED by the PIN
   # CO-EDIT arm on this branch off origin/main bd3a30233
   # ("@go_tag_pinned 401 -> 405"), never by arithmetic.
-  @go_tag_pinned 405
+  # 405 -> 407 (task-92b443a2c78a914f, a failed self-update's phase + tail): internal/cloudclient/client.go gains
+  # `Barkpark.UpdateLastFailure` and the `UpdateFailure` struct: TWO new NAMES
+  # (`update_last_failure`, and one of the struct's six tags not declared
+  # anywhere before); its other tags ride existing names and move the SITE
+  # register instead. MEASURED by the PIN CO-EDIT arm ("405 -> 407").
+  @go_tag_pinned 407
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2333,6 +2341,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.EvictedAt` joins the single existing declaration — when the recorder dropped the log.
     "evicted_at" => 2,
     "evidence" => 2,
+    # task-92b443a2c78a914f, MEASURED 2026-10-04 by the SITE arm: the new
+    # `UpdateFailure` struct (internal/cloudclient/client.go) joins the one
+    # existing declaration — NEWLY DUPLICATED, 1 -> 2. (Its `finished_at`,
+    # `mode` and `source` tags moved those rows by one site each.)
+    "exit_code" => 2,
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
     # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
     # /v1/tokens PAT surface). `PAT.ExpiresAt` joins the one
@@ -2348,7 +2361,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "failure_reason" => 5,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.FinishedAt`
     # joins the single existing declaration.
-    "finished_at" => 2,
+    "finished_at" => 3,
     "framework" => 5,
     "from" => 2,
     "git_ref" => 2,
@@ -2400,7 +2413,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "min_sample" => 6,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.Mode` —
     # deploy/rollback/teardown, as the record captured it.
-    "mode" => 2,
+    "mode" => 3,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go adds one name site (11 -> 12). `SiteBuildLogStage.Name` — one stage of the
     # recorded build ladder.
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
@@ -2502,7 +2515,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # same tree ("slug: 10 site(s) -> 11"): `DeployDeliverySite.Slug`.
     # task-5283ad9f9238f7fe: 11 -> 12, `AdoptRequest.Slug` (internal/cloudclient/adopt.go).
     "slug" => 12,
-    "source" => 3,
+    "source" => 4,
     "stage" => 3,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage
     # ladder, capped at 32 entries by the serializer.
@@ -2538,6 +2551,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # rows emit it. `@go_tag_pinned` structurally CANNOT see that second site —
     # the name was already in the union — so this row is the only guard that can
     # notice it being deleted.
+    # task-92b443a2c78a914f: `UpdateFailure.Tail` — NEWLY DUPLICATED, 1 -> 2.
+    "tail" => 2,
     "terminal_failure_rate" => 2,
     "theme" => 2,
     "to" => 2,
@@ -2659,8 +2674,12 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # walkers see it and the pair moves TOGETHER; `seeing - blind == 14` is
   # unmoved. The node's interior lives in its own pair and is not in this
   # family. MEASURED by the PIN CO-EDIT arm ("69 -> 70", "50 -> 51").
-  @barkpark_family_keys 70
-  @barkpark_family_keys_blind 51
+  # 70/51 -> 71/52 (task-92b443a2c78a914f, a failed self-update's phase + tail): `update_last_failure` is a plain
+  # key in the base literal, so BOTH walkers see it and the pair moves
+  # together; `seeing - blind == 14` is unmoved. MEASURED by the PIN CO-EDIT
+  # arm ("70 -> 71", "51 -> 52").
+  @barkpark_family_keys 71
+  @barkpark_family_keys_blind 52
 
   # ---------------------------------------------------------------------------
 
@@ -2753,7 +2772,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     #
     # 50 -> 51 (dr-w15-s5): `site_deploy` is the NINTH pipeline key —
     # `merge_capability/2`, reading the same beat `merge_pressure/2` reads.
-    assert MapSet.size(p.top) == 51
+    #
+    # 51 -> 52 (task-92b443a2c78a914f, a failed self-update's phase + tail): `update_last_failure` joins the base
+    # literal (not the pipeline), which this literal number counts too.
+    assert MapSet.size(p.top) == 52
 
     for key <- ~w(provision_status provision_error deprovision_status deprovision_error
                   provision_steps provision_console pressure deploy_rate site_deploy) do
@@ -3674,7 +3696,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # MEASURED on this tree by the PIN CO-EDIT / SCHEMA-SIDE arms, which printed
   # `118 schema column(s) collected` while the unserialized arm stayed at 32 —
   # never derived by adding two to the old number.
-  @schema_field_floor 118
+  # 118 -> 119 (task-92b443a2c78a914f, a failed self-update's phase + tail): `barkparks` gains `update_last_failure`.
+  # `@schema_unserialized_floor` does NOT move: `barkpark_json/6` emits it in
+  # the same commit. MEASURED by the SCHEMA-SIDE arm ("119 schema column(s)").
+  @schema_field_floor 119
   @schema_unserialized_floor 32
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:

@@ -3,11 +3,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Discard do
   Discard-draft flow (open/close/confirm). Behaviour-preserving extraction of
   the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   def discard_draft(socket) do
     doc = socket.assigns[:editor_doc]
@@ -42,14 +45,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Discard do
           {:noreply,
            socket
            |> assign(show_discard: false)
-           |> put_flash(:info, "Draft discarded")
+           |> put_flash(:info, gettext("Draft discarded"))
+           |> Paper.push_published_blocks(pub_id, type)
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, _} ->
           {:noreply,
            socket
            |> assign(show_discard: false)
-           |> put_flash(:error, "Failed to discard draft")}
+           |> put_flash(:error, gettext("Failed to discard draft"))}
       end
     else
       {:noreply, assign(socket, show_discard: false)}

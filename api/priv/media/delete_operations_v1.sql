@@ -75,7 +75,7 @@ BEGIN
   IF (SELECT jsonb_object_agg(a.attname,t.typname) FROM pg_attribute a
       JOIN pg_type t ON t.oid=a.atttypid WHERE a.attrelid='public.media_files'::regclass
       AND a.attnum > 0 AND NOT a.attisdropped) IS DISTINCT FROM
-    '{"id":"uuid","filename":"varchar","original_name":"varchar","path":"varchar","mime_type":"varchar","size":"int4","dataset":"varchar","inserted_at":"timestamp","updated_at":"timestamp","workspace_id":"uuid","project_id":"uuid","dataset_id":"uuid","object_key":"varchar"}'::jsonb
+    '{"id":"uuid","filename":"varchar","original_name":"varchar","path":"varchar","mime_type":"varchar","size":"int4","dataset":"varchar","inserted_at":"timestamp","updated_at":"timestamp","workspace_id":"uuid","project_id":"uuid","dataset_id":"uuid","object_key":"varchar","sha1":"varchar"}'::jsonb
   THEN RAISE EXCEPTION 'unsupported media row schema'; END IF;
   SELECT * INTO prior FROM public.media_delete_operations_v1 WHERE operation_id = op;
   SELECT to_jsonb(m) INTO original FROM public.media_files m WHERE id = target FOR UPDATE;
@@ -114,11 +114,9 @@ $intent$;
 CREATE FUNCTION public.media_object_address_v1(k text) RETURNS text
 LANGUAGE plpgsql IMMUTABLE STRICT SET search_path = pg_catalog, public AS $address$
 BEGIN
-  IF length(k) NOT BETWEEN 1 AND 4096 OR k !~ '^[ -~]+$' OR
-     k ~ '[\\:<>"|?*]' OR k LIKE '/%' OR
-     EXISTS (SELECT FROM unnest(string_to_array(k,'/')) s
-       WHERE s IN ('','.','..') OR s ~ '[. ]$' OR s ~* '^(con|prn|aux|nul|com[1-9]|lpt[1-9])([.]|$)')
-  THEN RAISE EXCEPTION 'unsupported reserved media address'; END IF;
+  -- Legacy absolute and Unicode addresses remain valid ordinary media rows.
+  -- This records their address, not permission to perform native cleanup.
+  -- prepare_media_delete_v1 independently validates Windows-relative targets.
   RETURN lower(k COLLATE "C");
 END $address$;
 -- @statement

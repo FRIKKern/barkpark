@@ -41,7 +41,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
   """
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
-  alias Barkpark.PortableDoc.Render.{Components, Palettes, StatusVocab}
+  alias Barkpark.PortableDoc.Render.{Chrome, Components, Palettes, StatusVocab}
 
   # ── tasks / task-list ────────────────────────────────────────────────────────
 
@@ -54,7 +54,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
     case rows do
       [] ->
-        empty_email("tasks", "No tasks yet.", theme)
+        empty_email("tasks", Chrome.t("No tasks yet."), theme)
 
       _ ->
         title = block |> get("title") |> stringish() |> String.trim()
@@ -79,7 +79,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
     end
   end
 
-  def tasks_email_html(_, theme), do: empty_email("tasks", "No tasks yet.", theme)
+  def tasks_email_html(_, theme), do: empty_email("tasks", Chrome.t("No tasks yet."), theme)
 
   @doc """
   The email twin of `Components.task_unavailable_html/1`: a query-carrying
@@ -89,7 +89,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
   def task_unavailable_email_html(block, theme \\ :evergreen) do
     empty_email(
       Components.task_unavailable_kind(block),
-      Components.task_unavailable_note(),
+      Chrome.t(Components.task_unavailable_note()),
       theme
     )
   end
@@ -118,7 +118,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
         # would disagree about whether the document even has a block there. Same
         # dashed-note family and the SAME copy every other unresolved task-family
         # block uses on this surface.
-        empty_email("task-detail", "No matching tasks.", theme)
+        empty_email("task-detail", Chrome.t("No matching tasks."), theme)
 
       _ ->
         role = t |> get("status") |> stringish() |> role_of()
@@ -131,7 +131,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
             detail_desc(t, sk),
             detail_criteria(t, sk),
             detail_deps(t, sk),
-            detail_rail(t, "children", "Children", sk),
+            detail_rail(t, "children", Chrome.t("Children"), sk),
             detail_papers(t, sk),
             detail_labels(t, sk)
           ]
@@ -167,7 +167,10 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
     u = t |> get("updated") |> stringish() |> String.trim()
 
     line =
-      [c != "" && "created #{escape_html(c)}", u != "" && "updated #{escape_html(u)}"]
+      [
+        c != "" && Chrome.t("created %{when}", when: escape_html(c)),
+        u != "" && Chrome.t("updated %{when}", when: escape_html(u))
+      ]
       |> Enum.filter(& &1)
       |> Enum.join(" · ")
 
@@ -245,7 +248,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
             ~s|<tr><td valign="top" width="18" style="color:#{role_color(role, sk)};font-family:#{mono()};font-size:13px;padding:2px 0">#{glyph_char(role)}</td><td valign="top" style="font-size:13px;color:#{sk.ink};padding:2px 0 2px 6px">#{txt}</td></tr>#{ev_html}|
           end)
 
-        detail_label("Criteria · #{met}/#{total}", sk) <>
+        detail_label(Chrome.t("Criteria · %{met}/%{total}", met: met, total: total), sk) <>
           table_open() <> rows <> "</table>"
     end
   end
@@ -256,8 +259,8 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
     words =
       [
-        blocks > 0 && "blocks #{blocks} #{plural(blocks, "task")}",
-        blocked > 0 && "blocked by #{blocked}"
+        blocks > 0 && blocks_words(blocks),
+        blocked > 0 && Chrome.t("blocked by %{n}", n: blocked)
       ]
       |> Enum.filter(& &1)
       |> Enum.join(" · ")
@@ -265,7 +268,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
     if words == "",
       do: "",
       else:
-        detail_label("Dependencies", sk) <>
+        detail_label(Chrome.t("Dependencies"), sk) <>
           ~s|<div style="font-size:12px;color:#{sk.ink};margin:2px 0 6px">#{words}</div>|
   end
 
@@ -295,9 +298,16 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
           if extra == [],
             do: "",
             else:
-              ~s|<tr><td></td><td style="font-size:11px;color:#{sk.muted};padding:2px 0 0 6px">… and #{length(extra)} more</td></tr>|
+              ~s|<tr><td></td><td style="font-size:11px;color:#{sk.muted};padding:2px 0 0 6px">#{Chrome.t("… and %{n} more", n: length(extra))}</td></tr>|
 
-        detail_label("#{label} · #{done}/#{length(rows)} done", sk) <>
+        detail_label(
+          Chrome.t("%{label} · %{done}/%{total} done",
+            label: label,
+            done: done,
+            total: length(rows)
+          ),
+          sk
+        ) <>
           table_open() <> body <> more <> "</table>"
     end
   end
@@ -322,9 +332,9 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
           if extra == [],
             do: "",
             else:
-              ~s|<div style="font-size:11px;color:#{sk.muted}">… and #{length(extra)} more</div>|
+              ~s|<div style="font-size:11px;color:#{sk.muted}">#{Chrome.t("… and %{n} more", n: length(extra))}</div>|
 
-        detail_label("Papers", sk) <> body <> more
+        detail_label(Chrome.t("Papers"), sk) <> body <> more
     end
   end
 
@@ -360,7 +370,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
     case rows do
       [] ->
-        empty_email("task-board", "No tasks yet.", theme)
+        empty_email("task-board", Chrome.t("No tasks yet."), theme)
 
       _ ->
         by_role = Enum.group_by(rows, fn r -> r |> get("status") |> stringish() |> role_of() end)
@@ -371,7 +381,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
         case present do
           [] ->
-            empty_email("task-board", "No tasks yet.", theme)
+            empty_email("task-board", Chrome.t("No tasks yet."), theme)
 
           _ ->
             width = max(div(100, length(present)), 1)
@@ -387,10 +397,11 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
     end
   end
 
-  def task_board_email_html(_, theme), do: empty_email("task-board", "No tasks yet.", theme)
+  def task_board_email_html(_, theme),
+    do: empty_email("task-board", Chrome.t("No tasks yet."), theme)
 
   defp board_col_email(role, rows, width, sk) do
-    label = role |> StatusVocab.label_for_role() |> String.capitalize()
+    label = role |> StatusVocab.label_for_role() |> Chrome.t() |> String.capitalize()
 
     cards =
       rows
@@ -425,14 +436,14 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
 
     case rows do
       [] ->
-        empty_email("roadmap", "No roadmap items.", theme)
+        empty_email("roadmap", Chrome.t("No roadmap items."), theme)
 
       _ ->
         if not Enum.any?(rows, &roadmap_placeable?(&1, block)) do
           # No timeline to draw — but the ITEMS still exist, so they render
           # through the task-list email emitter under the note. The article twin
           # degrades the same way.
-          empty_email("roadmap", Components.roadmap_unplaced_copy(), theme) <>
+          empty_email("roadmap", Chrome.t(Components.roadmap_unplaced_copy()), theme) <>
             tasks_email_html(%{"snapshot" => rows}, theme)
         else
           roadmap_lanes_email(block, rows, sk)
@@ -440,7 +451,8 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
     end
   end
 
-  def roadmap_email_html(_, theme), do: empty_email("roadmap", "No roadmap items.", theme)
+  def roadmap_email_html(_, theme),
+    do: empty_email("roadmap", Chrome.t("No roadmap items."), theme)
 
   # Geometry trust, the email twin of `Components.roadmap_placeable?/2`. Email
   # has no date-rail MATH (it has never derived a lane off the block span — see
@@ -497,7 +509,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
           else
             # No bar. A geometry-less row would clamp to the full width and
             # read as "runs the whole plan" — a claim the row never made.
-            ~s|<span style="font-family:#{mono()};font-size:11px;color:#{sk.muted}">#{escape_html(Components.roadmap_lane_unplaced_copy())}</span>|
+            ~s|<span style="font-family:#{mono()};font-size:11px;color:#{sk.muted}">#{escape_html(Chrome.t(Components.roadmap_lane_unplaced_copy()))}</span>|
           end
 
         ~s|<tr><td width="34%" valign="middle" style="font-size:12px;font-weight:#{weight};color:#{sk.ink};padding:4px 8px 4px 0">#{title}</td><td valign="middle" style="padding:4px 0">#{track}</td></tr>|
@@ -542,9 +554,9 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
       pct = round(done / total * 100)
 
       counts =
-        ~s|<span style="color:#{role_color("progress", sk)}">#{glyph_char("progress")}</span> <b style="color:#{sk.ink}">#{prog}</b> in flight · | <>
-          ~s|<span style="color:#{role_color("ready", sk)}">#{glyph_char("ready")}</span> <b style="color:#{sk.ink}">#{ready}</b> ready · | <>
-          ~s|<span style="color:#{role_color("done", sk)}">#{glyph_char("done")}</span> <b style="color:#{sk.ink}">#{done}</b> done · <b style="color:#{sk.ink}">#{pct}%</b>|
+        ~s|<span style="color:#{role_color("progress", sk)}">#{glyph_char("progress")}</span> <b style="color:#{sk.ink}">#{prog}</b> #{Chrome.t("in flight")} · | <>
+          ~s|<span style="color:#{role_color("ready", sk)}">#{glyph_char("ready")}</span> <b style="color:#{sk.ink}">#{ready}</b> #{Chrome.t("ready")} · | <>
+          ~s|<span style="color:#{role_color("done", sk)}">#{glyph_char("done")}</span> <b style="color:#{sk.ink}">#{done}</b> #{Chrome.t("done")} · <b style="color:#{sk.ink}">#{pct}%</b>|
 
       ~s|<div style="font-size:12px;color:#{sk.muted};font-family:#{mono()};margin:2px 0 4px">#{counts}</div>| <>
         momentum_bar(pct, sk)
@@ -775,8 +787,8 @@ defmodule Barkpark.PortableDoc.Render.FleetEmail do
   defp count_role(rows, role),
     do: Enum.count(rows, fn r -> r |> get("status") |> stringish() |> role_of() == role end)
 
-  defp plural(1, word), do: word
-  defp plural(_, word), do: word <> "s"
+  defp blocks_words(1), do: Chrome.t("blocks %{n} task", n: 1)
+  defp blocks_words(n), do: Chrome.t("blocks %{n} tasks", n: n)
 
   defp clampf(n) when is_number(n), do: n |> max(0) |> min(100)
   defp clampf(_), do: 0

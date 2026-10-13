@@ -87,7 +87,11 @@ defmodule Barkpark.Structure do
       # hierarchy (Sanity's «Hierarkisk struktur»). The node itself stays a type
       # list (no new wire node type — old Go TUIs keep rendering it as the
       # parentless root list); PaneBuilder walks the children pane by pane.
-      tree: nil
+      tree: nil,
+      # true on a `desk.hidden` type's node in the RESOLUTION tree only: it is
+      # there so a direct URL resolves, and a rendered list pane leaves it out
+      # (task-9df0043eb4ecf3cc follow-up).
+      desk_hidden: false
     ]
   end
 
@@ -162,11 +166,16 @@ defmodule Barkpark.Structure do
 
     schema_map = Map.new(schemas, &{&1.name, &1})
 
+    # The `deskStructure` document is read ONCE per build: its `items` declare
+    # the MAIN tier (`declared_desk/3`) and its `title` names the root, as
+    # Sanity's `S.list().title('Innhold')` does (task-9eafad70d2249770).
+    desk_doc = fetch_desk_doc(dataset, opts)
+
     %Node{
       id: "root",
-      title: "Structure",
+      title: desk_root_title(desk_doc),
       type: :list,
-      items: build_desk_items(schema_map, dataset, opts)
+      items: build_desk_items(schema_map, dataset, Keyword.put(opts, :desk_doc, desk_doc))
     }
   end
 
@@ -226,7 +235,14 @@ defmodule Barkpark.Structure do
     # never-hide invariant demands — a precompute type (the twin's
     # catalogueRow / frontpageResolved) is written by a worker, never edited,
     # and only confuses an editor. The documents stay readable everywhere else.
-    hidden_types = hidden_type_set(schemas)
+    # DISPLAY only: the `gating: :none` resolution tree keeps the type, so its
+    # list and `/studio/<type>/<id>` still open from a direct URL (the #1851
+    # never-unreachable guarantee; task-9df0043eb4ecf3cc).
+    hidden_types =
+      if Keyword.get(opts, :gating, :enabled) == :none,
+        do: MapSet.new(),
+        else: hidden_type_set(schemas)
+
     curated_types = MapSet.union(curated_types, hidden_types)
 
     # `build_generic_types_group/3` sits right before Settings: it and
@@ -304,8 +320,27 @@ defmodule Barkpark.Structure do
         [%Node{id: "rest", title: "…Rest", icon: "🗂", type: :list, items: rest_children}]
       end
 
-    maybe_join(non_rest_groups ++ [rest_tier])
+    tiers = maybe_join(non_rest_groups ++ [rest_tier])
+
+    if Keyword.get(opts, :gating, :enabled) == :none,
+      do: mark_desk_hidden(tiers, hidden_type_set(schemas)),
+      else: tiers
   end
+
+  # Flag every node of a `desk.hidden` type in the resolution tree, at any depth.
+  defp mark_desk_hidden(nodes, hidden) when is_list(nodes) do
+    if MapSet.size(hidden) == 0, do: nodes, else: Enum.map(nodes, &mark_desk_hidden(&1, hidden))
+  end
+
+  defp mark_desk_hidden(%Node{} = node, hidden) do
+    %{
+      node
+      | desk_hidden: is_binary(node.type_name) and MapSet.member?(hidden, node.type_name),
+        items: if(is_list(node.items), do: mark_desk_hidden(node.items, hidden), else: node.items)
+    }
+  end
+
+  defp mark_desk_hidden(other, _hidden), do: other
 
   # Place a host group (books / media) by its owning plugin's effective
   # enablement + placement. Disabled → dropped (its doc types then surface in
@@ -1083,11 +1118,55 @@ defmodule Barkpark.Structure do
 
   @desk_structure_type "deskStructure"
 
-  defp declared_desk(_schemas, dataset, opts) do
+  # The published `deskStructure` document, or nil. A read that raises degrades
+  # to the default desk with a logged reason — never a blank desk.
+  defp fetch_desk_doc(dataset, opts) do
     scope = Keyword.take(opts, [:workspace_id])
 
     case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
-      {:ok, %{content: %{"items" => items}}} when is_list(items) and items != [] ->
+      {:ok, doc} -> doc
+      _ -> nil
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "deskStructure for #{dataset} could not be read (#{Exception.message(e)}) — using the default desk"
+      )
+
+      nil
+  end
+
+  # task-b40b41f8d21992ae: a document's title lives in the row `title` column
+  # (`Barkpark.Content.Document`'s `:title` field) — the same place Studio's
+  # own title field writes to, and the same place every other node in this
+  # module reads from (see `title: doc.title || key` above). `content["title"]`
+  # was never where an author's typed title landed; a deskStructure authored
+  # through Studio with title "Innhold" kept resolving to "Structure" because
+  # this read only looked in `content`. `content["title"]` stays a defensive
+  # secondary source (never required by any known document) for a row whose
+  # title column is itself blank but whose content happens to carry one.
+  defp desk_root_title(doc) do
+    row_title(doc) || content_title(doc) || "Structure"
+  end
+
+  defp row_title(%{title: title}) when is_binary(title), do: present(title)
+  defp row_title(_doc), do: nil
+
+  defp content_title(%{content: %{"title" => title}}) when is_binary(title), do: present(title)
+  defp content_title(_doc), do: nil
+
+  defp present(s) do
+    case String.trim(s) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp declared_desk(_schemas, dataset, opts) do
+    scope = Keyword.take(opts, [:workspace_id])
+
+    case Keyword.get(opts, :desk_doc) do
+      %{content: %{"items" => items}} when is_list(items) and items != [] ->
         ctx = %{dataset: dataset, scope: scope}
 
         nodes =
@@ -1106,7 +1185,7 @@ defmodule Barkpark.Structure do
           {:ok, nodes}
         end
 
-      {:ok, _} ->
+      %{} ->
         Logger.warning("deskStructure for #{dataset} has no items list — using the default desk")
         :none
 

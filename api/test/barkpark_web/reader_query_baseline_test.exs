@@ -154,13 +154,20 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
     scope = [workspace_id: ws.id, project_id: project.id]
 
     # Real task schema (the driven task + task-list rows hydrate under it) and
-    # the E3 tag registry (published fixture docs carry weighted tags).
+    # the E3 tag registry (published fixture docs carry weighted tags). The
+    # shipped task schema is private (owner ruling #10), and the anonymous
+    # reader then hydrates no driven task at all; the fixture declares it
+    # public so the budget keeps measuring the driven-task amplifier a
+    # workspace with public tasks still pays.
     for schema_def <- Tasks.schema_definitions(@dataset) do
       attrs =
         schema_def
         |> Map.from_struct()
         |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
         |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+      attrs =
+        if attrs["name"] == "task", do: Map.put(attrs, "visibility", "public"), else: attrs
 
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end

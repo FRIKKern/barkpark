@@ -198,6 +198,23 @@ var builtinWriteCensus = []builtinWriteReceipt{
 		Disposition: dispOutOfFence,
 		Why:         "cloud control-plane census (hzResDone).",
 	},
+	// ---- import ----------------------------------------------------------
+	{
+		File: "internal/cli/import_cmd.go", Func: "importWriteBatch", Sites: 1,
+		Endpoint: "POST /v1/data/mutate/:dataset (one batch of a bp import restore)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx goes through screenBuiltinWriteReceipt, and the batch then counts as applied only when " +
+			"migrateBatchWritten reads a results array as long as the mutations sent; the `applied` number in the " +
+			"receipt is the sum of those confirmed batches, never len(rows).",
+	},
+	{
+		File: "internal/cli/import_sanity.go", Func: "uploadOne", Sites: 1,
+		Endpoint: "POST /v1/media/:dataset/upload (one asset of a bp import from a Sanity export)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx goes through builtinWriteReceiptErr, and the asset counts as uploaded only when the receipt " +
+			"decodes a non-empty result.assetDocId; that id is what the imported documents reference, so an empty " +
+			"or HTML 200 refuses the import before any document is written.",
+	},
 	// ---- migrate ---------------------------------------------------------
 	{
 		File: "internal/cli/migrate_cmd.go", Func: "migrateSchemas", Sites: 1,

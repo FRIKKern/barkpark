@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Integration.PreviewTokenDocScopeTest do
             "/v1/preview/tags/#{@dataset}",
             "/v1/preview/doc/#{@dataset}/post/p1?expand=author"
           ] do
-        resp = conn |> recycle() |> preview(jwt(%{doc_ids: ["p1"]})) |> get(path)
+        resp = conn |> recycle_scoped() |> preview(jwt(%{doc_ids: ["p1"]})) |> get(path)
         assert resp.status == 403, "#{path} answered #{resp.status}"
       end
     end
@@ -178,7 +178,10 @@ defmodule BarkparkWeb.Integration.PreviewTokenDocScopeTest do
             %{workspace_id: ws_b.id, project_id: default_project.id}
           ] do
         resp =
-          conn |> recycle() |> preview(jwt(claims)) |> get("/v1/preview/query/#{@dataset}/post")
+          conn
+          |> recycle_scoped()
+          |> preview(jwt(claims))
+          |> get("/v1/preview/query/#{@dataset}/post")
 
         assert resp.status == 403
       end

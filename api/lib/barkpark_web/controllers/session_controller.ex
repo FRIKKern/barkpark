@@ -1,11 +1,18 @@
 defmodule BarkparkWeb.SessionController do
   @moduledoc """
   Browser-facing session controller. Lets a human paste their raw API
-  token via `GET /login`, stores it in `session["api_token"]` on success,
-  and clears the session via `POST /logout`.
+  token via `GET /login`, mints a revocable `Barkpark.Auth.TokenSession` on
+  success and stores only its opaque id in `session["api_token_session"]`,
+  and clears it via `POST /logout`.
 
   This is the canonical browser entry point for admin LiveViews; see
   `BarkparkWeb.LiveAuth` for the on_mount that consumes the session key.
+
+  Ruling #16 rework half (task-57f23825b18ab55d): a cookie minted BEFORE this
+  change still carries the raw token directly under the legacy
+  `session["api_token"]` key and keeps working until it expires or the user
+  signs out — `Barkpark.Auth.resolve_session_credential/2` is the one place
+  that tolerates both shapes.
   """
   use BarkparkWeb, :controller
 
@@ -13,53 +20,61 @@ defmodule BarkparkWeb.SessionController do
 
   @default_return_to "/studio"
 
+  plug(:put_signin_locale)
+
   def new(conn, params) do
     return_to = sanitize_return_to(params["return_to"])
-    put_locale_for(return_to)
     render(conn, :new, new_assigns(return_to))
   end
 
-  # Gyldendal parity E7: the login page has no workspace of its own, but a
-  # `return_to` that points into `/w/<slug>/…` names one — so the page speaks
-  # that workspace's locale (nb-NO for the twin). Anything else stays English.
-  defp put_locale_for(return_to) when is_binary(return_to) do
-    locale =
-      case Regex.run(~r{^/w/([^/]+)/}, return_to) do
-        [_, slug] ->
-          Barkpark.Tenancy.workspace_locale(Barkpark.Tenancy.get_workspace_by_slug(slug))
+  # The sign-in pages have no workspace of their own. Their language, in order
+  # (lead ruling, run 8):
+  #   1. a `return_to` into `/w/<slug>/…` names a workspace: its locale
+  #      (Gyldendal parity E7, nb-NO for the twin);
+  #   2. otherwise the browser's Accept-Language (nb, no, nn → nb-NO);
+  #   3. otherwise English. Never the Default workspace's locale.
+  # Every action here renders or flashes, so the plug runs for all of them.
+  defp put_signin_locale(conn, _opts) do
+    return_to = sanitize_return_to(conn.params["return_to"])
 
-        _ ->
-          Barkpark.Tenancy.default_locale()
-      end
+    (return_to_locale(return_to) || BarkparkWeb.AcceptLanguage.locale(conn) ||
+       Barkpark.Tenancy.default_locale())
+    |> BarkparkWeb.StudioLocale.put_named()
 
-    BarkparkWeb.StudioLocale.put_named(locale)
+    conn
   end
 
-  defp put_locale_for(_), do: BarkparkWeb.StudioLocale.put_named(nil)
+  defp return_to_locale(return_to) do
+    with [_, slug] <- Regex.run(~r{^/w/([^/]+)/}, return_to),
+         %Barkpark.Tenancy.Workspace{} = ws <- Barkpark.Tenancy.get_workspace_by_slug(slug) do
+      Barkpark.Tenancy.workspace_locale(ws)
+    else
+      _ -> nil
+    end
+  end
 
   def create(conn, %{"token" => raw_token} = params) when is_binary(raw_token) do
     return_to = sanitize_return_to(params["return_to"])
-    put_locale_for(return_to)
     trimmed = String.trim(raw_token)
 
-    case Barkpark.Auth.verify_token(trimmed) do
-      {:ok, _api_token} ->
+    with {:ok, api_token} <- Barkpark.Auth.verify_token(trimmed),
+         {:ok, session_id} <- Barkpark.Auth.create_token_session(trimmed, api_token) do
+      conn
+      |> configure_session(renew: true)
+      |> put_session("api_token_session", session_id)
+      |> put_flash(:info, gettext("Signed in."))
+      |> redirect(to: return_to)
+    else
+      _ ->
         conn
-        |> configure_session(renew: true)
-        |> put_session("api_token", trimmed)
-        |> put_flash(:info, "Signed in.")
-        |> redirect(to: return_to)
-
-      {:error, :unauthorized} ->
-        conn
-        |> put_flash(:error, "Invalid API token.")
+        |> put_flash(:error, gettext("Invalid API token."))
         |> render(:new, new_assigns(return_to))
     end
   end
 
   def create(conn, _params) do
     conn
-    |> put_flash(:error, "Token is required.")
+    |> put_flash(:error, gettext("Token is required."))
     |> render(:new, new_assigns(@default_return_to))
   end
 
@@ -68,7 +83,7 @@ defmodule BarkparkWeb.SessionController do
   defp new_assigns(return_to) do
     [
       return_to: return_to,
-      page_title: "Sign in",
+      page_title: gettext("Sign in"),
       instance_host: instance_host(),
       cloud_login_href: cloud_login_href()
     ]
@@ -97,10 +112,10 @@ defmodule BarkparkWeb.SessionController do
   Consume a single-use login ticket (dwb-7 "Studio one-click entry").
 
   `GET /login/ticket/:ticket` — atomically consumes the ticket (single-use +
-  60s TTL, enforced in `Barkpark.Auth.consume_login_ticket/1`), drops the bound
-  RAW api_token into `session["api_token"]` exactly like `create/2` does for a
-  pasted token, and redirects to `/studio`. One click, no paste, works from a
-  fresh browser.
+  60s TTL, enforced in `Barkpark.Auth.consume_login_ticket/1`), mints a
+  `Barkpark.Auth.TokenSession` for the bound RAW api_token exactly like
+  `create/2` does for a pasted token, and redirects to `/studio`. One click,
+  no paste, works from a fresh browser.
 
   Consuming on GET is the magic-link tradeoff: mitigated by single-use + short
   TTL + `Cache-Control: no-store` (no proxy/history reuse) + `Referrer-Policy:
@@ -117,9 +132,9 @@ defmodule BarkparkWeb.SessionController do
       # SSO (find-or-create by email); the Default-workspace OWNER grant is
       # legitimate because minting required the instance ADMIN token, and the
       # control plane only mints for the instance's own team.
-      {:ok, {:user, email, _admin_token}} ->
+      {:ok, {:user, email, _admin_token, role}} ->
         user = Barkpark.Sso.find_or_create_user(email)
-        ensure_default_owner_membership(user)
+        ensure_default_membership(user, role)
 
         {:ok, token} =
           Barkpark.Accounts.create_user_session_token(
@@ -130,19 +145,29 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> configure_session(renew: true)
         |> put_session("user_session", token)
-        |> put_flash(:info, "Signed in.")
+        |> put_flash(:info, gettext("Signed in."))
         |> redirect(to: @default_return_to)
 
-      {:ok, api_token} when is_binary(api_token) ->
-        conn
-        |> configure_session(renew: true)
-        |> put_session("api_token", api_token)
-        |> put_flash(:info, "Signed in.")
-        |> redirect(to: @default_return_to)
+      {:ok, raw_api_token} when is_binary(raw_api_token) ->
+        case Barkpark.Auth.verify_token(raw_api_token) do
+          {:ok, api_token} ->
+            {:ok, session_id} = Barkpark.Auth.create_token_session(raw_api_token, api_token)
+
+            conn
+            |> configure_session(renew: true)
+            |> put_session("api_token_session", session_id)
+            |> put_flash(:info, gettext("Signed in."))
+            |> redirect(to: @default_return_to)
+
+          {:error, :unauthorized} ->
+            conn
+            |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
+            |> redirect(to: "/login")
+        end
 
       {:error, :invalid} ->
         conn
-        |> put_flash(:error, "This sign-in link is invalid or has expired.")
+        |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
         |> redirect(to: "/login")
     end
   end
@@ -150,20 +175,52 @@ defmodule BarkparkWeb.SessionController do
   def ticket(conn, _params) do
     conn
     |> no_store()
-    |> put_flash(:error, "This sign-in link is invalid or has expired.")
+    |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
     |> redirect(to: "/login")
   end
 
-  # Idempotent: an existing membership (any role) is left untouched — the
-  # handoff never DOWNGRADES; absence gets the owner grant the admin-token
-  # mint vouches for.
-  defp ensure_default_owner_membership(user) do
-    with %{id: ws_id} <- Barkpark.Tenancy.get_default_workspace(),
-         nil <- Barkpark.Tenancy.Auth.membership(user, ws_id) do
-      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_id, user.id, "owner", "user")
-      :ok
-    else
+  # Owner ruling #26 (2026-10-03, "Match role, revoke"): the handoff seats the
+  # user at the Cloud TEAM role the ticket carries — a team member lands as a
+  # member, an admin as an admin, the owner as owner. The team is the authority
+  # for a managed instance, so an existing BUILT-IN role is synced to it on every
+  # handoff (a promoted or demoted teammate lands at their current role). Two
+  # things are never touched: a CUSTOM role (an instance admin chose it), and the
+  # LAST owner of the workspace (`Members.update_role/3` refuses that demotion).
+  #
+  # A pre-ruling ticket carries no role (nil): it keeps the old behaviour — an
+  # absent membership gets owner, an existing one is left alone.
+  defp ensure_default_membership(user, role) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} -> seat_default_membership(user, ws_id, role)
       _ -> :ok
+    end
+  end
+
+  defp seat_default_membership(user, ws_id, role) do
+    alias Barkpark.Tenancy.Auth, as: TAuth
+
+    case {TAuth.membership(user, ws_id), role} do
+      {nil, nil} ->
+        {:ok, _} = TAuth.create_membership(ws_id, user.id, "owner", "user")
+        :ok
+
+      {nil, role} ->
+        {:ok, _} = TAuth.create_membership(ws_id, user.id, role, "user")
+        :ok
+
+      {_existing, nil} ->
+        :ok
+
+      {%{role: same}, same} ->
+        :ok
+
+      {%{role: current}, role} ->
+        # Members.update_role/3 refuses to demote the last owner on its own.
+        if current in Barkpark.Tenancy.Membership.roles() do
+          _ = Barkpark.Tenancy.Members.update_role(ws_id, %{type: :user, id: user.id}, role)
+        end
+
+        :ok
     end
   end
 
@@ -183,7 +240,7 @@ defmodule BarkparkWeb.SessionController do
     case Barkpark.Accounts.get_user_by_email_and_password(email, password) do
       nil ->
         conn
-        |> put_flash(:error, "Email or password is incorrect.")
+        |> put_flash(:error, gettext("Email or password is incorrect."))
         |> render(:new, new_assigns(return_to))
 
       user ->
@@ -193,7 +250,7 @@ defmodule BarkparkWeb.SessionController do
 
   def account(conn, params) do
     conn
-    |> put_flash(:error, "Email and password are required.")
+    |> put_flash(:error, gettext("Email and password are required."))
     |> render(:new, new_assigns(sanitize_return_to(params["return_to"])))
   end
 
@@ -220,7 +277,18 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> put_session("studio_mfa_user", user.id)
         |> put_session("studio_mfa_at", System.system_time(:second))
-        |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
+        |> render(:mfa, return_to: return_to, page_title: gettext("Two-step verification"))
+
+      # A passkey-only member presents the passkey at its own door (owner
+      # ruling #14); a member with no factor enrols first.
+      BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
+        conn
+        |> put_flash(
+          :error,
+          "Your organization requires a second factor: " <>
+            BarkparkWeb.SessionIssuer.org_factor_hint(user) <> "."
+        )
+        |> render(:new, new_assigns(return_to))
 
       Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) ->
         conn
@@ -244,7 +312,7 @@ defmodule BarkparkWeb.SessionController do
   flow already sends (which `magic/2` below makes land in a browser).
   """
   def magic_request_form(conn, _params) do
-    render(conn, :magic_request, page_title: "Sign-in link", sent: false)
+    render(conn, :magic_request, page_title: gettext("Sign-in link"), sent: false)
   end
 
   def magic_request(conn, %{"email" => email}) when is_binary(email) do
@@ -269,7 +337,7 @@ defmodule BarkparkWeb.SessionController do
         )
     end
 
-    render(conn, :magic_request, page_title: "Sign-in link", sent: true)
+    render(conn, :magic_request, page_title: gettext("Sign-in link"), sent: true)
   end
 
   def magic_request(conn, _params), do: redirect(conn, to: "/login/magic")
@@ -292,7 +360,10 @@ defmodule BarkparkWeb.SessionController do
 
       :error ->
         conn
-        |> put_flash(:error, "This sign-in link is invalid or has expired — request a fresh one.")
+        |> put_flash(
+          :error,
+          gettext("This sign-in link is invalid or has expired — request a fresh one.")
+        )
         |> redirect(to: "/login/magic")
     end
   end
@@ -307,7 +378,7 @@ defmodule BarkparkWeb.SessionController do
   what makes that link actually land somewhere in a browser.
   """
   def reset_request_form(conn, _params) do
-    render(conn, :reset_request, page_title: "Reset password", sent: false)
+    render(conn, :reset_request, page_title: gettext("Reset password"), sent: false)
   end
 
   def reset_request(conn, %{"email" => email}) when is_binary(email) do
@@ -322,7 +393,7 @@ defmodule BarkparkWeb.SessionController do
       NotificationWithhold.record("reset", :no_recipient_by_construction)
     end
 
-    render(conn, :reset_request, page_title: "Reset password", sent: true)
+    render(conn, :reset_request, page_title: gettext("Reset password"), sent: true)
   end
 
   def reset_request(conn, _params), do: redirect(conn, to: "/login/reset")
@@ -335,7 +406,7 @@ defmodule BarkparkWeb.SessionController do
   def reset_form(conn, %{"token" => token}) when is_binary(token) do
     conn
     |> no_store()
-    |> render(:reset, page_title: "Set a new password", token: token)
+    |> render(:reset, page_title: gettext("Set a new password"), token: token)
   end
 
   def reset_submit(conn, %{"token" => token, "password" => password})
@@ -344,7 +415,7 @@ defmodule BarkparkWeb.SessionController do
       {:ok, _user} ->
         conn
         |> configure_session(renew: true)
-        |> put_flash(:info, "Password updated — sign in with your new password.")
+        |> put_flash(:info, gettext("Password updated — sign in with your new password."))
         |> redirect(to: "/login")
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -353,27 +424,75 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> put_flash(:error, password_error(changeset))
         |> no_store()
-        |> render(:reset, page_title: "Set a new password", token: token)
+        |> render(:reset, page_title: gettext("Set a new password"), token: token)
 
       :error ->
         conn
-        |> put_flash(:error, "That reset link is invalid or has expired — request a fresh one.")
+        |> put_flash(
+          :error,
+          gettext("That reset link is invalid or has expired — request a fresh one.")
+        )
         |> redirect(to: "/login/reset")
     end
   end
 
   def reset_submit(conn, _params), do: redirect(conn, to: "/login/reset")
 
+  @doc """
+  Landing page for the emailed confirmation link (`GET /auth/confirm/:token`,
+  task-bd5e1aa94cf67a18). `AuthController.register/2` mails
+  `build_url("/auth/confirm/", token)`, but nothing served that path in a
+  browser — only the JSON `POST /v1/auth/verify-email` existed — so a new
+  account could never confirm from the email it was told to open.
+
+  Same GET-never-consumes shape as `reset_form/2`: this renders a page with a
+  "Confirm email" button that POSTs to the same path. A GET alone proves
+  nothing — an email-scanner's link-prefetch (Outlook Safe Links, Google's
+  image/link proxies) fires a plain GET at every URL in a message within
+  seconds of delivery, and a GET that consumed the token would burn it before
+  the real recipient ever clicked.
+  """
+  def confirm_form(conn, %{"token" => token}) when is_binary(token) do
+    conn
+    |> no_store()
+    |> render(:confirm, page_title: gettext("Confirm your email"), token: token, result: nil)
+  end
+
+  @doc """
+  Confirms the account (`POST /auth/confirm/:token`) — the only action that
+  consumes the token. `Accounts.confirm_user/1` is already single-use (the
+  token row is deleted in the same transaction that stamps `confirmed_at`),
+  so a reused link lands on the same `:error` arm as an expired or unknown
+  one — no oracle distinguishing the three, same anti-enumeration posture as
+  the rest of this module. Never a 500: `confirm_user/1` fails soft to
+  `:error` on anything it cannot resolve.
+  """
+  def confirm_submit(conn, %{"token" => token}) when is_binary(token) do
+    conn = no_store(conn)
+
+    case Barkpark.Accounts.confirm_user(token) do
+      {:ok, _user} ->
+        render(conn, :confirm, page_title: gettext("Email confirmed"), token: token, result: :ok)
+
+      :error ->
+        render(conn, :confirm,
+          page_title: gettext("Confirmation link expired"),
+          token: token,
+          result: :error
+        )
+    end
+  end
+
+  def confirm_submit(conn, _params), do: redirect(conn, to: "/login")
+
   defp password_error(changeset) do
     changeset
-    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {k, v}, acc ->
-        String.replace(acc, "%{#{k}}", to_string(v))
-      end)
-    end)
+    |> Ecto.Changeset.traverse_errors(
+      &BarkparkWeb.Studio.StudioLive.Shared.translate_changeset_error/1
+    )
     |> case do
-      %{password: [msg | _]} -> "Password " <> msg <> "."
-      _ -> "That password can't be used — pick a different one."
+      %{password: [msg | _]} -> gettext("Password %{message}.", message: msg)
+      _ -> gettext("That password can't be used — pick a different one.")
     end
   end
 
@@ -413,12 +532,12 @@ defmodule BarkparkWeb.SessionController do
       _ ->
         if is_binary(user_id) and fresh? do
           conn
-          |> put_flash(:error, "That code didn't work — try again.")
-          |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
+          |> put_flash(:error, gettext("That code didn't work — try again."))
+          |> render(:mfa, return_to: return_to, page_title: gettext("Two-step verification"))
         else
           conn
           |> configure_session(renew: true)
-          |> put_flash(:error, "Sign-in expired — start again.")
+          |> put_flash(:error, gettext("Sign-in expired — start again."))
           |> redirect(to: "/login")
         end
     end
@@ -444,15 +563,14 @@ defmodule BarkparkWeb.SessionController do
     conn
     |> configure_session(renew: true)
     |> put_session("user_session", token)
-    |> put_flash(:info, "Signed in.")
+    |> put_flash(:info, gettext("Signed in."))
     |> redirect(to: return_to)
   end
 
   def delete(conn, _params) do
     # Revoke the account session server-side (not just the cookie) — parity
-    # with DELETE /v1/auth/logout; the API-token session key needs no
-    # revocation (dropping the cookie is the whole grant).
-    revoked =
+    # with DELETE /v1/auth/logout.
+    user_revoked =
       case get_session(conn, "user_session") do
         token when is_binary(token) and token != "" ->
           {:ok, n} = Barkpark.Accounts.revoke_user_session_token(token)
@@ -462,19 +580,54 @@ defmodule BarkparkWeb.SessionController do
           0
       end
 
+    # Ruling #16 rework half (task-57f23825b18ab55d): a token sign-in now
+    # mints a revocable `Barkpark.Auth.TokenSession` holding the encrypted raw
+    # bearer, so logout DELETES that row — a copied `_barkpark_key` cookie
+    # stops authenticating the instant the user signs out, not merely when
+    # the cookie itself expires or the token is separately revoked. The
+    # legacy `session["api_token"]` key (a cookie minted before this change)
+    # still needs no server-side revocation: dropping the cookie IS the whole
+    # grant for that one-release transition case, same as before.
+    token_session_revoked =
+      case get_session(conn, "api_token_session") do
+        session_id when is_binary(session_id) and session_id != "" ->
+          {:ok, n} = Barkpark.Auth.revoke_token_session(session_id)
+          n
+
+        _ ->
+          0
+      end
+
+    # clear + renew, not `drop: true`: a dropped session deletes the cookie
+    # the flash rides in, so the receipt below never reached the next page.
+    # Clearing removes every credential key and renewing rotates the id.
     conn
-    |> configure_session(drop: true)
-    |> put_flash(:info, sign_out_flash(revoked))
-    |> redirect(to: "/studio")
+    |> clear_session()
+    |> configure_session(renew: true)
+    |> put_flash(:info, sign_out_flash(user_revoked + token_session_revoked))
+    |> redirect(to: after_sign_out_path())
+  end
+
+  # Where a signed-out browser lands. On a public-demo host /studio is open to
+  # anonymous visitors, so it stays there. Everywhere else /studio sends an
+  # anonymous browser on to /login through the DEFAULT workspace's Studio,
+  # and that hop lost the receipt and set `return_to` to a workspace the
+  # editor who just left may not belong to (task-429d3c7559ea8a3c). Landing
+  # on /login directly shows the receipt, and signing back in resolves the
+  # editor's own Studio.
+  defp after_sign_out_path do
+    if Application.get_env(:barkpark, :public_demo_studio, false) == true,
+      do: "/studio",
+      else: "/login"
   end
 
   # The receipt names what actually happened instead of asserting it. Both are
-  # successes — the cookie is dropped either way, so a benign double sign-out is
+  # successes — the session is cleared either way, so a benign double sign-out is
   # never an error — but "a live session was revoked" and "there was nothing
   # left to revoke" no longer arrive at the user as the same sentence over a
   # count nobody read (PDS-D523).
-  defp sign_out_flash(0), do: "You were already signed out."
-  defp sign_out_flash(_revoked), do: "Signed out."
+  defp sign_out_flash(0), do: gettext("You were already signed out.")
+  defp sign_out_flash(_revoked), do: gettext("Signed out.")
 
   # Harden the one-time-link response: never cached/stored, and the ticket URL
   # is never leaked onward as a Referer.

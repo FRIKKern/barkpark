@@ -86,7 +86,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       assert_recorder_gone(sid)
 
       # BINDING: the swallowed bp_sandbox frame persisted onto the Session row…
-      assert %{cloud_sandbox_id: @sandbox_id} = StudioChat.get_session(sid)
+      assert %{cloud_sandbox_id: @sandbox_id} =
+               wait_for_session(sid, &match?(%{cloud_sandbox_id: @sandbox_id}, &1))
+
       # …and it was NOT broadcast to viewers and appended NO chat_messages row.
       events1 = drain_chat_events()
 
@@ -158,7 +160,16 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       ref = Process.monitor(session)
       # The one-shot shim emits its result and EXITS → the Port closes →
       # the Session GenServer {:stop, :normal}s (claude_chat.ex:1319-1324).
-      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 2_000
+      #
+      # Wait on the EVENT, then on the stop it commits to (task-dad9a71f6dcd2f08).
+      # The exit message is sent in the same callback that returns
+      # {:stop, :normal}, so once it arrives the :DOWN is certain; what remains
+      # is `terminate/2`'s teardown (child reap wait, stderr rm, MCP token revoke
+      # — a Repo round trip). Under CI load that teardown outran the old 2 s
+      # budget on the :DOWN alone (run 36 of 50 under 8 CPU burners). The long
+      # ceiling below is a backstop for a wedged teardown, not a timing guess.
+      assert_receive {:claude_chat_exit, 0, _stderr_tail}, 30_000
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 30_000
       refute Process.alive?(session)
 
       # The regression pin (zero production code — claude_chat.ex:922 already
@@ -195,7 +206,9 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
         })
 
       assert_recorder_gone(sid)
-      assert %{cloud_sandbox_id: "sbx-stub-1"} = StudioChat.get_session(sid)
+
+      assert %{cloud_sandbox_id: "sbx-stub-1"} =
+               wait_for_session(sid, &match?(%{cloud_sandbox_id: "sbx-stub-1"}, &1))
 
       a1 = read_argv(argv1)
       refute "--sandbox-id" in a1, "turn 1 is a fresh create — no --sandbox-id"
@@ -218,7 +231,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       # `right: %Session{cloud_sandbox_id: "sbx-stub-1"}` — the dead binding
       # survives the loud failure and would --resume the NEXT turn into an empty
       # filesystem). After wiring, the loud nonzero exit clears it inline.
-      session_after = StudioChat.get_session(sid)
+      session_after = wait_for_session(sid, &match?(%{cloud_sandbox_id: nil}, &1))
 
       assert match?(%{cloud_sandbox_id: nil}, session_after),
              "a loud reuse failure (nonzero exit) must clear the dead sandbox binding (#{inspect(session_after.cloud_sandbox_id)})"
@@ -255,7 +268,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       assert_w12_belt_intact(a3)
 
       # …and it RE-BOUND a DIFFERENT sandbox (proving re-establish, not stale reuse).
-      session_after = StudioChat.get_session(sid)
+      session_after = wait_for_session(sid, &match?(%{cloud_sandbox_id: "sbx-stub-2"}, &1))
 
       assert match?(%{cloud_sandbox_id: "sbx-stub-2"}, session_after),
              "turn 3's fresh sandbox re-binds the session to a new id (#{inspect(session_after.cloud_sandbox_id)})"
@@ -290,7 +303,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       # exit must NOT clear — the bp_sandbox frame minted a LIVE box mid-turn and
       # clearing it (or re-reading the column at exit) would orphan a healthy
       # sandbox. The next turn legitimately reuses it.
-      session_after = StudioChat.get_session(sid)
+      session_after = wait_for_session(sid, &match?(%{cloud_sandbox_id: "sbx-preserve-1"}, &1))
 
       assert match?(%{cloud_sandbox_id: "sbx-preserve-1"}, session_after),
              "a create turn (at-spawn nil) keeps the freshly-bound sandbox even on nonzero exit (#{inspect(session_after.cloud_sandbox_id)})"
@@ -435,7 +448,14 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
   end
 
   # Poll until the WHOLE turn is gone: the Recorder for `sid` AND the provider
-  # Session it drove. 200 × 10ms = 2s ceiling; the happy path returns fast.
+  # Session it drove. 1000 × 10ms = 10s ceiling (widened from 2s,
+  # task-38ab22218252aa45): the `kill -0`/MCP-revoke cleanup `terminate/2`
+  # forks below is real OS + DB work, and a 2s ceiling was measured to flunk
+  # on a plain dev box under nothing more than two OTHER copies of this same
+  # suite running concurrently — not a hung process, a slow one, racing a
+  # clock that stood in for "has it finished" instead of observing it. The
+  # happy path still returns in well under 100ms; this only widens the floor
+  # a genuinely stuck case needs to clear before FLUNKING for real.
   #
   # The Recorder alone is not enough (task-f68536c6c37a2ece). The Session sends
   # `{:claude_chat_exit, …}` to its sink and only THEN stops — its `terminate/2`
@@ -447,7 +467,7 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
   # `{:error, {:already_started, dying}}` in `Recorder.init/1`, ADOPTS the dying
   # Session, gets its `:DOWN` and stops — the next shim never spawns
   # (CI: counter held `create\nreuse-fail\n`, argv3 never written).
-  defp assert_recorder_gone(sid, tries \\ 200) do
+  defp assert_recorder_gone(sid, tries \\ 1000) do
     cond do
       Recorder.whereis(sid) == nil and session_gone?(sid) -> :ok
       tries <= 0 -> flunk("recorder or provider session for #{sid} never terminated")
@@ -458,6 +478,69 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
   # The single-writer Session name (provider/claude.ex `@registry`) is released
   # only once the Session process has exited and the Registry has reaped it.
   defp session_gone?(sid), do: Registry.lookup(Barkpark.StudioChat.SessionRegistry, sid) == []
+
+  # Poll a session row until `pred` holds, or a ~30s ceiling elapses
+  # (task-38ab22218252aa45, widened at task-dad9a71f6dcd2f08 — see below).
+  #
+  # `assert_recorder_gone` proves the Recorder's LAST `handle_info` call has
+  # RETURNED — `{:claude_chat_event, bp_sandbox}`'s `Repo.update()` is
+  # synchronous and strictly precedes it in the SAME process's mailbox, so
+  # the write itself has already happened by then. What it does NOT prove is
+  # that this test's OWN read — a SEPARATE process, under Ecto's shared-mode
+  # sandbox connection but still a distinct scheduled read — observes it on
+  # the very next `get_session/1` call under CI's own scheduling pressure
+  # (measured: 50/50 green on an idle box, flaky under the load a real CI
+  # run carries — job 113285636215, PR #22072). This is the SAME class of
+  # gap `assert_recorder_gone` itself closes for process liveness, applied
+  # to the DB row it gates on: a bounded retry, not a weakened assertion —
+  # an outcome that is NEVER true still fails loudly, naming the value this
+  # test actually saw (every call site keeps its own `assert`/`match?` after
+  # calling this, so a genuine regression still reds with an honest diff).
+  #
+  # WIDENED at task-dad9a71f6dcd2f08: this helper's OWN original 1000x10ms
+  # (~10s) bound still timed out once in CI (job 113449840671, #22154) —
+  # AFTER `assert_recorder_gone` had already confirmed the process gone, so
+  # this is the gap this helper exists to close, recurring past its own
+  # fix. `shared: true` sandbox mode (data_case.ex) means a committed write
+  # is visible to every connection in the SAME transaction with NO
+  # replication-style lag, so a genuine COMMIT-VISIBILITY delay should never
+  # need more than one scheduler tick — the 10s margin was never about the
+  # write being slow to propagate, it is about THIS test process getting
+  # SCHEDULED to look again under host-level (not just BEAM-level)
+  # contention, which `Process.sleep/1`'s floor-not-ceiling semantics do not
+  # bound. Tripled to 3000 tries as the next increment in this fix's own
+  # escalation lineage (10s was once ~2s), and the timeout case now reports
+  # elapsed wall-clock time explicitly — not a confirmed root-cause fix
+  # (reproduction under load did not trigger the race locally), but a
+  # widened, honestly-labeled safety margin plus the diagnostic the NEXT
+  # recurrence needs to tell "genuinely never arrived" apart from "arrived
+  # outside even this margin."
+  defp wait_for_session(sid, pred, tries \\ 3000) do
+    started_at = System.monotonic_time(:millisecond)
+    wait_for_session(sid, pred, tries, started_at)
+  end
+
+  defp wait_for_session(sid, pred, tries, started_at) do
+    session = StudioChat.get_session(sid)
+
+    cond do
+      pred.(session) ->
+        session
+
+      tries <= 0 ->
+        elapsed = System.monotonic_time(:millisecond) - started_at
+
+        IO.warn(
+          "wait_for_session/2 timed out after #{elapsed}ms waiting on #{inspect(sid)} — " <>
+            "last observed: #{inspect(session)}"
+        )
+
+        session
+
+      true ->
+        Process.sleep(10) && wait_for_session(sid, pred, tries - 1, started_at)
+    end
+  end
 
   # Non-blocking drain of every chat event already delivered to this (subscribed)
   # process. The Recorder has stopped by call time (assert_recorder_gone), so a

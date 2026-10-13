@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.Section
@@ -25,7 +26,7 @@ defmodule BarkparkWeb.Studio.DatasetSwitcher do
 
     ~H"""
     <label class="dataset-switcher">
-      <span class="dataset-switcher-label">Dataset</span>
+      <span class="dataset-switcher-label"><%= gettext("Dataset") %></span>
       <%!-- `form-input` gives the select the themed chrome (appearance:none,
             token border/bg/text, the custom caret, the focus ring) so no
             native unthemed dropdown leaks; `dataset-switcher-select` layers

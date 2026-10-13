@@ -76,11 +76,13 @@ defmodule Barkpark.Tenancy.Auth do
 
     * `authorize/3` is NOT an admin gate; `workspace_admin?/2` is. `authorize/3`
       answers "is this principal a MEMBER here, and does its grant satisfy the
-      action" — where the grant is the token's GLOBAL `permissions[]` for an
-      `%ApiToken{}` and the membership ROLE for a `%User{}`. It never reads
-      `membership.role` for a token, so a global-admin token added to workspace
-      B as a plain `member` PASSES `authorize(tok, B, :admin)` and correctly
-      FAILS `workspace_admin?(tok, B)`. That divergence IS the cross-tenant
+      action" — where the grant is the token's GLOBAL `permissions[]` AND its
+      seat role (and, for a user-owned token, its owner's role) for an
+      `%ApiToken{}`, and the membership ROLE for a `%User{}`. Since OWNER
+      RULING 2026-10-03 #2 a global-admin token seated in B as a plain
+      `member` FAILS `authorize(tok, B, :admin)` too; `workspace_admin?/2`
+      still differs (it reads the role ALONE, so a read-only token seated as
+      admin passes it). The older divergence was the cross-tenant
       admin bypass fix (barkpark-23yi / barkpark-fsko); it is load-bearing and
       the two predicates must never be "unified". What the divergence covers is
       the GRANT SHAPE (a token's global `permissions[]` vs a membership role),
@@ -405,9 +407,9 @@ defmodule Barkpark.Tenancy.Auth do
   `%ApiToken{id: nil}` raised `FunctionClauseError` (HTTP 500). Totality for
   malformed input is inherited from `membership/2`, not declared here.
 
-  It is NOT an admin gate — see the module doc: a global-admin token that is a
-  plain `member` of workspace B passes `authorize(tok, B, :admin)` and must
-  still fail `workspace_admin?(tok, B)`.
+  It is NOT an admin gate — see the module doc. For a token it applies the
+  seat rule (OWNER RULING 2026-10-03 #2, `token_seat_decision/4`): the seat's
+  role, and a user-owned token's owner's role, must also allow the action.
   """
   @spec authorize(principal(), binary(), action()) :: :ok | {:error, :forbidden}
   def authorize(principal, workspace_id, action) do
@@ -443,12 +445,9 @@ defmodule Barkpark.Tenancy.Auth do
           :ok | {:error, :not_a_member | :missing_capability | :forbidden}
   def authorize_with_reason(%ApiToken{id: id} = token, workspace_id, action)
       when is_binary(workspace_id) and action in [:read, :write, :admin] do
-    cond do
-      not resolvable?(id, workspace_id) -> {:error, :forbidden}
-      not member?(token, workspace_id) -> {:error, :not_a_member}
-      not permits?(token, action) -> {:error, :missing_capability}
-      true -> :ok
-    end
+    if resolvable?(id, workspace_id),
+      do: token_seat_decision(token, membership(token, workspace_id), workspace_id, action),
+      else: {:error, :forbidden}
   end
 
   # User principal: the GRANT is the membership ROLE (users carry no
@@ -491,6 +490,47 @@ defmodule Barkpark.Tenancy.Auth do
 
   def authorize_with_reason(_token, _workspace_id, _action), do: {:error, :forbidden}
 
+  # THE TOKEN SEAT RULE (OWNER RULING 2026-10-03 #2, the D22 seat rule taken
+  # to every action). A token is authorized when ALL of these hold:
+  #
+  #   1. it holds a seat in the workspace;
+  #   2. its own `permissions` allow the action (unchanged);
+  #   3. that seat's ROLE allows the action — so a demotion through the roster
+  #      bites at once, without revoking the token;
+  #   4. for a USER-OWNED token (`owner_user_id`), the owner's own seat in the
+  #      workspace exists and its role allows the action — a token never
+  #      outlives its holder's demotion or removal.
+  #
+  # The role is always read off a row loaded HERE, so the workspace-blind
+  # built-in resolution in `granted_actions/2` is reached only with a role a
+  # real membership row carried (the provenance `role_permits?/3` relies on).
+  defp token_seat_decision(_token, nil, _workspace_id, _action), do: {:error, :not_a_member}
+
+  defp token_seat_decision(token, %Membership{role: role}, workspace_id, action) do
+    action_name = Atom.to_string(action)
+
+    cond do
+      not permits?(token, action) -> {:error, :missing_capability}
+      action_name not in granted_actions(role, workspace_id) -> {:error, :missing_capability}
+      true -> holder_seat_decision(token, workspace_id, action_name)
+    end
+  end
+
+  defp holder_seat_decision(%ApiToken{owner_user_id: uid}, workspace_id, action_name)
+       when is_binary(uid) do
+    case membership(uid, workspace_id, :user) do
+      %Membership{role: role} ->
+        if action_name in granted_actions(role, workspace_id),
+          do: :ok,
+          else: {:error, :missing_capability}
+
+      nil ->
+        {:error, :not_a_member}
+    end
+  end
+
+  defp holder_seat_decision(_token, _workspace_id, _action_name), do: :ok
+
   # `membership/2` answers `nil` for BOTH "no such row" and "that id could never
   # name a row" (nil, empty string, non-UUID) — it fails closed rather than
   # raising. `authorize/3` could not tell those apart and did not need to: both
@@ -511,14 +551,24 @@ defmodule Barkpark.Tenancy.Auth do
        do: authorize_with_reason(%User{id: uid}, workspace_id, action)
 
   defp membership_authorizes?(
-         %{principal_type: :api_token, token_id: tid, roles: roles},
+         %{principal_type: :api_token, token_id: tid, roles: roles} = ctx,
          workspace_id,
          action
        )
        when is_binary(tid) and is_list(roles),
-       do: authorize_with_reason(%ApiToken{id: tid, permissions: roles}, workspace_id, action)
+       do:
+         authorize_with_reason(
+           # A token context that names its owner user carries the holder
+           # half of the seat rule too (see token_seat_decision/4).
+           %ApiToken{id: tid, permissions: roles, owner_user_id: owner_user_id(ctx)},
+           workspace_id,
+           action
+         )
 
   defp membership_authorizes?(_ctx, _workspace_id, _action), do: {:error, :forbidden}
+
+  defp owner_user_id(%{user_id: uid}) when is_binary(uid), do: uid
+  defp owner_user_id(_ctx), do: nil
 
   defp grants_authorize?(%{grants: grants}, workspace_id, action) when is_list(grants) do
     Enum.any?(grants, fn grant ->
@@ -712,13 +762,16 @@ defmodule Barkpark.Tenancy.Auth do
         workspace_id
       )
       when is_binary(principal_id) and is_binary(workspace_id) do
+    # OWNER RULING 2026-10-03 #2: every action follows the seat role (and, for
+    # a user-owned token, the holder's seat) — the same decision
+    # `authorize/3`'s token arm makes. ONE role resolution for the three.
+    actions = granted_actions(role, workspace_id)
+    holder = holder_actions(token, workspace_id)
+
     %{
-      read: permits?(token, :read),
-      write: permits?(token, :write),
-      # PERMS FIRST, deliberately: a token without the `admin` permission
-      # short-circuits before any role resolution, so a read-only token pays
-      # nothing for the seat half.
-      admin: permits?(token, :admin) and role_confers_admin?(role, workspace_id)
+      read: permits?(token, :read) and "read" in actions and "read" in holder,
+      write: permits?(token, :write) and "write" in actions and "write" in holder,
+      admin: permits?(token, :admin) and "admin" in actions and "admin" in holder
     }
   end
 
@@ -754,11 +807,19 @@ defmodule Barkpark.Tenancy.Auth do
   # `:inherit_global` reach as `role_permits?(role, ws, :admin)` — this is the
   # spelling charter D22 ruled for the Studio column, NOT `workspace_admin?/2`'s
   # `:workspace_only` name-list-or-custom-row rule.
-  defp role_confers_admin?(role, workspace_id)
-       when is_binary(role) and is_binary(workspace_id),
-       do: "admin" in granted_actions(role, workspace_id)
+  # (Since ruling #2 the token arm reads `actions` above for all three.)
+  #
+  # The HOLDER half for the Studio: the actions a user-owned token's owner may
+  # take in the workspace (none when unseated); a token with no owner user is
+  # not narrowed by it.
+  defp holder_actions(%ApiToken{owner_user_id: uid}, workspace_id) when is_binary(uid) do
+    case membership(uid, workspace_id, :user) do
+      %Membership{role: role} -> granted_actions(role, workspace_id)
+      nil -> []
+    end
+  end
 
-  defp role_confers_admin?(_role, _workspace_id), do: false
+  defp holder_actions(_token, _workspace_id), do: ~w(read write admin)
 
   @doc """
   The caller's GLOBAL auth tier, as one of the closed strings the

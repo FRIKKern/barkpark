@@ -113,6 +113,9 @@ defmodule Barkpark.Plugins.Forms do
       icon: "inbox",
       visibility: "private",
       dataset: dataset,
+      # Only the public intake writes a submission (its required fields are
+      # the intake's), so Studio offers no "New document" for it.
+      desk: %{"authorCreatable" => false},
       fields: [
         %{"name" => "title", "type" => "string", "title" => "Title"},
         %{"name" => "site", "type" => "string", "title" => "Site", "readOnly" => true},

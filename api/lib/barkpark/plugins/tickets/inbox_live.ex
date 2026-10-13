@@ -519,11 +519,11 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         .bp-tk-topbar { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid var(--border-muted); }
         .bp-tk-topbar-left { display:flex; align-items:center; gap:12px; }
         .bp-tk-topbar-right { display:flex; align-items:center; gap:8px; }
-        .bp-tk-badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:600; background:var(--warn-soft); color:var(--warn); }
+        .bp-tk-badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:600; background:var(--warn-soft); color:var(--warn-text); }
         .bp-tk-body { flex:1; overflow-y:auto; padding:20px 24px; }
         .bp-tk-banner { padding:10px 24px; font-size:13px; }
-        .bp-tk-banner-ok { background:var(--ok-soft); color:var(--ok); }
-        .bp-tk-banner-error { background:var(--danger-soft); color:var(--danger); }
+        .bp-tk-banner-ok { background:var(--ok-soft); color:var(--ok-text); }
+        .bp-tk-banner-error { background:var(--danger-soft); color:var(--danger-text); }
 
         .bp-tk-partition { margin-bottom:22px; }
         .bp-tk-partition-title { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--muted-text); margin-bottom:8px; }
@@ -540,7 +540,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         .bp-tk-tone-dim.bp-tk-row { opacity:0.72; }
 
         .bp-tk-keypill { display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:999px; font-size:11px; font-weight:600; background:var(--bg-accent); color:var(--text); white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis; }
-        .bp-tk-oppill { background:hsl(var(--info-hsl) / 0.16); color:var(--info); }
+        .bp-tk-oppill { background:hsl(var(--info-hsl) / 0.16); color:var(--info-text); }
         .bp-tk-subject { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; font-weight:500; }
         .bp-tk-clip { font-size:13px; opacity:0.8; }
         .bp-tk-msgs { font-size:12px; color:var(--muted-text); white-space:nowrap; }
@@ -590,9 +590,12 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         .bp-tk-keyactions { display:flex; gap:6px; justify-content:flex-end; }
       </style>
 
-      <header class="bp-tk-topbar">
+      <%!-- A labelled region, not a <header>: outside <main> a header is a
+            banner, and Studio's own bar already is one (axe
+            landmark-no-duplicate-banner). --%>
+      <div class="bp-tk-topbar" role="region" aria-labelledby="bp-tk-title">
         <div class="bp-tk-topbar-left">
-          <h1 class="h1">Tickets</h1>
+          <h1 class="h1" id="bp-tk-title">Tickets</h1>
           <span :if={@view == :inbox and @presenter.badge_count > 0} class="bp-tk-badge" data-test-id="inbox-badge">
             {@presenter.badge_count} waiting
           </span>
@@ -616,7 +619,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
             Keys
           </button>
         </nav>
-      </header>
+      </div>
 
       <%!-- Flash is rendered by the :app layout's studio_flash — never here
             (a second copy would double every banner). The persistent

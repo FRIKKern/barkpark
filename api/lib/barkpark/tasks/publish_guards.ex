@@ -13,8 +13,8 @@ defmodule Barkpark.Tasks.PublishGuards do
       is side-effect-free. It carries the lifecycle transition check
       (`Transitions.legal?/2`), the stale-claim check, the claim-time criteria
       contract (`CriteriaContract`), the criteria regression fence, the
-      terminal-criteria fence (`TerminalCriteriaFence`) and the task-door field
-      fence, in that order.
+      shorter-evidence fence, the terminal-criteria fence
+      (`TerminalCriteriaFence`) and the task-door field fence, in that order.
     * `no_criteria_regression/4` — phase `:in_transaction`, formerly
       `Lifecycle.assert_no_criteria_regression!/4`: inside the publish
       transaction, directly after the incumbent row is locked `FOR UPDATE`
@@ -30,6 +30,7 @@ defmodule Barkpark.Tasks.PublishGuards do
   """
 
   alias Barkpark.Content.Document
+  alias Barkpark.Content.DraftId
   alias Barkpark.Tasks.CriteriaContract
   alias Barkpark.Tasks.TerminalCriteriaFence
   alias Barkpark.Tasks.Transitions
@@ -183,6 +184,7 @@ defmodule Barkpark.Tasks.PublishGuards do
         # `Barkpark.Tasks.CriteriaContract` for the predicate and its scope.
         with :ok <- CriteriaContract.check_substitution(pub_content, draft_content),
              :ok <- criteria_fence(pub_content, draft_content),
+             :ok <- evidence_shrink_fence(pub_content, draft_content, pid),
              :ok <- terminal_criteria_fence(pub_content, draft_content) do
           task_door_field_fence(pub_content, draft_content)
         end
@@ -314,6 +316,69 @@ defmodule Barkpark.Tasks.PublishGuards do
     else
       :ok
     end
+  end
+
+  # ── THE SHORTER-EVIDENCE TWIN (task-f8696f3aa33b06ec) ─────────────────────
+  #
+  # `criteria_fence/2` refuses a draft that clears `met`, blanks `evidence` or
+  # drops a proof-bearing row. It does not refuse a draft whose evidence is
+  # still non-blank but SHORTER than the published row's. That shape is a
+  # stale twin too: `bp task stamp` overwrites evidence on the published row
+  # and never rebases `drafts.<id>`, so a twin minted between two stamps
+  # carries the older text, and publishing it puts that text back.
+  #
+  # Measured on guerrilla 2026-10-07 with a read of all 11,274 task rows: 352
+  # published rows carry a twin, 229 of those twins hold less evidence than
+  # their published row, and 228 are already refused by `criteria_fence/2`. The
+  # one that was not is `task-12ee483328b7c87e`: met stays true on every
+  # criterion, but the twin's evidence is 480 bytes against the published 822.
+  #
+  # Same scope as `terminal_criteria_fence/2`: the api and github doors only.
+  # `:sync` mirrors upstream verbatim, and an upstream re-stamp to a shorter
+  # string is a legitimate write a replica must be able to copy. The remedy
+  # mirrors the patch door's fork refusal (`Mutations.draft_twin_error/1`):
+  # name the twin and the two ways to resolve it.
+  defp evidence_shrink_fence(pub_content, draft_content, pid) do
+    draft_list = criteria_list(draft_content)
+
+    pub_content
+    |> criteria_list()
+    |> Enum.with_index()
+    |> Enum.find_value(:ok, fn {pub_row, index} ->
+      shrunk_evidence_at(pub_row, index, draft_list, pid)
+    end)
+  end
+
+  defp shrunk_evidence_at(pub_row, index, draft_list, pid) when is_map(pub_row) do
+    with was when is_binary(was) <- present_string(pub_row["evidence"]),
+         %{} = draft_row <- criteria_counterpart(pub_row, index, draft_list),
+         now when is_binary(now) <- present_string(draft_row["evidence"]),
+         true <- byte_size(now) < byte_size(was) do
+      {:error,
+       {:invalid_task_content,
+        evidence_shrink_error(pid, index, present_string(pub_row["criterion"]), was, now)}}
+    else
+      _ -> nil
+    end
+  end
+
+  defp shrunk_evidence_at(_pub_row, _index, _draft_list, _pid), do: nil
+
+  defp evidence_shrink_error(pid, index, criterion, was, now) do
+    twin = DraftId.draft_id(pid)
+
+    %{
+      "acceptance_criteria" => [
+        "stale draft: the draft twin `#{twin}` carries less evidence than the published " <>
+          "task `#{pid}` for acceptance criterion #{index}#{criterion_label(criterion)}: " <>
+          "#{byte_size(now)} bytes against #{byte_size(was)}. Publishing copies the twin " <>
+          "over the published row, so the longer proof would be replaced. A stamp is " <>
+          "written directly to the published row (`bp task stamp`) and never rebases the " <>
+          "twin, so a twin minted before a re-stamp still carries the older evidence. " <>
+          "Resolve the fork first: `discardDraft` `#{pid}` to drop the twin, or re-stamp " <>
+          "the criterion with `bp task stamp` if the shorter evidence is the one you mean."
+      ]
+    }
   end
 
   defp criteria_fence(pub_content, draft_content) do
@@ -574,7 +639,12 @@ defmodule Barkpark.Tasks.PublishGuards do
   """
   @spec no_criteria_regression(String.t(), Document.t(), map(), keyword()) ::
           :ok | {:error, term()}
-  def no_criteria_regression("task", %Document{content: pub_content}, pub_attrs, opts) do
+  def no_criteria_regression(
+        "task",
+        %Document{content: pub_content, doc_id: pid},
+        pub_attrs,
+        opts
+      ) do
     pub_content = pub_content || %{}
     draft_content = pub_attrs["content"] || %{}
 
@@ -590,7 +660,9 @@ defmodule Barkpark.Tasks.PublishGuards do
       if Keyword.get(opts, :source, :api) == :sync do
         :ok
       else
-        terminal_criteria_fence(pub_content, draft_content)
+        with :ok <- evidence_shrink_fence(pub_content, draft_content, pid) do
+          terminal_criteria_fence(pub_content, draft_content)
+        end
       end
     end
   end

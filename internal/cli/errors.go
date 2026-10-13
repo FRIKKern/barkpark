@@ -89,6 +89,11 @@ var codeExit = map[string]int{
 	"forbidden_field": exitAuth,
 	"cors_forbidden":  exitAuth,
 	"csrf_required":   exitAuth,
+	// Per-account prefs (task-7d2a48dbf7e4bf34): a shared/admin-minted token
+	// with no owning account has no "user" to key a pref by. The credential
+	// itself is fine for every OTHER route; here it just can't authenticate
+	// THIS one — same bucket `forbidden` already uses for that shape.
+	"no_user_identity": exitAuth,
 	// The cloud control plane's team gate: the caller's login has no ACTIVE TEAM.
 	// Deliberately NOT the auth bucket even though it now arrives as a 403 — exit 3
 	// means "your credential is bad", and here the credential is fine; the fix is
@@ -102,20 +107,35 @@ var codeExit = map[string]int{
 	// unknown ops instead of silently returning every row (#570).
 	"invalid_filter":    exitUsage,
 	"validation_failed": exitValidation,
-	"invalid_paper":     exitValidation,
-	"malformed_op":      exitValidation,
-	"invalid_op":        exitValidation,
-	"block_not_found":   exitValidation,
-	"type_mismatch":     exitValidation,
-	"duplicate_id":      exitValidation,
+	// A versions.<release>.<id> write refused at the create-family door
+	// (task-078175e759f71b73) — malformed input, same bucket as
+	// validation_failed: there is no release/version-set entity here to
+	// resolve the id against, so the fix is the caller's, not a retry.
+	"versions_id_not_supported": exitValidation,
+	"invalid_paper":             exitValidation,
+	"malformed_op":              exitValidation,
+	"invalid_op":                exitValidation,
+	"block_not_found":           exitValidation,
+	"type_mismatch":             exitValidation,
+	"duplicate_id":              exitValidation,
 	// Blob-push refusals from the media put_blob route (the sidecar channel
 	// `bp cloud workspace import --with-blobs` writes to). Both are 422s emitted
 	// BEFORE any byte touches disk — a traversal/malformed relative path, and an
 	// empty body (usually a mislabeled content-type Plug.Parsers already ate).
 	// Absent from this table they fell to the exit-1 unknown-code bucket, which
 	// reads as "unexpected" for what is a plainly invalid payload (PDS-D52).
-	"invalid_path":        exitValidation,
-	"empty_body":          exitValidation,
+	"invalid_path": exitValidation,
+	"empty_body":   exitValidation,
+	// Per-account prefs (task-7d2a48dbf7e4bf34). "bad_request" is also emitted
+	// at 400 by auth_controller.ex/webauthn_controller.ex (the DOMINANT shape)
+	// and only here at 422 — same bucket either way, since the semantics are
+	// "the request itself is malformed", not "the value failed a business
+	// rule" (that's invalid_pref, below). exitUsage matches `malformed`'s own
+	// bucket for the identical reason.
+	"bad_request": exitUsage,
+	// A changeset's own field errors (invalid key/value shape for the
+	// stored JSON) — a validation bucket, not a credential one.
+	"invalid_pref":        exitValidation,
 	"rev_mismatch":        exitConflict,
 	"paper_exists":        exitConflict,
 	"precondition_failed": exitConflict,
@@ -312,6 +332,14 @@ var codeExit = map[string]int{
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
 	"host_execution_not_permitted": exitAuth,
 
+	// 403, Auth.rotate_token/3 (owner ruling #7): a user-owned token is rotated
+	// only by its owner; a workspace admin revokes it instead.
+	"owner_only": exitAuth,
+
+	// 422, auth_controller.ex create_token (owner ruling #7): the caller sits in
+	// several workspaces and must name the PAT's workspace.
+	"workspace_required": exitValidation,
+
 	// 404 → not-found.
 	"webhook_not_found": exitNotFound, // 404, webhook_controller.ex:288
 	"event_not_found":   exitNotFound, // 404, webhook_controller.ex:280
@@ -368,6 +396,8 @@ var codeExit = map[string]int{
 	"payload_too_large":          exitValidation, // 413, errors.ex:736
 	"import_body_too_large":      exitValidation, // 413, workspace_controller.ex:992
 	"searchable_text_too_large":  exitValidation, // 422, content/mutations.ex:216 (tsvector cap)
+	"document_too_large":         exitValidation, // 413, content/document_size.ex (owner ruling #39, per-document cap)
+	"private_field_bound":        exitValidation, // 422, content/bound_field_guard.ex (owner ruling #21)
 	// 402. There is no payment/quota bucket in the 0-8 scheme, and inventing
 	// one would redefine the published table. 5 is the honest neighbour: it
 	// says "not retryable as sent", which is the fact a wrapper needs.
@@ -378,6 +408,7 @@ var codeExit = map[string]int{
 	"duplicate_of":                exitConflict, // 409, errors.ex:604
 	"idempotency_key_in_use":      exitConflict, // 409, errors.ex:515
 	"schema_has_documents":        exitConflict, // 409, errors.ex:696
+	"document_referenced":         exitConflict, // 409, delete refused: other docs reference it
 	"conflict_retry":              exitConflict, // 409, bulldocs_ingest_controller.ex:1117
 	"workspace_slug_conflict":     exitConflict, // 409, workspace_controller.ex:513
 	"import_constraint_violation": exitConflict, // 409, workspace_controller.ex:651

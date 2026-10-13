@@ -59,6 +59,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias BarkparkWeb.BulldocsLive.Edit
   alias BarkparkWeb.Presence
   alias BarkparkWeb.PaperActor
+  alias Phoenix.LiveView.JS
   alias BarkparkWeb.PaperReaderStyle
   alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
@@ -121,6 +122,14 @@ defmodule BarkparkWeb.BulldocsLive do
     paper ||
       raise NotFound, message: "no published paper #{inspect(slug)}"
 
+    # The reader speaks the language of the workspace that owns the paper
+    # (task-c84978a632220e1c): its <html lang> and chrome. Set in mount so the
+    # dead render's root layout and the connected process both read it.
+    BarkparkWeb.StudioLocale.put_owner(
+      paper_workspace || socket.assigns[:current_workspace],
+      paper.workspace_id
+    )
+
     # Edit-on-the-link slice 1 (task-0c242c8dc61f6b13): the viewer was
     # resolved by `BarkparkWeb.PaperViewer.on_mount/4`; the EDIT verdict needs
     # the paper's OWN workspace, known only now. Fail-closed: a mount without
@@ -159,7 +168,7 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:paper_workspace_id, paper.workspace_id)
       |> assign(
         :presence_topic,
-        PaperPresence.topic(paper.workspace_id, dataset, slug)
+        PaperPresence.topic(paper.workspace_id, Map.get(paper, :project_id), dataset, slug)
       )
       |> assign(:paper_presence, PaperPresence.empty())
 
@@ -203,7 +212,7 @@ defmodule BarkparkWeb.BulldocsLive do
     # the body's own schema, so a private description / excerpt / tag never
     # reaches the head. The goal rail below keys off the same view.
     anonymous_content = Content.Papers.anonymous_content(paper, paper_schema)
-    preview = paper_preview(paper, anonymous_content, slug)
+    preview = paper_preview(paper, anonymous_content, slug, socket.assigns)
 
     socket =
       socket
@@ -508,23 +517,11 @@ defmodule BarkparkWeb.BulldocsLive do
         |> Keyword.put(:card_schemas, %{"paper" => paper_schema})
       )
 
-    task_opts =
-      if Enum.any?(referencers, &(&1.type == "task")),
-        do:
-          Keyword.put(
-            opts,
-            :anonymous_task_schema,
-            Content.Papers.reader_schema(paper, "task", dataset, reader_scope)
-          ),
-        else: opts
-
     socket
     |> assign(:backlinks_html, BarkparkWeb.PaperBacklinks.section_html(referencers))
     |> assign(
       :driven_tasks_html,
-      referencers
-      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(task_opts)
-      |> BarkparkWeb.PaperTasks.section_html()
+      driven_tasks_html(referencers, paper, dataset, reader_scope, opts)
     )
   end
 
@@ -532,6 +529,28 @@ defmodule BarkparkWeb.BulldocsLive do
     socket
     |> assign(:backlinks_html, "")
     |> assign(:driven_tasks_html, "")
+  end
+
+  # "Driven tasks" lists citing tasks to the ANONYMOUS reader, so it renders
+  # only when that reader may read tasks at all: the workspace's `task` schema
+  # is public. The shipped schema is private (owner ruling #10,
+  # task-771adf3d4bb86c69: anonymous task reads 404), so by default the
+  # section is empty and no task is hydrated. Without this gate the hydration's
+  # type-pinned retry (`Expectations.resolve_task/4`) re-read each task the
+  # schema-visibility clamp had dropped, one statement per citing task, and
+  # printed private tasks on a public page.
+  defp driven_tasks_html(referencers, paper, dataset, reader_scope, opts) do
+    with true <- Enum.any?(referencers, &(&1.type == "task")),
+         %{visibility: "public"} = task_schema <-
+           Content.Papers.reader_schema(paper, "task", dataset, reader_scope) do
+      referencers
+      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(
+        Keyword.put(opts, :anonymous_task_schema, task_schema)
+      )
+      |> BarkparkWeb.PaperTasks.section_html()
+    else
+      _ -> ""
+    end
   end
 
   defp maybe_scope(opts, _key, nil), do: opts
@@ -557,18 +576,18 @@ defmodule BarkparkWeb.BulldocsLive do
     cond do
       String.contains?(path, "/specs/") ->
         [
-          %{key: "create-plan", label: "Create plan from this spec"},
-          %{key: "grill", label: "Grill the spec"}
+          %{key: "create-plan", label: gettext("Create plan from this spec")},
+          %{key: "grill", label: gettext("Grill the spec")}
         ]
 
       String.contains?(path, "/plans/") ->
         [
-          %{key: "build", label: "Build this plan"},
-          %{key: "grill", label: "Grill the plan"}
+          %{key: "build", label: gettext("Build this plan")},
+          %{key: "grill", label: gettext("Grill the plan")}
         ]
 
       String.contains?(path, "/grills/") ->
-        [%{key: "submit", label: "Submit"}]
+        [%{key: "submit", label: gettext("Submit")}]
 
       true ->
         []
@@ -611,6 +630,24 @@ defmodule BarkparkWeb.BulldocsLive do
   end
 
   defp paper_scope_opts(_), do: []
+
+  # The rail's event list names a known event type in the reader's language
+  # (ruling 2026-10-10, option (a)): the stored `event_type` and the gitGraph's
+  # ASCII commit ids stay as written, and an unknown type reads raw. English
+  # reads the ids exactly as before (each id is its own msgid).
+  @doc false
+  def event_label("draft"), do: pgettext("paper event", "draft")
+  def event_label("revise"), do: pgettext("paper event", "revise")
+  def event_label("publish"), do: pgettext("paper event", "publish")
+  def event_label("published"), do: pgettext("paper event", "published")
+  def event_label("correction"), do: pgettext("paper event", "correction")
+  def event_label("search"), do: pgettext("paper event", "search")
+  def event_label("simplify-request"), do: pgettext("paper event", "simplify-request")
+  def event_label("simplify-accept"), do: pgettext("paper event", "simplify-accept")
+  def event_label("simplify-reject"), do: pgettext("paper event", "simplify-reject")
+  def event_label("goal-opened"), do: pgettext("paper event", "goal-opened")
+  def event_label("goal-snapshot"), do: pgettext("paper event", "goal-snapshot")
+  def event_label(type), do: type
 
   @doc false
   # Build a VALID linear Mermaid gitGraph from the rail's events. One `commit`
@@ -698,7 +735,8 @@ defmodule BarkparkWeb.BulldocsLive do
 
       {:noreply, socket}
     else
-      {:noreply, put_flash(socket, :error, "One of the selected events no longer exists.")}
+      {:noreply,
+       put_flash(socket, :error, gettext("One of the selected events no longer exists."))}
     end
   end
 
@@ -774,10 +812,10 @@ defmodule BarkparkWeb.BulldocsLive do
            socket
            |> assign(:pending_simplify, branch)
            |> assign(:pending_simplify_event_id, event.id)
-           |> assign(:last_simplify, "Simplify requested — #{branch}")}
+           |> assign(:last_simplify, gettext("Simplify requested — %{branch}", branch: branch))}
 
         {:error, _changeset} ->
-          {:noreply, assign(socket, :last_simplify, "Simplify could not be requested.")}
+          {:noreply, assign(socket, :last_simplify, gettext("Simplify could not be requested."))}
       end
     end
   end
@@ -835,16 +873,13 @@ defmodule BarkparkWeb.BulldocsLive do
       )
 
     if context in [{:error, :outdated_terminal_canvas}, {:error, :outdated_stage_canvas}] do
-      widget = if context == {:error, :outdated_terminal_canvas}, do: "Terminal", else: "Stage"
-
       {:reply,
        %{
          saved: false,
          request_id: request_id,
          rejected: Atom.to_string(elem(context, 1)),
          current_rev: socket.assigns[:paper_rev],
-         error:
-           "Reload the Paper editor before editing this #{widget}. Your draft has not been saved."
+         error: outdated_canvas_error(context)
        }, socket}
     else
       case Edit.apply_ops(socket, ops, request_id, is_map(params) && params["if_rev"], context) do
@@ -879,7 +914,7 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-block-autosave", params, socket) do
     socket =
       socket
-      |> assign(last_save_ok?: false, save_status: "Save failed")
+      |> assign(last_save_ok?: false, save_status: gettext("Save failed"))
       |> Edit.edit_block(params)
 
     {:reply, socket.assigns[:last_save_result] || %{saved: false}, socket}
@@ -912,13 +947,13 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-wikilink-search", %{"query" => query}, socket) do
     if item_share_grant?(socket.assigns),
       do: {:reply, %{results: []}, socket},
-      else: PaperHandlers.paper_wikilink_search(query, socket)
+      else: PaperHandlers.paper_wikilink_search(query, socket, search_scope(socket))
   end
 
   def handle_event("paper-tag-search", %{"query" => query}, socket) do
     if item_share_grant?(socket.assigns),
       do: {:reply, %{results: []}, socket},
-      else: PaperHandlers.paper_tag_search(query, socket)
+      else: PaperHandlers.paper_tag_search(query, socket, search_scope(socket))
   end
 
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
@@ -976,7 +1011,7 @@ defmodule BarkparkWeb.BulldocsLive do
           socket
           |> assign(:pending_simplify, nil)
           |> assign(:pending_simplify_event_id, nil)
-          |> assign(:last_simplify, "#{verb} #{event.branch}")
+          |> assign(:last_simplify, decision_ack(event_type, event.branch))
 
         {:error, reason} ->
           assign(socket, :last_simplify, decision_refusal(reason))
@@ -989,14 +1024,29 @@ defmodule BarkparkWeb.BulldocsLive do
   # read the same to the client.
   defp decision_refusal(reason) when is_atom(reason) do
     case reason do
-      :already_decided -> "That simplify request has already been decided."
-      :expired_request -> "That simplify request has expired."
-      :anonymous -> "Sign in to act on this paper."
-      _ -> "That simplify request is not yours to decide."
+      :already_decided -> gettext("That simplify request has already been decided.")
+      :expired_request -> gettext("That simplify request has expired.")
+      :anonymous -> gettext("Sign in to act on this paper.")
+      _ -> gettext("That simplify request is not yours to decide.")
     end
   end
 
-  defp decision_refusal(_), do: "That simplify request could not be decided."
+  defp decision_refusal(_), do: gettext("That simplify request could not be decided.")
+
+  # The reader's acknowledgement of a decision. The stored payload keeps the
+  # English verb; only this line shows in the viewer's language.
+  defp decision_ack("simplify-accept", branch), do: gettext("Accepted %{branch}", branch: branch)
+  defp decision_ack(_, branch), do: gettext("Rejected %{branch}", branch: branch)
+
+  defp outdated_canvas_error({:error, :outdated_terminal_canvas}),
+    do:
+      gettext(
+        "Reload the Paper editor before editing this Terminal. Your draft has not been saved."
+      )
+
+  defp outdated_canvas_error(_),
+    do:
+      gettext("Reload the Paper editor before editing this Stage. Your draft has not been saved.")
 
   # Stamp the authenticated principal behind this socket onto an event attr
   # map. `Edit.principal?/1` already gated the event, so an anonymous socket
@@ -1116,11 +1166,15 @@ defmodule BarkparkWeb.BulldocsLive do
   # the not-found reader unfurls as a branded default card rather than blank.
   # From the anonymous content (`Papers.anonymous_content/2`), never raw
   # content; the row title stays the last title fallback, as before.
-  defp paper_preview(paper, anonymous_content, slug),
+  defp paper_preview(paper, anonymous_content, slug, assigns),
     do:
       BarkparkWeb.ShareMeta.manifest(
         anonymous_content,
-        "/papers/#{slug}",
+        BarkparkWeb.ShareMeta.paper_reader_path(
+          assigns[:current_workspace],
+          assigns[:current_project],
+          slug
+        ),
         "paper",
         Map.get(paper, :title)
       )
@@ -1166,8 +1220,10 @@ defmodule BarkparkWeb.BulldocsLive do
   # two clauses are kept SEPARATE (not collapsed) because the article /
   # non-article split is a distinction the reader may re-acquire — today both
   # map to `:article`, the same way `Labels.paper_render_opts/3` does.
-  defp render_opts(true), do: %{style: :article}
-  defp render_opts(false), do: %{style: :article}
+  # Both also carry the owning workspace's locale, which `mount` put on the
+  # process, so the renderer's own words read in the paper's language.
+  defp render_opts(true), do: BarkparkWeb.StudioLocale.pd_opts(%{style: :article})
+  defp render_opts(false), do: BarkparkWeb.StudioLocale.pd_opts(%{style: :article})
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
@@ -1699,7 +1755,7 @@ defmodule BarkparkWeb.BulldocsLive do
           phx-hook="BarkparkPaperEditToggle"
           data-editing={to_string(@editing?)}
         >
-          {if @editing?, do: "View", else: "Edit"}
+          {if @editing?, do: gettext("View"), else: gettext("Edit")}
         </button>
       </div>
 
@@ -1729,7 +1785,7 @@ defmodule BarkparkWeb.BulldocsLive do
           data-presence-kind={p.kind}
           data-editing={to_string(p.editing?)}
         >
-          <span :if={p.editing?} class="bp-paper-presence-dot" aria-label="editing">•</span>
+          <span :if={p.editing?} class="bp-paper-presence-dot" aria-label={gettext("editing")}>•</span>
           {PaperPresence.display(p)}
         </span>
         <%!-- Anonymous readers are a NUMBER. There is deliberately no way to
@@ -1740,7 +1796,7 @@ defmodule BarkparkWeb.BulldocsLive do
           id="paper-presence-anon"
           data-count={@paper_presence.anonymous_count}
         >
-          {@paper_presence.anonymous_count} anonymous
+          {ngettext("%{count} anonymous", "%{count} anonymous", @paper_presence.anonymous_count)}
         </span>
       </div>
 
@@ -1769,7 +1825,7 @@ defmodule BarkparkWeb.BulldocsLive do
           {action.label}
         </button>
         <span :if={@last_action} class="bp-paper-action-ack" id="paper-action-ack">
-          Requested: {@last_action}
+          {gettext("Requested: %{action}", action: @last_action)}
         </span>
       </div>
 
@@ -1788,7 +1844,7 @@ defmodule BarkparkWeb.BulldocsLive do
           class="bp-paper-action"
           phx-click="simplify-request"
         >
-          Simplify
+          {gettext("Simplify")}
         </button>
         <%!-- Accept/Reject appear once a simplify-request is pending this
               session. They record the decision only; the actual branch-close /
@@ -1800,7 +1856,7 @@ defmodule BarkparkWeb.BulldocsLive do
             phx-click="simplify-accept"
             phx-value-request-id={@pending_simplify_event_id}
           >
-            Accept
+            {gettext("Accept")}
           </button>
           <button
             type="button"
@@ -1808,7 +1864,7 @@ defmodule BarkparkWeb.BulldocsLive do
             phx-click="simplify-reject"
             phx-value-request-id={@pending_simplify_event_id}
           >
-            Reject
+            {gettext("Reject")}
           </button>
         </span>
         <span :if={@last_simplify} class="bp-paper-action-ack" id="paper-simplify-ack">
@@ -1844,11 +1900,11 @@ defmodule BarkparkWeb.BulldocsLive do
           />
         <% @source_error -> %>
           <article id="paper-body" data-rev={@rev} data-source-error={@source_error}>
-            <p id="paper-invalid">This paper has no safe, unambiguous reader source.</p>
+            <p id="paper-invalid">{gettext("This paper has no safe, unambiguous reader source.")}</p>
           </article>
         <% not @found -> %>
           <article id="paper-body" data-rev={@rev}>
-            <p id="paper-empty">No paper saved yet for <code>{@slug}</code>.</p>
+            <p id="paper-empty">{gettext("No paper saved yet for")} <code>{@slug}</code>.</p>
           </article>
         <% @block_mode -> %>
           <%!-- Block-backed: each top-level block is its own keyed stream item.
@@ -1885,9 +1941,11 @@ defmodule BarkparkWeb.BulldocsLive do
             carrying phx-hook="PaperMermaid", so the engine runs over it on
             mount exactly as it does for diagram blocks in the article. --%>
       <aside :if={@rail_events != []} id="goal-path-rail" class="bp-goal-rail">
-        <h2 class="bp-goal-rail-title">Goal path</h2>
+        <h2 class="bp-goal-rail-title">{gettext("Goal path")}</h2>
         <div id="goal-path-graph" phx-hook="PaperMermaid">
-          <pre class="mermaid">{@rail_gitgraph}</pre>
+          <%!-- The graph scrolls sideways when wide; a keyboard user scrolls
+                it once it can take focus (axe scrollable-region-focusable). --%>
+          <pre class="mermaid" tabindex="0" role="group" aria-label={gettext("Goal path graph")}>{@rail_gitgraph}</pre>
         </div>
         <%!-- Clickable event list — doubles as the no-Mermaid fallback. A
               PLAIN click selects (highlight only, via "rail-select"). A
@@ -1895,14 +1953,19 @@ defmodule BarkparkWeb.BulldocsLive do
               rows and push "open-diff" — the U3 diff modal below renders the
               line-diff of the two events' payloads. --%>
         <ol class="bp-goal-rail-events" id="goal-path-events" phx-hook="RailDiffSelect">
-          <li
-            :for={{event, idx} <- Enum.with_index(@rail_events, 1)}
-            class={["bp-goal-rail-event", event.id == @selected_event_id && "is-selected"]}
-            phx-click="rail-select"
-            phx-value-event-id={event.id}
-          >
-            <span class="bp-goal-rail-event-idx">{idx}</span>
-            <span class="bp-goal-rail-event-type">{event.event_type}</span>
+          <%!-- Each row is a <button> so Tab reaches it: Enter selects, and
+                Shift+Enter picks a diff endpoint exactly like Shift+click. --%>
+          <li :for={{event, idx} <- Enum.with_index(@rail_events, 1)}>
+            <button
+              type="button"
+              class={["bp-goal-rail-event", event.id == @selected_event_id && "is-selected"]}
+              aria-pressed={to_string(event.id == @selected_event_id)}
+              phx-click="rail-select"
+              phx-value-event-id={event.id}
+            >
+              <span class="bp-goal-rail-event-idx">{idx}</span>
+              <span class="bp-goal-rail-event-type">{event_label(event.event_type)}</span>
+            </button>
           </li>
         </ol>
       </aside>
@@ -1912,20 +1975,43 @@ defmodule BarkparkWeb.BulldocsLive do
             "close-diff"; clicks inside the panel are stopped so the panel
             stays open. `{raw(@diff_html)}` is the TextDiff output — every line
             is HTML-escaped at format time, so the untrusted payload_html is
-            shown as text, never executed. --%>
-      <div :if={@diff_open} id="bp-diff-modal" class="bp-diff-overlay">
+            shown as text, never executed. RailDiffSelect pushes the row that
+            opened it onto the focus stack, the overlay moves focus to the
+            close button, and every close (✕, backdrop, Escape) pops focus back
+            to that row. --%>
+      <div
+        :if={@diff_open}
+        id="bp-diff-modal"
+        class="bp-diff-overlay"
+        phx-mounted={JS.focus(to: "#bp-diff-close")}
+      >
         <%!-- Backdrop is its own element behind the panel; clicking it closes
               the modal. The panel sits above it and does NOT carry the close
               click, so clicks inside the panel never bubble to a close. --%>
-        <div class="bp-diff-backdrop" phx-click="close-diff" aria-hidden="true"></div>
-        <div class="bp-diff-panel" role="dialog" aria-modal="true">
+        <div class="bp-diff-backdrop" phx-click={close_diff()} aria-hidden="true"></div>
+        <div
+          id="bp-diff-panel"
+          class="bp-diff-panel"
+          phx-hook="ModalFocus"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bp-diff-title"
+          phx-window-keydown={close_diff()}
+          phx-key="escape"
+        >
           <div class="bp-diff-head">
-            <h2 class="bp-diff-title">
+            <h2 class="bp-diff-title" id="bp-diff-title">
               <span class="bp-diff-from">{@diff_from}</span>
               <span class="bp-diff-arrow">→</span>
               <span class="bp-diff-to">{@diff_to}</span>
             </h2>
-            <button type="button" class="bp-diff-close" phx-click="close-diff" aria-label="Close diff">
+            <button
+              type="button"
+              id="bp-diff-close"
+              class="bp-diff-close"
+              phx-click={close_diff()}
+              aria-label={gettext("Close diff")}
+            >
               ×
             </button>
           </div>
@@ -1935,6 +2021,8 @@ defmodule BarkparkWeb.BulldocsLive do
     </main>
     """
   end
+
+  defp close_diff, do: JS.pop_focus() |> JS.push("close-diff")
 
   # ── P4 scoped-reader helpers ────────────────────────────────────────────
 
@@ -1963,6 +2051,26 @@ defmodule BarkparkWeb.BulldocsLive do
   # The independent grant assign is the authoritative capability boundary.
   defp item_share_grant?(assigns),
     do: match?(%{grant: :item}, assigns[:paper_share_grant])
+
+  # The editor's [[wikilink]] / #tag typeahead searches the paper's OWN tenant
+  # (owner ruling #30 Q10, 2026-10-03). The flat /papers reader carries no
+  # `:current_workspace`, so `ScopeHelpers.scope_opts/1` named no workspace and
+  # the search leaned on dataset scoping alone — a legacy NULL-dataset_id paper
+  # of ANOTHER workspace could surface. The same scope the backlinks read uses
+  # (`assign_linked_sections/4`): the paper's workspace and project. A scoped
+  # reader already has a workspace and keeps it; a legacy NULL-workspace paper
+  # stays unscoped, as its own read is.
+  defp search_scope(socket) do
+    paper = socket.assigns[:paper_doc] || %{}
+
+    if socket.assigns[:current_workspace] do
+      []
+    else
+      []
+      |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
+      |> maybe_scope(:project_id, Map.get(paper, :project_id))
+    end
+  end
 
   # Public (unscoped) reader — flat /papers/:slug and dataset-scoped
   # /d/:dataset/papers/:slug both arrive here (reader_scope == nil). The

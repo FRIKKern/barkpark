@@ -290,7 +290,7 @@ defmodule Barkpark.Content.EncryptionTest do
         )
 
       raw = raw_content(doc)
-      assert raw["secret"]["_bpenc"] == 1
+      assert raw["secret"]["_bpenc"] == 2
       refute String.contains?(Jason.encode!(raw), "hunter2")
     end
   end
@@ -373,10 +373,10 @@ defmodule Barkpark.Content.EncryptionTest do
       # re-encrypts; it must inherit ciphertext for BOTH the projected key and
       # the bound block — so plaintext can never reach the published row.
       raw = raw_content(published)
-      assert raw["secret"]["_bpenc"] == 1
+      assert raw["secret"]["_bpenc"] == 2
 
       bound = Enum.find(raw["blocks"], &(&1["fieldName"] == "secret"))
-      assert bound["value"]["_bpenc"] == 1
+      assert bound["value"]["_bpenc"] == 2
 
       encoded = Jason.encode!(raw)
       refute String.contains?(encoded, "hunter2")
@@ -405,7 +405,7 @@ defmodule Barkpark.Content.EncryptionTest do
 
       # Raw SQL: the on-disk envelope never contains the plaintext.
       raw = raw_content(doc)
-      assert raw["secret"]["_bpenc"] == 1
+      assert raw["secret"]["_bpenc"] == 2
       refute String.contains?(Jason.encode!(raw["secret"]), "hunter2")
       assert raw["name"] == "db"
     end
@@ -435,7 +435,7 @@ defmodule Barkpark.Content.EncryptionTest do
           @dataset
         )
 
-      assert raw_content(doc)["secret"]["_bpenc"] == 1
+      assert raw_content(doc)["secret"]["_bpenc"] == 2
     end
   end
 

@@ -2,16 +2,17 @@
 // FOURTH node-view variant, after divider (atom), callout (content), code/diagram
 // (attr-atom).
 //
-// Brings the 7 NATIVE-CONTROL field-* blocks INTO the continuous canvas as a
+// Brings the 8 NATIVE-CONTROL field-* blocks INTO the continuous canvas as a
 // ProseMirror ATOM whose VALUE rides in an ATTR (`value`) and is edited by a
 // NATIVE HTML control — like the S3.3 code attr-atom, but the edit surface is a
 // TYPED control (input / textarea / checkbox / select / datetime-local / color),
 // NOT a free textarea, and the value is COERCED BY FIELD TYPE exactly like the
 // shipped BarkparkFieldBlockBridge (root.html.heex ~3543):
 //   * field-boolean → a CHECKBOX whose value is `control.checked` (a BOOLEAN).
+//   * field-number  → a number input whose value is a NUMBER (null when empty).
 //   * everything else → a string control whose value is `control.value` (a STRING).
 //
-// ── THE 7 NATIVE-CONTROL FIELD TYPES (the S3.5 scope) ─────────────────────────
+// ── THE 8 NATIVE-CONTROL FIELD TYPES (the S3.5 scope + field-number) ──────────
 //
 //   field-string  → <input type=text>         value: string
 //   field-slug    → <input type=text>         value: string
@@ -20,6 +21,7 @@
 //   field-select  → <select><option…>          value: string   (options config carried)
 //   field-datetime→ <input type=datetime-local>value: string
 //   field-color   → <input type=color>         value: string
+//   field-number  → <input type=number>        value: NUMBER|null (min/max/step/unit carried)
 //
 // PHASE-4 RUN-SPLITTER TAIL (part 1): field-image (the bp-media-picker WC) and
 // field-reference (the bp-reference-picker WC) now ALSO ride the canvas as CONTROL-ATOM
@@ -106,6 +108,8 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { FIELD_SETTINGS_TYPES, buildFieldSettings } from "./field-settings.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpField` (the canvas naming convention, like
 // bpCode/bpDiagram). The portable-doc `bpType` is the specific field-* kind
@@ -115,7 +119,7 @@ import { DEBOUNCE_MS } from "../contract.js";
 // StarterKit node is disabled for it.
 export const BP_FIELD_NODE_NAME = "bpField";
 
-// The 7 NATIVE-CONTROL field-* bpTypes this node-view owns through a native HTML
+// The 8 NATIVE-CONTROL field-* bpTypes this node-view owns through a native HTML
 // control. Keep aligned with run-convert.js:CANVAS_NATIVE_FIELD_TYPES and
 // paper_canvas.ex:@canvas_field_types.
 export const BP_NATIVE_FIELD_TYPES = [
@@ -126,6 +130,7 @@ export const BP_NATIVE_FIELD_TYPES = [
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
 ];
 
 // The 2 PICKER field-* bpTypes this node-view owns through a client-side WC (the
@@ -154,11 +159,31 @@ const PICKER_TAG = {
 //
 // Read the control's value coerced by field type, EXACTLY as the per-block bridge:
 //   field-boolean → control.checked  (a BOOLEAN)
+//   field-number  → a NUMBER, or null when empty (what blocks.ex stores)
 //   everything else → control.value   (a STRING)
 // Exported so __smoke.mjs / run-convert.js can assert fidelity against the bridge.
 export function coerceFieldValue(fieldType, control) {
   if (fieldType === "field-boolean") return !!(control && control.checked);
+  if (fieldType === "field-number") return toFieldNumber(control ? control.value : null);
   return control ? control.value : "";
+}
+
+// A field-number value in its stored form: a finite NUMBER, or null for empty or
+// unparseable input. A numeric string ("12", "2.5") becomes its number, so a value
+// stored as text by an older path reads the same as one stored as a number.
+export function toFieldNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+// True when a number control holds input the server would refuse: text the browser
+// cannot parse, or a value outside the block's min/max (blocks.ex
+// validate_block_patch). Step alignment is not checked there, so not here either.
+function numberInputRefused(control) {
+  const v = control.validity;
+  return !!(v && (v.badInput || v.rangeUnderflow || v.rangeOverflow));
 }
 
 // ── THE PICKER COERCION (lifted verbatim from BarkparkFieldBlockBridge) ───────
@@ -183,7 +208,7 @@ export function coercePickerValue(detail) {
 function applyLockCue(dom, node) {
   if (node && node.attrs && node.attrs.locked === true) {
     dom.setAttribute("data-bp-locked", "true");
-    dom.setAttribute("title", "Part of the document template");
+    dom.setAttribute("title", t("Part of the document template"));
   }
 }
 
@@ -228,12 +253,13 @@ export function imagePlaceholderModel(fieldType, value, label) {
 
   return {
     show: fieldType === "field-image" && isEmptyPickerValue(value),
-    label: IMAGE_PLACEHOLDER_LABEL,
-    hint: IMAGE_PLACEHOLDER_HINT,
+    // Shown in the viewer's Studio language (the constants are the English keys).
+    label: t(IMAGE_PLACEHOLDER_LABEL),
+    hint: t(IMAGE_PLACEHOLDER_HINT),
     ariaLabel:
       fieldLabel === ""
-        ? IMAGE_PLACEHOLDER_LABEL
-        : IMAGE_PLACEHOLDER_LABEL + " — " + fieldLabel,
+        ? t(IMAGE_PLACEHOLDER_LABEL)
+        : t(IMAGE_PLACEHOLDER_LABEL) + " — " + fieldLabel,
   };
 }
 
@@ -248,7 +274,7 @@ function buildImagePlaceholder(ariaLabel) {
   el.setAttribute("contenteditable", "false");
   el.setAttribute("role", "button");
   el.setAttribute("tabindex", "0");
-  el.setAttribute("aria-label", ariaLabel || IMAGE_PLACEHOLDER_LABEL);
+  el.setAttribute("aria-label", ariaLabel || t(IMAGE_PLACEHOLDER_LABEL));
   el.setAttribute("data-test-id", "paper-featured-image-placeholder");
 
   // A calm framed-picture glyph (inline SVG, currentColor — themes with the label).
@@ -268,11 +294,11 @@ function buildImagePlaceholder(ariaLabel) {
 
   const label = document.createElement("div");
   label.className = "bp-canvas-field-image-empty-label";
-  label.textContent = IMAGE_PLACEHOLDER_LABEL;
+  label.textContent = t(IMAGE_PLACEHOLDER_LABEL);
 
   const hint = document.createElement("div");
   hint.className = "bp-canvas-field-image-empty-hint";
-  hint.textContent = IMAGE_PLACEHOLDER_HINT;
+  hint.textContent = t(IMAGE_PLACEHOLDER_HINT);
 
   el.appendChild(icon);
   el.appendChild(label);
@@ -287,6 +313,52 @@ const DEBOUNCED_FIELD_TYPES = new Set([
   "field-slug",
   "field-text",
 ]);
+
+// Keep a number input's min / max / step on the node's config, so an edit made
+// in the settings disclosure bounds the value input without rebuilding it.
+function paintNumberBounds(control, attrs) {
+  for (const key of ["min", "max"]) {
+    const next = attrs[key] != null ? String(attrs[key]) : null;
+    if (control.getAttribute(key) === next) continue;
+    if (next == null) control.removeAttribute(key);
+    else control.setAttribute(key, next);
+  }
+  const step = attrs.step != null ? String(attrs.step) : "any";
+  if (control.getAttribute("step") !== step) control.setAttribute("step", step);
+}
+
+// Rebuild a select's <option>s when the node's options list changed.
+function paintSelectOptions(select, options, value) {
+  const list = Array.isArray(options) ? options : [];
+  const painted = [...select.options].map((o) => [o.value, o.textContent]);
+  const wanted = list.map((opt) => {
+    const ov = opt && opt.value != null ? String(opt.value) : "";
+    return [ov, opt && opt.label != null ? String(opt.label) : ov];
+  });
+  if (JSON.stringify(painted) === JSON.stringify(wanted)) return;
+  select.replaceChildren();
+  const current = value == null ? "" : String(value);
+  for (const [ov, text] of wanted) {
+    const o = document.createElement("option");
+    o.value = ov;
+    o.textContent = text;
+    if (ov === current) o.selected = true;
+    select.appendChild(o);
+  }
+}
+
+// A field-number config attr (min / max / step): a number or null, carried on
+// data-field-<key>.
+function numberConfigAttr(key) {
+  return {
+    [key]: {
+      default: null,
+      parseHTML: (el) => toFieldNumber(el.getAttribute("data-field-" + key)),
+      renderHTML: (attrs) =>
+        attrs[key] != null ? { ["data-field-" + key]: String(attrs[key]) } : {},
+    },
+  };
+}
 
 export const Field = Node.create({
   name: BP_FIELD_NODE_NAME,
@@ -360,6 +432,9 @@ export const Field = Node.create({
           if (el.getAttribute("data-field-type") === "field-boolean") {
             return raw === "true";
           }
+          if (el.getAttribute("data-field-type") === "field-number") {
+            return toFieldNumber(raw);
+          }
           return raw;
         },
         renderHTML: (attrs) => ({
@@ -417,6 +492,19 @@ export const Field = Node.create({
         },
         renderHTML: (attrs) =>
           attrs.rows != null ? { "data-field-rows": String(attrs.rows) } : {},
+      },
+      // min / max / step / unit — field-number's config. min/max/step become the
+      // number input's attributes; unit is shown after it. OPTIONAL, carried so the
+      // round-trip preserves them. data-field-min / -max / -step / -unit.
+      ...numberConfigAttr("min"),
+      ...numberConfigAttr("max"),
+      ...numberConfigAttr("step"),
+      unit: {
+        default: null,
+        parseHTML: (el) =>
+          el.hasAttribute("data-field-unit") ? el.getAttribute("data-field-unit") : null,
+        renderHTML: (attrs) =>
+          attrs.unit != null ? { "data-field-unit": attrs.unit } : {},
       },
       // refType — field-reference's target schema (config; the `ref-type` attr the
       // bp-reference-picker reads to scope its typeahead). OPTIONAL (an unscoped
@@ -531,20 +619,43 @@ export const Field = Node.create({
       applyLockCue(dom, node);
 
       // The human label (a non-PM, non-editable caption beside the control).
-      const labelEl = document.createElement("label");
-      labelEl.className = "bp-canvas-field-label";
-      labelEl.textContent = (node.attrs && node.attrs.label) || "";
-      const label = mountFieldLabel(labelEl, { editor, getPos });
-
       // Build the native control for this field type. The control is the EDIT
       // island — PM never manages it (stopEvent / ignoreMutation below).
       const control = buildControl(fieldType, node);
+
+      const labelEl = document.createElement("label");
+      labelEl.className = "bp-canvas-field-label";
+      labelEl.textContent = (node.attrs && node.attrs.label) || "";
+      const label = mountFieldLabel(labelEl, {
+        editor,
+        getPos,
+        onName: (text) => nameControl(control, text),
+      });
       control.classList.add("bp-canvas-field-control");
       control.setAttribute("contenteditable", "false");
       control.setAttribute("data-test-id", "paper-field-" + fieldType);
 
       dom.appendChild(labelEl);
       dom.appendChild(control);
+      // field-number shows its unit (if any) after the input, as quiet text. The
+      // input and unit share the row's value column. Painted in place (paintUnit)
+      // so a unit edited in the settings disclosure keeps the control's focus.
+      let valueEl = null;
+      const paintUnit = (unit) => {
+        if (fieldType !== "field-number") return;
+        if (unit && !valueEl) {
+          valueEl = document.createElement("span");
+          valueEl.className = "bp-canvas-field-value";
+          const unitEl = document.createElement("span");
+          unitEl.className = "bp-canvas-field-unit";
+          control.replaceWith(valueEl);
+          valueEl.append(control, unitEl);
+        } else if (!unit && valueEl) {
+          valueEl.replaceWith(control);
+          valueEl = null;
+        }
+        if (valueEl && valueEl.lastChild.textContent !== unit) valueEl.lastChild.textContent = unit;
+      };
 
       // Paint the control from the node's current attrs. Re-run on every update()
       // so an external attr change (an echo, an undo) reflects. Guard against
@@ -558,6 +669,11 @@ export const Field = Node.create({
           if (control.checked !== checked) control.checked = checked;
           control.disabled = !editable;
         } else {
+          if (fieldType === "field-select") paintSelectOptions(control, n.attrs.options, value);
+          if (fieldType === "field-number") {
+            paintNumberBounds(control, n.attrs);
+            paintUnit(n.attrs.unit);
+          }
           const str = value == null ? "" : String(value);
           if (control.value !== str) control.value = str;
           // select / color / datetime / text / string controls: lock when read-only.
@@ -568,7 +684,33 @@ export const Field = Node.create({
           }
         }
         label.paint(n);
+        if (settings) settings.paint(n);
       };
+
+      // The quiet CONFIG disclosure (a select's options, a number's range + unit).
+      const settings = FIELD_SETTINGS_TYPES.has(fieldType)
+        ? buildFieldSettings({
+            fieldType,
+            editor,
+            current: () => {
+              const pos = typeof getPos === "function" ? getPos() : null;
+              return pos == null ? null : editor.state.doc.nodeAt(pos);
+            },
+            write: (config) => {
+              const pos = getPos();
+              const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+              if (!cur) return;
+              editor
+                .chain()
+                .command(({ tr }) => {
+                  tr.setNodeMarkup(pos, undefined, { ...cur.attrs, ...config });
+                  return true;
+                })
+                .run();
+            },
+          })
+        : null;
+      if (settings) dom.appendChild(settings.dom);
 
       paint(node);
 
@@ -584,6 +726,15 @@ export const Field = Node.create({
         if (pos == null) return;
         const cur = editor.state.doc.nodeAt(pos);
         if (!cur) return;
+        // A number the server would refuse (out of range, unparseable) stays in the
+        // control, marked invalid, and is not saved.
+        if (fieldType === "field-number") {
+          if (numberInputRefused(control)) {
+            control.setAttribute("aria-invalid", "true");
+            return;
+          }
+          control.removeAttribute("aria-invalid");
+        }
         // LIFT the BarkparkFieldBlockBridge coercion: boolean → checked; else value.
         const nextValue = coerceFieldValue(fieldType, control);
         if (cur.attrs.value === nextValue) return; // nothing changed — emit nothing
@@ -616,7 +767,7 @@ export const Field = Node.create({
       };
 
       // Mirror BarkparkFieldBlockBridge's event binding: string/slug/text on
-      // `input` (debounced); boolean/select/datetime/color on `change`.
+      // `input` (debounced); boolean/select/datetime/color/number on `change`.
       const eventName = DEBOUNCED_FIELD_TYPES.has(fieldType) ? "input" : "change";
       control.addEventListener(eventName, scheduleWrite);
       dom.addEventListener("bp-flush-node", flushPending);
@@ -651,6 +802,7 @@ export const Field = Node.create({
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
           label.destroy();
+          if (settings) settings.destroy();
           control.removeEventListener(eventName, scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);
         },
@@ -658,6 +810,14 @@ export const Field = Node.create({
     };
   },
 });
+
+// Name a value control after its field label; an empty label leaves it unnamed
+// rather than named "".
+export function nameControl(el, text) {
+  if (!el) return;
+  if (text) el.setAttribute("aria-label", text);
+  else el.removeAttribute("aria-label");
+}
 
 // ── the field LABEL, edited where it reads ──────────────────────────────────────
 //
@@ -667,14 +827,20 @@ export const Field = Node.create({
 // that changed), Enter commits instead of breaking. An absent label stays absent
 // until the author types one. The surface is outside ProseMirror (the node view
 // already stops its events), so it never splits or mutates the run.
-export function mountFieldLabel(labelEl, { editor, getPos }) {
+export function mountFieldLabel(labelEl, { editor, getPos, onName }) {
   let timer = null;
+  // The value control's accessible name is the visible label (WCAG 4.1.2): the
+  // label is an editable caption, not a <label for>, so the node view names its
+  // control through onName — on paint and on every keystroke in the label.
+  const name = () => {
+    if (typeof onName === "function") onName((labelEl.textContent || "").replace(/\s+/g, " ").trim());
+  };
   const editable = () => !!(editor && editor.isEditable);
   const sync = () => {
     if (editable()) {
       labelEl.setAttribute("contenteditable", "plaintext-only");
       labelEl.setAttribute("role", "textbox");
-      labelEl.setAttribute("aria-label", "Field label");
+      labelEl.setAttribute("aria-label", t("Field label"));
       labelEl.setAttribute("aria-multiline", "false");
       labelEl.setAttribute("spellcheck", "false");
       labelEl.tabIndex = 0;
@@ -700,6 +866,7 @@ export function mountFieldLabel(labelEl, { editor, getPos }) {
     }).run();
   };
   const onInput = () => {
+    name();
     if (timer) clearTimeout(timer);
     timer = setTimeout(commit, DEBOUNCE_MS);
   };
@@ -715,8 +882,10 @@ export function mountFieldLabel(labelEl, { editor, getPos }) {
     paint(n) {
       sync();
       const next = (n.attrs && n.attrs.label) || "";
-      if (labelEl.ownerDocument.activeElement === labelEl) return;
-      if (labelEl.textContent !== next) labelEl.textContent = next;
+      if (labelEl.ownerDocument.activeElement !== labelEl && labelEl.textContent !== next) {
+        labelEl.textContent = next;
+      }
+      name();
     },
     flush: commit,
     destroy() {
@@ -770,12 +939,24 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // discovery. Keep the already-stored value visible, but do not mount either
   // picker WC (both issue independent HTTP browse requests when upgraded).
   if (!scope.pickerBrowse) return buildPickerReadOnlyView(node, fieldType);
-  const label = mountFieldLabel(labelEl, { editor, getPos });
+  let picker = null;
+  // The reference picker builds its search input when it renders, so the label
+  // rides an attribute it reads then, and names the input already there.
+  const label = mountFieldLabel(labelEl, {
+    editor,
+    getPos,
+    onName: (text) => {
+      if (!picker) return;
+      if (text) picker.setAttribute("data-field-label", text);
+      else picker.removeAttribute("data-field-label");
+      nameControl(picker.querySelector(".bp-ref-search-input"), text);
+    },
+  });
 
   // The picker WC — the EDIT island PM does NOT manage. Seed value + scope as
   // ATTRIBUTES, mirroring the per-block <bp-media-picker>/<bp-reference-picker> render
   // EXACTLY (value / dataset / data-token / ref-type / scope-prefix).
-  const picker = document.createElement(tag);
+  picker = document.createElement(tag);
   picker.className = "bp-canvas-field-control";
   picker.setAttribute("contenteditable", "false");
   picker.setAttribute("data-test-id", "paper-field-" + fieldType);
@@ -790,6 +971,9 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // scope-prefix ("" on the flat surface) — byte-identical fetch paths when empty, so
   // only set it when non-empty.
   if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
+  // The workspace's picker strings; absent, the WC keeps its English defaults.
+  const strings = fieldType === "field-image" ? scope.mediaStrings : scope.referenceStrings;
+  if (strings) picker.setAttribute("data-strings", strings);
 
   if (fieldType === "field-image") {
     // GHOST chrome (pd-doctrine rule 6): in the canvas the picker is an atom that
@@ -1034,14 +1218,22 @@ function reportNodeViewFailure(editor, node, fieldType, error) {
   } catch (_e) {}
 }
 
-// Read the canvas-host scope (dataset / scope-prefix / bearer token) for the pickers.
+// Read the canvas-host scope (dataset / scope-prefix / bearer token / picker strings)
+// for the pickers.
 // The host <bp-paper-canvas> carries data-dataset / data-scope-prefix / data-token
 // (stamped by the BarkparkPaperCanvas hook from the run wrapper). The node-view reaches
 // it via editor.options.element (the mount .bp-paper-editor-body) → closest(
 // "bp-paper-canvas"). All optional — a missing host or missing attr yields "" so the
 // picker keeps its own defaults (dataset="production", no token → upload disabled).
 export function canvasScope(editor) {
-  const empty = { dataset: "", scopePrefix: "", token: "", pickerBrowse: true };
+  const empty = {
+    dataset: "",
+    scopePrefix: "",
+    token: "",
+    pickerBrowse: true,
+    mediaStrings: "",
+    referenceStrings: "",
+  };
   try {
     const mount = editor && editor.options && editor.options.element;
     if (!mount || typeof mount.closest !== "function") return empty;
@@ -1052,6 +1244,8 @@ export function canvasScope(editor) {
       scopePrefix: host.getAttribute("data-scope-prefix") || "",
       token: host.getAttribute("data-token") || "",
       pickerBrowse: host.getAttribute("data-picker-browse") !== "false",
+      mediaStrings: host.getAttribute("data-media-strings") || "",
+      referenceStrings: host.getAttribute("data-reference-strings") || "",
     };
   } catch (_e) {
     return empty;
@@ -1114,6 +1308,19 @@ function buildControl(fieldType, node) {
       inp.type = "color";
       inp.className = "bp-canvas-field-color";
       inp.value = value == null || value === "" ? "#000000" : String(value);
+      return inp;
+    }
+
+    case "field-number": {
+      // MIRRORS the per-block number input (paper_editor.ex field-number form):
+      // step="any" unless the block sets one; min/max from the block config.
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "bp-canvas-field-number";
+      if (attrs.min != null) inp.min = String(attrs.min);
+      if (attrs.max != null) inp.max = String(attrs.max);
+      inp.step = attrs.step != null ? String(attrs.step) : "any";
+      inp.value = value == null ? "" : String(value);
       return inp;
     }
 

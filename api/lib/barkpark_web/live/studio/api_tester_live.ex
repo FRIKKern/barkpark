@@ -38,6 +38,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     # category name into the set hides its items in the nav.
     {:ok,
      assign(socket,
+       # The tab and the screen reader's page announcement name this section,
+       # like every other Studio section (task-6e0b0f0ae9a665e1).
+       page_title: gettext("API"),
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
@@ -93,7 +96,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
     if endpoint == nil do
       # Stale id from a prior dataset — leave the current selection intact.
-      {:noreply, put_flash(socket, :error, "Unknown endpoint")}
+      {:noreply, put_flash(socket, :error, gettext("Unknown endpoint"))}
     else
       # Seed form state lazily if this is the first time selecting this endpoint
       form_state =
@@ -177,7 +180,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   # with the form's token. Only an admin principal (fresh Caps.derive) may fire
   # it — a non-admin member is denied here, mirroring the Studio caps deny-gate.
   defp deny_run(socket),
-    do: put_flash(socket, :error, "Admin access required to run API requests.")
+    do: put_flash(socket, :error, gettext("Admin access required to run API requests."))
 
   defp do_run(socket) do
     endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
@@ -566,6 +569,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     <.pane_layout id="api-tester-panes">
       <.pane_column title="API">
         <div class="pane-body">
+          <%!-- Inside the first region, not before the layout: there it sat in
+                no landmark (axe region). --%>
+          <h1 class="sr-only">{gettext("API")}</h1>
             <%= for category <- @categories do %>
               <% collapsed = MapSet.member?(@collapsed_categories, category) %>
               <.pane_section_header
@@ -594,7 +600,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
         </.pane_column>
 
-        <.pane_column title={docs_column_title(@endpoint)} marker_class="api-col-docs">
+        <.pane_column title={docs_column_title(@endpoint)} marker_class="api-col-docs" landmark="main">
           <:header_actions>
             <%= if @endpoint && @endpoint.kind == :endpoint do %>
               <span class={"badge #{auth_badge_class(@endpoint.auth)}"}><%= @endpoint.auth %></span>
@@ -603,7 +609,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           <div class="api-col-body">
             <%= cond do %>
               <% @endpoint == nil -> %>
-                <.pane_empty message="Select an endpoint on the left." />
+                <.pane_empty message={gettext("Select an endpoint on the left.")} />
               <% @endpoint.kind == :reference -> %>
                 <%= render_reference(assigns, @endpoint.render_key) %>
               <% true -> %>
@@ -613,14 +619,14 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
         </.pane_column>
 
-        <.pane_column title="Response" marker_class="api-col-response" last>
+        <.pane_column title={gettext("Response")} marker_class="api-col-response" last>
           <:header_actions>
             <%= if @scenario_results != [] do %>
               <div class="api-response-meta">
-                <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> pass</span>
-                <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> fail</span>
-                <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> error</span>
-                <span class="badge badge-verdict-unverified"><%= Enum.count(@scenario_results, &(&1.result.verdict == :unverified)) %> unverified</span>
+                <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> {gettext("pass")}</span>
+                <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> {gettext("fail")}</span>
+                <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> {gettext("error")}</span>
+                <span class="badge badge-verdict-unverified"><%= Enum.count(@scenario_results, &(&1.result.verdict == :unverified)) %> {gettext("unverified")}</span>
               </div>
             <% else %>
               <%= if @last_result do %>
@@ -660,7 +666,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
               <%= if @last_result do %>
                 <.response_view result={@last_result} />
               <% else %>
-                <.pane_empty message="No response yet. Click Run." />
+                <.pane_empty message={gettext("No response yet. Click Run.")} />
               <% end %>
             <% end %>
           </div>
@@ -686,8 +692,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         border-radius: 4px; font-size: 10px; font-weight: 700;
         font-family: var(--font-mono); letter-spacing: 0.04em;
       }
-      .api-method-get { background: var(--primary-soft); color: var(--primary); }
-      .api-method-post { background: var(--ok-soft); color: var(--success); }
+      .api-method-get { background: var(--primary-soft); color: var(--primary-text); }
+      .api-method-post { background: var(--ok-soft); color: var(--ok-text); }
       .api-url { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--fg); }
 
       /* Section headings inside the docs column */
@@ -760,9 +766,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
 
       /* Verdict badges — reuse .badge, provide colours */
-      .badge-verdict-pass { background: var(--ok-soft); color: var(--success); }
-      .badge-verdict-fail { background: var(--danger-soft); color: var(--destructive); }
-      .badge-verdict-error { background: var(--warn-soft); color: var(--warning); }
+      .badge-verdict-pass { background: var(--ok-soft); color: var(--ok-text); }
+      .badge-verdict-fail { background: var(--danger-soft); color: var(--danger-text); }
+      .badge-verdict-error { background: var(--warn-soft); color: var(--warn-text); }
       .badge-verdict-unverified { background: var(--bg-muted); color: var(--fg-muted); }
 
       /* Slim the verdict badge when it sits in place of a chevron in a pane-item row */
@@ -825,10 +831,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp render_verdict_badge(%{verdict: verdict}) do
     label =
       case verdict do
-        :pass -> "Pass"
-        :fail -> "Fail"
-        :error -> "Error"
-        :unverified -> "Unverified"
+        :pass -> gettext("Pass")
+        :fail -> gettext("Fail")
+        :error -> gettext("Error")
+        :unverified -> gettext("Unverified")
       end
 
     class = "badge badge-verdict-#{verdict}"

@@ -540,6 +540,9 @@ func (m *model) applyDirtyToDoc() {
 			m.selectedDoc.Title = v
 		case "status":
 			m.selectedDoc.Status = v
+			if _, ok := m.selectedDoc.Values["status"]; ok {
+				m.selectedDoc.Values["status"] = v // contentStatus and publishState read it
+			}
 		default:
 			if m.selectedDoc.Values == nil {
 				m.selectedDoc.Values = make(map[string]string)

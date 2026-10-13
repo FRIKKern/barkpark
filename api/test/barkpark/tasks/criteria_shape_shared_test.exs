@@ -43,7 +43,17 @@ defmodule Barkpark.Tasks.CriteriaShapeSharedTest do
     {"a non-map entry", ["not a map"]},
     {"a non-boolean `met`", [%{"criterion" => "ships", "met" => "yes"}]},
     {"a non-string `evidence`", [%{"criterion" => "ships", "evidence" => ["a", "list"]}]},
-    {"a clean entry followed by a dirty one", [%{"criterion" => "clean"}, %{"text" => "dirty"}]}
+    {"a clean entry followed by a dirty one", [%{"criterion" => "clean"}, %{"text" => "dirty"}]},
+    # pds-bl-stray-keys-on-acceptance-criteria — the live strays, each refused.
+    {"an unknown key beside a good criterion", [%{"criterion" => "ships", "owner" => "lead"}]},
+    {"a positional `index` (48 live rows)", [%{"criterion" => "ships", "index" => 0}]},
+    {"a stray `note` (belongs in attempts)", [%{"criterion" => "ships", "note" => "review"}]},
+    {"a singular `amendment` (amendments is the list)",
+     [%{"criterion" => "ships", "amendment" => "AMENDED by hand"}]},
+    {"a leading-space `\" met\"` beside `met`",
+     [%{"criterion" => "ships", "met" => true, " met" => false}]},
+    {"`text` beside a good `criterion` (it shadows it)",
+     [%{"criterion" => "ships", "text" => "ships too"}]}
   ]
 
   # Shapes that MUST still save. A predicate that refuses everything also stops
@@ -60,8 +70,22 @@ defmodule Barkpark.Tasks.CriteriaShapeSharedTest do
     {"an explicit nil met", [%{"criterion" => "ships", "met" => nil}]},
     {"an interior newline (stampable, and 4 live rows carry one)",
      [%{"criterion" => "ships the thing\nand proves it"}]},
-    {"unknown extra keys are none of this rule's business",
-     [%{"criterion" => "ships", "owner" => "lead", "merge_gate" => true}]},
+    {"every declared key at once",
+     [
+       %{
+         "criterion" => "ships",
+         "met" => true,
+         "evidence" => "PR #1",
+         "attempts" => [],
+         "merge_gate" => true,
+         "merge_discharges" => false,
+         "withdrawals" => [],
+         "amendments" => [],
+         "discharge_marks" => [],
+         "ack_gate" => true,
+         "weight" => 2
+       }
+     ]},
     {"atom keys", [%{criterion: "ships", met: false}]},
     {"an empty list", []},
     {"many well-formed entries",
@@ -294,5 +318,19 @@ defmodule Barkpark.Tasks.CriteriaShapeSharedTest do
                "worklog" => [entry]
              }) == :ok
     end
+  end
+
+  # pds-bl-stray-keys-on-acceptance-criteria — the refusal names the offending
+  # key AND the allowed set, so a writer can fix its write in one try.
+  test "an unknown key is refused naming the key and every allowed key" do
+    msg =
+      Validation.criteria_violation([
+        %{"criterion" => "ok"},
+        %{"criterion" => "ships", "index" => 1}
+      ])
+
+    assert msg =~ "criterion 1"
+    assert msg =~ ~s("index")
+    for key <- Validation.criterion_keys(), do: assert(msg =~ key)
   end
 end

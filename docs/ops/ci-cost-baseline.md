@@ -256,3 +256,14 @@ Two corrections that file makes to the bullets above, both MEASURED rather than 
 5 of 49 runs in the window (44 zero-step, 40 skipped), which is the venue ruling of
 `task-7ef9d81ed33d2b9c` having landed. And `compose-smoke`'s red rate is 0/31 here, not 0.43:
 that number dated its own window, not the workflow.
+
+## Per-PR-push BEFORE baseline (owner ruling #64, criterion c1)
+
+Window: PR heads merged before 2026-10-05T18:00Z, so before that night's Actions outage, API rate-limit storm and 300-run backlog. Population: the 15 most recently merged PRs in it (#21596..#21663, merged 2026-10-04T12:14Z..2026-10-05T16:51Z), one final head sha each. `/actions/runs?head_sha=` returned every run (retrieved == total_count on all 15). Per job, latest attempt (`jobs?filter=latest`). Compute = executed (non-skipped) step seconds. Queue wait = `created_at` -> `started_at`, over jobs that executed. A census of these heads, not a sample.
+
+| per PR head (median of 15) | runs | jobs | executed | compute s | wait p50 | wait p90 |
+|---|---|---|---|---|---|---|
+| BEFORE | 22 | 80 | 46 | 3,202 | 63 s | 150 s |
+| incident sample, 2026-10-05 21:40-23:59Z (#21721..#21806) | 22 | 81 | 47 | 3,880 | 365 s | 637 s |
+
+Pooled over executed jobs: BEFORE p50 39 s / p90 181 s (742 jobs); incident p50 372 s / p90 5,563 s (730 jobs). The incident row is not a baseline: an AFTER compares with BEFORE only. Concurrency ceiling 20 throughout (CONCURRENCY_LEDGER). `ci-measure.sh --since 2026-09-28 --until 2026-10-04` refused this window as a baseline (sample under-filled on 4 of 7 days), so its repo-wide daily table is not quoted.

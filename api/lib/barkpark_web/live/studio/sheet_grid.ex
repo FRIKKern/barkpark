@@ -251,7 +251,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
-  alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.SheetGrid.{Cells, FileIO, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.StudioLive.DocActions
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.TokensGen
 
@@ -286,7 +287,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   @impl true
   def mount(socket) do
     {:ok,
-     assign(socket,
+     socket
+     # The header's File panel (task-da387f54432114d8): download the sheet,
+     # and for write-capable hosts import a CSV as a new tab. See FileIO.
+     |> allow_upload(:csv_import,
+       # The mime registry has no `.tsv`, so the picker filter rides the
+       # input's own accept attribute and FileIO checks the extension.
+       accept: :any,
+       max_entries: 1,
+       max_file_size: FileIO.import_byte_cap()
+     )
+     |> assign(
+       file_panel: false,
        content: nil,
        rev: 0,
        epoch: nil,
@@ -328,6 +340,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        filters: %{},
        filter_panel: nil,
        renaming_tab: nil,
+       # The header's inline title rename (Studio chrome, write-capable only);
+       # `renamed_title` shows a rename this socket made until the parent's
+       # `@doc` catches up with it.
+       renaming_title: false,
+       renamed_title: nil,
        # The tab-color picker popover (editable hosts): false = closed. It
        # colors the ACTIVE tab (@tab), so a tab switch closes it (below).
        tab_color_open: false,
@@ -450,6 +467,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def update(assigns, socket) do
+    # A different title arriving on `@doc` is newer than this socket's own
+    # rename (a peer's, or the parent catching up), so the override yields.
+    socket =
+      case {socket.assigns[:doc], assigns[:doc]} do
+        {%{title: old}, %{title: new}} when old != new -> assign(socket, renamed_title: nil)
+        _ -> socket
+      end
+
     socket =
       assign(
         socket,
@@ -485,7 +510,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       # `@doc.content` only.
       content =
         if socket.assigns.live_session do
-          case Session.peek(slug, assigns.dataset, doc.workspace_id) do
+          case Session.peek(slug, assigns.dataset, doc) do
             {:ok, content} -> content
             {:error, :no_session} -> doc.content || %{}
           end
@@ -670,7 +695,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply,
      assign(socket,
        active: {1, range.first},
-       status: "Showing rows #{range.first}–#{range.last} of #{socket.assigns.rows}"
+       status:
+         gettext("Showing rows %{first}–%{last} of %{rows}",
+           first: range.first,
+           last: range.last,
+           rows: socket.assigns.rows
+         )
      )}
   end
 
@@ -727,9 +757,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, find_open: true)}
   end
 
+  # Closing find (Escape in the input, or ×) hands focus back to the grid once
+  # the patch lands; before, it fell to <body> (task-3e4466ab621e25fe).
   def handle_event("find-close", _params, socket) do
+    grid_id =
+      if socket.assigns.editable,
+        do: "#{socket.assigns.id}-grid",
+        else: "#{socket.assigns.id}-grid-view"
+
     {:noreply,
-     assign(socket, find_open: false, find_query: "", find_hits: MapSet.new(), status: "")}
+     socket
+     |> assign(find_open: false, find_query: "", find_hits: MapSet.new(), status: "")
+     |> push_event("bp:sheet-focus-grid", %{id: grid_id})}
   end
 
   def handle_event("find-next", %{"q" => q}, socket) when is_binary(q) do
@@ -1270,9 +1309,80 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # into @content) arrives AFTER this handler returns — so the switch is armed
   # here and taken in update/2 once the tab exists. Staying on the old tab was
   # a trap: the editor's next keystrokes overwrote the tab they had just left.
+  # ── File panel: download + CSV import (task-da387f54432114d8) ────────────
+
+  def handle_event("file-toggle", _params, socket) do
+    {:noreply, assign(socket, file_panel: not socket.assigns.file_panel)}
+  end
+
+  def handle_event("file-close", _params, socket) do
+    {:noreply, assign(socket, file_panel: false)}
+  end
+
+  # The file is built from the content this socket renders and pushed to the
+  # client, which saves it (phx:bp:sheet-download in bp-sheet-grid.js). A
+  # read-only viewer may download: it is the same bytes the grid shows.
+  def handle_event("download", %{"format" => format}, socket) do
+    title = socket.assigns.renamed_title || socket.assigns.doc.title
+
+    case FileIO.download(socket.assigns.content, title, socket.assigns.tab, format) do
+      {:ok, payload} ->
+        {:noreply,
+         socket
+         |> assign(status: gettext("Downloading %{file}", file: payload.filename))
+         |> push_event("bp:sheet-download", payload)}
+
+      {:error, message} ->
+        {:noreply, assign(socket, notice: message)}
+    end
+  end
+
+  def handle_event("csv-import-validate", _params, socket), do: {:noreply, socket}
+
+  # Only a write-capable host renders the import form; a forged submit from
+  # any other host consumes nothing and writes nothing (send_ops/2 is the
+  # last wall either way).
+  def handle_event("csv-import", _params, %{assigns: %{write_capable: false}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("csv-import", _params, socket) do
+    files = consume_uploaded_entries(socket, :csv_import, &read_import_upload/2)
+
+    case files do
+      [] ->
+        {:noreply, assign(socket, notice: gettext("Choose a CSV file to import."))}
+
+      [{raw, filename} | _] ->
+        case FileIO.import_ops(raw, filename, GridData.tabs(socket)) do
+          {:ok, ops, info} ->
+            socket = send_ops(socket, ops)
+
+            if socket.assigns[:notice] == nil do
+              {:noreply,
+               assign(socket,
+                 follow_tab: info.index,
+                 file_panel: false,
+                 status:
+                   gettext("Imported %{rows} rows into the new tab %{name}",
+                     rows: info.rows,
+                     name: info.name
+                   )
+               )}
+            else
+              {:noreply, socket}
+            end
+
+          {:error, message} ->
+            {:noreply, assign(socket, notice: message)}
+        end
+    end
+  end
+
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
-    socket = send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])
+    # Named in the Studio language, as a spreadsheet names a new tab ("Ark 2");
+    # the name is data from here on.
+    socket = send_ops(socket, [%{"op" => "add_tab", "name" => gettext("Sheet %{n}", n: n)}])
 
     if socket.assigns[:notice] == nil,
       do: {:noreply, assign(socket, follow_tab: n - 1)},
@@ -1294,7 +1404,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     else
       {:noreply,
        socket
-       |> assign(status: "Moved #{tab_name(socket, from)} #{dir}")
+       |> assign(status: moved_status(dir, tab_name(socket, from)))
        |> send_ops([%{"op" => "move_tab", "from" => from, "to" => to}])}
     end
   end
@@ -1305,7 +1415,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("tab-duplicate", _params, socket) do
     {:noreply,
      socket
-     |> assign(status: "Duplicated as Copy of #{tab_name(socket, socket.assigns.tab)}")
+     |> assign(
+       status: gettext("Duplicated as Copy of %{tab}", tab: tab_name(socket, socket.assigns.tab))
+     )
      |> send_ops([%{"op" => "duplicate_tab", "tab" => socket.assigns.tab}])}
   end
 
@@ -1387,6 +1499,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, apply_meta_to_selection(socket, fn _cell -> %{"fmt" => fmt} end)}
   end
 
+  # The currency picker (task-4fb1d8de887d8bc6, ruling (a)): picking a
+  # currency formats the selection AND names it, in the one op
+  # `set_cell_meta`'s override_fmt + override_cur pipeline already supports.
+  # "" (USD) sends cur: nil — the implicit default, byte-identical to a
+  # plain $ click.
+  def handle_event("set-currency", %{"cur" => cur}, socket) do
+    cur = if cur == "", do: nil, else: cur
+
+    {:noreply,
+     apply_meta_to_selection(socket, fn _cell -> %{"fmt" => "currency", "cur" => cur} end)}
+  end
+
   # Bold / italic — Excel toggle: the ACTIVE cell decides the new value (its key
   # absent/false → turn ON, true → turn OFF), then that ONE value stamps every
   # selected cell (merging into each cell's own "s" so bg/align survive).
@@ -1428,7 +1552,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # from the current selection (Excel's "apply to" default).
   def handle_event("cf-open", _params, socket) do
     panel = if socket.assigns.cf_panel, do: nil, else: cf_new_form(socket)
-    {:noreply, assign(socket, cf_panel: panel)}
+
+    {:noreply,
+     socket
+     |> assign(cf_panel: panel)
+     |> focus_first_in(panel && "#{socket.assigns.id}-cf-panel")}
   end
 
   def handle_event("cf-close", _params, socket) do
@@ -1508,7 +1636,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("filter-open", %{"col" => col}, socket) do
     col = to_int(col)
     panel = filter_open_form(socket.assigns.filters, col)
-    {:noreply, assign(socket, filter_panel: panel, menu: nil)}
+
+    {:noreply,
+     socket
+     |> assign(filter_panel: panel, menu: nil)
+     |> focus_first_in("#{socket.assigns.id}-filter-form-#{col}")}
   end
 
   def handle_event("filter-close", _params, socket) do
@@ -1579,6 +1711,51 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      |> GridData.derive_editable()}
   end
 
+  # ── the sheet's title (task-64d23dae8eed88e7) ───────────────────────────
+  #
+  # The title is written THROUGH the session: the session writes its own
+  # title on every persist, so a title saved beside it would be overwritten by
+  # the next debounce. Publish and Delete are not here — the header sends them
+  # untargeted to StudioLive, whose handlers flush or discard the session.
+  def handle_event("title-rename-start", _params, socket) do
+    {:noreply, assign(socket, renaming_title: socket.assigns.write_capable)}
+  end
+
+  def handle_event("title-rename-cancel", _params, socket) do
+    {:noreply, assign(socket, renaming_title: false)}
+  end
+
+  def handle_event("title-rename", %{"title" => title}, socket) do
+    socket = socket |> refresh_write_capable() |> assign(renaming_title: false)
+    title = String.trim(title)
+
+    cond do
+      not socket.assigns.write_capable ->
+        {:noreply, socket}
+
+      title == "" ->
+        {:noreply, assign(socket, notice: "a sheet needs a name — the old one was kept")}
+
+      true ->
+        case Session.set_title(
+               socket.assigns.slug,
+               socket.assigns.dataset,
+               title,
+               GridData.session_scope(socket)
+             ) do
+          :ok ->
+            {:noreply,
+             assign(socket,
+               renamed_title: title,
+               status: gettext("Renamed to %{title}", title: title)
+             )}
+
+          {:error, _} ->
+            {:noreply, assign(socket, notice: "the new name could not be saved — try again")}
+        end
+    end
+  end
+
   def handle_event("notice-dismiss", _params, socket) do
     {:noreply, assign(socket, notice: nil)}
   end
@@ -1631,6 +1808,69 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     |> refresh_write_capable()
     |> note_own_refs([Sheets.format_ref(pos)])
     |> Ops.commit(pos, value)
+  end
+
+  # Sobelow Traversal.FileModule false-positive: `path` is the LiveView upload's
+  # framework-managed temp file, never a name the client chose; `client_name`
+  # is only used to name the new tab.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_import_upload(%{path: path}, entry) do
+    {:ok, {File.read!(path), entry.client_name}}
+  end
+
+  defp import_error_text(:too_large),
+    do:
+      gettext("The file is larger than %{mb} MB.",
+        mb: div(FileIO.import_byte_cap(), 1_000_000)
+      )
+
+  defp import_error_text(:too_many_files), do: gettext("Choose one file.")
+  defp import_error_text(other), do: gettext("The upload failed (%{reason}).", reason: other)
+
+  # task-028c354f7f24fb65: a popover dialog takes focus when it opens. The hook
+  # (`bp:sheet-focus-first` in bp-sheet-grid.js) focuses the first control of
+  # the element with this id once the patch has put it in the DOM.
+  defp focus_first_in(socket, nil), do: socket
+  defp focus_first_in(socket, id), do: push_event(socket, "bp:sheet-focus-first", %{id: id})
+
+  # task-028c354f7f24fb65: closing a popover dialog (Escape, ×, Apply) hands
+  # focus back to the button that opened it instead of dropping it on <body>.
+  # Where a closed filter hands focus: the grid when the funnel is not a Tab
+  # stop (an editable grid opens the filter from Alt+Down, task-5201a73e33535129),
+  # else the funnel itself.
+  defp filter_return_id(id, _col, true), do: "#{id}-grid"
+  defp filter_return_id(id, col, _editable), do: "#{id}-filter-funnel-#{col}"
+
+  defp close_and_refocus(event, target, trigger_id) do
+    event
+    |> Phoenix.LiveView.JS.push(target: target)
+    |> Phoenix.LiveView.JS.focus(to: "#" <> trigger_id)
+  end
+
+  # task-d4619e875ace82ca: a swatch's accessible name is a colour a person can
+  # say, not its hex code. Named by POSITION in the generated palette (no colour
+  # literal here — studio-literal-check); a palette that grows or shrinks keeps
+  # the hex for every entry rather than mislabel one.
+  defp swatch_names,
+    do: [
+      gettext("Yellow"),
+      gettext("Green"),
+      gettext("Blue"),
+      gettext("Red"),
+      gettext("Purple"),
+      gettext("Grey")
+    ]
+
+  defp swatch_name(hex) do
+    palette = TokensGen.sheet_cf_backgrounds()
+    names = swatch_names()
+
+    with true <- length(palette) == length(names),
+         i when is_integer(i) <- Enum.find_index(palette, &(&1 == hex)) do
+      Enum.at(names, i)
+    else
+      _ -> hex
+    end
   end
 
   defp send_ops(socket, ops) do
@@ -1692,10 +1932,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp dispatch_sort(socket, c1, r1, c2, r2, key_col, dir) do
     cond do
       map_size(socket.assigns.filters) > 0 ->
-        assign(socket, notice: "Clear the column filters before sorting")
+        assign(socket, notice: gettext("Clear the column filters before sorting"))
 
       r2 - r1 + 1 < 2 ->
-        assign(socket, notice: "Nothing to sort")
+        assign(socket, notice: gettext("Nothing to sort"))
 
       true ->
         range = Sheets.format_ref({c1, r1}) <> ":" <> Sheets.format_ref({c2, r2})
@@ -1875,7 +2115,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         "lt" -> "< #{cf_value_to_str(w["value"])}"
         "eq" -> "= #{cf_value_to_str(w["value"])}"
         "between" -> "#{cf_value_to_str(w["value"])}–#{cf_value_to_str(w["value2"])}"
-        "contains" -> "contains “#{cf_value_to_str(w["value"])}”"
+        "contains" -> gettext("contains “%{value}”", value: cf_value_to_str(w["value"]))
         other -> other
       end
 
@@ -2232,7 +2472,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
         socket
         |> send_ops(ops)
-        |> assign(status: "Split #{length(plans)} cell(s) across #{span} columns")
+        |> assign(
+          status:
+            gettext("Split %{cells} cell(s) across %{span} columns",
+              cells: length(plans),
+              span: span
+            )
+        )
     end
   end
 
@@ -2323,7 +2569,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           assign(socket,
             find_query: query,
             find_hits: hits,
-            status: ~s(No matches for "#{query}")
+            status: gettext(~s(No matches for "%{query}"), query: query)
           )
 
         pos ->
@@ -2332,7 +2578,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           socket
           |> assign(find_query: query, find_hits: hits)
           |> jump_to(pos)
-          |> assign(status: ~s(Match #{idx} of #{length(ordered)} for "#{query}"))
+          |> assign(
+            status:
+              gettext(~s(Match %{n} of %{count} for "%{query}"),
+                n: idx,
+                count: length(ordered),
+                query: query
+              )
+          )
       end
     end
   end
@@ -2356,7 +2609,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp announce_commit(socket, pos) do
     if socket.assigns.notice == nil do
       ref = Sheets.format_ref(pos)
-      assign(socket, status: "#{ref}: #{committed_display(socket, ref)}")
+      assign(socket, status: "#{ref}: #{Cells.spoken(committed_display(socket, ref))}")
     else
       assign(socket, status: "")
     end
@@ -2367,7 +2620,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
            Session.peek(
              socket.assigns.slug,
              socket.assigns.dataset,
-             GridData.session_workspace_id(socket)
+             GridData.session_scope(socket)
            ),
          tab when is_map(tab) <- Enum.at(Map.get(content, "tabs") || [], socket.assigns.tab),
          cells when is_map(cells) <- Map.get(tab, "cells") do
@@ -2393,8 +2646,17 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
     if tab == socket.assigns.tab and Map.has_key?(changed, ref) and not own? do
       case Map.get(changed, ref) do
-        nil -> assign(socket, status: "#{ref} cleared")
-        cell -> assign(socket, status: "#{ref} changed to #{Cells.display(cell)}")
+        nil ->
+          assign(socket, status: gettext("%{ref} cleared", ref: ref))
+
+        cell ->
+          assign(socket,
+            status:
+              gettext("%{ref} changed to %{value}",
+                ref: ref,
+                value: Cells.spoken(Cells.display(cell))
+              )
+          )
       end
     else
       socket
@@ -2579,7 +2841,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       # viewer set on a different tab (per-tab view-state, SF-D2/SF-D7).
       filters: %{},
       filter_panel: nil,
-      status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
+      status:
+        gettext("Sheet %{n} of %{count}: %{name}",
+          n: idx + 1,
+          count: count,
+          name: tab_name(socket, idx)
+        )
     )
     |> GridData.derive_grid()
     |> Ops.push_presence(%{tab: idx, active: "A1", selection: nil, editing: nil})
@@ -2588,9 +2855,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp tab_name(socket, idx) do
     case Enum.at(GridData.tabs(socket), idx) do
       %{"name" => name} when is_binary(name) and name != "" -> name
-      _ -> "Sheet #{idx + 1}"
+      _ -> gettext("Sheet %{n}", n: idx + 1)
     end
   end
+
+  defp moved_status("left", tab), do: gettext("Moved %{tab} left", tab: tab)
+  defp moved_status("right", tab), do: gettext("Moved %{tab} right", tab: tab)
 
   # The tab's color IFF it is a well-formed `#rrggbb` — the render-time guard
   # that keeps a legacy/junk stored color (synthesis is lenient, so one can
@@ -2692,13 +2962,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       if assigns.editable,
         do: Map.get(Map.get(assigns.cells, Sheets.format_ref(assigns.active)) || %{}, "fmt")
 
+    # The currency select's selected option (task-4fb1d8de887d8bc6) — same
+    # render-local rule as active_fmt above.
+    active_cur =
+      if assigns.editable,
+        do: Map.get(Map.get(assigns.cells, Sheets.format_ref(assigns.active)) || %{}, "cur")
+
     assigns =
       assign(assigns,
         peer_cursors: peer_cursors,
         peer_sels: peer_sels,
         sel_stats: sel_stats,
         active_s: active_s,
-        active_fmt: active_fmt
+        active_fmt: active_fmt,
+        active_cur: active_cur
       )
 
     ~H"""
@@ -2707,18 +2984,200 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       class={"editor-panel sheet-editor" <> if(@chrome == :reader, do: " sheet-reader", else: "")}
       data-role="content"
       data-test-id={if @chrome == :reader, do: "sheet-reader", else: "studio-sheet-editor"}
+      role={if @chrome == :studio, do: "main"}
     >
       <%!-- CHROME axis: the header belongs to the Studio surface, not to write
             capability. A write-denied member is in Studio and keeps it — the
             wave-42 measurement found them staring at a headerless panel that
             called itself `sheet-reader`. --%>
-      <.document_header :if={@chrome == :studio} dataset={@dataset} title={@doc.title || @slug}>
+      <.document_header
+        :if={@chrome == :studio}
+        dataset={@dataset}
+        title={if @renaming_title, do: "", else: @renamed_title || BarkparkWeb.Studio.DocTitle.shown(@doc.title) || gettext("Untitled")}
+      >
         <:status_pill>
           <span class={"badge badge-#{if @is_draft, do: "draft", else: "published"}"}>
-            <%= if @is_draft, do: "draft", else: "published" %>
+            <%= BarkparkWeb.StudioComponents.Panes.status_word(if @is_draft, do: "draft", else: "published") %>
           </span>
         </:status_pill>
+        <:presence>
+          <%!-- The rename form takes the title's place while it is open (the
+                header renders an empty title meanwhile). --%>
+          <form
+            :if={@renaming_title}
+            phx-submit="title-rename"
+            phx-target={@myself}
+            style="display: inline-flex; min-width: 0;"
+          >
+            <.bp_input
+              name="title"
+              value={@renamed_title || @doc.title || ""}
+              class="sheet-title-rename-input"
+              autocomplete="off"
+              aria-label={gettext("Sheet name")}
+              phx-mounted={Phoenix.LiveView.JS.focus()}
+              phx-keydown="title-rename-cancel"
+              phx-key="Escape"
+              phx-target={@myself}
+              data-test-id="sheet-title-input"
+            />
+          </form>
+        </:presence>
         <:actions>
+          <button
+            :if={@write_capable and not @renaming_title}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="title-rename-start"
+            phx-target={@myself}
+            data-test-id="sheet-rename"
+          >
+            {gettext("Rename")}
+          </button>
+          <%!-- Publish and Delete are NOT targeted at this component: they reach
+                StudioLive's own handlers and its Caps deny-gate, like every
+                other document action. Publish flushes the session first;
+                Delete discards it (handlers/doc.ex, handlers/delete.ex). --%>
+          <button
+            :if={@write_capable and @is_draft}
+            type="button"
+            class="btn btn-primary btn-sm"
+            phx-click="publish"
+            title={DocActions.publish_label("sheet")}
+            aria-label={DocActions.publish_label("sheet")}
+            data-test-id="sheet-publish"
+          >
+            <.icon name="send" size={14} /> {gettext("Publish")}
+          </button>
+          <%!-- A published sheet is public (owner ruling #58), so the author can
+                take it back. Unpublish reaches StudioLive's own handler and
+                reference guard, which keeps the session's unsaved cells on the
+                new draft (task-3b3209373291e9fd). --%>
+          <button
+            :if={@write_capable and not @is_draft}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="unpublish"
+            data-test-id="sheet-unpublish"
+          >
+            <.icon name="archive" size={14} /> {gettext("Unpublish")}
+          </button>
+          <%!-- File panel (task-da387f54432114d8): every Studio viewer can
+                download; only a write-capable host gets the import form. A
+                disclosure, not a menu: it holds a file input and a form. --%>
+          <span class="sheet-file" style="position: relative; display: inline-flex;">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="file-toggle"
+              phx-target={@myself}
+              aria-expanded={to_string(@file_panel)}
+              aria-controls={"#{@id}-file-panel"}
+              id={"#{@id}-file-btn"}
+              data-test-id="sheet-file"
+            >
+              <.icon name="download" size={14} /> {if @write_capable,
+                do: gettext("Download or import"),
+                else: gettext("Download")}
+            </button>
+            <div
+              :if={@file_panel}
+              id={"#{@id}-file-panel"}
+              class="sheet-file-panel"
+              role="group"
+              aria-label={gettext("Download or import")}
+              phx-keydown={
+                Phoenix.LiveView.JS.push("file-close", target: @myself)
+                |> Phoenix.LiveView.JS.focus(to: "##{@id}-file-btn")
+              }
+              phx-key="Escape"
+              style="position: absolute; top: 100%; right: 0; z-index: 30; margin-top: 4px; min-width: 260px; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);"
+              data-test-id="sheet-file-panel"
+            >
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                style="justify-content: flex-start;"
+                phx-click="download"
+                phx-value-format="xlsx"
+                phx-target={@myself}
+                phx-mounted={Phoenix.LiveView.JS.focus()}
+                data-test-id="sheet-download-xlsx"
+              >
+                {gettext("Excel workbook, all tabs (.xlsx)")}
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                style="justify-content: flex-start;"
+                phx-click="download"
+                phx-value-format="csv"
+                phx-target={@myself}
+                data-test-id="sheet-download-csv"
+              >
+                {gettext("This tab as CSV (.csv)")}
+              </button>
+              <form
+                :if={@write_capable}
+                id={"#{@id}-csv-import"}
+                phx-submit={
+                  Phoenix.LiveView.JS.push("csv-import", target: @myself)
+                  |> Phoenix.LiveView.JS.focus(to: "##{@id}-file-btn")
+                }
+                phx-change="csv-import-validate"
+                phx-target={@myself}
+                style="display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px;"
+                data-test-id="sheet-import-form"
+              >
+                <label for={@uploads.csv_import.ref} style="font-size: 12px;">
+                  {gettext("Import a CSV or TSV file as a new tab")}
+                </label>
+                <.live_file_input
+                  upload={@uploads.csv_import}
+                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                  data-test-id="sheet-import-file"
+                />
+                <p
+                  :for={err <- upload_errors(@uploads.csv_import) ++ Enum.flat_map(@uploads.csv_import.entries, &upload_errors(@uploads.csv_import, &1))}
+                  role="alert"
+                  style="margin: 0; font-size: 12px; color: var(--destructive);"
+                  data-test-id="sheet-import-error"
+                >
+                  {import_error_text(err)}
+                </p>
+                <button
+                  type="submit"
+                  class="btn btn-primary btn-sm"
+                  disabled={@uploads.csv_import.entries == []}
+                  data-test-id="sheet-import-submit"
+                >
+                  {gettext("Import")}
+                </button>
+              </form>
+            </div>
+          </span>
+          <%!-- History reaches StudioLive's own handler; its restore goes
+                through Sheets.Session.restore/4 so the live session cannot
+                overwrite the restored row (task-1eaa2c0dc6e60047). --%>
+          <button
+            :if={@write_capable}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="show-history"
+            data-test-id="sheet-history"
+          >
+            <.icon name="history" size={14} /> {gettext("History")}
+          </button>
+          <button
+            :if={@write_capable}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            style="color: var(--destructive);"
+            phx-click="delete-doc"
+            data-test-id="sheet-delete"
+          >
+            <.icon name="trash-2" size={14} /> {gettext("Delete")}
+          </button>
           <%!-- AUTHORIZATION axis, and the header's ONE authority-bearing item.
                 `toggle-mode` flips @mode, but @editable is `mode == :edit and
                 write_capable`, so without the capability the toggle changes
@@ -2736,12 +3195,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-test-id="sheet-mode-toggle"
           >
             <.icon name={if @editable, do: "eye", else: "pencil"} size={14} />
-            <%= if @editable, do: "View", else: "Edit" %>
+            <%= if @editable, do: gettext("View"), else: gettext("Edit") %>
           </button>
         </:actions>
       </.document_header>
 
-      <div :if={@editable} class="sheet-toolbar" data-test-id="sheet-toolbar">
+      <%!-- role="toolbar": ONE Tab stop for the formatting controls, arrow keys
+            inside (the SheetToolbar hook, task-5201a73e33535129). The name box
+            and formula bar stay ordinary Tab stops. --%>
+      <div
+        :if={@editable}
+        id={"#{@id}-toolbar"}
+        class="sheet-toolbar"
+        role="toolbar"
+        aria-label={gettext("Sheet formatting")}
+        phx-hook="SheetToolbar"
+        data-test-id="sheet-toolbar"
+      >
         <form phx-submit="name-jump" phx-target={@myself}>
           <input
             name="ref"
@@ -2749,7 +3219,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="sheet-namebox-input"
             value={Sheets.format_ref(@active)}
             autocomplete="off"
-            aria-label="Cell reference (name box)"
+            aria-label={gettext("Cell reference (name box)")}
             data-test-id="sheet-namebox"
           />
         </form>
@@ -2762,8 +3232,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-raw={Cells.bar_value(@cells, @active)}
             autocomplete="off"
             spellcheck="false"
-            placeholder="Enter a value or =FORMULA"
-            aria-label={"Formula bar for " <> Sheets.format_ref(@active)}
+            placeholder={gettext("Enter a value or =FORMULA")}
+            aria-label={gettext("Formula bar for %{ref}", ref: Sheets.format_ref(@active))}
             list={"#{@id}-fns"}
             data-test-id="sheet-formula-bar"
           />
@@ -2782,30 +3252,30 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           class="btn btn-ghost btn-sm"
           phx-click="merge-selection"
           phx-target={@myself}
-          title="Merge the selected cells"
+          title={gettext("Merge the selected cells")}
           data-test-id="sheet-merge-btn"
         >
-          Merge
+          <%= gettext("Merge") %>
         </button>
         <button
           type="button"
           class="btn btn-ghost btn-sm"
           phx-click="unmerge-selection"
           phx-target={@myself}
-          title="Unmerge cells in the selection"
+          title={gettext("Unmerge cells in the selection")}
           data-test-id="sheet-unmerge-btn"
         >
-          Unmerge
+          <%= gettext("Unmerge") %>
         </button>
         <button
           type="button"
           class="btn btn-ghost btn-sm"
           phx-click="freeze-panes"
           phx-target={@myself}
-          title="Freeze rows/cols above and left of the active cell"
+          title={gettext("Freeze rows/cols above and left of the active cell")}
           data-test-id="sheet-freeze-toggle"
         >
-          <%= if @frozen_rows == 0 and @frozen_cols == 0, do: "Freeze", else: "Unfreeze" %>
+          <%= if @frozen_rows == 0 and @frozen_cols == 0, do: gettext("Freeze"), else: gettext("Unfreeze") %>
         </button>
 
         <%!-- Sort the current selection (SF-AM2). A whole-column selection (the
@@ -2820,8 +3290,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           phx-click="sort-selection"
           phx-value-dir="asc"
           phx-target={@myself}
-          aria-label="Sort ascending"
-          title="Sort the selection A→Z"
+          aria-label={gettext("Sort ascending")}
+          title={gettext("Sort the selection A→Z")}
           data-test-id="sheet-sort-asc"
         >
           A→Z
@@ -2832,8 +3302,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           phx-click="sort-selection"
           phx-value-dir="desc"
           phx-target={@myself}
-          aria-label="Sort descending"
-          title="Sort the selection Z→A"
+          aria-label={gettext("Sort descending")}
+          title={gettext("Sort the selection Z→A")}
           data-test-id="sheet-sort-desc"
         >
           Z→A
@@ -2847,39 +3317,62 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             name="delim"
             value=""
             options={[
-              {"", "Split…"},
-              {"comma", "Comma"},
-              {"semicolon", "Semicolon"},
-              {"space", "Space"},
-              {"colon", "Colon"},
-              {"pipe", "Pipe"}
+              {"", gettext("Split…")},
+              {"comma", gettext("Comma")},
+              {"semicolon", gettext("Semicolon")},
+              {"space", gettext("Space")},
+              {"colon", gettext("Colon")},
+              {"pipe", gettext("Pipe")}
             ]}
-            aria-label="Split text to columns"
+            aria-label={gettext("Split text to columns")}
             data-test-id="sheet-split-select"
           />
         </form>
 
-        <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select).
-              Each stamps a display-only "fmt" onto every occupied cell in the
-              selection; General clears it. The buttons' aria-pressed and the
-              select's selected option mirror the ACTIVE cell's fmt so AT reads
-              the current state, not just the available actions. --%>
-        <div class="sheet-fmt-group" role="group" aria-label="Number format" data-test-id="sheet-fmt-group">
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} aria-pressed={to_string(@active_fmt == "currency")} title="Currency ($1,234.50)" data-test-id="sheet-fmt-currency">$</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title="Percent (25.00%)" data-test-id="sheet-fmt-percent">%</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title="Thousands separator (1,234)" data-test-id="sheet-fmt-thousands">,</button>
+        <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select,
+              + a currency picker). Each stamps a display-only "fmt" onto every
+              occupied cell in the selection; General clears it. The buttons'
+              aria-pressed and the selects' selected option mirror the ACTIVE
+              cell's fmt/cur so AT reads the current state, not just the
+              available actions. --%>
+        <div class="sheet-fmt-group" role="group" aria-label={gettext("Number format")} data-test-id="sheet-fmt-group">
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} aria-pressed={to_string(@active_fmt == "currency")} title={gettext("Currency ($1,234.50)")} aria-label={gettext("Currency format")} data-test-id="sheet-fmt-currency">$</button>
+          <%!-- Currency picker (task-4fb1d8de887d8bc6, ruling (a) — additive,
+                per-cell): choosing one stamps BOTH fmt=currency and cur in
+                one op, so picking "NOK" formats the cell AND names its
+                currency — the $ button above stays the one-click USD
+                shortcut. "USD ($)" reselects the implicit default (nil cur),
+                byte-identical to a plain $ click. --%>
+          <form phx-change="set-currency" phx-target={@myself}>
+            <.bp_select
+              name="cur"
+              value={@active_cur || ""}
+              options={[
+                {"", gettext("USD ($)")},
+                {"EUR", gettext("EUR (€)")},
+                {"GBP", gettext("GBP (£)")},
+                {"NOK", gettext("NOK (kr)")},
+                {"SEK", gettext("SEK (kr)")},
+                {"DKK", gettext("DKK (kr)")}
+              ]}
+              aria-label={gettext("Currency")}
+              data-test-id="sheet-currency-select"
+            />
+          </form>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title={gettext("Percent (25.00%)")} aria-label={gettext("Percent format")} data-test-id="sheet-fmt-percent">%</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title={gettext("Thousands separator (1,234)")} aria-label={gettext("Thousands separator")} data-test-id="sheet-fmt-thousands">,</button>
           <form phx-change="set-fmt" phx-target={@myself}>
             <.bp_select
               name="fmt"
               value={@active_fmt}
               options={[
-                {"", "General"},
-                {"fixed", "Fixed"},
-                {"date", "Date"},
-                {"datetime", "Datetime"},
-                {"checkbox", "Checkbox"}
+                {"", gettext("General")},
+                {"fixed", gettext("Fixed")},
+                {"date", gettext("Date")},
+                {"datetime", gettext("Datetime")},
+                {"checkbox", gettext("Checkbox")}
               ]}
-              aria-label="Number format class"
+              aria-label={gettext("Number format")}
               data-test-id="sheet-fmt-select"
             />
           </form>
@@ -2887,13 +3380,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
         <%!-- Style group: B / I toggles + the align trio (aria-pressed off the
               active cell), and a fixed bg swatch palette + clear. --%>
-        <div class="sheet-style-group" role="group" aria-label="Cell style" data-test-id="sheet-style-group">
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="b" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "b") == true)} title="Bold (Cmd/Ctrl+B)" data-test-id="sheet-style-bold"><strong>B</strong></button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="i" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "i") == true)} title="Italic (Cmd/Ctrl+I)" data-test-id="sheet-style-italic"><em>I</em></button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "left")} title="Align left" data-test-id="sheet-align-left">⯇</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "center")} title="Align center" data-test-id="sheet-align-center">≡</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "right")} title="Align right" data-test-id="sheet-align-right">⯈</button>
-          <span class="sheet-bg-swatches" role="group" aria-label="Cell background">
+        <div class="sheet-style-group" role="group" aria-label={gettext("Cell style")} data-test-id="sheet-style-group">
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="b" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "b") == true)} title={gettext("Bold (Cmd/Ctrl+B)")} aria-label={gettext("Bold")} data-test-id="sheet-style-bold"><strong>B</strong></button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="i" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "i") == true)} title={gettext("Italic (Cmd/Ctrl+I)")} aria-label={gettext("Italic")} data-test-id="sheet-style-italic"><em>I</em></button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "left")} title={gettext("Align left")} aria-label={gettext("Align left")} data-test-id="sheet-align-left">⯇</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "center")} title={gettext("Align center")} aria-label={gettext("Align center")} data-test-id="sheet-align-center">≡</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "right")} title={gettext("Align right")} aria-label={gettext("Align right")} data-test-id="sheet-align-right">⯈</button>
+          <span class="sheet-bg-swatches" role="group" aria-label={gettext("Cell background")}>
             <button
               :for={swatch <- TokensGen.sheet_cf_backgrounds()}
               type="button"
@@ -2902,11 +3395,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               phx-click="set-bg"
               phx-value-bg={swatch}
               phx-target={@myself}
-              title={"Background " <> swatch}
+              title={gettext("Background %{color}", color: swatch)}
+              aria-label={gettext("%{color} background", color: swatch_name(swatch))}
               data-test-id={"sheet-bg-" <> String.trim_leading(swatch, "#")}
             >
             </button>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="set-bg" phx-value-bg="" phx-target={@myself} title="Clear background" data-test-id="sheet-bg-clear">⌫</button>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="set-bg" phx-value-bg="" phx-target={@myself} title={gettext("Clear background")} aria-label={gettext("Clear background")} data-test-id="sheet-bg-clear">⌫</button>
           </span>
         </div>
 
@@ -2917,7 +3411,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               session op (gate-parity validated, undo/redo via the structural
               inverse). Editable-mode only — the whole toolbar is @editable-gated,
               so read-only/View hosts never see it. --%>
-        <div class="sheet-cf-group" role="group" aria-label="Conditional formatting" data-test-id="sheet-cf-group">
+        <div class="sheet-cf-group" role="group" aria-label={gettext("Conditional formatting")} data-test-id="sheet-cf-group">
           <button
             type="button"
             class="btn btn-ghost btn-sm"
@@ -2925,20 +3419,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-target={@myself}
             aria-haspopup="dialog"
             aria-expanded={to_string(@cf_panel != nil)}
-            title="Conditional formatting"
+            title={gettext("Conditional formatting")}
+            id={"#{@id}-cf-btn"}
             data-test-id="sheet-cf-btn"
-          >Cond. format</button>
+          ><%= gettext("Cond. format") %></button>
 
           <div
             :if={@cf_panel}
             class="sheet-popover sheet-cf-panel"
             role="dialog"
-            aria-label="Conditional formatting rules"
+            aria-label={gettext("Conditional formatting rules")}
+            id={"#{@id}-cf-panel"}
+            phx-window-keydown={close_and_refocus("cf-close", @myself, "#{@id}-cf-btn")}
+            phx-key="Escape"
             data-test-id="sheet-cf-panel"
           >
             <div class="sheet-cf-head">
-              <span class="sheet-cf-title">Conditional formatting</span>
-              <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-close" phx-target={@myself} aria-label="Close conditional-format panel" data-test-id="sheet-cf-close">&times;</button>
+              <span class="sheet-cf-title"><%= gettext("Conditional formatting") %></span>
+              <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("cf-close", @myself, "#{@id}-cf-btn")} aria-label={gettext("Close conditional-format panel")} data-test-id="sheet-cf-close">&times;</button>
             </div>
 
             <%!-- Existing rules for THIS tab (raw stored list). Honest empty state. --%>
@@ -2946,18 +3444,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <li :for={rule <- @cf_rules} class="sheet-cf-rule">
                 <span class="sheet-cf-swatch" style={cf_swatch_style(rule)} aria-hidden="true"></span>
                 <span class="sheet-cf-summary"><%= cf_rule_summary(rule) %></span>
-                <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-edit" phx-value-id={rule["id"]} phx-target={@myself} aria-label={"Edit rule " <> cf_rule_summary(rule)} data-test-id={"sheet-cf-edit-" <> to_string(rule["id"])}>Edit</button>
-                <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-delete" phx-value-id={rule["id"]} phx-target={@myself} aria-label={"Delete rule " <> cf_rule_summary(rule)} data-test-id={"sheet-cf-delete-" <> to_string(rule["id"])}>Delete</button>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-edit" phx-value-id={rule["id"]} phx-target={@myself} aria-label={gettext("Edit rule %{rule}", rule: cf_rule_summary(rule))} data-test-id={"sheet-cf-edit-" <> to_string(rule["id"])}><%= gettext("Edit") %></button>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-delete" phx-value-id={rule["id"]} phx-target={@myself} aria-label={gettext("Delete rule %{rule}", rule: cf_rule_summary(rule))} data-test-id={"sheet-cf-delete-" <> to_string(rule["id"])}><%= gettext("Delete") %></button>
               </li>
             </ul>
-            <p :if={@cf_rules == []} class="sheet-cf-empty" data-test-id="sheet-cf-empty">No rules yet — add one below.</p>
+            <p :if={@cf_rules == []} class="sheet-cf-empty" data-test-id="sheet-cf-empty"><%= gettext("No rules yet — add one below.") %></p>
 
             <%!-- Create / edit form. phx-change tracks the op so value2 appears
                   only for "between" and typed values survive the re-render. --%>
             <form class="sheet-cf-form" phx-submit="cf-save" phx-change="cf-form-change" phx-target={@myself} data-test-id="sheet-cf-form">
               <input type="hidden" name="editing" value={@cf_panel["editing"]} />
               <label class="sheet-cf-field">
-                <span>Apply to range</span>
+                <span><%= gettext("Apply to range") %></span>
                 <.bp_input
                   name="range"
                   value={@cf_panel["range"]}
@@ -2968,22 +3466,22 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 />
               </label>
               <label class="sheet-cf-field">
-                <span>Format cells where the value</span>
+                <span><%= gettext("Format cells where the value") %></span>
                 <.bp_select
                   name="op"
                   value={@cf_panel["op"]}
                   options={[
-                    {"gt", "is greater than"},
-                    {"lt", "is less than"},
-                    {"eq", "is equal to"},
-                    {"between", "is between"},
-                    {"contains", "contains"}
+                    {"gt", gettext("is greater than")},
+                    {"lt", gettext("is less than")},
+                    {"eq", gettext("is equal to")},
+                    {"between", gettext("is between")},
+                    {"contains", gettext("contains")}
                   ]}
                   data-test-id="sheet-cf-op"
                 />
               </label>
               <label class="sheet-cf-field">
-                <span><%= if @cf_panel["op"] == "between", do: "min", else: "value" %></span>
+                <span><%= if @cf_panel["op"] == "between", do: gettext("min"), else: gettext("value") %></span>
                 <.bp_input
                   name="value"
                   value={@cf_panel["value"]}
@@ -2993,7 +3491,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 />
               </label>
               <label :if={@cf_panel["op"] == "between"} class="sheet-cf-field">
-                <span>max</span>
+                <span><%= gettext("max") %></span>
                 <.bp_input
                   name="value2"
                   value={@cf_panel["value2"]}
@@ -3003,15 +3501,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 />
               </label>
               <div class="sheet-cf-field">
-                <span>Background</span>
-                <span class="sheet-bg-swatches" role="radiogroup" aria-label="Rule background color">
+                <span><%= gettext("Background") %></span>
+                <span class="sheet-bg-swatches" role="radiogroup" aria-label={gettext("Rule background color")}>
                   <%!-- KIT-EXEMPT (charter D14): these radios are `.sr-only` —
                         the browser never paints them; the visible affordance is
                         the custom `.sheet-bg-swatch` square with a selection ring.
                         A themed control would be invisible here, so they stay
                         native. --%>
-                  <label :for={swatch <- TokensGen.sheet_cf_backgrounds()} class="sheet-cf-swatch-opt" title={"Background " <> swatch}>
-                    <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" />
+                  <label :for={swatch <- TokensGen.sheet_cf_backgrounds()} class="sheet-cf-swatch-opt" title={gettext("Background %{color}", color: swatch)}>
+                    <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" aria-label={gettext("%{color} background", color: swatch_name(swatch))} />
                     <span class="sheet-bg-swatch" style={"background: #{swatch};"} data-test-id={"sheet-cf-bg-" <> String.trim_leading(swatch, "#")} data-selected={to_string(@cf_panel["bg"] == swatch)}></span>
                   </label>
                 </span>
@@ -3021,7 +3519,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 <.bp_checkbox name="i" label="Italic" checked={@cf_panel["i"]} data-test-id="sheet-cf-italic" />
               </div>
               <div class="sheet-cf-actions">
-                <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-cf-submit"><%= if @cf_panel["editing"] in [nil, ""], do: "Add rule", else: "Save rule" %></button>
+                <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-cf-submit"><%= if @cf_panel["editing"] in [nil, ""], do: gettext("Add rule"), else: gettext("Save rule") %></button>
               </div>
             </form>
           </div>
@@ -3030,8 +3528,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <%!-- Visible undo/redo — the ghost buttons a MOUSE user needs; they
               phx-click the SAME "undo"/"redo" events the keyboard fires, so
               zero new server logic. --%>
-        <button type="button" class="btn btn-ghost btn-sm" phx-click="undo" phx-target={@myself} aria-label="Undo last change" title="Undo (Cmd/Ctrl+Z)" data-test-id="sheet-undo-btn">↶</button>
-        <button type="button" class="btn btn-ghost btn-sm" phx-click="redo" phx-target={@myself} aria-label="Redo last undone change" title="Redo (Cmd/Ctrl+Shift+Z)" data-test-id="sheet-redo-btn">↷</button>
+        <button type="button" class="btn btn-ghost btn-sm" phx-click="undo" phx-target={@myself} aria-label={gettext("Undo last change")} title={gettext("Undo (Cmd/Ctrl+Z)")} data-test-id="sheet-undo-btn">↶</button>
+        <button type="button" class="btn btn-ghost btn-sm" phx-click="redo" phx-target={@myself} aria-label={gettext("Redo last undone change")} title={gettext("Redo (Cmd/Ctrl+Shift+Z)")} data-test-id="sheet-redo-btn">↷</button>
 
         <%!-- The autosave trust signal — a quiet, right-aligned status region.
               role="status" is its own polite live region, kept SEPARATE from the
@@ -3045,9 +3543,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           title={if @save_state == :saved and @save_saved_at, do: DateTime.to_iso8601(@save_saved_at)}
         >
           <%= case @save_state do %>
-            <% :saving -> %>Saving…
-            <% :saved -> %>All changes saved · {Calendar.strftime(@save_saved_at, "%H:%M")}
-            <% :error -> %>Save failed — retrying
+            <% :saving -> %>{gettext("Saving…")}
+            <% :saved -> %>{gettext("All changes saved · %{time}",
+              time: Calendar.strftime(@save_saved_at, "%H:%M")
+            )}
+            <% :error -> %>{gettext("Save failed — retrying")}
           <% end %>
         </span>
       </div>
@@ -3058,7 +3558,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <div :if={@notice} class="sheet-notice" role="alert" data-test-id="sheet-notice">
         <span><%= @notice %></span>
         <button type="button" class="btn btn-ghost btn-sm" phx-click="notice-dismiss" phx-target={@myself}>
-          dismiss
+          <%= gettext("dismiss") %>
         </button>
       </div>
 
@@ -3072,6 +3572,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             back; both are plain phx events, so find works without the JS hook.
             View mode's missing find bar is a pre-existing gap this slice does
             not widen: it keys on write capability, not on @editable. --%>
+      <%!-- Opened by find-open (Ctrl+F from the grid), the input takes focus as
+            it mounts; before, focus fell to <body> (task-3e4466ab621e25fe). The
+            always-shown bar of a viewer without write capability mounts with
+            @find_open false, so it never steals focus on page load. --%>
       <div
         :if={@find_open or not @write_capable}
         class="sheet-find"
@@ -3086,15 +3590,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             value={@find_query}
             autocomplete="off"
             spellcheck="false"
-            placeholder="Find in sheet"
-            aria-label="Find in sheet"
+            placeholder={gettext("Find in sheet")}
+            aria-label={gettext("Find in sheet")}
             data-test-id="sheet-find-input"
+            phx-mounted={@find_open && Phoenix.LiveView.JS.focus()}
           />
           <button
             type="submit"
             class="btn btn-ghost btn-sm"
-            title="Next match (Enter)"
-            aria-label="Find next"
+            title={gettext("Next match (Enter)")}
+            aria-label={gettext("Find next")}
             data-test-id="sheet-find-next"
           >↓</button>
           <button
@@ -3103,8 +3608,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-click="find-prev"
             phx-value-q={@find_query}
             phx-target={@myself}
-            title="Previous match"
-            aria-label="Find previous"
+            title={gettext("Previous match")}
+            aria-label={gettext("Find previous")}
             data-test-id="sheet-find-prev"
           >↑</button>
           <button
@@ -3112,8 +3617,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="btn btn-ghost btn-sm"
             phx-click="find-close"
             phx-target={@myself}
-            title="Close find"
-            aria-label="Close find"
+            title={gettext("Close find")}
+            aria-label={gettext("Close find")}
             data-test-id="sheet-find-close"
           >&times;</button>
         </form>
@@ -3146,7 +3651,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-target={@myself}
             disabled={@row_offset == 0}
             data-test-id="sheet-pager-prev"
-          >Prev</button>
+          ><%= gettext("Prev") %></button>
           <button
             type="button"
             class="btn btn-ghost btn-sm"
@@ -3155,13 +3660,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-target={@myself}
             disabled={not @page_next?}
             data-test-id="sheet-pager-next"
-          >Next</button>
+          ><%= gettext("Next") %></button>
           <span data-test-id="sheet-pager-text">
-            Showing rows <%= @visible_first %>–<%= @visible_last %> of <%= @rows %><%= if @filter_active do %> · <%= @filter_hidden_count %> rows hidden by filter<% end %><%= if @col_truncated do %> · first <%= @cols %> of <%= @used_cols %> columns<% end %>
+            <%= gettext("Showing rows %{first}–%{last} of %{rows}", first: @visible_first, last: @visible_last, rows: @rows) %><%= if @filter_active do %> · <%= ngettext("%{count} rows hidden by filter", "%{count} rows hidden by filter", @filter_hidden_count) %><% end %><%= if @col_truncated do %> · <%= gettext("first %{cols} of %{used} columns", cols: @cols, used: @used_cols) %><% end %>
           </span>
         <% else %>
           <span data-test-id="sheet-pager-text">
-            Showing the first <%= @cols %> of <%= @used_cols %> columns
+            <%= gettext("Showing the first %{cols} of %{used} columns", cols: @cols, used: @used_cols) %>
           </span>
         <% end %>
       </div>
@@ -3211,7 +3716,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         }
         tabindex="0"
         role={if @hookable, do: "application", else: "region"}
-        aria-label="Spreadsheet grid"
+        aria-label={gettext("Spreadsheet grid")}
         aria-describedby={@hookable && "#{@id}-grid-instructions"}
         aria-activedescendant={
           @hookable && Cells.cell_dom_id(if(@editable, do: @id, else: "#{@id}-view"), @active)
@@ -3231,11 +3736,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           class="sr-only"
           style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"
         >
-          Press Escape then Tab to leave the grid.
+          <%= gettext("Press Escape then Tab to leave the grid.") %>
           <%= if @editable do %>
-            F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+            <%= gettext("F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes. Alt+Down opens the column filter, Alt+Shift+Down the column menu, and Shift+F10 the cell menu.") %>
           <% else %>
-            Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only.
+            <%= gettext("Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only.") %>
           <% end %>
         </span>
         <div class="sheet-scroll">
@@ -3323,40 +3828,65 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         :if={@write_capable and match?({:cell, _, _}, @menu)}
         class="sheet-context-menu"
         role="menu"
-        aria-label="Cell actions"
+        aria-label={gettext("Cell actions")}
         style={cell_menu_style(@menu)}
         phx-click-away="menu-close"
         phx-target={@myself}
         data-test-id="sheet-context-menu"
       >
-        <button type="button" role="menuitem" data-menu-action="cut" data-test-id="sheet-ctx-cut">Cut</button>
-        <button type="button" role="menuitem" data-menu-action="copy" data-test-id="sheet-ctx-copy">Copy</button>
-        <button type="button" role="menuitem" data-menu-action="paste" data-test-id="sheet-ctx-paste">Paste</button>
-        <button type="button" role="menuitem" phx-click="clear-selection" phx-target={@myself} data-test-id="sheet-ctx-clear">Clear</button>
-        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-row">Insert row</button>
-        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-row">Delete row</button>
-        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-col">Insert column</button>
-        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-col">Delete column</button>
+        <button type="button" role="menuitem" data-menu-action="cut" data-test-id="sheet-ctx-cut"><%= gettext("Cut") %></button>
+        <button type="button" role="menuitem" data-menu-action="copy" data-test-id="sheet-ctx-copy"><%= gettext("Copy") %></button>
+        <button type="button" role="menuitem" data-menu-action="paste" data-test-id="sheet-ctx-paste"><%= gettext("Paste") %></button>
+        <button type="button" role="menuitem" phx-click="clear-selection" phx-target={@myself} data-test-id="sheet-ctx-clear"><%= gettext("Clear") %></button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-row"><%= gettext("Insert row") %></button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="row" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-row"><%= gettext("Delete row") %></button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="insert" phx-target={@myself} data-test-id="sheet-ctx-insert-col"><%= gettext("Insert column") %></button>
+        <button type="button" role="menuitem" phx-click="rowcol-key" phx-value-kind="col" phx-value-action="delete" phx-target={@myself} data-test-id="sheet-ctx-delete-col"><%= gettext("Delete column") %></button>
       </div>
 
       <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving
-            tabindex is deferred — every tab stays natively tab-focusable. --%>
-      <div class="sheet-tabs" data-test-id="sheet-tabs" role="tablist" aria-label="Sheet tabs">
+            tabindex (task-5201a73e33535129): the ACTIVE tab is the one Tab
+            stop, Left/Right/Home/End move between tabs (the SheetToolbar
+            hook in its tab-strip mode), Enter/Space switch. The tablist is
+            the inner wrapper and holds ONLY the tabs: the move/add/duplicate/
+            delete/colour buttons are not tabs, so they sit beside it in the
+            strip (axe aria-required-children, task-c96d59d0b4516fe5). --%>
+      <div
+        id={"#{@id}-tabs"}
+        class="sheet-tabs"
+        data-test-id="sheet-tabs"
+        phx-hook={@hookable && "SheetToolbar"}
+        data-roving-items="[role='tab']"
+        data-roving-follow="selected"
+      >
+        <div class="sheet-tab-list" role="tablist" aria-label={gettext("Sheet tabs")} data-test-id="sheet-tablist">
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
+          <%!-- Stable ids: without them morphdom matched tabs by position, so
+                swapping the rename form back to a button re-used the FOCUSED
+                neighbour's node and focus jumped to the renamed tab. --%>
           <%= if @editable and @renaming_tab == i do %>
-            <form phx-submit="tab-rename" phx-target={@myself} style="display: inline-flex;">
+            <form
+              id={"#{@id}-tab-rename-form"}
+              phx-submit="tab-rename"
+              phx-target={@myself}
+              style="display: inline-flex;"
+            >
               <input type="hidden" name="tab" value={i} />
               <input
                 name="name"
                 type="text"
-                value={Map.get(t, "name") || "Sheet #{i + 1}"}
+                value={Map.get(t, "name") || gettext("Sheet %{n}", n: i + 1)}
                 class="sheet-tab-rename-input"
                 autocomplete="off"
-                aria-label={"Rename #{Map.get(t, "name") || "Sheet #{i + 1}"}"}
+                aria-label={
+                  gettext("Rename %{name}", name: Map.get(t, "name") || gettext("Sheet %{n}", n: i + 1))
+                }
                 phx-keydown="tab-rename-cancel"
                 phx-key="Escape"
                 phx-blur="tab-rename-cancel"
                 phx-target={@myself}
+                id={"#{@id}-tab-rename"}
+                phx-hook="SheetTabRename"
                 data-test-id="sheet-tab-rename-input"
               />
             </form>
@@ -3372,6 +3902,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               phx-key="F2"
               phx-value-tab={i}
               phx-target={@myself}
+              id={"#{@id}-tab-#{i}"}
               data-test-id={"sheet-tab-#{i}"}
             >
               <%!-- The tab-color swatch (QL-D2): a small colored dot in the
@@ -3386,10 +3917,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 data-test-id={"sheet-tab-swatch-#{i}"}
                 aria-hidden="true"
               ></span>
-              <%= Map.get(t, "name") || "Sheet #{i + 1}" %>
+              <%= Map.get(t, "name") || gettext("Sheet %{n}", n: i + 1) %>
             </button>
           <% end %>
         <% end %>
+        </div>
         <%= if @editable do %>
           <button
             type="button"
@@ -3398,8 +3930,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-value-dir="left"
             phx-target={@myself}
             disabled={@tab == 0}
-            aria-label="Move sheet left"
-            title="Move sheet left"
+            aria-label={gettext("Move sheet left")}
+            title={gettext("Move sheet left")}
             data-test-id="sheet-tab-move-left"
           >&#9664;</button>
           <button
@@ -3409,8 +3941,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-value-dir="right"
             phx-target={@myself}
             disabled={@tab >= length(@all_tabs) - 1}
-            aria-label="Move sheet right"
-            title="Move sheet right"
+            aria-label={gettext("Move sheet right")}
+            title={gettext("Move sheet right")}
             data-test-id="sheet-tab-move-right"
           >&#9654;</button>
           <button
@@ -3418,8 +3950,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="sheet-tab-action"
             phx-click="tab-add"
             phx-target={@myself}
-            aria-label="Add tab"
-            title="Add tab"
+            aria-label={gettext("Add tab")}
+            title={gettext("Add tab")}
             data-test-id="sheet-tab-add"
           >+</button>
           <button
@@ -3427,8 +3959,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="sheet-tab-action"
             phx-click="tab-duplicate"
             phx-target={@myself}
-            aria-label="Duplicate the active tab"
-            title="Duplicate the active tab"
+            aria-label={gettext("Duplicate the active tab")}
+            title={gettext("Duplicate the active tab")}
             data-test-id="sheet-tab-duplicate"
           >&#10697;</button>
           <button
@@ -3438,8 +3970,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-value-tab={@tab}
             phx-target={@myself}
             data-confirm="Delete this tab? Its cells are removed."
-            aria-label="Delete the active tab"
-            title="Delete the active tab"
+            aria-label={gettext("Delete the active tab")}
+            title={gettext("Delete the active tab")}
             data-test-id="sheet-tab-delete"
           >&times;</button>
           <%!-- Tab-color picker (QL-D2): a toggle + a preset swatch strip that
@@ -3456,15 +3988,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               phx-target={@myself}
               aria-haspopup="true"
               aria-expanded={to_string(@tab_color_open)}
-              aria-label="Set this sheet's tab color"
-              title="Tab color"
+              aria-label={gettext("Set this sheet's tab color")}
+              title={gettext("Tab color")}
               data-test-id="sheet-tab-color-btn"
             >&#9679;</button>
             <span
               :if={@tab_color_open}
               class="sheet-bg-swatches"
               role="group"
-              aria-label="Tab color"
+              aria-label={gettext("Tab color")}
               data-test-id="sheet-tab-color-picker"
             >
               <button
@@ -3475,18 +4007,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 phx-click="tab-set-color"
                 phx-value-color={swatch}
                 phx-target={@myself}
-                title={"Tab color " <> swatch}
+                title={gettext("Tab color %{color}", color: swatch)}
                 data-test-id={"sheet-tab-color-" <> String.trim_leading(swatch, "#")}
               >
               </button>
-              <button type="button" class="btn btn-ghost btn-sm" phx-click="tab-set-color" phx-value-color="" phx-target={@myself} title="Clear tab color" data-test-id="sheet-tab-color-clear">⌫</button>
+              <button type="button" class="btn btn-ghost btn-sm" phx-click="tab-set-color" phx-value-color="" phx-target={@myself} title={gettext("Clear tab color")} data-test-id="sheet-tab-color-clear">⌫</button>
             </span>
           </span>
         <% end %>
       </div>
 
       <div :if={@sel_stats} class="sheet-statsbar" data-test-id="sheet-statsbar">
-        Sum: {Sheets.number_to_display(@sel_stats.sum)} · Avg: {Sheets.number_to_display(@sel_stats.avg)} · Count: {@sel_stats.count}
+        {gettext("Sum:")} {Sheets.number_to_display(@sel_stats.sum)} · {gettext("Avg:")} {Sheets.number_to_display(@sel_stats.avg)} · {gettext("Count:")} {@sel_stats.count}
       </div>
     </div>
     """
@@ -3515,7 +4047,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       </colgroup>
       <thead>
         <tr aria-rowindex="1">
-          <th class="sheet-corner" aria-colindex="1"></th>
+          <%!-- The corner header names the row-number column (axe empty-table-header). --%>
+          <th class="sheet-corner" aria-colindex="1"><span class="sr-only"><%= gettext("Row / column") %></span></th>
           <th
             :for={c <- 1..@cols}
             class="sheet-colhead"
@@ -3533,11 +4066,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <button
                 type="button"
                 class="sheet-head-menu-btn"
+                tabindex="-1"
                 phx-click="menu-open"
                 phx-value-kind="col"
                 phx-value-index={c}
                 phx-target={@myself}
-                aria-label={"Column " <> Geometry.col_letters(c) <> " menu"}
+                aria-label={gettext("Column %{col} menu", col: Geometry.col_letters(c))}
                 aria-haspopup="menu"
                 aria-expanded={to_string(@menu == {:col, c})}
                 data-test-id={"sheet-colmenu-#{c}"}
@@ -3546,19 +4080,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 :if={@menu == {:col, c}}
                 class="sheet-menu"
                 role="menu"
-                aria-label={"Column " <> Geometry.col_letters(c) <> " menu"}
+                aria-label={gettext("Column %{col} menu", col: Geometry.col_letters(c))}
                 data-test-id="sheet-menu"
               >
-                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="before" phx-target={@myself}>Insert left</button>
-                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="after" phx-target={@myself}>Insert right</button>
-                <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="col" phx-value-at={c} phx-target={@myself}>Delete column</button>
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="before" phx-target={@myself}><%= gettext("Insert left") %></button>
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="col" phx-value-at={c} phx-value-where="after" phx-target={@myself}><%= gettext("Insert right") %></button>
+                <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="col" phx-value-at={c} phx-target={@myself}><%= gettext("Delete column") %></button>
                 <%!-- "Clicking a column header selects+offers to sort" (the wish).
                       SELECTS the column then dispatches the used-data-rect sort.
                       Sort is an EDIT mutation, so these menu items live INSIDE the
                       @editable block and NEVER render in a read-only view (SF-AM2d,
                       SF-AM4). --%>
-                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="asc" phx-target={@myself} data-test-id={"sheet-sort-col-asc-#{c}"}>Sort A→Z</button>
-                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="desc" phx-target={@myself} data-test-id={"sheet-sort-col-desc-#{c}"}>Sort Z→A</button>
+                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="asc" phx-target={@myself} data-test-id={"sheet-sort-col-asc-#{c}"}>{gettext("Sort A→Z")}</button>
+                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="desc" phx-target={@myself} data-test-id={"sheet-sort-col-desc-#{c}"}>{gettext("Sort Z→A")}</button>
               </div>
             <% end %>
             <%!-- Per-column FILTER funnel (SF-D9 + SF-AM4). Pure LiveView,
@@ -3573,20 +4107,24 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <button
               type="button"
               class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
+              tabindex={@editable && "-1"}
               phx-click="filter-open"
               phx-value-col={c}
               phx-target={@myself}
               aria-haspopup="dialog"
               aria-expanded={to_string(@filter_panel != nil and @filter_panel["col"] == c)}
               aria-label={
-                "Filter column " <>
-                  Geometry.col_letters(c) <>
-                  if(Map.has_key?(@filters, c),
-                    do: " (active: " <> filter_summary(@filters[c]) <> ")",
-                    else: ""
-                  )
+                if(Map.has_key?(@filters, c),
+                  do:
+                    gettext("Filter column %{col} (active: %{filter})",
+                      col: Geometry.col_letters(c),
+                      filter: filter_summary(@filters[c])
+                    ),
+                  else: gettext("Filter column %{col}", col: Geometry.col_letters(c))
+                )
               }
-              title="Filter this column"
+              title={gettext("Filter this column")}
+              id={"#{@id}-filter-funnel-#{c}"}
               data-active={to_string(Map.has_key?(@filters, c))}
               data-test-id={"sheet-filter-funnel-#{c}"}
             ><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M1.5 2.5h13L9.5 9v4.2l-3 1.4V9L1.5 2.5Z" fill="currentColor" /></svg></button>
@@ -3595,37 +4133,36 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               :if={@filter_panel && @filter_panel["col"] == c}
               class="sheet-popover sheet-filter-panel"
               role="dialog"
-              aria-label={"Filter column " <> Geometry.col_letters(c)}
-              phx-window-keydown="filter-close"
+              aria-label={gettext("Filter column %{col}", col: Geometry.col_letters(c))}
+              phx-window-keydown={close_and_refocus("filter-close", @myself, filter_return_id(@id, c, @editable))}
               phx-key="Escape"
-              phx-target={@myself}
               data-test-id="sheet-filter-panel"
             >
               <div class="sheet-filter-head">
-                <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
-                <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-close" phx-target={@myself} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
+                <span class="sheet-filter-title"><%= gettext("Filter %{col}", col: Geometry.col_letters(c)) %></span>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("filter-close", @myself, filter_return_id(@id, c, @editable))} aria-label={gettext("Close filter")} data-test-id="sheet-filter-close">&times;</button>
               </div>
-              <form class="sheet-filter-form" phx-submit="filter-apply" phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
+              <form id={"#{@id}-filter-form-#{c}"} class="sheet-filter-form" phx-submit={close_and_refocus("filter-apply", @myself, filter_return_id(@id, c, @editable))} phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
                 <input type="hidden" name="col" value={c} />
                 <label class="sheet-filter-field">
-                  <span>Show rows where</span>
+                  <span><%= gettext("Show rows where") %></span>
                   <.bp_select
                     name="op"
                     value={@filter_panel["op"]}
                     options={[
-                      {"nonblank", "is not empty"},
-                      {"blank", "is empty"},
-                      {"eq", "is equal to"},
-                      {"gt", "is greater than"},
-                      {"lt", "is less than"},
-                      {"between", "is between"},
-                      {"contains", "contains"}
+                      {"nonblank", gettext("is not empty")},
+                      {"blank", gettext("is empty")},
+                      {"eq", gettext("is equal to")},
+                      {"gt", gettext("is greater than")},
+                      {"lt", gettext("is less than")},
+                      {"between", gettext("is between")},
+                      {"contains", gettext("contains")}
                     ]}
                     data-test-id="sheet-filter-op"
                   />
                 </label>
                 <label :if={@filter_panel["op"] in ["gt", "lt", "eq", "between", "contains"]} class="sheet-filter-field">
-                  <span><%= if @filter_panel["op"] == "between", do: "min", else: "value" %></span>
+                  <span><%= if @filter_panel["op"] == "between", do: gettext("min"), else: gettext("value") %></span>
                   <.bp_input
                     name="value"
                     value={@filter_panel["value"]}
@@ -3636,7 +4173,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   />
                 </label>
                 <label :if={@filter_panel["op"] == "between"} class="sheet-filter-field">
-                  <span>max</span>
+                  <span><%= gettext("max") %></span>
                   <.bp_input
                     name="value2"
                     value={@filter_panel["value2"]}
@@ -3651,8 +4188,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                       data row (see filter-apply). Cleared on any form change. --%>
                 <p :if={@filter_panel["error"]} class="sheet-filter-error" role="alert" data-test-id="sheet-filter-error"><%= @filter_panel["error"] %></p>
                 <div class="sheet-filter-actions">
-                  <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-clear" phx-value-col={c} phx-target={@myself} data-test-id="sheet-filter-clear">Clear</button>
-                  <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-filter-apply">Apply</button>
+                  <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-clear" phx-value-col={c} phx-target={@myself} data-test-id="sheet-filter-clear"><%= gettext("Clear") %></button>
+                  <button type="submit" class="btn btn-primary btn-sm" data-test-id="sheet-filter-apply"><%= gettext("Apply") %></button>
                 </div>
               </form>
             </div>
@@ -3682,11 +4219,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <button
                 type="button"
                 class="sheet-head-menu-btn"
+                tabindex="-1"
                 phx-click="menu-open"
                 phx-value-kind="row"
                 phx-value-index={r}
                 phx-target={@myself}
-                aria-label={"Row #{r} menu"}
+                aria-label={gettext("Row %{row} menu", row: r)}
                 aria-haspopup="menu"
                 aria-expanded={to_string(@menu == {:row, r})}
                 data-test-id={"sheet-rowmenu-#{r}"}
@@ -3695,12 +4233,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 :if={@menu == {:row, r}}
                 class="sheet-menu"
                 role="menu"
-                aria-label={"Row #{r} menu"}
+                aria-label={gettext("Row %{row} menu", row: r)}
                 data-test-id="sheet-menu"
               >
-                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="before" phx-target={@myself}>Insert above</button>
-                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="after" phx-target={@myself}>Insert below</button>
-                <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="row" phx-value-at={r} phx-target={@myself}>Delete row</button>
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="before" phx-target={@myself}><%= gettext("Insert above") %></button>
+                <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="after" phx-target={@myself}><%= gettext("Insert below") %></button>
+                <button type="button" role="menuitem" phx-click="rowcol-delete" phx-value-kind="row" phx-value-at={r} phx-target={@myself}><%= gettext("Delete row") %></button>
               </div>
               <div class="sheet-rsz sheet-rsz--row" data-kind="row" data-index={r} data-px={Geometry.row_px(@row_heights, r)}></div>
             <% end %>
@@ -3733,7 +4271,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   value={@editing.prefill}
                   autocomplete="off"
                   spellcheck="false"
-                  aria-label={"Edit cell " <> ref}
+                  aria-label={gettext("Edit cell %{ref}", ref: ref)}
                   role="combobox"
                   aria-autocomplete="list"
                   aria-expanded="false"

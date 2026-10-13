@@ -260,14 +260,14 @@ defmodule Barkpark.Tenancy.SeatCapabilitiesTest do
     test "TOKEN: admin needs the PERMISSION and the SEAT — the D9 cell stays denied" do
       ws = workspace!("seat-token-admin")
 
-      # A global-admin token holding a plain `member` row here. authorize/3
-      # ADMITS (`member? AND permits?`); the seat rule DENIES. That divergence
-      # is charter D9 and this arity must preserve it — it is cell
-      # `token/foreign-member+perms[admin]` of the wave-10 parity table.
+      # A global-admin token holding a plain `member` row here. The seat rule
+      # DENIES. Charter D9 once let authorize/3 ADMIT this cell
+      # (`member? AND permits?`); OWNER RULING 2026-10-03 #2 closed that
+      # divergence, so both doors now agree: the seat decides.
       {:ok, foreign} = mint_token(["admin"])
       foreign_row = seat!(ws, foreign, "member")
 
-      assert TAuth.authorize(foreign, ws.id, :admin) == :ok
+      assert TAuth.authorize(foreign, ws.id, :admin) == {:error, :forbidden}
       assert TAuth.seat_capabilities(foreign, foreign_row, ws.id).admin == false
 
       # The mirror cell: an `admin` ROLE with read-only permissions. The token's

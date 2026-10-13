@@ -91,7 +91,7 @@ func (m *model) saveDocument() {
 // publish — the server copies ITS draft to the published id, so unsaved local
 // edits would silently miss the published document.
 func (m *model) publishDocument() {
-	if m.selectedDoc == nil || m.editorSchema == nil || m.selectedDoc.Status != "draft" {
+	if m.selectedDoc == nil || m.editorSchema == nil || publishState(m.selectedDoc) != "draft" {
 		return
 	}
 	if m.dirty {
@@ -108,7 +108,7 @@ func (m *model) publishDocument() {
 	}
 	// Optimistic flip, like saveDocument's in-memory apply — the SSE refresh
 	// will re-query and confirm. The published doc now lives at the bare id.
-	m.selectedDoc.Status = "published"
+	setPublishState(m.selectedDoc, "published")
 	m.selectedDoc.ID = id
 	m.setStatus("published", false)
 }
@@ -120,7 +120,7 @@ func (m *model) publishDocument() {
 // "type":…}}); the server moves the row to its drafts. twin, mirrored here
 // by the optimistic flip.
 func (m *model) unpublishDocument() {
-	if m.selectedDoc == nil || m.editorSchema == nil || m.selectedDoc.Status != "published" {
+	if m.selectedDoc == nil || m.editorSchema == nil || publishState(m.selectedDoc) != "published" {
 		return
 	}
 	id := strings.TrimPrefix(m.selectedDoc.ID, "drafts.")
@@ -128,7 +128,7 @@ func (m *model) unpublishDocument() {
 		m.setStatus(fmt.Sprintf("unpublish failed: %v", err), true)
 		return
 	}
-	m.selectedDoc.Status = "draft"
+	setPublishState(m.selectedDoc, "draft")
 	m.selectedDoc.ID = "drafts." + id
 	m.setStatus("unpublished — now a draft", false)
 }
@@ -250,12 +250,13 @@ func (m model) deleteTarget() (*Doc, string) {
 
 // performDelete deletes the armed document via the delete mutation
 // ({"delete":{"id":…,"type":…}}, matching Content.apply_one's delete arm).
-// The id goes over the wire EXACTLY as listed — drafts. prefix included — per
-// the API contract for drafts vs published rows. If the deleted doc is open
-// in the editor we pop out first; either way the panes re-query so the row
-// disappears now (the SSE refresh will confirm).
+// D deletes the DOCUMENT, so the id goes over the wire bare: since #23059 a
+// drafts.<id> delete removes only that draft (R is discard-draft), and a bare
+// id removes both rows. If the deleted doc is open in the editor we pop out
+// first; either way the panes re-query so the row disappears now (the SSE
+// refresh will confirm).
 func (m model) performDelete(docID, typeName string) (tea.Model, tea.Cmd) {
-	if err := m.ds.Delete(typeName, docID); err != nil {
+	if err := m.ds.Delete(typeName, strings.TrimPrefix(docID, "drafts.")); err != nil {
 		m.setStatus(fmt.Sprintf("delete failed: %v", err), true)
 		return m, nil
 	}
@@ -297,7 +298,7 @@ func discardTwinStatusMessage(outcome apiclient.DocReadOutcome) string {
 // discarding the only draft deletes the document outright, which is D's job
 // with its own confirm.
 func (m *model) armDiscard(doc *Doc, typeName string) {
-	if doc.Status != "draft" {
+	if publishState(doc) != "draft" {
 		m.setStatus("nothing to discard — not a draft", true)
 		return
 	}

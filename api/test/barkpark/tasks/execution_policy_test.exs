@@ -260,7 +260,10 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
 
     bad_resp =
       conn
-      |> recycle()
+      # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+      # conn.private's rate-limit test scope, silently sharing the whole-suite
+      # IP bucket on this METERED route (RateLimit plug in its pipeline).
+      |> recycle_scoped()
       |> authed()
       |> post(
         "/v1/tasks/#{bad.doc_id}/claim",
@@ -300,7 +303,7 @@ defmodule Barkpark.Tasks.ExecutionPolicyTest do
     for override <- bad_overrides do
       renew_resp =
         conn
-        |> recycle()
+        |> recycle_scoped()
         |> authed()
         |> post(
           "/v1/tasks/#{task.doc_id}/claim",

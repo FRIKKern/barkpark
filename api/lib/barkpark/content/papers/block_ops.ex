@@ -44,6 +44,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.Content.Papers.ChangeEvents
   alias Barkpark.Content.Papers.ContextualHistory
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
@@ -835,6 +836,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # transaction in `persist_blocks_doc` (see the note there).
     _ = {existing, opts}
     broadcast_paper_update(doc)
+    announce_ingest(doc, type, existing, opts)
     enqueue_edge_projection(doc)
     # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
     # gated strictly on a present `event_type` so ordinary streaming saves
@@ -847,6 +849,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
     maybe_append_paper_event(attrs, slug, doc)
     {:ok, doc}
   end
+
+  # Owner ruling #40: an ingest / BPML sync write of a PAPER is one change
+  # event right away (mutation_events row, list/doc frames, webhooks). Other
+  # blocks types (sessions) keep their own channels. `existing` tells a
+  # create from an update and carries the rev it replaced.
+  defp announce_ingest(%Document{} = doc, @paper_type, existing, opts) do
+    {mutation, previous_rev} =
+      case existing do
+        %Document{rev: rev} -> {"update", rev}
+        _ -> {"create", nil}
+      end
+
+    ChangeEvents.announce(doc, mutation,
+      previous_rev: previous_rev,
+      source: Keyword.get(opts, :source, :api)
+    )
+  end
+
+  defp announce_ingest(_doc, _type, _existing, _opts), do: :ok
 
   defp emit_tail_boundary_telemetry(type, dataset, slug) do
     :telemetry.execute(
@@ -1056,6 +1077,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # blocks and never drift. Threads the PRE-patch `blocks` as old_blocks so
         # an unbind (fieldName→nil) clears the now-orphaned content[fieldName].
         |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
+        |> sync_content_title()
 
       title = paper_title(content, slug)
 
@@ -1087,6 +1109,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
           broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
           enqueue_edge_projection(saved)
           maybe_save_op_revision(saved, dataset, opts)
+          # One combined change event once the editing burst settles (#40).
+          ChangeEvents.settle(saved, doc.rev)
 
           {:ok,
            %{
@@ -1685,6 +1709,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
           # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
           |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
+          |> sync_content_title()
 
         title = paper_title(content, slug)
 
@@ -1754,6 +1779,30 @@ defmodule Barkpark.Content.Papers.BlockOps do
     broadcast_paper_block(slug, saved.workspace_id, dataset, frame)
     enqueue_edge_projection(saved)
     maybe_save_batch_revision(saved, dataset, opts)
+
+    # task-dba598ed804f02a5: a paper op only ever fanned out on the internal
+    # `paper_topic` PubSub frame (`broadcast_paper_block/4` above) plus a
+    # SETTLED change event (#40, below) — never the document-list/`doc_topic`
+    # frames `Broadcast.broadcast_document_mutation/3` fires, which is what
+    # `/v1/data/listen/:dataset` actually subscribes to. For the canvas's own
+    # autosave (`apply_paper_block_ops/4`, called every few hundred ms while
+    # typing) that settled event is deliberate — one combined event per
+    # editing burst, not one per keystroke batch, and the batch frame here
+    # does not carry the pre-batch rev, so the job compares against the rev
+    # it finds when it fires. A single discrete HTTP call (the `:ops` route,
+    # `apply_paper_block_ops_once/6`) is not a keystroke-grade burst, so it
+    # opts into an IMMEDIATE event instead — `opts[:change_event] ==
+    # :immediate` — matching what any other document write's listen frame
+    # does: the editor hits save, the listen stream tells every other viewer
+    # right away, not up to `settle_seconds/0` later.
+    case Keyword.get(opts, :change_event, :settle) do
+      :immediate ->
+        ChangeEvents.announce(saved, "update", previous_rev: Keyword.get(opts, :previous_rev))
+
+      _ ->
+        ChangeEvents.settle(saved, Keyword.get(opts, :previous_rev))
+    end
+
     :ok
   end
 
@@ -2482,7 +2531,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do:
       Door.admit(fn ->
-        document_revless(opts, &admitted_apply_document_block_op(doc_id, type, op, dataset, &1))
+        document_revless(
+          opts,
+          &with_document_ops_lock(doc_id, type, dataset, &1, fn opts ->
+            admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
+          end)
+        )
       end)
 
   # [document-revless-cas] (Run-4 concurrent-writer matrix) — the document twin
@@ -2511,6 +2565,82 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, {:rev_mismatch, _}} -> document_revless_attempt(opts, fun, attempts - 1)
       other -> other
     end
+  end
+
+  # [document-ops-lock] task-6dd00e5b6b33c3c3 — the three document op paths
+  # (single, batch, field) read the row, compare `ifRev`, fold the ops and only
+  # then write. Nothing held the document between the compare and the write, so
+  # two batches fenced on the same rev of a PUBLISHED document both passed the
+  # compare and both inserted `drafts.<id>`: the second hit the unique index
+  # and surfaced as a 422 `invalid_op` instead of a 412 with `actual`. The
+  # writer's rev-fenced UPDATE only covers a draft that already exists.
+  #
+  # Each op now runs in one transaction that first takes a transaction-scoped
+  # advisory lock keyed on the document leaf (draft and published share it), so
+  # the read and the `ifRev` compare happen after any earlier op on the same
+  # document has committed. The loser reads the winner's row and is refused
+  # with `{:rev_mismatch, %{actual: <winner's rev>}}`.
+  #
+  # The lock is the transaction's FIRST lock and no other path takes this key,
+  # so a waiter never holds a lock someone else needs. A caller that already
+  # owns a transaction (`apply_document_block_op_once/7` row-locks the base
+  # first) keeps its own atomicity and is not re-locked here.
+  #
+  # Broadcasts and `:after_save` hooks are deferred to after the commit, as in
+  # `apply_document_block_op_once/7`.
+  @document_ops_lock_class 0x626F
+
+  defp with_document_ops_lock(doc_id, type, dataset, opts, fun) do
+    if Repo.in_transaction?() do
+      fun.(opts)
+    else
+      Broadcast.claim_deferred_queue()
+      Writer.clear_deferred_after_save()
+
+      try do
+        Repo.transaction(fn ->
+          lock_document_ops!(doc_id, type, dataset)
+
+          case fun.(Keyword.put(opts, :defer_after_save, true)) do
+            {:ok, result} -> {result, Writer.take_deferred_after_save()}
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end)
+      rescue
+        exception ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          reraise exception, __STACKTRACE__
+      catch
+        kind, reason ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      else
+        {:ok, {result, deferred}} ->
+          Broadcast.flush_deferred_broadcasts()
+          finish_document_ops_after_save(deferred)
+          {:ok, result}
+
+        {:error, reason} ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          {:error, reason}
+      end
+    end
+  end
+
+  defp finish_document_ops_after_save(nil), do: :ok
+
+  defp finish_document_ops_after_save({saved, payload}) do
+    _ = Writer.finish_deferred_after_save(saved, payload)
+    :ok
+  end
+
+  defp lock_document_ops!(doc_id, type, dataset) do
+    key = :erlang.crc32("#{dataset}:#{type}:#{DraftId.published_id(doc_id)}") - 2_147_483_648
+    Repo.query!("SELECT pg_advisory_xact_lock($1::int, $2::int)", [@document_ops_lock_class, key])
+    :ok
   end
 
   defp admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
@@ -2571,6 +2701,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
          dataset,
          opts
        ) do
+    with {:ok, saved, written_doc_id} <-
+           persist_document_blocks(doc, doc_id, type, blocks, new_blocks, dataset, opts) do
+      {:ok,
+       %{
+         block: affected.block,
+         block_id: affected.block_id,
+         op_kind: Map.get(op, "op"),
+         position: affected.position,
+         written_doc_id: written_doc_id,
+         written_row_id: saved.id,
+         rev: saved.rev
+       }}
+    end
+  end
+
+  # The one write behind both document op paths: store the new block list,
+  # re-project it into the bound fields and upsert the draft.
+  defp persist_document_blocks(doc, doc_id, type, blocks, new_blocks, dataset, opts) do
     content =
       (doc.content || %{})
       |> Map.put("blocks", new_blocks)
@@ -2596,27 +2744,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # Owner ruling #35 item 4: a bound block can set any content field, so the
     # op answers to the mutate door's guards (claim, close, plugin fences)
     # before it writes. See `Content.Mutations.ensure_content_write_guards/5`.
-    with :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts) do
-      upsert_document_block_op(type, attrs, op, affected, dataset, opts)
-    end
-  end
-
-  defp upsert_document_block_op(type, attrs, op, affected, dataset, opts) do
-    case Content.upsert_document(type, attrs, dataset, opts) do
-      {:ok, saved} ->
-        {:ok,
-         %{
-           block: affected.block,
-           block_id: affected.block_id,
-           op_kind: Map.get(op, "op"),
-           position: affected.position,
-           written_doc_id: attrs["doc_id"],
-           written_row_id: saved.id,
-           rev: saved.rev
-         }}
-
-      {:error, _} = err ->
-        err
+    with :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts),
+         {:ok, saved} <- Content.upsert_document(type, attrs, dataset, opts) do
+      {:ok, saved, attrs["doc_id"]}
     end
   end
 
@@ -2631,6 +2761,97 @@ defmodule Barkpark.Content.Papers.BlockOps do
       rev: doc.rev,
       no_op: true
     }
+  end
+
+  @doc """
+  Apply an ordered batch of block ops to a document's block list in one write
+  — the batch twin of `apply_document_block_op/5`.
+
+  The ops fold in memory, each over the result of the one before, exactly as
+  `apply_paper_block_ops` folds a paper batch. Any op that fails stops the
+  fold and nothing is written, so the batch applies whole or not at all. The
+  revision fence, draft target, re-projection and the mutate door's guards are
+  the single-op path's.
+
+  Returns `{:ok, %{results, written_doc_id, written_row_id, rev}}`, where
+  `results` holds one `%{block, block_id, op_kind, position}` per op in order,
+  plus `no_op: true` when a fenced batch changed nothing.
+  """
+  @spec apply_document_block_ops(String.t(), String.t(), [map()], String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def apply_document_block_ops(doc_id, type, ops, dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        document_revless(
+          opts,
+          &with_document_ops_lock(doc_id, type, dataset, &1, fn opts ->
+            admitted_apply_document_block_ops(doc_id, type, ops, dataset, opts)
+          end)
+        )
+      end)
+
+  defp admitted_apply_document_block_ops(doc_id, type, ops, dataset, opts)
+       when is_binary(doc_id) and is_binary(type) and is_list(ops) and ops != [] do
+    with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         :ok <- reject_implicit_html_conversion(doc),
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_ops_revision(ops, if_rev),
+         :ok <- check_document_if_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
+         :ok <- preflight_table_editor_ops(blocks, ops),
+         {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
+         {:ok, new_blocks, results} <- fold_document_ops(blocks, ops) do
+      if not is_nil(if_rev) and new_blocks == blocks do
+        {:ok,
+         %{
+           results: results,
+           written_doc_id: doc.doc_id,
+           written_row_id: doc.id,
+           rev: doc.rev,
+           no_op: true
+         }}
+      else
+        with {:ok, saved, written_doc_id} <-
+               persist_document_blocks(doc, doc_id, type, blocks, new_blocks, dataset, opts) do
+          {:ok,
+           %{
+             results: results,
+             written_doc_id: written_doc_id,
+             written_row_id: saved.id,
+             rev: saved.rev
+           }}
+        end
+      end
+    end
+  end
+
+  defp admitted_apply_document_block_ops(_doc_id, _type, _ops, _dataset, _opts),
+    do: {:error, :invalid_op}
+
+  # Ids are minted per op, as in `fold_paper_ops/3`, so each receipt names the
+  # id its block was stored with and the next op never meets an id-less block.
+  defp fold_document_ops(blocks, ops) do
+    Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, results} ->
+      with {:ok, applied_op} <- lower_editor_block_op(acc, op),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op),
+           next = ensure_block_ids(patched),
+           {:ok, affected} <- locate_paper_affected(applied_op, next) do
+        result = %{
+          block: affected.block,
+          block_id: affected.block_id,
+          op_kind: Map.get(op, "op"),
+          position: affected.position
+        }
+
+        {:cont, {:ok, next, [result | results]}}
+      else
+        {:error, _reason} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, folded, results} -> {:ok, folded, Enum.reverse(results)}
+      {:error, _reason} = err -> err
+    end
   end
 
   defp project_document_op_ids(blocks, nil), do: {:ok, blocks}
@@ -3038,25 +3259,45 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   The batch is checked against the field's declared vocabulary
   (`FieldVocabulary.validate/2`) BEFORE anything is written — the client
-  vetoes the same vocabulary calmly, this is the truth.
+  vetoes the same vocabulary calmly, this is the truth. ONLY the blocks this
+  batch inserts or modifies are checked (`Patch.touched_block_ids/1`,
+  task-bbd13e5a46240cc1) — not the field's whole block list. A field can
+  carry a block outside today's declared vocabulary that no op here ever
+  wrote (seeded by another producer — e.g. a Sanity inline object type
+  nothing has decided on yet, task-85fee859cf3bfef6 is the owner question on
+  deciding inline objects generally); such a block round-trips
+  byte-identical on a batch that never touches it, and is still refused the
+  moment a batch tries to insert or edit it.
 
-  Returns `{:ok, %{field, blocks, written_doc_id}}` or `{:error, reason}`.
+  `opts[:if_rev]` fences the batch: a document whose `rev` differs answers
+  `{:error, {:rev_mismatch, %{expected, actual}}}` before any op runs, and the
+  same value fences the UPDATE itself (`Writer`'s rev-fenced update). The ops
+  fold in memory and land in one write, so a batch applies whole or not at all.
+
+  Returns `{:ok, %{field, blocks, written_doc_id, rev}}` or `{:error, reason}`.
   """
   @spec apply_field_block_ops(String.t(), String.t(), String.t(), [map()], String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
     do:
       Door.admit(fn ->
-        admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+        with_document_ops_lock(doc_id, type, dataset, opts, fn opts ->
+          admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+        end)
       end)
 
   defp admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
        when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         :ok <- check_document_if_rev(doc, Keyword.get(opts, :if_rev)),
          {:ok, field_def} <- field_definition(type, dataset, field, opts),
          blocks = field_blocks(Map.get(doc.content || %{}, field)),
          {:ok, new_blocks} <- Patch.apply_patches(blocks, ops),
-         :ok <- FieldVocabulary.validate(FieldVocabulary.from_field(field_def), new_blocks) do
+         :ok <-
+           FieldVocabulary.validate(
+             FieldVocabulary.from_field(field_def),
+             touched_vocabulary_targets(new_blocks, ops)
+           ) do
       scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
       content =
@@ -3083,8 +3324,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
       }
 
       case Content.upsert_document(type, attrs, dataset, opts) do
-        {:ok, _saved} ->
-          {:ok, %{field: field, blocks: new_blocks, written_doc_id: attrs["doc_id"]}}
+        {:ok, saved} ->
+          {:ok,
+           %{field: field, blocks: new_blocks, written_doc_id: attrs["doc_id"], rev: saved.rev}}
 
         {:error, _} = err ->
           err
@@ -3092,6 +3334,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     else
       {:error, _reason} = err -> err
     end
+  end
+
+  # The subset of `new_blocks` the vocabulary check actually needs to look at
+  # (task-bbd13e5a46240cc1): the blocks `ops` inserted or modified, per
+  # `Patch.touched_block_ids/1`. A block whose id is NOT in that set is
+  # exactly as it was stored before this batch ran — this function never
+  # reads its content, only its id — so it is dropped here rather than handed
+  # to `FieldVocabulary.validate/2`, which cannot tell "always been this way"
+  # from "this batch just wrote this".
+  defp touched_vocabulary_targets(new_blocks, ops) do
+    touched = Patch.touched_block_ids(ops)
+    Enum.filter(new_blocks, &MapSet.member?(touched, Map.get(&1, "id")))
   end
 
   # The field's raw schema map — the vocabulary rides on it. A field that did
@@ -3112,11 +3366,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   @doc """
   The block array behind a field value, in every shape a `richText` field has
-  ever stored: the projected body map, a legacy plain string (one paragraph),
-  or nothing.
+  ever stored: the projected body map, a BARE list (task-839f9bebf5628c03 —
+  found alongside the Validation.walk_field/4 gap this mirrors: a raw `set`
+  patch, or any write that bypasses this field's own op path, can leave the
+  field holding a plain array rather than the `%{"blocks", "html"}` wrapper
+  this module itself always writes; a block op applied afterward used to read
+  that array as EMPTY via the catch-all below and silently DISCARD it instead
+  of extending it), a legacy plain string (one paragraph), or nothing.
   """
   @spec field_blocks(term()) :: [map()]
   def field_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  def field_blocks(blocks) when is_list(blocks), do: blocks
 
   def field_blocks(text) when is_binary(text) do
     case String.trim(text) do
@@ -5164,6 +5424,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
     blank_to_nil(Map.get(content, "title")) || heading_title(Map.get(content, "blocks")) || slug
   end
 
+  defp title_block_text(blocks), do: Papers.Template.derive_title(%{}, blocks)["title"]
+
+  # Doctrine (pdd-t4): the row title IS the locked title block's text. A paper
+  # created with a `title` attribute also stores content["title"], which
+  # `paper_title/2` reads first, so a canvas edit of the title block never
+  # reached the row, the desk or the header (task-23bff317e617928e). An op
+  # keeps that stored field in step with the block; a paper whose content
+  # carries no "title" key keeps its shape.
+  defp sync_content_title(%{"title" => _} = content) do
+    case title_block_text(Map.get(content, "blocks")) do
+      nil -> content
+      text -> Map.put(content, "title", text)
+    end
+  end
+
+  defp sync_content_title(content), do: content
+
   @doc """
   The first heading block's PLAIN text, or `nil` when there is no heading with
   printable text.
@@ -5554,7 +5831,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp paper_preview_opts(slug, scope) do
     %{
       media_scope: scope,
-      url: "/papers/#{slug}",
+      # The reader serves the PUBLISHED id; a body edit lands on the draft row,
+      # so the raw slug here was `drafts.<slug>` and the stored share card
+      # pointed at a page that never resolves (task-27265c623ef901d2). Same
+      # normalisation as Writer.maybe_put_preview_url/3.
+      url: "/papers/#{DraftId.published_id(slug)}",
       doc_type: @paper_type
     }
   end
@@ -5618,12 +5899,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # MUST be the row's workspace so a later `reveal_fields` resolves the same
   # (workspace_id, scope) DEK that sealed the bound block. `nil` (an unscoped
   # write) → the NULL-workspace DEK.
+  #
+  # Owner ruling #21 (task-9a7298f03aad0c42) rides the same chokepoint: before
+  # sealing, a block list that binds a field the schema keeps private is
+  # refused (`BoundFieldGuard`), because the body is the public artifact.
   defp encrypt_blocks_for_type(type, blocks, dataset, workspace_id)
        when is_list(blocks) and is_binary(dataset) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, type, dataset, workspace_id) do
-      {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
-      {:ok, _} -> {:ok, blocks}
-      {:error, _} = err -> err
+    with :ok <- Barkpark.Content.BoundFieldGuard.check(blocks, type, dataset, workspace_id) do
+      case Encryption.encrypt_marked(%{"blocks" => blocks}, type, dataset, workspace_id) do
+        {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
+        {:ok, _} -> {:ok, blocks}
+        {:error, _} = err -> err
+      end
     end
   end
 

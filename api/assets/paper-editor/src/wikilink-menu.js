@@ -17,6 +17,11 @@
 //   • open() shows a "Searching…" state until setResults() fires for the first time.
 //   • Eyebrow reads "Link to page" (vs slash menu's "Insert block").
 
+import { t, te } from "./i18n.js";
+
+// Unique per popup so two menus on one page never share option ids.
+let menuSeq = 0;
+
 export class WikilinkMenu {
   constructor({ onChoose, onDismiss, eyebrow, kind } = {}) {
     this._onChoose = onChoose || (() => {});
@@ -31,6 +36,7 @@ export class WikilinkMenu {
     this._query = "";       // live query (display only in the eyebrow)
     this._el = null;        // popup root element
     this._rowEls = [];      // parallel to this._results, for active styling
+    this._owner = null;     // the editable focus stays in; points at the active row
 
     // Bound once so add/removeEventListener match on teardown.
     this._onDocPointer = (e) => this._handlePointer(e);
@@ -58,6 +64,11 @@ export class WikilinkMenu {
       this._results = [];
       this._active = 0;
       this._open = true;
+      const active = document.activeElement;
+      const editable =
+        active && (active.isContentEditable || active.getAttribute?.("contenteditable") === "true");
+      this._owner = editable && !this._el.contains(active) ? active : null;
+      if (this._owner) this._owner.setAttribute("aria-controls", this._el.id);
       document.addEventListener("mousedown", this._onDocPointer, true);
       // Capture-phase Escape so the menu reliably closes even when keydown does
       // not route through TipTap's editorProps.handleKeyDown (e.g. a JS-
@@ -86,6 +97,11 @@ export class WikilinkMenu {
     if (!this._open) return;
     this._open = false;
     if (this._el) this._el.style.display = "none";
+    if (this._owner) {
+      this._owner.removeAttribute("aria-activedescendant");
+      this._owner.removeAttribute("aria-controls");
+      this._owner = null;
+    }
     document.removeEventListener("mousedown", this._onDocPointer, true);
     document.removeEventListener("keydown", this._onDocKeydown, true);
   }
@@ -119,6 +135,7 @@ export class WikilinkMenu {
     const el = document.createElement("div");
     el.className = "bp-wikilink-menu";
     el.setAttribute("role", "listbox");
+    el.id = `bp-wikilink-menu-${++menuSeq}`;
     el.setAttribute("data-kind", this._kind);
     el.style.display = "none";
     document.body.appendChild(el);
@@ -128,12 +145,14 @@ export class WikilinkMenu {
   _render() {
     this._el.innerHTML = "";
     this._rowEls = [];
+    // The listbox's accessible name is the eyebrow, in the viewer's language.
+    this._el.setAttribute("aria-label", t(this._eyebrow));
 
     // Eyebrow — uppercase, letter-spaced "Link to page" header, sitting above
     // the scrollable row list. Mirrors the slash menu's "Insert block" eyebrow.
     const eyebrow = document.createElement("div");
     eyebrow.className = "bp-wikilink-menu__eyebrow";
-    eyebrow.textContent = this._eyebrow;
+    eyebrow.textContent = t(this._eyebrow);
     this._el.appendChild(eyebrow);
 
     // Scrollable list region so the eyebrow + footer stay pinned at top/bottom.
@@ -145,13 +164,13 @@ export class WikilinkMenu {
       // Async loading state — setResults() has not yet been called for this open.
       const searching = document.createElement("div");
       searching.className = "bp-wikilink-empty";
-      searching.textContent = "Searching…";
+      searching.textContent = t("Searching…");
       list.appendChild(searching);
     } else if (this._results.length === 0) {
       // Empty results — non-selectable. Note-creation is out of scope.
       const empty = document.createElement("div");
       empty.className = "bp-wikilink-empty";
-      empty.textContent = "No matching pages";
+      empty.textContent = t("No matching pages");
       list.appendChild(empty);
     } else {
       // Flat candidate list — no groups (the server already scoped the results).
@@ -160,6 +179,7 @@ export class WikilinkMenu {
         row.type = "button";
         row.className = "bp-wikilink-item";
         row.setAttribute("role", "option");
+        row.id = `${this._el.id}-opt-${idx}`;
         row.dataset.id = candidate.id || "";
 
         // Bold page title — the primary label (left-aligned).
@@ -170,7 +190,9 @@ export class WikilinkMenu {
         // Muted right-aligned type badge, mirroring `.bp-slash-desc`.
         const badge = document.createElement("span");
         badge.className = "bp-wikilink-type-badge";
-        badge.textContent = candidate.type || "";
+        // The host's word for the type when it sends one (Studio: "artikkel"),
+        // else the type id.
+        badge.textContent = candidate.type_label || candidate.type || "";
 
         row.appendChild(title);
         row.appendChild(badge);
@@ -197,21 +219,23 @@ export class WikilinkMenu {
     const foot = document.createElement("div");
     foot.className = "bp-wikilink-foot";
     foot.innerHTML =
-      "<kbd>↵</kbd> insert link <span class=\"bp-wikilink-foot-sep\">·</span> " +
-      "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-      "<span class=\"bp-wikilink-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
+      `<kbd>↵</kbd> ${te("insert link")} <span class="bp-wikilink-foot-sep">·</span> ` +
+      `<kbd>↑</kbd><kbd>↓</kbd> ${te("navigate")} ` +
+      `<span class="bp-wikilink-foot-sep">·</span> <kbd>esc</kbd> ${te("dismiss")}`;
     this._el.appendChild(foot);
   }
 
   _syncActive() {
     this._rowEls.forEach((row, idx) => {
-      if (idx === this._active) {
-        row.classList.add("is-active");
-        row.scrollIntoView({ block: "nearest" });
-      } else {
-        row.classList.remove("is-active");
-      }
+      const on = idx === this._active;
+      row.classList.toggle("is-active", on);
+      row.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) row.scrollIntoView({ block: "nearest" });
     });
+    if (!this._owner) return;
+    const row = this._rowEls[this._active];
+    if (row) this._owner.setAttribute("aria-activedescendant", row.id);
+    else this._owner.removeAttribute("aria-activedescendant");
   }
 
   // Place the popup just below the caret; flip above if it would overflow the

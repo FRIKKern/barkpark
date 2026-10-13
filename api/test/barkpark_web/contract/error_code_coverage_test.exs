@@ -103,7 +103,16 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
   @non_error_code_literals MapSet.new([
                              # per-violation severity code in the validation
                              # envelope, not the top-level Error.code
-                             "legacy"
+                             "legacy",
+                             # a `warnings[].code` on member-add's 201 SUCCESS
+                             # (MemberController, owner ruling #7 reclaim), never
+                             # an error envelope
+                             "account_reclaimed",
+                             # a `warnings[].code` on schema apply's 201/200
+                             # SUCCESS (SchemaController, task-415c5c02fad8a3c7:
+                             # a key Barkpark never reads), never an error
+                             # envelope
+                             "schema_unknown_key"
                            ])
 
   defp emitted_codes do

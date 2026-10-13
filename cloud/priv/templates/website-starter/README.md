@@ -9,7 +9,7 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 - `@barkpark/nextjs` for server fetching + Server Actions
 - `@barkpark/react` `PortableDoc` — the canonical, Phoenix-faithful PortableDocument renderer, plus `@barkpark/react/client` media hydration (mermaid diagrams + asciicasts) and `@barkpark/react/paper-surface.css` for the skin
 - Tailwind CSS
-- `docker-compose.yml` bundling the Phoenix API + PostgreSQL
+- `docker-compose.yml` running the published API image + PostgreSQL (optional; see Quick start)
 - Sample schemas (`page`, `post`, `author`, `contact`) + seed script
 - SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
 - Graceful states: a branded `not-found.tsx` served with a real 404 status, and an `error.tsx` boundary
@@ -17,8 +17,12 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 ## Quick start
 
 ```sh
+# 1. A Barkpark API on :4000 — skip if you already run one
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp setup --target local --yes # clones Barkpark and runs it on :4000; names any missing prerequisite
+
+# 2. This app
 cp .env.example .env.local
-docker compose up -d          # Phoenix API on :4000, Postgres on :5432
 npm install                   # or: pnpm install · yarn · bun install
 {{pmCommand}} codegen         # generate TypeScript types (runs barkpark generate; requires @barkpark/codegen in devDependencies)
 {{pmCommand}} seed            # 2 authors, 3 pages, 3 posts — all published
@@ -26,6 +30,8 @@ npm install                   # or: pnpm install · yarn · bun install
 ```
 
 Open http://localhost:3000 · Studio: http://localhost:4000/studio
+
+> **Docker instead of `bp setup`:** `docker-compose.yml` runs the published image `ghcr.io/barkpark/api:latest` beside Postgres. Create a `.env` beside it with `BARKPARK_CLOAK_KEY` and `BARKPARK_KEK` (each `openssl rand -base64 32`), `PREVIEW_JWT_SECRET` and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` (each `openssl rand -base64 48`), then `docker compose up -d`. If the image cannot be pulled, build it from a Barkpark checkout: copy `docker-compose.override.yml.example` → `docker-compose.override.yml` and run `docker compose up -d --build`. Full setup guide: [QUICKSTART](https://github.com/FRIKKern/barkpark/blob/main/docs/setup/QUICKSTART.md).
 
 ## Auth
 

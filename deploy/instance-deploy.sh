@@ -40,7 +40,9 @@
 # ROLLBACK MODES (W6) — the same script owns the reverse flip:
 #   --rollback-preflight  read-only: is a rollback possible right now? Typed
 #                         exits (21 no_previous_slot, 22 not_supported, 23 lock
-#                         held); exit 0 prints TARGET_SLOT=/TARGET_SHA= lines
+#                         held, 25 v2_seals_unreadable: the target predates
+#                         bound field seals and this box holds some); exit 0
+#                         prints TARGET_SLOT=/TARGET_SHA= lines
 #                         (machine-parsed by the instance controller).
 #   --rollback            flip+reset to the IDLE slot at its RECORDED sha
 #                         (.slots/<slot>.sha): git reset --hard <stamp>, reboot
@@ -202,6 +204,24 @@ NODE_LINK="${BARKPARK_NODE_LINK:-/usr/local/bin/barkpark-node}"
 SANDBOX_RUNNER_BIN="${BARKPARK_SANDBOX_RUNNER_BIN:-/usr/local/bin/cloud-sandbox-runner}"
 SANDBOX_RUNNER_MJS="${BARKPARK_SANDBOX_RUNNER_MJS:-/usr/local/bin/cloud-sandbox-runner.mjs}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
+
+# Fire-and-forget: ask the slot about to be retired to end its own open SSE
+# streams (listen/chat/presence) right now, instead of sitting alive-but-deaf for the
+# ~20-30s its drain + the `systemctl disable --now` below takes
+# (task-2bcada0faa01ebb2 — Caddy already points elsewhere by the time this
+# runs, so a stream opened before the flip keeps sending ': keepalive' but
+# never sees a write again until the old slot actually stops). Called on
+# BOTH flip paths (forward deploy and --rollback) right after Caddy reload
+# succeeds, hitting the retiring slot's OWN port directly — never through
+# Caddy. Gated app-side by RequireLoopback (BarkparkWeb.DeployController);
+# best-effort here: a timeout/refused/non-204 is a LOG line, never a deploy
+# failure — the stream just drains the slow way instead, same as before
+# this existed.
+signal_sse_retire() { # $1 = the retiring slot's own port
+  local port="$1" code
+  code="$(bp_curl_code -s -o /dev/null --max-time 3 -X POST "http://localhost:${port}/v1/internal/retire-sse" 2>/dev/null || echo 000)"
+  log "signaled SSE retire on :$port (POST /v1/internal/retire-sse = $code)"
+}
 
 # ---- ONE shared Caddyfile lock (site-spawner D27) --------------------------
 # $CADDYFILE has a SECOND writer: deploy/site-deploy.sh arms a `handle_path
@@ -934,6 +954,29 @@ if [ "$MODE" != "deploy" ]; then
     log "idle slot '$TARGET_SLOT' has no complete build root (api/_build_$TARGET_SLOT/prod) — no_previous_slot"
     exit 21
   fi
+  # Bound field seals (owner ruling #18 bind half, e067ef7cd): code before it
+  # has no decrypt clause for a version-2 envelope ("_bpenc": 2), so rolling
+  # back past it leaves every v2-sealed field unrevealable. Refuse when the
+  # target predates v2 support AND this box holds v2 seals. The count is
+  # best-effort: no psql or no answer is "unknown" and only warns (a box
+  # this cannot inspect is not blocked). BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1
+  # accepts the loss deliberately.
+  # Captured, not piped: `git show | grep -q` under pipefail can SIGPIPE.
+  TARGET_CIPHER="$(git show "$TARGET_SHA:api/lib/barkpark/crypto/field_cipher.ex" 2>/dev/null || true)"
+  if [[ "$TARGET_CIPHER" != *"@bound_version"* ]]; then
+    V2_SEALS="unknown"
+    V2_DB_URL="$(set -a; . "$APP/.env" >/dev/null 2>&1; printf '%s' "${DATABASE_URL:-}")"
+    if command -v psql >/dev/null 2>&1 && [ -n "$V2_DB_URL" ]; then
+      V2_SEALS="$(PGCONNECT_TIMEOUT=5 psql "$V2_DB_URL" -tAc "SELECT count(*) FROM documents WHERE content::text LIKE '%\"_bpenc\": 2%'" 2>/dev/null || true)"
+      case "$V2_SEALS" in ''|*[!0-9]*) V2_SEALS="unknown" ;; esac
+    fi
+    if [ "$V2_SEALS" = "unknown" ]; then
+      log "WARN: target $TARGET_SHA predates bound field seals; could not count v2 seals on this box — if any exist, they become unrevealable after this rollback"
+    elif [ "$V2_SEALS" != "0" ] && [ "${BARKPARK_ROLLBACK_ALLOW_V2_SEALS:-}" != "1" ]; then
+      log "target $TARGET_SHA predates bound field seals and $V2_SEALS document(s) here hold one — rolling back would make them unrevealable (v2_seals_unreadable). Fix forward, or set BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1 to accept"
+      exit 25
+    fi
+  fi
   if [ "$MODE" = "preflight" ]; then
     log "rollback possible: would flip :$ACTIVE_PORT ($LIVE) -> :$TARGET_PORT ($TARGET_SLOT) at $TARGET_SHA"
     echo "TARGET_SLOT=$TARGET_SLOT"
@@ -1017,6 +1060,10 @@ if [ "$MODE" != "deploy" ]; then
   exec 8>&-   # leaf lock: released the moment the file is written + reloaded
   code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
   log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
+  # This path has no post-flip gate (the comment above the curl says so) —
+  # Caddy already points at $TARGET_PORT, so $FLIP_FROM (the slot rolled
+  # away from) is retiring right now.
+  signal_sse_retire "$FLIP_FROM"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
   # sha (W6 D21) — keeps coalesce, the agent's git_commit, and the next
@@ -2018,6 +2065,11 @@ if [ "$code" != "200" ]; then
   exit 14
 fi
 
+# The health gate just above can still revert the flip (old slot never
+# retired) — only past it is $FLIP_FROM (the slot Caddy flipped AWAY from)
+# actually retiring.
+signal_sse_retire "$FLIP_FROM"
+
 # ---- Drain, then retire the old slot AND the pre-blue/green legacy unit.
 # Exactly one slot stays enabled (survives reboot). Rollback is NOT a bare
 # Caddyfile flip — a slot restart recompiles NEW source from the ONE shared
@@ -2027,6 +2079,20 @@ fi
 # Caddy only on green (see the rollback block above).
 sleep 5
 systemctl enable "barkpark-slot@$TARGET" >/dev/null 2>&1 || true
+# task-234799142dfd8559. `systemctl disable --now` BLOCKS (no --no-block) on
+# the stop, so this line only returns once the old slot is actually down —
+# either the BEAM drained an in-flight ordinary HTTP request on its own
+# (Bandit's thousand_island_options: [shutdown_timeout: 20_000], a graceful
+# OTP application stop under SIGTERM; api/config/runtime.exs) or
+# barkpark-slot@.service's TimeoutStopSec=60 fired and systemd SIGKILLed it.
+# 60s, not 20s + Oban's own 15s shutdown_grace_period summed exactly: the
+# Endpoint stops FIRST (reverse of Application's start order, and it is
+# "typically the last entry" there), Oban stops LATER, and a dozen smaller
+# children stop in between — see the unit file's own comment for the full
+# chain. `|| true` only swallows a non-zero EXIT from systemctl itself (e.g.
+# the unit was already down) — it does not skip the wait. Long-lived SSE
+# streams are a SEPARATE concern already handled above by signal_sse_retire:
+# this pair covers everything else.
 systemctl disable --now "barkpark-slot@$OTHER" >/dev/null 2>&1 || true
 systemctl disable --now barkpark >/dev/null 2>&1 || true
 

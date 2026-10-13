@@ -11,7 +11,7 @@ defmodule BarkparkWeb.PaperBacklinks do
 
   @max_cards 4
 
-  @section_style "margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--paper-rule,#dde7e2)"
+  @section_style "margin-top:4.5rem;padding-top:1.5rem;border-top:1px solid var(--paper-rule,#e2e6e5)"
   @head_style "display:flex;align-items:flex-start;justify-content:space-between;gap:1.5rem;margin-bottom:1.25rem"
   @kicker_style "margin:0 0 0.35rem;color:var(--paper-accent,#1e5347);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.68rem;font-weight:700;letter-spacing:0.11em;text-transform:uppercase"
   @heading_style "margin:0;color:var(--paper-ink,#17332d);font-size:1.45rem;line-height:1.2;letter-spacing:-0.02em"
@@ -19,7 +19,7 @@ defmodule BarkparkWeb.PaperBacklinks do
   @live_style "display:inline-flex;flex:none;align-items:center;gap:0.4rem;margin-top:0.2rem;color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.68rem;font-weight:650;letter-spacing:0.08em;text-transform:uppercase"
   @dot_style "display:block;width:0.42rem;height:0.42rem;border-radius:50%;background:var(--paper-accent,#1e5347)"
   @grid_style "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr));gap:0.75rem"
-  @card_style "display:flex;min-width:0;min-height:10.5rem;flex-direction:column;padding:1rem;border:1px solid var(--paper-rule,#dde7e2);background:color-mix(in srgb,var(--paper-bg,#fff) 84%,transparent);color:var(--paper-ink,#17332d);text-decoration:none"
+  @card_style "display:flex;min-width:0;min-height:10.5rem;flex-direction:column;padding:1rem;border:1px solid var(--paper-rule,#e2e6e5);background:color-mix(in srgb,var(--paper-bg,#fff) 84%,transparent);color:var(--paper-ink,#17332d);text-decoration:none"
   @card_top_style "display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.1rem"
   @badge_style "color:var(--paper-ink-soft,#55635e);font-family:ui-sans-serif,system-ui,sans-serif;font-size:0.67rem;letter-spacing:0.075em;text-transform:uppercase"
   @arrow_style "color:var(--paper-accent,#1e5347);font-size:1rem"

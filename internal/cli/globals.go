@@ -222,7 +222,7 @@ func (g *globals) set(key, val string) error {
 		g.datasetSet = true
 	case "-o", "--output":
 		if !validOutput(val) {
-			return fmt.Errorf("invalid --output %q (want table|json|yaml|minimal)", val)
+			return flagValueErrorf("invalid --output %q (want table|json|yaml|minimal)", val)
 		}
 		g.output = val
 		g.outputSet = true
@@ -253,20 +253,20 @@ func (g *globals) set(key, val string) error {
 	case "--limit":
 		n, err := strconv.Atoi(val)
 		if err != nil {
-			return fmt.Errorf("invalid --limit %q", val)
+			return flagValueErrorf("invalid --limit %q (want a whole number)", val)
 		}
 		if n < 0 {
-			return fmt.Errorf("invalid --limit %q (must be >= 0)", val)
+			return flagValueErrorf("invalid --limit %q (must be >= 0)", val)
 		}
 		g.limit = n
 		g.limitSet = true
 	case "--offset":
 		n, err := strconv.Atoi(val)
 		if err != nil {
-			return fmt.Errorf("invalid --offset %q", val)
+			return flagValueErrorf("invalid --offset %q (want a whole number)", val)
 		}
 		if n < 0 {
-			return fmt.Errorf("invalid --offset %q (must be >= 0)", val)
+			return flagValueErrorf("invalid --offset %q (must be >= 0)", val)
 		}
 		g.offset = n
 		g.offsetSet = true
@@ -278,6 +278,20 @@ func (g *globals) set(key, val string) error {
 		return fmt.Errorf("unhandled global flag %q", key)
 	}
 	return nil
+}
+
+// flagValueError is a global flag that was given a value it cannot take
+// (`--limit abc`, `-o xml`). The flag itself was spelled right, so the global
+// usage block would only bury the one line that says what to fix. Execute
+// prints the message alone for it, the way a command-local flag's bad value
+// is reported. Structural errors (a missing value, a value on a bool flag)
+// stay plain errors and keep the usage block, which lists the global flags.
+type flagValueError struct{ msg string }
+
+func (e *flagValueError) Error() string { return e.msg }
+
+func flagValueErrorf(format string, args ...any) error {
+	return &flagValueError{msg: fmt.Sprintf(format, args...)}
 }
 
 func validOutput(s string) bool {

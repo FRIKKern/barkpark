@@ -18,6 +18,7 @@ defmodule BarkparkWeb.StudioUserLoginTest do
   import Phoenix.LiveViewTest
 
   alias Barkpark.Accounts
+  alias Barkpark.Auth
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -149,7 +150,18 @@ defmodule BarkparkWeb.StudioUserLoginTest do
 
       conn = post(conn, "/login", %{"token" => raw})
       assert redirected_to(conn) == "/studio"
-      assert get_session(conn, "api_token") == raw
+
+      # Ruling #16 rework half (task-57f23825b18ab55d): a token sign-in no
+      # longer puts the raw bearer in the session — it mints a revocable
+      # Barkpark.Auth.TokenSession and stores only its opaque id. Resolve it
+      # back to the same raw token via Auth.resolve_session_credential/2
+      # rather than comparing the cookie's contents directly.
+      refute get_session(conn, "api_token")
+      session_id = get_session(conn, "api_token_session")
+      assert is_binary(session_id)
+
+      assert {:ok, %Barkpark.Auth.ApiToken{}, ^raw} =
+               Auth.resolve_session_credential(session_id, nil)
     end
   end
 

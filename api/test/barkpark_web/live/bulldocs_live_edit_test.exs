@@ -540,6 +540,43 @@ defmodule BarkparkWeb.BulldocsLiveEditTest do
       assert ["action:grill"] == action_events(slug)
     end
 
+    # Owner ruling #30 Q6 (2026-10-03): a reader request is a signed-in act. A
+    # share viewer arrives with no user and no token (`%{kind: :share}`), and
+    # used to pass `principal?/1`, so a read-only link could post intents the
+    # orchestrator acts on. It now gets the anonymous refusal and writes no row.
+    for access <- ["read", "edit"] do
+      @access access
+      test "paper-action and simplify-request are refused on a #{access} item-share link",
+           %{conn: conn, default_ws: ws, default_proj: proj} do
+        slug = seed_spec_paper!()
+
+        {:ok, {raw, _link}} =
+          Links.create(%{
+            workspace_id: ws.id,
+            project_id: proj.id,
+            dataset: @dataset,
+            kind: "doc",
+            ref_type: "paper",
+            ref_id: slug,
+            access: @access
+          })
+
+        {:ok, view, _html} =
+          live(conn, "/w/#{ws.slug}/p/#{proj.slug}/papers/#{slug}?share=#{raw}")
+
+        assert %{kind: :share} = assigns_of(view).viewer
+
+        render_hook(view, "paper-action", %{"action" => "grill"})
+        assert assigns_of(view).last_action == nil
+        assert flash_of(view)["error"] == Edit.anon_denial()
+        assert action_events(slug) == []
+
+        render_hook(view, "simplify-request", %{})
+        assert assigns_of(view).pending_simplify == nil
+        assert Process.alive?(view.pid)
+      end
+    end
+
     # Only a key the paper DECLARES (its source_doc's button set) becomes an
     # intent: the orchestrator acts on `action:<key>` rows (r2-lane-b paper
     # write-path audit, 2026-09-30).

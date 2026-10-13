@@ -352,7 +352,12 @@ assert_fact dispatcher_matrix False
 # lockfiles and not about any source file. Pinned as the exact comma-joined set,
 # so ADDING a third — a new venue split nobody judged in the aggregator — reds
 # here, and so does silently dropping `locks` back to one.
-assert_fact dispatcher_outputs "api,locks"
+# THREE since 2026-10-07 (task-7d13174d1e8ef0a9): `sobelow_gate` gates two
+# STEPS inside the sobelow job (the fresh-finding guard and the baseline
+# reconcile), never a job, so the aggregator has no new skip to judge. The
+# job's own Decide step reads only `failure` outcomes, and a skipped step is
+# announced by a ::notice:: naming the inputs.
+assert_fact dispatcher_outputs "api,locks,sobelow_gate"
 echo "  info — continue-on-error jobs in security.yml: '$(fact coe_jobs)'"
 echo "  info — Security gate needs: '$(fact agg_needs)'"
 echo

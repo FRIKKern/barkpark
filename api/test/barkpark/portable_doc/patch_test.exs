@@ -466,6 +466,81 @@ defmodule Barkpark.PortableDoc.PatchTest do
     end
   end
 
+  describe "patch-block on field-number — numbers, the editor's range rule" do
+    # The canvas saves a number field through this op; it must store a number
+    # (or nil) and refuse what the Paper editor's number form refuses.
+    setup do
+      field = %{"id" => "n", "type" => "field-number", "value" => 5, "min" => 0, "max" => 10}
+      %{doc: doc_with([field])}
+    end
+
+    defp number_patch(patch), do: %{"op" => "patch-block", "id" => "n", "patch" => patch}
+
+    test "stores a number, numeric text as a number, and empty as nil", %{doc: doc} do
+      for {sent, stored} <- [{7, 7}, {2.5, 2.5}, {"8", 8}, {"", nil}, {nil, nil}] do
+        assert {:ok, %{"blocks" => [block]}} =
+                 Patch.apply_patch(doc, number_patch(%{"value" => sent}))
+
+        assert block["value"] === stored, "#{inspect(sent)} should store #{inspect(stored)}"
+      end
+    end
+
+    test "refuses a value outside min..max or not a number", %{doc: doc} do
+      for sent <- [11, -1, "abc", true] do
+        assert {:error, {:invalid_op, _}} =
+                 Patch.apply_patch(doc, number_patch(%{"value" => sent}))
+      end
+
+      assert {:error, {:invalid_op, _}} = Patch.apply_patch(doc, number_patch(%{"max" => 4}))
+
+      assert {:error, {:invalid_op, _}} =
+               Patch.apply_patch(doc, number_patch(%{"min" => 8, "max" => 3}))
+    end
+
+    test "a label-only patch is not checked", %{doc: doc} do
+      assert {:ok, %{"blocks" => [%{"label" => "Pages", "value" => 5}]}} =
+               Patch.apply_patch(doc, number_patch(%{"label" => "Pages"}))
+    end
+  end
+
+  describe "patch-block on field-select — the options list" do
+    # The canvas settings disclosure saves a select's options through this op.
+    setup do
+      field = %{
+        "id" => "s",
+        "type" => "field-select",
+        "value" => "a",
+        "options" => [%{"value" => "a", "label" => "Alpha"}]
+      }
+
+      %{doc: doc_with([field])}
+    end
+
+    defp options_patch(options),
+      do: %{"op" => "patch-block", "id" => "s", "patch" => %{"options" => options}}
+
+    test "stores a list of {value, label?} options", %{doc: doc} do
+      options = [%{"value" => "a", "label" => "Alpha"}, %{"value" => "b"}]
+
+      assert {:ok, %{"blocks" => [%{"options" => ^options, "value" => "a"}]}} =
+               Patch.apply_patch(doc, options_patch(options))
+    end
+
+    test "refuses options the reader cannot look up", %{doc: doc} do
+      for bad <- [
+            "a",
+            [%{"label" => "No value"}],
+            [%{"value" => ""}],
+            ["a"],
+            [%{"value" => "a"}, %{"value" => "a"}],
+            [%{"value" => "a", "label" => 1}]
+          ] do
+        assert match?({:error, {:invalid_op, _}}, Patch.apply_patch(doc, options_patch(bad))),
+               "#{inspect(bad)} should be refused"
+      end
+    end
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────
 
   defp doc_with(blocks), do: %{"version" => 1, "blocks" => blocks}

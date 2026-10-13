@@ -48,6 +48,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   `Components.PaperEditor.paper_block_editor/1`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   # Exactly the block kinds S0's run-convert.js treats as PROSE (PROSE_TYPES):
   # the ones a single ProseMirror document can hold as native textblock siblings,
   # giving cross-block caret / selection / split / merge for free.
@@ -94,17 +96,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # (Code/Diagram/Diff/Filetree) ⇄ here.
   @canvas_attr_atom_types ~w(code diagram diff filetree)
 
-  # S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
+  # S3.5: the 8 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
   # nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
   # in an attr and is edited by a NATIVE HTML control (input / textarea / checkbox /
-  # select / datetime-local / color; run-convert.js CANVAS_FIELD_TYPES). UNLIKE the
-  # code/diagram attr-atoms, the value is COERCED BY FIELD TYPE exactly like the
-  # shipped BarkparkFieldBlockBridge (field-boolean → a BOOLEAN; the rest → a STRING).
-  # These 7 no longer SPLIT a run.
+  # select / datetime-local / color / number; run-convert.js CANVAS_FIELD_TYPES).
+  # UNLIKE the code/diagram attr-atoms, the value is COERCED BY FIELD TYPE exactly like
+  # the shipped BarkparkFieldBlockBridge (field-boolean → a BOOLEAN; field-number → a
+  # NUMBER or nil, checked by Patch against min/max; the rest → a STRING).
+  # These 8 no longer SPLIT a run.
   #
   # Keep aligned with run-convert.js CANVAS_NATIVE_FIELD_TYPES and
   # field-node.js BP_NATIVE_FIELD_TYPES.
-  @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color)
+  @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color field-number)
 
   # RUN-SPLITTER TAIL (part 1): the 2 PICKER field-* block kinds the canvas now handles
   # as CONTROL-ATOM nodes mounting the EXISTING client-side picker Web Components —
@@ -602,6 +605,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def canvas?(_), do: false
 
   @doc """
+  Whether a freshly added block of this type can take the canvas caret through
+  `focusBlock/1`: the run blocks that hold text the author types into. Atoms
+  and field node views are left out — `TextSelection.near` would put the caret
+  in a NEIGHBOUR block instead (task-44f900b38fac79e9).
+  """
+  @caret_types @prose_types ++ @canvas_content_types ++ @canvas_role_types
+  def caret_block?(%{"type" => type} = block), do: canvas?(block) and type in @caret_types
+  def caret_block?(_), do: false
+
+  @doc """
   The STABLE run id for a run at ORDINAL `i` of the paper `slug`, in the ordered
   `partition_runs/1` output: `slug <> "-run-" <> i`.
 
@@ -774,16 +787,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   @spec slug_feedback(term()) :: {:ok | :warn | :danger, String.t()}
   def slug_feedback(slug) when is_binary(slug) do
     cond do
-      slug == "" -> {:warn, "Slug is required"}
-      sidebar_slug_valid?(slug) -> {:ok, "Looks good"}
-      slug =~ ~r/[A-Z]/ -> {:danger, "Lowercase only — no capitals"}
-      slug =~ ~r/\s/ -> {:danger, "No spaces — use hyphens"}
-      slug =~ ~r/(^-|-$|--)/ -> {:warn, "No leading, trailing, or doubled hyphens"}
-      true -> {:danger, "Only lowercase letters, numbers, and hyphens"}
+      slug == "" -> {:warn, gettext("Slug is required")}
+      sidebar_slug_valid?(slug) -> {:ok, gettext("Looks good")}
+      slug =~ ~r/[A-Z]/ -> {:danger, gettext("Lowercase only — no capitals")}
+      slug =~ ~r/\s/ -> {:danger, gettext("No spaces — use hyphens")}
+      slug =~ ~r/(^-|-$|--)/ -> {:warn, gettext("No leading, trailing, or doubled hyphens")}
+      true -> {:danger, gettext("Only lowercase letters, numbers, and hyphens")}
     end
   end
 
-  def slug_feedback(_), do: {:danger, "Only lowercase letters, numbers, and hyphens"}
+  def slug_feedback(_), do: {:danger, gettext("Only lowercase letters, numbers, and hyphens")}
 
   @doc """
   Reader visibility derived from publish status (papers publish to
@@ -792,9 +805,31 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   doc_id with no status filter, so a non-published row at `doc_id = slug` is
   still publicly reachable and the stronger claim would lie.
   """
-  @spec visibility_label(term()) :: String.t()
-  def visibility_label("published"), do: "Public"
-  def visibility_label(_), do: "Draft"
+  @spec visibility_label(term(), boolean()) :: String.t()
+  def visibility_label(status, public_reader?)
+  def visibility_label("published", true), do: gettext("Public")
+  # task-352b1074aba3f434: published in a scope the anonymous reader does not
+  # serve. "Public" was a promise nobody outside could see kept (403/404).
+  def visibility_label("published", _), do: gettext("Members only")
+  def visibility_label(_, _), do: gettext("Draft")
+
+  @doc """
+  Whether the anonymous paper reader serves this scope's published papers:
+  the Default workspace on the papers dataset (`/papers/:slug`), or a scope
+  carrying a `:papers` share (`RequireShareScope`). Fails closed on a missing
+  workspace or project.
+  """
+  @spec public_reader?(term(), term(), term()) :: boolean()
+  def public_reader?(%{id: ws_id, slug: ws_slug}, %{slug: proj_slug}, dataset)
+      when is_binary(ws_slug) and is_binary(proj_slug) and is_binary(dataset) do
+    default_papers? =
+      dataset == Barkpark.Content.Papers.paper_default_dataset() and
+        match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace())
+
+    default_papers? or Barkpark.Sharing.shared?(ws_slug, proj_slug, dataset, :papers)
+  end
+
+  def public_reader?(_workspace, _project, _dataset), do: false
 
   @doc """
   Taxonomy labels for the sidebar Labels section — the paper's `content["tags"]`

@@ -33,8 +33,11 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   require Logger
 
+  alias Barkpark.Content
   alias Barkpark.Sharing
   alias BarkparkWeb.MediaVisibilityCopy
+  alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
@@ -45,31 +48,70 @@ defmodule BarkparkWeb.Studio.MediaLive do
      |> assign_new(:scope_prefix, fn -> "" end)
      |> assign(
        dataset: dataset,
-       page_title: "Media Library"
+       page_title: gettext("Media Library")
      )
+     |> assign_asset_edit_path()
      |> assign_visibility_notice()}
+  end
+
+  # The explorer's "Edit metadata" button opens `<data-open-path>/<asset id>`,
+  # the asset's mediaAsset document, where alt text and caption are edited
+  # (task-aab4c14b96bc3af1). The in-desk explorer always passed the path; this
+  # tab never did, so the panel had no way to them. Offered only where the
+  # mediaAsset schema is installed for this scope: elsewhere that document
+  # cannot open, and a button into "could not open" is worse than none.
+  defp assign_asset_edit_path(socket) do
+    path =
+      case Content.resolve_schema(
+             "mediaAsset",
+             socket.assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+        {:ok, _schema} ->
+          Paths.studio_path(socket.assigns.scope_prefix, ["mediaAsset"], socket.assigns.dataset)
+
+        _ ->
+          nil
+      end
+
+    assign(socket, asset_edit_path: path)
   end
 
   @impl true
   def render(assigns) do
     ~H"""
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
-      <div id="media-visibility-notice" style="padding: 0.75rem 1rem; font-size: 0.8125rem;">
-        <strong>{@visibility_notice.label}</strong>
-        <p style="margin: 0.25rem 0;">{@visibility_notice.copy}</p>
+      <%!-- A named region, so the visibility notice sits inside a landmark. --%>
+      <section
+        id="media-visibility-notice"
+        aria-labelledby="media-visibility-notice-label"
+        style="padding: 0.75rem 1rem; font-size: 0.8125rem;"
+      >
+        <%!-- The page's one heading, for heading navigation (task-0374792cb435a2e3);
+              inside the region, so no content sits outside a landmark. --%>
+        <h1 class="sr-only">{gettext("Media library")}</h1>
+        <strong id="media-visibility-notice-label">
+          {MediaVisibilityCopy.translate(@visibility_notice.label)}
+        </strong>
+        <p style="margin: 0.25rem 0;">{MediaVisibilityCopy.translate(@visibility_notice.copy)}</p>
         <p style="margin: 0.25rem 0;">
-          Scope {@visibility_notice.scope}: {@visibility_notice.media_share_state}
+          {gettext("Scope %{scope}: %{state}",
+            scope: @visibility_notice.scope,
+            state: MediaVisibilityCopy.translate(@visibility_notice.media_share_state)
+          )}
         </p>
         <button
           :if={!@visibility_notice.media_shared && @shares_admin?}
           type="button"
+          class="btn btn-sm"
           phx-click="publish_scope_media"
         >
-          Publish this scope's media
+          {gettext("Publish this scope's media")}
         </button>
-      </div>
+      </section>
       <div
         id="media-explorer-host"
+        class="bp-ae-host"
         phx-update="ignore"
         style="flex: 1; display: flex; min-height: 0; overflow: hidden;"
       >
@@ -77,6 +119,8 @@ defmodule BarkparkWeb.Studio.MediaLive do
           dataset={@dataset}
           scope-prefix={@scope_prefix}
           data-token={assigns[:api_token_raw] || ""}
+          data-open-path={@asset_edit_path}
+          data-strings={BarkparkWeb.StudioLocale.component_strings(:asset_explorer)}
         />
       </div>
     </div>
@@ -94,10 +138,14 @@ defmodule BarkparkWeb.Studio.MediaLive do
       # media anonymously until the socket reconnected (task-a0d8bdd7b5a518cc).
       not BarkparkWeb.Studio.Caps.admin?(socket) ->
         {:noreply,
-         put_flash(socket, :error, "Admin access required to publish this scope's media.")}
+         put_flash(
+           socket,
+           :error,
+           gettext("Admin access required to publish this scope's media.")
+         )}
 
       is_nil(scope_string(socket)) ->
-        {:noreply, put_flash(socket, :error, "No resolved scope to publish.")}
+        {:noreply, put_flash(socket, :error, gettext("No resolved scope to publish."))}
 
       true ->
         case Sharing.publish_media(scope_string(socket)) do
@@ -105,10 +153,14 @@ defmodule BarkparkWeb.Studio.MediaLive do
             {:noreply,
              socket
              |> assign_visibility_notice()
-             |> put_flash(:info, "This scope's media is published — the :media share is live.")}
+             |> put_flash(
+               :info,
+               gettext("This scope's media is published — the :media share is live.")
+             )}
 
           {:error, _reason} ->
-            {:noreply, put_flash(socket, :error, "Could not publish this scope's media.")}
+            {:noreply,
+             put_flash(socket, :error, gettext("Could not publish this scope's media."))}
         end
     end
   end

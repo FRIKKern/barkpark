@@ -309,6 +309,7 @@ api/lib/barkpark_web/layouts/bulldocs.html.heex
 api/lib/barkpark_web/layouts/sheets.html.heex
 api/lib/barkpark_web/controllers/session_html.ex
 api/lib/barkpark_web/controllers/error_html.ex
+api/lib/barkpark_web/plugs/studio_refusal_html.ex
 api/lib/barkpark_web/controllers/status_controller.ex
 api/lib/barkpark/portable_doc/render/tokens_gen.ex
 api/lib/barkpark_web/studio/tokens_gen.ex

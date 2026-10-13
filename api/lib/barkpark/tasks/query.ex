@@ -473,7 +473,7 @@ defmodule Barkpark.Tasks.Query do
     # the query-map `dataset`, then "production" — the same cascade
     # `load_task_schema/3` and the agg path use.
     dataset = Keyword.get(opts, :dataset) || Map.get(query, "dataset") || "production"
-    readable? = row_field_visibility_gate(dataset, scope)
+    readable? = row_field_visibility_gate(dataset, scope, opts)
 
     Enum.map(docs, fn doc ->
       doc
@@ -497,12 +497,8 @@ defmodule Barkpark.Tasks.Query do
   # It used to run with NO scope, which resolves the dataset to the Default
   # workspace's: another workspace's own private task fields were then judged
   # by Default's schema and rendered to anonymous readers.
-  defp row_field_visibility_gate(dataset, scope) do
-    schema =
-      case Barkpark.Content.Schema.get_schema_for_redaction("task", dataset, scope) do
-        {:ok, schema} -> schema
-        _ -> nil
-      end
+  defp row_field_visibility_gate(dataset, scope, opts) do
+    schema = task_schema(dataset, scope, opts)
 
     fn field ->
       Barkpark.Content.Envelope.field_readable?(
@@ -791,11 +787,24 @@ defmodule Barkpark.Tasks.Query do
 
   defp load_task_schema(query, scope, opts) do
     dataset = Keyword.get(opts, :dataset) || Map.get(filter_of(query), "dataset") || "production"
+    task_schema(dataset, scope, opts)
+  end
 
-    case Barkpark.Content.Schema.get_schema_for_redaction("task", dataset, scope) do
-      {:ok, schema} -> schema
-      _ -> nil
-    end
+  # ctx-b6-memoized-visibility-gate — one read per (dataset, scope) per RENDER:
+  # a paper render threads `opts[:render_cache]` (`Content.RenderCache`) to every
+  # block's fetch, so twelve task blocks read the schema once, not twelve
+  # times. Without a cache ref (any other caller) it reads as before.
+  defp task_schema(dataset, scope, opts) do
+    Barkpark.Content.RenderCache.fetch(
+      Keyword.get(opts, :render_cache),
+      {:task_schema, dataset, scope},
+      fn ->
+        case Barkpark.Content.Schema.get_schema_for_redaction("task", dataset, scope) do
+          {:ok, schema} -> schema
+          _ -> nil
+        end
+      end
+    )
   end
 
   @doc false

@@ -228,13 +228,15 @@ defmodule BarkparkWeb.Studio.PressAnswerRefusalWordTest do
 
   describe "the branches that DO have evidence still speak (no over-correction into silence)" do
     @speaking [
-      {"the URL-patch witness", ~S|return p.name ? "Opened “" + p.name + "”." : "Opened.";|},
+      {"the URL-patch witness",
+       ~S|return p.name ? this._paT("Opened “%{name}”.", { name: p.name }) : this._paT("Opened.");|},
       {"the aria-current witness",
-       ~S|return p.name ? "Selected “" + p.name + "”." : "Selected.";|},
+       ~S|return p.name ? this._paT("Selected “%{name}”.", { name: p.name }) : this._paT("Selected.");|},
       {"the lost press", "That press did not reach the server — press it again."},
       {"the discarded press", "Still working on your last press — that one was not sent."},
       {"the named ceiling", "No answer from the server after 8 seconds."},
-      {"the press itself", ~S|this._paSay(p.name ? "Working on “" + p.name + "”…" : "Working…");|}
+      {"the press itself",
+       ~S|this._paSay(p.name ? this._paT("Working on “%{name}”…", { name: p.name }) : this._paT("Working…"));|}
     ]
 
     for {label, literal} <- @speaking do

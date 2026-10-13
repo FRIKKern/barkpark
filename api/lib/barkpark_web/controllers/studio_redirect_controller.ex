@@ -58,6 +58,33 @@ defmodule BarkparkWeb.StudioRedirectController do
   end
 
   @doc """
+  Bare `/w/:workspace_slug` → that workspace's default project/dataset Studio
+  (task-5e0c5c2533936e77). Admission already ran (`:workspace_browser`):
+  `ResolveWorkspace` admitted the caller and assigned `:current_workspace`, or
+  halted with the same refusal page or sign-in redirect every Studio URL in
+  the workspace gives. The project is `ScopeResolver.resolve_project/1`'s pick
+  and the dataset `resolve_dataset/2`'s, so this lands where a flat `/studio`
+  would for this workspace. A workspace with no project yet has no Studio to
+  open: 404.
+  """
+  def workspace(%{assigns: %{current_workspace: %{slug: ws_slug} = ws}} = conn, _params) do
+    case ScopeResolver.resolve_project(ws) do
+      %{slug: proj_slug} = project ->
+        ds = ScopeResolver.resolve_dataset(project, nil)
+
+        redirect(conn,
+          to: with_query("/w/#{ws_slug}/p/#{proj_slug}/d/#{ds}/studio", conn.query_string)
+        )
+
+      nil ->
+        conn
+        |> put_status(:not_found)
+        |> put_view(html: BarkparkWeb.ErrorHTML)
+        |> render("404.html")
+    end
+  end
+
+  @doc """
   Resolve the scoped Studio target for this conn's token. Shared with
   `PageController.redirect_to_studio` (bare `/` + `/studio`, dataset nil)
   and `LegacyRedirectController` (retargeted deep links).

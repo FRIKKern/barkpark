@@ -39,6 +39,12 @@ defmodule Barkpark.Quiz do
   @doc "Remove a player and drop their answer."
   defdelegate leave(pin, player_id), to: Room
 
+  @doc "Host control: lock (true) or unlock (false) the room to new players."
+  defdelegate lock(pin, locked?), to: Room
+
+  @doc "Host control: remove a player and refuse that player id for the room's life."
+  defdelegate kick(pin, player_id), to: Room
+
   @doc "Record a player's answer (last write wins)."
   defdelegate submit_answer(pin, player_id, choice_id), to: Room
 

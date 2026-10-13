@@ -153,14 +153,19 @@ defmodule Barkpark.Content.Analytics do
   end
 
   defp owner_clamp_exempt?(%CallerContext{is_admin: true}), do: true
+  # A token tied to a user acts as that user (owner ruling #9): not exempt.
+  defp owner_clamp_exempt?(%CallerContext{principal_type: :api_token, user_id: uid})
+       when is_binary(uid),
+       do: false
+
   defp owner_clamp_exempt?(%CallerContext{principal_type: :api_token}), do: true
   defp owner_clamp_exempt?(_), do: false
 
   defp scope_owned_types_to_owner(query, owned_types, %CallerContext{
-         principal_type: :user,
+         principal_type: kind,
          user_id: uid
        })
-       when is_binary(uid) do
+       when kind in [:user, :api_token] and is_binary(uid) do
     where(
       query,
       [d],

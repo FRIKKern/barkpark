@@ -53,7 +53,8 @@ defmodule Barkpark.PortableDoc.Render.EditorControlIslandParityTest do
     ".bp-canvas-figure-caption-input",
     ".bp-canvas-code-area",
     ".bp-canvas-term__title-input",
-    ".bp-canvas-term__foot-input"
+    ".bp-canvas-term__foot-input",
+    ".bp-canvas-diagram-area"
   ]
 
   # UA stylesheet resets that the reader's text does not have.

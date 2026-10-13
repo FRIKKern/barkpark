@@ -16,7 +16,9 @@ for (const file of ["../styles.css", "../../../../priv/static/assets/bp-paper-ed
   assert.match(css, /(^|\n)bp-paper-canvas\s*\{[^}]*position: relative;/, `${file}: the canvas anchors its gutter chrome`);
   assert.match(css, /\n\.bp-block-handle\s*\{[^}]*position: absolute;/, `${file}: the block handle is out of flow`);
   assert.match(css, /\n\.bp-block-drop\s*\{[^}]*position: absolute;/, `${file}: the drop line is out of flow`);
-  assert.match(css, /\n\.bp-block-menu\s*\{[^}]*position: absolute;/, `${file}: the block menu is out of flow`);
+  // Fixed since task-be754bd628311c5f: out of flow AND out of an overflow:auto
+  // host's clip, so a phone's viewport-clamped menu stays reachable.
+  assert.match(css, /\n\.bp-block-menu\s*\{[^}]*position: (absolute|fixed);/, `${file}: the block menu is out of flow`);
 }
 
 const { window } = new JSDOM("<!doctype html><body></body>", { pretendToBeVisual: true, url: "http://localhost/" });

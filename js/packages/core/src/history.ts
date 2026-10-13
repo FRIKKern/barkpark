@@ -6,7 +6,7 @@
 // require a token; the server 404s an unknown revision and returns an empty list
 // for an unknown document.
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { assertPaging } from './filter-builder'
@@ -36,7 +36,7 @@ export async function getHistory(
   const qp = new URLSearchParams()
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   const query = qp.toString() ? `?${qp.toString()}` : ''
-  const path = `${scopePrefix(config)}/v1/data/history/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
+  const path = `${dataPath(config, 'history')}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<{ revisions?: DocumentRevision[] }>(config, path, reqOpts)
@@ -54,7 +54,7 @@ export async function getRevision(
   opts?: RevisionOptions,
 ): Promise<DocumentRevision | null> {
   assertSegment(revId, 'revId')
-  const path = `${scopePrefix(config)}/v1/data/revision/${encodeURIComponent(config.dataset)}/${encodeURIComponent(revId)}`
+  const path = `${dataPath(config, 'revision')}/${encodeURIComponent(revId)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   try {
@@ -82,7 +82,7 @@ export async function restoreRevision(
     throw new BarkparkValidationError('restoreRevision requires a non-empty type', {
       field: 'type',
     })
-  const path = `${scopePrefix(config)}/v1/data/revision/${encodeURIComponent(config.dataset)}/${encodeURIComponent(revId)}/restore`
+  const path = `${dataPath(config, 'revision')}/${encodeURIComponent(revId)}/restore`
   const reqOpts: {
     method: 'POST'
     body: { type: string }

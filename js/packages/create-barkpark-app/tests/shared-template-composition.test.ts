@@ -101,6 +101,7 @@ describe('shared template composition', () => {
         'docker-compose.override.yml.example',
         'docker-compose.yml',
         'lib/format-date.ts',
+        'lib/ref.ts',
         'lib/resolve-server-token.ts',
         'lib/slug.ts',
         'next.config.mjs',
@@ -113,7 +114,7 @@ describe('shared template composition', () => {
 
   it('every shared file is byte-identical between the two generated apps', async () => {
     const sharedRels = (await listFiles(SHARED_DIR)).map(destRel)
-    expect(sharedRels.length).toBe(16)
+    expect(sharedRels.length).toBe(17)
 
     const differing: string[] = []
     for (const rel of sharedRels) {

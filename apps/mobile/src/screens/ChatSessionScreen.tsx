@@ -22,7 +22,8 @@ import {
 // a bare '@legendapp/list' import fails at the first build, not at runtime.
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native'
 
-import type { InstanceConnection } from '../api/instance'
+import { makeInstanceClient, type InstanceConnection } from '../api/instance'
+import { localeKey, useWorkspaceLocale } from '../api/workspace'
 import {
   fetchChatCapabilities,
   type ChatCapabilities,
@@ -585,8 +586,8 @@ export function bodyRender(row: BodyRow): BodyRender {
  * register binding is REACHABLE by jest. Inlined in the useMemo it was
  * unpinnable: deleting `register: 'chat'` silently demoted every assistant
  * turn to the paper serif and the whole suite stayed green. */
-export function chatBlockCtx(theme: Theme, serverBase?: string): BlockCtx {
-  return { theme, serverBase, register: 'chat' }
+export function chatBlockCtx(theme: Theme, serverBase?: string, locale?: string): BlockCtx {
+  return { theme, serverBase, register: 'chat', ...(locale !== undefined && { locale }) }
 }
 
 export function ChatSessionScreen({
@@ -674,9 +675,12 @@ export function ChatSessionScreen({
   const [follow, setFollow] = useState<FollowState>(initialFollowState)
   const [fold, setFold] = useState(initialWorkLogFold)
 
+  // The renderer's own words follow the workspace language, as in the reader.
+  const localeClient = useMemo(() => makeInstanceClient(connection), [connection])
+  const locale = useWorkspaceLocale(localeClient, localeKey(connection))
   const blockCtx = useMemo<BlockCtx>(
-    () => chatBlockCtx(theme, connection.projectUrl),
-    [theme, connection.projectUrl],
+    () => chatBlockCtx(theme, connection.projectUrl, locale),
+    [theme, connection.projectUrl, locale],
   )
 
   // Three memos, not one — see assembleRows: the split is what keeps a settled

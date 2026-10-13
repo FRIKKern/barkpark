@@ -440,10 +440,10 @@ test("ts-w5a: a BARE {bg,ink,accent}×2 skin resolves ALL 156 slots (no unresolv
   for (const slot of SLOTS) assert.notEqual(bare.values[slot], undefined, `slot ${slot} unresolved on a bare skin`);
 });
 
-test("ts-w5a: derive(evergreen) is complete AND byte-frozen at 82 pins (the ratchet)", () => {
+test("ts-w5a: derive(evergreen) is complete AND byte-frozen at 79 pins (the ratchet)", () => {
   const r = derive(EVERGREEN_THEME);
   assert.equal(r.unresolved.length, 0, "evergreen leaves no slot unresolved");
-  assert.equal(r.pinned.length, 82, "evergreen override count is frozen at 82 (56 legacy + 26 zinc characterization freezes)");
+  assert.equal(r.pinned.length, 79, "evergreen override count is frozen at 79 (53 legacy + 26 zinc characterization freezes; the three tinted line pins retired to the neutral line formula 2026-10-05)");
   // byte identity is what the seam guard rides on — spot-check across formats.
   assert.equal(r.values["primary.light"], "151.96 71.81% 29.22%");  // HSL native (designer mint #15804e, gui-remake GR2)
   assert.equal(r.values["border.light"], "240 5.9% 90%");           // HSL pinned (zinc freeze)
@@ -583,6 +583,165 @@ test("sup-w1: --fg-dim stays the DIMMEST text tier (lower contrast on --bg than 
       );
     }
   }
+});
+
+test("paper faint ink clears AA 4.5 on bg AND bg-deep and stays below ink-soft, every theme × mode (task-f7bbcc0256a563d3)", () => {
+  // Faint paper ink is text (dates, captions, meta lines) on either paper ground.
+  // Decorative dots and borders ride ink-faint-line and are not held to 4.5.
+  for (const { name, theme } of ALL_THEMES) {
+    const { values, misses } = derive(theme);
+    assert.deepEqual(misses.filter((m) => /ink-faint/.test(m.slot)), [], `${name}: faint ink walk reported a miss`);
+    for (const mode of ["light", "dark"]) {
+      for (const g of ["bg", "bg-deep"]) {
+        const ground = values[`paper.surface.${g}.${mode}`];
+        const faint = contrast(values[`paper.surface.ink-faint.${mode}`], ground);
+        const soft = contrast(values[`paper.surface.ink-soft.${mode}`], ground);
+        assert.ok(faint >= 4.5, `${name} ${mode}: contrast(--paper-ink-faint, --paper-${g}) = ${faint.toFixed(3)} < 4.5`);
+        assert.ok(faint < soft, `${name} ${mode}: --paper-ink-faint (${faint.toFixed(3)}) is not below --paper-ink-soft (${soft.toFixed(3)}) on --paper-${g}`);
+      }
+      assert.ok(values[`paper.surface.ink-faint-line.${mode}`], `${name} ${mode}: paper.surface.ink-faint-line must resolve`);
+    }
+  }
+});
+
+test("paper form option ring clears 3:1 non-text contrast on bg AND bg-deep, every theme × mode (WCAG 1.4.11, task-f7bbcc0256a563d3)", () => {
+  // The ring is a control boundary, not decoration. Read the token the rule
+  // actually paints, so a repoint to a lighter token (ink-faint-line) reds.
+  const css = readFileSync(new URL("../api/assets/paper-surface/paper-surface.css", import.meta.url), "utf8");
+  const rule = css.match(/\.bp-form-opt > input \{[^}]*\}/);
+  assert.ok(rule, "paper-surface.css must carry a .bp-form-opt > input rule");
+  const tok = rule[0].match(/border:[^;]*var\(--paper-([a-z-]+)\)/);
+  assert.ok(tok, ".bp-form-opt > input must paint its border from a var(--paper-<role>) token");
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const ring = values[`paper.surface.${tok[1]}.${mode}`];
+      assert.ok(ring, `${name} ${mode}: paper.surface.${tok[1]} must resolve`);
+      for (const g of ["bg", "bg-deep"]) {
+        const ratio = contrast(ring, values[`paper.surface.${g}.${mode}`]);
+        assert.ok(ratio >= 3, `${name} ${mode}: form option ring (--paper-${tok[1]}) on --paper-${g} = ${ratio.toFixed(3)} < 3`);
+      }
+    }
+  }
+});
+
+test("paper ghost-slot hint clears AA 4.5 on its tinted slot (rest and hover) over bg AND bg-deep, every theme × mode (task-4fe2840b400afeb1)", () => {
+  // The hint is text on the slot's accent-soft tint (hover: edit-hover), not on
+  // the bare paper ground — measuring it on bg alone is how a 4.19 shipped.
+  // Read the token each rule paints from the shell stylesheet.
+  const css = readFileSync(new URL("../api/priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+  const rule = (sel) => {
+    const m = css.match(new RegExp(sel.replace(/[.:]/g, "\\$&") + "\\s*\\{[^}]*\\}"));
+    assert.ok(m, `bp-paper-editor-shell.css must carry a ${sel} rule`);
+    return m[0];
+  };
+  const tokenOf = (sel, prop) => {
+    const t = rule(sel).match(new RegExp(`(?:^|[\\s;{])${prop}:\\s*var\\(--paper-([a-z-]+)`));
+    assert.ok(t, `${sel} must paint ${prop} from a var(--paper-<role>) token`);
+    return t[1];
+  };
+  const hint = tokenOf(".bp-paper-ghost-hint", "color");
+  const rest = tokenOf(".bp-paper-ghost-slot", "background");
+  const hover = tokenOf(".bp-paper-ghost-slot:hover", "background");
+  const over = (top, ground) => {
+    const m = String(top).match(/rgba?\(([^)]*)\)/);
+    if (!m) return parseColor(top);
+    const [r, g, b, a = 1] = m[1].split(",").map(Number);
+    const base = parseColor(ground);
+    return [r / 255, g / 255, b / 255].map((c, i) => c * a + base[i] * (1 - a));
+  };
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const v = (role) => values[`paper.surface.${role}.${mode}`];
+      for (const g of ["bg", "bg-deep"]) {
+        for (const [state, tint] of [["rest", rest], ["hover", hover]]) {
+          const ratio = contrast(v(hint), over(v(tint), v(g)));
+          assert.ok(
+            ratio >= 4.5,
+            `${name} ${mode}: ghost hint (--paper-${hint}) on the ${state} slot (--paper-${tint} over --paper-${g}) = ${ratio.toFixed(3)} < 4.5`,
+          );
+        }
+      }
+    }
+  }
+});
+
+test("media picker broken-image notice clears AA 4.5 at its painted opacity, every theme × mode (task-0abfa028a9b454bc)", () => {
+  // .bp-mp-broken paints the danger token as TEXT; an opacity on the rule
+  // blends that text toward the ground (0.8 read 4.26 in dark). Composite the
+  // token at the rule's own opacity over the Studio ground.
+  const css = readFileSync(new URL("../api/priv/static/assets/bp-media-picker.css", import.meta.url), "utf8");
+  const rule = css.match(/\.bp-mp-broken\s*\{[^}]*\}/);
+  assert.ok(rule, "bp-media-picker.css must carry a .bp-mp-broken rule");
+  assert.match(rule[0], /color:\s*var\(--destructive/, ".bp-mp-broken paints the danger token");
+  const op = rule[0].match(/(?:^|[\s;{])opacity:\s*([0-9.]+)/);
+  const alpha = op ? Number(op[1]) : 1;
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const fg = parseColor(values[`status.danger.${mode}`]);
+      const bg = parseColor(values[`bg.${mode}`]);
+      const seen = fg.map((c, i) => c * alpha + bg[i] * (1 - alpha));
+      const ratio = contrast(seen, bg);
+      assert.ok(ratio >= 4.5, `${name} ${mode}: broken-image notice at opacity ${alpha} = ${ratio.toFixed(3)} < 4.5`);
+    }
+  }
+});
+
+test("every text-on-tint voice clears AA 4.5 on its own soft tint, every theme × mode (rulings on task-f6a066642fcac678, task-399a8a237f339eb1)", () => {
+  const soft = JSON.parse(readFileSync(new URL("./tokens.json", import.meta.url), "utf8")).color._convention.softAlpha;
+  const q = (rgb) => rgb.map((c) => Math.round(c * 255) / 255);
+  const VOICES = { "ok-text": "status.ok", "warn-text": "status.warn", "danger-text": "status.danger", "info-text": "status.info", "primary-text": "primary" };
+  for (const { name, theme } of ALL_THEMES) {
+    const { values, misses } = derive(theme);
+    assert.deepEqual(misses.filter((m) => /-text\./.test(m.slot)), [], `${name}: a text-on-tint walk reported a miss`);
+    for (const [voice, fillSlot] of Object.entries(VOICES)) {
+      for (const mode of ["light", "dark"]) {
+        for (const g of ["bg", "muted-surface"]) {
+          const fill = parseColor(values[`${fillSlot}.${mode}`]);
+          const ground = parseColor(values[`${g}.${mode}`]);
+          const tint = q(fill.map((c, i) => c * soft[mode] + ground[i] * (1 - soft[mode])));
+          const ratio = contrast(q(parseColor(values[`onTint.${voice}.${mode}`])), tint);
+          assert.ok(ratio >= 4.5, `${name} ${mode}: --${voice} on its tint over --${g} = ${ratio.toFixed(3)} < 4.5`);
+        }
+      }
+    }
+  }
+});
+
+test("no Studio rule paints a status or primary fill as text on its own tint (it takes the -text voice)", () => {
+  // Swept by shape across the Studio layout, the hand-authored stylesheets under
+  // api/priv/static, and every LiveView/plugin that inlines a <style> block.
+  const FAMILIES = {
+    primary: ["primary"], ok: ["ok", "success"], warn: ["warn", "warning"],
+    danger: ["danger", "destructive"], info: ["info"],
+  };
+  const libRoot = new URL("../api/lib/", import.meta.url);
+  const exFiles = readdirSync(libRoot, { recursive: true })
+    .filter((f) => /\.(ex|heex)$/.test(f))
+    .map((f) => new URL(f, libRoot));
+  const files = [
+    ...exFiles,
+    ...readdirSync(new URL("../api/priv/static/assets/", import.meta.url))
+      .filter((f) => f.endsWith(".css") && !/\.min\.|bundle/.test(f))
+      .map((f) => new URL(`../api/priv/static/assets/${f}`, import.meta.url)),
+  ];
+  const offenders = [];
+  for (const url of files) {
+    const css = readFileSync(url, "utf8");
+    if (!/-soft|-hsl\)/.test(css)) continue;
+    for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+      const body = m[2];
+      for (const names of Object.values(FAMILIES)) {
+        const alt = names.join("|");
+        const tinted = new RegExp(`background(?:-color)?\\s*:\\s*(?:var\\(--(?:${alt})-soft|hsl\\(var\\(--(?:${alt})-hsl\\)\\s*\\/)`).test(body);
+        const fillText = new RegExp(`(?<![-\\w])color\\s*:\\s*var\\(--(?:${alt})\\)`).test(body);
+        if (tinted && fillText) offenders.push(`${url.pathname.split("/").pop()}: ${m[1].trim().slice(-60)}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
 });
 
 test("sup-w1: --surface-raised is visibly elevated above --bg in dark for the shipped evergreen theme", () => {

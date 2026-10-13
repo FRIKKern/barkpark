@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   Network shares panel (scoped-sharing P6). Every mutate re-checks admin
   server-side. Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -29,7 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
          shares_prefill_surfaces: surfaces
        )}
     else
-      {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+      {:noreply, put_flash(socket, :error, gettext("Admin access required to manage shares."))}
     end
   end
 
@@ -249,7 +250,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
               {:noreply,
                socket
                |> assign(shares_rows: Shared.load_share_rows(socket), shares_error: nil)
-               |> put_flash(:info, "Shared #{scope}.")}
+               |> put_flash(:info, gettext("Shared %{scope}.", scope: scope))}
 
             {:error, _reason} ->
               {:noreply,
@@ -259,14 +260,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
           end
       end
     else
-      {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+      {:noreply, put_flash(socket, :error, gettext("Admin access required to manage shares."))}
     end
   end
 
-  # The cascade clause both info receipts carry. `remove_share/3` revokes every
-  # live item link under the scope on EVERY call, so this is a statement of what
-  # just happened, not a hedge.
-  @item_links_revoked "Every item /s/ link under it was revoked too."
+  # Both info receipts below end on the cascade clause "Every item /s/ link
+  # under it was revoked too.": `remove_share/3` revokes every live item link
+  # under the scope on EVERY call, so it is a statement of what just happened,
+  # not a hedge. Each receipt is one sentence for translation.
 
   @doc """
   Stop sharing a scope — and report what the STORE now says, not what the
@@ -336,7 +337,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
           {:noreply, assign(socket, shares_error: "Could not parse that scope.")}
       end
     else
-      {:noreply, put_flash(socket, :error, "Admin access required to manage shares.")}
+      {:noreply, put_flash(socket, :error, gettext("Admin access required to manage shares."))}
     end
   end
 
@@ -351,21 +352,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
         put_flash(
           socket,
           :error,
-          "#{scope} is STILL shared — " <> still_shared_reason(ws, proj, dataset)
+          gettext("%{scope} is STILL shared — %{reason}",
+            scope: scope,
+            reason: still_shared_reason(ws, proj, dataset)
+          )
         )
 
       count == 0 ->
         put_flash(
           socket,
           :info,
-          "#{scope} was not shared — nothing to remove. " <> @item_links_revoked
+          gettext(
+            "%{scope} was not shared — nothing to remove. Every item /s/ link under it was revoked too.",
+            scope: scope
+          )
         )
 
       true ->
         put_flash(
           socket,
           :info,
-          "Stopped sharing #{scope} — it is no longer shared. " <> @item_links_revoked
+          gettext(
+            "Stopped sharing %{scope} — it is no longer shared. Every item /s/ link under it was revoked too.",
+            scope: scope
+          )
         )
     end
   end
@@ -384,12 +394,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # it did not check is the same defect this handler was repaired for.
   defp still_shared_reason(ws, proj, dataset) do
     if in_env_baseline?(ws, proj, dataset) do
-      "the stored share is gone, but this scope is also declared in " <>
-        BarkparkWeb.StudioComponents.Modals.env_baseline_immutable()
+      gettext("the stored share is gone, but this scope is also declared in %{baseline}",
+        baseline: BarkparkWeb.StudioComponents.Modals.env_baseline_immutable()
+      )
     else
-      "the stored share is gone and it is NOT in the BARKPARK_SHARES baseline, so something " <>
-        "else is still exposing it. The Studio cannot name the source — check the share " <>
-        "configuration before treating this scope as private."
+      gettext(
+        "the stored share is gone and it is NOT in the BARKPARK_SHARES baseline, so something else is still exposing it. The Studio cannot name the source — check the share configuration before treating this scope as private."
+      )
     end
   end
 

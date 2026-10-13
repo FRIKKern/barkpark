@@ -320,6 +320,7 @@ defmodule Barkpark.Plugins.Capabilities do
     |> maybe_gate_views(opts)
     |> maybe_gate_chat(base, opts)
     |> maybe_gate_bpml(base, opts)
+    |> maybe_put_token(base, opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
   end
 
@@ -358,6 +359,24 @@ defmodule Barkpark.Plugins.Capabilities do
   defp maybe_gate_bpml(manifest, _caller_tier, opts) do
     if Keyword.get(opts, :include_bpml, false) do
       Map.put(manifest, "bpml", Barkpark.PortableDoc.Bpml.vocabulary())
+    else
+      manifest
+    end
+  end
+
+  # The root `token` key (task-0cf611238d4ad597 JQ1, owner ruling #36): facts
+  # about the CALLER'S OWN credential that `auth_tier` cannot carry. Today one:
+  # `public_read`. A `public-read` token and a plain `read` token both rank
+  # "read" on the ladder, but only the first is pinned to published, public
+  # types (`BarkparkWeb.Plugs.PublicRead`). A starter that inlines its token
+  # into a browser bundle must tell them apart, and this is the signal.
+  # STRICTLY OPT-IN (`include_token: true`, wired from `?token=1`) for the same
+  # reason `build`/`chat`/`bpml` are: released bp binaries strict-decode the
+  # manifest root. Withheld from tier "none": there is no credential to
+  # describe. Feeds etag_for/1, so a public-read body and a read body differ.
+  defp maybe_put_token(manifest, caller_tier, opts) do
+    if Keyword.get(opts, :include_token, false) and caller_tier != "none" do
+      Map.put(manifest, "token", %{"public_read" => Keyword.get(opts, :public_read, false)})
     else
       manifest
     end
@@ -973,6 +992,19 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      core_cmd(
+        "doc.locations",
+        "doc",
+        "locations",
+        "\"Used on N pages\": backlinks resolved into consumer-site URLs via each referrer's own schema desk.preview template. A referrer with no template, or needing :slug with none set, is omitted.",
+        "GET",
+        "/v1/data/locations/:dataset/:id",
+        "read",
+        args: [arg("id", true, "string", "Document id to find referring page URLs for.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # auth_tier "read", NEVER "none" (D71): a none-tier read drops the bearer
       # and silently 404s private-schema reads to authenticated callers — the
       # proven doc.query bug class. The endpoint 404s anon (existence-hiding),
@@ -1019,6 +1051,33 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("tag", true, "string", "Tag name (exact match).")],
         flags: [
           flag("type", "string", "Comma list of document types to include (default paper,task).")
+        ],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "codelist.show",
+        "codelist",
+        "show",
+        "Read a registered codelist's values as a tree (a flat list is a tree with no children): code, resolved label and nested children, by a member token.",
+        "GET",
+        "/v1/codelists/:codelist_id",
+        "read",
+        args: [
+          arg(
+            "codelist_id",
+            true,
+            "string",
+            "Codelist id, e.g. onixedit:thema (<plugin>:<name>)."
+          )
+        ],
+        flags: [
+          flag(
+            "lang",
+            "string",
+            "Comma-separated language preference order for labels (default nob,eng)."
+          )
         ],
         writes: false,
         default_output: "table",
@@ -1181,10 +1240,23 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.disconnect",
+        "doc",
+        "disconnect",
+        "Remove every reference to a document from the documents that hold one, and list which documents and fields changed. Full members with write only.",
+        "POST",
+        "/v1/data/disconnect/:dataset/:doc_id",
+        "write",
+        args: [arg("doc_id", true, "string", "The referenced document's id.")],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.op",
         "doc",
         "op",
-        "Apply one PortableDoc block op to a document, fenced on its current _rev.",
+        "Apply one PortableDoc block op, or a batch all or nothing, to a document, fenced on its current _rev.",
         "POST",
         "/v1/data/doc/:dataset/:type/:doc_id/ops",
         "write",
@@ -1196,11 +1268,75 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "file",
             "file",
-            "Body {\"op\": {...}, \"ifRev\": \"<_rev>\"} from a file or - for stdin."
+            "Body {\"op\": {...}, \"ifRev\": \"<_rev>\"} or {\"ops\": [...], \"ifRev\": ...} from a file or - for stdin."
           )
         ],
         writes: true,
         default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.field-ops",
+        "doc",
+        "field-ops",
+        "Apply a batch of PortableDoc block ops to one block-editor field, all or nothing, fenced on the document's current _rev.",
+        "POST",
+        "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops",
+        "write",
+        args: [
+          arg("type", true, "string", "Document type (schema name)."),
+          arg("doc_id", true, "string", "Document id; drafts.<id> is edited when it exists."),
+          arg("field", true, "string", "A richText field with editor: blocks.")
+        ],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"ops\": [...], \"ifRev\": \"<_rev>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.actions",
+        "doc",
+        "actions",
+        "List a document's resolved actions (built-in + schema-declared, plugin-filtered by live state).",
+        "GET",
+        "/v1/data/doc/:dataset/:type/:doc_id/actions",
+        "admin",
+        args: [
+          arg("type", true, "string", "Document type (schema name)."),
+          arg("doc_id", true, "string", "Document id; drafts.<id> is read when it exists.")
+        ],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.run-action",
+        "doc",
+        "run-action",
+        "Run one of a document's resolved actions by name, dry-run or real.",
+        "POST",
+        "/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
+        "admin",
+        args: [
+          arg("type", true, "string", "Document type (schema name)."),
+          arg("doc_id", true, "string", "Document id; drafts.<id> is edited when it exists."),
+          arg("name", true, "string", "The action's name, as doc.actions lists it.")
+        ],
+        flags: [
+          flag(
+            "mode",
+            "string",
+            "\"dryrun\" (preview, no side effects) or \"real\". Required."
+          )
+        ],
+        writes: true,
+        default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
@@ -1638,6 +1774,22 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # The folder create (task-c09196a99fad3d3a). The Media library used to make
+      # a folder through the token-only document mutate door, so an account
+      # (cookie) session got 403; this media-scoped door serves both.
+      core_cmd(
+        "media.create-collection",
+        "media",
+        "create-collection",
+        "Create a media folder (a published mediaCollection of kind folder).",
+        "POST",
+        "/v1/media/:dataset/collections",
+        "write",
+        args: [arg("title", true, "string", "Folder title.")],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "media.add-member",
         "media",
@@ -1712,6 +1864,151 @@ defmodule Barkpark.Plugins.Capabilities do
       # `scoped_prefix` is set ONLY where router.ex actually mounts a
       # `/w/:workspace_slug/p/:project_slug` mirror — settings, synonym-preview
       # and promote have none.
+      # ── paper masters over HTTP (task-2dc7b441443f3aaf). Member token,
+      # scoped `/w/:workspace_slug/p/:project_slug` — the same checks the
+      # Studio canvas's save/insert/pin/detach events get in-process
+      # (Barkpark.Plugins.Bulldocs.Masters).
+      core_cmd(
+        "paper.masters",
+        "paper",
+        "masters",
+        "The masters an author may insert into paper :slug.",
+        "GET",
+        "/v1/papers/:slug/masters",
+        "read",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.save-master",
+        "paper",
+        "save-master",
+        "Save a block of paper :slug as a master, published immediately.",
+        "POST",
+        "/v1/papers/:slug/masters",
+        "write",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"blockId\": \"...\", \"title\": \"...\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.insert-master",
+        "paper",
+        "insert-master",
+        "Insert master :master_id into paper :slug, detached (a copy) or linked (follows latest).",
+        "POST",
+        "/v1/papers/:slug/masters/:master_id/insert",
+        "write",
+        args: [
+          arg("slug", true, "string", "Paper slug."),
+          arg("master_id", true, "string", "Master document id.")
+        ],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"mode\": \"detached\"|\"linked\", \"afterId\": \"...\"|null, \"requestId\": \"<uuid>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.pin-master",
+        "paper",
+        "pin-master",
+        "Pin (or unpin) linked instance :block_id in paper :slug to the master's latest published revision.",
+        "POST",
+        "/v1/papers/:slug/masters/blocks/:block_id/pin",
+        "write",
+        args: [
+          arg("slug", true, "string", "Paper slug."),
+          arg("block_id", true, "string", "Linked instance block id.")
+        ],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"pin\": true|false, \"requestId\": \"<uuid>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.detach-master",
+        "paper",
+        "detach-master",
+        "Detach linked instance :block_id in paper :slug to a plain, no-longer-following copy.",
+        "POST",
+        "/v1/papers/:slug/masters/blocks/:block_id/detach",
+        "write",
+        args: [
+          arg("slug", true, "string", "Paper slug."),
+          arg("block_id", true, "string", "Linked instance block id.")
+        ],
+        flags: [
+          flag("file", "file", "Body {\"requestId\": \"<uuid>\"} from a file or - for stdin.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # ── paper member-token batch block ops (task-7ee817f37630d669, P1).
+      # Member token, scoped `/w/:workspace_slug/p/:project_slug` — the same
+      # ifRev-fenced op path (`Content.apply_paper_block_ops_once/6`) and the
+      # same write gate the masters routes above already carry, so an
+      # external Studio can save a paper's own block list, not just insert a
+      # master into one.
+      core_cmd(
+        "paper.apply-ops",
+        "paper",
+        "apply-ops",
+        "Apply an ifRev-fenced batch of block ops to paper :slug, atomically.",
+        "POST",
+        "/v1/papers/:slug/ops",
+        "write",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"ops\": [...], \"ifRev\": <rev>, \"requestId\": \"<uuid>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # ── paper fleet blocks over HTTP (task-4feb8efa46a0ed33). Member
+      # token, scoped `/w/:workspace_slug/p/:project_slug` — the same render
+      # the Studio canvas gets pushed in-process
+      # (StudioLive.Shared.Paper.push_block_renders/1).
+      core_cmd(
+        "paper.fleet-blocks",
+        "paper",
+        "fleet-blocks",
+        "Server-rendered HTML for paper :slug's fleet blocks (task list/board/detail, roadmap, …), by block id.",
+        "GET",
+        "/v1/papers/:slug/fleet-blocks",
+        "read",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # ── paper access trail (edit-on-the-link slice 4, task-e99a8e946f80f52c).
       # Behind `:flat_admin_api` (RequireToken + RequireAdmin) -> tier "admin",
       # the same pipeline the media/documents search-config blocks below ride.
@@ -2294,7 +2591,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "workspace.member-add",
         "workspace",
         "member-add",
-        "Seat a human in the workspace by e-mail (creates the account if new; sends no mail).",
+        "Seat a human in the workspace by e-mail. A new e-mail (or an " <>
+          "unconfirmed account) is created and seated directly. An EXISTING " <>
+          "confirmed account is invited instead (owner ruling #7) — the " <>
+          "answer is the invitation, and the seat appears only once the " <>
+          "invited user accepts it (workspace.invitation-ls / " <>
+          "auth.invitation-accept).",
         "POST",
         "/v1/members",
         "scoped_admin",
@@ -2302,6 +2604,34 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("role", "string", "owner | admin | member (or a custom role).", default: "member")
         ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # ── Seat consent, admin side (owner ruling #7, task-a08da65bc33083d0) ──
+      # workspace.member-add's invited-not-seated branch leaves a pending row
+      # an admin needs to see and, if it was sent to the wrong person, retract.
+      core_cmd(
+        "workspace.invitation-ls",
+        "workspace",
+        "invitation-ls",
+        "Pending invitations this workspace has sent, awaiting the invited user's accept.",
+        "GET",
+        "/v1/invitations",
+        "scoped_admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.invitation-rm",
+        "workspace",
+        "invitation-rm",
+        "Withdraw a pending invitation before the invited user accepts it.",
+        "DELETE",
+        "/v1/invitations/:id",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Invitation id.")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -2328,6 +2658,18 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "workspace.locale",
+        "workspace",
+        "locale",
+        "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
+        "GET",
+        "/v1/workspace/locale",
+        "read",
+        writes: false,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "workspace.set-locale",
         "workspace",
         "set-locale",
@@ -2336,6 +2678,48 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/workspace/locale",
         "scoped_admin",
         args: [arg("locale", true, "string", "en | nb-NO")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "pref.get",
+        "pref",
+        "get",
+        "Read one named per-account pref (task-7d2a48dbf7e4bf34) in the active --workspace/--dataset. value is null when unset. Identity is the caller's account session or a personal access token's owner.",
+        "GET",
+        "/v1/prefs/:dataset/:key",
+        "read",
+        args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
+        writes: false,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "pref.set",
+        "pref",
+        "set",
+        "Set one named per-account pref (task-7d2a48dbf7e4bf34) — an upsert, never an append. Capped at 16KB.",
+        "PUT",
+        "/v1/prefs/:dataset/:key",
+        "write",
+        args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
+        flags: [
+          flag("file", "file", "Body {\"value\": {...}} from a file or - for stdin.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "pref.rm",
+        "pref",
+        "rm",
+        "Delete one named per-account pref (task-7d2a48dbf7e4bf34). Idempotent — deleting an absent key is still ok.",
+        "DELETE",
+        "/v1/prefs/:dataset/:key",
+        "write",
+        args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -2927,6 +3311,60 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of
+      # share.link-* above, not a branch of it: a preview link's doc_id keeps
+      # its `drafts.` prefix on purpose (Links.create/1 strips that prefix
+      # unconditionally, so share.link-* can never mint one). Same tier,
+      # same confinement shape, different id vocabulary (doc_id/ref_type, no
+      # kind/access — always one document).
+      core_cmd(
+        "share.preview-link-ls",
+        "share",
+        "preview-link-ls",
+        "List the draft-capable preview links (task-6812c3100d7aedbc) for one document.",
+        "GET",
+        "/v1/shares/preview-links",
+        "admin",
+        args: [
+          arg("scope", true, "string", "ws[/project[/dataset]] the document lives in."),
+          arg("doc_id", true, "string", "The document's id (a drafts. prefix is kept)."),
+          arg("ref_type", true, "string", "Document type.")
+        ],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "share.preview-link-mint",
+        "share",
+        "preview-link-mint",
+        "Mint a draft-capable preview link (raw token shown once, TTL required).",
+        "POST",
+        "/v1/shares/preview-links",
+        "admin",
+        args: [
+          arg("scope", true, "string", "ws[/project[/dataset]] the document lives in."),
+          arg("doc_id", true, "string", "The document's id (a drafts. prefix is kept)."),
+          arg("ref_type", true, "string", "Document type.")
+        ],
+        flags: [
+          flag("label", "string", "Human label for the minted link."),
+          flag("ttl", "int", "Link TTL in seconds (default 24h, capped at 7d).")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "share.preview-link-revoke",
+        "share",
+        "preview-link-revoke",
+        "Revoke one preview link by id.",
+        "DELETE",
+        "/v1/shares/preview-links/:id",
+        "admin",
+        args: [arg("id", true, "string", "Preview link id (from share preview-link-ls).")],
+        writes: true,
+        default_output: "minimal"
+      ),
       # ── Content graph (Goal ges/graph-edge-seam) ─────────────────────────
       # Mounted from CORE so the verbs survive the `:plugins, []` kill switch
       # (the graph roots on ANY content doc). All `auth_tier: "read"`: the
@@ -3118,6 +3556,31 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       core_cmd(
+        "auth.set-display-name",
+        "auth",
+        "set-display-name",
+        "Set (or, passed blank, clear) the current user's display name. Not security-sensitive — no reauth. Shown in place of \"another editor\" wherever another account is named back to a viewer.",
+        "PATCH",
+        "/v1/auth/display-name",
+        "write",
+        args: [
+          arg("display_name", false, "string", "New display name; omit or pass blank to clear.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "auth.token",
+        "auth",
+        "token",
+        "Describe the bearer: an API token (permissions, tier, dataset, workspace, seat) or a login session (kind session, its user's seats) — no admin token needed.",
+        "GET",
+        "/v1/auth/token",
+        "read",
+        writes: false,
+        default_output: "json"
+      ),
+      core_cmd(
         "auth.logout",
         "auth",
         "logout",
@@ -3170,6 +3633,42 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("password", true, "string", "Account password (re-auth).")],
         writes: true,
         default_output: "json"
+      ),
+      # ── Seat consent, invited user's side (owner ruling #7, task-a08da65bc33083d0) ──
+      core_cmd(
+        "auth.invitation-ls",
+        "auth",
+        "invitation-ls",
+        "Workspace invitations addressed to the signed-in account, awaiting accept or decline.",
+        "GET",
+        "/v1/auth/invitations",
+        "read",
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "auth.invitation-accept",
+        "auth",
+        "invitation-accept",
+        "Accept an invitation and take the seat.",
+        "POST",
+        "/v1/auth/invitations/:id/accept",
+        "read",
+        args: [arg("id", true, "string", "Invitation id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "auth.invitation-decline",
+        "auth",
+        "invitation-decline",
+        "Decline an invitation. The seat is never created.",
+        "DELETE",
+        "/v1/auth/invitations/:id",
+        "read",
+        args: [arg("id", true, "string", "Invitation id.")],
+        writes: true,
+        default_output: "minimal"
       ),
       # ── Airdrop grants — the `access` noun (grantor surface) ──────────────
       # CORE (survives `:plugins, []`). All four sit behind `[:api,

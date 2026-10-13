@@ -187,6 +187,20 @@ defmodule BarkparkWeb.Studio.ChatTaskSeamTest do
     end
   end
 
+  # task-e9866733f6217e28: the picker's hand button was literal English.
+  describe "tasks enabled, Norwegian workspace" do
+    test "the ready row's hand button reads in the Studio language", ctx do
+      {:ok, _} = Tenancy.set_workspace_locale(ctx.ws, "nb-NO")
+      view = mount!(ctx)
+      assert_loaded!(view, ctx, Barkpark.Tasks.PaperResolver)
+
+      picker = render_click(view, "toggle-task-picker", %{})
+      assert picker =~ ~s(phx-value-id="#{ctx.ready.doc_id}")
+      assert picker =~ "Gi til Claude"
+      refute picker =~ "Hand to Claude"
+    end
+  end
+
   # ── source: no chat file names Barkpark.Tasks outside the seam ────────────
 
   describe "source" do

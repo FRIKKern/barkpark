@@ -239,7 +239,9 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
       assert html =~ ~s(class="form-switch bp-input-checkbox")
       assert html =~ ~s(class="form-switch-track")
       refute html =~ ~r{<input\s+type="checkbox"\s+class="bp-input"}
-      assert html =~ ">On<"
+
+      assert html =~
+               ~s(<span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">Off</span><span class="form-switch-state-on">On</span></span>)
     end
 
     test "select subfield with layout: radio renders radios with the option titles" do
@@ -279,6 +281,11 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
                ~r{<button[^>]*data-group="content"[^>]*aria-selected="false"[^>]*>2\. Innhold</button>}
 
       assert html =~ ~r{<div class="bp-subfield" data-subfield-name="title" data-group="content">}
+
+      # task-9bf415c3d78b42d6: a roving tabindex — only the default group is a
+      # Tab stop; bp-tab-keys.js moves between groups on the arrow keys.
+      assert html =~ ~r{<button[^>]*data-group="link"[^>]*tabindex="0"}
+      assert html =~ ~r{<button[^>]*data-group="content"[^>]*tabindex="-1"}
     end
 
     test "a composite without groups renders no tab strip and no hook (byte-compat)" do
@@ -391,6 +398,20 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
       assert p.media == "https://img/y.png"
 
       assert %{title: "Row"} = ArrayField.item_preview(item, %{})
+    end
+
+    # task-3630409f12d4a43b: an untitled item's internal "<array>[item]" name
+    # reached the empty row's heading ("Choices[item]").
+    test "an untitled item reads Item, never its internal [item] name" do
+      item = %Field{
+        name: "choices[item]",
+        type: "composite",
+        fields: [%Field{name: "label", type: "string"}]
+      }
+
+      assert %{title: "Item"} = ArrayField.item_preview(item, %{})
+      assert %{title: "Ja"} = ArrayField.item_preview(item, %{"label" => "Ja"})
+      assert %{title: "Valg"} = ArrayField.item_preview(%{item | title: "Valg"}, %{})
     end
 
     test "arrays of scalars keep the plain row (no item frame)" do

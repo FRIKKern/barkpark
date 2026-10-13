@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Refs do
   Reference field events — picker open/close, search, select, clear.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2]
 
   alias Barkpark.Content
@@ -18,7 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Refs do
 
     candidates =
       Enum.map(docs, fn doc ->
-        %{id: Content.published_id(doc.doc_id), title: doc.title || "Untitled"}
+        %{id: Content.published_id(doc.doc_id), title: doc.title || gettext("Untitled")}
       end)
 
     {:noreply,

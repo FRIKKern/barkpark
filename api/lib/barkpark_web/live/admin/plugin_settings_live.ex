@@ -299,7 +299,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="bp-settings-form" data-test-id="plugin-settings">
+    <main class="bp-settings-form" data-test-id="plugin-settings">
       <div class="bp-settings-header">
         <div>
           <h1 class="h1">{@plugin_name} settings</h1>
@@ -368,7 +368,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
           </button>
         </div>
       </form>
-    </div>
+    </main>
     """
   end
 

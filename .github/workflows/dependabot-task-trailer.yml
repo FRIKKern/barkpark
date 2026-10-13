@@ -82,7 +82,22 @@ on:
   # `on: paths:` filtered, and a paths-filtered workflow emits NO check run at
   # all on a PR it skips (D18) — so a PR editing this injector could land with
   # its harness never having run.
+  #
+  # PATH-FILTERED (task-ffc8e01b392cb5fc, 2026-10-06). The only job on this arm
+  # is the self-test, and it tests exactly these files: the injector, its
+  # harness, the gate script the harness runs as its positive control, and the
+  # two workflows whose call shape it mirrors. Unfiltered, this arm started a
+  # no-op run on every PR push (15 of 15 merged heads #21721..#21806). Listing
+  # the files keeps the D18 promise above: a PR that edits any of them still
+  # runs the self-test. The job is no required context, so a PR that touches
+  # none of them simply starts no run.
   pull_request:
+    paths:
+      - scripts/dependabot-task-trailer.sh
+      - scripts/dependabot-task-trailer.test.sh
+      - scripts/pr-task-gate.sh
+      - .github/workflows/dependabot-task-trailer.yml
+      - .github/workflows/pr-task-gate.yml
   pull_request_target:
     # `opened` is the arm that matters (dependabot opens in bursts). `reopened`
     # and `synchronize` cover a re-opened or force-pushed bump whose body was

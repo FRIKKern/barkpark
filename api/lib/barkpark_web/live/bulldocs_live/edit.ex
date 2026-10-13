@@ -156,7 +156,12 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   def anon_denial, do: @anon_denial
 
   @doc """
-  Whether SOMEONE identifiable is behind this socket.
+  Whether SOMEONE identifiable is behind this socket: a signed-in user or an
+  API token. A share viewer (`%{kind: :share}`, section share or item link,
+  read or edit) arrives with neither and is NOT a principal here — owner
+  ruling #30 Q6 (2026-10-03): reader requests are a signed-in act, and the
+  2026-09-10 ruling already makes anonymous read-only. An edit link still
+  edits (that gate is `:can_edit?`, not this one).
 
   `BarkparkWeb.PaperViewer.on_mount(:viewer, …)` resolves every credential a
   browser can arrive with and summarises it as `:viewer`; `:anonymous` is what
@@ -168,7 +173,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   @spec principal?(map()) :: boolean()
   def principal?(assigns) when is_map(assigns) do
     case Map.get(assigns, :viewer) do
-      %{kind: kind} when kind in [:user, :token, :share] -> true
+      %{kind: kind} when kind in [:user, :token] -> true
       _ -> false
     end
   end
@@ -1076,6 +1081,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
       history_step: nil
     })
   end
+
+  # Owner ruling #21: a private field bound into the body is refused with the
+  # same banner as a lifecycle halt, carrying the guard's message.
+  defp handle_result({:error, {:private_field_bound, names}}, socket, request_id),
+    do:
+      handle_result(
+        {:error, {:halted, Barkpark.Content.BoundFieldGuard.message(names)}},
+        socket,
+        request_id
+      )
 
   # A lifecycle-hook HALT. MIRROR the server truth verbatim; the reader authors
   # no copy of its own (the same D5/D6 stance the Studio editor holds).

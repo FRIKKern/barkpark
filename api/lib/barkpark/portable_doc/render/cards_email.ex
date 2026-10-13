@@ -31,7 +31,7 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
   Skin hexes come from `Palettes.email_skin(theme)` (the theme-resolved
   captured `paperEmail` hand hex — the SAME source the email palette and
   article var() fallbacks draw on). Card tones come from `StatusVocab.tones()`
-  light values (`info #2563eb`, `ok #0d9488`, `warn #d97706`, `danger #dc2626`
+  light values (`info #2563eb`, `ok #0f766e`, `warn #d97706`, `danger #dc2626`
   — matching the reader `--st-*`). NEVER `TokensGen.tone_*`, never a hand-typed
   hex.
 
@@ -45,7 +45,7 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
 
-  alias Barkpark.PortableDoc.Render.{Compose, Palettes, StatusVocab}
+  alias Barkpark.PortableDoc.Render.{Chrome, Compose, Palettes, StatusVocab}
   alias Barkpark.PortableDoc.Slots
 
   # ── cards / card (shared card-cell) ─────────────────────────────────────────
@@ -371,7 +371,7 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
   defp empty_email(kind, theme) do
     sk = skin(theme)
 
-    ~s|<div style="border:1px dashed #{sk.border};border-radius:10px;padding:10px 13px;color:#{sk.muted};font-family:#{Palettes.font_mono()};font-size:12px;margin:12px 0">#{escape_html(kind)} — no data</div>|
+    ~s|<div style="border:1px dashed #{sk.border};border-radius:10px;padding:10px 13px;color:#{sk.muted};font-family:#{Palettes.font_mono()};font-size:12px;margin:12px 0">#{Chrome.t("%{kind} — no data", kind: escape_html(kind))}</div>|
   end
 
   # ── small helpers (Components/DataViz conventions) ──────────────────────────

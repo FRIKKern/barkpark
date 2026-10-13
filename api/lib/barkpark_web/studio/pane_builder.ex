@@ -15,6 +15,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   use Gettext, backend: BarkparkWeb.Gettext
   alias Barkpark.{Content, Structure}
   alias Barkpark.Content.Graph
+  alias Barkpark.Content.PreviewText
+  alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   @doc """
@@ -67,7 +69,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # The DISPLAYED desk is the default-gated tree (charter Decisions 1/3): a
     # disabled plugin's tree and top-menu Media are absent, so panes[0] tells
     # the enablement truth. `gated` renders the root pane in EVERY case.
-    gated = Structure.build(dataset, scope(opts))
+    gated = dataset |> Structure.build(scope(opts)) |> StructureCopy.localize()
 
     # Resolution walks gated-first. A raw nav_path whose head no longer sits at
     # the gated root (a stale pre-tiering deep link — e.g. the router's legacy
@@ -279,7 +281,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           # the form. This restores the #1851 never-unreachable guarantee for
           # the one type that only lives off the top menu.
           nil ->
-            ungated = Structure.build(dataset, [gating: :none] ++ scope(opts))
+            ungated =
+              dataset
+              |> Structure.build([gating: :none] ++ scope(opts))
+              |> StructureCopy.localize()
 
             cond do
               root_has_segment?(ungated, head) ->
@@ -455,13 +460,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          type_title: schema && schema.title,
+          author_creatable: author_creatable?(schema),
           role: :list,
           priority: :active,
           desk_groups: [],
           active_desk: nil,
           filter_error: filter_error,
           has_more: has_more,
-          items: doc_items(docs, schema),
+          items: doc_items(docs, schema, dataset, opts),
           selected: Enum.at(rest, 0)
         }
 
@@ -495,7 +502,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             _ -> nil
           end
 
-        desk_groups = schema_desk_groups(schema)
+        # A content plugin's desk filters read in the Studio language
+        # (PluginSchemaCopy); names and filters are data and stay.
+        desk_groups =
+          schema_desk_groups(schema && BarkparkWeb.Studio.PluginSchemaCopy.localize(schema))
+
         active_desk = Keyword.get(opts, :desk)
         active_group = find_desk_group(desk_groups, active_desk)
 
@@ -533,13 +544,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          type_title: schema && schema.title,
+          author_creatable: author_creatable?(schema),
           role: :list,
           priority: :active,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
           filter_error: filter_error,
           has_more: has_more,
-          items: doc_items(docs, schema),
+          items: doc_items(docs, schema, dataset, opts),
           selected: Enum.at(rest, 0)
         }
 
@@ -653,7 +666,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           active_desk: nil,
           filter_error: filter_error,
           tree_level: level,
-          items: doc_items([doc], schema) ++ [divider] ++ doc_items(children, schema),
+          items:
+            doc_items([doc] ++ children, schema, dataset, opts) |> List.insert_at(1, divider),
           selected: rest |> Enum.at(0) |> then(&(&1 && Content.published_id(&1)))
         }
 
@@ -919,9 +933,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # as before (post/page back-compat lock). Generic by construction: PaneBuilder
   # never branches on the document type; the declaration/manifest is the switch.
 
-  defp doc_items(docs, schema) do
+  defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
     media_field = preview_field(Map.get(preview, "media"))
+    subtitle = Map.get(preview, "subtitle")
+    targets = subtitle_targets(docs, subtitle, dataset, opts)
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -943,7 +959,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # subtitle fallback so a row is never a bare mono id; the render picks
         # `meta || updated`. Threading updated_at only READS a field already on
         # every Document — no /v1/structure wire change.
-        meta: row_meta(doc, Map.get(preview, "meta")),
+        meta: subtitle_meta(doc, subtitle, targets) || row_meta(doc, Map.get(preview, "meta")),
         updated: relative_updated(doc)
       }
     end)
@@ -991,9 +1007,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # and only a document with neither falls back to the unnamed-row spelling.
   defp row_title(doc, schema) do
     case doc.title && String.trim(doc.title) do
-      nil -> preview_title(doc, schema) || unnamed_row_title(doc)
-      "" -> preview_title(doc, schema) || unnamed_row_title(doc)
-      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      nil -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
+      "" -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
+      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
       title -> title
     end
   end
@@ -1001,12 +1017,90 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
-  defp unnamed_row_title(doc) do
-    gettext("Untitled %{type} · %{tail}", type: row_type_word(doc), tail: doc_id_tail(doc))
+  @doc """
+  The desk row's title for `doc` under `schema`: its stored title, else the
+  schema's `list_preview` title field, else `Untitled <type> · <id tail>`.
+  Studio's paper header and its live row refresh use it too, so the three
+  surfaces name one document the same way (task-23bff317e617928e).
+  """
+  def display_title(doc, schema \\ nil), do: row_title(doc, schema)
+
+  defp unnamed_row_title(doc, schema) do
+    gettext("Untitled %{type} · %{tail}",
+      type: row_type_word(doc, schema),
+      tail: doc_id_tail(doc)
+    )
   end
 
-  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type
-  defp row_type_word(_), do: gettext("document")
+  defp row_type_word(%{type: type}, schema) when is_binary(type) and type != "",
+    do: type_word(type, schema_title(schema))
+
+  defp row_type_word(_, _), do: gettext("document")
+
+  defp schema_title(%{title: title}), do: title
+  defp schema_title(%{"title" => title}), do: title
+  defp schema_title(_), do: nil
+
+  @doc """
+  The word Studio copy uses for one document of `type` ("New %{type}",
+  "Untitled %{type}"), in the viewer's language (task-7b0c9b8ae4ac6f79):
+
+    * a plugin-owned type has a singular word of its own (`task` → "oppgave");
+      its schema title cannot stand in, being plural for some types
+      ("Form submissions") and singular for others (task-6dfc55e961ffa137);
+    * a workspace's own type uses its schema `title` — what its author named
+      it ("Forfatter");
+    * only a type with neither falls back to its name as words
+      (`form_submission` → "form submission").
+  """
+  def type_word(type, title \\ nil)
+
+  def type_word(type, title) when is_binary(type) do
+    case Map.fetch(plugin_type_words(), type) do
+      {:ok, word} ->
+        word
+
+      :error ->
+        if is_binary(title) and String.trim(title) != "",
+          do: title,
+          else: String.replace(type, ~r/[_-]+/, " ")
+    end
+  end
+
+  @doc "`type_word/2` for a caller holding no schema: resolves the type's title in scope."
+  def type_word_for(type, dataset, scope_opts) when is_binary(type) do
+    title =
+      case Content.resolve_schema(type, dataset, scope_opts) do
+        {:ok, schema} -> schema.title
+        _ -> nil
+      end
+
+    type_word(type, title)
+  end
+
+  @doc "The plugin-owned types that carry a word of their own (the drift test reads it)."
+  def plugin_type_word_types, do: Map.keys(plugin_type_words())
+
+  defp plugin_type_words do
+    %{
+      "paper" => pgettext("type word", "paper"),
+      "paper_master" => pgettext("type word", "master"),
+      "form_response" => pgettext("type word", "form response"),
+      "form_submission" => pgettext("type word", "form submission"),
+      "form_endpoint" => pgettext("type word", "form endpoint"),
+      "session" => pgettext("type word", "session"),
+      "fact" => pgettext("type word", "fact"),
+      "mediaAsset" => pgettext("type word", "media asset"),
+      "mediaCollection" => pgettext("type word", "media collection"),
+      "quiz" => pgettext("type word", "quiz"),
+      "command" => pgettext("type word", "command"),
+      "sheet" => pgettext("type word", "sheet"),
+      "task" => pgettext("type word", "task"),
+      "listener" => pgettext("type word", "listener"),
+      "ticket" => pgettext("type word", "ticket"),
+      "book" => pgettext("type word", "book")
+    }
+  end
 
   # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
   # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
@@ -1047,6 +1141,69 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # paper/sheet/form — declare none) read the write-time manifest description.
   # Identical priority to the Go TUI's `rowMeta` (listpreview_render_test.go
   # pins it there; pane_builder_test.exs pins it here).
+  # `list_preview.subtitle` (task-f3203617ae4cf03e): a path, `ref.field` through
+  # one reference, `|date`, and parts with a fallback — `PreviewText`. The
+  # referenced documents of a whole page load in ONE scoped read.
+  defp subtitle_meta(_doc, nil, _targets), do: nil
+
+  defp subtitle_meta(doc, spec, targets) do
+    PreviewText.format(spec, fn path ->
+      case String.split(path, ".", parts: 2) do
+        [field] ->
+          content_value(doc, field)
+
+        [ref, rest] ->
+          with id when is_binary(id) <- ref_id(content_value(doc, ref)),
+               %{} = target <- Map.get(targets, id) do
+            target_value(target, rest)
+          else
+            _ -> nil
+          end
+      end
+    end)
+  end
+
+  defp subtitle_targets(docs, spec, dataset, opts) do
+    case PreviewText.refs(spec) do
+      [] ->
+        %{}
+
+      refs ->
+        ids =
+          for doc <- docs,
+              ref <- refs,
+              id = ref_id(content_value(doc, ref)),
+              is_binary(id),
+              uniq: true,
+              do: id
+
+        found =
+          Content.get_documents_by_ids(
+            ids ++ Enum.map(ids, &("drafts." <> &1)),
+            dataset,
+            scope(opts)
+          )
+
+        # The published row wins; a draft-only target still names itself.
+        Map.new(ids, fn id -> {id, found[id] || found["drafts." <> id]} end)
+    end
+  end
+
+  defp ref_id(%{"_ref" => id}) when is_binary(id), do: Content.published_id(id)
+  defp ref_id(id) when is_binary(id) and id != "", do: Content.published_id(id)
+  defp ref_id(_), do: nil
+
+  defp target_value(target, "title"), do: target.title || content_value(target, "title")
+
+  defp target_value(target, path) do
+    path
+    |> String.split(".")
+    |> Enum.reduce(Map.get(target, :content), fn
+      key, %{} = map -> Map.get(map, key)
+      _key, _ -> nil
+    end)
+  end
+
   defp row_meta(doc, nil), do: manifest_description(doc)
   defp row_meta(doc, spec), do: preview_value(doc, spec)
 
@@ -1228,6 +1385,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         []
     end)
   end
+
+  @doc """
+  False when the type's desk block declares `"authorCreatable": false`: its
+  documents are written by something other than an author (a form's public
+  intake, say), so Studio offers no "New" for it. Render-only — the write
+  path still answers a create with its own refusal.
+  """
+  def author_creatable?(%{desk: %{"authorCreatable" => false}}), do: false
+  def author_creatable?(_schema), do: true
 
   defp schema_desk_groups(nil), do: []
 
@@ -1522,6 +1688,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   def list_items(node, scope_prefix) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
+        # A desk.hidden type rides the resolution tree so its URL opens; a
+        # rendered list never names it (task-9df0043eb4ecf3cc follow-up).
+        _ when is_map_key(child, :desk_hidden) and child.desk_hidden == true ->
+          []
+
         :divider ->
           # Carry the optional label through so the renderer can show it as a
           # section break. Legacy host-side dividers omit it (label nil).
@@ -1573,17 +1744,25 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   end
 
   @doc """
-  Update a doc's title in the pane items list without rebuilding from
-  DB. Hot-path optimisation for autosave — preserves N+1-query-free
-  behaviour per IMPL-SPEC Risk #3.
+  Refresh a saved doc's row in the pane items without rebuilding from DB:
+  its title, and the draft state and "Updated …" subtitle the save just
+  changed. Hot-path optimisation for autosave — preserves N+1-query-free
+  behaviour per IMPL-SPEC Risk #3. Our own save's `document_changed`
+  broadcast is skipped (`sender == self()`), so without this the row kept
+  saying "published, Updated 3m ago" until a reload. The row keeps its place.
   """
-  @spec update_title([map()], String.t(), String.t()) :: [map()]
-  def update_title(panes, doc_id, new_title) do
+  @spec update_saved_row([map()], String.t(), String.t(), map()) :: [map()]
+  def update_saved_row(panes, doc_id, new_title, saved_doc) do
     Enum.map(panes, fn pane ->
       updated_items =
         Enum.map(pane.items, fn item ->
           if Map.get(item, :type) == :doc && Map.get(item, :id) == doc_id do
-            %{item | title: new_title}
+            Map.merge(item, %{
+              title: new_title,
+              is_draft: Content.draft?(saved_doc.doc_id),
+              status: Map.get(saved_doc, :status),
+              updated: relative_updated(saved_doc)
+            })
           else
             item
           end

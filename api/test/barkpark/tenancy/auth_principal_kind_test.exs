@@ -258,7 +258,10 @@ defmodule Barkpark.Tenancy.AuthPrincipalKindTest do
       token = token!(["read", "write", "admin"])
       {:ok, _} = Auth.create_membership(ws_b.id, token.id, "member", "api_token")
 
-      assert Auth.authorize(token, ws_b.id, :admin) == :ok
+      # Since owner ruling #2, task-6132833921b7dc36, authorize/3 reads the seat role too,
+      # so a member seat no longer reaches :admin; the member seat still writes.
+      assert Auth.authorize(token, ws_b.id, :admin) == {:error, :forbidden}
+      assert Auth.authorize(token, ws_b.id, :write) == :ok
       refute Auth.workspace_admin?(token, ws_b.id)
       refute Auth.workspace_admin?(token.id, ws_b.id)
       refute Auth.workspace_admin?(token.id, ws_b.id, :api_token)

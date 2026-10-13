@@ -73,9 +73,29 @@ defmodule Barkpark.Content.Mutations do
     DraftId,
     Envelope,
     MutateDoorFences,
+    PatchPath,
+    ReadOnlyFields,
+    ReferenceIntegrity,
     Warnings,
     Writer
   }
+
+  # ── dryRun (task-ca600d55736bc9ca) ──────────────────────────────────────────
+  #
+  # `opts[:dry_run]` (the mutate door's `dryRun`) runs the batch inside its
+  # transaction and then ROLLS IT BACK: the document, revision, event and audit
+  # rows go with it, and the deferred broadcast/webhook queue is cleared instead
+  # of flushed. The door used to ignore the flag, so a `dryRun: true` request
+  # committed a real draft.
+  #
+  # The rollback cannot reach the one thing that runs during the batch and
+  # outside its connection: `WriteScope.fire_after/3`'s after_* hooks, edge
+  # projector and after-write listeners. This process flag tells it to skip
+  # them; `dry_run?/0` is how it asks.
+  @dry_run_key :barkpark_mutate_dry_run
+
+  @doc "True while this process is inside a dryRun batch (see `apply_mutations/3`)."
+  def dry_run?, do: Process.get(@dry_run_key) == true
 
   @doc """
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
@@ -106,13 +126,78 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = Door.admit(fn -> do_apply_mutations(mutations, dataset, opts) end)
+        result = Door.admit(fn -> apply_with_stale_retry(mutations, dataset, opts) end)
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )
   end
 
+  # task-f25c61a3a3c2cb9d — a write that loses a race to a concurrent writer of
+  # the SAME row (a createOrReplace of X while a publish of X moves the draft)
+  # raised Ecto.StaleEntryError out of the transaction, and the caller got 409
+  # `internal_error` "unknown error (Ecto.StaleEntryError)": 43 of 100 in a
+  # real two-process race. The row moved under us, so the whole batch runs ONCE
+  # more after a short jitter: it re-reads every row, so a createOrReplace
+  # writes over what is there now (last write wins, its contract). The first
+  # attempt's transaction rolled back and its deferred broadcasts were cleared
+  # in do_apply_mutations/3's rescue; its queued advisories are put back here
+  # so they are not reported twice. A second loss answers a typed
+  # `rev_mismatch` (409, "document was modified by another writer"), never
+  # `internal_error`.
+  # The caller-facing sentence for a batch-level connection fault. A refused
+  # checkout means the transaction never ran, so nothing was written; a
+  # connection lost at COMMIT is the one case the server cannot know, so the
+  # message says to re-read before resending rather than promising either.
+  defp batch_fault_message(%DBConnection.ConnectionError{} = e) do
+    "the database connection was refused or lost on this batch " <>
+      "(#{Exception.message(e)}). Nothing was refused on its merits — this is " <>
+      "transient. The batch is one transaction: a refused connection applied " <>
+      "nothing, and only a connection lost at commit leaves the outcome unknown. " <>
+      "Re-read the ids you sent before resending the identical batch."
+  end
+
+  # Test-only fault seam, the same `:writer_fault` config `Content.Writer`
+  # reads (site `:batch_transaction`): the SQL sandbox cannot produce a real
+  # pool shed, so the test raises the exception the live run carried, inside
+  # the batch transaction. `nil` outside tests.
+  defp inject_batch_fault! do
+    case Application.get_env(:barkpark, :writer_fault) do
+      {:batch_transaction, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp apply_with_stale_retry(mutations, dataset, opts) do
+    warnings = Barkpark.Content.Warnings.snapshot()
+
+    try do
+      do_apply_mutations(mutations, dataset, opts)
+    rescue
+      e in Ecto.StaleEntryError ->
+        require Logger
+
+        Logger.warning(
+          "[Mutations] stale row under a concurrent writer " <>
+            "(#{Exception.message(e) |> String.split("\n") |> hd()}); retrying the batch once"
+        )
+
+        Barkpark.Content.Warnings.restore(warnings)
+        Process.sleep(5 + :rand.uniform(20))
+
+        try do
+          do_apply_mutations(mutations, dataset, opts)
+        rescue
+          Ecto.StaleEntryError -> {:error, :rev_mismatch}
+        end
+    end
+  end
+
   defp do_apply_mutations(mutations, dataset, opts) do
+    dry_run? = Keyword.get(opts, :dry_run, false) == true
+
     # Initialise the deferred-broadcast queue for this process so
     # tap_broadcast/5 knows to queue instead of broadcast immediately, and CLAIM
     # it: the claim is what tells `maybe_dispatch_webhook/7` that this queue has
@@ -120,10 +205,12 @@ defmodule Barkpark.Content.Mutations do
     # used to leave alone — a stale webhook entry stranded on this process by an
     # unowned transaction would otherwise be dispatched by the next mutate.
     Broadcast.claim_deferred_queue()
+    if dry_run?, do: Process.put(@dry_run_key, true)
 
     try do
       result =
         Repo.transaction(fn ->
+          inject_batch_fault!()
           :ok = serialize_unscoped_batch(opts)
           tx_id = Writer.generate_rev()
 
@@ -138,25 +225,12 @@ defmodule Barkpark.Content.Mutations do
           # already knows the value it sent). Schema is memoised per type.
           caller = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
 
-          {results, _schema_cache} =
-            Enum.map_reduce(mutations, %{}, fn m, cache ->
-              case apply_one(m, dataset, opts) do
-                {:ok, doc, op} ->
-                  :ok = between_mutations_barrier()
-                  {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
+          results = apply_all(mutations, dataset, opts, caller)
 
-                  {%{
-                     id: doc.doc_id,
-                     operation: op,
-                     document: Envelope.render(doc, schema, caller)
-                   }, cache}
-
-                {:error, reason} ->
-                  Repo.rollback(reason)
-              end
-            end)
-
-          {tx_id, results}
+          # DRY RUN: every gate, fence and write above ran for real, so the
+          # results are exactly what a real batch would answer — then the whole
+          # transaction is thrown away.
+          if dry_run?, do: Repo.rollback({@dry_run_key, {tx_id, results}}), else: {tx_id, results}
         end)
 
       case result do
@@ -164,11 +238,43 @@ defmodule Barkpark.Content.Mutations do
           Broadcast.flush_deferred_broadcasts()
           result
 
+        {:error, {@dry_run_key, would_be}} ->
+          Broadcast.clear_deferred_broadcasts()
+          {:ok, would_be}
+
+        # A failed dry run answers the real error, but never runs the
+        # compensating discard: that is a write of its own.
+        _ when dry_run? ->
+          Broadcast.clear_deferred_broadcasts()
+          result
+
         _ ->
           Broadcast.clear_deferred_broadcasts()
           compensating_discard(result, mutations, dataset, opts)
       end
     rescue
+      # task-f8233616de3513d4 — a refused or lost DB checkout on the BATCH'S own
+      # transaction (the pool shed it: "request was dropped from queue").
+      # `Content.Writer.create_document/4` already types this fault for its own
+      # Repo calls (#15489), but the batch transaction's checkout is above it,
+      # so under a pool shed 8,011 batches answered 503 `internal_error`
+      # "unknown error (DBConnection.ConnectionError)" (run8-sweep2 probe).
+      # Same typed tuple as the write twin, so the caller gets 503
+      # `storage_unavailable` / reason `connection_unavailable`. Narrow on
+      # purpose: only this struct; every other exception keeps propagating.
+      e in DBConnection.ConnectionError ->
+        Broadcast.clear_deferred_broadcasts()
+        require Logger
+
+        Logger.error(
+          "Barkpark.Content.Mutations.apply_mutations/3: the database connection was " <>
+            "refused or lost on the batch transaction (dataset=#{inspect(dataset)}, " <>
+            "#{length(mutations)} mutation(s)) — answering 503 storage_unavailable/" <>
+            "connection_unavailable. exception=#{Exception.message(e)}"
+        )
+
+        {:error, {:connection_unavailable, batch_fault_message(e)}}
+
       e ->
         Broadcast.clear_deferred_broadcasts()
 
@@ -176,7 +282,91 @@ defmodule Barkpark.Content.Mutations do
           {:ok, reason} -> {:error, reason}
           :no -> reraise(e, __STACKTRACE__)
         end
+    after
+      Process.delete(@dry_run_key)
     end
+  end
+
+  # task-6b5e4b3e572d38c9 — `ensure_unreferenced/5` (called from the plain
+  # `"delete"` clause below) ran `ReferenceIntegrity.referrers/3` once PER
+  # delete: a query per reference-typed field across every schema in the
+  # dataset, PER delete, so a batch of N deletes cost O(N × reference
+  # fields) queries inside one transaction (task-c801daf4efd35a74, the
+  # 250-delete 500). Batched here: a RUN of 2+ CONSECUTIVE `"delete"`
+  # mutations gets its referrers precomputed in ONE pass
+  # (`ReferenceIntegrity.referrers_for_ids/3`) before any of them run, so the
+  # whole run costs the SAME query count as a single delete, not that count
+  # times the run's length.
+  #
+  # WHY ONLY A CONSECUTIVE RUN, NOT THE WHOLE BATCH AT ONCE: precomputing
+  # referrers for every delete in the batch BEFORE the batch starts would
+  # miss a reference CREATED earlier in the SAME transaction by an EARLIER,
+  # non-delete mutation — the live per-id check sees it (Postgres read-committed:
+  # your own transaction's earlier writes are visible to its later reads);
+  # a single global precompute, run before mutation 1, would not. Chunking
+  # on "is this a delete" and precomputing ONLY within each consecutive run —
+  # right when that run begins, after every PRECEDING mutation in the batch
+  # (delete or not) has already applied — preserves that visibility exactly:
+  # a run's precompute sees everything that ran before it, same as the
+  # unbatched per-id code would have. A lone delete between two non-deletes
+  # still runs the ORIGINAL single-id path unchanged (a run of 1 gains
+  # nothing from batching and this keeps that path's surface untouched).
+  #
+  # `referrers_for_ids/3`'s own moduledoc states the one deliberate
+  # behaviour refinement this introduces: two documents in the SAME run that
+  # reference each other no longer block one another (they vanish together
+  # regardless of order, since the whole mutate is one transaction) — the
+  # unbatched path was order-dependent for exactly that case.
+  defp apply_all(mutations, dataset, opts, caller) do
+    {chunks_results, _cache} =
+      mutations
+      |> Enum.chunk_by(&delete_mutation?/1)
+      |> Enum.map_reduce(%{}, fn chunk, cache ->
+        apply_chunk(chunk, dataset, opts, caller, cache)
+      end)
+
+    List.flatten(chunks_results)
+  end
+
+  defp delete_mutation?(%{"delete" => _}), do: true
+  defp delete_mutation?(_), do: false
+
+  defp apply_chunk([_, _ | _] = chunk, dataset, opts, caller, cache) do
+    if delete_mutation?(hd(chunk)) do
+      ids =
+        chunk
+        |> Enum.map(fn %{"delete" => %{"id" => id}} -> DraftId.published_id(id) end)
+        |> Enum.uniq()
+
+      precomputed = ReferenceIntegrity.referrers_for_ids(ids, dataset, opts)
+      chunk_opts = Keyword.put(opts, :precomputed_referrers, precomputed)
+
+      apply_each(chunk, dataset, chunk_opts, caller, cache)
+    else
+      apply_each(chunk, dataset, opts, caller, cache)
+    end
+  end
+
+  defp apply_chunk(chunk, dataset, opts, caller, cache),
+    do: apply_each(chunk, dataset, opts, caller, cache)
+
+  defp apply_each(chunk, dataset, opts, caller, cache) do
+    Enum.map_reduce(chunk, cache, fn m, cache ->
+      case apply_one(m, dataset, opts) do
+        {:ok, doc, op} ->
+          :ok = between_mutations_barrier()
+          {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
+
+          {%{
+             id: doc.doc_id,
+             operation: op,
+             document: Envelope.render(doc, schema, caller)
+           }, cache}
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
   end
 
   # ── The tsvector cap is a CALLER fault, not an engine fault ────────────────
@@ -449,6 +639,8 @@ defmodule Barkpark.Content.Mutations do
       _ ->
         with :ok <-
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
+             :ok <-
+               ensure_read_only_unchanged(type, nil, incoming_content(attrs), id, dataset, opts),
              {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
           warn_create_over_published("create", type, id, dataset, opts, doc)
           {:ok, doc, "create"}
@@ -477,6 +669,8 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+         :ok <-
+           ensure_read_only_unchanged(type, existing, incoming_content(attrs), id, dataset, opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -503,6 +697,8 @@ defmodule Barkpark.Content.Mutations do
       _ ->
         with :ok <-
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
+             :ok <-
+               ensure_read_only_unchanged(type, nil, incoming_content(attrs), id, dataset, opts),
              {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
           warn_create_over_published("createIfNotExists", type, id, dataset, opts, doc)
           {:ok, doc, "create"}
@@ -555,38 +751,66 @@ defmodule Barkpark.Content.Mutations do
          do: {:ok, doc, "deleteExactDraft"}
   end
 
-  defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
-    case if_rev(op) do
-      nil ->
-        with {:ok, doc} <- Content.delete_document(id, type, dataset, opts),
+  # A `delete` naming a `drafts.` id deletes ONLY that draft; the published row
+  # survives (Sanity semantics, task-47f8394f07b97f8b). Before, the id was
+  # widened to the whole pair, so asking to drop a draft deleted the published
+  # document too. It runs through `delete_exact_draft/5`, fenced at the caller's
+  # `ifRevisionID` or else at the draft's rev as read here. References point at
+  # the published id, so they block it only when no published row exists, i.e.
+  # when the draft IS the whole document. A bare id keeps deleting both rows.
+  defp apply_one(
+         %{"delete" => %{"id" => "drafts." <> _ = id, "type" => type} = op},
+         dataset,
+         opts
+       ) do
+    case Content.get_document(id, type, dataset, opts) do
+      {:ok, draft} ->
+        with :ok <- ensure_draft_unreferenced(id, type, op, dataset, opts),
+             {:ok, doc} <-
+               Content.delete_exact_draft(id, type, dataset, if_rev(op) || draft.rev, opts),
              do: {:ok, doc, "delete"}
 
-      expected ->
-        # The guard must read the SAME row-set delete_document acts on. It removes
-        # BOTH the draft and published spellings, but get_document is an exact-id
-        # match with no draft/published fallback — so an unpublished doc (present
-        # only as drafts.<id>) guarded by its canonical id would miss the row and
-        # spuriously 412. Read the exact id first (preserves every working case),
-        # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
-        # rev_mismatch for a truly-absent doc — no regression on that path.
-        existing =
-          case Content.get_document(id, type, dataset, opts) do
-            {:ok, d} ->
-              d
+      _ ->
+        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+    end
+  end
 
-            _ ->
-              Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
-                case Content.get_document(v, type, dataset, opts) do
-                  {:ok, d} -> d
-                  _ -> nil
-                end
-              end)
+  defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
+    # Reference integrity (task-c8c22ee8076535fe): refuse while another document
+    # still points here, unless the op says `force: true`. See ensure_unreferenced/5.
+    with :ok <- ensure_unreferenced(id, type, op, dataset, opts) do
+      case if_rev(op) do
+        nil ->
+          with {:ok, doc} <- Content.delete_document(id, type, dataset, opts),
+               do: {:ok, doc, "delete"}
+
+        expected ->
+          # The guard must read the SAME row-set delete_document acts on. It removes
+          # BOTH the draft and published spellings, but get_document is an exact-id
+          # match with no draft/published fallback — so an unpublished doc (present
+          # only as drafts.<id>) guarded by its canonical id would miss the row and
+          # spuriously 412. Read the exact id first (preserves every working case),
+          # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
+          # rev_mismatch for a truly-absent doc — no regression on that path.
+          existing =
+            case Content.get_document(id, type, dataset, opts) do
+              {:ok, d} ->
+                d
+
+              _ ->
+                Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
+                  case Content.get_document(v, type, dataset, opts) do
+                    {:ok, d} -> d
+                    _ -> nil
+                  end
+                end)
+            end
+
+          with :ok <- ensure_rev(existing, expected),
+               {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
+            {:ok, doc, "delete"}
           end
-
-        with :ok <- ensure_rev(existing, expected),
-             {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
-          {:ok, doc, "delete"}
-        end
+      end
     end
   end
 
@@ -610,6 +834,8 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+         :ok <-
+           ensure_read_only_unchanged(type, existing, incoming_content(attrs), id, dataset, opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -623,44 +849,48 @@ defmodule Barkpark.Content.Mutations do
   # and falls through to it. Order: setIfMissing fills absent defaults → set
   # merges (overriding) → inc/dec adjust the merged numeric values →
   # append/prepend extend list fields → unset removes. Promoted/system fields
-  # (title/status/_id/_type/_rev) stay protected throughout; malformed ops (a
+  # (title/status/_id/_type/_rev) stay protected in `content`; an unset of
+  # `title` clears the title COLUMN, as `set {title: ""}` does; malformed ops (a
   # non-map setIfMissing/inc/dec/append/prepend, a non-list unset, a non-numeric
   # delta, non-list append/prepend items) are ignored, not fatal.
   defp apply_one(%{"patch" => %{"id" => id, "type" => type} = patch}, dataset, opts)
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
-              is_map_key(patch, "append") or is_map_key(patch, "prepend") do
+              is_map_key(patch, "append") or is_map_key(patch, "prepend") or
+              is_map_key(patch, "insert") do
     # [bare-id-refusal] task-eeaf3a622b6c74c7 — `id`/`_id` under set/setIfMissing
     # address nothing here; refuse BEFORE the read so the answer does not depend
     # on whether the document exists. See Writer.refuse_bare_id/2.
     with :ok <- Writer.refuse_bare_id(Map.get(patch, "set"), :patch),
          :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
+         :ok <- lock_patch_target(id, dataset, opts),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)) do
-      protected = patch_protected_keys(patch, type, dataset, opts)
+         :ok <- ensure_rev(existing, if_rev(patch)),
+         protected = patch_protected_keys(patch, type, dataset, opts),
+         {:ok, applied} <- apply_patch_ops(existing.content || %{}, patch, protected) do
       set_fields = Map.get(patch, "set", %{})
-      unset_keys = list_or_empty(Map.get(patch, "unset"))
+      # The title is a row column, so an `unset` of it never reached the row:
+      # unsetting clears it exactly as `set {title: ""}` does (task-a50bcf53bee78a53).
+      # A `set` of the title in the same patch wins.
+      title =
+        if not Map.has_key?(set_fields, "title") and
+             "title" in list_or_empty(Map.get(patch, "unset")),
+           do: "",
+           else: set_fields["title"]
 
       merged =
-        (existing.content || %{})
-        |> put_new_fields(Map.get(patch, "setIfMissing"), protected)
-        |> Map.merge(Map.drop(set_fields, protected))
-        |> apply_delta(Map.get(patch, "inc"), protected, 1)
-        |> apply_delta(Map.get(patch, "dec"), protected, -1)
-        |> apply_array_op(Map.get(patch, "append"), protected, :append)
-        |> apply_array_op(Map.get(patch, "prepend"), protected, :prepend)
-        |> Map.drop(unset_keys -- protected)
+        applied
         # Bound-block write-through (task-d8785cff163c8013). On a blocks-bearing
         # document `Writer.maybe_project_document_content/2` re-derives every
         # `content[fieldName]` from `content["blocks"]`, so a merge alone was
         # overwritten back to the stale block value on the way to the row. Update
         # the block projection reads FROM; projection stays its sole writer. A
         # document with no block list is byte-identical. See BoundFieldSync.
-        |> BoundFieldSync.sync(existing.content || %{}, set_fields["title"])
+        |> BoundFieldSync.sync(existing.content || %{}, title)
 
       attrs = %{
         "doc_id" => id,
-        "title" => set_fields["title"] || existing.title,
+        "title" => title || existing.title,
         "content" => merged
       }
 
@@ -668,6 +898,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <-
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
+           :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -682,15 +913,20 @@ defmodule Barkpark.Content.Mutations do
        ) do
     # [bare-id-refusal] task-eeaf3a622b6c74c7 — see the ops arm above.
     with :ok <- Writer.refuse_bare_id(fields, :patch),
+         :ok <- lock_patch_target(id, dataset, opts),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)) do
+         :ok <- ensure_rev(existing, if_rev(patch)),
+         prior = existing.content || %{},
+         {:ok, applied} <-
+           apply_patch_ops(
+             prior,
+             %{"set" => fields},
+             patch_protected_keys(patch, type, dataset, opts)
+           ) do
       warn_on_nested_content(fields)
 
-      prior = existing.content || %{}
-
       merged =
-        prior
-        |> Map.merge(Map.drop(fields, patch_protected_keys(patch, type, dataset, opts)))
+        applied
         # Bound-block write-through — see the ops clause above and
         # `Barkpark.Content.BoundFieldSync`.
         |> BoundFieldSync.sync(prior, fields["title"])
@@ -705,6 +941,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <-
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
+           :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -1147,6 +1384,30 @@ defmodule Barkpark.Content.Mutations do
   # The create family passes its attrs as `op` and `incoming_content/1` as
   # `merged` (what the guards read today); `patch` passes the patch map and the
   # merged content it computed.
+  # ── readOnly schema fields (owner ruling #35, item 5) ──────────────────────
+  #
+  # The last step before the writer on every clause that stores content, so a
+  # task's own guards keep refusing first. `existing` is the row the clause
+  # resolved; a create (or a `createOrReplace` with no draft) compares against
+  # the published row instead, read only when the check applies. Who is refused
+  # and what counts as a change: `Barkpark.Content.ReadOnlyFields`.
+  defp ensure_read_only_unchanged(type, %{content: content}, merged, _id, dataset, opts),
+    do: ReadOnlyFields.check(type, content || %{}, merged, dataset, opts)
+
+  defp ensure_read_only_unchanged(type, _existing, merged, id, dataset, opts) do
+    base = fn ->
+      with true <- is_binary(id) and is_binary(type),
+           {:ok, published} <-
+             Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+        published.content || %{}
+      else
+        _ -> %{}
+      end
+    end
+
+    ReadOnlyFields.check(type, base, merged, dataset, opts)
+  end
+
   defp run_mutate_door_fences(phase, type, existing, attrs, dataset, opts),
     do:
       run_mutate_door_fences(
@@ -1178,8 +1439,8 @@ defmodule Barkpark.Content.Mutations do
   A block op re-projects every bound block (`fieldName`) into `content`, so it
   can set any field a `patch` can. This runs, in the mutate door's order, the
   close fence (`ensure_task_close_is_cas`), the claim fence
-  (`ensure_claim_not_dropped`) and the `:after_claim` plugin fences over the
-  row the op read (`existing`) and the content it will store (`merged`), and
+  (`ensure_claim_not_dropped`), the `:after_claim` plugin fences and the
+  readOnly field check (`Barkpark.Content.ReadOnlyFields`) over the row the op read (`existing`) and the content it will store (`merged`), and
   returns the same refusal the mutate door would.
 
   One difference, on purpose: the close fence is judged as a write WITHOUT a
@@ -1193,16 +1454,18 @@ defmodule Barkpark.Content.Mutations do
     no_revision_precondition = %{}
 
     with :ok <- ensure_task_close_is_cas(type, existing, merged, no_revision_precondition, opts),
-         :ok <- ensure_claim_not_dropped(type, existing, merged, opts) do
-      run_mutate_door_fences(
-        :after_claim,
-        type,
-        existing,
-        merged,
-        no_revision_precondition,
-        dataset,
-        opts
-      )
+         :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
+         :ok <-
+           run_mutate_door_fences(
+             :after_claim,
+             type,
+             existing,
+             merged,
+             no_revision_precondition,
+             dataset,
+             opts
+           ) do
+      ensure_read_only_unchanged(type, existing, merged, nil, dataset, opts)
     end
   end
 
@@ -1438,6 +1701,172 @@ defmodule Barkpark.Content.Mutations do
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []
 
+  # ── Patch ops with paths (task-bfb66a2ff491f6e7) ─────────────────────────
+  #
+  # One pass for both patch clauses. Order is unchanged for plain keys:
+  # setIfMissing fills absent defaults → set merges (overriding) → inc/dec →
+  # append/prepend → insert → unset. A key containing `.` or `[` is a PATH
+  # (`seo.metaTitle`, `body[_key=="b1"].text`) applied in the same slot through
+  # `PatchPath`; plain keys keep the shallow top-level behaviour byte for byte.
+  # A path whose first key is protected is skipped like a protected plain key.
+  # A path that does not parse, or walks into a scalar, refuses the batch (422);
+  # a selector that matches no item is a no-op with a `patch.path_unmatched`
+  # warning, as Sanity's API leaves the document unchanged there.
+  defp apply_patch_ops(content, patch, protected) do
+    {set_plain, set_paths} = split_paths(Map.get(patch, "set"))
+    {sim_plain, sim_paths} = split_paths(Map.get(patch, "setIfMissing"))
+    {inc_plain, inc_paths} = split_paths(Map.get(patch, "inc"))
+    {dec_plain, dec_paths} = split_paths(Map.get(patch, "dec"))
+
+    {unset_paths, unset_plain} =
+      Enum.split_with(list_or_empty(Map.get(patch, "unset")), &PatchPath.path?/1)
+
+    content
+    |> put_new_fields(sim_plain, protected)
+    |> path_ops(sim_paths, protected, &set_if_missing_fun/1, true)
+    |> ok_then(&Map.merge(&1, Map.drop(set_plain, protected)))
+    |> path_ops(set_paths, protected, &set_fun/1, true)
+    |> ok_then(&apply_delta(&1, inc_plain, protected, 1))
+    |> path_ops(numeric(inc_paths), protected, &delta_fun(&1, 1), true)
+    |> ok_then(&apply_delta(&1, dec_plain, protected, -1))
+    |> path_ops(numeric(dec_paths), protected, &delta_fun(&1, -1), true)
+    |> ok_then(&apply_array_op(&1, Map.get(patch, "append"), protected, :append))
+    |> ok_then(&apply_array_op(&1, Map.get(patch, "prepend"), protected, :prepend))
+    |> apply_insert(Map.get(patch, "insert"), protected)
+    |> path_ops(Enum.map(unset_paths, &{&1, nil}), protected, &unset_fun/1, false)
+    |> ok_then(&Map.drop(&1, unset_plain -- protected))
+  end
+
+  defp split_paths(fields) when is_map(fields) do
+    {paths, plain} = Enum.split_with(fields, fn {k, _} -> PatchPath.path?(k) end)
+    {Map.new(plain), Enum.sort(paths)}
+  end
+
+  defp split_paths(nil), do: {%{}, []}
+  defp split_paths(other), do: {other, []}
+
+  defp numeric(pairs), do: Enum.filter(pairs, fn {_k, d} -> is_number(d) end)
+
+  # PatchPath.update/4 callbacks: given the current value (`{:ok, v}` or
+  # `:absent`), say what to store.
+  defp set_fun(value), do: fn _ -> {:put, value} end
+
+  defp set_if_missing_fun(value) do
+    fn
+      :absent -> {:put, value}
+      {:ok, _} -> :keep
+    end
+  end
+
+  defp unset_fun(_value) do
+    fn
+      :absent -> :keep
+      {:ok, _} -> :delete
+    end
+  end
+
+  defp delta_fun(delta, sign) do
+    fn
+      {:ok, n} when is_number(n) -> {:put, n + sign * delta}
+      _ -> {:put, sign * delta}
+    end
+  end
+
+  defp ok_then({:ok, content}, fun), do: {:ok, fun.(content)}
+  defp ok_then(content, fun) when is_map(content), do: {:ok, fun.(content)}
+  defp ok_then(error, _fun), do: error
+
+  defp wrap_ok({:ok, _} = ok), do: ok
+  defp wrap_ok(content) when is_map(content), do: {:ok, content}
+  defp wrap_ok(error), do: error
+
+  defp path_ops({:error, _} = error, _pairs, _protected, _make_fun, _create?), do: error
+
+  defp path_ops(acc, pairs, protected, make_fun, create?) do
+    Enum.reduce_while(pairs, wrap_ok(acc), fn {path, value}, {:ok, content} ->
+      with {:ok, segs} <- path_error(PatchPath.parse(path)),
+           false <- PatchPath.root(path) in protected do
+        case PatchPath.update(content, segs, create?, make_fun.(value)) do
+          {:ok, updated} -> {:cont, {:ok, updated}}
+          :unmatched -> {:cont, {:ok, warn_unmatched(path, content)}}
+          {:error, msg} -> {:halt, path_error({:error, "#{msg} (path #{inspect(path)})"})}
+        end
+      else
+        true -> {:cont, {:ok, content}}
+        {:error, _} = e -> {:halt, e}
+      end
+    end)
+  end
+
+  # `insert: {"before"|"after"|"replace": path, "items": [...]}` — one anchor.
+  defp apply_insert(acc, nil, _protected), do: wrap_ok(acc)
+
+  defp apply_insert(acc, insert, protected) do
+    with {:ok, content} <- wrap_ok(acc),
+         {:ok, position, path, items} <- insert_shape(insert),
+         {:ok, segs} <- path_error(PatchPath.parse(path)) do
+      if PatchPath.root(path) in protected do
+        {:ok, content}
+      else
+        case PatchPath.insert(content, segs, position, items) do
+          {:ok, _} = ok -> ok
+          :unmatched -> {:ok, warn_unmatched(path, content)}
+          {:error, msg} -> path_error({:error, "#{msg} (path #{inspect(path)})"})
+        end
+      end
+    end
+  end
+
+  defp insert_shape(%{"items" => items} = insert) when is_list(items) do
+    case Enum.filter(~w(before after replace), &is_binary(Map.get(insert, &1))) do
+      [pos] -> {:ok, String.to_existing_atom(pos), insert[pos], items}
+      _ -> path_error({:error, "insert needs exactly one of before, after or replace"})
+    end
+  end
+
+  defp insert_shape(_),
+    do: path_error({:error, "insert must be an object with `items` (a list) and one anchor path"})
+
+  defp path_error({:error, msg}) when is_binary(msg),
+    do:
+      {:error,
+       {:validation_failed, "patch path", %{"path" => [msg]},
+        ~s(Use field.sub, list[_key=="…"] or list[N]; insert takes {"after"|"before"|"replace": path, "items": [...]}.)}}
+
+  defp path_error(other), do: other
+
+  defp warn_unmatched(path, content) do
+    Warnings.put(
+      "patch.path_unmatched",
+      "patch path #{inspect(path)} matched no array item, so that op changed nothing. " <>
+        "Re-read the document: the item may have been removed or re-keyed.",
+      "warning"
+    )
+
+    content
+  end
+
+  # Serialize patches on one document (task-bfb66a2ff491f6e7 c1). Without this,
+  # two clients patching sibling nested fields (seo.metaTitle, seo.metaDescription)
+  # both read the same base, and the later UPDATE writes its stale merge over the
+  # earlier one. A transaction-scoped advisory lock on the document's published
+  # id makes the second patch wait and read the first one's result. It covers
+  # the fork-from-published case too, where no draft row exists yet to lock.
+  # Released at commit or rollback. Two-key form, so it never shares a lock
+  # with the single-key audit-chain locks.
+  @patch_lock_class 0x7061
+
+  defp lock_patch_target(id, dataset, opts) when is_binary(id) do
+    key =
+      :erlang.crc32("#{Keyword.get(opts, :workspace_id)}:#{dataset}:#{DraftId.published_id(id)}") -
+        2_147_483_648
+
+    Repo.query!("SELECT pg_advisory_xact_lock($1::int, $2::int)", [@patch_lock_class, key])
+    :ok
+  end
+
+  defp lock_patch_target(_id, _dataset, _opts), do: :ok
+
   # setIfMissing: put each field only if absent (Map.put_new), so it fills
   # defaults without clobbering existing values. Protected keys are skipped; a
   # non-map `fields` (malformed op) is a no-op.
@@ -1497,6 +1926,88 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_array_op(content, _fields, _protected, _position), do: content
+
+  # ── Reference integrity on delete (task-c8c22ee8076535fe) ─────────────────
+  #
+  # A delete of a document that other documents still reference is refused
+  # 409 `document_referenced`, listing the referrers, as Sanity's API does. The
+  # op's `"force": true` deletes anyway; that path writes a
+  # `document.delete_forced` audit event naming the referrers, in the same
+  # transaction, so an override is never silent. A target that does not exist
+  # is left to the delete itself to answer 404. Who counts as a referrer:
+  # `Barkpark.Content.ReferenceIntegrity`.
+  # task-6b5e4b3e572d38c9 — `opts[:precomputed_referrers]` is set ONLY by
+  # `apply_chunk/5` for a RUN of 2+ consecutive deletes, keyed by PUBLISHED
+  # id (the same key `ReferenceIntegrity.referrers_for_ids/3` returns, and
+  # the same resolution `referrers/3` performs internally on `id`). A lone
+  # delete in a mixed batch, or any caller of `delete_document`/`apply_one`
+  # outside `apply_mutations` entirely, carries no such opt and falls
+  # through to the ORIGINAL per-id query unchanged.
+  defp ensure_unreferenced(id, type, op, dataset, opts) when is_binary(id) do
+    referrers =
+      case Keyword.get(opts, :precomputed_referrers) do
+        %{} = precomputed -> Map.get(precomputed, DraftId.published_id(id), [])
+        _ -> ReferenceIntegrity.referrers(id, dataset, opts)
+      end
+
+    case referrers do
+      [] ->
+        :ok
+
+      found ->
+        case {delete_target(id, type, dataset, opts), Map.get(op, "force") == true} do
+          {nil, _} -> :ok
+          {doc, true} -> audit_forced_delete(doc, type, dataset, found, opts)
+          {_doc, false} -> {:error, {:document_referenced, DraftId.published_id(id), found}}
+        end
+    end
+  end
+
+  defp ensure_unreferenced(_id, _type, _op, _dataset, _opts), do: :ok
+
+  # A draft delete leaves the published row, which is what references name, so
+  # only a draft-only document (no published row) is checked.
+  defp ensure_draft_unreferenced(id, type, op, dataset, opts) do
+    case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+      {:ok, _published} -> :ok
+      _ -> ensure_unreferenced(id, type, op, dataset, opts)
+    end
+  end
+
+  defp delete_target(id, type, dataset, opts) do
+    Enum.find_value([DraftId.published_id(id), DraftId.draft_id(id)], fn v ->
+      case Content.get_document(v, type, dataset, opts) do
+        {:ok, doc} -> doc
+        _ -> nil
+      end
+    end)
+  end
+
+  defp audit_forced_delete(doc, type, dataset, referrers, opts) do
+    user_id = Keyword.get(opts, :user_id)
+
+    result =
+      Barkpark.Audit.emit(%{
+        category: "content_mutation",
+        action: "document.delete_forced",
+        subject: DraftId.published_id(doc.doc_id),
+        actor_type: if(user_id, do: "user"),
+        actor_id: user_id,
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        metadata: %{
+          "type" => type,
+          "dataset" => dataset,
+          "referrer_count" => length(referrers),
+          "referrers" => Enum.map(referrers, &"#{&1.type}:#{&1.id}")
+        }
+      })
+
+    case result do
+      {:ok, _event} -> :ok
+      {:error, _} = error -> error
+    end
+  end
 
   defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
   defp if_rev(_), do: nil

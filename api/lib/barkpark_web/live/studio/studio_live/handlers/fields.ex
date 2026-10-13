@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   Document lifecycle (new/save/autosave) + editor toggles + ArrayField ops.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -11,26 +13,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Shared
 
-  # The Studio's display default for a brand-new row's `title` FIELD.
-  @untitled "Untitled"
-
-  # Types whose title is NOT a plain field but the text of a locked title
-  # BLOCK. Mirrors `Writer.maybe_apply_paper_template/2`, which seeds the paper
-  # template for "paper" and nothing else.
-  #
-  # [untitled-is-a-fallback-not-a-seed] A paper is born WITHOUT a title, on
-  # purpose. `Papers.Template.template_blocks/1` copies the attrs title
-  # verbatim into the locked `tpl-title` heading's `"text"`, so seeding
-  # "Untitled" here did not write chrome — it wrote CONTENT, into the one block
-  # the author is about to type in, and the caret landing after it made the
-  # first keystroke APPEND ("UntitledHand walk…"). Every display site already
-  # renders `doc.title || "Untitled"` (pane_builder, components, secondary,
-  # refs, editor_fields, modals), so a nil title still reads "Untitled" on the
-  # desk, the breadcrumb and the tab — while the title block itself starts
-  # empty and the editor paints its own heading placeholder. `derive_title/2`
-  # then fills the row title from the block the moment the author types, which
-  # is the single-truth contract the literal was quietly pre-empting.
-  @block_titled_types ["paper"]
+  # [untitled-is-a-fallback-not-a-seed] A new document is born WITHOUT a
+  # title, on purpose. A paper showed it first: `Papers.Template.template_blocks/1`
+  # copies the attrs title verbatim into the locked `tpl-title` heading's
+  # `"text"`, so seeding "Untitled" did not write chrome — it wrote CONTENT,
+  # into the one block the author is about to type in, and the caret landing
+  # after it made the first keystroke APPEND ("UntitledHand walk…"). Every
+  # display site already renders `doc.title || "Untitled"` (pane_builder,
+  # components, secondary, refs, editor_fields, modals), so a nil title still
+  # reads "Untitled" on the desk, the breadcrumb and the tab — while the title
+  # input or block itself starts empty. `derive_title/2` (papers) and
+  # `TitleDerivation.maybe_derive` (titleless types) then fill the row title
+  # the moment the author types, which is the single-truth contract the
+  # literal was quietly pre-empting.
 
   # How long a create press stays "the press you just made". PUSH_TIMEOUT in
   # phoenix_live_view.js is 30_000ms — after that the client itself has given
@@ -38,7 +33,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # retry of the old one.
   @create_retry_window_ms 30_000
 
-  def new_document(%{"type" => type}, socket) do
+  def new_document(%{"type" => type} = params, socket) do
     case retry_of_recent_create(socket, type) do
       {:ok, %{path: path}} ->
         # [plus-press-retry-coalesce] THE SECOND PRESS OF "+". spd-w18 measured
@@ -75,16 +70,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          socket
          |> put_flash(
            :info,
-           "That “+” already created an untitled #{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
+           gettext(
+             "That “+” already created an untitled %{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another.",
+             type:
+               BarkparkWeb.Studio.PaneBuilder.type_word_for(
+                 type,
+                 socket.assigns.dataset,
+                 BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               )
+           )
          )
-         |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))}
+         |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))
+         |> focus_new_doc(List.last(path))}
 
       :none ->
-        create_new_document(type, socket)
+        create_new_document(type, pane_prefix(params, socket), socket)
     end
   end
 
-  defp create_new_document(type, socket) do
+  # The pressed pane's own address, the prefix `Handlers.Scope.select/2` uses
+  # for a row click (#35b). `nav_path ++ [id]` appended the new id after the
+  # OPEN document whenever one was open, so the walker kept the old document in
+  # the editor and the new one sat orphaned in the list
+  # (task-c06799c87b8d4964). A press with no pane index (none today) keeps the
+  # old formula.
+  defp pane_prefix(%{"pane" => pane}, socket) when is_binary(pane) do
+    with {idx, ""} when idx >= 0 <- Integer.parse(pane),
+         %{path: path} when is_list(path) <- Enum.at(socket.assigns[:panes] || [], idx) do
+      path
+    else
+      _ -> socket.assigns.nav_path
+    end
+  end
+
+  defp pane_prefix(_params, socket), do: socket.assigns.nav_path
+
+  defp create_new_document(type, prefix, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
     # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
@@ -100,7 +121,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          ) do
       {:ok, doc} ->
         pub_id = Content.published_id(doc.doc_id)
-        new_path = socket.assigns.nav_path ++ [pub_id]
+        new_path = prefix ++ [pub_id]
 
         {:noreply,
          socket
@@ -113,15 +134,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
              at: System.monotonic_time(:millisecond)
            }
          )
-         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))
+         |> focus_new_doc(pub_id)}
 
       {:error, {:halted, reason}} ->
-        {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
+        {:noreply,
+         put_flash(socket, :error, gettext("Create cancelled: %{reason}", reason: reason))}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to create")}
+        {:noreply, put_flash(socket, :error, gettext("Failed to create"))}
     end
   end
+
+  # A create the user just made opens with the caret in its first field
+  # (task-92e2615cf6ec27e6). Without this, focus stayed on the "+", and a
+  # keyboard user tabbed through every list row to reach the form. The client
+  # half (`phx:bp:focus-new-doc` in root.html.heex) waits for this id's editor
+  # to render, since the push_patch above has not rendered it yet.
+  defp focus_new_doc(socket, id), do: push_event(socket, "bp:focus-new-doc", %{id: id})
 
   # See [plus-press-retry-coalesce] above. `{:ok, marker}` means: this press is
   # indistinguishable from a re-press of one whose answer never reached the
@@ -143,14 +173,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
-  # See [untitled-is-a-fallback-not-a-seed] above.
-  defp new_document_attrs(type) do
-    attrs = %{"content" => Shared.seed_new_doc_content(type)}
+  # See [untitled-is-a-fallback-not-a-seed] above (task-79e28148d9925097). For
+  # a field-titled type the stored "Untitled" opened in the title input as
+  # text the editor had to delete, and it SATISFIED a required title, so +
+  # then Publish shipped "Untitled". For a titleless type (author:
+  # `list_preview.title = name`) it blocked `TitleDerivation.maybe_derive`,
+  # which fills only a BLANK title, so the name never reached the title column
+  # and the header kept saying Untitled.
+  #
+  # A task alone keeps the seed: the Tasks plugin's authoring quality gate
+  # (`Plugins.Tasks` `gate_title/2`) refuses a task with a blank title, so a
+  # titleless + would answer "Create cancelled".
+  defp new_document_attrs("task" = type),
+    do: %{"content" => Shared.seed_new_doc_content(type), "title" => "Untitled"}
 
-    if type in @block_titled_types,
-      do: attrs,
-      else: Map.put(attrs, "title", @untitled)
-  end
+  defp new_document_attrs(type), do: %{"content" => Shared.seed_new_doc_content(type)}
 
   def save(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
@@ -173,7 +210,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # stale concurrent-edit banner.
         socket =
           socket
-          |> put_flash(:info, "Saved")
+          |> put_flash(:info, gettext("Saved"))
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false)
           |> clear_touched()

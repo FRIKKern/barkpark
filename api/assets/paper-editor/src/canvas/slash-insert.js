@@ -81,6 +81,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
   // A sheet REFERENCE inserts with an empty `ref`: the bpSheet atom mounts its
   // reference picker (pd-ee-sheet-embed-retarget), so the author picks the sheet
   // right on the chip, and the server hydrates the snapshot on save. Without this
@@ -98,7 +99,24 @@ export const CANVAS_SLASH_TYPES = new Set([
 // re-partitioned run renders the new block with its own editor. They stay members of
 // CANVAS_SLASH_TYPES so the slash menu and the palette keep offering them
 // (task-f3c8acd1e09a0eda, owner ruling 2026-10-03 #56).
-export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage"]);
+//
+// Image and equation are boundary blocks too (not in PaperCanvas @canvas_types).
+// Inserted as canvas nodes, they re-rendered ~500 ms later as boundary editors
+// outside the canvas, dropping whatever the author had typed into the transient
+// node and leaving no focus (task-f92354b415b486f5). The server builds them, and
+// pushes `bp:focus-boundary` so the caret lands in the editor that persists.
+export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage", "image", "equation"]);
+
+// All four go to the server ONLY when the host builds blocks there: Barkpark's own
+// LiveView marks its editor `data-server-insert` (bp-paper-editor-hooks.js), and only
+// its canvas fence refuses a canvas-built terminal or stage. Any other host (an HTTP
+// embedder such as barkpark-studio, a field canvas) gets the canvas node instead —
+// sent to a host that builds nothing, the pick removed its "/" line and inserted
+// nothing (image + equation: task-9c04bcc87b3da42f; terminal + stage:
+// task-d170de40027ea448).
+export function serverBuildsInsert(type, hostBuilds) {
+  return CANVAS_SERVER_INSERT_TYPES.has(type) && Boolean(hostBuilds);
+}
 
 // canvasDefaultBlock(type) → the minimal VALID portable-doc block for `type`,
 // MIRRORING blocks.ex default_block/2 (the server clause a per-block bp-slash-insert
@@ -267,6 +285,8 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "field-datetime", label: "Date & time", value: "" };
     case "field-color":
       return { id: null, type: "field-color", label: "Color", value: "#000000" };
+    case "field-number":
+      return { id: null, type: "field-number", label: "Number", value: null };
     case "field-select":
       return {
         id: null,

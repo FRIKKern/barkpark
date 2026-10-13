@@ -3,16 +3,23 @@ defmodule Barkpark.Media.Storage.Checkout do
 
   alias Barkpark.Content
   alias Barkpark.Content.Document
-  alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Media.Storage.{Actor, MediaFile}
 
   @asset_type "mediaAsset"
 
   @doc "Check out an asset for editing. Returns updated document."
-  @spec checkout(%MediaFile{}, String.t(), String.t()) :: {:ok, Document.t()} | {:error, term()}
-  def checkout(%MediaFile{} = file, actor, dataset) when is_binary(actor) do
+  @spec checkout(%MediaFile{}, Actor.t() | String.t(), String.t()) ::
+          {:ok, Document.t()} | {:error, term()}
+  # A bare label string is a token/system actor (tests, internal callers).
+  def checkout(%MediaFile{} = file, actor, dataset) when is_binary(actor),
+    do: checkout(file, %Actor{label: actor}, dataset)
+
+  def checkout(%MediaFile{} = file, %Actor{} = actor, dataset) do
     with %Document{} = doc <- fetch_doc(file, dataset),
          :ok <- ensure_available(doc, actor) do
-      patch_checkout(doc, file, dataset, actor, DateTime.utc_now() |> DateTime.to_iso8601())
+      # Stamps the actor's label, so a legacy email stamp the same account
+      # held is rewritten to "user:<id>" here (task-36a302b2e981d5e1).
+      patch_checkout(doc, file, dataset, actor.label, DateTime.utc_now() |> DateTime.to_iso8601())
     end
   end
 
@@ -23,14 +30,17 @@ defmodule Barkpark.Media.Storage.Checkout do
   (`BarkparkWeb.V1.MediaController.admin?/1`), which is TRUE ADMIN ONLY as of
   felix-w28-bl-checkout-tighten-adjudication (ruled 2026-09-09). A write token
   arrives here with `admin? == false`, so the holder-only branch
-  (`holder == actor`) of `ensure_can_release/3` is the LIVE API path for it — a
+  (`Actor.holds?/2`) of `ensure_can_release/3` is the LIVE API path for it — a
   write token releases only its own lock; releasing another actor's lock is an
   admin privilege. A force-release (actor -> nil) also drops the file's
   renditions — see `patch_checkout/5`.
   """
-  @spec undo_checkout(%MediaFile{}, String.t(), String.t(), boolean()) ::
+  @spec undo_checkout(%MediaFile{}, Actor.t() | String.t(), String.t(), boolean()) ::
           {:ok, Document.t()} | {:error, term()}
-  def undo_checkout(%MediaFile{} = file, actor, dataset, admin?) do
+  def undo_checkout(%MediaFile{} = file, actor, dataset, admin?) when is_binary(actor),
+    do: undo_checkout(file, %Actor{label: actor}, dataset, admin?)
+
+  def undo_checkout(%MediaFile{} = file, %Actor{} = actor, dataset, admin?) do
     with %Document{} = doc <- fetch_doc(file, dataset),
          :ok <- ensure_can_release(doc, actor, admin?) do
       patch_checkout(doc, file, dataset, nil, nil)
@@ -53,7 +63,7 @@ defmodule Barkpark.Media.Storage.Checkout do
 
     cond do
       holder in [nil, ""] -> :ok
-      holder == actor -> :ok
+      Actor.holds?(actor, holder) -> :ok
       true -> {:error, :checked_out}
     end
   end
@@ -64,7 +74,7 @@ defmodule Barkpark.Media.Storage.Checkout do
     cond do
       holder in [nil, ""] -> :ok
       admin? -> :ok
-      holder == actor -> :ok
+      Actor.holds?(actor, holder) -> :ok
       true -> {:error, :forbidden}
     end
   end

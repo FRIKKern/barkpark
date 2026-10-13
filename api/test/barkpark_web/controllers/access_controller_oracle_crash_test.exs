@@ -291,10 +291,20 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
     # The guard must not swallow the MISSING case, which has its own contract.
     test "a MISSING workspace_id keeps its existing answers", %{conn: _conn} do
       ws = create_workspace!()
-      {grantor_raw, _} = token_principal(ws, ["read", "write", "admin"])
+      {grantor_raw, token} = token_principal(ws, ["read", "write", "admin"])
+
+      # Two memberships, so the list cannot default to the only workspace
+      # (task-1640b4d8feff6ae8) and the missing case is still a 422.
+      {:ok, _} =
+        Barkpark.Tenancy.Auth.create_membership(
+          create_workspace!().id,
+          token.id,
+          "admin",
+          "api_token"
+        )
 
       list = scoped_conn() |> bearer(grantor_raw) |> get("/v1/access")
-      assert json_response(list, 422)["error"]["message"] == "workspace_id is required"
+      assert json_response(list, 422)["error"]["message"] =~ "workspace_id is required"
 
       mint =
         scoped_conn()

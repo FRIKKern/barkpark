@@ -162,6 +162,40 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
     end
   end
 
+  @doc """
+  The action names whose handlers belong to plugins DISABLED in `ctx`'s
+  workspace (task-a11fcaa6d46a5fa4). A schema may declare such an action
+  (a fixture `volume` declares OnixEdit's `publish_to_bokbasen`), but where the
+  plugin is off the action is neither listed nor dispatched:
+  `StudioLive.DocActions` drops these names from the doc-action list and
+  refuses them at dispatch. Handler resolution itself stays unfiltered (a
+  non-surfacing callback), so this is the one place that answers "is this
+  action's plugin on here?". No workspace in `ctx` → `MapSet.new()`, the same
+  nil→unfiltered contract `:resolve_doc_actions` keeps.
+  """
+  @spec disabled_action_names(map()) :: MapSet.t(String.t())
+  def disabled_action_names(ctx) do
+    case ctx_workspace_id(ctx) do
+      nil ->
+        MapSet.new()
+
+      workspace_id ->
+        effective = Barkpark.Plugins.Enablement.effective(workspace_id)
+
+        {additive, arity, default, lift} =
+          Map.fetch!(@resolver_callbacks, :resolve_action_handlers)
+
+        load_ordered_plugins()
+        |> Enum.reject(&Barkpark.Plugins.Enablement.enabled?(effective, &1.name))
+        |> Enum.flat_map(fn entry ->
+          entry
+          |> apply_resolver(:resolve_action_handlers, additive, arity, default, lift, %{}, ctx)
+          |> Map.keys()
+        end)
+        |> MapSet.new()
+    end
+  end
+
   defp ctx_workspace_id(ctx) when is_map(ctx) do
     case Map.get(ctx, :workspace_id) do
       id when is_binary(id) and id != "" -> id
@@ -359,7 +393,13 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
       # disabled-here-but-enabled-elsewhere entry carries `true` + the
       # human sentence naming the workspace that DOES enable it.
       disabled: false,
-      reason: nil
+      reason: nil,
+      # task-aa4f50a406951fae: `enabled_in` carries the SAME fact `reason`
+      # composes into a sentence, as data — nil here, the enabling
+      # workspace's label on the disabled-elsewhere arm below. Always
+      # present, same invariant as disabled/reason, so a translating reader
+      # never has to branch on whether the key exists.
+      enabled_in: nil
     }
   end
 
@@ -441,7 +481,13 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
           |> normalize_top_menu_entry()
           |> Map.merge(%{
             disabled: true,
-            reason: "Disabled in this workspace — enabled in #{workspace_label}"
+            # task-aa4f50a406951fae: `reason` stays a finished English sentence
+            # (kept one release for any reader still on it, additive-only
+            # change) — `enabled_in` carries the SAME fact as data, so a
+            # translating reader (Studio's nav.ex) can compose its own
+            # sentence instead of displaying this one verbatim.
+            reason: "Disabled in this workspace — enabled in #{workspace_label}",
+            enabled_in: workspace_label
           })
         end
     end

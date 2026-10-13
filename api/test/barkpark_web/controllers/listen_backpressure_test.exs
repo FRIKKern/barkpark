@@ -17,6 +17,20 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   """
   use ExUnit.Case, async: false
 
+  # task-399143cf7ac6b952 made `listen/2` query the Repo for the welcome
+  # frame's head event id (EventLog.head_event_id/3), where it previously
+  # built a pure string literal — this file's own moduledoc claim of "no DB"
+  # is no longer true of the code path under test, only of these tests'
+  # OWN setup (no DataCase, no fixtures). `async: false` keeps using plain
+  # ExUnit.Case; :shared sandbox mode gives the listener process spawned
+  # below (and the forwarder it spawns) the SAME connection the test checked
+  # out, without an explicit `Sandbox.allow/3` at every spawn site.
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Barkpark.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Barkpark.Repo, {:shared, self()})
+    :ok
+  end
+
   # WHY THESE ASSERTIONS CARRY AN EXPLICIT 2_000 ms BUDGET.
   #
   # Three `assert_receive`s in this file are STARTUP-GATED: each waits on a
@@ -304,10 +318,40 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     end
   end
 
+  # task-2bcada0faa01ebb2 (#22639) widened this process's own links: `listen/2`
+  # now calls `DrainSignal.subscribe()` from INSIDE the listener process, and
+  # `Phoenix.PubSub.subscribe/2` wraps `Registry.register/3` — which, for the
+  # `:duplicate`-keyed registry PubSub's local adapter uses, LINKS the
+  # subscribing process to its own registry partition (confirmed against a
+  # bare `Registry.start_link(keys: :duplicate, …)` probe: the registering
+  # process gains a link to a process registered as `<Registry>.PIDPartitionN`
+  # — this is Elixir's OWN Registry design, not a leak this PR introduced).
+  # That link is REAL, PERMANENT for the life of the stream, and exists
+  # whether or not this helper's read wins the race against `listen/2`
+  # reaching the subscribe call (the welcome chunk is sent BEFORE it) — so a
+  # bare `length(links) == 1` flips on scheduler timing alone, which is
+  # exactly why this read differently on different local runs.
+  # The event forwarder stays identifiable without counting on that race: it
+  # is an ANONYMOUS `spawn_link`, never a registered name, while every
+  # PubSub registry partition this process links to IS a registered name.
+  # Filtering on that distinction names the forwarder by what it structurally
+  # is, not by a link count sensitive to an unrelated subscription race.
   defp only_forwarder_link(pid) do
     {:links, links} = Process.info(pid, :links)
-    assert length(links) == 1
-    hd(links)
+
+    unnamed =
+      Enum.reject(links, fn l ->
+        case Process.info(l, :registered_name) do
+          {:registered_name, name} -> name != []
+          # the linked process already exited; it is not the forwarder we want.
+          nil -> true
+        end
+      end)
+
+    assert length(unnamed) == 1,
+           "expected exactly one unnamed link (the event forwarder); got #{inspect(links)}"
+
+    hd(unnamed)
   end
 
   # A SHARED-LAYER event: `workspace_id: nil`, the value `tap_broadcast/5`

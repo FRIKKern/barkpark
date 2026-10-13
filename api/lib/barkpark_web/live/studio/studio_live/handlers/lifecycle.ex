@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   Thin routing heads stay on StudioLive (Phoenix dispatch); the bodies — which
   thread `socket` through `Shared` — live here. Behaviour-preserving.
   """
+
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
@@ -32,6 +33,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> Shared.maybe_open_shares(params)
       |> Shared.rebuild_panes()
+      |> Shared.assign_page_title()
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
       # Navigating (re)loads the editor from the DB, so the buffer is clean:
@@ -245,7 +247,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, assign(socket, sheet_presences: PresenceState.list(topic))}
 
       socket.assigns[:presence_topic] != nil ->
-        {:noreply, assign(socket, presences: PresenceState.list(socket.assigns.presence_topic))}
+        {:noreply,
+         socket
+         |> assign(presences: PresenceState.list(socket.assigns.presence_topic))
+         |> Shared.push_remote_selections()}
 
       true ->
         {:noreply, socket}
@@ -279,6 +284,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         {:noreply, socket}
 
       viewing_type != type ->
+        {:noreply, socket}
+
+      # An open paper repaints from its own paper topic (`{:paper_updated}` /
+      # `{:paper_block}`). Paper writes reach this list topic too since owner
+      # ruling #40 (they now emit change events for listen/sync/webhooks); a
+      # pane rebuild on top of the paper frame would discard the HTML it just
+      # painted.
+      type == "paper" and socket.assigns[:editor_view] == :paper ->
         {:noreply, socket}
 
       # A rebuild reloads the open doc's form from the DB — with unsaved local

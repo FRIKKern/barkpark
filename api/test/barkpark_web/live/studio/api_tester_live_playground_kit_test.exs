@@ -79,7 +79,21 @@ defmodule BarkparkWeb.Studio.ApiTesterLivePlaygroundKitTest do
       # The group's own label text. NOT the `studio-bar-actions` CLASS — that
       # string is also a selector in the inline stylesheet every studio page
       # ships, so refuting it is true of no page and would red always.
-      refute html =~ ~s(<label class="studio-bar-actions-label">)
+      refute html =~ ~s(<label class="studio-bar-actions-label" for="api-tester-token">)
+      refute html =~ ~s(id="api-tester-token")
+    end
+
+    # task-bd90e61ae5f1abd2: the visible "Token" label was not tied to the input.
+    test "the api-tester Token input is labelled by its Token label", %{
+      conn: conn,
+      admin_raw: raw
+    } do
+      {:ok, _view, html} = mount_as(conn, raw)
+
+      assert html =~
+               ~s(<label class="studio-bar-actions-label" for="api-tester-token">Token</label>)
+
+      assert html =~ ~r/<input[^>]*id="api-tester-token"[^>]*name="token"/
     end
   end
 

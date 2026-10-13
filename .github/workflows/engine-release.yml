@@ -1,0 +1,499 @@
+name: engine-release
+
+# Builds the Barkpark engine folder (scripts/engine/) for macOS arm64, Linux x64
+# and Linux arm64, uploads each as an artifact, then boots each artifact with the
+# @barkpark/engine integration test on a runner with no Elixir and no Postgres on
+# PATH and checks /status.json. The boot job then packs @barkpark/engine and the
+# platform package (scripts/engine/pack.mjs), npm installs both tarballs into a
+# scratch app and boots it with startBarkpark({ dataDir }) alone.
+# A workflow_dispatch run can add Windows x64 (input windows), and also runs the
+# npm job on the tarballs the boot jobs installed (win32-x64 too when windows=also): dry-run by
+# default, a real publish only when the owner picks it (NPM_TOKEN, main, version
+# above 0.0.0).
+#
+# WHY IT EXISTS: plan work for the App shape (task-03d94dbc4ad7b160, paper
+# /papers/the-engine-2026-10-05); no merge waits on it. It runs on pushes to main
+# that can change the release and on demand, never on pull requests, and no
+# required check names it. The paths mirror release-artifact.yml plus the
+# compile-time assets api/Dockerfile copies from outside api/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - ".tool-versions"
+      - "VERSION"
+      - "design/status-manifest.json"
+      - "cloud/priv/secret-scrub.exs"
+      - "tooling/pds/pre-gate-papers.json"
+      - "scripts/engine/**"
+      - "js/packages/engine/**"
+      - "js/pnpm-lock.yaml"
+      - ".github/workflows/engine-release.yml"
+  workflow_dispatch:
+    inputs:
+      npm:
+        # dry-run packs and checks all four packages and writes nothing to npm.
+        # publish is the owner's act: it needs NPM_TOKEN and a version above 0.0.0.
+        description: "npm publish of @barkpark/engine and its platform packages"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - publish
+      dist_tag:
+        # Passed as --tag to every npm publish. preview by default, as in release.yml:
+        # a pre-release on latest is what npm install resolves (ADR 0002).
+        description: "npm dist-tag to publish under"
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - next
+          - latest
+      windows:
+        # The Windows x64 jobs run on demand only (task-efbf914de2e8ab25): windows-latest
+        # minutes are scarce, and the leg is still being proven. There is no Windows-only
+        # choice: a skipped matrix job renders its name unexpanded on the head.
+        description: "Windows x64 build and boot"
+        required: true
+        default: "no"
+        type: choice
+        options:
+          - "no"
+          - also
+
+permissions:
+  contents: read
+
+env:
+  POSTGRES_VERSION: "15.18"
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, target: darwin-arm64 }
+          - { runner: ubuntu-latest, target: linux-x64 }
+          - { runner: ubuntu-24.04-arm, target: linux-arm64 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Barkpark.BuildInfo runs `git describe` at compile time, so tags and history are needed.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup BEAM (.tool-versions)
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Build tools for Postgres (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q build-essential bison flex zlib1g-dev libssl-dev
+
+      - name: Static OpenSSL for Postgres (macOS)
+        if: runner.os == 'macOS'
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+
+      - name: Cache mix deps and build
+        uses: actions/cache@v6
+        with:
+          path: |
+            api/deps
+            api/_build/engine-prod
+          key: engine-mix-${{ matrix.target }}-${{ hashFiles('.tool-versions', 'api/mix.lock') }}
+          restore-keys: engine-mix-${{ matrix.target }}-
+
+      - name: Cache Postgres build
+        id: pg-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/postgres
+          key: engine-postgres-${{ matrix.target }}-${{ env.POSTGRES_VERSION }}-${{ hashFiles('scripts/engine/build-postgres.mjs') }}
+
+      - name: Build Postgres
+        if: steps.pg-cache.outputs.cache-hit != 'true'
+        run: node scripts/engine/build-postgres.mjs --version "$POSTGRES_VERSION" --out "$RUNNER_TEMP/postgres"
+
+      - name: Build the release
+        run: |
+          mix local.hex --force && mix local.rebar --force
+          node scripts/engine/build-release.mjs --out "$RUNNER_TEMP/engine"
+          node scripts/engine/build-release.mjs --add-postgres "$RUNNER_TEMP/engine" "$RUNNER_TEMP/postgres"
+
+      - name: Pack
+        id: pack
+        run: |
+          name="barkpark-engine-$(git rev-parse --short=9 HEAD)-${{ matrix.target }}"
+          tar -czf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP" engine
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ matrix.target }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| engine folder | $(du -sh "$RUNNER_TEMP/engine" | cut -f1) |"
+            echo "| of which postgres/ | $(du -sh "$RUNNER_TEMP/engine/postgres" | cut -f1) |"
+            echo "| tarball | $(du -sh "$RUNNER_TEMP/$name.tar.gz" | cut -f1) |"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/engine/engine.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ steps.pack.outputs.name }}.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  boot:
+    # The App shape's CI leg (docs/contracts/product-era.md); deploy.yml is Cloud's, compose-smoke.yml Solo's.
+    name: App shape boot (${{ matrix.target }})
+    needs: build
+    # Boot every platform whose build passed, even when another platform's build failed.
+    if: ${{ !cancelled() }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, target: darwin-arm64 }
+          - { runner: ubuntu-latest, target: linux-x64 }
+          - { runner: ubuntu-24.04-arm, target: linux-arm64 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            js
+            scripts/engine
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      - name: Install @barkpark/engine
+        working-directory: js
+        run: pnpm install --frozen-lockfile --filter @barkpark/engine
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine-${{ matrix.target }}
+          path: ${{ runner.temp }}/artifact
+
+      - name: Unpack
+        run: tar -xzf "$RUNNER_TEMP"/artifact/*.tar.gz -C "$RUNNER_TEMP"
+
+      # The runner images carry a Postgres (and macOS a Homebrew OpenSSL). Remove what
+      # could stand in for the engine's own, then prove nothing is left on the PATH
+      # the test runs with.
+      - name: Take away Elixir, Erlang, Postgres and Homebrew OpenSSL
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get purge -y -q 'postgresql*' >/dev/null 2>&1 || true
+          else
+            for f in openssl@3 postgresql@14 postgresql@15 postgresql@16 postgresql@17; do
+              p="$(brew --prefix "$f" 2>/dev/null)" && [ -e "$p" ] && sudo mv "$(cd "$p" && pwd -P)" "$RUNNER_TEMP/hidden-$f" || true
+            done
+          fi
+          test_path="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin"
+          echo "TEST_PATH=$test_path" >> "$GITHUB_ENV"
+          found=0
+          for tool in erl elixir mix iex initdb pg_ctl postgres psql createdb; do
+            if PATH="$test_path" command -v "$tool" >/dev/null 2>&1; then echo "still on PATH: $tool -> $(PATH="$test_path" command -v "$tool")"; found=1; fi
+          done
+          [ "$found" = 0 ] || exit 1
+          echo "none of erl, elixir, mix, iex, initdb, pg_ctl, postgres, psql, createdb is on $test_path"
+
+      - name: Boot the engine and read /status.json
+        working-directory: js/packages/engine
+        run: |
+          mkdir -p "$RUNNER_TEMP/it"
+          PATH="$TEST_PATH" TMPDIR="$RUNNER_TEMP/it" BARKPARK_ENGINE_RELEASE="$RUNNER_TEMP/engine" BARKPARK_ENGINE_REPORT="$RUNNER_TEMP/report.json" \
+            ./node_modules/.bin/vitest run -c vitest.config.ts tests/engine.integration.test.ts tests/app-shape.integration.test.ts
+          cat "$RUNNER_TEMP/report.json"
+          { echo "### boot ${{ matrix.target }}"; echo; echo '```json'; cat "$RUNNER_TEMP/report.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # The same engine folder, the way an app gets it: both packages from their npm
+      # tarballs into a scratch app, then startBarkpark({ dataDir }) and nothing else.
+      - name: Pack @barkpark/engine and its platform package
+        run: |
+          set -o pipefail  # tee below must not hide a failed pack
+          (cd js/packages/engine && pnpm build)
+          node scripts/engine/pack.mjs platform --engine "$RUNNER_TEMP/engine" --out "$RUNNER_TEMP/npm" | tee "$RUNNER_TEMP/platform.json"
+          node scripts/engine/pack.mjs launcher --out "$RUNNER_TEMP/npm" | tee "$RUNNER_TEMP/launcher.json"
+
+      - name: npm install and one startBarkpark call
+        run: |
+          set -o pipefail  # tee below must not hide a failed boot
+          app="$RUNNER_TEMP/app"
+          mkdir -p "$app"
+          cd "$app"
+          echo '{ "name": "scratch-app", "version": "1.0.0", "private": true, "type": "module" }' > package.json
+          npm install --no-audit --no-fund "$(jq -r .tarball "$RUNNER_TEMP/launcher.json")" "$(jq -r .tarball "$RUNNER_TEMP/platform.json")"
+          cp "$GITHUB_WORKSPACE/scripts/engine/npm-boot-check.mjs" .
+          mkdir -p "$RUNNER_TEMP/npm-it"
+          env -u BARKPARK_ENGINE_RELEASE PATH="$TEST_PATH" TMPDIR="$RUNNER_TEMP/npm-it" node npm-boot-check.mjs | tee "$RUNNER_TEMP/npm-boot.json"
+          {
+            echo "### npm install + startBarkpark ${{ matrix.target }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| @barkpark/engine tarball | $(du -h "$(jq -r .tarball "$RUNNER_TEMP/launcher.json")" | cut -f1) |"
+            echo "| platform package tarball | $(du -h "$(jq -r .tarball "$RUNNER_TEMP/platform.json")" | cut -f1) |"
+            echo "| installed node_modules | $(du -sh node_modules | cut -f1) |"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/npm-boot.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The tarballs the boot just installed are the ones the publish job ships.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.target }}
+          path: ${{ runner.temp }}/npm/*.tgz
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Keep the data folder on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-boot-logs-${{ matrix.target }}
+          path: |
+            ${{ runner.temp }}/it/barkpark-engine-it-*/logs
+            ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
+          if-no-files-found: ignore
+
+  # Windows x64, on demand (inputs.windows). The same engine folder and the same
+  # npm-install boot as the other platforms, with what differs on Windows: Postgres
+  # is cut from EnterpriseDB's binary zip, argon2's C compiles under MSVC, the
+  # release script is bin/barkpark.bat, and :expty (forkpty) is left out of the
+  # build, so the Studio terminal reports itself not enabled.
+  build-windows:
+    name: build (win32-x64)
+    if: github.event_name == 'workflow_dispatch' && inputs.windows == 'also'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup BEAM (.tool-versions)
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # argon2_elixir builds its NIF with nmake and cl.exe.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Postgres (EnterpriseDB binaries)
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          node scripts/engine/build-postgres.mjs --version $env:POSTGRES_VERSION --out "$env:RUNNER_TEMP\postgres"
+
+      - name: Build the release
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          mix local.hex --force
+          mix local.rebar --force
+          node scripts/engine/build-release.mjs --out "$env:RUNNER_TEMP\engine"
+          node scripts/engine/build-release.mjs --add-postgres "$env:RUNNER_TEMP\engine" "$env:RUNNER_TEMP\postgres"
+          Get-Content "$env:RUNNER_TEMP\engine\engine.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-win32-x64
+          path: ${{ runner.temp }}/engine
+          retention-days: 14
+          if-no-files-found: error
+
+  boot-windows:
+    name: App shape boot (win32-x64)
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            js
+            scripts/engine
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine-win32-x64
+          path: ${{ runner.temp }}/engine
+
+      - name: Pack @barkpark/engine and its platform package
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Set-Location js
+          pnpm install --frozen-lockfile --filter @barkpark/engine
+          Set-Location packages/engine
+          pnpm build
+          Set-Location $env:GITHUB_WORKSPACE
+          node scripts/engine/pack.mjs platform --engine "$env:RUNNER_TEMP\engine" --out "$env:RUNNER_TEMP\npm" | Set-Content "$env:RUNNER_TEMP\platform.json"
+          node scripts/engine/pack.mjs launcher --out "$env:RUNNER_TEMP\npm" | Set-Content "$env:RUNNER_TEMP\launcher.json"
+          Get-Content "$env:RUNNER_TEMP\platform.json", "$env:RUNNER_TEMP\launcher.json"
+
+      # The runner image carries a Postgres and an Erlang; the engine never reaches
+      # them, because every child it starts gets a fixed system PATH (platform.ts).
+      - name: npm install and one startBarkpark call
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $launcher = (Get-Content "$env:RUNNER_TEMP\launcher.json" | ConvertFrom-Json).tarball
+          $platform = (Get-Content "$env:RUNNER_TEMP\platform.json" | ConvertFrom-Json).tarball
+          $app = "$env:RUNNER_TEMP\app"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Location $app
+          '{ "name": "scratch-app", "version": "1.0.0", "private": true, "type": "module" }' | Set-Content package.json
+          npm install --no-audit --no-fund $launcher $platform
+          Copy-Item "$env:GITHUB_WORKSPACE\scripts\engine\npm-boot-check.mjs" .
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\npm-it" | Out-Null
+          Remove-Item Env:BARKPARK_ENGINE_RELEASE -ErrorAction SilentlyContinue
+          $env:TMP = "$env:RUNNER_TEMP\npm-it"
+          $env:TEMP = "$env:RUNNER_TEMP\npm-it"
+          node npm-boot-check.mjs
+
+      # The tarballs this job just installed and booted are the ones the npm job ships.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-win32-x64
+          path: ${{ runner.temp }}/npm/*.tgz
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Keep the data folder on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-boot-logs-win32-x64
+          path: ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
+          if-no-files-found: ignore
+
+  # On demand only, and only after every platform booted from its npm tarballs:
+  # publish the three platform packages first, then @barkpark/engine, so a fresh
+  # install never resolves an optional dependency the registry does not have yet.
+  npm:
+    name: npm publish (dry-run unless chosen)
+    needs: [boot, boot-windows]
+    # boot-windows is skipped unless windows=also; when it ran, it must have passed.
+    if: >-
+      github.event_name == 'workflow_dispatch' && !cancelled() &&
+      needs.boot.result == 'success' &&
+      (needs.boot-windows.result == 'success' || needs.boot-windows.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-*
+          path: ${{ runner.temp }}/npm
+          merge-multiple: true
+
+      - name: Check the packages agree
+        id: check
+        env:
+          WINDOWS: ${{ inputs.windows }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npm"
+          ls -la
+          targets="darwin-arm64 linux-x64 linux-arm64"
+          if [ "$WINDOWS" = also ]; then targets="$targets win32-x64"; fi
+          launcher=(barkpark-engine-[0-9]*.tgz)
+          [ "${#launcher[@]}" -eq 1 ] || { echo "::error::expected one @barkpark/engine tarball, found ${#launcher[@]}"; exit 1; }
+          version="$(tar -xzOf "${launcher[0]}" package/package.json | jq -r .version)"
+          for target in $targets; do
+            f="barkpark-engine-$target-$version.tgz"
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+            [ "$(tar -xzOf "$f" package/package.json | jq -r .version)" = "$version" ] || { echo "::error::$f is not version $version"; exit 1; }
+            [ "$(tar -xzOf "${launcher[0]}" package/package.json | jq -r --arg n "@barkpark/engine-$target" '.optionalDependencies[$n]')" = "$version" ] \
+              || { echo "::error::@barkpark/engine does not depend on @barkpark/engine-$target@$version"; exit 1; }
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "launcher=${launcher[0]}" >> "$GITHUB_OUTPUT"
+          echo "targets=$targets" >> "$GITHUB_OUTPUT"
+          { echo "### npm ${{ inputs.npm }} $version (dist-tag ${{ inputs.dist_tag }})"; echo; echo "| package | tarball |"; echo "|---|---|"; for f in barkpark-engine-*.tgz; do echo "| $(tar -xzOf "$f" package/package.json | jq -r .name) | $(du -h "$f" | cut -f1) |"; done; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refuse a real publish without its preconditions
+        if: inputs.npm == 'publish'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::a real publish runs from main only, not $GITHUB_REF"; exit 1; }
+          [ -n "${NODE_AUTH_TOKEN:-}" ] || { echo "::error::repository secret NPM_TOKEN is not set"; exit 1; }
+          [ "$VERSION" != 0.0.0 ] || { echo "::error::version is 0.0.0; set a real version in js/packages/engine/package.json first"; exit 1; }
+
+      - name: npm publish (platform packages, then @barkpark/engine)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+          LAUNCHER: ${{ steps.check.outputs.launcher }}
+          TARGETS: ${{ steps.check.outputs.targets }}
+          MODE: ${{ inputs.npm }}
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npm"
+          if [ "$MODE" = publish ]; then flags=(--access public --provenance); else flags=(--access public --dry-run); fi
+          flags+=(--tag "$DIST_TAG")
+          for target in $TARGETS; do
+            npm publish "barkpark-engine-$target-$VERSION.tgz" "${flags[@]}"
+          done
+          npm publish "$LAUNCHER" "${flags[@]}"

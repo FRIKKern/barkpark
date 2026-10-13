@@ -177,7 +177,10 @@ defmodule BarkparkWeb.Studio.Caps do
 
   # Held-capability share flows — the handler + Access.mint/2 re-check
   # no-escalation, so the gate only requires the caller be able to read here.
-  @read_events ~w(airdrop-open airdrop-create)
+  # `paper-selection` (task-c522237b9f37de21) writes nothing persisted: it puts
+  # the caret of someone who can read the open paper into this socket's own
+  # presence meta, for the other sessions on that paper to draw.
+  @read_events ~w(airdrop-open airdrop-create paper-selection)
 
   # Admin (tenant-control): the network-shares panel + per-item share popover,
   # plus STRUCTURAL mutation — schema-declared doc actions and bulk

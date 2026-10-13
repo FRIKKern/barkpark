@@ -9,6 +9,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.DraftId
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Expand
+  alias Barkpark.Content.PreviewLocations
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
@@ -307,6 +308,13 @@ defmodule BarkparkWeb.QueryController do
     caller_context = CallerContext.from_conn(conn)
 
     cond do
+      # task-341a5d9e63ffdcc3: a broken bracket spelling (`?filter[[=x`,
+      # `filter[title=x`) decodes to a top-level key nothing reads, and a blank
+      # or bracketed field (`filter[%20]=x`, `filter[a]]=x`) is no field at all.
+      # Either one used to run the query as if unfiltered. Refuse it by name.
+      param = malformed_filter_param(params) ->
+        {:error, {:malformed_filter_param, param}}
+
       # Owner ruling #53: `?expand=` naming a field that is not a reference
       # field on this type used to answer 200 with nothing expanded.
       refusal = expand_refusal(conn, params["expand"], expand_spec, type, dataset, schema) ->
@@ -333,7 +341,7 @@ defmodule BarkparkWeb.QueryController do
       # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
       # every row — a typo'd op (?filter[status][bogus]=x) looked like it
       # filtered but didn't. Checked here so the reject beats the query.
-      bad = invalid_filter_op(filter_map) ->
+      bad = invalid_filter_op(filter_map, reference_ops_allowed?(conn)) ->
         case bad do
           # A documented operator whose value/shape can't be honoured carries
           # its OWN message — the shared "unknown filter operator" wording
@@ -376,16 +384,27 @@ defmodule BarkparkWeb.QueryController do
             ] ++ scope_opts(conn)
           )
 
-        rendered =
-          Envelope.render_many(docs, schema, caller_context)
+        base_rendered = Envelope.render_many(docs, schema, caller_context)
+
+        # Same split as `show_doc!/5` (task-0e0cb2167c6fcdea): captured
+        # between Expand.expand/4 and project_fields/maybe_resolve_tasks, so
+        # `maybe_source_map_many/5` can diff it against `base_rendered` for
+        # expand provenance before `?fields=`/task-resolution touch it.
+        expanded =
+          base_rendered
           |> Expand.expand(
             expand_spec,
             dataset,
             [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
               scope_opts(conn)
           )
+
+        rendered =
+          expanded
           |> project_fields(parse_fields(params["fields"]))
           |> maybe_resolve_tasks(conn, params)
+
+        source_map = maybe_source_map_many(conn, params, docs, base_rendered, expanded)
 
         inner =
           %{
@@ -409,14 +428,15 @@ defmodule BarkparkWeb.QueryController do
           list_sync_tags(dataset, type, rendered),
           etag,
           cache_validator(etag, schema_hash, page_shape(inner)),
-          t0
+          t0,
+          source_map
         )
     end
   end
 
   @doc """
   Inbound references — the documents that reference `:id` (Sanity's
-  `*[references($id)]`). Wraps `Content.Graph.reverse_referencers/2`, which is
+  `*[references($id)]`). Wraps `Content.Graph.backlinks/2`, which is
   FAIL-CLOSED: a referencing source the caller can't see (out-of-tenant,
   owner-scoped to another user, unpublished-to-anon) is dropped entirely — never
   stubbed — so backlinks never leak the existence of an unreadable link. Scoping
@@ -434,11 +454,45 @@ defmodule BarkparkWeb.QueryController do
 
         backlinks =
           id
-          |> Content.Graph.reverse_referencers(opts)
+          |> Content.Graph.backlinks(opts)
           |> redact_backlink_content(dataset, opts)
 
         json(conn, %{
           result: %{backlinks: backlinks, count: length(backlinks)},
+          syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
+        })
+      end)
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  "Used on N pages" (Studio J62, task-c5d5e045e7efcc96): backlinks/2's own
+  list, resolved into readable consumer-site URLs via each backlink's own
+  schema desk.preview template. Byte-identical scoping/auth to backlinks/2
+  -- same Content.Graph.backlinks/2 call (live + indexed reference holders,
+  deduplicated, field-visibility filtered), same preview-or-token gate, so
+  this can never surface more than backlinks already does. A backlink whose
+  type declares no template, or whose template needs :slug and the document
+  has none, is OMITTED -- never emitted with a guessed/wrong URL
+  (PreviewLocations.resolve/4).
+  """
+  def locations(conn, %{"dataset" => dataset, "id" => id} = params) do
+    if preview?(conn) or authed?(conn) do
+      read_region(:locations, "locations/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
+        opts = [dataset: dataset] ++ scope_opts(conn)
+        backlinks = Content.Graph.backlinks(id, opts)
+
+        url_scope = %{
+          workspace_slug: params["workspace_slug"],
+          project_slug: params["project_slug"]
+        }
+
+        locations = PreviewLocations.resolve(backlinks, dataset, opts, url_scope)
+
+        json(conn, %{
+          result: %{locations: locations, count: length(locations)},
           syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
         })
       end)
@@ -903,14 +957,28 @@ defmodule BarkparkWeb.QueryController do
          {:ok, doc} <- get_document_for_perspective(conn, doc_id, type, dataset, params) do
       caller_context = CallerContext.from_conn(conn)
 
-      rendered =
-        [Envelope.render(doc, schema, caller_context)]
+      base_rendered = Envelope.render(doc, schema, caller_context)
+
+      # Captured BETWEEN Expand.expand/4 and project_fields/maybe_resolve_tasks
+      # (task-0e0cb2167c6fcdea) — `source_map` needs the post-expand,
+      # pre-projection envelope to diff against `base_rendered` and find which
+      # fields Expand actually resolved; `?fields=` narrowing or task
+      # resolution afterward would hide or further mutate those fields for no
+      # reason `maybe_source_map/5` cares about (it already reads from
+      # `base_rendered`, not the `?fields=`-projected `rendered`, for the
+      # SAME reason — see that function's doc).
+      expanded =
+        [base_rendered]
         |> Expand.expand(
           expand_spec,
           dataset,
           [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
             scope_opts(conn)
         )
+        |> hd()
+
+      rendered =
+        [expanded]
         |> project_fields(parse_fields(params["fields"]))
         |> maybe_resolve_tasks(conn, params)
         |> hd()
@@ -918,6 +986,7 @@ defmodule BarkparkWeb.QueryController do
       schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
       etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
+      source_map = maybe_source_map(conn, params, doc, base_rendered, expanded)
 
       respond(
         conn,
@@ -926,9 +995,49 @@ defmodule BarkparkWeb.QueryController do
         sync_tags,
         etag,
         cache_validator(etag, schema_hash),
-        t0
+        t0,
+        source_map
       )
     end
+  end
+
+  # task-f18edb4599e06308 (candidate 1) — `?sourceMap=true`, DRAFTS/RAW ONLY.
+  # Never published: a published/production read returning a source map leaks
+  # internal doc_id/field-path structure to a public caller for no reason,
+  # mirroring AnonPerspective's own anon-pinning and PreviewToken's doc-scoped
+  # posture — the same rule this session applied twice already, not a new one.
+  # "Refused or ignored": ignored, not erred — the query is well-formed, the
+  # FLAG just isn't honoured outside drafts/raw, the same way `AnonPerspective.
+  # resolve/2` silently clamps `?perspective=drafts` for an anonymous caller
+  # rather than 400ing it.
+  # `expanded` (task-0e0cb2167c6fcdea) — the post-`Expand.expand/4` sibling
+  # of `base_rendered`, so a caller's `?expand=` gets provenance into the
+  # expanded sub-document too. `Envelope.source_map/3` already no-ops
+  # whenever `expanded` is identical to `base_rendered` (no `?expand=` was
+  # asked for — `Expand.expand/4`'s own `[]`-spec fast path returns its input
+  # untouched), so this is never gated on `expand_spec` here — one fewer
+  # thing for this function to get wrong relative to the one Expand.expand/4
+  # itself already decided.
+  defp maybe_source_map(conn, params, doc, base_rendered, expanded) do
+    if source_map_requested?(conn, params) do
+      Envelope.source_map(doc, base_rendered, expanded)
+    end
+  end
+
+  # List-result sibling (task-b54d854d43769266) — SAME opt-in flag, SAME
+  # drafts/raw-only rule as the doc-get candidate above; only the Envelope
+  # function differs (source_map_many/3, one row per result instead of one
+  # whole document). `expanded_list` is `source_map/3`'s `expanded` arg's
+  # per-row sibling — same task, same reasoning.
+  defp maybe_source_map_many(conn, params, docs, base_rendered_list, expanded_list) do
+    if source_map_requested?(conn, params) do
+      Envelope.source_map_many(docs, base_rendered_list, expanded_list)
+    end
+  end
+
+  defp source_map_requested?(conn, params) do
+    truthy = params["sourceMap"] in ["true", "1", true]
+    truthy and AnonPerspective.resolve(conn, params) != :published
   end
 
   # doc-get USED TO READ `?perspective` AND THROW IT AWAY. show_doc/5 did a bare
@@ -1183,7 +1292,7 @@ defmodule BarkparkWeb.QueryController do
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
 
-  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0) do
+  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0, source_map) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     conn =
@@ -1202,7 +1311,7 @@ defmodule BarkparkWeb.QueryController do
       if IfNoneMatch.match?(conn, entity_tag) do
         conn |> send_resp(304, "") |> halt()
       else
-        respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
+        respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash, source_map)
       end
     else
       # No header, and therefore no 304 branch: a validator we would refuse to
@@ -1210,13 +1319,13 @@ defmodule BarkparkWeb.QueryController do
       # UNCHANGED — it is the SDK's change-detection token, not a cache
       # validator (the SDK never sends If-None-Match itself — see runFetch in
       # js/packages/nextjs/src/server/core.ts), so consumers keep working.
-      respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
+      respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash, source_map)
     end
   end
 
-  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash) do
+  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash, source_map) do
     if Map.get(conn.assigns, :barkpark_filterresponse, true) do
-      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, schema_hash))
+      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, schema_hash, source_map))
     else
       json(conn, inner)
     end
@@ -1235,7 +1344,7 @@ defmodule BarkparkWeb.QueryController do
   # is now folded into the cache validator. Recomputing it here would be a
   # second identical DB read AND — worse — could disagree with the value the
   # ETag was built from if a schema landed in between.
-  defp envelope(result, sync_tags, etag, ms, schema_hash) do
+  defp envelope(result, sync_tags, etag, ms, schema_hash, source_map) do
     %{
       result: result,
       syncTags: sync_tags,
@@ -1243,7 +1352,14 @@ defmodule BarkparkWeb.QueryController do
       etag: etag,
       schemaHash: schema_hash
     }
+    |> maybe_put_source_map(source_map)
   end
+
+  # Key OMITTED (never `sourceMap: null`) when absent — the opt-in param is
+  # absent, the perspective is published, or there were no user-content keys
+  # to map — so a consumer that never asked for it sees a byte-identical body.
+  defp maybe_put_source_map(envelope, nil), do: envelope
+  defp maybe_put_source_map(envelope, source_map), do: Map.put(envelope, :sourceMap, source_map)
 
   # Fold each doc's `_id` AND `_rev` into the ETag IN LIST ORDER (not a sorted
   # set): an in-place edit (same id, new rev) or a reorder must change the ETag,
@@ -1391,7 +1507,7 @@ defmodule BarkparkWeb.QueryController do
   # 400 `internal_error` reading "unknown error (Ecto.Query.CastError)" with a
   # "Retry shortly" hint — a permanently malformed request dressed as a
   # transient server fault. The rule is now stated once, from the list side.
-  @list_value_ops ~w(in nin)
+  @list_value_ops Content.Query.list_value_ops()
 
   # Returns nil when every clause is honourable, or the FIRST offence as either
   #   * `{field, op}` — an operator outside @valid_filter_ops, rendered by
@@ -1410,7 +1526,18 @@ defmodule BarkparkWeb.QueryController do
   #
   # A bare `filter[field]=value` scalar carries no op (it's `eq` sugar) and is
   # accepted; a bare LIST/MAP value is not (same CastError family).
-  defp invalid_filter_op(filter_map) do
+  # `referencedBy` / `notReferencedBy` on `_id` (task-f343d828861d7a7a): the
+  # desk's «Kategorier uten utgivelser» list. Builder-only until now; the wire
+  # takes them from a caller that reads with a token and is not grant-narrowed,
+  # because the clause reads ANOTHER type's rows (drafts included) and a
+  # grant-narrowed or anonymous caller must not learn from rows it cannot read.
+  @wire_reference_ops ~w(referencedBy notReferencedBy)
+  @id_fields_on_wire ~w(_id doc_id)
+
+  defp reference_ops_allowed?(conn),
+    do: authed?(conn) and conn.assigns[:grant_scoped_read] != true
+
+  defp invalid_filter_op(filter_map, reference_ops? \\ false) do
     Enum.find_value(filter_map, fn
       # `$or`/`$and`: not fields, and this route has no boolean-group form. Checked
       # BEFORE the operator scan so the group INDEX is never reported as an operator.
@@ -1422,8 +1549,20 @@ defmodule BarkparkWeb.QueryController do
 
       {field, %{} = ops} ->
         cond do
-          op = Enum.find(Map.keys(ops), fn op -> op not in @valid_filter_ops end) ->
+          op =
+              Enum.find(Map.keys(ops), fn op ->
+                op not in @valid_filter_ops and
+                    not (reference_ops? and field in @id_fields_on_wire and
+                             op in @wire_reference_ops)
+              end) ->
             {field, op}
+
+          op =
+              Enum.find(@wire_reference_ops, fn op ->
+                Map.has_key?(ops, op) and not (is_binary(ops[op]) and String.trim(ops[op]) != "")
+              end) ->
+            {:clause, "filter[#{field}][#{op}] takes a document type name",
+             %{field: field, op: op}}
 
           Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
             {:clause,
@@ -1443,11 +1582,31 @@ defmodule BarkparkWeb.QueryController do
                "(e.g. \"epic:50\"), got #{inspect(Map.get(ops, "hasStrong"))}",
              %{field: field, op: "hasStrong"}}
 
+          # The array-length ops take an integer (task-aaf4d51bf8a51aec); the SQL
+          # arm reads it with the same parser.
+          op =
+              Enum.find(Content.Query.count_ops(), fn op ->
+                Map.has_key?(ops, op) and Content.Query.parse_count(Map.get(ops, op)) == :error
+              end) ->
+            {:clause,
+             "filter[#{field}][#{op}] takes a whole number (an array length), got " <>
+               "#{inspect(Map.get(ops, op))}", %{field: field, op: op}}
+
+          # `nbetween` (task-cecd2cb193365b71) binds EXACTLY two bounds — a
+          # door-level check, same reason `hasStrong`/count ops get one: catch
+          # the malformed shape here with a specific message, rather than
+          # falling through to `Content.Query`'s own generic refusal.
+          Map.has_key?(ops, "nbetween") and not match?([_, _], Map.get(ops, "nbetween")) ->
+            {:clause,
+             "filter[#{field}][nbetween] takes exactly two bounds, a comma list (a,b) or " <>
+               "the repeated form filter[#{field}][nbetween][]=a&filter[#{field}][nbetween][]=b, " <>
+               "got #{inspect(Map.get(ops, "nbetween"))}", %{field: field, op: "nbetween"}}
+
           op = Enum.find(Map.keys(ops), &non_scalar_op_value?(ops, &1)) ->
             {:clause,
              "filter[#{field}][#{op}] takes a single value, not a list or object; " <>
-               "the list form filter[#{field}][#{op}][]=… is only valid for in/nin",
-             %{field: field, op: op}}
+               "the list form filter[#{field}][#{op}][]=… is only valid for " <>
+               Enum.join(@list_value_ops, "/"), %{field: field, op: op}}
 
           op = Enum.find(@list_value_ops, &non_list_op_value?(ops, &1)) ->
             {:clause,
@@ -1518,9 +1677,14 @@ defmodule BarkparkWeb.QueryController do
   # ONE definition of the tier: `Plugs.PublicRead.public_read_token?/1` is public
   # on purpose (its own comment: "a second copy in the controller is exactly how
   # a clamp and its downstream filter drift apart"). Never re-derive it here.
+  # A token (not the public-read tier), OR a login session that
+  # `ResolveWorkspace` admitted by MEMBERSHIP (`:member_user`,
+  # task-ce99fd602a697010) — a seated member reads as themselves, cookie or
+  # bearer, exactly as their own API token would.
   defp authed?(conn) do
-    not is_nil(conn.assigns[:api_token]) and
-      not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)
+    (not is_nil(conn.assigns[:api_token]) and
+       not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)) or
+      conn.assigns[:member_user] == true
   end
 
   # Perspective resolution + the anon/public-read pin live in ONE place —
@@ -1744,6 +1908,33 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  # The first malformed filter param, spelled as the caller sent it, or nil. A
+  # PREDICATE, not a list of known typos: any top-level key that starts `filter`
+  # and then a bracket is a bracket form Plug could not nest, and any field key
+  # in a nested `filter` map that is blank or still carries a bracket is not a
+  # field name. `filters`/`fil` are other params and stay ignored.
+  defp malformed_filter_param(params) when is_map(params) do
+    stray =
+      params
+      |> Map.keys()
+      |> Enum.filter(&(is_binary(&1) and String.match?(&1, ~r/^filter[\[\]]/)))
+      |> Enum.sort()
+      |> List.first()
+
+    stray || malformed_filter_field(Map.get(params, "filter"))
+  end
+
+  defp malformed_filter_field(%{} = filter) do
+    filter
+    |> Map.keys()
+    |> Enum.filter(&(is_binary(&1) and (String.trim(&1) == "" or String.match?(&1, ~r/[\[\]]/))))
+    |> Enum.sort()
+    |> Enum.map(&"filter[#{&1}]")
+    |> List.first()
+  end
+
+  defp malformed_filter_field(_), do: nil
+
   defp normalize_filter_map(map) when is_map(map) do
     Enum.into(map, %{}, fn
       {field, %{} = ops} -> {field, Enum.into(ops, %{}, &normalize_filter_op/1)}
@@ -1958,7 +2149,7 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  defp normalize_filter_op({op, csv}) when op in ["in", "nin"] and is_binary(csv) do
+  defp normalize_filter_op({op, csv}) when op in ["in", "nin", "nbetween"] and is_binary(csv) do
     {op, csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)}
   end
 

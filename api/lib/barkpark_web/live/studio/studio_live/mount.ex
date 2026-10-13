@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   via this module so the gate stays single-sourced.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign_new: 3]
   import Phoenix.LiveView, only: [get_connect_params: 1, stream: 3, allow_upload: 3]
 
@@ -29,17 +30,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     stored_name = connect_params["user_name"]
     stored_color = connect_params["user_color"]
 
-    user_name =
-      if stored_name && stored_name != "",
-        do: stored_name,
-        else: "User #{String.slice(user_id, 0..3)}"
+    # A signed-in account's display name is the name peers see; it wins over
+    # the per-browser name, so it follows the account to every browser
+    # (task-8d8dabe8b693031d). Without an account, the browser's own name.
+    fallback = fallback_name(socket, fallback_id(socket, user_id))
 
-    # SELF-ONLY account label (task-28aea4a555586ce6). The signed-in account's
-    # email names the viewer's OWN avatar ("<email> — open your profile")
-    # instead of "User islf". It is deliberately NOT the presence `name`:
-    # presence meta reaches every socket on the workspace topic, including
-    # share-link / edit-share grant holders, and an email must not travel
-    # there. Presence keeps the handle above.
+    user_name =
+      case socket.assigns[:current_user] do
+        %{display_name: name} when is_binary(name) and name != "" ->
+          name
+
+        _ ->
+          if stored_name && stored_name != "",
+            do: stored_name,
+            else: fallback
+      end
+
+    # SELF-ONLY account label. The signed-in account's email, shown ONLY in the
+    # viewer's own profile dialog ("Signed in as <email>"). It is deliberately
+    # NOT the presence `name` and not the avatar: presence meta reaches every
+    # socket on the workspace topic, including share-link / edit-share grant
+    # holders, and the avatar must read the name peers see, so all three agree
+    # (task-9f31f04ab4882f7d, revising task-28aea4a555586ce6).
     account_label =
       case socket.assigns[:current_user] do
         %{email: email} when is_binary(email) and email != "" -> email
@@ -52,9 +64,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
         else: PresenceState.pick_color(user_id)
 
     # Presence subscription happens in handle_params via
-    # ensure_presence_subscription/1 — the topic is workspace-keyed
-    # (tsk-url-p0) and the workspace isn't resolved until
-    # ensure_tenancy_scope runs there.
+    # ensure_presence_subscription/1 — the topic is keyed by workspace +
+    # project + dataset (tsk-url-p0, owner ruling #30 Q7) and the scope isn't
+    # resolved until ensure_tenancy_scope runs there.
     socket
     # LiveScope (scoped mount) assigns the real prefix BEFORE mount runs;
     # assign_new keeps it. The flat mount lands here unset → "" → every
@@ -146,10 +158,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       unpublish_refs: [],
       user_id: user_id,
       user_name: user_name,
+      # The generated name, kept so the profile dialog can show it as a
+      # placeholder rather than as a value to save (task-acae5df91728ca9d).
+      user_name_fallback: fallback,
       account_label: account_label,
       user_color: user_color,
       presences: [],
       show_profile: false,
+      profile_error: nil,
       # ── Capability map (airdrop-grants ag-studio-capability-hide) ─────
       # `caps` = %{read, write, admin} for the mounted desk: membership ∪
       # active grants (grants never confer admin). It DRIVES the `:if`
@@ -191,6 +207,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       airdrop_can_share?: (socket.assigns[:current_user] || socket.assigns[:api_token]) != nil,
       airdrop_open: false,
       airdrop_type: nil,
+      airdrop_type_word: nil,
       airdrop_caps: [],
       airdrop_link: nil,
       airdrop_error: nil,
@@ -391,4 +408,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   Re-evaluated in every shares-* handler, not just at mount.
   """
   def shares_admin?(socket), do: Caps.admin?(socket)
+
+  # The fallback name is keyed on the signed-in account, not the per-browser
+  # presence id: the static render has no connect params, so a per-browser key
+  # painted a random "User <hex>" on every load and a different one in every
+  # browser (task-6db38e1365702602). Anonymous sessions keep the browser's id.
+  defp fallback_id(socket, user_id) do
+    case socket.assigns[:current_user] do
+      %{id: id} when is_binary(id) -> id
+      _ -> user_id
+    end
+  end
+
+  # A session with no display name and no stored name is "User <4 hex>" in
+  # the workspace's language (task-af8133b738966b6c). Mount runs before
+  # handle_params puts the Studio locale, so the name is built inside it.
+  defp fallback_name(socket, user_id) do
+    locale = BarkparkWeb.StudioLocale.resolve(socket.assigns[:current_workspace])
+
+    Gettext.with_locale(BarkparkWeb.Gettext, locale, fn ->
+      gettext("User %{id}", id: String.slice(user_id, 0..3))
+    end)
+  end
 end

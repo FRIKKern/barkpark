@@ -95,9 +95,10 @@ defmodule Barkpark.Accounts.Webauthn do
 
   @doc """
   Verify an assertion for the credential named by `credential_id`. On success
-  advances the stored signature counter and returns the credential + its owning
-  user. Fails closed on an unknown credential or a non-increasing counter (clone
-  signal).
+  spends the challenge, advances the stored signature counter and returns the
+  credential + its owning user. Fails closed on an unknown credential, a
+  non-increasing counter (clone signal), or a challenge an earlier assertion
+  already spent (`{:error, :challenge_spent}`).
   """
   @spec verify_authentication(binary(), binary(), binary(), binary(), binary(), keyword()) ::
           {:ok, WebauthnCredential.t()} | {:error, term()}
@@ -134,7 +135,8 @@ defmodule Barkpark.Accounts.Webauthn do
                        {credential_id, cose_key}
                      ]
                    ),
-                 :ok <- counter_ok?(cred.sign_count, auth_data.sign_count) do
+                 :ok <- counter_ok?(cred.sign_count, auth_data.sign_count),
+                 :ok <- spend_challenge(challenge_bytes, opts) do
               advance_counter(cred, auth_data.sign_count)
             end
 
@@ -144,6 +146,20 @@ defmodule Barkpark.Accounts.Webauthn do
             {:error, :corrupt_credential}
         end
     end
+  end
+
+  # A verified assertion spends its challenge (owner ruling #34 item 2): a sign
+  # count of 0 cannot tell a replay from a fresh use, so the challenge itself is
+  # single-use. `:challenge_ttl` is how long the caller's challenge token stays
+  # valid (WebauthnController's `max_age`, 300 s); the ledger keeps the digest
+  # that long and no longer.
+  defp spend_challenge(challenge_bytes, opts) do
+    ttl = Keyword.get(opts, :challenge_ttl, 300)
+
+    Barkpark.Accounts.WebauthnChallengeReplay.claim(
+      challenge_bytes,
+      DateTime.add(DateTime.utc_now(), ttl)
+    )
   end
 
   # Both-zero authenticators don't implement a counter — accept. Otherwise the

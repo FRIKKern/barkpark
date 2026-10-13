@@ -7,9 +7,17 @@ defmodule Barkpark.Auth do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Auth.LoginTicket
   alias Barkpark.Auth.TokenExpiry
+  alias Barkpark.Auth.TokenSession
   alias Barkpark.Sharing
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  # Ruling #16 rework half (task-57f23825b18ab55d) — default validity of a
+  # browser token-session row, in days. Mirrors `Accounts.UserSession`'s own
+  # 30-day default; the underlying api_token's own `expires_at`/`revoked_at`
+  # are re-checked on every `verify_token_session/1` call regardless, so this
+  # is a ceiling on an otherwise-forgotten row, not the only revocation path.
+  @token_session_default_validity_days 30
 
   # dwb-7 login-ticket TTL: 60s. A one-time handoff URL is used immediately
   # (control plane mints it, browser opens it), so the window is deliberately
@@ -108,6 +116,30 @@ defmodule Barkpark.Auth do
 
   def verify_token_id(_), do: nil
 
+  @doc """
+  Resolve a raw bearer to `{id, owner_user_id}`, or nil.
+
+  Sibling of `verify_token_id/1` above — same WHERE clause, same fail-closed
+  `kind == "api"` boundary, same `verify_token/1` call, just one more field off
+  the struct `Repo.one()` already loaded. No second query.
+
+  For `BarkparkWeb.Plugs.RateLimit` (task-2c31de0cf6597d32): a token that
+  `owner_user_id` names as ONE human's — a personal PAT, or an app token
+  minted via `POST /v1/auth/app-tokens` (`AppTokenController.mint/2` sets
+  `owner_user_id: user.id` on every mint, one per editor email) — gets its own
+  write budget instead of sharing the flat per-token default with every other
+  caller of a shared/service credential.
+  """
+  @spec verify_token_principal(binary()) :: {binary(), binary() | nil} | nil
+  def verify_token_principal(raw_token) when is_binary(raw_token) do
+    case verify_token(raw_token) do
+      {:ok, %ApiToken{id: id, owner_user_id: owner_user_id}} -> {id, owner_user_id}
+      _ -> nil
+    end
+  end
+
+  def verify_token_principal(_), do: nil
+
   # ── dwb-7: single-use login handoff tickets ─────────────────────────────
 
   @doc """
@@ -136,6 +168,7 @@ defmodule Barkpark.Auth do
 
   def mint_login_ticket(raw_api_token, opts) when is_binary(raw_api_token) do
     user_email = presence(opts[:user_email])
+    user_role = ticket_role(presence(opts[:user_role]))
 
     case verify_token(raw_api_token) do
       {:ok, token} ->
@@ -151,6 +184,7 @@ defmodule Barkpark.Auth do
             ticket_hash: hash_ticket(raw_ticket),
             api_token: raw_api_token,
             user_email: user_email,
+            user_role: user_email && user_role,
             expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
           }
 
@@ -166,6 +200,14 @@ defmodule Barkpark.Auth do
   end
 
   def mint_login_ticket(_, _), do: {:error, :unauthorized}
+
+  # Owner ruling #26: the role a user-shaped ticket seats its consumer at. A
+  # recognised Cloud team role passes through; any other PRESENT value is read
+  # as the least privilege ("member") — fail closed, never an owner by typo.
+  # ABSENT stays nil: the pre-ruling shape an older control plane mints.
+  defp ticket_role(nil), do: nil
+  defp ticket_role(role) when role in ["owner", "admin", "member"], do: role
+  defp ticket_role(_other), do: "member"
 
   defp presence(value) when is_binary(value) do
     case String.trim(value) do
@@ -205,7 +247,8 @@ defmodule Barkpark.Auth do
   `{:error, :invalid}` — no oracle distinguishes the failure kinds, and
   deleting the row collapses no distinction that was ever exposed.
   """
-  @spec consume_login_ticket(binary()) :: {:ok, binary()} | {:error, :invalid}
+  @spec consume_login_ticket(binary()) ::
+          {:ok, binary() | {:user, binary(), binary(), binary() | nil}} | {:error, :invalid}
   def consume_login_ticket(raw_ticket) when is_binary(raw_ticket) do
     hash = hash_ticket(raw_ticket)
     now = DateTime.utc_now()
@@ -221,15 +264,16 @@ defmodule Barkpark.Auth do
     query =
       from t in LoginTicket,
         where: t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now,
-        select: {t.api_token, t.user_email}
+        select: {t.api_token, t.user_email, t.user_role}
 
     case Repo.delete_all(query) do
       # user-shaped (cloud-identity handoff): the consumer mints a
-      # user_session for this email instead of dropping the token in.
-      {1, [{raw_api_token, user_email}]} when is_binary(user_email) ->
-        {:ok, {:user, user_email, raw_api_token}}
+      # user_session for this email instead of dropping the token in. The
+      # fourth element is the carried Cloud team role (nil = pre-ruling #26).
+      {1, [{raw_api_token, user_email, user_role}]} when is_binary(user_email) ->
+        {:ok, {:user, user_email, raw_api_token, user_role}}
 
-      {1, [{raw_api_token, nil}]} ->
+      {1, [{raw_api_token, nil, _role}]} ->
         {:ok, raw_api_token}
 
       _ ->
@@ -451,6 +495,222 @@ defmodule Barkpark.Auth do
 
   def broadcast_socket_teardown(_token), do: :ok
 
+  # ── Browser token sessions (ruling #16 rework half, task-57f23825b18ab55d) ─
+  #
+  # A token sign-in used to store the RAW api_token in the Phoenix session, so
+  # logging out cleared the cookie but left the token itself (and any copy of
+  # the cookie made beforehand) valid until the token was separately revoked.
+  # This mints a server-side row instead — the cookie carries only its opaque
+  # session id — so logout can actually kill it. See `TokenSession`'s
+  # moduledoc and the creating migration for why logout DELETES the row
+  # rather than only flagging `revoked_at`.
+
+  @doc """
+  Mint a browser token-session for `api_token`, binding `raw_token` (the
+  bearer the caller just verified). Returns the one-time opaque session id —
+  the ONLY thing the caller may put in the cookie.
+  """
+  @spec create_token_session(binary(), ApiToken.t()) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_token_session(raw_token, %ApiToken{} = api_token) when is_binary(raw_token) do
+    plaintext = "bpts_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    expires = DateTime.add(now, @token_session_default_validity_days * 24 * 3600, :second)
+
+    %TokenSession{}
+    |> TokenSession.changeset(%{
+      api_token_id: api_token.id,
+      session_hash: TokenSession.hash_token(plaintext),
+      raw_token: raw_token,
+      expires_at: expires,
+      last_used_at: now
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _} -> {:ok, plaintext}
+      {:error, cs} -> {:error, cs}
+    end
+  end
+
+  @doc """
+  Resolve a browser token-session's opaque session id to its live
+  `%ApiToken{}` and the raw bearer it was minted with. Returns `:error` for
+  an unknown, revoked, or expired session row, OR one whose underlying
+  api_token is itself no longer live.
+
+  THE UNDERLYING TOKEN'S LIVENESS IS RE-CHECKED BY CALLING `verify_token/1`
+  ON THE DECRYPTED RAW BEARER — not by re-reading the preloaded `ApiToken`
+  struct's fields against a second, hand-written copy of `verify_token/1`'s
+  WHERE clause. Two copies of "is this api_token still live" (kind == "api",
+  not revoked, not expired) can drift: a future change to `verify_token/1`'s
+  checks (a new revocation signal, a new kind) would silently NOT apply to a
+  session-cookie-minted caller unless this function's own copy were updated
+  in lockstep, and nothing would catch the gap. Calling `verify_token/1`
+  itself makes that impossible by construction — there is exactly one place
+  that decides whether an api_token is live, and both the legacy raw-cookie
+  arm of `resolve_session_credential/2` and this one route through it
+  (pinned in `CapsAuthorizationParityTest`, both hops).
+  """
+  @spec verify_token_session(binary()) :: {:ok, ApiToken.t(), binary()} | :error
+  def verify_token_session(plaintext) when is_binary(plaintext) do
+    hash = TokenSession.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from s in TokenSession,
+        where: s.session_hash == ^hash and is_nil(s.revoked_at),
+        where: is_nil(s.expires_at) or s.expires_at > ^now
+
+    case Repo.one(query) do
+      %TokenSession{raw_token: raw, last_used_at: prev} ->
+        case verify_token(raw) do
+          {:ok, token} ->
+            maybe_touch_token_session_last_used(hash, prev, now)
+            {:ok, token, raw}
+
+          {:error, :unauthorized} ->
+            :error
+        end
+
+      nil ->
+        :error
+    end
+  end
+
+  def verify_token_session(_), do: :error
+
+  @token_session_last_used_throttle_seconds 60
+
+  defp maybe_touch_token_session_last_used(hash, prev, now) do
+    stale? =
+      is_nil(prev) or
+        DateTime.diff(now, prev, :second) > @token_session_last_used_throttle_seconds
+
+    if stale? do
+      stamped = DateTime.truncate(now, :microsecond)
+
+      from(s in TokenSession, where: s.session_hash == ^hash)
+      |> Repo.update_all(set: [last_used_at: stamped])
+
+      :ok
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Delete a browser token-session by its opaque session id (idempotent).
+  Called at logout — a DELETE, not a `revoked_at` flag: the row holds an
+  encrypted-at-rest raw bearer, so leaving it readable (even flagged) keeps a
+  live credential retained, the same lesson `Barkpark.Auth.LoginTicket`'s
+  moduledoc already states. Returns `{:ok, n}`, the number of rows actually
+  removed (0 for an unknown/already-gone session id — not an error).
+  """
+  @spec revoke_token_session(binary()) :: {:ok, non_neg_integer()}
+  def revoke_token_session(plaintext) when is_binary(plaintext) do
+    hash = TokenSession.hash_token(plaintext)
+    {deleted, _} = from(s in TokenSession, where: s.session_hash == ^hash) |> Repo.delete_all()
+    {:ok, deleted}
+  end
+
+  def revoke_token_session(_), do: {:ok, 0}
+
+  @doc """
+  Delete `token_sessions` rows that are expired (`expires_at <= now`) or
+  flagged revoked (`revoked_at` not nil — the idempotent kill-switch flag
+  `revoke_token_session/1` does not itself rely on, since logout DELETES;
+  this is the backstop for any OTHER path that flags rather than deletes).
+  Single unbounded `DELETE`; see `sweep_token_sessions_batch/1` for the
+  bounded form `Barkpark.Auth.TokenSessionSweeper` actually drives.
+
+  A live row holds a Cloak-encrypted raw bearer — the same retention
+  concern `LoginTicketSweeper`'s moduledoc documents for `login_tickets` —
+  so an expired-but-unswept row is a live, decryptable credential retained
+  past its stated life, not a hygiene-only concern.
+  """
+  @spec sweep_token_sessions(DateTime.t()) :: {:ok, non_neg_integer()}
+  def sweep_token_sessions(now \\ DateTime.utc_now()) do
+    {n, _} =
+      from(s in TokenSession, where: s.expires_at <= ^now or not is_nil(s.revoked_at))
+      |> Repo.delete_all()
+
+    {:ok, n}
+  end
+
+  @doc """
+  ONE BOUNDED PASS of `sweep_token_sessions/1` — deletes at most
+  `:token_session, :sweep_batch_limit` (default 5_000) rows, OLDEST
+  `expires_at` first, and returns how many it removed. Mirrors
+  `Barkpark.PreviewToken.sweep_batch/1`'s shape exactly: the subquery picks
+  the oldest eligible ids and the outer DELETE removes just those, so one
+  statement is bounded no matter how deep the backlog is. Returning 0 means
+  "nothing left eligible" and is the sweeper's loop terminator.
+  """
+  @spec sweep_token_sessions_batch(DateTime.t()) :: non_neg_integer()
+  def sweep_token_sessions_batch(now \\ DateTime.utc_now()) do
+    victims =
+      from(s in TokenSession,
+        where: s.expires_at <= ^now or not is_nil(s.revoked_at),
+        order_by: [asc: s.expires_at],
+        limit: ^token_session_sweep_batch_limit(),
+        select: s.id
+      )
+
+    {n, _} = from(s in TokenSession, where: s.id in subquery(victims)) |> Repo.delete_all()
+    n
+  end
+
+  @default_token_session_sweep_batch_limit 5_000
+
+  defp token_session_sweep_batch_limit do
+    Application.get_env(:barkpark, :token_session, [])
+    |> Keyword.get(:sweep_batch_limit, @default_token_session_sweep_batch_limit)
+  end
+
+  @doc """
+  True when EITHER the new session-id key or the legacy raw-token key holds a
+  non-blank string — independent of whether either actually verifies. Lets a
+  caller distinguish "no explicit browser credential was presented" (where a
+  configured dev-browser fallback may still apply) from "a credential was
+  presented but is dead" (where it must not silently fall through to the dev
+  fallback — that would reopen the provenance hole `LiveAuth`'s
+  `:fetch_api_token` moduledoc already documents).
+  """
+  @spec session_credential_present?(term(), term()) :: boolean()
+  def session_credential_present?(session_id, legacy_raw) do
+    present?(session_id) or present?(legacy_raw)
+  end
+
+  defp present?(v), do: is_binary(v) and v != ""
+
+  @doc """
+  Resolve a browser session's api-token credential: the new revocable
+  session id (`session_id`) if present and live, else the legacy raw bearer
+  (`legacy_raw`) — a cookie minted before this change, tolerated for one
+  release (ruling #16 rework half). Returns `{:ok, ApiToken.t(), raw ::
+  binary()}` (the raw bearer, needed for `data-token=`) or `:error`.
+
+  This is the ONE resolver every browser-session read call-site funnels
+  through (`LiveAuth`, `OptionalSessionToken`, `RequireBearerOrSessionToken`,
+  `PaperViewer`) — so there is exactly one place that knows the session
+  cookie's two possible shapes, not N copies of a fallback chain.
+  """
+  @spec resolve_session_credential(term(), term()) :: {:ok, ApiToken.t(), binary()} | :error
+  def resolve_session_credential(session_id, _legacy_raw)
+      when is_binary(session_id) and session_id != "" do
+    verify_token_session(session_id)
+  end
+
+  def resolve_session_credential(_session_id, legacy_raw)
+      when is_binary(legacy_raw) and legacy_raw != "" do
+    case verify_token(legacy_raw) do
+      {:ok, token} -> {:ok, token, legacy_raw}
+      _ -> :error
+    end
+  end
+
+  def resolve_session_credential(_session_id, _legacy_raw), do: :error
+
   # ── Token rotation (task-e78edcc2145ed3df) ──────────────────────────────
 
   # Default grace window: the old secret keeps working for 24h so a deploy can
@@ -567,6 +827,7 @@ defmodule Barkpark.Auth do
 
         with %ApiToken{} <- old || {:error, :not_found},
              :ok <- rotatable(old, now),
+             :ok <- owner_may_rotate(old, actor),
              :ok <- within_ceiling(old, seats, actor),
              forced_cloud? = cloud_held_admin?(old),
              :ok <-
@@ -610,6 +871,20 @@ defmodule Barkpark.Auth do
   end
 
   defp rotatable(_token, _now), do: {:error, :not_rotatable}
+
+  # OWNER RULING 2026-10-03 #7: rotation HANDS OVER a live secret whose
+  # successor keeps `owner_user_id`, so a workspace admin rotating a member's
+  # PAT received a working copy of the member's credential (and acted AS the
+  # member wherever `ResolveTokenOwner` maps it) while killing the member's
+  # own. A user-owned token is rotated only by a token of the SAME owner;
+  # admins revoke it instead. Machine tokens (no owner) are unchanged.
+  defp owner_may_rotate(%ApiToken{owner_user_id: nil}, _actor), do: :ok
+
+  defp owner_may_rotate(%ApiToken{owner_user_id: uid}, %ApiToken{owner_user_id: uid})
+       when is_binary(uid),
+       do: :ok
+
+  defp owner_may_rotate(_old, _actor), do: {:error, :owner_only}
 
   defp within_ceiling(%ApiToken{} = old, seats, %ApiToken{} = actor) do
     perms_ok? = Enum.all?(old.permissions || [], &(&1 in (actor.permissions || [])))
@@ -673,6 +948,7 @@ defmodule Barkpark.Auth do
       name: old.name,
       kind: old.kind,
       dataset: old.dataset,
+      dataset_bound: old.dataset_bound,
       permissions: old.permissions,
       workspace_id: old.workspace_id,
       share_scope: old.share_scope,
@@ -809,6 +1085,69 @@ defmodule Barkpark.Auth do
         _ -> acc
       end
     end)
+  end
+
+  @doc """
+  Owner ruling #26 (2026-10-03, "Match role, revoke"): take a Cloud user OFF
+  this instance when they are removed from the team that owns it. Called by the
+  control plane with the stored instance admin token
+  (`POST /v1/auth/cloud-users/deprovision`).
+
+  For the account with `email`:
+
+    * every live user session is revoked (Studio signs them out now);
+    * every workspace seat the account holds is dropped (no Studio re-entry);
+    * every live api token it OWNS (`owner_user_id`) is revoked — the tokens
+      it minted for itself in Studio, admin-grade ones included, which is the
+      escalation the ruling closes;
+    * every live `app:<email>` app token is revoked (the mobile exchange's
+      label), except an `admin`-permissioned one, which that path never mints.
+
+  The account row itself is KEPT (soft deprovision, like SCIM's default): its
+  documents keep their author, and a later re-invite re-seats it. Unknown email
+  is a no-op answer, never an error. Returns the counts it changed.
+  """
+  @spec deprovision_cloud_user(String.t()) :: {:ok, map()}
+  def deprovision_cloud_user(email) when is_binary(email) do
+    email = String.trim(email)
+
+    case Barkpark.Accounts.get_user_by_email(email) do
+      nil ->
+        {:ok, %{found: false, sessions_revoked: 0, memberships_dropped: 0, tokens_revoked: 0}}
+
+      %{id: user_id} = user ->
+        # No wrapping transaction, on purpose: each step is idempotent and the
+        # control plane retries a box until it answers, so a partial run
+        # converges on the next call. The receipt carries the counts each step
+        # actually measured.
+        {:ok, sessions} = Barkpark.Accounts.revoke_all_user_sessions(user)
+
+        {dropped, _} =
+          Repo.delete_all(
+            from m in Barkpark.Tenancy.Membership,
+              where: m.principal_type == "user" and m.principal_id == ^user_id
+          )
+
+        label = "app:" <> email
+
+        tokens =
+          from(t in ApiToken,
+            where: is_nil(t.revoked_at) and t.kind == "api",
+            where:
+              t.owner_user_id == ^user_id or
+                (t.label == ^label and not fragment("'admin' = ANY(?)", t.permissions))
+          )
+          |> Repo.all()
+          |> Enum.count(fn token -> match?({:ok, _}, revoke_token(token)) end)
+
+        {:ok,
+         %{
+           found: true,
+           sessions_revoked: sessions,
+           memberships_dropped: dropped,
+           tokens_revoked: tokens
+         }}
+    end
   end
 
   # The ONE tenancy predicate both app-token revoke selectors share, so the
@@ -1057,6 +1396,10 @@ defmodule Barkpark.Auth do
       exactly what it minted before this option existed.
     * `:class` — `:api` / `:share` / `:app`; inferred from `permissions` when
       absent (`public-read` → `:share`). The app-token mint passes `:app`.
+    * `:dataset_bound` — `true` when the mint request NAMED `dataset`; the
+      token is then refused on every other dataset
+      (`BarkparkWeb.Plugs.RequireToken.dataset_off_binding?/2`). Absent → NULL,
+      unbound, today's behaviour (task-4418b517649a58ce).
     * `:actor` — the minting principal. `:no_expiry` is admitted only when it
       is an `%ApiToken{}` holding the flat `"admin"` permission, and the mint +
       its `token/token_no_expiry_opt_out` audit row commit together.
@@ -1076,9 +1419,14 @@ defmodule Barkpark.Auth do
         token_hash: ApiToken.hash_token(raw_token),
         label: label,
         dataset: dataset,
+        dataset_bound: Keyword.get(opts, :dataset_bound),
         permissions: permissions,
         workspace_id: ws_id,
-        expires_at: expires_at
+        expires_at: expires_at,
+        # `:owner_user_id` — the user this credential is FOR (an app token
+        # minted for a person), so `Accounts.Privacy.erase_subject/1` revokes
+        # it with the rest of their access. nil (absent) for machine tokens.
+        owner_user_id: Keyword.get(opts, :owner_user_id)
       }
 
       insert = fn ->
@@ -1156,6 +1504,7 @@ defmodule Barkpark.Auth do
 
   `opts`: `:label` (required), `:permissions` (required, a non-empty subset of
   `#{inspect(@delegable_permissions)}`), `:dataset` (default `"production"`),
+  `:dataset_bound` (true when the request named `dataset` — see `create_token/6`),
   `:expires_at` (`nil` → the class default, a `DateTime`, or `:no_expiry`).
 
   Errors: `:admin_required` (no flat admin), `:not_workspace_admin`,
@@ -1177,7 +1526,11 @@ defmodule Barkpark.Auth do
          :ok <- if(label == "", do: {:error, :missing_label}, else: :ok) do
       raw = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
-      mint_opts = [expires_at: Keyword.get(opts, :expires_at), actor: actor]
+      mint_opts = [
+        expires_at: Keyword.get(opts, :expires_at),
+        actor: actor,
+        dataset_bound: Keyword.get(opts, :dataset_bound)
+      ]
 
       Repo.transaction(fn ->
         with {:ok, token} <- create_token(raw, label, dataset, perms, workspace_id, mint_opts),
@@ -1479,6 +1832,15 @@ defmodule Barkpark.Auth do
   USER identity — set ONLY by the session-gated self-mint, hard-bound to the
   authenticated caller; never a client-supplied value).
 
+  `:expires_at` (task-9d2cdfae246cc486) — a caller-REQUESTED expiry
+  (`TokenExpiry.request()`: `nil` | a `DateTime.t()`), taking precedence over
+  `:ttl` when given. Resolved through the SAME `TokenExpiry.resolve/3` every
+  other mint route uses, so a requested expiry over the `:api` class's 365-day
+  max is refused (`{:error, {:expiry_exceeds_max, :api, 365}}`), never
+  clamped, and a non-future expiry is `{:error, :expiry_not_in_future}`.
+  Omitted (the default for every caller before this option existed) keeps the
+  exact `:ttl`-based 30-day horizon unchanged.
+
   ## `:workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
 
   When `:workspace_id` is omitted (or `nil`), the token is minted
@@ -1500,7 +1862,7 @@ defmodule Barkpark.Auth do
     role = Keyword.get(opts, :role, "member")
 
     with :ok <- authorize_pat_permissions(role, permissions),
-         {:ok, expires_at} <- pat_expires_at(Keyword.get(opts, :ttl, @pat_default_ttl)) do
+         {:ok, expires_at} <- pat_expires_at(opts) do
       raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
       ws_id = Keyword.get(opts, :workspace_id)
 
@@ -1606,13 +1968,26 @@ defmodule Barkpark.Auth do
     end
   end
 
+  # `:expires_at` (task-9d2cdfae246cc486) takes precedence when the caller
+  # supplied one — resolved through the SAME TokenExpiry policy every other
+  # mint route uses, so it is capped (REFUSED over the :api max, never
+  # clamped) exactly like them. Absent, falls through to the pre-existing
+  # :ttl-based 30-day default, byte-identical to every caller before this
+  # option existed (none of them pass :expires_at).
+  defp pat_expires_at(opts) do
+    case Keyword.fetch(opts, :expires_at) do
+      {:ok, request} -> TokenExpiry.resolve(:api, request)
+      :error -> pat_ttl_expires_at(Keyword.get(opts, :ttl, @pat_default_ttl))
+    end
+  end
+
   # `:ttl nil` stays "never" (an in-process, trusted-caller choice — no HTTP
   # route reaches it). A positive ttl over the api max age is REFUSED naming
   # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to 1 year.
   # A non-positive/non-integer ttl still falls back to the 30-day default.
-  defp pat_expires_at(nil), do: {:ok, nil}
+  defp pat_ttl_expires_at(nil), do: {:ok, nil}
 
-  defp pat_expires_at(ttl) do
+  defp pat_ttl_expires_at(ttl) do
     ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @pat_default_ttl
     TokenExpiry.resolve(:api, DateTime.add(DateTime.utc_now(), ttl, :second))
   end

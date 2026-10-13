@@ -205,6 +205,30 @@ defmodule Barkpark.ContentStudioHelpersTest do
       assert copy.status == "draft"
     end
 
+    # task-141c0bba8070ef02: the suffix is the caller's; without one the
+    # title is exactly as before, including an untitled source.
+    test "a :title_suffix replaces the English suffix; an untitled source then stays untitled" do
+      src = seed_post("c-sfx", title: "Fjellet", body: "b")
+
+      assert {:ok, copy} =
+               Content.clone_document(src, @doc_type, @dataset, title_suffix: " (kopi)")
+
+      assert copy.title == "Fjellet (kopi)"
+
+      untitled = seed_post("c-sfx-u", title: nil, body: "b")
+
+      assert {:ok, ucopy} =
+               Content.clone_document(untitled, @doc_type, @dataset, title_suffix: " (kopi)")
+
+      assert ucopy.title in [nil, ""]
+    end
+
+    test "a caller with no :title_suffix keeps the English suffix and the Untitled fallback" do
+      untitled = seed_post("c-dflt-u", title: nil, body: "b")
+      assert {:ok, copy} = Content.clone_document(untitled, @doc_type, @dataset)
+      assert copy.title == "Untitled (copy)"
+    end
+
     test "copy is independent of source — editing source does not affect copy" do
       src = seed_post("c2", title: "Source", body: "S")
       {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
@@ -218,6 +242,64 @@ defmodule Barkpark.ContentStudioHelpersTest do
       {:ok, refetched} = Content.get_document(fetched.doc_id, @doc_type, @dataset)
       assert refetched.content["body"] == "S"
       assert refetched.title == "Source (copy)"
+    end
+
+    # task-970a40d1a252e649: the copy's own title source carries the copy's
+    # title, or the next write re-derives the source title from it.
+    test "the copy's content title and paper title block carry the copy title" do
+      {:ok, src} =
+        Content.create_document(
+          @doc_type,
+          %{
+            "doc_id" => "c-retitle",
+            "title" => "Fjellet",
+            "content" => %{
+              "title" => "Fjellet",
+              "subtitle" => "Fjellet",
+              "blocks" => [
+                %{
+                  "id" => "tpl-title",
+                  "type" => "heading",
+                  "role" => "title",
+                  "text" => "Fjellet"
+                },
+                %{"id" => "h-2", "type" => "heading", "text" => "Fjellet"},
+                %{
+                  "id" => "synth-f-title-0",
+                  "type" => "field-string",
+                  "fieldName" => "title",
+                  "value" => "Fjellet"
+                }
+              ]
+            }
+          },
+          @dataset
+        )
+
+      assert {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+      assert copy.title == "Fjellet (copy)"
+      assert copy.content["title"] == "Fjellet (copy)"
+
+      assert [
+               %{"text" => "Fjellet (copy)"},
+               %{"text" => "Fjellet"},
+               %{"fieldName" => "title", "value" => "Fjellet (copy)"}
+             ] = copy.content["blocks"]
+
+      # Only the title source changes: another field holding the same words stays.
+      assert copy.content["subtitle"] == "Fjellet"
+    end
+
+    test "a content title that differs from the row title is left alone" do
+      {:ok, src} =
+        Content.create_document(
+          @doc_type,
+          %{"doc_id" => "c-differs", "title" => "Row", "content" => %{"title" => "Field"}},
+          @dataset
+        )
+
+      assert {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+      assert copy.content["title"] == "Field"
     end
 
     test "untitled source clones to 'Untitled (copy)'" do

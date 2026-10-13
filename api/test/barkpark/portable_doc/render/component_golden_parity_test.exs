@@ -166,8 +166,10 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
              "legend label #{inspect(row["label"])} for #{role} missing"
 
       if row["spinner"] do
-        # A spinner role is an empty glyph span the CSS animates — no static char.
-        assert html =~ ~s|<span class="bp-g bp-g--#{role}" aria-label="in progress"></span>|,
+        # A spinner role is an empty glyph span the CSS animates — no static char —
+        # named as an image (role="img": an aria-label needs a role, task-21231dd5be0ca72c).
+        assert html =~
+                 ~s|<span class="bp-g bp-g--#{role}" role="img" aria-label="in progress"></span>|,
                "spinner rung #{role} not realized as an animated empty glyph"
       else
         assert html =~ ~s|<span class="bp-g bp-g--#{role}">#{row["glyph"]}</span>|,

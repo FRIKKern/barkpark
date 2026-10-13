@@ -2,7 +2,13 @@ import { Command } from 'commander'
 import path from 'node:path'
 import * as p from '@clack/prompts'
 import pc from 'picocolors'
-import { AVAILABLE_TEMPLATES, BARKPARK_VERSION, type TemplateName } from './constants.js'
+import {
+  AVAILABLE_TEMPLATES,
+  BARKPARK_VERSION,
+  HOSTED_DEMO_AVAILABLE,
+  HOSTED_DEMO_UNAVAILABLE_MESSAGE,
+  type TemplateName,
+} from './constants.js'
 import { runPrompts } from './prompts.js'
 import { scaffold } from './scaffold.js'
 import { detectPackageManager } from './pm.js'
@@ -27,7 +33,7 @@ async function main(argv: string[]): Promise<number> {
     .option('-t, --template <name>', `Template to use (${AVAILABLE_TEMPLATES.join(' | ')})`)
     .option(
       '--hosted-demo',
-      'Opt into the hosted barkpark.dev demo instead of local docker-compose',
+      'Opt into the hosted barkpark.dev demo instead of a local API (not available yet)',
       false,
     )
     .option('-y, --yes', 'Accept all defaults, no interactive prompts', false)
@@ -40,6 +46,13 @@ async function main(argv: string[]): Promise<number> {
 
   const rawDir = program.args[0]
   const flags = program.opts<CliFlags>()
+
+  // Refuse before any prompt or file write: an app pointed at a demo host that does
+  // not answer fails every API call (task-9b5a6d8efdfab59e).
+  if (flags.hostedDemo && !HOSTED_DEMO_AVAILABLE) {
+    console.error(pc.red(HOSTED_DEMO_UNAVAILABLE_MESSAGE))
+    return 1
+  }
 
   const templateArg = flags.template
   if (templateArg && !AVAILABLE_TEMPLATES.includes(templateArg as TemplateName)) {

@@ -89,6 +89,54 @@ defmodule BarkparkCloud.DomainOwnership do
   # Resolve a host over inet + inet6 (the DomainStatus.resolve_all idiom) and
   # return de-duplicated address STRINGS. A resolver error/raise on either
   # family is an empty contribution, never a crash.
+  @doc """
+  Owner ruling #29 (2026-10-03): does `domain` carry the site-domain proof —
+  a TXT record at `_barkpark-verify.<domain>` whose value is exactly
+  `expected_value`? Returns `:ok` or `{:error, observed}` with the TXT values
+  actually seen at that name.
+
+  FAIL-CLOSED: a resolver error, timeout, raise or NXDOMAIN is `{:error, []}`.
+  The proof reads its own name, so it holds whether the domain's traffic points
+  at a Barkpark box or at Cloudflare.
+
+  Seam: `opts[:txt_dns]`, else a per-process override
+  (`put_txt_dns/1`, async-test safe), else the `:domain_txt_dns` application
+  env, else `:inet_res`. The fun takes the record name (a charlist) and answers
+  `{:ok, [value :: String.t()]}` or `{:error, reason}`. Test config defaults to
+  an offline empty answer, so no test touches real DNS.
+  """
+  @spec txt_proven?(String.t(), String.t(), keyword()) :: :ok | {:error, [String.t()]}
+  def txt_proven?(domain, expected_value, opts \\ [])
+      when is_binary(domain) and is_binary(expected_value) do
+    name = BarkparkCloud.Registry.DomainVerification.record_name(domain)
+
+    observed =
+      case safe_call(fn -> txt_fun(opts).(to_charlist(name)) end) do
+        {:ok, values} when is_list(values) -> Enum.map(values, &to_string/1)
+        _ -> []
+      end
+
+    if expected_value in observed, do: :ok, else: {:error, observed}
+  end
+
+  @doc "TEST-ONLY: answer TXT lookups in THIS process with `fun` (nil clears)."
+  def put_txt_dns(fun) when is_function(fun, 1) or is_nil(fun),
+    do: Process.put({__MODULE__, :txt_dns}, fun)
+
+  defp txt_fun(opts) do
+    opts[:txt_dns] || Process.get({__MODULE__, :txt_dns}) ||
+      Application.get_env(:barkpark_cloud, :domain_txt_dns, &default_txt/1)
+  end
+
+  # :inet_res answers each TXT record as a list of charlist chunks (a long
+  # record is split at 255 bytes); join each record's chunks into one value.
+  defp default_txt(name) do
+    case :inet_res.lookup(name, :in, :txt, [], 5_000) do
+      records when is_list(records) ->
+        {:ok, Enum.map(records, fn chunks -> chunks |> Enum.map(&to_string/1) |> Enum.join() end)}
+    end
+  end
+
   defp resolve_all(host, dns_fun) do
     charlist = to_charlist(host)
 

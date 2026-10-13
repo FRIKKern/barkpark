@@ -77,6 +77,26 @@ defmodule BarkparkWeb.ConnCase do
   end
 
   @doc """
+  `Phoenix.ConnTest.recycle/1`, scoped (task-696e001dce483d37).
+
+  A `scoped_conn/0`'s `:barkpark_rate_limit_scope` lives in `conn.private`.
+  `recycle/1` builds a brand-new conn via `build_conn/0` under the hood and
+  copies over only the host, peer, cookies and a named set of headers — NOT
+  `private` — so `scoped_conn() |> recycle()` silently hands back an UNSCOPED
+  conn, indistinguishable from a bare `build_conn()` on a metered route. The
+  AST scanner in `RateLimitTestConnScopeTest` greps for the literal text
+  `build_conn()`; `recycle()` never writes that token, so this shape is
+  invisible to it. A test that loops several requests through one `conn` via
+  `recycle/1` before hitting a metered route (`preview_token_doc_scope_test.exs`
+  was the one that actually reddened under suite load) needs THIS instead.
+  """
+  def recycle_scoped(conn) do
+    conn
+    |> Phoenix.ConnTest.recycle()
+    |> Plug.Conn.put_private(:barkpark_rate_limit_scope, rate_limit_test_scope())
+  end
+
+  @doc """
   RAISE, NAMING THE LIMITER, IF A RESPONSE IS A 429.
 
   Call this immediately BEFORE an auth-verdict assertion. A throttled request

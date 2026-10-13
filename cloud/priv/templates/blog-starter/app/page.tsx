@@ -5,6 +5,7 @@ import { pageCount, resolvePageParam } from '../lib/page-param'
 import { Pagination } from './components/Pagination'
 import { formatDate } from '../lib/format-date'
 import { slugOf, type SlugValue } from '../lib/slug'
+import { type RefValue } from '../lib/ref'
 
 interface Post {
   _id: string
@@ -12,7 +13,7 @@ interface Post {
   excerpt?: string
   slug?: SlugValue
   publishedAt?: string
-  author?: { _ref: string }
+  author?: RefValue
 }
 
 interface HomeProps {

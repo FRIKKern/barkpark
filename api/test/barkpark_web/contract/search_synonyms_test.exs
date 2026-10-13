@@ -39,7 +39,10 @@ defmodule BarkparkWeb.Contract.SearchSynonymsTest do
 
     resp =
       conn
-      |> recycle()
+      # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+      # conn.private's rate-limit test scope, silently sharing the whole-suite
+      # IP bucket on this METERED route (RateLimit plug in its pipeline).
+      |> recycle_scoped()
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> get("/v1/data/search/test", %{"q" => "hero"})
 
@@ -61,7 +64,7 @@ defmodule BarkparkWeb.Contract.SearchSynonymsTest do
 
     conn =
       conn
-      |> recycle()
+      |> recycle_scoped()
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> delete("/v1/data/search/test/synonyms/#{row.id}")
 
@@ -161,7 +164,7 @@ defmodule BarkparkWeb.Contract.SearchSynonymsTest do
 
     conn =
       conn
-      |> recycle()
+      |> recycle_scoped()
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> post("/v1/data/search/test/synonyms/promote", %{"from" => "guide", "to" => "phoenix"})
 

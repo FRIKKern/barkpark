@@ -140,9 +140,36 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
       assert conn.status == 200
 
       # The instance mint request asks for a USER-shaped ticket bound to the
-      # cloud account's email — the browser lands signed in AS this user.
+      # cloud account's email — the browser lands signed in AS this user — at
+      # the caller's TEAM role (owner ruling #26).
       assert [req] = StudioLinkFakeHttpClient.requests()
-      assert Jason.decode!(req.body) == %{"email" => user.email}
+      assert Jason.decode!(req.body) == %{"email" => user.email, "role" => "owner"}
+    end
+
+    # Owner ruling #26 (2026-10-03, "Match role, revoke"): a plain member's
+    # ticket asks the instance to seat them as a MEMBER, never as the owner.
+    for role <- ["member", "admin"] do
+      test "a team #{role}'s ticket carries role #{role} (ruling #26)" do
+        {_owner, team} = user_with_team()
+        bp = live_barkpark(team)
+        person = user_fixture()
+        {:ok, _} = Accounts.add_member(team, person, unquote(role))
+        {:ok, token} = Accounts.create_user_session_token(person)
+
+        StudioLinkFakeHttpClient.program([
+          {:ok, %{status: 201, body: ~s({"ticket":"bplt_user-shaped-2","expires_in":60})}}
+        ])
+
+        conn = call(:post, "/v1/barkparks/#{bp.id}/studio-link", token)
+        assert conn.status == 200
+
+        assert [req] = StudioLinkFakeHttpClient.requests()
+
+        assert Jason.decode!(req.body) == %{
+                 "email" => person.email,
+                 "role" => unquote(role)
+               }
+      end
     end
 
     test "cross-team: a member of ANOTHER team gets the same 404 as a nonexistent id (no leak)" do

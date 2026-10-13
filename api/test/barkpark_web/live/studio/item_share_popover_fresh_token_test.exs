@@ -13,8 +13,8 @@ defmodule BarkparkWeb.Studio.ItemSharePopoverFreshTokenTest do
       database, so the link the operator just made IS copyable in the session
       that made it. This is what keeps the feature usable.
     * RE-OPENED / PRE-EXISTING — a link this socket did not just mint has
-      `url: nil`, and the popover renders "Link is active. Regenerate to copy a
-      new URL." with the Revoke affordance instead of an input whose value it
+      `url: nil`, and the popover says the link is active and how to share it
+      again, with the Revoke affordance instead of an input whose value it
       cannot fill. `item_share_open/2` CLEARS the fresh map, so re-opening the
       popover on the same item drops back to this arm — a raw token does not
       survive the popover that minted it.
@@ -101,7 +101,7 @@ defmodule BarkparkWeb.Studio.ItemSharePopoverFreshTokenTest do
     html = popover(socket.assigns.item_share_links)
     assert html =~ ~s(value="#{url}")
     assert html =~ "Copy"
-    refute html =~ "Regenerate to copy a new URL"
+    refute html =~ "Its address is shown only when the link is"
   end
 
   # ── ARM 2: re-opened — not copyable, honest, still revocable ──────────────
@@ -125,7 +125,11 @@ defmodule BarkparkWeb.Studio.ItemSharePopoverFreshTokenTest do
     assert reopened.assigns.item_share_fresh == %{}
 
     html = popover(reopened.assigns.item_share_links)
-    assert html =~ "Link is active. Regenerate to copy a new URL."
+    # task-d1a4f006a902e415: the row used to say "Regenerate", a control the
+    # dialog does not have; it now names the actions it does have.
+    assert html =~ "Link is active. Its address is shown only when the link is"
+    assert html =~ "create a new link, and revoke"
+    refute html =~ "Regenerate"
     refute html =~ ~s(class="form-input item-share-url")
     refute html =~ ~s(data-url=)
     refute html =~ ">Copy<"

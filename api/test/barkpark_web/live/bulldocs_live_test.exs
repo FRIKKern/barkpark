@@ -303,8 +303,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     @dt_paper "2026-07-02-dt-paper"
     @dt_task "2026-07-02-dt-task"
 
-    test "renders a 'Driven tasks' section with the citing task's criteria state",
-         %{conn: conn} do
+    # Seeds a paper and a REAL published task citing it via design_doc, under
+    # the plugin's task schema with `visibility` set as given.
+    defp seed_driven_task!(visibility) do
       {:ok, _p} =
         Content.upsert_paper(
           Barkpark.LabelFixtures.paper_attrs(%{slug: @dt_paper, body_html: "<h1>Strategy</h1>"})
@@ -327,6 +328,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           |> Map.from_struct()
           |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
           |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        attrs =
+          if attrs["name"] == "task", do: Map.put(attrs, "visibility", visibility), else: attrs
 
         {:ok, _} = Content.upsert_schema(attrs, dataset, scope)
       end
@@ -363,6 +367,11 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         [%{from_id: @dt_task, to_id: @dt_paper, kind: "design_doc"}],
         dataset: dataset
       )
+    end
+
+    test "with a public task schema, renders a 'Driven tasks' section with the citing task's criteria state",
+         %{conn: conn} do
+      seed_driven_task!("public")
 
       {:ok, _view, html} = live(conn, "/papers/#{@dt_paper}")
 
@@ -372,6 +381,20 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert html =~ "satisfied claim"
       assert html =~ "PR #42"
       assert html =~ "open claim"
+    end
+
+    # Owner ruling #10 (task-771adf3d4bb86c69): the shipped task schema is
+    # private, so the anonymous reader never prints a citing task.
+    test "with the shipped private task schema, the anonymous reader shows no citing task",
+         %{conn: conn} do
+      seed_driven_task!("private")
+
+      {:ok, _view, html} = live(conn, "/papers/#{@dt_paper}")
+
+      assert html =~ "Strategy"
+      refute html =~ "Driven tasks"
+      refute html =~ "Drive the strategy"
+      refute html =~ "PR #42"
     end
   end
 
@@ -804,6 +827,46 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       paper
     end
 
+    # task-b46266af433288e3: the graph's <pre> scrolls sideways when wide but
+    # could not take focus (axe scrollable-region-focusable).
+    test "the goal-path graph is keyboard-focusable and named", %{conn: conn} do
+      seed_rail_paper()
+      {:ok, _view, html} = live(conn, "/papers/#{@rail_slug}")
+
+      assert html =~
+               ~r/<pre class="mermaid" tabindex="0" role="group" aria-label="Goal path graph">/
+    end
+
+    # Ruling 2026-10-10 (a): the event list names a known event type in the
+    # reader's language; an unknown type ("plan-written") reads raw, the
+    # gitGraph's commit ids stay ASCII, and the stored rows are untouched.
+    test "the event list reads known event types in the reader's language", %{conn: conn} do
+      paper = seed_rail_paper()
+
+      list = fn html ->
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#goal-path-events .bp-goal-rail-event-type")
+        |> Enum.map(&LazyHTML.text/1)
+      end
+
+      {:ok, _view, en} = live(conn, "/papers/#{@rail_slug}")
+      assert list.(en) == ["goal-opened", "plan-written", "goal-snapshot"]
+
+      ws = Barkpark.Tenancy.get_workspace_by_id(paper.workspace_id)
+      {:ok, _} = Barkpark.Tenancy.set_workspace_locale(ws, "nb-NO")
+
+      {:ok, _view, nb} = live(build_conn(), "/papers/#{@rail_slug}")
+      assert list.(nb) == ["mål åpnet", "plan-written", "målstatus"]
+
+      for id <- ["goal-opened-1", "plan-written-2", "goal-snapshot-3"], do: assert(nb =~ id)
+
+      assert Barkpark.Repo.all(Barkpark.Plugins.Bulldocs.Event)
+             |> Enum.filter(&(&1.goal_id == @rail_goal))
+             |> Enum.map(& &1.event_type)
+             |> Enum.sort() == Enum.sort(["goal-opened", "plan-written", "goal-snapshot"])
+    end
+
     test "renders the rail with a linear gitGraph commit per event", %{conn: conn} do
       seed_rail_paper()
 
@@ -856,6 +919,23 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       # untouched (no swap/diff in v1).
       assert rendered =~ "is-selected"
       assert rendered =~ "Rail demo body."
+    end
+
+    # task-cb2e20ecf89522cf: the rows were <li phx-click> — no tabindex, so a
+    # keyboard user could neither select an event nor reach the diff.
+    test "every rail event is a button Tab can reach", %{conn: conn} do
+      seed_rail_paper()
+      {:ok, _view, html} = live(conn, "/papers/#{@rail_slug}")
+
+      rows =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s(#goal-path-events [phx-click="rail-select"]))
+
+      assert Enum.count(rows) == 3
+      assert rows |> Enum.flat_map(&LazyHTML.tag/1) |> Enum.uniq() == ["button"]
+      assert LazyHTML.attribute(rows, "type") == ["button", "button", "button"]
+      assert LazyHTML.attribute(rows, "aria-pressed") == ["false", "false", "false"]
     end
 
     test "a paper WITHOUT a goal_id renders NO rail", %{conn: conn} do
@@ -960,6 +1040,35 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         |> element(~s(button.bp-diff-close))
         |> render_click()
 
+      refute closed =~ ~s(id="bp-diff-modal")
+    end
+
+    # task-cb2e20ecf89522cf: the dialog had no Escape and never took or
+    # returned focus.
+    test "the diff dialog closes on Escape and moves focus in and back", %{conn: conn} do
+      {_paper, a, b} = seed_diff_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@diff_slug}")
+
+      doc =
+        view
+        |> render_hook("open-diff", %{"from" => a.id, "to" => b.id})
+        |> LazyHTML.from_fragment()
+
+      ops = fn selector, attr ->
+        doc
+        |> LazyHTML.query(selector)
+        |> LazyHTML.attribute(attr)
+        |> List.first()
+        |> Jason.decode!()
+        |> Enum.map(&hd/1)
+      end
+
+      assert ops.("#bp-diff-modal", "phx-mounted") == ["focus"]
+      assert ops.(".bp-diff-panel", "phx-window-keydown") == ["pop_focus", "push"]
+      assert ops.("#bp-diff-close", "phx-click") == ["pop_focus", "push"]
+      assert LazyHTML.attribute(LazyHTML.query(doc, ".bp-diff-panel"), "phx-key") == ["escape"]
+
+      closed = render_keydown(view, "close-diff", %{"key" => "Escape"})
       refute closed =~ ~s(id="bp-diff-modal")
     end
 

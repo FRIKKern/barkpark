@@ -75,9 +75,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def document_header(assigns) do
     ~H"""
+    <%!-- tabindex stays on, so the header is always a focus target: the
+          one-shot `phx-mounted` mark is spent by the next width-bucket
+          report, and a desk search hit's live navigation focuses it from the
+          client (`bp:focus-doc-header`) with no mark at all. --%>
     <div
       class="pane-header editor-header"
-      tabindex={@focus_on_mount && "-1"}
+      tabindex="-1"
       phx-mounted={@focus_on_mount && JS.focus()}
     >
       <%!-- spd-b35: `min-width: 0` + `max-width: 70%` are LOAD-BEARING, not
@@ -103,6 +107,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <a href={@back_href} class="btn btn-ghost btn-sm" aria-label={gettext("Back to Studio")}>&larr;</a>
         <% end %>
         <%= render_slot(@status_pill) %>
+        <%!-- The document's heading for screen readers (task-50c06dba12b3e908);
+              the visible title stays the span its pins and CSS expect. --%>
+        <h1 class="sr-only"><%= @title %></h1>
         <span class="pane-header-title"><%= @title %></span>
         <%= render_slot(@presence) %>
         <%= if @meta != [] do %>
@@ -272,7 +279,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def unresolved_document_notice(%{reason: :nothing_selected} = assigns) do
     ~H"""
-    <div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected">
+    <%!-- With no document open this is the page's main region and carries its
+          one heading, as the open editor panel does (task-6e6de3764438c5cf).
+          It renders beside the pane columns, never inside one, so no landmark
+          nests. --%>
+    <div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected" role="main">
+      <h1 class="sr-only"><%= gettext("Studio") %></h1>
       <div style="color: var(--fg-dim); text-align: center;">
         <div style="margin-bottom: 12px; opacity: 0.4;"><.icon name="file-text" size={40} /></div>
         <div class="text-sm"><%= gettext("No document is open. Pick one from the list to start editing.") %></div>
@@ -283,62 +295,67 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def unresolved_document_notice(assigns) do
     ~H"""
-    <div
-      class="bp-paper-unrenderable"
-      role="alert"
-      aria-live="assertive"
-      tabindex="-1"
-      data-test-id="studio-unresolved-document-notice"
-      data-reason={@reason}
-      data-doc-id={@doc_id}
-      data-doc-type={@doc_type}
-      data-cause={@cause}
-    >
-      <p class="bp-paper-unrenderable-title">
-        <%= gettext("Studio could not open this document.") %>
-      </p>
-      <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
-        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
-      </p>
-      <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
-        <%= gettext("Ask whoever shared access with you to widen the grant.") %>
-      </p>
-      <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
-        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
-      </p>
-      <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
-        <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
-        <%= gettext("Whatever is stored under that type is untouched.") %>
-      </p>
-      <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
-        <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
-      </p>
-      <div class="bp-paper-unrenderable-actions">
-        <a
-          :if={@cause == :elsewhere and @elsewhere_href}
-          href={@elsewhere_href}
-          class="btn btn-primary btn-sm"
-          data-test-id="studio-unresolved-open-elsewhere"
-        >
-          <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
-        </a>
-        <a
-          href={@list_href || @desk_href}
-          class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
-          data-test-id="studio-unresolved-recovery"
-        >
-          <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
-        </a>
-        <a
-          :if={@list_href}
-          href={@desk_href}
-          class="btn btn-ghost btn-sm"
-          data-test-id="studio-unresolved-back-to-desk"
-        >
-          <%= gettext("Back to the desk") %>
-        </a>
+    <%!-- Like the nothing-selected state, this card stands in for the editor
+          panel, so it is the page's main region and carries its one heading.
+          A wrapper holds the landmark: the card itself is the alert. --%>
+    <div role="main" class="bp-unresolved-main" data-test-id="studio-unresolved-document-main">
+      <div
+        class="bp-paper-unrenderable"
+        role="alert"
+        aria-live="assertive"
+        tabindex="-1"
+        data-test-id="studio-unresolved-document-notice"
+        data-reason={@reason}
+        data-doc-id={@doc_id}
+        data-doc-type={@doc_type}
+        data-cause={@cause}
+      >
+        <h1 class="bp-paper-unrenderable-title">
+          <%= gettext("Studio could not open this document.") %>
+        </h1>
+        <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
+          <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
+        </p>
+        <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
+          <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
+          <%= gettext("Ask whoever shared access with you to widen the grant.") %>
+        </p>
+        <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
+          <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
+        </p>
+        <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
+          <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
+          <%= gettext("Whatever is stored under that type is untouched.") %>
+        </p>
+        <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
+          <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
+          <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
+        </p>
+        <div class="bp-paper-unrenderable-actions">
+          <a
+            :if={@cause == :elsewhere and @elsewhere_href}
+            href={@elsewhere_href}
+            class="btn btn-primary btn-sm"
+            data-test-id="studio-unresolved-open-elsewhere"
+          >
+            <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
+          </a>
+          <a
+            href={@list_href || @desk_href}
+            class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
+            data-test-id="studio-unresolved-recovery"
+          >
+            <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
+          </a>
+          <a
+            :if={@list_href}
+            href={@desk_href}
+            class="btn btn-ghost btn-sm"
+            data-test-id="studio-unresolved-back-to-desk"
+          >
+            <%= gettext("Back to the desk") %>
+          </a>
+        </div>
       </div>
     </div>
     """
@@ -387,9 +404,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <%!-- Only the field's OWN findings here; a composite / array subtree
          (Gyldendal parity E1.11) is handed to the component, which renders
          each finding under the subfield or row it names. --%>
-    <% errors = own_findings(Map.get(@validation_errors, field_name, [])) %>
-    <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) %>
-    <%= if self_titled?(type) do %>
+    <% errors = own_findings(Map.get(@validation_errors, field_name, [])) ++ image_subfield_findings(@field, Map.get(@validation_errors, field_name)) %>
+    <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) ++ image_subfield_findings(@field, Map.get(@validation_warnings, field_name)) %>
+    <%!-- A readOnly composite shown to a non-admin takes the labelled row and
+         FieldInputs' display-only clause: the v2 renderer has no readOnly
+         path and would hand a member its subfield inputs
+         (task-08b6c963d72ce983). --%>
+    <% ro_display? = read_only_display?(@field, @parent_assigns) %>
+    <%= if self_titled?(type) and not ro_display? do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
       <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
@@ -406,6 +428,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_type={@doc_type}
             document_rev={@document_rev}
             form_gen={@form_gen}
+            schema_admin={BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(@parent_assigns, :caps))}
           />
         <% end %>
         <%= if onix = onix_element(@field) do %>
@@ -428,7 +451,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <% body_in_blocks? = classic_body_in_blocks?(@field, @parent_assigns) %>
       <.editor_field
         label={@field["title"] || field_name}
-        for={if body_in_blocks?, do: nil, else: FieldInputs.label_target(@field, @editor_form, label_prefix)}
+        for={if body_in_blocks? or ro_display?, do: nil, else: FieldInputs.label_target(@field, @editor_form, label_prefix)}
         required={required?}
         errors={errors}
         warnings={warnings}
@@ -456,7 +479,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             ><%= gettext("Edit the body in Beta") %></button>
           </div>
         <% else %>
-        <%= if PluginAdapter.v2?(@field) do %>
+        <%= if PluginAdapter.v2?(@field) and not ro_display? do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
           <FieldInputs.input
@@ -470,6 +493,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             document_rev={@document_rev}
             form_gen={@form_gen}
             id_prefix={label_prefix}
+            schema_admin={BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(@parent_assigns, :caps))}
           />
         <% end %>
         <% end %>
@@ -525,6 +549,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # — once in `<label class="editor-field-label">`, once in the legend.
   # See `barkpark-jwcb`.
   defp self_titled?(type), do: type in ~w(arrayOf composite localizedText)
+
+  # Whether a `readOnly` field renders display-only here: a non-admin viewer,
+  # the same rule FieldInputs and the server's mutate door apply (#21536).
+  defp read_only_display?(%{"readOnly" => true}, parent_assigns),
+    do: not BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(parent_assigns, :caps))
+
+  defp read_only_display?(_field, _parent_assigns), do: false
 
   @doc """
   StudioLive editor column, extracted from StudioLive's former
@@ -659,15 +690,17 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
     ~H"""
     <%= if @editor_doc do %>
-      <div class="editor-panel" data-role="content">
+      <%!-- The open document is the page's main region (task-8e2fa7915ed7faa0);
+            the paper and beta shells carry their own <main> instead. --%>
+      <div class="editor-panel" data-role="content" role="main">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || "Untitled"}
+          title={BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
             <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
-              <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
+              <%= BarkparkWeb.StudioComponents.Panes.status_word(if @editor_is_draft, do: "draft", else: @editor_doc.status) %>
             </span>
           </:status_pill>
           <:presence>
@@ -700,7 +733,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   to the group div and neither mode fires. At phone width the
                   toggle was always the first child collapsed. --%>
             <%= render_slot(@extra_actions) %>
-            <bp-overflow-menu class="bp-overflow-menu">
+            <bp-overflow-menu class="bp-overflow-menu" data-label={gettext("More actions")}>
               <%= for action <- @doc_actions do %>
                 <.doc_action_button
                   action={action}
@@ -725,7 +758,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     schema 500'd the WHOLE Studio editor for every document of
                     that type — the largest of the three spd-w18-nil-icon-500
                     crash sites. --%>
-              <.icon name={drawable_icon(@editor_schema.icon) || "file"} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+              <.icon name={drawable_icon(@editor_schema.icon) || "file"} size={14} /> <%= @editor_schema.title %> &middot; <%= ngettext("1 field", "%{count} fields", length(@editor_schema.fields)) %>
             </div>
           <% end %>
 
@@ -738,6 +771,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               draft={@editor_doc}
               published={@published_doc}
               schema={@editor_schema}
+              ref_title={diff_ref_title(@dataset, @parent_assigns)}
             />
           <% else %>
             <%!-- DOCUMENT VIEWS (Gyldendal parity E10). Sanity's
@@ -752,7 +786,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-click="select-view"
                 phx-value-view=""
                 role="tab"
-                aria-selected={@nav_view == nil}
+                aria-selected={to_string(@nav_view == nil)}
+                tabindex={if @nav_view == nil, do: "0", else: "-1"}
                 class={"bp-view-tab " <> if(@nav_view == nil, do: "is-active", else: "")}
                 data-test-id="document-view-form"
               ><%= gettext("Fields") %></button>
@@ -762,7 +797,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-click="select-view"
                 phx-value-view={v["id"]}
                 role="tab"
-                aria-selected={@nav_view == v["id"]}
+                aria-selected={to_string(@nav_view == v["id"])}
+                tabindex={if @nav_view == v["id"], do: "0", else: "-1"}
                 title={v["title"]}
                 class={"bp-view-tab " <> if(@nav_view == v["id"], do: "is-active", else: "")}
                 data-test-id="document-view-tab"
@@ -787,14 +823,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             </div>
 
             <%= if @nav_view == nil and schema_groups(@editor_schema) != [] do %>
+              <%!-- A roving tabindex: only the selected group is a Tab stop, and
+                    bp-tab-keys.js moves between groups on the arrow keys
+                    (task-9bf415c3d78b42d6). The editor form is the panel. --%>
               <div class="bp-tab-bar" role="tablist">
                 <%= for grp <- schema_groups(@editor_schema) do %>
                   <button
                     type="button"
+                    id={"bp-group-tab-" <> grp["name"]}
                     phx-click="select-group"
                     phx-value-group={grp["name"]}
                     role="tab"
-                    aria-selected={@nav_group == grp["name"]}
+                    aria-selected={to_string(@nav_group == grp["name"])}
+                    aria-controls="editor-tabpanel"
+                    tabindex={if tab_stop_group(@editor_schema, @nav_group) == grp["name"], do: "0", else: "-1"}
                     title={grp["title"]}
                     aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
@@ -811,7 +853,21 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   — a draft with no keystroke, and before Forms.coerce_params a
                   corrupt one. Autosave already persists each change within its
                   500 ms debounce, so recovery has nothing to restore. --%>
-            <form :if={@nav_view == nil} phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
+            <%!-- The group tabs' panel is this wrapper, not the form: ARIA
+                  does not allow role="tabpanel" on a <form> (axe
+                  aria-allowed-role). --%>
+            <div
+              :if={@nav_view == nil}
+              id="editor-tabpanel"
+              role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
+              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
+            >
+            <form
+              phx-submit="save"
+              phx-change="autosave"
+              phx-auto-recover="ignore"
+              id="editor-form"
+            >
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
@@ -832,7 +888,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
                         Visibility.visible?(field, @editor_form) do %>
                   <.studio_field_renderer
-                    field={field}
+                    field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
@@ -846,7 +902,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <% end %>
               <% end %>
               <div class="editor-actions">
-                <span class="save-status" role="status" aria-live="polite"><%= @save_status %></span>
+                <span class="save-status" role="status" aria-live="polite"><%= BarkparkWeb.Studio.SaveStatus.label(@save_status) %></span>
                 <%!-- Gyldendal parity E1.6 — the publish bar's warning count:
                       Sanity's warning-level validation nags here and never
                       blocks; the fields carry the wording inline. --%>
@@ -859,6 +915,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 ><%= ngettext("%{count} warning — publishing is still allowed", "%{count} warnings — publishing is still allowed", warning_count) %></span>
               </div>
             </form>
+            </div>
           <% end %>
         </div>
         <BarkparkWeb.Components.OnixPreview.content_preview
@@ -895,8 +952,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     names = Enum.map(presences, &Map.get(&1, :name, "User"))
 
     case names do
-      [one] -> "#{one} is editing"
-      many -> "#{Enum.join(many, ", ")} are editing"
+      [one] -> gettext("%{name} is editing", name: one)
+      many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
     end
   end
 
@@ -1110,31 +1167,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
   # :workspace is replaced before :w-anything ambiguity can arise because
   # the replacements run longest-token-first.
+  # Delegates to `Barkpark.Content.PreviewLocations.interpolate/5` — the ONE
+  # placeholder-substitution implementation, shared with the batch backlinks
+  # -> locations resolver (task-c5d5e045e7efcc96). Same vocabulary, same
+  # longest-token-first order; `studio_preview_link_action_test.exs` pins
+  # that a StudioLive-rendered href and a direct `interpolate/5` call agree
+  # for the same inputs.
   defp do_interpolate_href(href, doc, dataset, ws_slug, proj_slug) do
-    id =
-      case doc do
-        %{doc_id: doc_id} -> Barkpark.Content.published_id(doc_id)
-        _ -> ""
-      end
-
-    # `:slug` (S9 criterion 4) — the consumer site addresses a page by slug,
-    # not by doc id, so a preview template interpolates the document's own
-    # slug. Replaced BEFORE `:id` for the same longest-token-first reason the
-    # scope pair is: neither is a prefix of the other today, but the ordering
-    # is the invariant this list is built on.
-    href
-    |> String.replace(":workspace", to_string(ws_slug || ""))
-    |> String.replace(":project", to_string(proj_slug || ""))
-    |> String.replace(":dataset", to_string(dataset || ""))
-    |> String.replace(":slug", doc_slug_for_href(doc))
-    |> String.replace(":id", id)
-  end
-
-  defp doc_slug_for_href(doc) do
-    case BarkparkWeb.Studio.StudioLive.DocActions.doc_slug(doc) do
-      slug when is_binary(slug) -> slug
-      _ -> ""
-    end
+    Barkpark.Content.PreviewLocations.interpolate(href, doc, dataset, ws_slug, proj_slug)
   end
 
   @doc """
@@ -1165,16 +1205,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="bp-violations" role="status" aria-live="polite" data-test-id="cross-violations">
         <div class="bp-violations-summary">
           <span class="bp-violations-count">
-            <%= length(@violations) %> issue<%= if length(@violations) != 1, do: "s" %>:
+            <%= ngettext("1 issue:", "%{count} issues:", length(@violations)) %>
           </span>
           <%= if @counts.error > 0 do %>
-            <span class="bp-violations-error"><%= @counts.error %> error<%= if @counts.error != 1, do: "s" %></span>
+            <span class="bp-violations-error"><%= ngettext("1 error", "%{count} errors", @counts.error) %></span>
           <% end %>
           <%= if @counts.error > 0 and @counts.warning > 0 do %>
             <span>·</span>
           <% end %>
           <%= if @counts.warning > 0 do %>
-            <span class="bp-violations-warning"><%= @counts.warning %> warning<%= if @counts.warning != 1, do: "s" %></span>
+            <span class="bp-violations-warning"><%= ngettext("1 warning", "%{count} warnings", @counts.warning) %></span>
           <% end %>
         </div>
         <ul class="bp-violations-list">
@@ -1208,7 +1248,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
            data-test-id="doc-conflict-banner">
         <div class="bp-violations-summary">
           <span class="bp-violations-warning">
-            Updated by another user — your unsaved edits are kept.
+            <%= gettext("Updated by another user — your unsaved edits are kept.") %>
           </span>
         </div>
         <button
@@ -1216,7 +1256,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           class="btn btn-sm"
           phx-click="reload-remote-doc"
           data-test-id="doc-conflict-reload"
-        >Reload</button>
+        ><%= gettext("Reload") %></button>
       </div>
     <% end %>
     """
@@ -1311,6 +1351,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     end
   end
 
+  # The group tab that is the bar's one Tab stop: the selected group, else the
+  # first, so the bar is never unreachable from the keyboard.
+  defp tab_stop_group(schema, nav_group) do
+    names = Enum.map(schema_groups(schema), & &1["name"])
+    if nav_group in names, do: nav_group, else: List.first(names)
+  end
+
   # Per-group icon (task barkpark-sfzn). Plugins that omit "icon" still
   # render — falls back to a neutral "circle" so the tab bar never blanks.
   # A group's icon is workspace-schema data, so an unrecognised name gets the
@@ -1341,7 +1388,29 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # a leaf is a plain list; a composite / array node keeps its own under
   # `:__self__` and its subfields' under their names (rendered by the
   # component, never joined into the top-level line).
+  # An image field's declared subfields (Sanity's `alt`) have no inputs of
+  # their own in the form, the picker edits them, so their findings show under
+  # the image field, named by the subfield's title (task-6f2b84a0e32688ad).
+  defp image_subfield_findings(%{"type" => "image"} = field, %{} = tree) do
+    titles =
+      Map.new(List.wrap(field["fields"]), fn f -> {f["name"], f["title"] || f["name"]} end)
+
+    for {name, messages} <- tree, is_binary(name), is_list(messages), msg <- messages do
+      "#{Map.get(titles, name, name)}: #{msg}"
+    end
+  end
+
+  defp image_subfield_findings(_field, _tree), do: []
+
   defp own_findings(list) when is_list(list), do: list
   defp own_findings(%{__self__: list}) when is_list(list), do: list
   defp own_findings(_), do: []
+
+  # The Diff view's reference resolver (task-30d564b8b1219ab9): the referenced
+  # document's title, read in the editor's own tenant scope — the same
+  # `scope_opts_from_assigns/1` seam the paper sidebar uses for its relations.
+  defp diff_ref_title(dataset, parent_assigns) do
+    scope = BarkparkWeb.ScopeHelpers.scope_opts_from_assigns(parent_assigns)
+    fn id, ref_type -> Barkpark.Content.reference_title(id, ref_type, dataset, scope) end
+  end
 end

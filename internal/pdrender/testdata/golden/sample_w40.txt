@@ -8,8 +8,6 @@ the target width can be eyeballed across
 several lines of running prose.         
                                         
                                         
-                                        
-                                        
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                                         
 A level-two heading                     

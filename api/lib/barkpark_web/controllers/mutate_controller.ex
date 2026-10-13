@@ -10,19 +10,22 @@ defmodule BarkparkWeb.MutateController do
   action_fallback BarkparkWeb.FallbackController
 
   def mutate(conn, %{"dataset" => dataset, "mutations" => mutations}) when is_list(mutations) do
-    with {:ok, mutations} <- apply_if_match_header(conn, mutations),
+    with {:ok, dry_run} <- dry_run_flag(conn.params["dryRun"]),
+         {:ok, mutations} <- apply_if_match_header(conn, mutations),
          {:ok, scope, resolved} <- resolve_write_scope(conn) do
-      opts = [source: :api] ++ scope
+      opts = [source: :api, dry_run: dry_run] ++ scope
 
       # The advisory channel (authoring-excellence D5): the publish wall queues
       # non-blocking warnings ([{code, severity, message}]) while the batch
       # applies; they ride the SUCCESS envelope only. Reset before the batch so
       # a prior request on a reused test process can never leak entries in.
       Warnings.reset()
+      warn_unknown_keys(conn.body_params)
 
       case Content.apply_mutations(mutations, dataset, opts) do
         {:ok, {tx_id, results}} ->
           body = %{transactionId: tx_id, results: results}
+          body = if dry_run, do: Map.put(body, :dryRun, true), else: body
 
           # The INFER half of the unscoped-write ruling NAMES the workspace it
           # chose. Present ONLY when the scope was inferred — a request that
@@ -56,6 +59,37 @@ defmodule BarkparkWeb.MutateController do
   def mutate(conn, _params) do
     respond_with_error(conn, :malformed)
   end
+
+  # `dryRun` — body field or query param (Phoenix merges both into params).
+  # The batch runs every gate and write, then rolls back (Content.Mutations):
+  # 200 with the would-be results, nothing persisted. Anything but a boolean
+  # is refused, so a mistyped flag can never fall through to a real write.
+  defp dry_run_flag(nil), do: {:ok, false}
+  defp dry_run_flag(flag) when flag in [true, "true"], do: {:ok, true}
+  defp dry_run_flag(flag) when flag in [false, "false"], do: {:ok, false}
+  defp dry_run_flag(other), do: {:error, {:invalid_dry_run, other}}
+
+  # A top-level body key the door does not read used to vanish without a
+  # trace — that is how `dryRun` wrote for real before the door honoured it
+  # (task-778e3617070bce11). Named in a non-fatal warning, never refused: a
+  # 400 here could break clients that send harmless extras.
+  @known_body_keys ~w(mutations dryRun)
+
+  defp warn_unknown_keys(%{} = body) do
+    case body |> Map.keys() |> Enum.reject(&(&1 in @known_body_keys)) |> Enum.sort() do
+      [] ->
+        :ok
+
+      unknown ->
+        Warnings.put(
+          "mutate.unknown_key",
+          "ignored unknown top-level key(s): #{Enum.join(unknown, ", ")} — " <>
+            "the body reads only #{Enum.join(@known_body_keys, ", ")}"
+        )
+    end
+  end
+
+  defp warn_unknown_keys(_), do: :ok
 
   # Tenancy scope opts come from BarkparkWeb.ScopeHelpers.scope_opts/1, the
   # shared seam over the conn assigns set by ResolveWorkspace / ResolveProject

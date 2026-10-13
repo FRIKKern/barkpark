@@ -3,7 +3,7 @@
 
 import type { BarkparkClientConfig, CommitOptions, MutateEnvelope, MutateResult } from './types'
 import { request } from './transport'
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { BarkparkValidationError } from './errors'
 
 /**
@@ -11,8 +11,11 @@ import { BarkparkValidationError } from './errors'
  * `createTransaction().commit` does: idempotency key → header, `retry` → retry
  * policy, `timeoutMs` → per-call override. Keeps the three publish-lifecycle
  * conveniences symmetric with `create` / `delete`.
+ *
+ * @internal Shared with the block-op writes in ops.ts. A consumer passes
+ * {@link CommitOptions} to a public call and never builds the request bag.
  */
-function commitOptions(opts?: CommitOptions): {
+export function commitOptions(opts?: CommitOptions): {
   headers: Record<string, string>
   retryPolicy: 'none' | 'on-idempotency-key'
   timeoutMs?: number
@@ -86,7 +89,7 @@ async function lifecycleMutation(
   }
   const { data } = await request<MutateEnvelope>(
     config,
-    `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
+    `${dataPath(config, 'mutate')}`,
     {
       method: 'POST',
       body: { mutations: [{ [op]: { id, type } }] },
@@ -116,9 +119,11 @@ export async function publishDoc(
 }
 
 /**
- * Unpublish (move back to draft) a published document.
+ * Unpublish a published document.
  *
- * Moves `{id}` → `drafts.{id}`. Returns the resulting {@link MutateResult}
+ * Deletes `{id}`. An existing `drafts.{id}` is kept unchanged, so unpublished
+ * edits survive; with no draft, one is created from the published content.
+ * Returns the resulting {@link MutateResult}
  * with `operation: 'unpublish'` plus any publish-wall `warnings` (see
  * {@link onlyResult}). Prefer `client.unpublish(id, type)`. `opts`
  * forwards retry / idempotencyKey / timeoutMs to the write request.

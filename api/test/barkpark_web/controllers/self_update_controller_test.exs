@@ -265,6 +265,14 @@ defmodule BarkparkWeb.SelfUpdateControllerTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "no_previous_slot"
     end
 
+    test "target predates bound field seals (preflight exit 25) → 409 v2_seals_unreadable",
+         %{conn: conn} do
+      put_runner_cfg(enabled: true, rollback_preflight_command: preflight_exit(25))
+      resp = conn |> admin_conn() |> post("/v1/admin/rollback")
+      assert resp.status == 409
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "v2_seals_unreadable"
+    end
+
     test "unsupported box (preflight exit 22) → 409 not_supported", %{conn: conn} do
       put_runner_cfg(enabled: true, rollback_preflight_command: preflight_exit(22))
       resp = conn |> admin_conn() |> post("/v1/admin/rollback")

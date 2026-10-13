@@ -466,6 +466,8 @@ defmodule BarkparkWeb.AppTokenController do
 
   defp mint(conn, params) do
     with {:ok, email} <- fetch_email(params),
+         :ok <- label_names_email(params, email),
+         :ok <- may_mint_for(conn.assigns.api_token, email),
          {:ok, permissions} <- fetch_permissions(params),
          {:ok, workspace} <- resolve_workspace(params),
          :ok <- may_mint_into(conn.assigns.api_token, workspace) do
@@ -482,7 +484,14 @@ defmodule BarkparkWeb.AppTokenController do
       # `class: :app` — app tokens keep today's no-expiry mint: no max age and
       # no configured default apply until the App shape exists
       # (task-a0f8cfd7f4800236).
-      case Auth.create_token(raw, label, dataset, permissions, workspace.id, class: :app) do
+      # `owner_user_id` (owner ruling #32 item 3, 2026-10-03): the token is the
+      # USER's credential, so erasing the user revokes it. The member seat
+      # above stays — it is what the token acts through.
+      case Auth.create_token(raw, label, dataset, permissions, workspace.id,
+             class: :app,
+             owner_user_id: user.id,
+             dataset_bound: dataset_named?(params)
+           ) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
           # happened, for whom, into which workspace — never the token value.
@@ -493,7 +502,15 @@ defmodule BarkparkWeb.AppTokenController do
             actor_type: "user",
             actor_id: user.id,
             workspace_id: workspace.id,
-            metadata: %{"email" => email, "label" => label, "permissions" => permissions}
+            # No raw email (owner ruling #32 item 2): audit_events is
+            # append-only and hash-chained, so an email written here would
+            # outlive erasure. The user is named by id; the default label
+            # `app:<email>` is recorded as `app:<user id>`.
+            metadata: %{
+              "user_id" => user.id,
+              "label" => audit_label(label, email, user.id),
+              "permissions" => permissions
+            }
           })
 
           conn
@@ -520,7 +537,54 @@ defmodule BarkparkWeb.AppTokenController do
 
       {:error, :workspace_not_found} ->
         unprocessable(conn, "workspace could not be resolved")
+
+      {:error, :label_mismatch} ->
+        unprocessable(
+          conn,
+          "a label starting with \"app:\" must be \"app:\" followed by the email"
+        )
+
+      {:error, :operator_account} ->
+        ErrorResponse.emit_fields(conn, :forbidden, %{
+          code: "forbidden",
+          required: "platform_operator",
+          message: "only the instance operator mints an app token for an operator account"
+        })
     end
+  end
+
+  defp audit_label(label, email, user_id) when is_binary(label),
+    do: String.replace(label, email, user_id)
+
+  defp audit_label(label, _email, _user_id), do: label
+
+  # task-60ed926e61d3d048: `RequirePlatformOperator` resolves an app token's
+  # identity from `owner_user_id` (stamped above, #21569) and no longer reads
+  # the label. A minted token's owner is the user for `email`, so (2) is the
+  # load-bearing guard: a token FOR an email on the armed operator allowlist is
+  # minted only by a bearer the allowlist already names — otherwise any minting
+  # admin could hand itself the operator's identity. (1) keeps the `app:` label
+  # namespace honest: such a label must name THIS token's email. Labels outside
+  # the "app:" namespace are unaffected.
+  defp label_names_email(%{"label" => label}, email) when is_binary(label) do
+    case String.downcase(String.trim(label)) do
+      "app:" <> named ->
+        if named == String.downcase(email), do: :ok, else: {:error, :label_mismatch}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp label_names_email(_params, _email), do: :ok
+
+  defp may_mint_for(bearer, email) do
+    %{emails: operator_emails} = BarkparkWeb.Plugs.RequirePlatformOperator.allowlist()
+
+    if String.downcase(email) in operator_emails and
+         not BarkparkWeb.Plugs.RequirePlatformOperator.permits?(bearer),
+       do: {:error, :operator_account},
+       else: :ok
   end
 
   defp fetch_email(%{"email" => email}) when is_binary(email) do
@@ -603,6 +667,15 @@ defmodule BarkparkWeb.AppTokenController do
     do: dataset
 
   defp fetch_dataset(_), do: "production"
+
+  # A NAMED dataset is a binding the caller asked for (task-4418b517649a58ce);
+  # the "production" fallback above is a default, never a binding. `nil`, not
+  # `false`, when absent, so an unbound app token reads exactly like every row
+  # minted before the column existed.
+  defp dataset_named?(%{"dataset" => dataset}) when is_binary(dataset) and dataset != "",
+    do: true
+
+  defp dataset_named?(_), do: nil
 
   defp unprocessable(conn, message) do
     conn

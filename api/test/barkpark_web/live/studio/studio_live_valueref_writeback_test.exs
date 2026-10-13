@@ -147,6 +147,14 @@ defmodule BarkparkWeb.Studio.StudioLiveValuerefWritebackTest do
     # In-scope impact only: the one referencer, no denied note.
     assert html =~ "In-scope referencing paper"
     refute html =~ ~s(data-test-id="valueref-writeback-denied")
+
+    # ModalFocus lands on the value being edited, not on the dialog's ✕.
+    first =
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-test-id="valueref-writeback-modal"] [data-modal-focus]))
+
+    assert LazyHTML.attribute(first, "name") == ["value"]
   end
 
   test "authorized confirm writes the canonical value through the guarded path", %{

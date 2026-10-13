@@ -656,11 +656,16 @@ const HOVER_HSL_STEP = { light: -6, dark: +8 };
 // roles are the paper ink (or accent) at a fixed alpha. Strings so "0.10"
 // keeps its trailing zero.
 const PAPER_ALPHA = {
-  "rule":          { light: "0.09", dark: "0.10" },
+  "rule":          { light: "0.07", dark: "0.08" },
   "edit-hover":    { light: "0.08", dark: "0.09" },
-  "chrome-border": { light: "0.12", dark: "0.13" },
+  "chrome-border": { light: "0.09", dark: "0.10" },
   "accent-soft":   { light: "0.10", dark: "0.16" },
 };
+
+// Lines are NEUTRAL (owner, 2026-10-05): pure black on a light page, pure white on
+// a dark one, at a very low alpha — never the skin's tinted ink, which read as a
+// coloured stripe. edit-hover and accent-soft are tints, not lines, and keep the ink.
+const LINE_INK = { light: "#000000", dark: "#ffffff" };
 
 // ── skin-responsive perceptual formula helpers (ts-w5a — full derive) ─────────
 // These PROMOTE Part I's deriveSpine capabilities into derive()'s per-slot
@@ -735,8 +740,32 @@ const PAPER_BASE_II = {
   "bg-deep":   { light: { L: 0.948, C: 0.010 }, dark: { L: 0.186, C: 0.014 } },
   "ink":       { light: { L: 0.245, C: 0.020 }, dark: { L: 0.902, C: 0.010 } },
   "ink-soft":  { light: { L: 0.440, C: 0.016 }, dark: { L: 0.702, C: 0.012 } },
-  "ink-faint": { light: { L: 0.585, C: 0.012 }, dark: { L: 0.532, C: 0.010 } },
+  // ink-faint-line: the decorative faint tone (dots, borders, fills). Faint TEXT
+  // (paper.surface.ink-faint) walks from here to clear AA 4.5 on bg AND bg-deep
+  // (task-f7bbcc0256a563d3) — see paperFaintII.
+  "ink-faint-line": { light: { L: 0.585, C: 0.012 }, dark: { L: 0.532, C: 0.010 } },
 };
+
+// Faint paper TEXT — starts at the (resolved) line tone, same hue and chroma, and walks lightness away from the
+// grounds until it clears AA 4.5 on BOTH bg and bg-deep (the meta line, dates,
+// captions sit on either). A residual on either ground is a reported miss (D15).
+function paperFaintII(c, mode) {
+  const { L, C, h } = srgbToOklch(parseColor(c.resolve(`paper.surface.ink-faint-line.${mode}`)));
+  const grounds = ["bg", "bg-deep"].map((g) => parseColor(c.resolve(`paper.surface.${g}.${mode}`)));
+  const step = mode === "light" ? -0.002 : 0.002;
+  // Measure the SHIPPED hex, not the float: rounding to 8-bit can cost ~0.01.
+  const ratios = (hex) => grounds.map((g) => contrast(parseColor(hex), g));
+  let l = L;
+  let hex = toHex(oklchToSrgb(l, C, h));
+  for (let i = 0; i < 300 && ratios(hex).some((r) => r < 4.5) && l > 0.04 && l < 0.98; i++) {
+    l += step;
+    hex = toHex(oklchToSrgb(l, C, h));
+  }
+  ratios(hex).forEach((got, i) => {
+    if (got < 4.5) c.misses.push({ slot: `paper.surface.ink-faint.${mode}`, ground: ["bg", "bg-deep"][i], got, want: 4.5 });
+  });
+  return hex;
+}
 
 // Status roles — OKLCH hue-lock + chroma dial + AA lightness-walk (D15). Each
 // status.<role>.<mode> is a SINGLE readable tone (the shipped tokens shape),
@@ -753,6 +782,48 @@ function statusII(role, skin, mode, misses) {
   });
   if (!w.hit) misses.push({ slot: `status.${role}.${mode}`, got: w.contrast, want: 4.5 });
   return toHslTriplet(w.rgb);
+}
+
+// Text-on-tint voice (color.onTint.warn-text, task-98bc0a831eecc140): the
+// theme's own status amber as TEXT on its -soft tint. It was a fixed 8-point
+// step in light; the ruling on task-399a8a237f339eb1 makes it the same per-theme
+// AA walk as ok/danger/info/primary (onTintTextII below).
+
+// Text-on-tint voice for the brand (color.onTint.primary-text, ruling on
+// task-f6a066642fcac678): primary as TEXT on its own --primary-soft tint (active
+// filters, badges, history "create"). The fill hue reads 4.06:1 there in
+// evergreen light and 4.39:1 in charple dark, so the text walks its HSL
+// lightness away from the ground until it clears AA on the composited tint;
+// a primary that already clears ships unchanged. Fills, buttons and links stay
+// --primary. SOFT_ALPHA mirrors color._convention.softAlpha; validate.mjs
+// measures the shipped value on the tint built from the tokens themselves.
+const SOFT_ALPHA = { light: 0.15, dark: 0.2 };
+// The same walk serves every text-on-tint voice (ruling on task-399a8a237f339eb1):
+// a fill hue as TEXT on its own soft tint. ok/warn/danger/info walk from
+// status.<role>; primary walks from primary.
+function onTintTextII(c, mode, fillSlot, outSlot, misses) {
+  const p = hslParse(c.resolve(`${fillSlot}.${mode}`));
+  const fill = parseColor(c.resolve(`${fillSlot}.${mode}`));
+  const a = SOFT_ALPHA[mode];
+  // Measured as the browser paints it: both colours rounded to 8-bit sRGB.
+  const q = (rgb) => rgb.map((ch) => Math.round(ch * 255) / 255);
+  // A tint sits on the page (bg) AND on panels (muted-surface: the chat mode
+  // toggle, tool rows), so the voice must clear AA over both composited tints.
+  const tints = ["bg", "muted-surface"].map((g) => {
+    const ground = parseColor(c.resolve(`${g}.${mode}`));
+    return q(fill.map((ch, i) => ch * a + ground[i] * (1 - a)));
+  });
+  const seen = (triplet) => Math.min(...tints.map((t) => contrast(q(parseColor(triplet)), t)));
+  const step = relLum(parseColor(c.resolve(`bg.${mode}`))) > 0.5 ? -0.5 : 0.5;
+  let l = p.l;
+  let out = hslFormat(p);
+  for (let i = 0; i < 200 && seen(out) < 4.5 && l > 0 && l < 100; i++) {
+    l = Math.min(100, Math.max(0, l + step));
+    out = hslFormat({ h: p.h, s: p.s, l });
+  }
+  const got = seen(out);
+  if (got < 4.5) misses.push({ slot: `onTint.${outSlot}.${mode}`, got, want: 4.5 });
+  return out;
 }
 
 // Paper callout tones — TINTED from the status ramp: a pale tinted panel (bg) and
@@ -910,6 +981,11 @@ function buildFormulas() {
   for (const role of ["ok", "warn", "danger", "info"])
     M((m) => [`status.${role}.${m}`, (c) => statusII(role, c.skin, m, c.misses)]);
 
+  // — onTint: a status hue as text on its own tint (light one step darker) —
+  for (const role of ["ok", "warn", "danger", "info"])
+    M((m) => [`onTint.${role}-text.${m}`, (c) => onTintTextII(c, m, `status.${role}`, `${role}-text`, c.misses)]);
+  M((m) => [`onTint.primary-text.${m}`, (c) => onTintTextII(c, m, "primary", "primary-text", c.misses)]);
+
   // — CLI chrome: skin-tinted gray ramp + 5 structural var() aliases —
   for (const role of Object.keys(CHROME_II))
     M((m) => [`cliChrome.${role}.${m}`, (c) => chromeII(c.skin, m, CHROME_II[role][m])]);
@@ -942,9 +1018,11 @@ function buildFormulas() {
   // — paper.surface: hue-tinted bases from the skin, then hairlines/tints/chrome —
   for (const role of Object.keys(PAPER_BASE_II))
     M((m) => [`paper.surface.${role}.${m}`, (c) => oklchHex(PAPER_BASE_II[role][m].L, PAPER_BASE_II[role][m].C, accentHueOf(c.skin, m))]);
+  M((m) => [`paper.surface.ink-faint.${m}`, (c) => paperFaintII(c, m)]);
   M((m) => [`paper.surface.accent.${m}`, (c) => hslToHex(c.skin[m].accent)]);
-  for (const role of ["rule", "edit-hover", "chrome-border"])
-    M((m) => [`paper.surface.${role}.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.ink.${m}`), PAPER_ALPHA[role][m])]);
+  for (const role of ["rule", "chrome-border"])
+    M((m) => [`paper.surface.${role}.${m}`, () => rgbaFrom(LINE_INK[m], PAPER_ALPHA[role][m])]);
+  M((m) => [`paper.surface.edit-hover.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.ink.${m}`), PAPER_ALPHA["edit-hover"][m])]);
   M((m) => [`paper.surface.accent-soft.${m}`, (c) => rgbaFrom(c.resolve(`paper.surface.accent.${m}`), PAPER_ALPHA["accent-soft"][m])]);
   F["paper.surface.chrome-bg.light"] = (c) => c.resolve("paper.surface.bg.light");    // chrome bg == page bg (light)
   F["paper.surface.chrome-bg.dark"] = (c) => c.resolve("paper.surface.bg-deep.dark"); // chrome bg == deep bg (dark)
@@ -952,15 +1030,15 @@ function buildFormulas() {
   // — paper.reader: overlay of paper.surface; only the two hairline rules diverge —
   const readerMap = {
     light: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft" },
-    dark: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft", "ink-faint": "ink-faint", "chrome-bg": "chrome-bg", "chrome-border": "chrome-border" },
+    dark: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft", "ink-faint": "ink-faint", "ink-faint-line": "ink-faint-line", "chrome-bg": "chrome-bg", "chrome-border": "chrome-border" },
   };
   for (const m of modes)
     for (const [rk, sk] of Object.entries(readerMap[m]))
       F[`paper.reader.${m}.${rk}`] = ((mm, s) => (c) => c.resolve(`paper.surface.${s}.${mm}`))(m, sk);
   // reader hairline DIVERGES from the surface rule (charter D4): light is a SOLID
-  // tint (ink mixed over the page), dark a slightly heavier alpha than surface's.
-  F["paper.reader.light.rule"] = (c) => toHex(mixSrgb(c.resolve("paper.surface.ink.light"), c.resolve("paper.surface.bg.light"), 13));
-  F["paper.reader.dark.rule"] = (c) => rgbaFrom(c.resolve("paper.surface.ink.dark"), "0.13");
+  // neutral (black mixed 8% over the page), dark white at a slightly heavier alpha.
+  F["paper.reader.light.rule"] = (c) => toHex(mixSrgb(LINE_INK.light, c.resolve("paper.surface.bg.light"), 8));
+  F["paper.reader.dark.rule"] = () => rgbaFrom(LINE_INK.dark, "0.10");
 
   // — mailChrome: ⊂ paper.surface mapping. paper.light = the (near-white) page bg;
   // rule.dark = a solid hairline (paper ink mixed 20% over the dark page). —
@@ -975,7 +1053,7 @@ function buildFormulas() {
   for (const [slot, src] of Object.entries(mailMap))
     F[`mailChrome.${slot}`] = ((s) => (c) => c.resolve(s))(src);
   F["mailChrome.paper.light"] = (c) => hslToHex(c.skin.light.bg);
-  F["mailChrome.rule.dark"] = (c) => toHex(mixSrgb(c.resolve("paper.surface.ink.dark"), c.resolve("paper.surface.bg.dark"), 20));
+  F["mailChrome.rule.dark"] = (c) => toHex(mixSrgb(LINE_INK.dark, c.resolve("paper.surface.bg.dark"), 12));
 
   // — paperEmail: light-only skin, ⊂ paper.surface / reader —
   const emailMap = {
@@ -1013,14 +1091,16 @@ export const SLOTS = (() => {
   const s = [];
   for (const r of base) for (const m of ["light", "dark"]) s.push(`${r}.${m}`);
   for (const r of ["fg", "bg"]) for (const m of ["light", "dark"]) s.push(`code.${r}.${m}`);
-  const paperRoles = ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"];
+  const paperRoles = ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "ink-faint-line", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"];
   for (const r of paperRoles) for (const m of ["light", "dark"]) s.push(`paper.surface.${r}.${m}`);
   for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft"]) s.push(`paper.reader.light.${r}`);
-  for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "chrome-bg", "chrome-border"]) s.push(`paper.reader.dark.${r}`);
+  for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "ink-faint-line", "chrome-bg", "chrome-border"]) s.push(`paper.reader.dark.${r}`);
   for (const r of ["paper", "bar", "rule", "ink", "soft", "accent"]) for (const m of ["light", "dark"]) s.push(`mailChrome.${r}.${m}`);
   for (const m of ["light", "dark"]) s.push(`cliCalloutNeutral.${m}`);
   for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`status.${r}.${m}`);
   for (const r of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) for (const m of ["light", "dark"]) s.push(`onStatus.${r}.${m}`);
+  for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`onTint.${r}-text.${m}`);
+  for (const m of ["light", "dark"]) s.push(`onTint.primary-text.${m}`);
   for (const r of ["bg-accent", "border-muted", "fg-dim", "fg-accent", "surface-raised", "border-subtle"]) for (const m of ["light", "dark"]) s.push(`studioChrome.${r}.${m}`);
   const cliHex = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-selection-bg", "chrome-selection-fg", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"];
   for (const r of cliHex) for (const m of ["light", "dark"]) s.push(`cliChrome.${r}.${m}`);

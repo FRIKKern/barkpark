@@ -8,6 +8,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { contrast, parseColor } from "./derive.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const errors = [];
@@ -64,6 +65,55 @@ const onStatus = color.onStatus || {};
 for (const role of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) {
   ok(onStatus[role] != null, `color.onStatus.${role} is required (on-fill white foregrounds, Studio-only)`);
   hslPair(onStatus[role], `color.onStatus.${role}`);
+}
+
+// --- text-on-tint voices: warn-text (Studio-only, task-98bc0a831eecc140) -------
+const onTint = color.onTint || {};
+// The voices are read from the tokens themselves (not a second hand list beside
+// emit.mjs ON_TINT): every key of color.onTint but its _note.
+const ON_TINT_VOICES = Object.keys(onTint).filter((k) => !k.startsWith("_"));
+for (const role of ON_TINT_VOICES) {
+  ok(onTint[role] != null, `color.onTint.${role} is required (status text on its own -soft tint, Studio-only)`);
+  hslPair(onTint[role], `color.onTint.${role}`);
+}
+// The point of warn-text is AA on its own tint: text over warn at softAlpha on
+// the Studio ground, both modes. A retint that drops it under 4.5 reds here.
+{
+  const soft = (color._convention && color._convention.softAlpha) || {};
+  for (const m of ["light", "dark"]) {
+    const ground = parseColor(color.bg && color.bg[m]);
+    const hue = parseColor(color.status.warn[m]);
+    const a = Number(soft[m]);
+    const tint = hue.map((c, i) => c * a + ground[i] * (1 - a));
+    const ratio = contrast(onTint["warn-text"][m], tint);
+    ok(ratio >= 4.5,
+      `color.onTint.warn-text.${m} must clear AA 4.5 on its warn tint (softAlpha ${a} over bg.${m}); got ${ratio.toFixed(2)}`);
+  }
+}
+
+// Every text-on-tint voice is AA on its own composited tint (fill at softAlpha
+// over bg), both modes (rulings on task-f6a066642fcac678, task-399a8a237f339eb1).
+{
+  const soft = (color._convention && color._convention.softAlpha) || {};
+  // A voice names its fill: primary-text -> color.primary, <role>-text -> color.status.<role>.
+  const fillOf = (voice) => (voice === "primary-text" ? color.primary : color.status[voice.replace(/-text$/, "")]);
+  for (const voice of ON_TINT_VOICES) {
+    const fillPair = fillOf(voice);
+    ok(fillPair, `color.onTint.${voice} names no fill (expected primary-text or a status role)`);
+    if (!fillPair) continue;
+    for (const m of ["light", "dark"]) {
+      // On the page (bg) and on panels (muted-surface) — a chip sits on both.
+      for (const g of ["bg", "muted-surface"]) {
+        const ground = parseColor(color[g] && color[g][m]);
+        const fill = parseColor(fillPair[m]);
+        const a = Number(soft[m]);
+        const tint = fill.map((c, i) => c * a + ground[i] * (1 - a));
+        const ratio = contrast(onTint[voice][m], tint);
+        ok(ratio >= 4.5,
+          `color.onTint.${voice}.${m} must clear AA 4.5 on its tint (softAlpha ${a} over ${g}.${m}); got ${ratio.toFixed(2)}`);
+      }
+    }
+  }
 }
 
 // --- Studio zinc/chrome ladder: HSL channels OR a var(--role) reference -------
@@ -150,7 +200,7 @@ hslList((color.matchQuality || {}).spectrum, "color.matchQuality.spectrum", 7);
 const HEX_OR_RGBA = /^(#[0-9a-fA-F]{6}|rgba?\([0-9]{1,3},\s*[0-9]{1,3},\s*[0-9]{1,3}(,\s*[0-9.]+)?\))$/;
 const paper = color.paper || {};
 const psurf = paper.surface || {};
-for (const role of ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"]) {
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "ink-faint-line", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"]) {
   const o = psurf[role];
   ok(o && typeof o === "object", `color.paper.surface.${role} is required`);
   if (o) {
@@ -165,8 +215,28 @@ for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accen
 }
 const preadDark = (paper.reader || {}).dark || {};
 ok((paper.reader || {}).dark && typeof (paper.reader || {}).dark === "object", "color.paper.reader.dark is required");
-for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "chrome-bg", "chrome-border"]) {
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "ink-faint-line", "chrome-bg", "chrome-border"]) {
   ok(HEX_OR_RGBA.test(preadDark[role] || ""), `color.paper.reader.dark.${role} must be #rrggbb or rgba(), got ${JSON.stringify(preadDark[role])}`);
+}
+// Faint paper ink is TEXT (dates, captions, meta lines) on either paper ground:
+// it must clear AA 4.5 on bg AND bg-deep in both modes, and stay a tier below
+// ink-soft (task-f7bbcc0256a563d3). Decorative uses ride ink-faint-line instead.
+for (const [where, get] of [
+  ["paper.surface", (role, m) => psurf[role] && psurf[role][m]],
+  ["paper.reader.dark", (role, m) => (m === "dark" ? preadDark[role] : null)],
+]) {
+  for (const m of ["light", "dark"]) {
+    const faint = get("ink-faint", m);
+    if (!faint || !HEX.test(faint)) continue;
+    for (const g of ["bg", "bg-deep"]) {
+      const ground = get(g, m);
+      if (!ground || !HEX.test(ground)) continue;
+      const ratio = contrast(faint, ground);
+      const soft = contrast(get("ink-soft", m), ground);
+      ok(ratio >= 4.5, `color.${where}.ink-faint (${m}) must clear AA 4.5 on ${g}; got ${ratio.toFixed(2)}`);
+      ok(ratio < soft, `color.${where}.ink-faint (${m}) must stay below ink-soft on ${g}; got ${ratio.toFixed(2)} vs ${soft.toFixed(2)}`);
+    }
+  }
 }
 
 // --- mail-client popup chrome (color.mailChrome): 6 hex pairs ----------------

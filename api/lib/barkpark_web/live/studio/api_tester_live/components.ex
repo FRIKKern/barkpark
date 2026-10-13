@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
   @moduledoc "Function components for the API-tester LiveView — docs, playground, and response panes, extracted from the view shell."
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   import BarkparkWeb.Studio.ApiTesterLive.Format
   import BarkparkWeb.Studio.ApiTesterLive.Request
@@ -13,9 +14,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
     <p class="api-description"><%= @endpoint.description %></p>
 
     <%= if @endpoint.path_params != [] do %>
-      <div class="api-section">Path params</div>
+      <div class="api-section">{gettext("Path params")}</div>
       <table class="api-table">
-        <thead><tr><th>Name</th><th>Type</th><th>Notes</th></tr></thead>
+        <thead><tr><th>{gettext("Name")}</th><th>{gettext("Type")}</th><th>{gettext("Notes")}</th></tr></thead>
         <tbody>
           <%= for p <- @endpoint.path_params do %>
             <tr>
@@ -29,9 +30,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
     <% end %>
 
     <%= if @endpoint.query_params != [] do %>
-      <div class="api-section">Query params</div>
+      <div class="api-section">{gettext("Query params")}</div>
       <table class="api-table">
-        <thead><tr><th>Name</th><th>Default</th><th>Notes</th></tr></thead>
+        <thead><tr><th>{gettext("Name")}</th><th>{gettext("Default")}</th><th>{gettext("Notes")}</th></tr></thead>
         <tbody>
           <%= for p <- @endpoint.query_params do %>
             <tr>
@@ -44,11 +45,11 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       </table>
     <% end %>
 
-    <div class="api-section">Response shape</div>
+    <div class="api-section">{gettext("Response shape")}</div>
     <pre class="api-code-block"><%= @endpoint.response_shape %></pre>
 
     <%= if @endpoint.possible_errors != [] do %>
-      <div class="api-section">Possible errors</div>
+      <div class="api-section">{gettext("Possible errors")}</div>
       <div class="api-error-chips">
         <%= for code <- @endpoint.possible_errors do %>
           <code class="api-inline-code"><%= code %></code>
@@ -78,7 +79,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       )
 
     ~H"""
-    <div class="api-section">Playground</div>
+    <div class="api-section">{gettext("Playground")}</div>
     <form phx-change="form-change" class="api-playground">
       <%= for p <- @endpoint.path_params do %>
         <div class="api-param-row">
@@ -99,28 +100,27 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       <% end %>
 
       <%= if @endpoint.method == "POST" do %>
-        <div class="api-section" style="margin-top: 16px;">Request body (JSON)</div>
+        <div class="api-section" style="margin-top: 16px;">{gettext("Request body (JSON)")}</div>
         <.bp_textarea name="_body_text" class="api-body-textarea" spellcheck="false" value={Map.get(@form_state, "_body_text", "")} />
       <% end %>
     </form>
 
-    <div class="api-section">Copy as curl</div>
+    <div class="api-section">{gettext("Copy as curl")}</div>
     <pre class="api-code-block api-curl-block" id="tester-curl"><%= @curl %></pre>
 
     <%= if @endpoint[:runnable] == false do %>
       <div class="api-runnable-note">
-        Streaming endpoint — the playground does not support SSE. Use <code>curl -N</code>
-        from the command line to tail this stream.
+        {gettext("Streaming endpoint — the playground does not support SSE. Use")} <code>curl -N</code>
+        {gettext("from the command line to tail this stream.")}
       </div>
     <% else %>
       <div class="api-actions">
-        <button phx-click="run" class="btn btn-primary btn-sm" disabled={@running}><%= if @running, do: "Running…", else: "Run" %></button>
+        <button phx-click="run" class="btn btn-primary btn-sm" disabled={@running}><%= if @running, do: gettext("Running…"), else: gettext("Run") %></button>
         <button
           type="button"
-          onclick={~s|navigator.clipboard.writeText(document.getElementById('tester-curl').textContent); this.textContent='Copied \u2713'; setTimeout(() => this.textContent='Copy curl', 1500)|
-          }
+          onclick={"navigator.clipboard.writeText(document.getElementById('tester-curl').textContent); this.textContent=#{Jason.encode!(gettext("Copied ✓"))}; setTimeout(() => this.textContent=#{Jason.encode!(gettext("Copy curl"))}, 1500)"}
           class="btn btn-sm"
-        >Copy curl</button>
+        >{gettext("Copy curl")}</button>
       </div>
     <% end %>
     """
@@ -137,9 +137,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       <% total = length(asserts) %>
       <div class="api-tester-plugin-asserts">
         <div class="api-section" style="margin-top: 0;">
-          Asserts —
+          {gettext("Asserts —")}
           <span class={"status-#{Map.get(@result, :plugin_status, :pass)}"}>
-            <%= pass_count %>/<%= total %> pass
+            {gettext("%{passed}/%{total} pass", passed: pass_count, total: total)}
           </span>
         </div>
         <ul>
@@ -155,7 +155,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
 
     <%= if (cleanup = Map.get(@result, :plugin_cleanup)) && cleanup != [] do %>
       <details class="api-tester-plugin-cleanup">
-        <summary>Cleanup ran <%= length(cleanup) %> step<%= if length(cleanup) == 1, do: "", else: "s" %></summary>
+        <summary>{ngettext("Cleanup ran %{count} step", "Cleanup ran %{count} steps", length(cleanup))}</summary>
         <ul>
           <%= for step <- cleanup do %>
             <li>
@@ -168,10 +168,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive.Components do
       </details>
     <% end %>
 
-    <div class="api-section">Response headers</div>
+    <div class="api-section">{gettext("Response headers")}</div>
     <pre class="api-code-block"><%= Enum.map_join(@result.headers, "\n", fn {k, v} -> "#{k}: #{v}" end) %></pre>
 
-    <div class="api-section">Response body</div>
+    <div class="api-section">{gettext("Response body")}</div>
     <pre class="api-code-block"><%= format_body(@result) %></pre>
     """
   end

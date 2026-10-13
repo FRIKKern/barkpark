@@ -832,12 +832,14 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     test "sending a message renders the user bubble and goes to working", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "hei Claude"})
       assert html =~ "hei Claude"
-      assert html =~ "working"
+      # The chat's own status, not the page: the Studio bar's press-answer words
+      # (data-press-strings, task-24a481a493ad60d7) carry "Working…" on every page.
+      assert html =~ ~r/data-chat-status="(working|thinking)"/
     end
 
     test "an empty message is ignored", %{view: view} do
       html = render_submit(element(view, "form[phx-submit=send]"), %{"message" => "   "})
-      refute html =~ "working"
+      refute html =~ ~r/data-chat-status="(working|thinking)"/
     end
 
     # Server-owned runtime (wave 4, charter D28): tabs are VIEWERS. A second
@@ -7168,7 +7170,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       # This is the phase-1 render (the handle_event reply) — the words + the
       # working status are here INSTANTLY, before any subprocess work.
       assert html =~ "did you get this"
-      assert html =~ "working"
+      assert html =~ ~r/data-chat-status="(working|thinking)"/
       assert html =~ ~s(data-role="user")
     end
 
@@ -8364,10 +8366,11 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
     end
   end
 
-  # Connectors epic wave 1 (charter D17/D18): the admin chat LiveView is the
-  # `:global` superuser path — the tenant seam added to the store MUST NOT change
-  # what the admin sidebar sees. It surfaces sessions of EVERY owner (a
-  # workspace-owned one and a NULL-owner/global one alike), exactly as today.
+  # Connectors epic wave 1 (charter D17/D18) made the admin chat LiveView the
+  # `:global` superuser path. Owner ruling #30 Q2 (2026-10-03) narrowed that to
+  # the GENUINELY unbound superuser token: a Default-bound admin token lists
+  # what it may load — Default's rows plus NULL-owned legacy rows (it is the
+  # operator while the allowlist is unset) — and not another workspace's.
   describe "tenant seam — admin sidebar is the :global superuser (charter D17/D18)" do
     setup %{conn: conn} do
       enable_fake_chat()
@@ -8393,10 +8396,26 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, view, _html} = live(conn, "/studio/chat")
       html = render(view)
 
-      # Both owners' sessions render in the sidebar — the admin path is unfiltered.
-      assert html =~ "/studio/chat/#{tenant.id}"
+      # The Default-bound admin token: the NULL-owned row lists, the foreign
+      # workspace's row does not (owner ruling #30 Q2).
+      refute html =~ "/studio/chat/#{tenant.id}"
       assert html =~ "/studio/chat/#{global.id}"
       assert has_element?(view, ~s([data-test-id="chat-session-row"]))
+
+      # The genuinely unbound superuser token still sees every owner.
+      raw = "chat-unbound-superuser-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Auth.create_token(raw, "chat unbound", "production", ["read", "write", "admin"])
+
+      {:ok, _} = token |> Ecto.Changeset.change(%{workspace_id: nil}) |> Barkpark.Repo.update()
+
+      {:ok, super_view, _html} =
+        scoped_conn() |> init_test_session(%{"api_token" => raw}) |> live("/studio/chat")
+
+      super_html = render(super_view)
+      assert super_html =~ "/studio/chat/#{tenant.id}"
+      assert super_html =~ "/studio/chat/#{global.id}"
     end
 
     # Herd charter D43h: `BlockedSweeper` is fail-closed on NULL owners, so a

@@ -9,6 +9,10 @@ defmodule BarkparkWeb.ListenFilter do
 
     * `?types=a,b`: only mutations whose `_type` is in the set. Absent or
       blank means every type.
+    * `?ids=a,b`: only mutations of those documents (task-66d495ccd23e7f16).
+      An id names the document, so `a` and `drafts.a` both match either
+      spelling; add `?perspective=published` to drop the draft writes. Absent
+      or blank means every document.
     * `?perspective=`:
       * `published` drops draft writes (a `drafts.` document id).
       * `drafts` and `raw` pass both.
@@ -36,14 +40,34 @@ defmodule BarkparkWeb.ListenFilter do
   must not miss a removal.
   """
 
+  alias Barkpark.Content.DraftId
+
   @perspectives ["published", "drafts", "raw"]
 
-  defstruct types: nil, perspective: nil, filter: %{}
+  # `project_id` is not a query param: the controller sets it from the URL
+  # (`narrow_to_project/2`) when the stream was opened on a
+  # `/w/:ws/p/:proj/...` path (owner ruling #50, task-d60479a7749b0ca5).
+  #
+  # `only_doc_ids` is ALSO not a query param: the controller sets it from
+  # `scope[:only_doc_ids]` (`narrow_to_only_doc_ids/2`, task-78dc25a4f117fa07)
+  # when the connection carries a doc-scoped `Barkpark.PreviewToken` — a
+  # SERVER-ENFORCED floor the caller cannot widen, unlike `ids` (a caller's
+  # own `?ids=` narrowing). The two compose as an AND in `id_ok?/2` below:
+  # a token scoped to {A, B} that also asks `?ids=A,C` sees only A.
+  defstruct types: nil,
+            ids: nil,
+            perspective: nil,
+            filter: %{},
+            project_id: nil,
+            only_doc_ids: nil
 
   @type t :: %__MODULE__{
           types: MapSet.t(String.t()) | nil,
+          ids: MapSet.t(String.t()) | nil,
           perspective: String.t() | nil,
-          filter: %{optional(String.t()) => [String.t()]}
+          filter: %{optional(String.t()) => [String.t()]},
+          project_id: String.t() | nil,
+          only_doc_ids: MapSet.t(String.t()) | nil
         }
 
   @doc "The `?perspective` values the listen route honours."
@@ -61,6 +85,7 @@ defmodule BarkparkWeb.ListenFilter do
       {:ok,
        %__MODULE__{
          types: parse_types(Map.get(params, "types")),
+         ids: parse_ids(Map.get(params, "ids")),
          perspective: perspective,
          filter: filter
        }}
@@ -78,6 +103,14 @@ defmodule BarkparkWeb.ListenFilter do
     do: list |> Enum.filter(&is_binary/1) |> Enum.join(",") |> parse_types()
 
   defp parse_types(_), do: nil
+
+  # Stored as published ids, so `a` and `drafts.a` name the same document.
+  defp parse_ids(v) do
+    case parse_types(v) do
+      nil -> nil
+      set -> MapSet.new(set, &DraftId.published_id/1)
+    end
+  end
 
   defp parse_perspective(nil), do: {:ok, nil}
   defp parse_perspective(v) when v in @perspectives, do: {:ok, v}
@@ -113,9 +146,54 @@ defmodule BarkparkWeb.ListenFilter do
   `perspective`. Cheap, and runs before the per-subscriber re-render.
   """
   @spec pass_meta?(t(), %{type: term(), doc_id: term()}) :: boolean()
-  def pass_meta?(%__MODULE__{} = f, %{type: type, doc_id: doc_id}) do
-    type_ok?(f.types, type) and perspective_ok?(f.perspective, doc_id)
+  def pass_meta?(%__MODULE__{} = f, %{type: type, doc_id: doc_id} = event) do
+    type_ok?(f.types, type) and id_ok?(f.ids, doc_id) and
+      id_ok?(f.only_doc_ids, doc_id) and
+      perspective_ok?(f.perspective, doc_id) and project_ok?(f.project_id, event)
   end
+
+  @doc """
+  Narrow the stream to one project (owner ruling #50). Every project's
+  dataset is usually named `production`, so a stream keyed by workspace and
+  dataset name carried sibling projects' changes. A stream opened on a
+  `/w/:ws/p/:proj/...` URL now carries only that project's events; a flat
+  `/v1/...` stream is left workspace-wide (`nil`).
+  """
+  @spec narrow_to_project(t(), String.t() | nil) :: t()
+  def narrow_to_project(%__MODULE__{} = f, project_id) when is_binary(project_id),
+    do: %{f | project_id: project_id}
+
+  def narrow_to_project(%__MODULE__{} = f, _), do: f
+
+  @doc """
+  Narrow the stream to a `Barkpark.PreviewToken`'s own `doc_ids` claim
+  (task-78dc25a4f117fa07, owner ruling #17's listen twin). This is a
+  SERVER-ENFORCED floor, not a caller-chosen narrowing like `ids` above — a
+  doc-scoped preview token's connection never forwards another document's
+  event, on either the live leg or the Last-Event-ID replay leg (both run
+  `pass_meta?/2`). `ids` already published-normalises via `DraftId` at parse
+  time; `only_doc_ids` is handed the SAME normalised set `ScopeHelpers`
+  already built (`scope[:only_doc_ids]`), so no second normalisation runs
+  here — `nil`/`[]` (no token scope, or an empty-doc_ids dataset-wide token)
+  leaves the stream unnarrowed, exactly like `narrow_to_project/2`'s `nil` arm.
+  """
+  @spec narrow_to_only_doc_ids(t(), [String.t()] | nil) :: t()
+  def narrow_to_only_doc_ids(%__MODULE__{} = f, [_ | _] = ids),
+    do: %{f | only_doc_ids: MapSet.new(ids)}
+
+  def narrow_to_only_doc_ids(%__MODULE__{} = f, _), do: f
+
+  # An event with no project (a shared-layer or pre-tenancy row) is not this
+  # project's business either.
+  defp project_ok?(nil, _event), do: true
+  defp project_ok?(project_id, event), do: Map.get(event, :project_id) == project_id
+
+  defp id_ok?(nil, _doc_id), do: true
+
+  defp id_ok?(ids, doc_id) when is_binary(doc_id),
+    do: MapSet.member?(ids, DraftId.published_id(doc_id))
+
+  defp id_ok?(_ids, _doc_id), do: false
 
   defp type_ok?(nil, _type), do: true
   defp type_ok?(types, type), do: MapSet.member?(types, type)

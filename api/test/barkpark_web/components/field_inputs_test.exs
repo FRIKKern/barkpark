@@ -283,8 +283,14 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
           editor_form: %{"body" => "hello"}
         })
 
+      # task-d1c2ef3924bde715: the toolbar's words ride a data-strings map.
+      strings =
+        BarkparkWeb.StudioLocale.component_strings(:rich_text)
+        |> Phoenix.HTML.html_escape()
+        |> Phoenix.HTML.safe_to_string()
+
       assert String.trim(html) ==
-               ~s(<div id="bp-rt-wrap-body-doc" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body"></bp-rich-text-editor>\n</div>),
+               ~s(<div id="bp-rt-wrap-body-doc" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body" data-strings="#{strings}" data-label="body"></bp-rich-text-editor>\n</div>),
              "the unconfigured richText clause changed — Option A must not become " <>
                "Option B (the blocks editor as the DEFAULT for every richText field)"
 
@@ -326,7 +332,9 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       # (hidden-false + checkbox-true ordering is the form contract below).
       assert html =~ ~s(class="form-switch")
       assert html =~ ~s(class="form-switch-track")
-      assert html =~ ">Off<"
+      # Both words ship; CSS :checked shows the true one (task-70fd7cef5d0266aa).
+      assert html =~
+               ~s(<span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">Off</span><span class="form-switch-state-on">On</span></span>)
 
       hidden_idx =
         :binary.match(html, ~s(<input type="hidden" name="doc[featured]" value="false"))
@@ -348,7 +356,9 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         })
 
       assert html =~ ~s(value="true" checked phx-debounce="100")
-      assert html =~ ">On<"
+
+      assert html =~
+               ~s(<span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">Off</span><span class="form-switch-state-on">On</span></span>)
     end
 
     test "id_prefix lands on the checkbox only" do
@@ -646,6 +656,8 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
 
       assert html =~ ~s(<input)
       assert html =~ ~s(type="datetime-local")
+      # Owner ruling #46: the named control is the hidden UTC-instant input.
+      assert html =~ ~s(type="hidden")
       assert html =~ ~s(name="doc[publishedAt]")
       assert html =~ ~s(class="form-input")
     end

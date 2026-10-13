@@ -71,8 +71,8 @@ func TestPublishSendsBareIDPublishMutation(t *testing.T) {
 		t.Errorf("publish type = %q, want post", p.Type)
 	}
 	// Optimistic flip, mirroring saveDocument's in-memory apply.
-	if m.selectedDoc.Status != "published" || m.selectedDoc.ID != "playground-unpublish-1" {
-		t.Errorf("optimistic flip wrong: status=%q id=%q", m.selectedDoc.Status, m.selectedDoc.ID)
+	if publishState(m.selectedDoc) != "published" || m.selectedDoc.ID != "playground-unpublish-1" {
+		t.Errorf("optimistic flip wrong: status=%q id=%q", publishState(m.selectedDoc), m.selectedDoc.ID)
 	}
 	if m.status != "published" {
 		t.Errorf("status = %q, want published", m.status)
@@ -103,8 +103,8 @@ func TestPublishRefusesWhenDirty(t *testing.T) {
 	if !m.statusErr || m.status != "save first (ctrl+s)" {
 		t.Errorf("status = (%q, err=%v), want the save-first error", m.status, m.statusErr)
 	}
-	if m.selectedDoc.Status != "draft" {
-		t.Errorf("doc must stay a draft, got %q", m.selectedDoc.Status)
+	if publishState(m.selectedDoc) != "draft" {
+		t.Errorf("doc must stay a draft, got %q", publishState(m.selectedDoc))
 	}
 }
 
@@ -118,7 +118,7 @@ func TestPublishNoopsOnPublishedDoc(t *testing.T) {
 	defer srv.Close()
 
 	doc := draftDoc(t)
-	doc.Status = "published"
+	setPublishState(doc, "published")
 	doc.ID = "playground-unpublish-1"
 	m := model{
 		ds:           apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"}),
@@ -272,7 +272,7 @@ func TestEditorFooterPublishState(t *testing.T) {
 	}
 
 	pub := draftDoc(t)
-	pub.Status = "published"
+	setPublishState(pub, "published")
 	pub.ID = "playground-unpublish-1"
 	m = model{selectedDoc: pub, editorSchema: schema}
 	out = m.buildEditorContent(80)
@@ -299,7 +299,7 @@ func TestUnpublishDemotesPublishedDoc(t *testing.T) {
 	defer srv.Close()
 
 	doc := draftDoc(t)
-	doc.Status = "published"
+	setPublishState(doc, "published")
 	doc.ID = "playground-unpublish-1"
 	m := model{
 		ds:           apiclient.New(apiclient.Config{BaseURL: srv.URL, Token: "t"}),
@@ -323,8 +323,8 @@ func TestUnpublishDemotesPublishedDoc(t *testing.T) {
 	if u.ID != "playground-unpublish-1" || u.Type != "post" {
 		t.Errorf("unpublish = %+v, want bare id + post", u)
 	}
-	if m.selectedDoc.Status != "draft" || m.selectedDoc.ID != "drafts.playground-unpublish-1" {
-		t.Errorf("optimistic flip wrong: status=%q id=%q", m.selectedDoc.Status, m.selectedDoc.ID)
+	if publishState(m.selectedDoc) != "draft" || m.selectedDoc.ID != "drafts.playground-unpublish-1" {
+		t.Errorf("optimistic flip wrong: status=%q id=%q", publishState(m.selectedDoc), m.selectedDoc.ID)
 	}
 
 	// Inert on a draft: no second request.
@@ -337,7 +337,7 @@ func TestUnpublishDemotesPublishedDoc(t *testing.T) {
 // TestEditorFooterAdvertisesUnpublish: the published footer carries the U hint.
 func TestEditorFooterAdvertisesUnpublish(t *testing.T) {
 	doc := draftDoc(t)
-	doc.Status = "published"
+	setPublishState(doc, "published")
 	m := model{selectedDoc: doc, editorSchema: &Schema{Name: "post", Title: "Posts"}}
 	if out := m.buildEditorContent(80); !strings.Contains(out, "U unpublish") {
 		t.Errorf("published footer must advertise U unpublish:\n%s", out)

@@ -325,6 +325,16 @@ defmodule BarkparkWeb.Studio.ChatContextBandTest do
       # headline here exactly as it is on an open session.
       assert band(html, "dataset") =~ "dataset (not set) — the chat mount substitutes"
 
+      # task-42d4ac3dbd2b7b64: the mismatch notice is text, so it takes the
+      # text voice --warn-text (the --warn fill read 3.88:1 on white).
+      [style] =
+        html
+        |> segments(~s([data-test-id="chat-context-dataset"][data-mismatch="true"]))
+        |> LazyHTML.attribute("style")
+
+      assert style =~ "var(--warn-text)"
+      refute style =~ "var(--warn);"
+
       # The project is genuinely resolvable on the flat mount (StudioChrome's
       # `derive_scope_from_principal/1` reads it off the acting token), so the
       # band names it rather than claiming an absence that is not there.

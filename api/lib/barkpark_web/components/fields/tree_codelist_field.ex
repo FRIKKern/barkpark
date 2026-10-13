@@ -360,7 +360,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           disabled
           data-codelist-empty="true"
         >
-          <option value="">(no codelist registered: <%= @plugin_name %>:<%= @list_id %>)</option>
+          <option value=""><%= gettext("(no codelist registered: %{list})", list: "#{@plugin_name}:#{@list_id}") %></option>
         </select>
       <% else %>
         <input
@@ -374,7 +374,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           <input
             type="text"
             class="bp-input bp-tree-search"
-            placeholder="Search codes or labels…"
+            placeholder={gettext("Search codes or labels…")}
             value={@search_query}
             phx-keyup="tree_search_input"
             phx-debounce="200"
@@ -387,7 +387,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
               class="bp-btn bp-tree-search-clear"
               phx-click="tree_search_clear"
               phx-target={@myself}
-            >Clear</button>
+            ><%= gettext("Clear") %></button>
           <% end %>
         </div>
 
@@ -395,9 +395,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           <%= if @visible_rows == [] do %>
             <li class="bp-tree-empty">
               <%= if @search_query != "" do %>
-                No matches for "<%= @search_query %>".
+                <%= gettext("No matches for \"%{query}\".", query: @search_query) %>
               <% else %>
-                No entries.
+                <%= gettext("No entries.") %>
               <% end %>
             </li>
           <% else %>

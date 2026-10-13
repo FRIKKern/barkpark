@@ -268,7 +268,7 @@ defmodule Barkpark.Tasks.Board do
     dataset = Keyword.get(opts, :dataset, "production")
     now = Keyword.get(opts, :now) || DateTime.utc_now()
 
-    collapsed = load_task_docs(dataset)
+    collapsed = load_task_docs(dataset, Keyword.get(opts, :workspace_id))
     docs = Enum.map(collapsed, fn {doc, _pair?} -> doc end)
     status_by_pk = Map.new(docs, fn d -> {d.id, lifecycle_of(d)} end)
     blockers_by_pk = load_blocker_targets(Map.keys(status_by_pk))
@@ -368,11 +368,12 @@ defmodule Barkpark.Tasks.Board do
   #
   # If a deployment wants per-tenant admins, that is a NEW tenant-scoped board
   # surface behind a workspace credential, not a narrowing of this one.
-  defp load_task_docs(dataset) do
+  defp load_task_docs(dataset, workspace_id) do
     from(d in Document,
       where: d.type == "task" and d.dataset == ^dataset,
       limit: ^snapshot_max()
     )
+    |> clamp_workspace(workspace_id)
     |> Repo.all()
     |> Enum.group_by(fn d -> Content.published_id(d.doc_id) end)
     # TWIN COLLAPSE POLICY: the rule, its carve-out for unpaired drafts, and
@@ -384,6 +385,16 @@ defmodule Barkpark.Tasks.Board do
       {TwinCollapse.canonical(twins), TwinCollapse.unpublished_pair?(twins)}
     end)
   end
+
+  # OWNER RULING 2026-10-03 #4 amends the no-tenant ruling above: a board
+  # opened INSIDE a workspace (`/w/:ws/p/:proj/admin/projects`) passes
+  # `workspace_id:` and sees that workspace's tasks only. The flat
+  # `/admin/projects` board stays instance-wide, and is now gated on the
+  # platform operator (`BarkparkWeb.OpsOperatorGate`) instead of `:ops` alone.
+  defp clamp_workspace(query, nil), do: query
+
+  defp clamp_workspace(query, workspace_id),
+    do: from(d in query, where: d.workspace_id == ^workspace_id)
 
   # One batched query for every outbound `blocks` edge in the corpus, grouped
   # `from_pk => [to_pk]`. Charter allows batched OR per-task; batched keeps the

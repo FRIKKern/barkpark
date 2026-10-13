@@ -8,6 +8,8 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
   (`Geometry.col_px(...)`) without re-marking change-tracked assigns.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias Barkpark.Plugins.Sheets.CondFormat
   alias Barkpark.Plugins.Sheets.Core, as: Sheets
   alias BarkparkWeb.Studio.PresenceState
@@ -148,7 +150,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Geometry do
         uid != user_id,
         Map.get(p, :tab, 0) == tab do
       %{
-        name: Map.get(p, :name) || "User #{String.slice(uid, 0..3)}",
+        name: Map.get(p, :name) || gettext("User %{id}", id: String.slice(uid, 0..3)),
         color: peer_color(p, uid),
         active: Map.get(p, :active),
         selection: Map.get(p, :selection),

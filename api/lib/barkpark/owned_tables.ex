@@ -21,7 +21,9 @@ defmodule Barkpark.OwnedTables do
       core module by its own moduledoc, and the core endpoint mounts
       `PulseSocket`, whose channel join reads `pulse_counters`.
 
-  A table listed here is dropped by the differential check
+  The owned tables, functions and core triggers are read from
+  `Barkpark.SchemaOwnership`, the manifest that gives every database object
+  one owner. A table owned there is dropped by the differential check
   (`mix test.core_without_owned_tables`), which proves core runs without it.
 
   ## The two instance-level switches
@@ -46,84 +48,12 @@ defmodule Barkpark.OwnedTables do
 
   alias Barkpark.Capability
   alias Barkpark.Repo
+  alias Barkpark.SchemaOwnership
 
   @type owner :: {:plugin, String.t()} | {:capability, Capability.name()}
 
-  @owners %{
-    # studio_chat
-    "chat_execution_events" => {:capability, :studio_chat},
-    "chat_execution_leases" => {:capability, :studio_chat},
-    "chat_messages" => {:capability, :studio_chat},
-    "chat_runtime_telemetry_events" => {:capability, :studio_chat},
-    "chat_runtime_usage_receipts" => {:capability, :studio_chat},
-    "chat_sessions" => {:capability, :studio_chat},
-    "registered_chat_hosts" => {:capability, :studio_chat},
-    # cycle_fleet
-    "cycle_build_plans" => {:capability, :cycle_fleet},
-    "cycle_correction_admissions" => {:capability, :cycle_fleet},
-    "cycle_correction_promotion_events" => {:capability, :cycle_fleet},
-    "cycle_correction_quarantines" => {:capability, :cycle_fleet},
-    "cycle_correction_roots" => {:capability, :cycle_fleet},
-    "cycle_correction_targets" => {:capability, :cycle_fleet},
-    "cycle_release_gate_admissions" => {:capability, :cycle_fleet},
-    "cycle_release_gate_captures" => {:capability, :cycle_fleet},
-    "cycle_release_gate_challenges" => {:capability, :cycle_fleet},
-    "cycle_release_gate_consumptions" => {:capability, :cycle_fleet},
-    "cycle_release_gate_migration_state_20260719020100" => {:capability, :cycle_fleet},
-    "cycle_release_paper_candidates" => {:capability, :cycle_fleet},
-    "cycle_release_public_smokes" => {:capability, :cycle_fleet},
-    "cycle_waves" => {:capability, :cycle_fleet},
-    # epic_fleet
-    "epic_assignment_results" => {:capability, :epic_fleet},
-    "epic_assignment_runtime_attempts" => {:capability, :epic_fleet},
-    "epic_assignment_tasks" => {:capability, :epic_fleet},
-    "epic_assignments" => {:capability, :epic_fleet},
-    "epic_benchmark_attempts" => {:capability, :epic_fleet},
-    "epic_benchmark_experiments" => {:capability, :epic_fleet},
-    # plugins. `paper_events_dataset_rescope_backup` is a Bulldocs migration's
-    # side-table that nothing in api/lib reads.
-    "paper_events_dataset_rescope_backup" => {:plugin, "bulldocs"},
-    "github_sync_conflicts" => {:plugin, "github"}
-  }
-
-  # The two BEFORE DELETE triggers on CORE tables that call a cycle_fleet
-  # function (migration 20260715000500), as {table, trigger}.
-  @core_triggers [
-    {"workspaces", "workspaces_teardown_cycle_ledger"},
-    {"projects", "projects_teardown_cycle_ledger"}
-  ]
-
-  # SQL functions the fleet migrations install, as `to_regprocedure` signatures.
-  # Every one is used only by an owned table's trigger or check, or by the
-  # teardown path `Barkpark.Tenancy.delete_workspace/1` guards.
-  @functions [
-    "barkpark_prepare_workspace_cycle_teardown(uuid)",
-    "barkpark_teardown_cycle_ledger()",
-    "barkpark_cycle_correction_immutable()",
-    "barkpark_epic_costs_valid(jsonb)",
-    "barkpark_epic_ledger_immutable()",
-    "barkpark_epic_replacement_ordinal_valid()",
-    "barkpark_b1_document(uuid)",
-    "barkpark_paper_has_cycle_authority(jsonb,uuid,uuid,text,text,uuid,text,text,text,text,jsonb)",
-    "barkpark_reject_padded_cycle_assignment_unit_ids()",
-    "barkpark_reject_padded_cycle_result_unit_ids()",
-    "barkpark_reject_sealed_cycle_append()",
-    "barkpark_release_gate_challenge_transition()",
-    "barkpark_release_gate_immutable()",
-    "barkpark_release_public_smoke_transition()",
-    "barkpark_runtime_usage_receipts_immutable()",
-    "barkpark_seal_cycle_correction_parent()",
-    "barkpark_seed_cycle_retrieval_attribution()",
-    "barkpark_unavailable_smoke_retry_allowed(uuid,uuid)",
-    "barkpark_validate_cycle_assignment()",
-    "barkpark_validate_cycle_build_result()",
-    "barkpark_validate_cycle_correction()",
-    "barkpark_validate_cycle_wave_inventory()",
-    "barkpark_validate_cycle_wave_inventory_00600()",
-    "barkpark_validate_release_gate()",
-    "barkpark_canonical_jsonb(jsonb)",
-    "barkpark_jsonb_canonical_digest(jsonb)"
-  ]
+  # The lists live in the ownership manifest (slice 3, task-097a1b8ed6d27a8b).
+  @owners SchemaOwnership.owned_tables()
 
   @doc "Every table a plugin or capability owns, sorted."
   @spec tables() :: [String.t()]
@@ -131,11 +61,11 @@ defmodule Barkpark.OwnedTables do
 
   @doc "The core-table triggers that call a fleet function, as `{table, trigger}`."
   @spec core_triggers() :: [{String.t(), String.t()}]
-  def core_triggers, do: @core_triggers
+  def core_triggers, do: SchemaOwnership.owned_core_triggers()
 
   @doc "The fleet-installed SQL functions, as `to_regprocedure` signatures."
   @spec functions() :: [String.t()]
-  def functions, do: @functions
+  def functions, do: SchemaOwnership.owned_functions()
 
   @doc "The owner of `table`, or `:core` for a table no plugin or capability owns."
   @spec owner(String.t()) :: owner() | :core

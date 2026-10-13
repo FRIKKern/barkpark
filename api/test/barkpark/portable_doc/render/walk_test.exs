@@ -15,7 +15,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
   describe "render_body/3 — PdHr" do
     test "emits hr with default thickness 1 and palette rule colour" do
       html = Walk.render_body(%{"kind" => "PdHr"}, @width, @email)
-      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+      assert html == ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
     end
 
     test "respects explicit thickness" do
@@ -242,17 +242,20 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
       assert html =~ "text-decoration:underline"
     end
 
-    test "article link drops the inline decoration/border — the .bp-paper-surface a rule owns it" do
+    test "article link carries no inline style — the .bp-paper-surface a rule owns colour and decoration" do
       node = %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["go"]}
       html = Walk.render_body(node, @width, @article)
-      # Stage 2: no inline text-decoration or border-bottom at all; the surface
-      # element rule paints the soft-border at-rest look in View and Edit alike.
-      refute html =~ "text-decoration"
-      refute html =~ "border-bottom"
-      # The accent link colour stays inline (the same --paper-accent token the
-      # CSS rule resolves — data-adjacent, no drift).
-      assert html ==
-               ~s|<a href="https://example.com" style="color:var(--paper-accent, #1e5347)">go</a>|
+      # The link colour is a THEME value (task-10ca9c3597695db7): the surface
+      # element rule paints it in View and Edit alike, so nothing rides inline.
+      assert html == ~s|<a href="https://example.com">go</a>|
+    end
+
+    test "email link keeps the inline colour and underline — a mail client strips <style>" do
+      node = %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["go"]}
+      html = Walk.render_body(node, @width, @email)
+
+      assert html =~
+               ~r|<a href="https://example.com" style="color:#[0-9a-f]{6};text-decoration:underline">go</a>|
     end
 
     test "javascript: href is sanitised by safe_url (returns # sentinel)" do

@@ -106,7 +106,11 @@ defmodule BarkparkCloud.Web.RouterDetailsInternalColumnTest do
   # refuses a non-https `artifact_url` with `details: %{artifact_url: [...]}`.
   # It is the REQUEST BODY field the caller typed. `deployments.artifact_url`
   # shares the name but is user-supplied data, not an internal column.
-  @router_details_maps 17
+  # 17 -> 18 (task-0cf611238d4ad597, owner ruling #37, 2026-10-03): PUT
+  # /v1/operator/teams/:id/support-cap refuses a bad body with
+  # `details: %{cap: [...]}` — the REQUEST BODY field the operator typed.
+  # `teams.support_box_cap` is the column and is never named.
+  @router_details_maps 18
 
   ## ────────────────────────────────────────────────────────────────────
   ## PART 1 — the driven reachability table

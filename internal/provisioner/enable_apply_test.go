@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -133,15 +134,18 @@ func TestRunOnceEnableApplyHappyPath(t *testing.T) {
 		t.Fatal("RunOnceEnableApply claimed=false, want true (an enable-apply job was queued)")
 	}
 
-	// ── exactly two steps, in order: env flag append, then app restart ──
-	if len(runner.steps) != 2 {
-		t.Fatalf("runner ran %d steps, want 2 (env flag + restart): %+v", len(runner.steps), runner.steps)
+	// ── exactly three steps, in order: env flag, go.mod churn restore, restart ──
+	if len(runner.steps) != 3 {
+		t.Fatalf("runner ran %d steps, want 3 (env flag + churn restore + restart): %+v", len(runner.steps), runner.steps)
 	}
 	if !strings.Contains(runner.steps[0].Title, "BARKPARK_SELF_UPDATE_APPLY") {
 		t.Errorf("step[0] = %q, want the env-flag step first", runner.steps[0].Title)
 	}
-	if !strings.Contains(runner.steps[1].Title, "restart Barkpark") {
-		t.Errorf("step[1] = %q, want the app restart second", runner.steps[1].Title)
+	if !strings.Contains(runner.steps[1].Title, "go.mod/go.sum") {
+		t.Errorf("step[1] = %q, want the go.mod/go.sum restore second", runner.steps[1].Title)
+	}
+	if !strings.Contains(runner.steps[2].Title, "restart Barkpark") {
+		t.Errorf("step[2] = %q, want the app restart last", runner.steps[2].Title)
 	}
 
 	// ── the rendered env step carries the pinned flag + env file ──
@@ -247,9 +251,9 @@ func TestEnableApplyStepIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	steps := enableApplySteps(envFile)
-	if len(steps) != 2 {
-		t.Fatalf("enableApplySteps returned %d steps, want 2 (env flag + restart)", len(steps))
+	steps := enableApplySteps(envFile, dir)
+	if len(steps) != 3 {
+		t.Fatalf("enableApplySteps returned %d steps, want 3 (env flag + churn restore + restart)", len(steps))
 	}
 
 	// Run the env-flag step TWICE — the re-run must change nothing.
@@ -348,4 +352,103 @@ func TestSetShapeCloudStepReplacesAndIsIdempotent(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("env file mode = %v, want 0600 kept (the step rewrites in place)", info.Mode().Perm())
 	}
+}
+
+// churnRepo builds a real git checkout shaped like a jammed box: go.mod/go.sum
+// committed, then optionally rewritten (the `go mod tidy` churn) and optionally
+// another tracked file edited.
+func churnRepo(t *testing.T, tidyChurn bool, otherEdit bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(name, body string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	run("init", "-q")
+	write("go.mod", "module x\n\ngo 1.25\n")
+	write("go.sum", "a v1 h1:x\n")
+	write("README", "readme\n")
+	run("add", "-A")
+	run("commit", "-qm", "base")
+	if tidyChurn {
+		write("go.mod", "module x\n\ngo 1.25.0\n")
+		write("go.sum", "a v1 h1:x\nb v2 h1:y\n")
+	}
+	if otherEdit {
+		write("README", "someone's local edit\n")
+	}
+	// An untracked file is never a reason to refuse.
+	write(".bp-self-update-runs", "untracked\n")
+	return dir
+}
+
+func gitStatus(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.Command("git", "status", "--porcelain", "--untracked-files=no")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// TestRestoreGoModChurnStep EXECUTES the rendered step (real bash, real git)
+// against the three box shapes: tidy churn only → restored and clean (and a
+// re-run is a no-op); a clean tree → no-op; churn PLUS another tracked edit →
+// the step FAILS, names the file, and touches nothing.
+func TestRestoreGoModChurnStep(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+
+	t.Run("tidy churn only: restored, clean, re-run is a no-op", func(t *testing.T) {
+		dir := churnRepo(t, true, false)
+		step := restoreGoModChurnStep(dir)
+		runAttachScript(t, step)
+		if got := gitStatus(t, dir); got != "" {
+			t.Fatalf("tree still dirty after restore: %q", got)
+		}
+		runAttachScript(t, step)
+		if _, err := os.Stat(filepath.Join(dir, ".bp-self-update-runs")); err != nil {
+			t.Errorf("an untracked file was removed: %v", err)
+		}
+	})
+
+	t.Run("clean tree: no-op", func(t *testing.T) {
+		dir := churnRepo(t, false, false)
+		runAttachScript(t, restoreGoModChurnStep(dir))
+		if got := gitStatus(t, dir); got != "" {
+			t.Fatalf("clean tree changed: %q", got)
+		}
+	})
+
+	t.Run("another tracked edit: refuses loudly and changes nothing", func(t *testing.T) {
+		dir := churnRepo(t, true, true)
+		step := restoreGoModChurnStep(dir)
+		out, err := exec.Command(step.Argv[0], step.Argv[1:]...).CombinedOutput()
+		if err == nil {
+			t.Fatalf("step succeeded with a foreign tracked edit present, want a failure:\n%s", out)
+		}
+		if !strings.Contains(string(out), "README") || !strings.Contains(string(out), "REFUSING") {
+			t.Errorf("refusal does not name the blocking file:\n%s", out)
+		}
+		status := gitStatus(t, dir)
+		for _, f := range []string{"go.mod", "go.sum", "README"} {
+			if !strings.Contains(status, f) {
+				t.Errorf("%s was touched (status now %q) — a refusal must change nothing", f, status)
+			}
+		}
+	})
 }

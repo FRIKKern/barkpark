@@ -79,6 +79,37 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
     |> render_click()
   end
 
+  # task-9bf415c3d78b42d6: the bar said role=tab, but every tab was a Tab stop and
+  # none named its panel; bp-tab-keys.js drives the arrows over this markup.
+  # Plugins-off: the tasks plugin (the task schema's work/system tab groups)
+  @tag :requires_plugins
+  test "the group tab bar is a roving tablist whose panel wraps the editor form", %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
+
+    doc = view |> select_tab("work") |> LazyHTML.from_fragment()
+    tabs = LazyHTML.query(doc, ~s(.bp-tab-bar [role="tab"]))
+    names = LazyHTML.attribute(tabs, "phx-value-group")
+
+    assert "work" in names
+    assert LazyHTML.attribute(tabs, "id") == Enum.map(names, &("bp-group-tab-" <> &1))
+
+    assert LazyHTML.attribute(tabs, "aria-controls") ==
+             Enum.map(names, fn _ -> "editor-tabpanel" end)
+
+    assert LazyHTML.attribute(tabs, "tabindex") ==
+             Enum.map(names, &if(&1 == "work", do: "0", else: "-1"))
+
+    # The panel is the form's wrapper: role="tabpanel" is not allowed on a
+    # <form> (axe aria-allowed-role).
+    panel = LazyHTML.query(doc, "#editor-tabpanel")
+    assert LazyHTML.attribute(panel, "role") == ["tabpanel"]
+    assert LazyHTML.attribute(panel, "aria-labelledby") == ["bp-group-tab-work"]
+
+    form = LazyHTML.query(doc, "#editor-tabpanel #editor-form")
+    assert Enum.count(form) == 1, "the form sits inside the panel"
+    assert LazyHTML.attribute(form, "role") == [], "no role on the <form> itself"
+  end
+
   # Plugins-off: the tasks plugin (the task schema's work/system tab groups)
   @tag :requires_plugins
   test "lifecycle_status renders as a select with the five lifecycle options", %{conn: conn} do

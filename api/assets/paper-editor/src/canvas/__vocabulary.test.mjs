@@ -10,6 +10,7 @@ import {
   docVocabularyViolation,
   transactionVetoesVocabulary,
   slashItemsForVocabulary,
+  quoteTypeFor,
 } from "./vocabulary.js";
 
 let failures = 0;
@@ -106,6 +107,72 @@ check("the slash menu offers only the vocabulary's block types and never a compo
   ];
   assert.deepEqual(slashItemsForVocabulary(items, v).map((i) => i.type), ["paragraph", "heading", "list"]);
   assert.equal(slashItemsForVocabulary(items, null), items);
+});
+
+// task-96fce87b7b71c288: `{name, fields}` entries in blocks.of are custom object
+// blocks the server already admits; the canvas admits the same names.
+const WITH_OBJECTS = JSON.stringify({
+  styles: ["normal"],
+  of: [
+    "image",
+    { name: "callout", fields: [{ name: "tone", type: "string" }] },
+    { name: "factBox", title: "Faktaboks", fields: [{ name: "body", type: "text" }] },
+    { fields: [] },
+  ],
+});
+
+check("object entries in blocks.of are allowed block types", () => {
+  const v = parseVocabulary(WITH_OBJECTS);
+  assert.deepEqual(v.of, ["image", "callout", "factBox"]);
+  assert.deepEqual(
+    v.objects.map((o) => [o.name, o.title]),
+    [
+      ["callout", "callout"],
+      ["factBox", "Faktaboks"],
+    ],
+  );
+  assert.ok(allowedBlockTypes(v).has("factBox"));
+  const opaque = (t) => ({ type: "bpOpaque", attrs: { bpType: t, bpBlock: { type: t } } });
+  assert.equal(docVocabularyViolation(doc(para(text("a")), opaque("factBox")), v), null);
+  assert.equal(docVocabularyViolation(doc(opaque("banner")), v), "block type banner");
+  // inserting a declared object block into a clean doc is not vetoed
+  assert.equal(
+    transactionVetoesVocabulary(fakeTr(doc(para(text("a")), opaque("factBox"))), fakeState(doc(para(text("a")))), v),
+    false,
+  );
+});
+
+check("the slash menu offers a declared object block, once, as an object row", () => {
+  const v = parseVocabulary(WITH_OBJECTS);
+  const items = [
+    { type: "paragraph", label: "Paragraph" },
+    { type: "callout", label: "Callout" },
+  ];
+  const offered = slashItemsForVocabulary(items, v);
+  // callout is ALSO a canvas built-in, but the declaration wins
+  // (task-5bc7771edf30199a): the built-in row is dropped and the declared one
+  // offered once, as an object row, so the pick opens its field dialog.
+  assert.deepEqual(offered.map((i) => i.type), ["paragraph", "callout", "factBox"]);
+  const row = offered.find((i) => i.type === "factBox");
+  assert.equal(row.object, true);
+  assert.equal(row.label, "Faktaboks");
+  assert.equal(offered.find((i) => i.type === "callout").object, true);
+});
+
+// task-071f8c843336d12e: a field's blockquote STYLE is the pullquote block.
+check("a quote gesture makes the block the field admits", () => {
+  assert.equal(quoteTypeFor(null), "blockquote", "a paper canvas keeps the plain quote");
+  assert.equal(quoteTypeFor(parseVocabulary({ styles: ["normal", "blockquote"] })), "pullquote");
+  assert.equal(quoteTypeFor(parseVocabulary({ styles: ["normal"], of: ["blockquote"] })), "blockquote");
+  assert.equal(quoteTypeFor(parseVocabulary({ styles: ["normal"] })), "blockquote", "no quote admitted: the veto decides");
+});
+check("the slash menu keeps its Quote row in a field with the blockquote style, as a pullquote pick", () => {
+  const items = [{ type: "paragraph" }, { type: "blockquote", label: "Quote" }, { type: "callout" }];
+  const offered = slashItemsForVocabulary(items, parseVocabulary({ styles: ["normal", "blockquote"] }));
+  assert.deepEqual(offered.map((i) => i.type), ["paragraph", "blockquote"]);
+  assert.equal(offered[1].quoteAs, "pullquote");
+  assert.equal(offered[1].label, "Quote");
+  assert.deepEqual(slashItemsForVocabulary(items, parseVocabulary({ styles: ["normal"] })).map((i) => i.type), ["paragraph"]);
 });
 
 if (failures > 0) {

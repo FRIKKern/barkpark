@@ -110,6 +110,12 @@ defmodule BarkparkWeb.AuthController do
           user.totp_enabled ->
             login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
 
+          # Owner ruling #14: a passkey-only member of a require-MFA org used to
+          # sign in with the password alone (the org check asked "enrolled?",
+          # not "presented?"). They present the passkey at its own door.
+          BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
+            BarkparkWeb.SessionIssuer.deny_org_factor_required(conn, user, "password")
+
           true ->
             issue_session(conn, user)
         end
@@ -261,14 +267,48 @@ defmodule BarkparkWeb.AuthController do
         id: user.id,
         email: user.email,
         confirmed: not is_nil(user.confirmed_at),
-        mfa: user.totp_enabled
+        mfa: user.totp_enabled,
+        display_name: user.display_name
       }
     })
   end
 
   @doc """
+  Self-service display name (task-cfb6ca3f5ffaf099). Not security-sensitive —
+  unlike `change_password/2`/`erase/2` above, no reauth is required. A blank
+  or missing `display_name` clears it back to the `"another editor"` fallback
+  `Media.Storage.Actor.display/2` renders for an unset name.
+  """
+  def update_display_name(conn, params) do
+    user = conn.assigns.current_user
+
+    case Accounts.update_display_name(user, %{display_name: Map.get(params, "display_name")}) do
+      {:ok, updated} ->
+        json(conn, %{ok: true, display_name: updated.display_name})
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        error(conn, 422, "invalid_display_name", changeset_errors(cs))
+    end
+  end
+
+  @doc """
   Session-gated self-mint of a Personal Access Token that carries the caller's
   USER identity (`owner_user_id`).
+
+  ## Optional expiry (task-9d2cdfae246cc486)
+
+  Body may carry AT MOST ONE of:
+
+    * `ttl_seconds` (positive integer) — expire this many seconds from mint.
+    * `expires_at` (ISO-8601 string) — expire at that instant; must be in the
+      future.
+
+  Both resolve through `TokenExpiry.resolve/3` (the same policy every other
+  mint route uses): a requested expiry over the `:api` class's 365-day max is
+  422, naming the max, and no token is minted — never silently clamped.
+  Omitting both keeps the existing 30-day default unchanged. An expired token
+  answers the identical 401 a revoked one does (`Auth.verify_token/1`'s single
+  WHERE clause checks both; no separate "expired" oracle).
 
   ## No-escalation invariant (SECURITY)
 
@@ -336,20 +376,107 @@ defmodule BarkparkWeb.AuthController do
   claim path re-applies `RequireOrgMfaEnrolment` on the `:access_principal`
   pipeline; the token path relies on this issuance gate.)
   """
+  # Owner ruling #13 (task-f4cfc3e2ab4bd6b8): a personal token outlives the
+  # session that minted it, so minting one is a re-auth action. A stolen
+  # session alone used to mint a standing credential that survived the owner's
+  # password reset. A session that presented an MFA factor within the step-up
+  # window (a login with a factor counts) mints as-is; otherwise the current
+  # password rides the body, through the same per-user re-check budget as
+  # every other password door (`reauth/2`).
   def create_token(conn, params) do
+    cond do
+      session_mfa_fresh?(conn.assigns[:current_user_session]) ->
+        mint_token(conn, params)
+
+      is_binary(params["current_password"]) ->
+        case reauth(conn.assigns.current_user, params["current_password"]) do
+          :ok -> mint_token(conn, params)
+          {:error, :reauth_rate_limited} -> reauth_rate_limited(conn)
+          {:error, :invalid_password} -> reauth_required(conn)
+        end
+
+      true ->
+        reauth_required(conn)
+    end
+  end
+
+  defp reauth_required(conn) do
+    error(
+      conn,
+      401,
+      "reauth_required",
+      "minting a personal token needs your current password or a recent MFA verification",
+      "send current_password in the body, or call POST /v1/auth/mfa/step-up (or the passkey step-up) and retry"
+    )
+  end
+
+  defp session_mfa_fresh?(%UserSession{} = session), do: UserSession.mfa_fresh?(session)
+  defp session_mfa_fresh?(_), do: false
+
+  defp mint_token(conn, params) do
+    case resolve_caller_workspace(conn.assigns.current_user, params["workspace"]) do
+      {:ok, {workspace_id, role}} ->
+        mint_pat(conn, params, workspace_id, role)
+
+      {:error, {:workspace_required, slugs}} ->
+        BarkparkWeb.ErrorResponse.emit_fields(conn, 422, %{
+          code: "workspace_required",
+          message:
+            "you belong to several workspaces — name the one this token is for " <>
+              "(\"workspace\": slug or id)",
+          workspaces: slugs
+        })
+
+      {:error, :not_a_member} ->
+        error(conn, 403, "forbidden", "you are not a member of that workspace")
+    end
+  end
+
+  defp mint_pat(conn, params, workspace_id, role) do
+    case fetch_pat_expiry(params) do
+      {:ok, expiry} ->
+        do_mint_pat(conn, params, workspace_id, role, expiry)
+
+      {:error, :invalid_expiry} ->
+        error(
+          conn,
+          422,
+          "unprocessable",
+          "send at most one of ttl_seconds (a positive integer) or expires_at " <>
+            "(an ISO-8601 datetime)"
+        )
+    end
+  end
+
+  # Split out of `mint_pat/4` so this function's own `case` on
+  # `Auth.create_personal_access_token/3`'s result stays at the SAME
+  # indentation depth it had before the ttl_seconds/expires_at option
+  # existed — `ChangesetDetailControllersTest` pins the changeset arm's
+  # source text byte-for-byte (including whitespace), so nesting this `case`
+  # one level deeper inside a `with` would have broken that source-anchored
+  # assertion for a reason that has nothing to do with what it is actually
+  # guarding (the changeset error detail stays routed through
+  # `changeset_errors/1`, never a flat literal).
+  defp do_mint_pat(conn, params, workspace_id, role, expiry) do
     user = conn.assigns.current_user
     name = token_name(params)
-    {workspace_id, role} = resolve_caller_workspace(user)
     permissions = Auth.max_pat_permissions_for_role(role)
 
     # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
     # `user_id` is never read — this is the mint's no-escalation guarantee.
-    case Auth.create_personal_access_token(name, permissions,
-           role: role,
-           created_by: user.email,
-           owner_user_id: user.id,
-           workspace_id: workspace_id
-         ) do
+    #
+    # `:expires_at` is OMITTED (not passed as `nil`) when the caller asked
+    # for nothing: `Auth.create_personal_access_token/3`'s `Keyword.fetch/2`
+    # on that key distinguishes "absent" from "present and nil" — passing
+    # `nil` explicitly would route through `TokenExpiry.resolve/3`'s own
+    # unconfigured-default branch (no expiry) instead of falling through to
+    # the existing 30-day `:ttl` default, silently un-expiring every PAT
+    # mint that asks for nothing.
+    mint_opts =
+      [role: role, created_by: user.email, owner_user_id: user.id, workspace_id: workspace_id]
+      |> then(fn opts -> if expiry, do: Keyword.put(opts, :expires_at, expiry), else: opts end)
+
+    case Auth.create_personal_access_token(name, permissions, mint_opts) do
       {:ok, {raw, token}} ->
         # Minting a standing credential is an audit-worthy lifecycle event.
         Audit.emit(%{
@@ -378,8 +505,38 @@ defmodule BarkparkWeb.AuthController do
       {:error, :forbidden} ->
         error(conn, 403, "forbidden", "you may not mint a token with those permissions")
 
+      {:error, {:expiry_exceeds_max, _, _} = reason} ->
+        error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
+
+      {:error, :expiry_not_in_future = reason} ->
+        error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
+
       {:error, %Ecto.Changeset{} = cs} ->
         error(conn, 422, "unprocessable", changeset_errors(cs))
+    end
+  end
+
+  # AT MOST ONE of `ttl_seconds` (positive integer, seconds from now) or
+  # `expires_at` (ISO-8601, must parse). Neither → nil, resolved as `opts[:ttl]`
+  # defaulting to the existing 30-day horizon inside
+  # `Auth.create_personal_access_token/3` — byte-identical to every mint before
+  # this option existed. Mirrors `TokenController.fetch_expiry/1`'s XOR shape.
+  defp fetch_pat_expiry(params) do
+    case {Map.get(params, "ttl_seconds"), Map.get(params, "expires_at")} do
+      {nil, nil} ->
+        {:ok, nil}
+
+      {ttl, nil} when is_integer(ttl) and ttl > 0 ->
+        {:ok, DateTime.add(DateTime.utc_now(), ttl, :second)}
+
+      {nil, at} when is_binary(at) ->
+        case DateTime.from_iso8601(at) do
+          {:ok, dt, _offset} -> {:ok, dt}
+          _ -> {:error, :invalid_expiry}
+        end
+
+      _ ->
+        {:error, :invalid_expiry}
     end
   end
 
@@ -394,13 +551,32 @@ defmodule BarkparkWeb.AuthController do
   # `workspace_memberships`), so a workspace the caller has no membership row
   # in can never come back; a user with no membership anywhere resolves to
   # `{nil, nil}`, which `Auth.create_personal_access_token/3` reads as "mint
-  # workspace-less" (no Tenancy.Membership grant). Ordered by slug, so a user
-  # in more than one workspace resolves deterministically to the same one on
-  # every call.
-  defp resolve_caller_workspace(user) do
-    case Tenancy.list_workspaces_for(user) do
-      [workspace | _rest] -> {workspace.id, TenancyAuth.membership_role(user, workspace.id)}
-      [] -> {nil, nil}
+  # workspace-less" (no Tenancy.Membership grant).
+  #
+  # OWNER RULING 2026-10-03 #7: the mint NAMES its workspace. `workspace` (a
+  # slug or id among the caller's OWN workspaces) picks it; a non-member target
+  # is 403. Without it, a user in exactly one workspace gets that one (as
+  # before) and a user in several gets 422 `workspace_required` listing them —
+  # never the first by slug, which let any admin who seated the user decide
+  # where the user's next token landed.
+  defp resolve_caller_workspace(user, requested) do
+    workspaces = Tenancy.list_workspaces_for(user)
+
+    case {requested, workspaces} do
+      {ref, _} when is_binary(ref) and ref != "" ->
+        case Enum.find(workspaces, &(&1.slug == ref or &1.id == ref)) do
+          nil -> {:error, :not_a_member}
+          ws -> {:ok, {ws.id, TenancyAuth.membership_role(user, ws.id)}}
+        end
+
+      {_, [workspace]} ->
+        {:ok, {workspace.id, TenancyAuth.membership_role(user, workspace.id)}}
+
+      {_, []} ->
+        {:ok, {nil, nil}}
+
+      {_, several} ->
+        {:error, {:workspace_required, Enum.map(several, & &1.slug)}}
     end
   end
 
@@ -621,6 +797,9 @@ defmodule BarkparkWeb.AuthController do
 
           user.totp_enabled ->
             login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
+
+          BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
+            BarkparkWeb.SessionIssuer.deny_org_factor_required(conn, user, "magic_link")
 
           true ->
             issue_session(conn, user)

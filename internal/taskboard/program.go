@@ -48,6 +48,9 @@ type Config struct {
 	// contract). Resolved by the CLI; empty sends no header.
 	SessionKey string
 	SessionDoc string
+	// Goal narrows the board to one task and its descendants (scope.go). Set
+	// from "goal" in the repo's .barkpark.json; empty shows every task.
+	Goal string
 }
 
 // default live-loop timings. Fields on Model so tests can shrink them.
@@ -319,8 +322,8 @@ func newModel(client *apiclient.Client, token string, cfg Config) Model {
 		stack:         []Frame{{Kind: FrameBoard, Title: "tasks"}},
 		papers:        map[string]PaperState{},
 		cacheDir:      cfg.CacheDir,
-		cacheKey:      cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset),
-		fetch:         newSnapshotFetcher(cfg.CacheDir, cacheKey(cfg.BaseURL, cfg.Workspace, cfg.Project, cfg.Dataset)),
+		cacheKey:      boardCacheKey(cfg),
+		fetch:         scopeFetcher(newSnapshotFetcher(cfg.CacheDir, boardCacheKey(cfg)), cfg.Goal),
 		fetchEvents:   FetchTaskEvents,
 		tick:          tea.Tick,
 		build:         BuildBoard,
@@ -392,6 +395,11 @@ func (m *Model) primeFromCache() {
 		// shipped. Read the old scope key once so an upgrade preserves the last
 		// real task corpus during a transient server failure, then migrate it to
 		// the dataset-scoped key. The legacy key is never written again.
+		// A goal-scoped board never had a legacy cache: the legacy file holds
+		// the unscoped board, which is exactly what it must not paint.
+		if m.cfg.Goal != "" {
+			return
+		}
 		legacyKey := legacyCacheKey(m.cfg.BaseURL, m.cfg.Workspace, m.cfg.Project)
 		snap, ok = LoadCachedSnapshot(m.cacheDir, legacyKey)
 		if !ok {

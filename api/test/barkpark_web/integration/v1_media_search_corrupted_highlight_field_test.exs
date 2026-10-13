@@ -105,7 +105,10 @@ defmodule BarkparkWeb.Integration.V1MediaSearchCorruptedHighlightFieldTest do
 
     resp =
       conn
-      |> recycle()
+      # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+      # conn.private's rate-limit test scope, silently sharing the whole-suite
+      # IP bucket on this METERED route (RateLimit plug in its pipeline).
+      |> recycle_scoped()
       |> authed()
       |> get(~p"/v1/media/production/search?q=corrupted-hf-hero")
       |> json_response(200)

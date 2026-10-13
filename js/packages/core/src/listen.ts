@@ -76,6 +76,11 @@ function withJitter(ms: number): number {
 
 export interface ListenOptions {
   perspective?: Perspective
+  /**
+   * Only these documents, sent as `?ids=a,b`. The server matches each id in both
+   * its published and its `drafts.` spelling.
+   */
+  ids?: readonly string[]
   onUnsubscribe?: () => void
   /**
    * Max reconnect attempts after an *error* (clean stream close doesn't count).
@@ -146,8 +151,7 @@ export function createListenHandle<T = BarkparkDocument>(
   const edge = detectEdgeRuntime()
   if (edge !== null) {
     throw new BarkparkEdgeRuntimeError(
-      `listen() is not supported in ${edge} runtime — streaming fetch is unavailable. ` +
-        `Use polling via client.docs() on a short interval instead.`,
+      `listen() is not supported in ${edge} runtime: no streaming fetch. Poll client.docs() instead.`,
     )
   }
 
@@ -205,11 +209,10 @@ export function createListenHandle<T = BarkparkDocument>(
 
   let unsubscribed = false
   let lastEventId: string | undefined
-  // The requested type set, applied HERE. The server's listen route does not
-  // read `?types=` (it streams every type in scope), so `listen('post')` used to
-  // yield article mutations too (stranger walk, 2026-09-30). The param is still
-  // sent so a server that learns to filter saves the bandwidth. `null` = every
-  // type; control frames (welcome) always pass.
+  // The requested type set, applied here as well. The server narrows by
+  // `?types=` (task-684369333a0f0deb); before it did, `listen('post')` yielded
+  // article mutations too (stranger walk, 2026-09-30), so this stays as a backstop
+  // against an older server. `null` = every type; control frames (welcome) always pass.
   const wantedTypes = parseTypeSet(type)
   let reconnectCount = 0
   let cleanCloseCount = 0
@@ -255,6 +258,7 @@ export function createListenHandle<T = BarkparkDocument>(
               `${base}${prefix}/v1/data/listen/${encodeURIComponent(config.dataset)}`,
             )
             if (type) url.searchParams.set('types', type)
+            if (opts?.ids?.length) url.searchParams.set('ids', opts.ids.join())
             const p = opts?.perspective ?? config.perspective
             if (p) url.searchParams.set('perspective', p)
             if (filter && typeof filter === 'object') {

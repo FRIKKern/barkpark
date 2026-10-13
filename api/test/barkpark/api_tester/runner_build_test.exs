@@ -75,6 +75,99 @@ defmodule Barkpark.ApiTester.RunnerBuildTest do
   # same as the sibling `Barkpark.ApiTestRunner.fire/2`) so the verdict is
   # unit-testable without a live port.
 
+  # Owner ruling #30 Q14 (2026-10-03, task-1631e0fa917452d9). The runner
+  # fires from this node to its own loopback address, so a request it sends
+  # PASSES `RequireLoopback`. The loopback-only lane (`:api_local`,
+  # /v1/data/local/*) is for the co-located site, never for a Studio user.
+  describe "run/2 never reaches the loopback-only lane" do
+    test "a case aimed at /v1/data/local/* is refused without sending anything" do
+      test_pid = self()
+
+      Req.Test.stub(@stub_name, fn conn ->
+        send(test_pid, :request_sent)
+        Req.Test.json(conn, %{"ok" => true})
+      end)
+
+      for path <- [
+            "/v1/data/local/search/production?q=x",
+            "/v1/data/../data/local/search/production",
+            "/v1/data/doc/x/../../local/search/production"
+          ] do
+        result =
+          Runner.run(
+            %{method: "GET", path: path, headers: [], body: nil, expect: nil},
+            req_options: [plug: {Req.Test, @stub_name}]
+          )
+
+        assert result.verdict == :error, "#{path} was not refused"
+        assert result.verdict_reason =~ "loopback-only"
+      end
+
+      refute_received :request_sent
+    end
+
+    test "every route the router pipes through :api_local is covered" do
+      local_paths =
+        for %{path: path, pipe_through: pipes} <- api_local_routes(),
+            :api_local in pipes,
+            do: path
+
+      assert local_paths != [], "no :api_local route found — the census is reading nothing"
+
+      for path <- local_paths do
+        assert Runner.loopback_only_path?(path), "#{path} is loopback-only but not refused"
+      end
+    end
+
+    test "a path param cannot inject extra path segments" do
+      ep = Endpoints.find("production", "query-list")
+
+      req =
+        Runner.build_request(
+          ep,
+          %{"dataset" => "production", "type" => "../local/search/production"},
+          %{token: "", base: "http://x"}
+        )
+
+      refute req.url =~ "/local/search/"
+    end
+
+    test "an ordinary case still runs" do
+      Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, %{"ok" => true}) end)
+
+      result =
+        Runner.run(
+          %{
+            method: "GET",
+            path: "/v1/data/query/production/post",
+            headers: [],
+            body: nil,
+            expect: nil
+          },
+          req_options: [plug: {Req.Test, @stub_name}]
+        )
+
+      assert result.status == 200
+    end
+  end
+
+  # Every router path, with the pipelines Phoenix reports for it. `:dataset`
+  # style segments are filled with a literal so route_info/4 can match them.
+  defp api_local_routes do
+    for route <- Phoenix.Router.routes(BarkparkWeb.Router),
+        concrete = String.replace(route.path, ~r/[:*][a-z_]+/, "x"),
+        info =
+          Phoenix.Router.route_info(
+            BarkparkWeb.Router,
+            route.verb |> to_string() |> String.upcase(),
+            concrete,
+            ""
+          ),
+        is_map(info) do
+      %{path: concrete, pipe_through: Map.get(info, :pipe_through, [])}
+    end
+  end
+
   describe "run/2 — :unverified is a third state, never :pass and never :fail" do
     test "no :expect at all → :unverified on a 200, not :pass" do
       Req.Test.stub(@stub_name, fn conn -> Req.Test.json(conn, %{"ok" => true}) end)

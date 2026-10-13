@@ -89,6 +89,12 @@ class BpReferencePicker extends HTMLElement {
     return typeof strings[key] === "string" ? strings[key] : fallback;
   }
 
+  // A count in the viewer's words: the singular form for one, else the plural
+  // with its %{count} slot filled.
+  _count(n, oneKey, one, manyKey, many) {
+    return n === 1 ? this._t(oneKey, one) : this._t(manyKey, many).replace("%{count}", String(n));
+  }
+
   disconnectedCallback() {
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
@@ -120,10 +126,7 @@ class BpReferencePicker extends HTMLElement {
 
     const typeSpan = document.createElement("span");
     typeSpan.className = "ref-selected-type";
-    // One declared type reads as before; several read as the PICKED type
-    // (resolved with the title) until it is known, then the declared set.
-    typeSpan.textContent =
-      this._refTypes.length > 1 ? this._selectedType || this._refTypes.join(" · ") : this._refType;
+    typeSpan.textContent = this._typeLabel();
     info.appendChild(typeSpan);
 
     pill.appendChild(info);
@@ -137,6 +140,7 @@ class BpReferencePicker extends HTMLElement {
     change.textContent = this._t("change", "Change");
     change.addEventListener("click", () => this._switchToSearch());
     actions.appendChild(change);
+    this._changeButton = change;
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -150,6 +154,49 @@ class BpReferencePicker extends HTMLElement {
     this.appendChild(wrap);
   }
 
+  // One declared type reads as before; several read as the PICKED type
+  // (resolved with the title) until it is known, then the declared set.
+  _typeLabel() {
+    return this._refTypes.length > 1
+      ? (this._selectedType ? this._typeWord(this._selectedType) : this._typeWords().join(" · "))
+      : this._typeWord(this._refType);
+  }
+
+  // The word a type reads as for people: Studio stamps a {type => word} map
+  // (its plugin word or schema title) on the shell (task-a3bedc86f8a6a517).
+  // Elsewhere, or for a type it does not list, the type's own name.
+  _typeWord(type) {
+    if (!this._typeLabelMap) {
+      let map = {};
+      try {
+        const host = this.closest && this.closest("[data-type-labels]");
+        map = JSON.parse((host && host.getAttribute("data-type-labels")) || "{}") || {};
+      } catch (_e) {
+        map = {};
+      }
+      this._typeLabelMap = map;
+    }
+    return typeof this._typeLabelMap[type] === "string" ? this._typeLabelMap[type] : type;
+  }
+
+  _typeWords() {
+    return this._refTypes.map((type) => this._typeWord(type));
+  }
+
+  // A resolved title lands in the pill in place. A full render would replace
+  // the Change button a keyboard user may already be on, dropping focus to
+  // the page just as the title arrives.
+  _paintSelected() {
+    const title = this.querySelector(".ref-selected-title");
+    const type = this.querySelector(".ref-selected-type");
+    if (!title || !type) {
+      this._render();
+      return;
+    }
+    title.textContent = this._selectedTitle || this._value;
+    type.textContent = this._typeLabel();
+  }
+
   _renderSearch() {
     const wrap = document.createElement("div");
     wrap.className = "ref-field bp-ref-search-wrap";
@@ -158,44 +205,144 @@ class BpReferencePicker extends HTMLElement {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "form-input bp-ref-search-input";
-    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._refTypes.join(", ") : this._t("documents", "documents"));
+    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._typeWords().join(", ") : this._t("documents", "documents"));
     input.autocomplete = "off";
+    // A combobox over the listbox below (task-06efa9925540f212): the input
+    // announced as a plain textbox, arrows did nothing, and the options only
+    // answered mousedown, so a reference could not be chosen without a mouse.
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
+    // A host that shows the field's label beside the picker names the search
+    // after it (the Paper canvas field node view).
+    const fieldLabel = this.getAttribute("data-field-label");
+    if (fieldLabel) input.setAttribute("aria-label", fieldLabel);
     input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this._hideDropdown();
+      if (e.key === "Escape") {
+        // The first Escape closes an open list; the next one, after Change,
+        // takes the field back to the document it held.
+        if (this._prior && (!this._dropdown || this._dropdown.hidden)) {
+          e.preventDefault();
+          this._cancelChange();
+          return;
+        }
+        this._hideDropdown();
+      }
+      if (e.key === "ArrowDown") {
+        const first = this._options()[0];
+        if (first) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     });
     wrap.appendChild(input);
+
+    if (this._prior) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "btn btn-sm bp-ref-cancel";
+      cancel.textContent = this._t("cancel", "Cancel");
+      cancel.addEventListener("click", () => this._cancelChange());
+      wrap.appendChild(cancel);
+    }
 
     const dropdown = document.createElement("div");
     dropdown.className = "bp-ref-dropdown";
     dropdown.id = this._listId;
     dropdown.hidden = true;
     dropdown.setAttribute("role", "listbox");
+    // Arrows walk the options; Up from the first, and Escape, return to the
+    // input. Enter/Space are the options' own click.
+    dropdown.addEventListener("keydown", (e) => {
+      const options = this._options();
+      const at = options.indexOf(e.target);
+      if (at < 0) return;
+      if (e.key === "ArrowDown" && at < options.length - 1) {
+        e.preventDefault();
+        options[at + 1].focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        (at > 0 ? options[at - 1] : input).focus();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this._hideDropdown();
+        input.focus();
+      }
+    });
     wrap.appendChild(dropdown);
 
+    // The result count, for a screen reader (the list itself is silent).
+    const status = document.createElement("div");
+    status.className = "bp-ref-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.style.cssText =
+      "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;";
+    wrap.appendChild(status);
+
+    // The list belongs to the field: once focus leaves the input and its
+    // options (Tab, Shift+Tab, a click elsewhere) it closes instead of
+    // floating over the fields below (task-99bc7de193ae9efe).
+    wrap.addEventListener("focusout", (e) => {
+      if (wrap.contains(e.relatedTarget) || this._inHostEditor(e.relatedTarget)) return;
+      if (this._debounceTimer) clearTimeout(this._debounceTimer);
+      this._hideDropdown();
+    });
+
     this.appendChild(wrap);
+    this._searchWrap = wrap;
     this._searchInput = input;
     this._dropdown = dropdown;
+    this._status = status;
   }
 
+  _options() {
+    return this._dropdown ? Array.from(this._dropdown.querySelectorAll('[role="option"]')) : [];
+  }
+
+  _announce(text) {
+    if (this._status) this._status.textContent = text;
+  }
+
+  // Change keeps the pick it replaces until a new one lands, so Cancel or
+  // Escape can bring it back: the stored value never changed, and nothing
+  // is emitted.
   _switchToSearch() {
+    this._prior = { value: this._value, title: this._selectedTitle, type: this._selectedType };
     this._value = "";
     this._selectedTitle = "";
     this._render();
     if (this._searchInput) this._searchInput.focus();
   }
 
+  _cancelChange() {
+    const prior = this._prior;
+    this._prior = null;
+    if (!prior) return;
+    this._hideDropdown();
+    this._value = prior.value;
+    this._selectedTitle = prior.title;
+    this._selectedType = prior.type;
+    this._render();
+    if (this._changeButton) this._changeButton.focus();
+  }
+
   _clear() {
+    this._prior = null;
     this._value = "";
     this._selectedTitle = "";
     this._render();
+    // Remove took the focused button with it: land on the search input.
+    if (this._searchInput) this._searchInput.focus();
     this._emit("");
   }
 
   _select(doc) {
+    this._prior = null;
     const idx = this._lastSearchMatches.findIndex((d) => d.id === doc.id);
     this._recordSearchInteraction(doc.id, idx >= 0 ? idx : null);
     // Store the CANONICAL id even when the picked row is a draft — Sanity's
@@ -208,6 +355,8 @@ class BpReferencePicker extends HTMLElement {
     this._selectedType = doc.type || "";
     this._hideDropdown();
     this._render();
+    // The picked option is gone from the DOM; keep focus in the field.
+    if (this._changeButton) this._changeButton.focus();
     this._emit(this._value);
   }
 
@@ -247,16 +396,30 @@ class BpReferencePicker extends HTMLElement {
 
     if (!t) {
       await this._fetchSuggestions("");
-      this._renderSuggestDropdown();
+      if (this._focusInField()) this._renderSuggestDropdown();
       return;
     }
 
     try {
       const matches = await this._fetchSearchResults(t);
-      this._renderResultDropdown(matches);
+      // An answer that lands after focus left the field must not reopen it.
+      if (this._focusInField()) this._renderResultDropdown(matches);
     } catch (_e) {
       this._hideDropdown();
     }
+  }
+
+  // Inside the paper canvas the picker sits in a node view, and the editor
+  // can take focus back while a search is in flight; that editor is the
+  // field's own context, so its answer still lands there.
+  _focusInField() {
+    const active = document.activeElement;
+    return !!(this._searchWrap && this._searchWrap.contains(active)) || this._inHostEditor(active);
+  }
+
+  _inHostEditor(el) {
+    const editor = this.closest('[contenteditable="true"]');
+    return !!(editor && el && editor.contains(el));
   }
 
   _searchUrl(query) {
@@ -359,21 +522,27 @@ class BpReferencePicker extends HTMLElement {
 
     if (recent.length) {
       html +=
-        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">Recent</div>' +
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">' +
+        bpRefEsc(this._t("recent", "Recent")) +
+        "</div>" +
         recent.map((item, i) => this._suggestRow(item, "recent", i)).join("") +
         "</div>";
     }
 
     if (popular.length) {
       html +=
-        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">Popular</div>' +
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">' +
+        bpRefEsc(this._t("popular", "Popular")) +
+        "</div>" +
         popular.map((item, i) => this._suggestRow(item, "popular", i, item.count)).join("") +
         "</div>";
     }
 
     if (nohits.length) {
       html +=
-        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">No matches before</div>' +
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">' +
+        bpRefEsc(this._t("no_matches_before", "No matches before")) +
+        "</div>" +
         nohits
           .map((item, i) =>
             this._suggestRow({ query: item.query, filters: {} }, "nohits", i, item.count)
@@ -387,8 +556,9 @@ class BpReferencePicker extends HTMLElement {
     if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
 
     this._dropdown.querySelectorAll(".bp-ref-suggest-item").forEach((btn) => {
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
+      // mousedown keeps focus in the picker; click (mouse, Enter, Space) acts.
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
         const section = btn.dataset.section;
         const idx = parseInt(btn.dataset.index, 10);
         let payload = null;
@@ -410,9 +580,13 @@ class BpReferencePicker extends HTMLElement {
     const label = bpRefEsc(item.query || "");
     const meta =
       typeof count === "number"
-        ? '<span class="bp-ref-suggest-meta">' + count + " searches</span>"
+        ? '<span class="bp-ref-suggest-meta">' +
+          bpRefEsc(this._count(count, "one_search", "1 search", "n_searches", "%{count} searches")) +
+          "</span>"
         : item.resultCount != null
-          ? '<span class="bp-ref-suggest-meta">' + item.resultCount + " docs</span>"
+          ? '<span class="bp-ref-suggest-meta">' +
+            bpRefEsc(this._count(item.resultCount, "one_doc", "1 doc", "n_docs", "%{count} docs")) +
+            "</span>"
           : "";
     return (
       '<button type="button" class="bp-ref-suggest-item" role="option" data-section="' +
@@ -436,6 +610,7 @@ class BpReferencePicker extends HTMLElement {
       empty.className = "bp-ref-dropdown-empty";
       empty.textContent = this._t("no_matches", "No matches");
       this._dropdown.appendChild(empty);
+      this._announce(empty.textContent);
       this._dropdown.hidden = false;
       if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
       return;
@@ -451,7 +626,7 @@ class BpReferencePicker extends HTMLElement {
         // Sanity shows the hit's type when a reference may point at several.
         const type = document.createElement("span");
         type.className = "bp-ref-suggest-meta bp-ref-hit-type";
-        type.textContent = doc.type;
+        type.textContent = this._typeWord(doc.type);
         btn.appendChild(type);
       }
       if (doc.draft) {
@@ -461,15 +636,16 @@ class BpReferencePicker extends HTMLElement {
         badge.textContent = this._t("draft", "draft");
         btn.appendChild(badge);
       }
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        this._select(doc);
-      });
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => this._select(doc));
       this._dropdown.appendChild(btn);
     }
 
     this._dropdown.hidden = false;
     if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
+    this._announce(
+      this._count(matches.length, "one_result", "1 result", "n_results", "%{count} results"),
+    );
   }
 
   _hideDropdown() {
@@ -506,7 +682,7 @@ class BpReferencePicker extends HTMLElement {
       const title = doc.title || doc._id || "";
       if (title && this._value) {
         this._selectedTitle = title;
-        if (this._mounted && this._value) this._render();
+        if (this._mounted && this._value) this._paintSelected();
       }
     } catch (_e) {
       /* pill keeps id */
@@ -535,7 +711,7 @@ class BpReferencePicker extends HTMLElement {
       if (title && this._value) {
         this._selectedTitle = title;
         this._selectedType = (match && (match._type || match.type)) || "";
-        if (this._mounted && this._value) this._render();
+        if (this._mounted && this._value) this._paintSelected();
       }
     } catch (_e) {
       /* pill keeps id */
@@ -558,6 +734,7 @@ class BpReferencePicker extends HTMLElement {
 
   set value(v) {
     if (v === this._value) return;
+    this._prior = null;
     this._value = v || "";
     // Before connectedCallback the element has no config (ref-type, dataset,
     // strings) to render with. Keep the value; connectedCallback renders it.

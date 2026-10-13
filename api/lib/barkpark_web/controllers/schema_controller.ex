@@ -3,6 +3,7 @@ defmodule BarkparkWeb.SchemaController do
 
   alias Barkpark.Content
   alias Barkpark.Content.SchemaDefinition
+  alias Barkpark.Content.SchemaUnknownKeys
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -79,19 +80,40 @@ defmodule BarkparkWeb.SchemaController do
            {:ok, schema} <- Content.Schema.validate_schema(attrs, dataset, scope_opts(conn)) do
         conn
         |> put_status(:ok)
-        |> json(Content.serialize_schema_for_sdk(schema))
+        |> json(with_key_warnings(Content.serialize_schema_for_sdk(schema), attrs, conn))
       end
     else
       with :ok <- validate_fields(attrs),
            {:ok, schema} <- Content.upsert_schema(attrs, dataset, scope_opts(conn)) do
         conn
         |> put_status(:created)
-        |> json(Content.serialize_schema_for_sdk(schema))
+        |> json(with_key_warnings(Content.serialize_schema_for_sdk(schema), attrs, conn))
       end
     end
   end
 
   defp validate_only?(params), do: truthy_param?(params, "validate_only")
+
+  # task-415c5c02fad8a3c7 — a misspelled key (`requred`, `requird`,
+  # `singelton`) used to vanish without a word. Each key Barkpark never reads
+  # now rides the success body as an advisory `warnings` entry naming its
+  # path. ADVISORY ONLY: refusing them is an open owner decision. A body with
+  # no unknown key keeps its exact pre-existing shape (no `warnings` key).
+  defp with_key_warnings(body, attrs, conn) do
+    case SchemaUnknownKeys.unknown(Map.drop(attrs, Map.keys(conn.path_params))) do
+      [] ->
+        body
+
+      found ->
+        Map.put(
+          body,
+          :warnings,
+          Enum.map(found, fn a ->
+            %{code: "schema_unknown_key", severity: "advisory", message: a.message, path: a.path}
+          end)
+        )
+    end
+  end
 
   # `plugin: nil` — the ad-hoc admin endpoint is not a plugin, so field names in
   # the reserved `plugin:` namespace are rejected (only a plugin's own

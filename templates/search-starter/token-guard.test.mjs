@@ -11,12 +11,14 @@
  * admin token once landed in five files under `dist/` and in a visible `wss://`
  * URL during the astro parity work.
  *
- * So each config verifies the token against the server's own `auth_tier`
- * contract (GET /v1/capabilities) BEFORE baking it, with three outcomes:
- *   admin (or any privileged tier) → throw, hard-failing the build
- *   none / absent                  → throw (would join green, find nothing)
- *   read                           → bake it
- *   endpoint unreachable / non-2xx → drop the token, warn, build on
+ * So each config verifies the token against the server's own answer
+ * (GET /v1/capabilities?token=1) BEFORE baking it, with these outcomes:
+ *   admin (or any privileged tier)      → throw, hard-failing the build
+ *   none / absent                       → throw (would join green, find nothing)
+ *   read + token.public_read true       → bake it
+ *   read + token.public_read false      → throw (a private read token reads drafts)
+ *   read, token.public_read not answered → drop the token, warn, build on
+ *   endpoint unreachable / non-2xx      → drop the token, warn, build on
  *
  * This file is the mutation proof for BOTH doors: delete or weaken either
  * guard and these tests red. Run it with
@@ -25,10 +27,10 @@
  *
  * CI runs it on any change to either config (astro-search-finder-test.yml).
  *
- * NOT covered on purpose: the `read` tier is coarser than "public-read" — a
- * read-scoped token that is not a public-read mint still passes. That hole is
- * backlogged as `astro-guard-read-vs-publicread-tier`; this file pins only the
- * admin/none/read behaviour both configs implement today.
+ * The `read` tier is coarser than "public-read": a plain read token also ranks
+ * "read". That hole (`astro-guard-read-vs-publicread-tier`,
+ * task-0cf611238d4ad597 JQ1) is closed by `token.public_read`, and the cases
+ * below pin it.
  */
 
 import { test, describe, afterEach } from 'node:test'
@@ -47,14 +49,20 @@ process.env.BARKPARK_TOKEN = TOKEN
 
 const realFetch = globalThis.fetch
 
-/** Stub `fetch` with a fixed /v1/capabilities response. */
-function stubTier(tier, { ok = true, status = 200 } = {}) {
+/**
+ * Stub `fetch` with a fixed /v1/capabilities?token=1 response. `publicRead`
+ * is the server's `token.public_read`; `null` omits the `token` key, the
+ * shape a server that predates `?token=1` answers.
+ */
+function stubTier(tier, { ok = true, status = 200, publicRead = tier === 'read' ? true : undefined } = {}) {
   globalThis.fetch = async (url) => {
-    assert.equal(String(url), `${ORIGIN}/v1/capabilities`)
+    assert.equal(String(url), `${ORIGIN}/v1/capabilities?token=1`)
+    const body = tier === undefined ? {} : { auth_tier: tier }
+    if (publicRead != null) body.token = { public_read: publicRead }
     return {
       ok,
       status,
-      json: async () => (tier === undefined ? {} : { auth_tier: tier }),
+      json: async () => body,
     }
   }
 }
@@ -159,14 +167,34 @@ for (const door of doors) {
       await assert.rejects(door.verify(), /does not authenticate/)
     })
 
-    test('a public-read token (auth_tier "read") passes and is baked', async () => {
-      stubTier('read')
+    test('a public-read token (auth_tier "read", token.public_read true) passes and is baked', async () => {
+      stubTier('read', { publicRead: true })
       const { token, note } = await door.verify()
       assert.equal(token, TOKEN)
       assert.equal(note, '')
 
-      stubTier('read')
+      stubTier('read', { publicRead: true })
       assert.equal(await door.bake(), TOKEN)
+    })
+
+    test('a PRIVATE read token (token.public_read false) HARD-FAILS the build', async () => {
+      stubTier('read', { publicRead: false })
+      await assert.rejects(door.verify(), (err) => {
+        assert.match(err.message, /private "read" token/)
+        assert.match(err.message, /drafts/)
+        assert.match(err.message, /public-read/)
+        return true
+      })
+    })
+
+    test('a read token the server cannot classify (no token key) is dropped, never baked', async () => {
+      stubTier('read', { publicRead: null })
+      const { token, note } = await door.verify()
+      assert.equal(token, '', 'an unclassified read token must never be baked')
+      assert.match(note, /public-read/)
+
+      stubTier('read', { publicRead: null })
+      assert.equal(await door.bake(), '', 'the browser must get nothing')
     })
 
     test('an unreachable capabilities endpoint drops the token instead of failing', async () => {

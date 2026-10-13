@@ -36,6 +36,19 @@ Keep the server, database, and files on your computer. Local work continues when
 the internet or a remote server fails. Run remotely for shared access.
 Local and remote instances hold separate data; transfers are explicit today.
 
+## What's new
+
+<!-- highlights:start -->
+**Where we are · 5 October 2026.** A security sweep is turning the owner's access rulings into code, the paper editor is catching up with Notion, and Cloud can adopt servers it did not create.
+
+**This week (28 Sep – 4 Oct)** · 633 merges
+- **Security sweep:** 32 owner rulings shipped. Examples: the task ledger is private ([#21558](https://github.com/FRIKKern/barkpark/pull/21558)), preview tokens read only what they name ([#21512](https://github.com/FRIKKern/barkpark/pull/21512)), the Studio cookie no longer carries a readable token ([#21534](https://github.com/FRIKKern/barkpark/pull/21534)).
+- **Papers:** six heading levels ([#21521](https://github.com/FRIKKern/barkpark/pull/21521)), quotes ([#21524](https://github.com/FRIKKern/barkpark/pull/21524)), and pasted pictures that upload ([#21358](https://github.com/FRIKKern/barkpark/pull/21358)).
+- **Cloud:** `bp barkparks adopt` attaches a running server ([#21478](https://github.com/FRIKKern/barkpark/pull/21478)), and the API ships as a public image ([#21544](https://github.com/FRIKKern/barkpark/pull/21544)).
+
+[Weekly edition](https://github.com/FRIKKern/barkpark/issues/21659) · [Paper](https://guerrilla.barkpark.cloud/papers/barkpark-changelog-2026-w40) · [All editions](CHANGELOG.md) · [How this is written](changelog/ROUTINE.md)
+<!-- highlights:end -->
+
 ## Get started
 
 [Run locally](docs/setup/QUICKSTART.md) · [Open Studio](https://api.barkpark.cloud/studio) · [Deploy a server](docs/setup/GO-LIVE.md) · [Connect an agent](docs/setup/AGENT-ONRAMPS.md)

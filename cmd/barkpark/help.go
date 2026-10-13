@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
@@ -72,9 +73,34 @@ var helpSections = []helpSection{
 	}},
 }
 
-// helpLines pre-renders the overlay rows once per open.
-func helpLines() []string {
+// helpChrome is the horizontal space the modal spends outside the rows: the
+// rounded border (2) plus Padding(1, 2) (4).
+const helpChrome = 6
+
+// helpKeyWidth is the key column width: the longest key plus a two-space gap,
+// so a long key such as "j / k · ctrl+d / u" never runs into its description.
+func helpKeyWidth() int {
+	w := 0
+	for _, sec := range helpSections {
+		for _, row := range sec.rows {
+			w = maxInt(w, lipgloss.Width(row[0]))
+		}
+	}
+	return w + 2
+}
+
+// helpLines pre-renders the overlay rows once per open. width is the space
+// the modal is centred in. A description that would not fit wraps onto
+// continuation rows under the description column, so the frame's width clamp
+// never cuts it mid-sentence. width <= 0 disables wrapping.
+func helpLines(width int) []string {
 	keyStyle := lipgloss.NewStyle().Bold(true).Foreground(highlight)
+	keyW := helpKeyWidth()
+	descW := width - helpChrome - 2 - keyW
+	if width > 0 && descW < 12 {
+		descW = 12 // very narrow terminal: keep a readable column, the frame clamp backstops
+	}
+	indent := "  " + strings.Repeat(" ", keyW)
 	var lines []string
 	for i, sec := range helpSections {
 		if i > 0 {
@@ -82,8 +108,15 @@ func helpLines() []string {
 		}
 		lines = append(lines, editorLabelStyle.Render(strings.ToUpper(sec.title)))
 		for _, row := range sec.rows {
-			key := fmt.Sprintf("%-14s", row[0])
-			lines = append(lines, "  "+keyStyle.Render(key)+dimStyle.Render(row[1]))
+			desc := []string{row[1]}
+			if width > 0 && lipgloss.Width(row[1]) > descW {
+				desc = strings.Split(ansi.Wrap(row[1], descW, ""), "\n")
+			}
+			key := row[0] + strings.Repeat(" ", keyW-lipgloss.Width(row[0]))
+			lines = append(lines, "  "+keyStyle.Render(key)+dimStyle.Render(desc[0]))
+			for _, d := range desc[1:] {
+				lines = append(lines, indent+dimStyle.Render(d))
+			}
 		}
 	}
 	return lines
@@ -92,11 +125,11 @@ func helpLines() []string {
 // helpMaxScroll is the largest helpScroll that still moves the window. The
 // render path clamps its top row to len-maxRows (a full trailing page), so the
 // handler must stop at the same bound — otherwise down/j and G run helpScroll
-// past it and the next maxRows-1 `k` presses look dead. height is the paneHeight
-// the render path receives, so callers pass m.paneHeight() to match exactly.
-func helpMaxScroll(height int) int {
+// past it and the next maxRows-1 `k` presses look dead. width and height are
+// what the render path receives, so callers pass m.width and m.paneHeight().
+func helpMaxScroll(width, height int) int {
 	maxRows := maxInt(height-8, 4)
-	return maxInt(len(helpLines())-maxRows, 0)
+	return maxInt(len(helpLines(width))-maxRows, 0)
 }
 
 // handleHelpKey routes key input while the help overlay is open.
@@ -106,7 +139,7 @@ func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpOpen = false
 		return m, nil
 	case "down", "j":
-		if m.helpScroll < helpMaxScroll(m.paneHeight()) {
+		if m.helpScroll < helpMaxScroll(m.width, m.paneHeight()) {
 			m.helpScroll++
 		}
 		return m, nil
@@ -119,7 +152,7 @@ func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.helpScroll = 0
 		return m, nil
 	case "G", "end":
-		m.helpScroll = helpMaxScroll(m.paneHeight())
+		m.helpScroll = helpMaxScroll(m.width, m.paneHeight())
 		return m, nil
 	}
 	return m, nil
@@ -127,7 +160,7 @@ func (m model) handleHelpKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // renderHelpOverlay draws the key reference centred over the body area.
 func (m model) renderHelpOverlay(width, height int) string {
-	all := helpLines()
+	all := helpLines(width)
 	maxRows := maxInt(height-8, 4)
 
 	var lines []string
@@ -135,7 +168,7 @@ func (m model) renderHelpOverlay(width, height int) string {
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", 34)))
 	lines = append(lines, "")
 
-	start := minInt(m.helpScroll, helpMaxScroll(height))
+	start := minInt(m.helpScroll, helpMaxScroll(width, height))
 	end := minInt(start+maxRows, len(all))
 	lines = append(lines, all[start:end]...)
 	if end < len(all) {

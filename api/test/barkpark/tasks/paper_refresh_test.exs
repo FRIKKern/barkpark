@@ -126,6 +126,12 @@ defmodule Barkpark.Tasks.PaperRefreshTest do
         Barkpark.LabelFixtures.paper_attrs(%{slug: slug, style: "article", blocks: blocks})
       )
 
+    # The ingest itself is a paper change event and fires the site webhook
+    # (owner ruling #40). This suite measures what a TASK transition sends,
+    # so the fixture's own delivery is drained and forgotten here.
+    drain()
+    :ok = RecordingHTTP.start()
+
     paper
   end
 

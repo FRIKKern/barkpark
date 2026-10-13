@@ -33,6 +33,25 @@ defmodule BarkparkWeb.Studio.PresenceState do
   def topic(workspace_id) when is_binary(workspace_id), do: "#{@topic}:ws:#{workspace_id}"
   def topic(_workspace_id), do: @topic
 
+  @doc """
+  Studio presence topic keyed by workspace + project + dataset — the room a
+  Studio socket joins (owner ruling #30 Q7, 2026-10-03).
+
+  The workspace-only topic above let a share or grant viewer of ONE project
+  receive the doc ids, types and display names being edited in every other
+  project of the workspace. A nil project or dataset gets a `none` segment: its
+  own room, never the workspace-wide one and never a real project's. A nil
+  workspace keeps the legacy global topic, as `topic/1` does.
+  """
+  @spec topic(String.t() | nil, String.t() | nil, String.t() | nil) :: String.t()
+  def topic(workspace_id, project_id, dataset) when is_binary(workspace_id),
+    do: "#{topic(workspace_id)}:p:#{segment(project_id)}:d:#{segment(dataset)}"
+
+  def topic(_workspace_id, _project_id, _dataset), do: @topic
+
+  defp segment(value) when is_binary(value) and value != "", do: value
+  defp segment(_), do: "none"
+
   @doc "Generate a random 12-char hex user id (used when client localStorage has none)."
   @spec generate_user_id() :: String.t()
   def generate_user_id do
@@ -68,5 +87,62 @@ defmodule BarkparkWeb.Studio.PresenceState do
   @spec on_doc([map()], String.t(), String.t() | nil) :: [map()]
   def on_doc(presences, doc_id, dataset) do
     Enum.filter(presences, &(&1.doc_id == doc_id and Map.get(&1, :dataset) == dataset))
+  end
+
+  @doc """
+  Whether `selection` is a shared text selection: `%{"anchor" => point, "head" => point}`,
+  each point `%{"blockId" => id, "path" => path?, "offset" => n}`. The one shape
+  the presence API (#22510) and the Studio paper canvas both carry.
+  """
+  @spec selection_shape?(term()) :: boolean()
+  def selection_shape?(%{"anchor" => a, "head" => h} = sel) when map_size(sel) == 2,
+    do: point?(a) and point?(h)
+
+  def selection_shape?(_), do: false
+
+  defp point?(%{"blockId" => id, "offset" => off} = p)
+       when is_binary(id) and id != "" and is_integer(off) and off >= 0 do
+    case Map.drop(p, ["blockId", "offset"]) do
+      empty when empty == %{} -> true
+      %{"path" => path} when is_binary(path) and path != "" -> true
+      _ -> false
+    end
+  end
+
+  defp point?(_), do: false
+
+  @doc """
+  The other people's carets on `doc_id`, for the paper canvas's
+  `setRemoteSelections` (task-c522237b9f37de21): every presence on that
+  document with a selection, except the session `own_session_id`, as
+  `%{id, name, color, anchor, head}`, sorted by id so an unchanged list
+  compares equal.
+  """
+  @spec remote_selections([map()], String.t(), String.t() | nil, String.t() | nil) :: [map()]
+  def remote_selections(presences, doc_id, dataset, own_session_id) do
+    presences
+    |> on_doc(doc_id, dataset)
+    |> Enum.flat_map(fn p ->
+      id = Map.get(p, :session_id) || Map.get(p, :user_id)
+
+      case Map.get(p, :selection) do
+        %{"anchor" => anchor, "head" => head} = sel when id != own_session_id ->
+          if selection_shape?(sel),
+            do: [
+              %{
+                id: id,
+                name: Map.get(p, :name),
+                color: Map.get(p, :color),
+                anchor: anchor,
+                head: head
+              }
+            ],
+            else: []
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.sort_by(& &1.id)
   end
 end

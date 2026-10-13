@@ -1,4 +1,5 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
+lib/barkpark/auth/public_read.ex	write_token_file
 lib/barkpark/codelists/editeur.ex	parse_xml
 lib/barkpark/codelists/editeur.ex	seed_thema
 lib/barkpark/content/validation.ex	get_in_field
@@ -14,6 +15,8 @@ lib/barkpark/media/blobstore/s3.ex	delete
 lib/barkpark/media/blobstore/s3.ex	download
 lib/barkpark/media/blobstore/s3.ex	put_file
 lib/barkpark/media/blobstore/s3.ex	warm_cache
+lib/barkpark/media/dataset_id_backfill.ex	apply_plan
+lib/barkpark/media/dataset_id_backfill.ex	undo
 lib/barkpark/media/delivery/search.ex	run_tags_facet_sql
 lib/barkpark/media/image_backend/magick.ex	run_bounded
 lib/barkpark/media/image_metadata.ex	maybe_lqip
@@ -124,7 +127,6 @@ lib/barkpark/studio_chat/provider/claude.ex	read_stderr_tail
 lib/barkpark/studio_chat/provider/claude.ex	rewrite_mcp_config
 lib/barkpark/studio_chat/provider/claude.ex	write_mcp_config
 lib/barkpark/studio_chat/runtime.ex	registered_provider_ready
-lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
 lib/barkpark/sync/pusher.ex	reason_atom
 lib/barkpark/tasks/queue_gate.ex	fetch
@@ -170,5 +172,6 @@ lib/barkpark_web/controllers/workspace_controller.ex	deliver_bundle
 lib/barkpark_web/controllers/workspace_controller.ex	spill_body
 lib/barkpark_web/layouts.ex	paper_stylesheet
 lib/barkpark_web/live/studio/chat_live.ex	consume_attachments
+lib/barkpark_web/live/studio/sheet_grid.ex	read_import_upload
 lib/barkpark_web/plugs/idempotency.ex	replay
 lib/barkpark_web/router/plugins.ex	public_root_session_name

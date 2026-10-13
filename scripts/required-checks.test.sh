@@ -2786,7 +2786,36 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # Schedule + workflow_dispatch only, so its job name renders on main
         # commits and never on a PR head; its row lands with the workflow and the
         # frozen fixture pair predates it.
-        --expect-unrendered "Core without owned tables (differential, two suite runs)")
+        --expect-unrendered "Core without owned tables (differential, two suite runs)"
+        # api-image.yml (owner ruling #60, 2026-10-03): push-to-main on VERSION and
+        # workflow_dispatch only, so its four job names render on release commits on
+        # main and never on a PR head; the rows land with the workflow and the frozen
+        # fixture pair predates it.
+        --expect-unrendered "Decide (credential + version)"
+        --expect-unrendered "Build linux/amd64"
+        --expect-unrendered "Build linux/arm64"
+        --expect-unrendered "Tag the multi-arch manifest"
+        # weekly-changelog.yml + chronicle-paper.yml (task-26d47d28df1391cd):
+        # paths-filtered report workflows whose names render only on heads that
+        # touch their paths; the rows land after the frozen fixture pair.
+        --expect-unrendered "Weekly changelog generator"
+        --expect-unrendered "Publish weekly changelog"
+        --expect-unrendered "verify"
+        --expect-unrendered "publish"
+        # engine-release.yml (task-9c8d9e3ed15bdcc9): push-to-main (path-filtered) and
+        # workflow_dispatch only, so its job names render on main and never on a PR
+        # head; the rows land after the workflow (#21657) and the frozen fixture pair.
+        --expect-unrendered "build (darwin-arm64)"
+        --expect-unrendered "build (linux-x64)"
+        --expect-unrendered "build (linux-arm64)"
+        --expect-unrendered "App shape boot (darwin-arm64)"
+        --expect-unrendered "App shape boot (linux-x64)"
+        --expect-unrendered "App shape boot (linux-arm64)"
+        --expect-unrendered "npm publish (dry-run unless chosen)"
+        # engine-release.yml Windows jobs (task-efbf914de2e8ab25): workflow_dispatch
+        # with windows=also, so these names render on no PR head and no push.
+        --expect-unrendered "build (win32-x64)"
+        --expect-unrendered "App shape boot (win32-x64)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

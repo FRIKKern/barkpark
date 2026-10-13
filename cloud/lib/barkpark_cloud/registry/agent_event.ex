@@ -31,30 +31,23 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   # narrowing this list tightens the changeset on WRITE only and cannot reject
   # or corrupt a row that already exists.
   #
-  # `content` STAYS, and the difference is not sentiment — it is a live
-  # CONSUMER. `Accounts.published_doc?/1` queries `agent_events` for
-  # `type == "content"` with `published_count > 0` to derive the onboarding
-  # checklist's "published a doc" step. No producer writes it yet, so that step
-  # is reached today through the user-ack path (`Accounts.ack_onboarding_step/2`)
-  # and tightens automatically the day the on-box agent learns to report
-  # content. Dropping the word would be compile-clean — the consumer holds a
-  # string literal, not a reference to this list — so the step would go
-  # permanently, silently false with no warning and no log. A word with a reader
-  # is forward-compat; a word with neither reader nor writer is a lie.
-  #
-  # cch-w55-bl — THAT "reached today through the user-ack path" SENTENCE WAS
-  # ITSELF UNBACKED UNTIL NOW, and it is the half this row actually found. The
-  # ack function and its route (`POST /v1/onboarding {action:"ack"}`) both
-  # existed, but the console POSTed only `{action:"skip"}`, so no customer could
-  # reach either path: not the producer (none exists) and not the ack (no
-  # control). The console now renders a "Mark as done" button on the pending
-  # step (`runwayStepModel`/`runwayCardHtml` in `priv/static/app.js`,
-  # owner/admin-gated like Dismiss), which is what makes the sentence above
-  # true. Charter D902 rules that ending 1 of the three ships and that NO
-  # producer is built: `content` remains declared-and-consumer-only ON PURPOSE,
-  # and `agent_event_producer_census_test.exs` pins that per-type expectation in
-  # BOTH directions — a `content` producer landing without this decision being
-  # revisited reds, exactly as a `status` producer disappearing does.
+  # `content` was declared here for a single CONSUMER:
+  # `Accounts.published_doc?/1` queried `agent_events` for `type == "content"`
+  # with `published_count > 0` to derive the onboarding checklist's "published
+  # a doc" step, OR'd with the user-ack path (`Accounts.ack_onboarding_step/2`).
+  # No producer ever wrote it — the agent's HTTP surface (/v1/agent/report,
+  # /commands, /results, /space) has no content endpoint — and charter D902
+  # ruled that NO producer would be built (ticking a checkbox you ticked
+  # yourself is an honest self-report; inventing an agent endpoint to observe
+  # it is the "build the actor before deciding the effect" trap the wave
+  # refused). task-71a5ed0d3734d592 (2026-10-08) struck the consumer instead:
+  # the automatic arm never fired in the wild and implied a measurement the
+  # product never took, so `published_doc?/1` is gone and the step is reached
+  # ONLY through the ack control (which the console's "Mark as done" button,
+  # cch-w55-bl, already made reachable). `content` now has neither a producer
+  # nor a consumer, so it follows `backup`/`tls` out of the allowlist — same
+  # reasoning, same precedent, same test (`agent_event_test.exs`'s closed-
+  # vocabulary check) that would have caught it staying behind.
   #
   # `verify` (C8/D53) is the on-demand readiness proof: `BarkparkCloud.Verify`
   # re-runs the golden-path probe suite over HTTPS and appends the full result
@@ -77,10 +70,11 @@ defmodule BarkparkCloud.Registry.AgentEvent do
   # producer's type must be declared here (an undeclared one is rejected by the
   # `validate_inclusion` below and its row is silently never written). That test
   # is an OR — it cannot tell a producer-backed word from a consumer-only one,
-  # so `content` gaining or losing a writer is invisible to it.
+  # so a word quietly losing its only producer (or only consumer) is invisible
+  # to it as long as the other arm still holds.
   # `agent_event_producer_census_test.exs` is the per-type half: it carries the
   # expected producer-backedness of EVERY word here and reds on either change.
-  @types ~w(health status content verify space)
+  @types ~w(health status verify space)
 
   # Append-only stream: stamp inserted_at, never updated_at.
   @timestamps_opts [type: :utc_datetime_usec, updated_at: false]

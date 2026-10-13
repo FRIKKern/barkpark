@@ -48,6 +48,12 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
   alias Barkpark.{Accounts, Auth, Content, Media, Tenancy}
   alias Barkpark.Plugins.Media.Assets
 
+  # Each upload appends a unique trailer after IEND (still a valid PNG):
+
+  # the v1 upload door answers repeated bytes with the existing asset
+
+  # (task-b6e57c37f6928344), and these tests need distinct assets.
+
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
   @ds "production"
 
@@ -72,7 +78,7 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
 
   defp png_upload do
     path = Path.join(System.tmp_dir!(), "anonclamp-#{System.unique_integer([:positive])}.png")
-    File.write!(path, Base.decode64!(@png_b64))
+    File.write!(path, Base.decode64!(@png_b64) <> "#{System.unique_integer([:positive])}")
     on_exit(fn -> File.rm(path) end)
     %Plug.Upload{path: path, filename: "pixel.png", content_type: "image/png"}
   end

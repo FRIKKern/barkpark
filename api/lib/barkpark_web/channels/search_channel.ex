@@ -138,6 +138,9 @@ defmodule BarkparkWeb.SearchChannel do
   def join("search:" <> scope, _params, socket) do
     with [ws_slug, proj_slug, dataset] <- String.split(scope, ":"),
          %Tenancy.Workspace{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
+         # Archiving is a read cutoff (owner ruling #51, RQ10): the HTTP routes
+         # answer an archived workspace 409, and so does this join.
+         {:archived, false} <- {:archived, Tenancy.Workspace.archived?(ws)},
          :ok <- TenancyAuth.authorize(socket.assigns.api_token, ws.id, :read),
          %Tenancy.Project{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
          # The dataset leaf of the topic used to be trusted as a free string:
@@ -183,6 +186,7 @@ defmodule BarkparkWeb.SearchChannel do
     else
       [_ | _] -> {:error, %{reason: "bad_topic"}}
       {:dataset, _} -> {:error, %{reason: "unknown_dataset"}}
+      {:archived, true} -> {:error, %{reason: "workspace_archived"}}
       _ -> {:error, %{reason: "unauthorized"}}
     end
   end
@@ -199,6 +203,10 @@ defmodule BarkparkWeb.SearchChannel do
     case reauthorize(socket) do
       {:error, :forbidden} ->
         {:stop, {:shutdown, :unauthorized}, {:error, %{reason: "unauthorized", seq: seq}}, socket}
+
+      {:error, :archived} ->
+        {:stop, {:shutdown, :workspace_archived},
+         {:error, %{reason: "workspace_archived", seq: seq}}, socket}
 
       :ok ->
         serve_query(q, seq, params, socket)
@@ -347,6 +355,7 @@ defmodule BarkparkWeb.SearchChannel do
     # authorization is re-resolved here too, on the same terms.
     case reauthorize(socket) do
       {:error, :forbidden} -> {:stop, {:shutdown, :unauthorized}, socket}
+      {:error, :archived} -> {:stop, {:shutdown, :workspace_archived}, socket}
       :ok -> push_live_results(socket)
     end
   end
@@ -403,14 +412,25 @@ defmodule BarkparkWeb.SearchChannel do
   defp reauthorize(socket) do
     case socket.assigns[:current_workspace] do
       %Tenancy.Workspace{id: ws_id} ->
-        if Barkpark.Auth.token_live?(socket.assigns.api_token),
-          do: TenancyAuth.authorize(socket.assigns.api_token, ws_id, :read),
-          else: {:error, :forbidden}
+        cond do
+          not Barkpark.Auth.token_live?(socket.assigns.api_token) -> {:error, :forbidden}
+          workspace_archived?(ws_id) -> {:error, :archived}
+          true -> TenancyAuth.authorize(socket.assigns.api_token, ws_id, :read)
+        end
 
       # No resolved workspace means this channel never completed a join;
       # fail closed rather than serving on an unresolvable scope.
       _ ->
         {:error, :forbidden}
+    end
+  end
+
+  # Re-read every frame: a workspace archived after the join stops answering
+  # (owner ruling #51, RQ10). A workspace that is gone reads as archived.
+  defp workspace_archived?(ws_id) do
+    case Barkpark.Repo.get(Tenancy.Workspace, ws_id) do
+      %Tenancy.Workspace{} = ws -> Tenancy.Workspace.archived?(ws)
+      nil -> true
     end
   end
 

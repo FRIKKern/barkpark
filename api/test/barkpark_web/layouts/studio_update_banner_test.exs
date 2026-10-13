@@ -110,6 +110,44 @@ defmodule BarkparkWeb.Layouts.StudioUpdateBannerTest do
       assert html =~ "feat: b"
     end
 
+    # task-34cf5768b10b3c79: the bar and the words its script writes read in
+    # the workspace's Studio language.
+    test "a Norwegian workspace reads the bar in Norwegian", %{conn: conn} do
+      prime_behind!()
+
+      {:ok, _} =
+        Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+
+      {:ok, _view, html} =
+        with_apply_enabled(fn -> live(conn, scoped_studio("/d/production/studio")) end)
+
+      assert html =~ "Ny oppdatering tilgjengelig — Barkpark"
+      assert html =~ "du kjører "
+      assert html =~ "Hva er nytt"
+      assert html =~ "Oppdater nå"
+      refute html =~ "New update available"
+
+      [json] =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#bp-update-bar")
+        |> LazyHTML.attribute("data-strings")
+
+      strings = Jason.decode!(json)
+      assert strings["Rebuilding & restarting…"] == "Bygger og starter på nytt…"
+
+      assert strings["Updated to %{release} — reloading…"] ==
+               "Oppdatert til %{release} — laster inn på nytt…"
+    end
+
+    test "the update script writes its status through the bar's strings" do
+      root = File.read!("lib/barkpark_web/layouts/root.html.heex")
+      assert root =~ ~s|setStatus(el, t(el, "Rebuilding & restarting…"))|
+      refute root =~ ~s|setStatus(el, "Rebuilding & restarting…")|
+    end
+
     test "curated release notes (isu-w2) win over the digest and link out", %{conn: conn} do
       prime_behind!()
 

@@ -43,6 +43,7 @@
 // the bp-canvas-callout / bp-canvas-table precedent. ZERO reader CSS drift.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { t } from "../i18n.js";
 
 // Node NAMES (the canvas bp-prefix convention). No StarterKit collision (StarterKit
 // ships no terminal node), so NO StarterKit node is disabled. Keep aligned with
@@ -114,7 +115,9 @@ export const Terminal = Node.create({
 
   // Specific parse rule (data-bp-type='terminal') so a bare <div> stays unclaimed.
   parseHTML() {
-    return [{ tag: "div[data-bp-type='terminal']" }];
+    // The children live in `.bp-term__body`; the title bar and footer are attrs
+    // (pasted, they used to come back as paragraphs — task-d175b72aba4d5cd6).
+    return [{ tag: "div[data-bp-type='terminal']", contentElement: (dom) => dom.querySelector(":scope > .bp-term__body") || dom }];
   },
 
   // Schema-level fallback render (the pure-Node / non-node-view path — keeps the
@@ -192,7 +195,7 @@ export const Terminal = Node.create({
       const titleInput = document.createElement("input");
       titleInput.className = "bp-term__title bp-canvas-term__title-input";
       titleInput.setAttribute("type", "text");
-      titleInput.setAttribute("placeholder", "title");
+      titleInput.setAttribute("placeholder", t("title"));
       titleInput.addEventListener("input", () => {
         const v = titleInput.value;
         setAttrs({ title: v === "" ? null : v });
@@ -203,7 +206,7 @@ export const Terminal = Node.create({
       // == the reader.
       const liveBadge = document.createElement("span");
       liveBadge.className = "bp-term__live";
-      liveBadge.textContent = "live";
+      liveBadge.textContent = t("live");
 
       const liveToggle = document.createElement("button");
       liveToggle.type = "button";
@@ -241,7 +244,7 @@ export const Terminal = Node.create({
       const footInput = document.createElement("input");
       footInput.className = "bp-canvas-term__foot-input";
       footInput.setAttribute("type", "text");
-      footInput.setAttribute("placeholder", "footer");
+      footInput.setAttribute("placeholder", t("footer"));
       footInput.addEventListener("input", () => {
         const v = footInput.value;
         setAttrs({ footer: v === "" ? null : v });
@@ -251,7 +254,7 @@ export const Terminal = Node.create({
       const addFootBtn = document.createElement("button");
       addFootBtn.type = "button";
       addFootBtn.className = "bp-canvas-term__add-foot";
-      addFootBtn.textContent = "+ footer";
+      addFootBtn.textContent = t("+ footer");
       addFootBtn.contentEditable = "false";
       addFootBtn.addEventListener("mousedown", (e) => e.preventDefault());
       addFootBtn.addEventListener("click", (e) => {

@@ -569,11 +569,11 @@ defmodule PDS.Census do
   # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
   # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 115,
-    ast: 106,
+    textual: 118,
+    ast: 109,
     phantom: 9,
     consumer: 4,
-    emitted: 102,
+    emitted: 105,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -721,9 +721,39 @@ defmodule PDS.Census do
     # closure hop as the earlier entries, between every task verb and the fenced `Repo.update_all`;
     # two task-verb receipts land in the READ class at depth 6. Same ruling: the hop stays, the door is
     # one place. Engine printed live by that run: Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
-    write: 52,
-    read: 35,
-    unrouted: 15
+    #
+    # RE-DERIVED AGAIN 2026-10-03 at r6a/owner-scope (owner ruling #9, task-84f7e11095ee859c):
+    # read-routed 35 -> 37 and unrouted 15 -> 13. `CallerContext.from_conn/1` now builds a
+    # signed-in user's context with ONE `Tenancy.Auth.membership/3` read (Studio account
+    # sockets act as the user, not anonymous), so two receipts that reached no Repo verb inside
+    # depth 6 now reach that read. The UNROUTED SPLITS block diffed against the run on the
+    # parent tree names them: one receipt in the Sheets ImportController and
+    # one in SearchController left the unrouted list. `write` (52), `textual`
+    # (115), `ast` (106), `phantom` (9), `consumer` (4) and `emitted` (102) read `==` in the
+    # same run; lens unchanged. DERIVED BY THE INSTRUMENT: the `derived` half of this census's
+    # own D448-DRIFT-REFUSES line on this commit's tree. Engine printed live by that run:
+    # Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    #
+    # RE-DERIVED AGAIN 2026-10-08 (task-cfb6ca3f5ffaf099, PATCH /v1/auth/display-name):
+    # textual 115 -> 116, ast 106 -> 107, emitted 102 -> 103, write-routed 52 -> 53. ONE
+    # new emitted site — AuthController.update_display_name/2's `ok: true` success arm —
+    # lands in the WRITE class: it reaches `Accounts.update_display_name/2`, which calls
+    # `Repo.update/1` directly. `read` (37), `phantom` (9), `consumer` (4) and `unrouted`
+    # (13) did NOT move, which is the signature of an added site rather than a
+    # reclassified one. DERIVED BY THE INSTRUMENT: the `derived` half of this census's own
+    # D448-DRIFT-REFUSES line, run from the repo root on this commit's tree.
+    #
+    # RE-DERIVED AGAIN 2026-10-08 (task-7d2a48dbf7e4bf34, PUT+DELETE
+    # /v1/prefs/:dataset/:key): textual 116 -> 118, ast 107 -> 109, emitted
+    # 103 -> 105, write-routed 53 -> 55. TWO new emitted sites —
+    # UserPrefController.update/2 and delete/2's `ok: true` arms — both land
+    # in the WRITE class: they reach Barkpark.UserPrefs.put/5 and delete/4,
+    # which call Repo.insert/1 and Repo.delete_all/1 directly. `read` (37),
+    # `phantom` (9), `consumer` (4) and `unrouted` (13) did NOT move — two
+    # added sites, not a reclassification.
+    write: 55,
+    read: 37,
+    unrouted: 13
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -906,9 +936,56 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # Seat consent (owner ruling #7, task-a08da65bc33083d0): three NEW routed
+    # writes, rows proposed by `--routed-rows` and pasted verbatim. Each renders
+    # the row the context function returned (accept: the created seat; decline:
+    # the id it deleted; withdraw: the deleted invitation) behind a tagged
+    # `{:ok, _}` match — a status receipt, never an `ok: true` literal.
+    {:delete, "/v1/auth/invitations/:id", "BarkparkWeb.InvitationController", :decline, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/invitations/:id", "BarkparkWeb.MemberController", :cancel_invitation, :status_only_receipt},
+    {:post, "/v1/auth/invitations/:id/accept", "BarkparkWeb.InvitationController", :accept, :status_only_receipt},
+    # The browser door to the same seat consent (task-5306379c9be40c89): rows
+    # proposed by `--routed-rows` and pasted verbatim. Accept redirects into the
+    # joined workspace behind the context function's `{:ok, _}`; decline
+    # redirects to the list behind its `:ok` — a status receipt, never `ok: true`.
+    {:post, "/invitations/:id/accept", "BarkparkWeb.InvitationPageController", :accept, :status_only_receipt},
+    {:post, "/invitations/:id/decline", "BarkparkWeb.InvitationPageController", :decline, :status_only_receipt},
     # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
     # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},
+    # Preview JWT mint (task-8f7cba7f65cb343c). Renders fields taken straight off
+    # the just-signed claims map (`token`, `jti`, `dataset`, `workspace_id`,
+    # `expires_at`, …) — a request-echo-shaped receipt, never an `ok: true`
+    # literal this lens keys on. For a `multi_use` mint the signing call ALSO
+    # inserts the `preview_token_jti` row (`PreviewToken.record_jti/1`), but the
+    # response is built from the in-memory claims, never a re-read of that row.
+    {:post, "/v1/preview-tokens", "BarkparkWeb.PreviewTokenController", :mint, :status_only_receipt},
+    # task-88e9094df76d31c6 — the SCOPED twin of the row above. SAME action,
+    # SAME receipt shape (the census keys the QUAD, not {module, action}, so
+    # a second ROUTE onto an already-disposed action still needs its own row).
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/preview-tokens", "BarkparkWeb.PreviewTokenController",
+     :mint, :status_only_receipt},
+    # task-49a6a686bb88d9e5 — the scoped revoke. Renders a bare literal
+    # `revoked: true` plus the request's OWN `jti` echoed back — never a
+    # stored read, never the `ok: true` shape this lens keys on.
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/preview-tokens/:jti",
+     "BarkparkWeb.PreviewTokenController", :revoke, :status_only_receipt},
+    # THE FOUR PAPER-MASTERS WRITES (task-2dc7b441443f3aaf). Each answers the op
+    # receipt `Content.apply_paper_block_ops_once/6` returns (`slug`, `opCount`,
+    # `rev`, `blockIds` — a store-derived position and row-id array), or the
+    # saved master document (`docId`, `rev`, `title`), never an `ok: true`
+    # literal this lens keys on — same class and same reasoning as the
+    # member-admin rows above.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters", "BarkparkWeb.PaperMastersController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/:master_id/insert", "BarkparkWeb.PaperMastersController", :insert, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/pin", "BarkparkWeb.PaperMastersController", :pin, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/detach", "BarkparkWeb.PaperMastersController", :detach, :status_only_receipt},
+    # THE MEMBER-TOKEN PAPER BATCH OPS WRITE (task-7ee817f37630d669, P1). Answers
+    # the SAME minimal op receipt (`slug`, `opCount`, `rev`, `blockIds`) the
+    # masters rows above and the :ingest-tier `POST .../papers/:slug/ops`
+    # answer — a store-derived position/row-id array, never an `ok: true`
+    # literal — so it is the SAME class and the SAME reasoning.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/ops", "BarkparkWeb.PaperOpsController", :apply_op, :status_only_receipt},
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
@@ -954,6 +1031,7 @@ defmodule PDS.Census do
     {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete, :status_only_receipt},
     {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete, :status_only_receipt},
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke, :status_only_receipt},
+    {:delete, "/v1/shares/preview-links/:id", "BarkparkWeb.PreviewLinkController", :revoke, :status_only_receipt},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token, :status_only_receipt},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete, :status_only_receipt},
@@ -1034,6 +1112,7 @@ defmodule PDS.Census do
     {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/projects", "BarkparkWeb.WorkspaceController", :create_project, :status_only_receipt},
     {:post, "/api/workspaces/:workspace_slug/restore", "BarkparkWeb.WorkspaceController", :restore, :status_only_receipt},
+    {:post, "/auth/confirm/:token", "BarkparkWeb.SessionController", :confirm_submit, :status_only_receipt},
     {:post, "/auth/reset/:token", "BarkparkWeb.SessionController", :reset_submit, :status_only_receipt},
     {:post, "/login", "BarkparkWeb.SessionController", :create, :status_only_receipt},
     {:post, "/login/account", "BarkparkWeb.SessionController", :account, :status_only_receipt},
@@ -1082,6 +1161,7 @@ defmodule PDS.Census do
     # judged by it.
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
+    {:post, "/v1/auth/cloud-users/deprovision", "BarkparkWeb.CloudUserController", :deprovision, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
     {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login, :status_only_receipt},
@@ -1126,7 +1206,9 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/v1/data/disconnect/:dataset/:doc_id", "BarkparkWeb.DisconnectController", :create, :status_only_receipt},
     {:post, "/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
+    {:post, "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
@@ -1134,6 +1216,7 @@ defmodule PDS.Census do
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
     {:post, "/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
+    {:post, "/v1/media/:dataset/collections", "BarkparkWeb.V1.MediaCollectionsController", :create, :status_only_receipt},
     {:post, "/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member, :status_only_receipt},
     {:post, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share, :status_only_receipt},
     {:post, "/v1/media/:dataset/processing/:id/callback", "BarkparkWeb.V1.MediaProcessingController", :callback, :status_only_receipt},
@@ -1147,6 +1230,7 @@ defmodule PDS.Census do
     {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert, :status_only_receipt},
     {:post, "/v1/shares", "BarkparkWeb.ShareController", :create, :status_only_receipt},
     {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint, :status_only_receipt},
+    {:post, "/v1/shares/preview-links", "BarkparkWeb.PreviewLinkController", :mint, :status_only_receipt},
     # `post /v1/shares/media` — the one-verb media-publish affordance behind `bp media
     # publish` and the Studio media-library action. SAME SHAPE AND SAME CLASS AS ITS
     # SIBLING `post /v1/shares` -> :create one row above: do_publish_media/2 renders the
@@ -1192,12 +1276,22 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/disconnect/:dataset/:doc_id", "BarkparkWeb.DisconnectController", :create, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/presence/:dataset/focus", "BarkparkWeb.PresenceController", :focus, :status_only_receipt},
+    # task-936472b77285df5b — leave's own answer (`%{left: true, sessionId: sid}`)
+    # is built from the REQUEST's own sessionId echoed back plus a bare literal,
+    # never a stored re-read — same class, same reasoning as its `focus` sibling
+    # directly above (which answers the room entry read back after applying it,
+    # also never an `ok: true` literal this lens keys on).
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/data/presence/:dataset/leave", "BarkparkWeb.PresenceController", :leave, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections", "BarkparkWeb.V1.MediaCollectionsController", :create, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym, :status_only_receipt},
@@ -1234,7 +1328,28 @@ defmodule PDS.Census do
     {:put, "/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
     {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
-    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
+    # task-bd311f4b5ea2b3b8 (#22210): dispatch/2's :real-mode receipt is
+    # `json(conn, %{result: json_safe(result)})`, where `result` is a
+    # PLUGIN-OWNED map (OnixEdit's publish_to_bokbasen returns `%{status:
+    # Status.read-shape, job: %Oban.Job{}}`) handed straight back, not a
+    # literal `ok: true` this controller asserts about its own write. The
+    # mutation itself already happened inside the plugin's own handler
+    # (DocActions.dispatch_action/5 -> the resolved handler), one hop below
+    # this action — same shape the PluginSettingsController/SecretController/
+    # WebhookController rows above already carry.
+    {:post,
+     "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
+     "BarkparkWeb.DocumentActionsController", :dispatch, :status_only_receipt},
+    # task-2bcada0faa01ebb2 (#22639): retire_sse/2 is `:ok =
+    # DrainSignal.broadcast_retire(); send_resp(conn, 204, "")` — a genuine
+    # bodiless 204, the same shape status_only_receipt's own prose already
+    # names ChatController.answer/2 as carrying (one of 149, not the class's
+    # norm). The caller is the deploying box's own instance-deploy.sh, never
+    # a document write: the receipt this action could render is a PubSub
+    # broadcast's fan-out count, which no HTTP response here claims either
+    # way. ARRIVED via `--routed-rows`, not hand-classified.
+    {:post, "/v1/internal/retire-sse", "BarkparkWeb.DeployController", :retire_sse, :status_only_receipt}
   ]
 
   # ---------------------------------------- the exclusion anchors (PDS-D585)
@@ -1296,12 +1411,14 @@ defmodule PDS.Census do
     {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
     {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete} => {"BarkparkWeb.ShareController.delete/2", 1, "18318765"},
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
+    {:delete, "/v1/shares/preview-links/:id", "BarkparkWeb.PreviewLinkController", :revoke} => {"BarkparkWeb.PreviewLinkController.revoke/2", 1, "33520504"},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "98736159"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/preview-tokens/:jti", "BarkparkWeb.PreviewTokenController", :revoke} => {"BarkparkWeb.PreviewTokenController.revoke/2", 1, "78846380"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
     {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke} => {"BarkparkWeb.ChatHostController.revoke/2", 1, "131654882"},
@@ -1455,7 +1572,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{530, 530}],
+      basis_spans: [{706, 706}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1473,7 +1590,7 @@ defmodule PDS.Census do
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
           "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
           "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
-          "the comment still sits on the def's first body line.",
+          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37. RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — comment slid :610 -> :629, the def's first body line, by +19. RE-ANCHORED again 2026-10-09 (task-9d2cdfae246cc486): create_token/2 took a new \"Optional expiry\" @doc section, and mint_pat/4 split into mint_pat/4 (the fetch_pat_expiry/1 dispatch) + a new do_mint_pat/5 (the mint itself, plus two new TokenExpiry error clauses) so the pre-existing changeset clause ChangesetDetailControllersTest source-anchors stayed at its old indentation depth — net +77 lines above this def — comment slid :629 -> :706, the def's first body line, by +77.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1482,7 +1599,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{545, 550}],
+      basis_spans: [{721, 726}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1501,7 +1618,7 @@ defmodule PDS.Census do
           "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
           "on :540). RE-ANCHORED again off :537-542 on the re-auth failure budget (owner ruling " <>
           "#34): +8 lines inserted above by erase/2 taking the rate-limited branch (the token " <>
-          "`anti-enumeration` now on :548).",
+          "`anti-enumeration` now on :548). RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — doc slid :625-630 -> :644-649, the token `anti-enumeration` now on :647). RE-ANCHORED again 2026-10-09 (task-9d2cdfae246cc486): the same +77-line insertion above (create_token/2's new @doc section and the mint_pat/4 -> mint_pat/4+do_mint_pat/5 split) slid the doc :644-649 -> :721-726, the token `anti-enumeration` now on :724).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -1596,13 +1713,13 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
             "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
-      basis_spans: [{219, 244}],
+      basis_spans: [{227, 252}],
       basis_token: "no failure reaches this receipt",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis:
-        "the in-code ruling at :219-244, added by #18899 — the `media` surface twin of the " <>
-          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :236.",
+        "the in-code ruling at :227-252, added by #18899 — the `media` surface twin of the " <>
+          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :245.",
       why:
         "the arm fires and this row withholds the finding, for the reason its twin states: " <>
           "same split, same @spec'd delete, same 404 beside the receipt. TWO ROWS, NOT ONE " <>
@@ -1612,13 +1729,20 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{556, 578}],
+      basis_spans: [{732, 754}],
       basis_token: "why it must merge",
       class: "PURE-ECHO",
       confirmation: "declared",
       basis:
         "the in-code ruling at :556-578, added by #18899 — the `{:error, changeset}` " <>
-          "mint-failure arm, token `WHY IT MUST MERGE` on :565.",
+          "mint-failure arm, token `WHY IT MUST MERGE` on :565. RE-ANCHORED again " <>
+          "2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new " <>
+          "def above this one, was inserted whole (+17), and me/2 above it grew by one " <>
+          "field (+1) — span slid :636-658 -> :655-677, the token `WHY IT MUST MERGE` " <>
+          "now on :672. RE-ANCHORED again 2026-10-09 (task-9d2cdfae246cc486): the same " <>
+          "+77-line insertion above (create_token/2's new @doc section and the " <>
+          "mint_pat/4 -> mint_pat/4+do_mint_pat/5 split) slid the span :655-677 -> " <>
+          ":732-754, the token `WHY IT MUST MERGE` now on :749.",
       why:
         "A SECOND ROW ON A KEY THAT ALREADY HAS ONE, DELIBERATELY. The site carries TWO " <>
           "independent declarations now: the @doc's anti-enumeration contract (the NO-OP-ACK " <>
@@ -1924,9 +2048,9 @@ defmodule PDS.Census do
       note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670, and that verdict outlived its defect by a whole wave). Scim.delete_group/2 (scim.ex:502-516) now returns {:error, :not_found} when Repo.delete_all removed nothing, so {:ok, 0} is UNREACHABLE, and the caller cases on the tag rather than discarding it: {:ok, _n} -> 204, {:error, :not_found} -> a SCIM 404. Driven and read back: scim_groups_controller_test.exs `the group vanishes between the read and the delete → 404, never 204` deletes the row out from under the request through a repo telemetry handler, then asserts the 404 AND `refute Repo.get(Group, gid)`."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "Scim.deprovision_user(org, user, hard: true)",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067", callee_fp: "1045515",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067", callee_fp: "118289629",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
-      note: "RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1): the ONE-HOP callee Scim.deprovision_user/3 now degrades a hard delete to the org-scoped soft path when the user still holds a seat outside the org — callee_fp 58639899 -> 1045515, def_fp unchanged. The 204 still means `this org's deprovision took`: the transaction drops the org's seats and PATs either way, and `HARD (DELETE) from org A of a user seated in org B degrades to SOFT (ruling #1)` reads the stored rows back (org B seat and PAT alive, org A PAT dead, org A GET 404). Verdict stands. Original note: the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
+      note: "RE-DERIVED on task-f462de9e4c1c4621 (owner ruling #35 item 8): Scim.deprovision_user/3 now runs its transaction inside Accounts.with_session_teardown_after_commit/1, which returns the transaction result untouched and only delays the session teardown broadcast to after commit; the body moved into deprovision_in_transaction/4 — callee_fp 1045515 -> 118289629, def_fp unchanged, `{:ok, _} =` still matches the same {:ok, map} and a failed deprovision still raises before the 204. Verdict stands. Previous: RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1): the ONE-HOP callee Scim.deprovision_user/3 now degrades a hard delete to the org-scoped soft path when the user still holds a seat outside the org — callee_fp 58639899 -> 1045515, def_fp unchanged. The 204 still means `this org's deprovision took`: the transaction drops the org's seats and PATs either way, and `HARD (DELETE) from org A of a user seated in org B degrades to SOFT (ruling #1)` reads the stored rows back (org B seat and PAT alive, org A PAT dead, org A GET 404). Verdict stands. Original note: the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
     # ------------------------------------------------------------------ THE SIX SCIM
     # WRITE ROUTES (pds-w39-status-only-receipts). They sat in @routed_excluded as
     # :status_only_receipt — the wave-38 population hole, named by the wish as "the
@@ -1943,11 +2067,11 @@ defmodule PDS.Census do
     # search_controller.ex correction/2 row above, which removed two).
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "case Scim.provision_user(org, params) do",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "42182949", callee_fp: "106034506",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "42182949", callee_fp: "80280370",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
                  "test \"provisions a confirmed user who can then log in (via magic-link)\" do"},
-      note: "RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1, SCIM adopts only accounts the org can vouch for): create/2 gained ONE error arm, `{:error, :email_not_owned_by_org}` -> a SCIM 409 scimType uniqueness, and its callee Scim.provision_user/2 now routes an existing account through Sso.org_adopt/3. That moved def_fp 70214860 -> 42182949 and callee_fp 90246701 -> 106034506. The 201 arm is byte-identical and still renders the `user` the write returned; the new arm is a SCIM error, so the 201 stays unreachable without a provisioned (or vouched-for adopted) row. scim_users_controller_test.exs re-runs GREEN (35 tests), including `org A's SCIM token cannot adopt org B's existing user (409, no seat)`. THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
+      note: "RE-DERIVED on task-43179d8d03efe969 (owner ruling #32 item 2, no raw email in audit metadata): the callee Scim.provision_user/2 now audits `user_provisioned` with `user_id` instead of `email`. callee_fp 106034506 -> 80280370, read from this census's ROSTER-VERDICT-FRESH line; def_fp unchanged. The 201 arm and its store-derived receipt are untouched; scim_users_controller_test.exs + scim_conformance_test.exs re-run GREEN. EARLIER: RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1, SCIM adopts only accounts the org can vouch for): create/2 gained ONE error arm, `{:error, :email_not_owned_by_org}` -> a SCIM 409 scimType uniqueness, and its callee Scim.provision_user/2 now routes an existing account through Sso.org_adopt/3. That moved def_fp 70214860 -> 42182949 and callee_fp 90246701 -> 106034506. The 201 arm is byte-identical and still renders the `user` the write returned; the new arm is a SCIM error, so the 201 stays unreachable without a provisioned (or vouched-for adopted) row. scim_users_controller_test.exs re-runs GREEN (35 tests), including `org A's SCIM token cannot adopt org B's existing user (409, no seat)`. THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
       anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131", callee_fp: "22175733",
@@ -1983,9 +2107,9 @@ defmodule PDS.Census do
       note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE ANCHOR MOVED ONTO `do_replace/4` FOR THE SAME REASON `create` MOVED ONTO `do_create/3`: `replace/2` is now the bound check and every call this note describes lives in `do_replace/4`, so the wrapper's def_fp would detect nothing. `put /scim/v2/Groups/:id -> replace` stays disposed by reachability. PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
-      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031", callee_fp: "115836642",
+      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "92011717", callee_fp: "119154111",
       verdict: "PROVEN", basis: :end_to_end,
-      note: "RE-DERIVED on task-807307d827255d7e (a revoked account session now closes its open LiveViews): revoke_user_session_token/1 gained `select: t.id` on its update_all and a best-effort broadcast_session_teardown/1 of those ids AFTER the write, which moved callee_fp 12927600 -> 115836642. The function still returns {:ok, revoked} where revoked is the update_all COUNT, the caller still binds {:ok, n} and forks the flash on it, so the verdict and its citation stand as below. RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs `clears the session and redirects to /studio` posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
+      note: "RE-DERIVED on studio/signin-nb (task-e807e0e5d7cf57c7, the sign-in pages speak the browser's language): the one-hop callee `sign_out_flash/1` now returns gettext(\"You were already signed out.\") / gettext(\"Signed out.\") instead of the bare strings, which moved callee_fp 27216941 -> 119154111; def_fp is unchanged. THE VERDICT IS UNCHANGED: the flash still forks on the same `user_revoked + token_session_revoked` count, 0 only when both revokes found nothing; only the words are now in the request's language. RE-DERIVED on fix/session-token-not-raw-key (task-57f23825b18ab55d, ruling #16 rework half), on top of task-429d3c7559ea8a3c and task-807307d827255d7e (both folded in by this rebase). delete/2 grew a SECOND revoke arm alongside the unchanged user_session one: `Barkpark.Auth.revoke_token_session/1` on `session[\"api_token_session\"]`, which also carries @spec :: {:ok, non_neg_integer()} (a DELETE count, not an update_all — see TokenSession's moduledoc for why: the row holds an encrypted-at-rest raw bearer, so a live row is a live credential regardless of a revoked_at flag). THE VERDICT IS UNCHANGED AND STRICTLY STRONGER: the flash now forks on `sign_out_flash(user_revoked + token_session_revoked)`, 0 only when BOTH counts are 0 — a token-session-only logout (no user_session cookie) now also reports \"Signed out.\" rather than the user_session arm silently absorbing it, and the redirect target is still the unrelated after_sign_out_path/0 (/studio on a public-demo host, else /login) task-429d3c7559ea8a3c added. Driven and read back: session_controller_test.exs `clears the session and redirects to /studio` is unchanged (still certifies the user_session row's revoked_at across a double logout) and a new case, `after sign-in and logout, replaying a COPIED cookie no longer authenticates`, certifies the NEW arm — it resolves a token-session id copied from the pre-logout cookie through `Auth.resolve_session_credential/2` BEFORE logout (proving the copy was live) and again AFTER (proving the real logout deleted the row the copy names, so the copy's own resolve dies even though it was never itself posted to /logout). PRIOR HISTORY (task-429d3c7559ea8a3c, task-807307d827255d7e, 974d412ca, was REFUTED at 501fb9670): revoke_user_session_token/1 (accounts.ex) carries @spec :: {:ok, non_neg_integer()}, returns the Repo.update_all count (now also select: t.id, broadcasting a best-effort session teardown of those ids after the write), the caller binds `{:ok, n} =` and the flash forks on it."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
       anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "11050786", callee_fp: "62964120",
@@ -2094,6 +2218,19 @@ defmodule PDS.Census do
         "question is unjudged; the receipt-vs-OBSERVABLE-BEHAVIOUR question is answered and " <>
         "answered well. Upgrading this row to end_to_end needs one Repo read of " <>
         "hashed_password beside the existing assertions, not a better argument."},
+    # barkpark_web/controllers/auth_controller.ex:282
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.update_display_name/2", "6362529", "126656458"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited (task-cfb6ca3f5ffaf099): PATCH /v1/auth/display-name is a " <>
+        "new door on the new Accounts.update_display_name/2 primitive. Same shape as " <>
+        "change_password/2 above, same honest limit: the cited test (auth_controller_test.exs " <>
+        "`/me reports display_name: nil until it's set`) drives the route, then certifies the " <>
+        "post-condition through a SECOND route (GET /v1/auth/me), asserting the field reads " <>
+        "nil before and the new value after. It does not read the stored row directly, so " <>
+        "end_to_end's @repo_tokens falsifier would be REFUSED here — unjudged_other is the " <>
+        "honest basis, not a weaker test."},
     # barkpark_web/controllers/auth_controller.ex:329
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.revoke_session/2", "14482306", "17656195"},
@@ -2920,7 +3057,26 @@ defmodule PDS.Census do
          ~S|test "delete (200 receipt) renders the ROW Repo.delete removed — nickname and " <>|},
       attestation:
         "mutation: revert the receipt to the bare success map — `mix test api/test/barkpark_web/controllers/webauthn_controller_test.exs` — the test `delete (200 receipt) renders the ROW Repo.delete removed — nickname and created_at are store fields the request never carried` — reds on created_at being nil",
-    }
+    },
+    # barkpark_web/controllers/user_pref_controller.ex — task-7d2a48dbf7e4bf34
+    %{key: {"api/lib/barkpark_web/controllers/user_pref_controller.ex",
+            "BarkparkWeb.UserPrefController.update/2", "43197058", "40851440"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited: PUT /v1/prefs/:dataset/:key is the first door on the new " <>
+        "Barkpark.UserPrefs.put/5 primitive. The cited tests " <>
+        "(user_pref_controller_test.exs, several PUT-then-GET round-trip cases) drive the " <>
+        "route, then certify the post-condition through a SECOND route (GET on the same " <>
+        "key), never a direct Repo read — same honest limit as AuthController." <>
+        "update_display_name/2 above, same reason: unjudged_other, not a weaker test."},
+    %{key: {"api/lib/barkpark_web/controllers/user_pref_controller.ex",
+            "BarkparkWeb.UserPrefController.delete/2", "133250656", "17468236"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited: DELETE /v1/prefs/:dataset/:key on the same new primitive " <>
+        "(Barkpark.UserPrefs.delete/4). The cited test drives DELETE then certifies via a " <>
+        "second GET that the value cleared to nil — same unjudged_other basis as update/2 " <>
+        "above."}
   ]
 
 
@@ -11776,7 +11932,18 @@ defmodule PDS.Census do
   # `elixir scripts/pds-elixir-receipt-census.exs` printed count 84 fp 103207718.
   # The create-only Paper route reaches the existing UNJUDGED receipt, now /5;
   # both prior ingest routes remain disposed through the register. No exclusion was added.
-  @derived_disposition_pin %{count: 84, fp: "103207718"}
+  # Re-derived 2026-10-08 (task-cfb6ca3f5ffaf099): `elixir scripts/pds-elixir-receipt-census.exs`
+  # printed `DERIVED PIN count 85 fp 118961623`. PATCH /v1/auth/display-name
+  # (BarkparkWeb.AuthController.update_display_name/2) is a new routed-write member, now
+  # disposed through its own register row (UNJUDGED, added above) rather than excluded —
+  # one arrival, no exclusion added.
+  # Re-derived 2026-10-08 (task-7d2a48dbf7e4bf34): `elixir scripts/pds-elixir-receipt-census.exs`
+  # printed `DERIVED PIN count 87 fp 21248959`. PUT and DELETE
+  # /v1/prefs/:dataset/:key (UserPrefController.update/2, delete/2) are two new
+  # routed-write members, now disposed through their own register rows
+  # (UNJUDGED, added above) rather than excluded — two arrivals, no exclusion
+  # added.
+  @derived_disposition_pin %{count: 87, fp: "21248959"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm

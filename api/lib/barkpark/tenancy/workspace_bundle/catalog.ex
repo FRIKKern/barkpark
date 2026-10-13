@@ -106,9 +106,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
-    secrets secrets_audit share_links sync_cursors sync_dead_letters
-    sync_push_conflicts sync_push_cursors sync_push_doc_revs webhooks
-    workspace_memberships
+    secrets secrets_audit preview_links share_links sync_cursors sync_dead_letters
+    sync_push_conflicts sync_push_cursors sync_push_doc_revs user_prefs webhooks
+    workspace_invitations workspace_memberships
   )
 
   # The six 20260715 cycle-fleet children are FK-transitive descendants of
@@ -122,13 +122,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #   * epic_assignment_runtime_attempts  → epic_assignments (assignment_id)
   #   * epic_assignment_tasks             → epic_assignments (assignment_id)
   #   * epic_benchmark_attempts           → epic_benchmark_experiments (experiment_id)
+  #   * token_sessions                    → api_tokens (api_token_id), task-cfb6ca3f5ffaf099's
+  #     sibling task-57f23825b18ab55d: a revocable browser session row, NOT NULL
+  #     FK to the E1-pinned `api_tokens`, so it travels in the owning workspace's
+  #     bundle the same way `webhook_deliveries` rides its `webhooks` parent.
   @pinned_e2 ~w(
     chat_runtime_usage_receipts content_edges cycle_build_plans
     cycle_release_gate_captures cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes datasets
     epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
     epic_benchmark_attempts plugin_doc_state role_permissions task_edges
-    webhook_deliveries
+    token_sessions webhook_deliveries
   )
 
   # E3 tables that carry a `doc_id` → filtered by a (doc_id, dataset) semi-join.
@@ -185,22 +189,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # D5): global codelists, admin/host state, the org tier, job queue, metrics,
   # user/auth tier, and the residual *_backup tables. A base table that is
   # neither live-tenant nor in this list makes the sentinel RAISE.
-  # chat_runtime_telemetry_events (20260715 cycle-fleet) FK-references
-  # chat_sessions only — it is NOT reachable from `workspaces` by any FK path, so
-  # the live E1/E2/E3 scans never surface it. Like chat_sessions / chat_messages
-  # it is host/admin-scoped runtime telemetry that rolls OUTSIDE the workspace
-  # grain; pinned non-tenant so the "unaccounted base table" sentinel is clear.
+  # chat_sessions / chat_messages / chat_runtime_telemetry_events: OWNED by a
+  # workspace (`chat_sessions.owner_workspace_id`, no FK; messages and telemetry
+  # FK-cascade off the session) but NOT carried in its bundle — admin
+  # transcripts with host paths never travel. No FK path from `workspaces`, so
+  # the live E1/E2/E3 scans never surface them; pinned here so the sentinel is
+  # clear. Teardown is NOT export: `Tenancy.delete_workspace/1` deletes the
+  # workspace's chats explicitly (`delete_workspace_chats/1`, owner ruling #32).
   @pinned_non_tenant ~w(
     chat_messages chat_runtime_telemetry_events chat_sessions
     codelist_value_translations codelist_values
     codelists collapsed_schema_definitions_backup
     cycle_release_gate_migration_state_20260719020100 idempotency_keys login_tickets
+    media_delete_operations_v1 media_object_reservations_v1
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
     scim_groups scim_tokens social_identities
     social_providers status_incidents user_email_tokens user_sessions users
-    webauthn_credentials
+    webauthn_challenge_replays webauthn_credentials
   )
 
   # E2 extraction specs: a parent-join from the child (`t`) to the nearest
@@ -249,7 +256,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     "epic_assignment_tasks" =>
       {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
     "epic_benchmark_attempts" =>
-      {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"}
+      {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"},
+    "token_sessions" => {"JOIN api_tokens at ON at.id = t.api_token_id", "at.workspace_id"}
   }
 
   # ── Connector-credential exclusion (an EXPLICIT deny, not a namespace accident)
@@ -471,6 +479,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   """
   def assert_partition!(repo) do
     assert_connector_credential_exclusion!(repo)
+    assert_no_pending_media_cleanup!(repo)
 
     live_e1 = live_e1(repo)
     live_e2 = live_e2(repo)
@@ -538,6 +547,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
 
     assert_webhook_delivery_confinement!(repo)
+
+    :ok
+  end
+
+  # Native root/file identities are host-local recovery state. Reservations
+  # are rebuilt from media rows on another host. An unresolved operation must
+  # neither silently disappear nor travel as permission to delete a path.
+  @doc "Refuse export preflight while host-local media cleanup remains unresolved."
+  def assert_no_pending_media_cleanup!(repo) do
+    if "media_delete_operations_v1" in live_base_tables(repo) do
+      %{rows: [[pending]]} =
+        repo.query!("SELECT EXISTS (SELECT FROM public.media_delete_operations_v1)", [])
+
+      if pending do
+        raise "WorkspaceBundle.Catalog: pending host-local media cleanup must be reconciled before export"
+      end
+    end
 
     :ok
   end
@@ -682,7 +708,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #     audit_export_sinks (plaintext `secret` sink column), share_links,
   #     shares (access-granting registry — copying would silently re-open
   #     public surfaces on the target), registered_chat_hosts,
-  #     preview_token_jti.
+  #     preview_token_jti, token_sessions (task-57f23825b18ab55d — holds a
+  #     Cloak-encrypted RAW api_token, decryptable at rest; more sensitive than
+  #     api_tokens itself, which only ever stores a hash).
   #   * PII / conversation / audit trails: audit_events, paper_access_log
   #     (who read which paper and when, identified where the reader could
   #     identify them — the same trail shape as audit_events and denied for the
@@ -738,9 +766,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     paper_access_log plugin_doc_state preview_token_jti registered_chat_hosts
     revisions search_intel_events
     secrets secrets_audit
-    share_links shares sync_cursors sync_dead_letters sync_push_conflicts
-    sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
-    workspace_memberships
+    preview_links share_links shares sync_cursors sync_dead_letters sync_push_conflicts
+    sync_push_cursors sync_push_doc_revs token_sessions webhook_deliveries webhooks
+    workspace_invitations workspace_memberships user_prefs
   )
 
   # W1 ships an empty scrub set; the key shape is `table => [field]`.
@@ -839,6 +867,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   """
   def assert_dev_partition!(repo, partition \\ @dev_partition) do
     assert_connector_credential_exclusion!(repo)
+    assert_no_pending_media_cleanup!(repo)
 
     malformed = for {table, c} <- partition, not valid_dev_classification?(c), do: table
 

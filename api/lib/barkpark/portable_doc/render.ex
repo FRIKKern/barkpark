@@ -71,7 +71,7 @@ defmodule Barkpark.PortableDoc.Render do
                         ] ++
                           Enum.map(
                             ~w(
-                              cards_email.ex components.ex compose.ex data_viz.ex figures.ex
+                              cards_email.ex chrome.ex components.ex compose.ex data_viz.ex figures.ex
                               fleet_email.ex forms.ex inline.ex math.ex palettes.ex
                               panels_email.ex section_layout.ex status_vocab.ex stylesheet.ex tokens_gen.ex
                               util.ex walk.ex
@@ -186,6 +186,11 @@ defmodule Barkpark.PortableDoc.Render do
       # cache, delta frames, and the public reader keep the default `false`,
       # so the control never leaks into shared caches or anonymous HTML.
       |> Map.put(:valueref_accept, Map.get(opts, :valueref_accept, false))
+      # Inline object renderers (task-85fee859cf3bfef6): `:inline_objects` is a
+      # caller-supplied `%{type => (node -> html_string)}` map. The function
+      # gets the stored node (`{type, ...fields}`) and returns HTML, so it owns
+      # escaping. Absent ⇒ %{} ⇒ an inline object shows its text in a span.
+      |> Map.put(:inline_objects, Map.get(opts, :inline_objects, %{}))
 
     width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
     body = Walk.render_body(root, width, palette)
@@ -209,8 +214,15 @@ defmodule Barkpark.PortableDoc.Render do
   # A standalone export has NO `html[data-theme]` ancestor, so the stylesheet's
   # unscoped `.bp-paper-surface` fallback token block paints its LIGHT values;
   # dark mode only engages under a host that stamps `data-theme` on an ancestor.
+  #
+  # The export therefore stamps that ancestor itself: `data-theme="light"`. The
+  # `--paper-*` ground follows only `data-theme`, but the status tones and the
+  # `--ok/--warn` hues also follow `prefers-color-scheme`, so with no data-theme a
+  # dark-mode OS painted dark tones on this light paper ("done" #2dd4bf on
+  # #f6faf9, 1.76:1). The explicit-light rules outrank the media query
+  # (task-0282e7bb116faf7c).
   defp document(body, %{style: :article} = palette) do
-    ~s(<!doctype html><html><head><meta charset="utf-8"><style>) <>
+    ~s(<!doctype html><html data-theme="light"><head><meta charset="utf-8"><style>) <>
       Stylesheet.css() <>
       ~s(</style></head>) <>
       ~s(<body class="bp-paper-surface" style="background:#{palette.bg};margin:0;padding:0;">) <>
@@ -252,10 +264,32 @@ defmodule Barkpark.PortableDoc.Render do
     style = Map.get(opts, :style, :email)
     theme = Map.get(opts, :theme, :evergreen)
 
-    block
-    |> prepare_block(opts)
-    |> compose_block(style, theme)
-    |> render_html(Map.put(opts, :doctype, false))
+    in_locale(opts, fn ->
+      block
+      |> prepare_block(opts)
+      |> compose_block(style, theme)
+      |> render_html(Map.put(opts, :doctype, false))
+    end)
+  end
+
+  @doc """
+  The language the renderer's own chrome words are written in (task-8e96278fc4ee7097).
+  `opts[:locale]` is a workspace locale ("nb-NO") or a gettext one ("nb_NO");
+  absent, it is English — ALWAYS, never the calling process's locale, so a
+  render (and the body cache built from it) does not depend on who asked.
+  Every emitter calls `gettext` directly; the locale rides the process for the
+  duration of this render. English msgids are the English output byte for byte.
+  """
+  def in_locale(opts, fun) when is_function(fun, 0) do
+    locale =
+      case Map.get(opts, :locale) do
+        l when is_binary(l) and l != "" -> String.replace(l, "-", "_")
+        _ -> "en"
+      end
+
+    Gettext.with_locale(BarkparkWeb.Gettext, locale, fn ->
+      Barkpark.PortableDoc.Render.Chrome.with_strings(fun)
+    end)
   end
 
   # Container block types whose clauses recurse into child BLOCKS (not inline

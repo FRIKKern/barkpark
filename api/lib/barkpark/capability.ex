@@ -46,6 +46,10 @@ defmodule Barkpark.Capability do
   @spec names() :: [name()]
   def names, do: @names
 
+  @doc "The capabilities `name` requires to be on."
+  @spec requires(name()) :: [name()]
+  def requires(name) when name in @names, do: Map.get(@requires, name, [])
+
   @doc """
   True when the capability is switched on AND every capability it requires is
   switched on. Unset config means on.

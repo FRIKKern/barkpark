@@ -10,6 +10,8 @@
 // Same shape as FormatBubble: one fixed-position element appended to <body>, fully torn down by
 // destroy(). Nothing here writes to the document; the card only reads the DOM and the doc marks.
 
+import { t } from "../i18n.js";
+
 const CLASS = "bp-link-preview";
 
 export class LinkPreview {
@@ -109,7 +111,7 @@ export class LinkPreview {
     const el = document.createElement("div");
     el.className = CLASS;
     el.setAttribute("role", "dialog");
-    el.setAttribute("aria-label", "Link preview");
+    el.setAttribute("aria-label", t("Link preview"));
     el.style.display = "none";
 
     const title = document.createElement("div");
@@ -123,11 +125,11 @@ export class LinkPreview {
     const open = document.createElement("button");
     open.type = "button";
     open.className = `${CLASS}__btn ${CLASS}__open`;
-    open.textContent = "Open";
+    open.textContent = t("Open");
     const edit = document.createElement("button");
     edit.type = "button";
     edit.className = `${CLASS}__btn ${CLASS}__edit`;
-    edit.textContent = "Edit";
+    edit.textContent = t("Edit");
     actions.appendChild(open);
     actions.appendChild(edit);
     el.appendChild(title);
@@ -165,10 +167,10 @@ export class LinkPreview {
     const ticket = ++this._ticket;
     const p = this._parts;
     if (info.kind === "link") {
-      p.title.textContent = hostOf(info.href) || "Link";
+      p.title.textContent = hostOf(info.href) || t("Link");
       p.addr.textContent = info.href;
     } else {
-      p.title.textContent = info.alias && info.alias !== info.target ? `${info.alias} → ${info.target}` : info.target || "Wikilink";
+      p.title.textContent = info.alias && info.alias !== info.target ? `${info.alias} → ${info.target}` : info.target || t("Wikilink");
       p.addr.textContent = `[[${info.target}]]`;
     }
     p.excerpt.textContent = "";

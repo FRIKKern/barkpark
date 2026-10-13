@@ -184,6 +184,9 @@ interface GridTableProps {
   /** Per-body-cell fmt classes, keyed `"row,col"`. Present only on the raw
    * document view; snapshots omit it (their values are already formatted). */
   fmts?: Record<string, string>;
+  /** Per-body-cell currency codes, keyed `"row,col"` (task-4fb1d8de887d8bc6).
+   * Same raw-document-only contract as `fmts`. */
+  curs?: Record<string, string>;
   /** Per-body-row pixel heights (0-based body index; undefined = default).
    * Present only on the raw document view — snapshots carry no heights. */
   rowHeights?: (number | undefined)[];
@@ -228,6 +231,7 @@ function GridTable({
   merges,
   styles,
   fmts,
+  curs,
   rowHeights,
   headRowHeight,
 }: GridTableProps) {
@@ -276,7 +280,7 @@ function GridTable({
 
     // A whole-string http(s) URL links at display time, through the same scheme
     // allowlist the reader uses (safeHref) — mirrors Studio + the paper embed.
-    const text = formatDisplay(value, fmt);
+    const text = formatDisplay(value, fmt, curs?.[key]);
     const href =
       typeof value === "string" && isHttpUrl(value)
         ? safeHref(value)
@@ -474,6 +478,7 @@ export function SheetGrid({ tabs }: { tabs: SheetTab[] }): JSX.Element {
         merges={denseMerges}
         styles={model.styles}
         fmts={fmts}
+        curs={model.curs}
         rowHeights={heights.body}
         headRowHeight={heights.head}
       />

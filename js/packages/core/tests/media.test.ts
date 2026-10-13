@@ -53,6 +53,43 @@ describe('uploadAsset', () => {
   })
 })
 
+describe('uploadAsset v1 response shape', () => {
+  it('uses the scoped dataset route and returns absoluteUrl and the asset document', async () => {
+    let path = ''
+    server.use(
+      http.post(`${TEST_BASE_URL}/w/acme/p/blog/v1/media/:ds/upload`, ({ request }) => {
+        path = new URL(request.url).pathname
+        return HttpResponse.json(
+          {
+            result: {
+              id: 'f1',
+              url: '/media/files/f1.png',
+              absoluteUrl: 'https://api.example/media/files/f1.png',
+              assetDocId: 'asset-f1',
+              asset: {
+                _id: 'asset-f1',
+                _publishedId: 'asset-f1',
+                altText: 'A dog',
+                fileInfo: { url: '/media/files/f1.png', width: 640, height: 480 },
+              },
+            },
+            syncTags: ['media:f1'],
+          },
+          { status: 201 },
+        )
+      }),
+    )
+    const bp = createClient({ ...baseConfig, workspace: 'acme', project: 'blog' })
+    const asset = await bp.uploadAsset(new Blob([new Uint8Array([1])], { type: 'image/png' }))
+
+    expect(path).toBe(`/w/acme/p/blog/v1/media/${TEST_DATASET}/upload`)
+    expect(asset.absoluteUrl).toBe('https://api.example/media/files/f1.png')
+    expect(asset.asset?._publishedId).toBe('asset-f1')
+    expect(asset.asset?.fileInfo?.width).toBe(640)
+    expect(asset.asset?.altText).toBe('A dog')
+  })
+})
+
 describe('listAssets / getAsset / deleteAsset', () => {
   it('listAssets GETs /v1/media/:ds with limit/offset and returns the page', async () => {
     let seenUrl = ''

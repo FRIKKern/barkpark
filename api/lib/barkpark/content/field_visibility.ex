@@ -27,6 +27,13 @@ defmodule Barkpark.Content.FieldVisibility do
   becomes `{"field": "banners", "operator": "count_neq", "value": 2}` read as
   "visible when …"; a list counts its rows, a map its keys, nil/"" count 0).
   Field references support dotted paths (`"foo.bar.baz"` walks the doc map).
+
+  `"scope"` picks where the path starts (task-9905a69475b1ff3b):
+  `"document"` (the default) walks from the document root; `"parent"` walks
+  from the enclosing object or array item, Sanity's `hidden: ({parent}) => …`.
+  `{"field": "kind", "operator": "eq", "value": "url", "scope": "parent"}`
+  inside a `links` item is "visible when THIS link's kind is url". The schema
+  validator refuses `"parent"` on a top-level field, which has no parent.
   When the path traverses a list, the walk flat-maps the rest of the path
   across every row — useful for `subjects.subject.subjectCode`-style refs.
 
@@ -42,15 +49,29 @@ defmodule Barkpark.Content.FieldVisibility do
   Returns `true` when `field` should render given the current document
   state, `false` otherwise. Unknown operator → defaults to visible.
   """
-  def visible?(field, doc) when is_map(doc) do
+  def visible?(field, doc), do: visible?(field, doc, nil)
+
+  @doc """
+  As `visible?/2`, with the enclosing object or array item a `"scope": "parent"`
+  predicate reads. With no parent (a top-level field) it reads the document.
+  """
+  def visible?(field, doc, parent) when is_map(doc) do
     case extract_visible_when(field) do
       nil -> true
-      %{} = cond -> evaluate(cond, doc)
+      %{} = cond -> evaluate(cond, scope_root(cond, doc, parent))
       _ -> true
     end
   end
 
-  def visible?(_field, _doc), do: true
+  def visible?(_field, _doc, _parent), do: true
+
+  @doc "The map a predicate's path starts from: the parent for `\"scope\": \"parent\"`."
+  def scope_root(cond, doc, parent) do
+    case Map.get(cond, "scope", Map.get(cond, :scope)) do
+      scope when scope in ["parent", :parent] and is_map(parent) -> parent
+      _ -> doc
+    end
+  end
 
   # Pull the visibleWhen predicate off the field regardless of shape.
   # Order of precedence:

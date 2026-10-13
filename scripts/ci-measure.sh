@@ -56,6 +56,15 @@
 #   bash scripts/ci-measure.sh --since … --until … --json          # machine-readable
 #   bash scripts/ci-measure.sh --breaker --since 2026-09-03        # main-red breaker value
 #   bash scripts/ci-measure.sh --selftest                          # fixtures, no network
+#
+# QUEUE WAIT (owner ruling #64, 2026-10-03). The CI goal is measured in runner
+# time and queue wait per PR, not in check-run count. `wait` is a job's
+# created_at -> started_at: the time it sat queued before a runner took it.
+# The older `queue` column is NOT that — it is started_at -> completed_at minus
+# the step span (runner setup and teardown) and keeps its name only because
+# earlier baselines were recorded under it. A job row without created_at (an old
+# fixture or an old --raw-out file) adds nothing to wait and is counted in
+# wait_unknown_jobs, so a missing field never reads as zero wait.
 #   CI_MEASURE_FIXTURE=<file> bash scripts/ci-measure.sh --since … --until …
 #
 # EXIT CODES
@@ -157,8 +166,10 @@ for line in sys.stdin:
         continue
     jobs.append(obj)
 
-by_day = collections.defaultdict(lambda: {"compute": 0.0, "queue": 0.0,
+by_day = collections.defaultdict(lambda: {"compute": 0.0, "queue": 0.0, "wait": 0.0,
                                           "executed": 0, "zero_step": 0, "jobs": 0})
+waits = []
+wait_unknown = 0
 per_workflow = collections.defaultdict(lambda: {"compute": 0.0, "runs": 0,
                                                 "zero_step": 0, "red": 0})
 
@@ -187,6 +198,13 @@ for j in jobs:
         w["zero_step"] += 1
     if started and completed:
         d["queue"] += max(0.0, (completed - started).total_seconds() - compute)
+    # Queue WAIT: created -> started. Only measurable when both exist.
+    created = parse(j.get("created_at"))
+    if created and started:
+        w_s = max(0.0, (started - created).total_seconds())
+        d["wait"] += w_s; waits.append(w_s)
+    else:
+        wait_unknown += 1
 
 def ceilings(l):
     out = []
@@ -222,6 +240,7 @@ for day in days:
         "day": day, "concurrent_job_ceiling": day_caps[day],
         "compute_min": round(d["compute"] / 60, 1),
         "queue_min": round(d["queue"] / 60, 1),
+        "wait_min": round(d["wait"] / 60, 1),
         "jobs": d["jobs"], "executed": d["executed"], "zero_step": d["zero_step"],
     })
     tc += d["compute"]; tq += d["queue"]; te += d["executed"]; tz += d["zero_step"]
@@ -250,8 +269,16 @@ report["sampling"] = {
             "systematic sample. TOTALS below are SAMPLE totals; the estimated_* "
             "fields scale them by population/sample and are ESTIMATES, not measurements.",
 }
+def pct(xs, q):
+    if not xs: return None
+    xs = sorted(xs)
+    return round(xs[min(len(xs) - 1, int(q * len(xs)))], 1)
+
 report["totals"] = {
     "compute_min": round(tc / 60, 1), "queue_min": round(tq / 60, 1),
+    "wait_min": round(sum(waits) / 60, 1),
+    "wait_p50_s": pct(waits, 0.5), "wait_p90_s": pct(waits, 0.9),
+    "wait_measured_jobs": len(waits), "wait_unknown_jobs": wait_unknown,
     "executed_jobs": te, "zero_step_jobs": tz,
     "zero_step_share": round(tz / (te + tz), 3) if (te + tz) else 0.0,
 }
@@ -281,6 +308,12 @@ print(f"{'TOTAL':<12}{'':>8}{t['compute_min']:>10.1f}{t['queue_min']:>10.1f}"
 print()
 print(f"zero-step jobs: {t['zero_step_jobs']} of {t['executed_jobs'] + t['zero_step_jobs']} "
       f"({t['zero_step_share'] * 100:.1f}%) — these executed NOTHING and contribute no compute")
+if t["wait_measured_jobs"]:
+    print(f"queue wait (created -> started): {t['wait_min']:.1f} min over {t['wait_measured_jobs']} jobs, "
+          f"p50 {t['wait_p50_s']}s, p90 {t['wait_p90_s']}s"
+          + (f"; {t['wait_unknown_jobs']} jobs carried no created_at and are NOT counted" if t["wait_unknown_jobs"] else ""))
+else:
+    print(f"queue wait: NOT MEASURED — none of the {t['wait_unknown_jobs']} job rows carried created_at")
 print()
 print(f"{'workflow':<46}{'compute':>9}{'exec':>6}{'0-step':>8}{'min/exec':>10}{'red':>7}")
 for w in report["workflows"][:30]:
@@ -439,7 +472,7 @@ fetch() {
         if [ -n "$rid" ] && [ "$rid" != "null" ]; then
           day_got=$(( day_got + 1 ))
           gh api "repos/$REPO/actions/runs/$rid/jobs?per_page=100" \
-            --jq '.jobs[] | {name, workflow_name, run_id, conclusion, started_at, completed_at, steps: [.steps[]? | {started_at, completed_at}]}' \
+            --jq '.jobs[] | {name, workflow_name, run_id, conclusion, created_at, started_at, completed_at, steps: [.steps[]? | {started_at, completed_at}]}' \
             2>/dev/null
         fi
         i=$(( i + 1 ))
@@ -549,6 +582,24 @@ FIX
     pass=$((pass+1)); echo "  ok   a7 a full 60-of-60 sample is NOT flagged (the guard discriminates)"
   else
     fail=$((fail+1)); echo "  FAIL a7 a healthy sample was flagged as under-filled — the guard cries wolf"
+  fi
+
+  # a8 — QUEUE WAIT is created_at -> started_at (owner ruling #64), never the
+  # step-less wall remainder, and a row without created_at is counted as
+  # unknown rather than as zero wait. The first job waited 90s, the second 30s;
+  # the third has no created_at.
+  cat > "$tmp/wait.jsonl" <<'FIX'
+{"name":"Test","workflow_name":"elixir","conclusion":"success","created_at":"2026-09-01T09:58:30Z","started_at":"2026-09-01T10:00:00Z","completed_at":"2026-09-01T10:02:00Z","steps":[{"started_at":"2026-09-01T10:00:10Z","completed_at":"2026-09-01T10:01:10Z"}]}
+{"name":"Lint","workflow_name":"elixir","conclusion":"success","created_at":"2026-09-01T09:59:30Z","started_at":"2026-09-01T10:00:00Z","completed_at":"2026-09-01T10:01:00Z","steps":[{"started_at":"2026-09-01T10:00:05Z","completed_at":"2026-09-01T10:00:35Z"}]}
+{"name":"Old","workflow_name":"elixir","conclusion":"success","started_at":"2026-09-01T10:00:00Z","completed_at":"2026-09-01T10:01:00Z","steps":[{"started_at":"2026-09-01T10:00:05Z","completed_at":"2026-09-01T10:00:35Z"}]}
+FIX
+  local wait_out
+  wait_out=$(CI_MEASURE_FIXTURE="$tmp/wait.jsonl" bash "$0" --since 2026-09-01 --until 2026-09-01 --json \
+               | python3 -c 'import json,sys; t=json.load(sys.stdin)["totals"]; print(t["wait_min"], t["wait_p90_s"], t["wait_measured_jobs"], t["wait_unknown_jobs"])')
+  if [ "$wait_out" = "2.0 90.0 2 1" ]; then
+    pass=$((pass+1)); echo "  ok   a8 queue wait is created->started (2.0 min, p90 90s over 2 jobs) and the row without created_at is counted as unknown"
+  else
+    fail=$((fail+1)); echo "  FAIL a8 queue wait read '$wait_out', expected '2.0 90.0 2 1'"
   fi
 
   # ── v1 THE ARM THE VALUE AUDIT EXISTS FOR ────────────────────────────────

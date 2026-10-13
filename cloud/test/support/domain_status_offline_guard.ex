@@ -21,6 +21,9 @@ defmodule BarkparkCloud.DomainStatusOfflineGuard do
   @spec nxdomain(charlist(), :inet.address_family()) :: {:error, :nxdomain}
   def nxdomain(_host, _family), do: {:error, :nxdomain}
 
+  @doc "Owner ruling #29: no TXT record anywhere — a domain proof never passes by default."
+  def no_txt(_name), do: {:ok, []}
+
   @spec tls(String.t(), :inet.port_number()) :: {:error, :offline_guard}
   def tls(_host, _port), do: {:error, :offline_guard}
 

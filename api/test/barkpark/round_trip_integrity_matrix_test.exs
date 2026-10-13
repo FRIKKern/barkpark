@@ -528,7 +528,32 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
     test "the field corpus", %{src: src, fields_doc: doc} do
       {:ok, copy} = Content.clone_document(doc, @type_name, @ds, src.scope)
       refute copy.doc_id == doc.doc_id
-      assert_none!("clone_fields", field_failures(fields_of(doc), fields_of(copy)))
+
+      # The one intended change (task-970a40d1a252e649): the block bound to
+      # the title field carries the copy's title, or the copy's next block
+      # write would project the source title back. Every other cell survives.
+      expected =
+        case fields_of(doc) do
+          %{"blocks" => blocks} = fields when is_list(blocks) ->
+            Map.put(
+              fields,
+              "blocks",
+              Enum.map(blocks, fn
+                %{"fieldName" => "title"} = b -> Map.put(b, "value", copy.title)
+                b -> b
+              end)
+            )
+
+          fields ->
+            fields
+        end
+
+      if is_list(fields_of(doc)["blocks"]) do
+        assert %{"value" => "Round trip (copy)"} =
+                 Enum.find(fields_of(copy)["blocks"], &(&1["fieldName"] == "title"))
+      end
+
+      assert_none!("clone_fields", field_failures(expected, fields_of(copy)))
     end
 
     test "the golden-65 paper", %{default: default, paper: paper} do

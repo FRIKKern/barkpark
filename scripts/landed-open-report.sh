@@ -147,20 +147,26 @@ walk() {
 
     # The scanner exits 3 and writes to stderr on a bad page; the substitution
     # captures only stdout, so the exit code is the whole test.
-    scan="$(python3 "$PY" scan "$raw" 2>"$WORK/scan.$page.err")"
+    # The scan goes to a FILE, never into a shell variable passed as argv. A
+    # page's hits once grew past Linux's 128 KiB per-argument cap
+    # (MAX_ARG_STRLEN): python3 died with "Argument list too long", the eval
+    # below set nothing, and the walk spun to MAX_PAGES (run 37630037819).
+    scan="$WORK/scan.$page.json"
+    python3 "$PY" scan "$raw" > "$scan" 2>"$WORK/scan.$page.err"
     if [ "$?" -ne 0 ]; then
       die2 "page $page: $(cat "$WORK/scan.$page.err")"
     fi
 
-    local docs_len returned next_cursor has_more
-    eval "$(python3 -c '
+    local docs_len returned next_cursor has_more page_vars
+    page_vars="$(python3 -c '
 import json,sys
-d=json.loads(sys.argv[1])
+d=json.load(open(sys.argv[1]))
 print("docs_len=%d" % d["docs_len"])
 print("returned=%s" % (d["returned"] if isinstance(d["returned"],int) else -1))
 print("has_more=%d" % (1 if d["has_more"] else 0))
 print("next_cursor=%s" % json.dumps(d["next_cursor"]))
-' "$scan")"
+' "$scan")" || die2 "page $page: could not read the scanner's output at $scan"
+    eval "$page_vars"
 
     # THE ASSERTION THAT CAUGHT THE ORIGINAL BUG. A pager keyed on the wrong
     # array name wrote ZERO rows for 3 of 9 pages while printing a tidy
@@ -171,7 +177,7 @@ print("next_cursor=%s" % json.dumps(d["next_cursor"]))
 
     python3 -c '
 import json,sys
-d=json.loads(sys.argv[1])
+d=json.load(open(sys.argv[1]))
 with open(sys.argv[2],"a") as fh:
     for h in d["hits"]:
         fh.write(json.dumps(h)+"\n")
@@ -427,6 +433,25 @@ JSON
   out="$(bash "$SELF" --fixture "$fx" 2>&1)"
   case "$out" in *"landed:pr-15092@cccccc3333"*) ;;
     *) echo "FAIL: an object-shaped label array lost its landing fact"; fail=1 ;; esac
+
+  # A PAGE WHOSE HITS OUTGROW ONE ARGUMENT (run 37630037819, 2026-10-07). The
+  # scan used to travel to python3 as argv; past Linux's 128 KiB per-argument
+  # cap it died with "Argument list too long" and the walk spun to MAX_PAGES.
+  # 4,000 hits is about 1.2 MiB of scan, past macOS's 1 MiB total ARG_MAX too,
+  # so this reds on either machine if the scan goes back into argv. Every row
+  # shares one sha so ages_map makes one git call, not 4,000.
+  local fl="$WORK/fl"; mkdir -p "$fl/pages"
+  python3 -c '
+import json,sys
+docs=[{"doc_id":"task-big-%d" % i,"title":"x"*80,"lifecycle_status":"open","child_count":0,
+       "content":{"labels":["landed-on-main","landed:pr-%d@abcdef0000" % (20000+i)],
+                  "acceptance_criteria":[{"criterion":"c","met":False}]}} for i in range(4000)]
+json.dump({"ok":True,"docs":docs,"page":{"returned":len(docs),"has_more":False}},open(sys.argv[1],"w"))
+' "$fl/pages/1.json"
+  out="$(bash "$SELF" --fixture "$fl" 2>&1)"; rc=$?
+  [ "$rc" -eq 0 ] || { echo "FAIL: a page with over 1 MiB of scan exited $rc, want 0. tail: $(printf '%s' "$out" | tail -2)"; fail=1; }
+  case "$out" in *"walked 4000 rows, 4000 carry landed-on-main, 4000 live"*) ;;
+    *) echo "FAIL: a large page lost rows. got: $(printf '%s' "$out" | tail -2)"; fail=1 ;; esac
 
   # UNKNOWN FLAG NEVER PASSES.
   bash "$SELF" --fixture "$fx" --nope >/dev/null 2>&1; rc=$?

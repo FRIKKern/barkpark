@@ -313,11 +313,41 @@ defmodule BarkparkWeb.AccessControllerTest do
       assert json_response(conn, 403)["error"]["code"] == "forbidden"
     end
 
-    test "missing workspace_id → 422", %{conn: conn} do
+    # task-1640b4d8feff6ae8: an absent workspace_id defaults only when the
+    # answer is unambiguous, and the default is authorized like an explicit id.
+    test "missing workspace_id defaults to the token's only workspace", %{conn: conn} do
       ws = create_workspace!()
+      other = create_workspace!()
       {grantor_raw, _} = token_principal(ws, ["admin"])
+      {grant, _} = mint_grant(ws, "only@example.com")
+      {other_grant, _} = mint_grant(other, "other@example.com")
 
       conn = conn |> bearer(grantor_raw) |> get("/v1/access")
+
+      ids = json_response(conn, 200)["grants"] |> MapSet.new(& &1["id"])
+      assert grant.id in ids
+      refute other_grant.id in ids
+    end
+
+    test "missing workspace_id with two memberships → 422 naming the flag", %{conn: conn} do
+      ws = create_workspace!()
+      ws2 = create_workspace!()
+      {grantor_raw, token} = token_principal(ws, ["admin"])
+      {:ok, _} = TenancyAuth.create_membership(ws2.id, token.id, "admin", "api_token")
+
+      conn = conn |> bearer(grantor_raw) |> get("/v1/access")
+
+      body = json_response(conn, 422)
+      assert body["error"]["code"] == "unprocessable"
+      assert body["error"]["message"] =~ "pass workspace_id"
+    end
+
+    test "missing workspace_id with no membership → 422, never another workspace's grants",
+         %{conn: conn} do
+      ws = create_workspace!()
+      mint_grant(ws, "x@example.com")
+
+      conn = conn |> bearer(stranger_token()) |> get("/v1/access")
       assert json_response(conn, 422)["error"]["code"] == "unprocessable"
     end
   end

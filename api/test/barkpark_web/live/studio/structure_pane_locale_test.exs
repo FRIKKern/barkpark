@@ -1,0 +1,186 @@
+defmodule BarkparkWeb.Studio.StructurePaneLocaleTest do
+  @moduledoc """
+  task-acb3765dea94de2e: in a Norwegian Studio the structure pane read
+  "Content", "Plugins", "…Rest" and the plugin type titles in English. The
+  pane now reads Norwegian for Barkpark's own words; an authored type title
+  stays as written, and an English workspace reads as before.
+  """
+  use BarkparkWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Auth
+  alias Barkpark.Content
+  alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  @dataset "production"
+
+  setup %{conn: conn} do
+    default_ws = Tenancy.get_default_workspace()
+    suffix = System.unique_integer([:positive])
+
+    {:ok, ws} =
+      Tenancy.create_workspace(%{slug: "struct-loc-#{suffix}", name: "Structure Locale"})
+
+    {:ok, proj} = Tenancy.create_project(ws, %{slug: "default", name: "Default Project"})
+    {:ok, _ds} = Tenancy.create_dataset(proj, %{slug: @dataset, name: "production"})
+    {:ok, ws} = Tenancy.set_workspace_locale(ws, "nb-NO")
+
+    raw = "struct-loc-token-" <> Ecto.UUID.generate()
+
+    {:ok, token} =
+      Auth.create_token(raw, "struct-loc", @dataset, ["read", "write", "admin"], default_ws.id)
+
+    {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "owner")
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "paper",
+          "title" => "Papers",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "forfatter",
+          "title" => "Forfatter",
+          "visibility" => "public",
+          "fields" => [%{"name" => "name", "title" => "Name", "type" => "string"}]
+        },
+        @dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "struct-loc-paper",
+          "title" => "Fjellet",
+          "dataset" => @dataset,
+          "blocks" => [
+            %{
+              "id" => "p1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Ein stad i fjellet."}]
+            }
+          ],
+          "workspace_id" => ws.id,
+          "project_id" => proj.id
+        })
+      )
+
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
+    {:ok, conn: conn, ws: ws, proj: proj}
+  end
+
+  defp pane_labels(conn, ws, proj) do
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
+
+    ~r/class="pane-item-label">([^<]*)</
+    |> Regex.scan(html, capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.map(&String.trim/1)
+  end
+
+  test "a Norwegian Studio's structure pane reads Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    assert pane_labels(conn, ws, proj) == [
+             "Papers",
+             "Regneark",
+             "Innhold",
+             "Oppgaver",
+             "Prosjekter",
+             "Flåte",
+             "Utvidelser",
+             "…Resten"
+           ]
+  end
+
+  test "an English Studio's structure pane reads as before", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, ws} = Tenancy.set_workspace_locale(ws, "en")
+
+    assert pane_labels(conn, ws, proj) == [
+             "Papers",
+             "Sheets",
+             "Content",
+             "Tasks",
+             "Projects",
+             "Fleet",
+             "Plugins",
+             "…Rest"
+           ]
+  end
+
+  # task-7b0c9b8ae4ac6f79: the list pane names the type by what its author
+  # called it, and a plugin-owned type by a Norwegian word of its own.
+  test "a Norwegian list pane names its type by title or by its own word", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/forfatter")
+
+    assert has_element?(view, ~s(button[aria-label="Opprett Forfatter"]))
+    refute has_element?(view, ~s(button[aria-label="Opprett forfatter"]))
+
+    {:ok, view, _html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/sheet")
+    assert has_element?(view, ~s(button[aria-label="Opprett regneark"]))
+  end
+
+  # task-a3bedc86f8a6a517: the shell carries each type's word for the client
+  # pickers — its schema title, or a plugin type's own word.
+  test "the Studio shell carries the type words the pickers read", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
+
+    [json] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("[data-type-labels]")
+      |> LazyHTML.attribute("data-type-labels")
+
+    labels = Jason.decode!(json)
+    assert labels["forfatter"] == "Forfatter"
+    assert labels["paper"] == "artikkel"
+  end
+
+  # task-f1b5f9e279951791: the map was built from the listed catalog only, which
+  # leaves out a plugin's SHARED schema row outside the Default workspace, so
+  # its pickers read the raw id ("paper", "sheet"). This workspace registers no
+  # sheet or task schema of its own; their words are on the shell anyway.
+  test "the shell's type words include every plugin type, registered here or not", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
+
+    [json] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("[data-type-labels]")
+      |> LazyHTML.attribute("data-type-labels")
+
+    labels = Jason.decode!(json)
+
+    for type <- BarkparkWeb.Studio.PaneBuilder.plugin_type_word_types() do
+      assert Map.has_key?(labels, type), "no word for plugin type #{type}: #{inspect(labels)}"
+    end
+
+    assert labels["sheet"] == "regneark"
+    assert labels["task"] == "oppgave"
+    assert labels["forfatter"] == "Forfatter", "an authored title still wins"
+  end
+end

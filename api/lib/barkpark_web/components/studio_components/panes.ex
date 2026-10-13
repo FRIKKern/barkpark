@@ -32,6 +32,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       that makes `aria-selected` meaningful.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Phoenix.LiveView.JS
 
@@ -41,7 +42,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
     ~H"""
     <span class={"status status-#{@status}"}>
       <span class="status-dot"></span>
-      <%= @status %>
+      <%= status_word(@status) %>
     </span>
     """
   end
@@ -57,11 +58,13 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   """
   attr :id, :string, default: nil
   attr :phx_hook, :string, default: nil
+  # The desk is the page's main region (task-50c06dba12b3e908); nil renders no role.
+  attr :role, :string, default: nil
   slot :inner_block, required: true
 
   def pane_layout(assigns) do
     ~H"""
-    <div class="pane-layout" id={@id} phx-hook={@phx_hook}>
+    <div class="pane-layout" id={@id} phx-hook={@phx_hook} role={@role}>
       <%= render_slot(@inner_block) %>
     </div>
     """
@@ -174,6 +177,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # Set by the caller for the pane a just-handled `expand-pane` named, so the
   # initial page load (where every pane mounts) never steals focus.
   attr :focus_on_mount, :boolean, default: false
+  # The expanded column's landmark role. "region" everywhere except a page whose
+  # main content IS a column and has no <main> of its own (the API tester's docs
+  # column), which passes "main" (axe landmark-one-main).
+  attr :landmark, :string, default: "region", values: ~w(region main)
 
   slot :header_actions
   slot :inner_block, required: true
@@ -197,6 +204,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       |> assign(:col_class, col_class)
       |> assign(:role_attr, assigns[:data_role] && to_string(assigns[:data_role]))
       |> assign(:priority_attr, assigns[:data_priority] && to_string(assigns[:data_priority]))
+      |> assign(:title, chrome_title(assigns.title))
 
     ~H"""
     <%= if @collapsed do %>
@@ -208,8 +216,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         data-priority={@priority_attr}
         phx-click={@phx_click}
         phx-value-idx={@phx_value_idx}
-        title={"Back to #{@title}"}
-        aria-label={"Back to #{@title}"}
+        title={gettext("Back to %{pane}", pane: @title)}
+        aria-label={gettext("Back to %{pane}", pane: @title)}
         aria-controls={@controls}
       >
         <%!-- PHRASING CONTENT ONLY. This is a <button>, whose HTML5 content
@@ -232,9 +240,15 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <span class="pane-column-collapsed-label"><%= @title %></span>
       </button>
     <% else %>
+      <%!-- A named region, so screen-reader landmark navigation reaches each
+           desk column and its header is inside a landmark (task-462c98e4f1abdf92).
+           No pane column holds a landmark of its own (the editor's main and the
+           paper shell's main render outside the panes), so nothing nests. --%>
       <div
         class={@col_class}
         id={@id}
+        role={@landmark}
+        aria-label={@title}
         data-role={@role_attr}
         data-priority={@priority_attr}
         tabindex={@focus_on_mount && "-1"}
@@ -294,6 +308,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <bp-document-preview
         document-json={@json}
         schema-name={@schema_name}
+        data-strings={BarkparkWeb.StudioLocale.component_strings(:document_preview)}
       ></bp-document-preview>
     </div>
     """
@@ -540,7 +555,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           role="checkbox"
           class="bp-doc-checkbox"
           aria-checked={to_string(@checked)}
-          aria-label={"Select #{@title}"}
+          aria-label={gettext("Select %{item}", item: @title)}
           phx-click="toggle-doc-checkbox"
           phx-value-id={@phx_value_id}
           data-test-id={"doc-checkbox-#{@phx_value_id}"}
@@ -555,6 +570,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         class="bp-doc-row-body"
         title={@doc_id}
         aria-label={@aria_label}
+        data-press-name={@title}
         aria-current={@selected && "true"}
         phx-click={@phx_click}
         phx-value-pane={@phx_value_pane}
@@ -603,7 +619,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # of the document. The `:trailing` slot (presence dots) is decorative and
   # deliberately not spoken.
   defp doc_row_label(assigns) do
-    status = if assigns.is_draft, do: "draft", else: assigns.status
+    status = status_word(if assigns.is_draft, do: "draft", else: assigns.status)
 
     [assigns.title, status, assigns[:badge], assigns[:meta]]
     |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
@@ -620,4 +636,24 @@ defmodule BarkparkWeb.StudioComponents.Panes do
     |> String.replace(~r/[^a-z0-9]+/, "-")
     |> String.trim("-")
   end
+
+  # The desk's own folder names come from `Barkpark.Structure`, which also feeds
+  # the TUI and /v1/structure, so they stay English there and are translated
+  # here, at display (task-33bcb0b4415bc528). Schema titles pass through: they
+  # are already the content owner's words. Public for the desk breadcrumb,
+  # which shows the same pane titles.
+  @doc """
+  A document status in the viewer's Studio language, for text a person reads
+  or hears (the status badge, a list row's accessible name). The raw status
+  stays the CSS modifier. A status this map does not know reads as written.
+  """
+  @spec status_word(String.t() | nil) :: String.t() | nil
+  def status_word("draft"), do: gettext("draft")
+  def status_word("published"), do: gettext("published")
+  def status_word(status), do: status
+
+  @doc false
+  def chrome_title("Structure"), do: gettext("Structure")
+  def chrome_title("Plugins"), do: gettext("Plugins")
+  def chrome_title(title), do: title
 end

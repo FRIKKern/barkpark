@@ -238,6 +238,8 @@ func rollbackMessage(ref string, re *cloudclient.RollbackError) string {
 		return fmt.Sprintf("an update or rollback is already running on instance %q — one run at a time; wait for it to finish (watch `bp cloud status`) and retry. Nothing new was flipped.", ref)
 	case "not_supported":
 		return fmt.Sprintf("instance %q predates the blue/green slot machinery — it has no idle slot to roll back to. Nothing was flipped.", ref)
+	case "v2_seals_unreadable":
+		return fmt.Sprintf("instance %q holds encrypted fields sealed in the bound (v2) format, and its previous version cannot open them — rolling back would leave them unreadable. Fix forward instead. Nothing was flipped.", ref)
 	case "not_found":
 		return fmt.Sprintf("no such instance %q (or it is not in your team)", ref)
 	case "no_admin_token":

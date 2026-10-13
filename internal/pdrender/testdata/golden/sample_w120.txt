@@ -5,8 +5,6 @@ This paragraph mixes bold, italic, inline code() and a link (https://barkpark.cl
 be eyeballed across several lines of running prose.                                                                     
                                                                                                                         
                                                                                                                         
-                                                                                                                        
-                                                                                                                        
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                                                                                                                         
 A level-two heading                                                                                                     

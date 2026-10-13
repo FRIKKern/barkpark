@@ -5,7 +5,8 @@ defmodule BarkparkWeb.LoginTicketTest do
   Proves the security-relevant properties, not just the happy path:
 
     * mint requires a valid bearer (POST /v1/auth/login-tickets)
-    * consume sets `session["api_token"]` to the RAW bound token + redirects
+    * consume mints a revocable TokenSession and sets `session["api_token_session"]`
+      to its opaque id (never the raw bound token) + redirects
     * the minted session actually passes the LiveAuth `:admin` mount
     * single-use RACE: N concurrent consumes → EXACTLY ONE wins (no double-spend)
     * the WINNING consume DELETES the row, so the bound bearer stops being
@@ -27,6 +28,21 @@ defmodule BarkparkWeb.LoginTicketTest do
 
   @admin_token "dwb7-admin-token-abcdef"
   @reader_token "dwb7-reader-token-123456"
+
+  # Ruling #16 rework half (task-57f23825b18ab55d): a consumed login ticket no
+  # longer puts the raw bearer in the session — it mints a
+  # Barkpark.Auth.TokenSession and stores only its opaque id under
+  # `session["api_token_session"]`. Resolve it back to the same raw token via
+  # Auth.resolve_session_credential/2 rather than comparing the cookie's
+  # contents directly — the whole point is that the cookie no longer CAN be
+  # compared that way.
+  defp assert_session_resolves_to(conn, expected_raw) do
+    session_id = get_session(conn, "api_token_session")
+    assert is_binary(session_id)
+
+    assert {:ok, %Auth.ApiToken{}, ^expected_raw} =
+             Auth.resolve_session_credential(session_id, nil)
+  end
 
   # SettingsLive moved to `/w/:ws/p/:proj/studio/settings` (sdl-w1-admin-canonical).
   @settings_path "/w/default/p/default/studio/settings"
@@ -89,7 +105,8 @@ defmodule BarkparkWeb.LoginTicketTest do
       conn = get(conn, "/login/ticket/#{ticket}")
 
       assert redirected_to(conn, 302) == "/studio"
-      assert get_session(conn, "api_token") == @admin_token
+      refute get_session(conn, "api_token")
+      assert_session_resolves_to(conn, @admin_token)
       # One-time-link hardening headers.
       assert get_resp_header(conn, "cache-control") == ["no-store"]
       assert get_resp_header(conn, "referrer-policy") == ["no-referrer"]
@@ -99,7 +116,7 @@ defmodule BarkparkWeb.LoginTicketTest do
       {:ok, ticket} = Auth.mint_login_ticket(@admin_token)
 
       conn = get(conn, "/login/ticket/#{ticket}")
-      assert get_session(conn, "api_token") == @admin_token
+      assert_session_resolves_to(conn, @admin_token)
 
       # Carry the freshly-set session cookie forward into a LiveView mount.
       conn = recycle(conn)
@@ -110,11 +127,12 @@ defmodule BarkparkWeb.LoginTicketTest do
       {:ok, ticket} = Auth.mint_login_ticket(@admin_token)
 
       first = get(conn, "/login/ticket/#{ticket}")
-      assert get_session(first, "api_token") == @admin_token
+      assert_session_resolves_to(first, @admin_token)
 
       second = get(scoped_conn(), "/login/ticket/#{ticket}")
       assert redirected_to(second, 302) == "/login"
       assert get_session(second, "api_token") == nil
+      assert get_session(second, "api_token_session") == nil
     end
 
     test "unknown / used / expired all redirect to /login with NO session (no oracle)", %{

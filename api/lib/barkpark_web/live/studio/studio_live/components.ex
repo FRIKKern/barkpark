@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
@@ -41,6 +42,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # — the same no-reload proof BulldocsLive uses, now inside the Studio. Read-only:
   # editing stays on the paper-ingest ops endpoint.
   attr(:paper_doc, :map, default: nil)
+  # Whether the open paper has a published row (the standalone reader's page).
+  attr(:paper_has_published, :boolean, default: false)
   attr(:paper_rev, :integer, default: 0)
   attr(:paper_html, :string, default: "")
   attr(:paper_block_mode, :boolean, default: false)
@@ -65,6 +68,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
+  attr(:public_reader, :boolean, default: false)
+  attr(:sidebar_label_suggestions, :list, default: [])
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
   # call site can lean on the component's own defaults on first paint.
   attr(:sidebar_open, :boolean, default: true)
@@ -130,7 +135,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # controls reds the inclusion arm.
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
-    title = (assigns.paper_doc && assigns.paper_doc.title) || slug || "Paper"
+    # The desk row's own spelling for an untitled paper, never the raw
+    # `drafts.<id>` (task-23bff317e617928e).
+    title =
+      if assigns.paper_doc,
+        do: BarkparkWeb.Studio.PaneBuilder.display_title(assigns.paper_doc),
+        else: gettext("Paper")
 
     edit_blocks =
       case assigns.paper_doc do
@@ -210,7 +220,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
       <.document_header dataset={@dataset} title={@title} focus_on_mount={@focus_on_mount}>
         <:status_pill>
-          <span class="badge badge-published">{@doc_type}</span>
+          <span class="badge badge-published">{BarkparkWeb.Studio.PaneBuilder.type_word(@doc_type)}</span>
         </:status_pill>
         <:actions>
           <%!-- spd-bl-publish-affordance-triple — the hand path's missing
@@ -227,10 +237,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             type="button"
             class="btn btn-primary btn-sm"
             phx-click="paper-publish"
-            aria-label="Publish"
+            aria-label={gettext("Publish")}
             data-test-id="paper-publish"
           >
-            Publish
+            {gettext("Publish")}
           </button>
           <%!-- View ⇄ Edit toggle — the flag-OFF OPT-OUT path ONLY. With the
                 canvas on (the D7/D9 default) there are no modes: the editor is
@@ -246,17 +256,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             data-test-id="paper-edit-toggle"
           >
             <.icon name={if @paper_edit_mode, do: "eye", else: "pencil"} size={14} />
-            <%= if @paper_edit_mode, do: "View", else: "Edit" %>
+            <%= if @paper_edit_mode, do: gettext("View"), else: gettext("Edit") %>
           </button>
+          <%!-- The standalone reader serves PUBLISHED rows only, under the
+                published id. The link used the open row's id (`drafts.<id>`
+                for a draft), so it 404'd for every draft, even one with a
+                published version; and a never-published paper has no page
+                to open (task-a69f860810cbcfc3). --%>
           <a
-            :if={@slug}
-            href={Paths.paper_path(@scope_prefix, @slug)}
+            :if={@slug && (not @paper_draft? or @paper_has_published)}
+            href={Paths.paper_path(@scope_prefix, Barkpark.Content.published_id(@slug))}
             class="btn btn-ghost btn-sm"
             target="_blank"
             rel="noopener"
             data-test-id="paper-open-standalone"
           >
-            <.icon name="external-link" size={14} /> Open standalone
+            <.icon name="external-link" size={14} /> {gettext("Open standalone")}
           </a>
           <%!-- ITEM share (P7): a direct Google-Docs-style link to THIS paper,
                 not the whole papers section. Admin-only; the handler re-checks
@@ -270,10 +285,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             phx-value-ref-type="paper"
             phx-value-ref-id={@slug}
             phx-value-title={@title}
-            title="Share this paper (direct link)"
+            title={gettext("Share this paper (direct link)")}
             data-test-id="paper-share"
           >
-            <.icon name="share-2" size={14} /> Share
+            <.icon name="share-2" size={14} /> {gettext("Share")}
           </button>
         </:actions>
       </.document_header>
@@ -319,7 +334,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             data-test-id="studio-paper-shell"
             aria-label={
               @slug &&
-                if(@canvas_on, do: @show_editor && "Editing #{@title}", else: @title)
+                if(@canvas_on, do: @show_editor && gettext("Editing %{title}", title: @title), else: @title)
             }
           >
             <%!-- Sentinel: rendered once, OUTSIDE the streamed/re-assigned
@@ -330,7 +345,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <%= cond do %>
               <% is_nil(@slug) -> %>
                 <article id="paper-body" data-rev={@paper_rev}>
-                  <p id="paper-empty">No paper selected.</p>
+                  <p id="paper-empty">{gettext("No paper selected.")}</p>
                 </article>
               <% @show_editor -> %>
                 <%!-- Rule 5 — opening a paper IS the editor. On the canvas
@@ -388,7 +403,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   class="bp-paper-editor-empty"
                   data-test-id="paper-blocks-empty-readonly"
                 >
-                  This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Choose Edit above to add one.
+                  {gettext("This %{type} (", type: @doc_type)}<code>{@slug}</code>{gettext(
+                    ") has no body blocks yet. Choose Edit above to add one."
+                  )}
                 </p>
                 <article
                   id={"paper-body-#{@slug}"}
@@ -515,6 +532,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
+          public_reader={@public_reader}
+          label_suggestions={@sidebar_label_suggestions}
+          label_admin?={@shares_admin?}
         />
       </div>
     </div>
@@ -564,18 +584,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       data-doc-type={@doc_type}
     >
       <p class="bp-paper-unrenderable-title">
-        Studio cannot render the body of this {@doc_type}.
+        {gettext("Studio cannot render the body of this %{type}.", type: @doc_type)}
       </p>
       <p :if={not @html_backed} class="bp-paper-unrenderable-reason">
-        <code>{@doc_id}</code> ({@doc_type}) was stored without a body block list and without
-        saved HTML, so there is nothing here to show or edit yet. The document itself is intact —
-        its metadata is in the panel beside this message.
+        <code>{@doc_id}</code> {gettext(
+          "(%{type}) was stored without a body block list and without saved HTML, so there is nothing here to show or edit yet. The document itself is intact — its metadata is in the panel beside this message.",
+          type: @doc_type
+        )}
       </p>
       <p :if={@html_backed} class="bp-paper-unrenderable-reason">
-        <code>{@doc_id}</code> ({@doc_type}) was stored as saved HTML that renders nothing a reader
-        can see, and it has no body block list. Studio will not silently convert stored HTML into
-        blocks, so the body cannot be started from here — the document itself is intact, and its
-        metadata is in the panel beside this message.
+        <code>{@doc_id}</code> {gettext(
+          "(%{type}) was stored as saved HTML that renders nothing a reader can see, and it has no body block list. Studio will not silently convert stored HTML into blocks, so the body cannot be started from here — the document itself is intact, and its metadata is in the panel beside this message.",
+          type: @doc_type
+        )}
       </p>
       <div class="bp-paper-unrenderable-actions">
         <button
@@ -587,10 +608,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           phx-value-if_rev={@if_rev}
           data-test-id="paper-unrenderable-start-body"
         >
-          Start the body with a paragraph
+          {gettext("Start the body with a paragraph")}
         </button>
         <a href={@list_href} class="btn btn-ghost btn-sm" data-test-id="paper-unrenderable-back">
-          Back to the {@doc_type} list
+          {gettext("Back to the %{type} list", type: @doc_type)}
         </a>
       </div>
     </div>
@@ -649,6 +670,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
+  # task-352b1074aba3f434: whether the anonymous reader serves this scope
+  # (`PaperCanvas.public_reader?/3`). Defaults false: never claim "Public"
+  # for a caller that did not say.
+  attr(:public_reader, :boolean, default: false)
+  # task-3a5b9cda74564d1c: the registered labels to suggest, and whether this
+  # viewer may register a new one (a workspace admin) or must ask for one.
+  attr(:label_suggestions, :list, default: [])
+  attr(:label_admin?, :boolean, default: false)
 
   # Rendered for PAPERS ONLY (the caller gates it on @paper_doc). Sheet, graph
   # and media editors deliberately have no inspector: see the ruling recorded at
@@ -685,7 +714,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     # document you came from rather than the literal word "Document", and its
     # control must point the way the action goes (back, not down). Mirrors the
     # title expression in `studio_paper_view/1` above — same fallback ladder.
-    destination_title = (paper && Map.get(paper, :title)) || slug || "Paper"
+    destination_title = (paper && Map.get(paper, :title)) || slug || gettext("Paper")
 
     # spd-bl-publish-affordance-triple — the metadata affordances below render
     # only for a genuine drafts row (same predicate as the pane's Publish
@@ -737,7 +766,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       data-role="inspector"
       data-test-id="paper-metadata-sidebar"
       data-inspector-destination={@destination && ""}
-      aria-label={if @destination, do: "Document metadata for #{@destination_title}", else: "Document metadata"}
+      aria-label={
+        if @destination,
+          do: gettext("Document metadata for %{title}", title: @destination_title),
+          else: gettext("Document metadata")
+      }
       tabindex={@destination && "-1"}
     >
       <%!-- spd-w12 / D173 — THE KEYBOARD EXIT. Escape leaves the destination.
@@ -817,9 +850,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           aria-controls="bp-doc-sidebar-body"
           title={
             cond do
-              @destination -> "Back to #{@destination_title}"
-              @visually_open -> "Collapse document panel"
-              true -> "Expand document panel"
+              @destination -> gettext("Back to %{title}", title: @destination_title)
+              @visually_open -> gettext("Collapse document panel")
+              true -> gettext("Expand document panel")
             end
           }
           data-test-id={if @destination, do: "sidebar-dismiss", else: "sidebar-toggle-panel"}
@@ -836,7 +869,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           />
         </button>
         <span :if={@panel_open} class="bp-doc-sidebar__title">
-          {if @destination, do: @destination_title, else: "Document"}
+          {if @destination, do: @destination_title, else: gettext("Document")}
         </span>
       </div>
 
@@ -859,21 +892,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               D229/D230). --%>
         <.sidebar_section
           key="publish"
-          title="Publish"
+          title={gettext("Publish")}
           open={PaperCanvas.sidebar_section_open?(@collapsed, "publish")}
         >
           <div class="bp-doc-field">
-            <span class="bp-doc-field__label">Status</span>
+            <span class="bp-doc-field__label">{gettext("Status")}</span>
             <span class={"bp-doc-badge bp-doc-badge--#{@status}"} data-test-id="sidebar-status">
-              {@status}
+              {status_word(@status)}
             </span>
           </div>
           <div class="bp-doc-field">
-            <span class="bp-doc-field__label">Visibility</span>
+            <span class="bp-doc-field__label">{gettext("Visibility")}</span>
             <span class="bp-doc-field__val" data-test-id="sidebar-visibility">
-              {PaperCanvas.visibility_label(@status)}
+              {PaperCanvas.visibility_label(@status, @public_reader)}
             </span>
           </div>
+          <p
+            :if={@status == "published" and not @public_reader}
+            class="bp-doc-empty"
+            data-test-id="sidebar-visibility-why"
+          >
+            {gettext(
+              "This workspace has no public page for papers, so only members and share-link holders can read it."
+            )}
+          </p>
           <%!-- spd-bl-publish-affordance-triple — the description the publish
                 wall demands FIRST (LabelSpine fires on it before anything
                 else, and no amount of body authoring moves it). Draft-only:
@@ -883,7 +925,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             phx-change="sidebar-description-change"
             class="bp-doc-field bp-doc-field--stacked"
           >
-            <label for="bp-doc-desc-input" class="bp-doc-field__label">Description</label>
+            <label for="bp-doc-desc-input" class="bp-doc-field__label">{gettext("Description")}</label>
             <textarea
               id="bp-doc-desc-input"
               name="value"
@@ -895,14 +937,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               data-test-id="sidebar-description-input"
             >{@description}</textarea>
             <p id="bp-doc-desc-hint" class="bp-doc-empty">
-              Publishing needs a description of at least 20 characters.
+              {gettext("Publishing needs a description of at least 20 characters.")}
             </p>
           </form>
         </.sidebar_section>
 
         <.sidebar_section
           key="slug"
-          title="Slug"
+          title={gettext("Slug")}
           open={PaperCanvas.sidebar_section_open?(@collapsed, "slug")}
         >
           <% {tone, msg} = @feedback %>
@@ -933,22 +975,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
         <.sidebar_section
           key="context"
-          title="Context"
+          title={gettext("Context")}
           open={PaperCanvas.sidebar_section_open?(@collapsed, "context")}
         >
           <div class="bp-doc-field">
-            <span class="bp-doc-field__label">Dataset</span>
+            <span class="bp-doc-field__label">{gettext("Dataset")}</span>
             <span class="bp-doc-field__val" data-test-id="sidebar-dataset">{@dataset}</span>
           </div>
           <div :if={@workspace_label} class="bp-doc-field">
-            <span class="bp-doc-field__label">Workspace</span>
+            <span class="bp-doc-field__label">{gettext("Workspace")}</span>
             <span class="bp-doc-field__val" data-test-id="sidebar-workspace">{@workspace_label}</span>
           </div>
         </.sidebar_section>
 
         <.sidebar_section
           key="labels"
-          title="Labels"
+          title={gettext("Labels")}
           open={PaperCanvas.sidebar_section_open?(@collapsed, "labels")}
         >
           <%!-- ae-w10 / D76 — the Labels section renders the WEIGHT the publish
@@ -959,7 +1001,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 a flag icon + bold name. Reuses the existing `.bp-doc-*` classes
                 only (root.html.heex is spd territory — zero new CSS). --%>
           <%= if @labels == [] do %>
-            <p class="bp-doc-empty" data-test-id="sidebar-labels-empty">No labels yet.</p>
+            <p class="bp-doc-empty" data-test-id="sidebar-labels-empty">{gettext("No labels yet.")}</p>
           <% else %>
             <ul class="bp-doc-tags" data-test-id="sidebar-labels">
               <li
@@ -998,10 +1040,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               name="tag"
               required
               class="form-input"
-              placeholder="tag"
-              aria-label="Tag name"
+              placeholder={gettext("label")}
+              aria-label={gettext("Tag name")}
+              list="bp-label-suggestions"
+              autocomplete="off"
+              aria-describedby="bp-label-hint"
               data-test-id="sidebar-label-add-tag"
             />
+            <datalist id="bp-label-suggestions" data-test-id="sidebar-label-suggestions">
+              <option :for={name <- @label_suggestions} value={name} />
+            </datalist>
+            <p id="bp-label-hint" class="bp-doc-empty" data-test-id="sidebar-label-hint">
+              <%= cond do %>
+                <% @label_admin? and @label_suggestions == [] -> %>
+                  {gettext(
+                    "No labels are registered here yet. Type a new name (lowercase, hyphens) to register it."
+                  )}
+                <% @label_admin? -> %>
+                  {gettext("Pick a registered label, or type a new name to register it.")}
+                <% @label_suggestions == [] -> %>
+                  {gettext("No labels are registered here yet. Ask an admin to add a label.")}
+                <% true -> %>
+                  {gettext("Pick a registered label. Ask an admin to add a label that isn't listed.")}
+              <% end %>
+            </p>
             <input
               type="number"
               name="strength"
@@ -1009,8 +1071,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               min="1"
               max="100"
               class="form-input"
-              placeholder="strength 1–100"
-              aria-label="Tag strength, 1 to 100"
+              placeholder={gettext("strength 1–100")}
+              aria-label={gettext("Tag strength, 1 to 100")}
               data-test-id="sidebar-label-add-strength"
             />
             <input
@@ -1018,12 +1080,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               name="rationale"
               required
               class="form-input"
-              placeholder="why this tag fits (at least 20 characters)"
-              aria-label="Tag rationale"
+              placeholder={gettext("why this tag fits (at least 20 characters)")}
+              aria-label={gettext("Tag rationale")}
               data-test-id="sidebar-label-add-rationale"
             />
             <button type="submit" class="btn btn-ghost btn-sm" data-test-id="sidebar-label-add-submit">
-              Add label
+              {gettext("Add label")}
             </button>
           </form>
         </.sidebar_section>
@@ -1037,7 +1099,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               inbound) — NEVER a raw id (wave-1 integration lesson). --%>
         <.sidebar_section
           key="relations"
-          title="Relations"
+          title={gettext("Relations")}
           open={PaperCanvas.sidebar_section_open?(@collapsed, "relations")}
         >
           <% has_any =
@@ -1048,7 +1110,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               type="button"
               class="bp-doc-rel-refresh"
               phx-click="backlinks-refresh"
-              title="Refresh inbound references"
+              title={gettext("Refresh inbound references")}
               data-test-id="backlinks-refresh"
             >
               <.icon name="refresh-cw" size={12} />
@@ -1056,11 +1118,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </div>
 
           <%= if not has_any do %>
-            <p class="bp-doc-empty" data-test-id="sidebar-relations-empty">No relations.</p>
+            <p class="bp-doc-empty" data-test-id="sidebar-relations-empty">{gettext("No relations.")}</p>
           <% else %>
             <%!-- Outbound: docs THIS paper references (its own body/fields). --%>
             <section :if={@relations != []} class="bp-doc-rel-group">
-              <h4 class="bp-doc-rel-group__h">References ({length(@relations)})</h4>
+              <h4 class="bp-doc-rel-group__h">
+                {gettext("References (%{count})", count: length(@relations))}
+              </h4>
               <ul class="bp-doc-rels" data-test-id="sidebar-relations">
                 <li :for={rel <- @relations} class="bp-doc-rel">
                   <span class="bp-doc-rel__label">{rel.label}</span>
@@ -1072,14 +1136,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <%!-- Inbound (backlinks): docs that reference THIS paper. Used-by
                   (valueref impact) first, then linked + derived mentions. Each
                   group renders only when non-empty (folded chrome stays calm). --%>
-            <.backlink_group title="Used by" refs={@backlinks_used_by} test_id="backlinks-used-by" />
             <.backlink_group
-              title="Linked mentions"
+              title={gettext("Used by")}
+              refs={@backlinks_used_by}
+              test_id="backlinks-used-by"
+            />
+            <.backlink_group
+              title={gettext("Linked mentions")}
               refs={@backlinks_linked}
               test_id="backlinks-linked"
             />
             <.backlink_group
-              title="Derived mentions"
+              title={gettext("Derived mentions")}
               refs={@backlinks_unlinked}
               test_id="backlinks-unlinked"
             />
@@ -1147,11 +1215,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             phx-value-type={ref.type}
             data-test-id="backlink-row"
           >
-            <span class="bp-doc-backlink__title">{ref.title || "Untitled"}</span>
+            <span class="bp-doc-backlink__title">{BarkparkWeb.Studio.DocTitle.shown(ref.title) || gettext("Untitled")}</span>
             <span class="bp-doc-backlink__meta">{ref.type} / {ref.via_field}</span>
           </button>
           <div :if={!ref[:from_doc_id]} class="bp-doc-backlink" data-test-id="backlink-row">
-            <span class="bp-doc-backlink__title">{ref.title || "Untitled"}</span>
+            <span class="bp-doc-backlink__title">{BarkparkWeb.Studio.DocTitle.shown(ref.title) || gettext("Untitled")}</span>
             <span class="bp-doc-backlink__meta">{ref.type} / {ref.via_field}</span>
           </div>
         </li>
@@ -1248,7 +1316,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <nav
       :if={@trail_visible and (length(@panes) > 1 or @has_editor)}
       class="bp-desk-crumbs"
-      aria-label="Desk breadcrumb"
+      aria-label={gettext("Desk breadcrumb")}
       data-test-id="desk-crumbs"
     >
       <%= for {pane, idx} <- Enum.with_index(@panes) do %>
@@ -1261,14 +1329,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           :if={idx == @leaf_idx and not @has_editor}
           class="bp-desk-crumb bp-desk-crumb--current"
           aria-current="page"
-        ><%= pane.title %></span>
+        ><%= BarkparkWeb.StudioComponents.Panes.chrome_title(pane.title) %></span>
         <button
           :if={idx != @leaf_idx or @has_editor}
           type="button"
           class="bp-desk-crumb"
           phx-click="expand-pane"
           phx-value-idx={idx}
-        ><%= pane.title %></button>
+        ><%= BarkparkWeb.StudioComponents.Panes.chrome_title(pane.title) %></button>
       <% end %>
       <span :if={@has_editor} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
       <%!-- The document crumb. Static text while the document IS where you are;
@@ -1279,21 +1347,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         :if={@has_editor and not @inspector_leaf}
         class="bp-desk-crumb bp-desk-crumb--current"
         aria-current="page"
-      ><%= @editor_doc.title || "Untitled" %></span>
+      ><%= BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || gettext("Untitled") %></span>
       <button
         :if={@inspector_leaf}
         type="button"
         class="bp-desk-crumb"
         phx-click={dismiss_or_toggle(true, "#bp-doc-sidebar-toggle")}
         data-test-id="desk-crumb-document"
-      ><%= @editor_doc.title || "Untitled" %></button>
+      ><%= @editor_doc.title || gettext("Untitled") %></button>
       <span :if={@inspector_leaf} class="bp-desk-crumb-sep" aria-hidden="true">/</span>
       <span
         :if={@inspector_leaf}
         class="bp-desk-crumb bp-desk-crumb--current"
         aria-current="page"
         data-test-id="desk-crumb-inspector"
-      >Document</span>
+      >{gettext("Document")}</span>
     </nav>
     """
   end
@@ -1348,6 +1416,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       sidebar_user_opened={Map.get(assigns, :sidebar_user_opened, false) == true}
     />
 
+    <%!-- No landmark role on the desk: it holds the navigation columns too.
+          The open document's panel is the page's main (task-8e2fa7915ed7faa0);
+          a paper or beta shell carries its own labelled <main>. --%>
     <.pane_layout id="studio-panes" phx_hook="WidthBucket">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
@@ -1409,8 +1480,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
-                title={gettext("Share access to %{type}", type: pane.type_name)}
-                aria-label={gettext("Share access to %{type}", type: pane.type_name)}
+                title={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
+                aria-label={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1426,11 +1497,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <%!-- Icon-only: without an explicit label its accessible name
                     is the empty string, so AT announces a nameless button. --%>
               <button
+                :if={pane[:author_creatable] != false}
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
-                title={gettext("New %{type}", type: pane.type_name)}
-                aria-label={gettext("New %{type}", type: pane.type_name)}
+                phx-value-pane={"#{idx}"}
+                title={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
+                aria-label={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>
@@ -1485,7 +1558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 the one pane every desk has and the only one whose contents are
                 not already a single type. Typing swaps THIS pane's body for the
                 hits and leaves every other pane untouched, so a drilled path
-                stays on screen behind the results. A hit is an ordinary link to
+                stays on screen behind the results. A hit is a real link to
                 `/…/studio/<type>/<id>`, so it is deep-linkable, middle-clickable,
                 and opens a type the desk does not list at its root through the
                 E3.5 dead-head alias. --%>
@@ -1519,33 +1592,52 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             class="pane-body"
             data-test-id="desk-search-results"
           >
+            <%!-- The search's one live region (task-0ad7fed4370a5978,
+                  task-b78dddf5135d8bbf). Every state's message lands here, so
+                  "no match" after hits is a text change in place, which is read;
+                  it used to be a new role=status node arriving already filled,
+                  which often is not. The visible notices below are not live
+                  regions. It lives in the results block, not the search box,
+                  so a settled desk ships no second empty announcer beside
+                  #bp-press-answer (press_answer_region_guard_test). The id keeps
+                  the DOM patch updating this node in place. --%>
+            <div
+              id="desk-search-status"
+              class="sr-only"
+              role="status"
+              data-test-id="desk-search-count"
+            ><%= desk_search_status(@desk_search, @desk_search_hits) %></div>
             <%= if String.length(String.trim(@desk_search)) < 2 do %>
-              <div class="bp-pane-notice" role="status" data-test-id="desk-search-too-short">
+              <div class="bp-pane-notice" data-test-id="desk-search-too-short">
                 <%= gettext("Type at least 2 characters") %>
               </div>
             <% else %>
               <%= if @desk_search_hits == [] do %>
-                <div class="bp-pane-notice" role="status" data-test-id="desk-search-empty">
+                <div class="bp-pane-notice" data-test-id="desk-search-empty">
                   <%= gettext("No documents match “%{query}”", query: String.trim(@desk_search)) %>
                 </div>
               <% else %>
-                <a
+                <%!-- A live navigation, not a page load: `navigate` keeps the
+                      real href (middle-click, new tab), and `focus: :doc`
+                      lands focus on the opened document's header, where a
+                      desk row open puts it (task-4e10550394f87112). --%>
+                <.link
                   :for={hit <- @desk_search_hits}
                   class="pane-doc-item bp-desk-search-hit"
                   data-test-id="desk-search-hit"
                   data-hit-type={hit.type}
-                  href={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset)}
+                  navigate={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset, focus: :doc)}
                 >
                   <span class="pane-doc-title"><%= hit.title %></span>
-                  <span class="pane-doc-sub"><%= hit.type %></span>
-                </a>
+                  <span class="pane-doc-sub"><%= hit.type_title %></span>
+                </.link>
               <% end %>
             <% end %>
           </div>
 
           <div :if={not (idx == 0 and desk_searching)} class="pane-body">
             <%= if pane.items == [] and pane[:type_name] != nil and pane[:filter_error] == nil do %>
-              <.pane_empty message="No documents yet">
+              <.pane_empty message={gettext("No documents yet")}>
                 <%!-- `drawable_name/2`, not `||` (icons-tab-icon-tenant-guard):
                       a pane's icon is schema/structure DATA, and `||` answers
                       only nil/false. An unknown string, or a truthy non-binary
@@ -1553,11 +1645,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       document glyph in dev/prod, a RAISE in :test. --%>
                 <:icon><.icon name={Icons.drawable_name(pane[:icon], "file")} size={32} /></:icon>
                 <button
+                  :if={pane[:author_creatable] != false}
                   class="btn btn-primary btn-sm"
                   phx-click="new-document"
                   phx-value-type={pane.type_name}
+                  phx-value-pane={"#{idx}"}
                 >
-                  <.icon name="plus" size={14} /> New document
+                  <.icon name="plus" size={14} /> {gettext("New document")}
                 </button>
               </.pane_empty>
             <% end %>
@@ -1599,7 +1693,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                         sibling in-desk row speaks aria-current="true". The full
                         selection vocabulary is documented ONCE, in
                         `StudioComponents.Panes`' moduledoc. --%>
+                  <%!-- An ops-gated destination is left out for a viewer the
+                        `:ops` gate would bounce (task-f859c5f7f3a0f9f5). --%>
                   <a
+                    :if={
+                      assigns[:ops_access?] != false or
+                        not BarkparkWeb.LiveAuth.ops_gated_path?(item.href)
+                    }
                     id={"plugin-link-#{item.id}"}
                     href={item.href}
                     class="pane-item nav-plugin-entry"
@@ -1641,7 +1741,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
-                    selectable={pane[:type_name] != nil}
+                    selectable={pane[:type_name] != nil and Caps.admin_affordance?(@caps)}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
                   >
                     <:trailing :if={item_presences != []}>
@@ -1720,6 +1820,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_canvas_resume_status={Map.get(assigns, :paper_canvas_resume_status, :none)}
           focus_on_mount={@focus_doc_on_open}
           paper_doc={@paper_doc}
+          paper_has_published={Map.get(assigns, :editor_has_published, false)}
           paper_rev={@paper_rev}
           paper_html={@paper_html}
           paper_block_mode={@paper_block_mode}
@@ -1745,6 +1846,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
           sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}
           sidebar_slug_feedback={Map.get(assigns, :sidebar_slug_feedback)}
+          public_reader={
+            PaperCanvas.public_reader?(
+              Map.get(assigns, :current_workspace),
+              Map.get(assigns, :current_project),
+              @dataset
+            )
+          }
+          sidebar_label_suggestions={Map.get(assigns, :sidebar_label_suggestions, [])}
           workspace_label={
             case Map.get(assigns, :current_workspace) do
               %{name: name} when is_binary(name) and name != "" -> name
@@ -1828,10 +1937,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               class="btn btn-ghost btn-sm"
               phx-click="shares-open"
               phx-value-surface="media"
-              title="Share this workspace's media library"
+              title={gettext("Share this workspace's media library")}
               data-test-id="media-share"
             >
-              <.icon name="share-2" size={14} /> Share media
+              <.icon name="share-2" size={14} /> {gettext("Share media")}
             </button>
             <%!-- Workspace Share-access entry (airdrop-grants): a workspace-scoped
                   grant (no post-type). Held-cap gated, not admin-only. --%>
@@ -1840,10 +1949,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               type="button"
               class="btn btn-ghost btn-sm"
               phx-click="airdrop-open"
-              title="Share scoped access to this workspace"
+              title={gettext("Share scoped access to this workspace")}
               data-test-id="airdrop-open-workspace"
             >
-              <.icon name="send" size={14} /> Share access
+              <.icon name="send" size={14} /> {gettext("Share access")}
             </button>
             <%!-- Access panel (airdrop-grants): review your own scoped access +
                   (for members) the workspace's active grants, with one-click
@@ -1857,15 +1966,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               title={gettext("Review scoped access grants")}
               data-test-id="access-open"
             >
-              <.icon name="clock" size={14} /> Access
+              <.icon name="clock" size={14} /> {gettext("Access")}
             </button>
           </div>
-          <div style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
+          <div class="bp-ae-host" style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
             <bp-asset-explorer
               dataset={@dataset}
               data-token={Map.get(assigns, :api_token_raw, "")}
               data-kind-filter={@media_kind_filter || "all"}
               data-open-path={Paths.studio_path(assigns[:scope_prefix] || "", @nav_path, @dataset)}
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:asset_explorer)}
             />
           </div>
         </div>
@@ -1881,7 +1991,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           <div class="editor-panel" data-role="content" data-test-id="studio-doc-beta-editor">
             <.document_header
               dataset={@dataset}
-              title={@editor_doc.title || "Untitled"}
+              title={@editor_doc.title || gettext("Untitled")}
               focus_on_mount={@focus_doc_on_open}
             >
               <:status_pill>
@@ -1891,6 +2001,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               </:status_pill>
               <:actions>
                 <.editor_mode_toggle mode={@editor_mode} beta_ok={beta_ok} />
+                <%!-- The same document actions Classic offers (Publish,
+                      History, Delete, …), so an editor can publish without
+                      leaving Beta (task-fc4102c1e2f9b606). The two that toggle a
+                      Classic-only panel are left out: Beta has no diff or
+                      content-preview pane to show. --%>
+                <bp-overflow-menu
+                  class="bp-overflow-menu"
+                  data-label={gettext("More actions")}
+                  data-test-id="studio-beta-doc-actions"
+                >
+                  <%= for action <- beta_doc_actions(assigns) do %>
+                    <.doc_action_button
+                      action={action}
+                      editor_doc={@editor_doc}
+                      dataset={@dataset}
+                      admin?={Caps.admin_affordance?(@caps)}
+                      workspace_slug={beta_scope_slug(assigns, :current_workspace)}
+                      project_slug={beta_scope_slug(assigns, :current_project)}
+                    />
+                  <% end %>
+                </bp-overflow-menu>
               </:actions>
             </.document_header>
             <div class="editor-with-preview">
@@ -2041,8 +2172,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <.studio_modals
         show_profile={@show_profile}
         user_name={@user_name}
+        user_name_fallback={assigns[:user_name_fallback]}
         user_color={@user_color}
+        account_label={assigns[:account_label]}
         account_path={account_path(assigns)}
+        profile_error={assigns[:profile_error]}
         image_picker_field={@image_picker_field}
         uploads={@uploads}
         media_files={@media_files}
@@ -2067,6 +2201,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <div
           class="delete-modal"
           data-test-id="unpublish-guard-modal"
+          id="unpublish-guard-dialog"
+          phx-hook="ModalFocus"
           role="dialog"
           aria-modal="true"
           aria-labelledby="unpublish-guard-modal-title"
@@ -2074,38 +2210,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           phx-key="escape"
         >
           <div class="delete-modal-header">
-            <span id="unpublish-guard-modal-title" style="font-weight: 600; font-size: 16px;">Unpublish document</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-unpublish-guard" aria-label="Close">x</button>
+            <span id="unpublish-guard-modal-title" style="font-weight: 600; font-size: 16px;">{gettext("Unpublish document")}</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="close-unpublish-guard" aria-label={gettext("Close")}>x</button>
           </div>
           <div class="delete-modal-body">
             <div class="delete-warning">
               <p class="text-sm" style="margin-bottom: 12px;">
-                <strong><%= @editor_doc && @editor_doc.title %></strong> is referenced by
-                <strong><%= length(@unpublish_refs) %></strong> document<%= if length(@unpublish_refs) != 1, do: "s" %>.
-                Unpublishing it will leave those references dangling:
+                <strong><%= @editor_doc && @editor_doc.title %></strong> <%= ngettext(
+                  "is referenced by %{count} document. Unpublishing it will leave those references dangling:",
+                  "is referenced by %{count} documents. Unpublishing it will leave those references dangling:",
+                  length(@unpublish_refs)
+                ) %>
               </p>
               <div class="delete-ref-list">
                 <%= for ref <- @unpublish_refs do %>
                   <div class="delete-ref-item" data-test-id="unpublish-ref">
-                    <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                    <span class="delete-ref-title"><%= ref.title || gettext("Untitled") %></span>
                     <span class="delete-ref-meta"><%= ref.type %> / <%= ref.via_field %></span>
                   </div>
                 <% end %>
               </div>
             </div>
             <div class="delete-modal-actions">
-              <button class="btn btn-sm" phx-click="close-unpublish-guard">Cancel</button>
+              <button class="btn btn-sm" phx-click="close-unpublish-guard" data-modal-focus>{gettext("Cancel")}</button>
               <button
                 class="btn btn-sm"
                 phx-click="confirm-unpublish"
                 phx-value-disconnect="true"
                 data-test-id="confirm-unpublish-disconnect"
-              >Disconnect references and unpublish</button>
+              >{gettext("Disconnect references and unpublish")}</button>
               <button
                 class="btn btn-destructive btn-sm"
                 phx-click="confirm-unpublish"
                 data-test-id="confirm-unpublish"
-              >Unpublish anyway</button>
+              >{gettext("Unpublish anyway")}</button>
             </div>
           </div>
         </div>
@@ -2127,6 +2265,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <div
           class="delete-modal"
           data-test-id="valueref-writeback-modal"
+          id="valueref-writeback-dialog"
+          phx-hook="ModalFocus"
           role="dialog"
           aria-modal="true"
           aria-labelledby="valueref-writeback-modal-title"
@@ -2134,8 +2274,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           phx-key="escape"
         >
           <div class="delete-modal-header">
-            <span id="valueref-writeback-modal-title" style="font-weight: 600; font-size: 16px;">Shared value</span>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="valueref-writeback-close" aria-label="Close">x</button>
+            <span id="valueref-writeback-modal-title" style="font-weight: 600; font-size: 16px;">{gettext("Shared value")}</span>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="valueref-writeback-close" aria-label={gettext("Close")}>x</button>
           </div>
           <div class="delete-modal-body">
             <p class="text-sm" style="margin-bottom: 8px;">
@@ -2146,18 +2286,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             </p>
             <%= if @valueref_panel.authorized do %>
               <p class="text-sm" style="margin-bottom: 12px;">
-                Current canonical value:
-                <strong data-test-id="valueref-current-value"><%= @valueref_panel.current_value || "(unset)" %></strong>
+                {gettext("Current canonical value:")}
+                <strong data-test-id="valueref-current-value"><%= @valueref_panel.current_value || gettext("(unset)") %></strong>
               </p>
               <p class="text-sm" style="margin-bottom: 8px;" data-test-id="valueref-impact">
-                Writing to the canonical source changes
-                <strong><%= @valueref_panel.impact.count %></strong>
-                doc<%= if @valueref_panel.impact.count != 1, do: "s" %>:
+                <%= ngettext(
+                  "Writing to the canonical source changes %{count} doc:",
+                  "Writing to the canonical source changes %{count} docs:",
+                  @valueref_panel.impact.count
+                ) %>
               </p>
               <div class="delete-ref-list">
                 <%= for ref <- @valueref_panel.impact.referencers do %>
                   <div class="delete-ref-item" data-test-id="valueref-impact-ref">
-                    <span class="delete-ref-title"><%= ref.title || "Untitled" %></span>
+                    <span class="delete-ref-title"><%= ref.title || gettext("Untitled") %></span>
                     <span class="delete-ref-meta"><%= ref.type %> / <%= ref.kind %></span>
                   </div>
                 <% end %>
@@ -2174,21 +2316,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   class="form-input"
                   value={@valueref_panel.current_value}
                   autocomplete="off"
+                  data-modal-focus
                 />
                 <div class="delete-modal-actions" style="margin-top: 12px;">
-                  <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">Cancel</button>
+                  <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">{gettext("Cancel")}</button>
                   <button type="submit" class="btn btn-primary btn-sm" data-test-id="valueref-writeback-confirm">
-                    Write to canonical
+                    {gettext("Write to canonical")}
                   </button>
                 </div>
               </form>
             <% else %>
               <p class="text-sm" data-test-id="valueref-writeback-denied">
-                This value lives on a canonical document you do not have write
-                access to. It can only be changed at its source.
+                {gettext(
+                  "This value lives on a canonical document you do not have write access to. It can only be changed at its source."
+                )}
               </p>
               <div class="delete-modal-actions">
-                <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">Close</button>
+                <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">{gettext("Close")}</button>
               </div>
             <% end %>
           </div>
@@ -2207,7 +2351,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <.item_share_popover
         show={@item_share_open}
         admin?={@caps.admin}
-        title={(@item_share && @item_share.title) || "this item"}
+        title={(@item_share && @item_share.title) || gettext("this item")}
         links={@item_share_links}
         error={@item_share_error}
       />
@@ -2215,6 +2359,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <.airdrop_sheet
         show={@airdrop_open}
         type={@airdrop_type}
+        type_word={@airdrop_type_word}
         caps={@airdrop_caps}
         link={@airdrop_link}
         error={@airdrop_error}
@@ -2233,12 +2378,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     """
   end
 
+  # The sidebar's status badge showed the stored status code. Its words go
+  # through gettext; an unknown code reads as itself.
+  defp status_word("draft"), do: gettext("draft")
+  defp status_word("published"), do: gettext("published")
+  defp status_word(status), do: status
+
   defp beta_identity_error_message({:malformed_block_authority, _path}) do
-    "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
+    gettext(
+      "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
+    )
   end
 
   defp beta_identity_error_message(_reason) do
-    "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
+    gettext(
+      "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
+    )
   end
 
   # ── the SheetGrid capability prop ───────────────────────────────────────────
@@ -2273,6 +2428,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.
   # Returns [] when there is no schema/Expectation (no group shown).
+  # Classic's document actions, minus the two that toggle a Classic-only panel
+  # (task-fc4102c1e2f9b606).
+  @classic_panel_actions ~w(toggle-diff toggle-content-preview)
+
+  defp beta_doc_actions(assigns) do
+    assigns
+    |> DocActions.resolved_doc_actions()
+    |> Enum.reject(&(&1["name"] in @classic_panel_actions))
+  end
+
+  defp beta_scope_slug(assigns, key) do
+    case Map.get(assigns, key) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> ""
+    end
+  end
+
   defp beta_expected_fields(%Barkpark.Content.SchemaDefinition{} = schema, blocks)
        when is_list(blocks) do
     Content.available_expected_fields(blocks, Content.resolve_expectation(schema), schema)
@@ -2284,7 +2456,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # panel. [] when there is no schema/Expectation.
   defp beta_all_descriptors(%Barkpark.Content.SchemaDefinition{} = schema, blocks)
        when is_list(blocks) do
-    Content.all_expected_fields(blocks, Content.resolve_expectation(schema), schema)
+    fields = Map.new(schema.fields || [], &{&1["name"] || &1[:name], &1})
+
+    blocks
+    |> Content.all_expected_fields(Content.resolve_expectation(schema), schema)
+    # The image picker's controls (alt text, focal point) as the schema field
+    # declares them, so a Beta property row offers what Classic does
+    # (task-6f2b84a0e32688ad).
+    |> Enum.map(&Map.put(&1, :picker, FieldInputs.image_picker_flags(Map.get(fields, &1.name))))
   end
 
   defp beta_all_descriptors(_schema, _blocks), do: []
@@ -2398,4 +2577,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   end
 
   defp blank_body?(_not_a_string), do: true
+
+  # What the desk search's status region says for the current query: nothing
+  # before a search, then the same message the pane shows (task-b78dddf5135d8bbf).
+  defp desk_search_status(query, hits) do
+    query = String.trim(query || "")
+
+    cond do
+      query == "" -> ""
+      String.length(query) < 2 -> gettext("Type at least 2 characters")
+      hits == [] -> gettext("No documents match “%{query}”", query: query)
+      true -> ngettext("1 result", "%{count} results", length(hits))
+    end
+  end
 end

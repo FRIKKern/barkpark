@@ -95,4 +95,30 @@ defmodule BarkparkWeb.Plugs.OptionalSessionTokenPrecedenceTest do
       assert label(out) == nil
     end
   end
+
+  describe "the revocable session-id cookie (ruling #16 rework half, task-57f23825b18ab55d)" do
+    defp run_with_session_id(conn, session_id) do
+      conn
+      |> init_test_session(%{"api_token_session" => session_id})
+      |> OptionalSessionToken.call([])
+    end
+
+    test "a live session id resolves the same principal the legacy raw cookie would", ctx do
+      {:ok, api_token} = Auth.verify_token(ctx.session_raw)
+      {:ok, session_id} = Auth.create_token_session(ctx.session_raw, api_token)
+
+      out = run_with_session_id(ctx.conn, session_id)
+      assert label(out) == "SESSION-TOKEN"
+    end
+
+    test "a revoked session id is anonymous, never halts", ctx do
+      {:ok, api_token} = Auth.verify_token(ctx.session_raw)
+      {:ok, session_id} = Auth.create_token_session(ctx.session_raw, api_token)
+      {:ok, 1} = Auth.revoke_token_session(session_id)
+
+      out = run_with_session_id(ctx.conn, session_id)
+      refute out.halted
+      assert label(out) == nil
+    end
+  end
 end

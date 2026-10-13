@@ -9,7 +9,7 @@ import type {
   PatchBuilder,
 } from './types'
 import { request, type TransportRequestOptions } from './transport'
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { BarkparkAPIError, BarkparkValidationError } from './errors'
 
 interface PatchState {
@@ -337,7 +337,7 @@ export function createPatch(
 
       const { data } = await request<MutateEnvelope>(
         config,
-        `${scopePrefix(config)}/v1/data/mutate/${encodeURIComponent(config.dataset)}`,
+        `${dataPath(config, 'mutate')}`,
         reqOpts,
       )
 

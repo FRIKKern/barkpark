@@ -43,6 +43,12 @@ defmodule Barkpark.Accounts.User do
     field :failed_login_count, :integer, default: 0
     field :locked_until, :utc_datetime_usec
 
+    # task-cfb6ca3f5ffaf099 — the editor sets this in the Studio profile
+    # dialog; Media.Storage.Actor.display/2 reads it to name another
+    # account's checkout-lock holder. nil (unset) renders "another editor",
+    # same as today. NEVER derived from email.
+    field :display_name, :string
+
     has_many :sessions, Barkpark.Accounts.UserSession
 
     timestamps(type: :utc_datetime_usec)
@@ -68,6 +74,23 @@ defmodule Barkpark.Accounts.User do
     |> cast(attrs, [:password])
     |> validate_password()
     |> hash_password()
+  end
+
+  @doc "Changeset for setting an account's display name (task-cfb6ca3f5ffaf099)."
+  def display_name_changeset(user, attrs) do
+    user
+    |> cast(attrs, [:display_name])
+    |> update_change(:display_name, &normalize_display_name/1)
+    |> validate_length(:display_name, max: 80)
+  end
+
+  defp normalize_display_name(nil), do: nil
+
+  defp normalize_display_name(name) when is_binary(name) do
+    case String.trim(name) do
+      "" -> nil
+      trimmed -> trimmed
+    end
   end
 
   @doc "Changeset that stamps `confirmed_at` (email verification)."

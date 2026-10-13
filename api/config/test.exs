@@ -398,3 +398,27 @@ config :barkpark, tenancy_default_scope_cache_ttl_ms: 0
 # sets it. See the module's moduledoc and
 # test/barkpark/dedup/scan_seam_inertness_test.exs.
 config :barkpark, dedup_scan_seam: true
+
+# Quiz room join rate (owner ruling #59, `Barkpark.Quiz.Room`). Production
+# defaults to a burst of 50 new players refilled at 5/s. The load and
+# crossover tests join hundreds of players in a tight loop to exercise the
+# cursor and heatmap paths, not the limiter, so the suite runs with the
+# limiter effectively open. test/barkpark/quiz/room_flood_test.exs sets real
+# values for its own (synchronous) duration.
+config :barkpark, Barkpark.Quiz.Room, join_burst: 1_000_000, join_rate_per_sec: 1_000_000
+
+# The canonical value-shape writes (#42/#43/#44) are ON in tests so the shape
+# suites exercise them; the flag-off behaviour is pinned by synchronous tests
+# that switch it off for their own duration (canonical_shape_writes_flag_test).
+config :barkpark, canonical_shape_writes: true
+
+# The finder's shared graph derivation keeps its result for 0 ms in tests:
+# every test seeds its own corpus in a sandboxed transaction, and a result
+# cached by one test must never be served to the next. Concurrent mounts
+# still share one derivation (Barkpark.SingleFlight); the TTL itself is
+# pinned in finder_graph_single_flight_test.exs.
+config :barkpark, :finder_graph_ttl_ms, 0
+
+# Barkpark's own test runs the publish wall, as every instance we run does
+# (task-8edd8e147c648a36; the library default in config.exs is off).
+config :barkpark, :authoring_wall, true

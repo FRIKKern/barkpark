@@ -160,11 +160,35 @@ defmodule Barkpark.Content.Schema do
       # (limit, perspective, caller context) do not change the row
       {:get_schema_raw, name, dataset, Keyword.fetch(opts, :workspace_id),
        Keyword.fetch(opts, :project_id)},
-      fn -> do_get_schema_raw(name, dataset, opts) end,
+      fn -> do_get_schema_raw(name, dataset, opts) |> shared_fallback(name, dataset, opts) end,
       # the newest 8 rows: a request repeats ONE type; a corpus fold walks all
       8
     )
   end
+
+  # THE SHARED LAYER UNDER EVERY WORKSPACE (task-be5eaec4a5b9e524, ruling A).
+  # Plugin schemas are installed once as GLOBAL rows (`workspace_id IS NULL`,
+  # `Plugins.Bootstrap`), so a workspace that owns no row of a type reads the
+  # shared one. A tenant's own row of the same name is found by the scoped read
+  # above and wins. The retry pins `:shared_only`, which filters to
+  # `workspace_id IS NULL` — dropping the scope keys instead would read the
+  # Default dataset slot and hand back Default's row first.
+  #
+  # Reads only. `upsert_schema/3`, `validate_schema/3` and `delete_schema/3`
+  # stay on the strict `do_get_schema_raw/3`, so a tenant's write never updates
+  # or deletes the shared row.
+  defp shared_fallback({:error, :not_found}, name, dataset, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      ws when is_binary(ws) ->
+        shared = opts |> Keyword.delete(:project_id) |> Keyword.put(:workspace_id, :shared_only)
+        do_get_schema_raw(name, dataset, shared)
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
+  defp shared_fallback(found, _name, _dataset, _opts), do: found
 
   defp do_get_schema_raw(name, dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -191,10 +215,10 @@ defmodule Barkpark.Content.Schema do
   tenant-scoped lookup with the GLOBAL-schema fallback.
 
   THE ONE chokepoint every Envelope render/redact site resolves its schema
-  through. `get_schema/3` with a binary `:workspace_id` filters
-  `where workspace_id == ^ws` (`Barkpark.Content.Scope.scope_to_workspace/3`), so
-  a schema declared GLOBALLY (`workspace_id: nil`) never matches a document that
-  lives in a workspace. `Barkpark.Content.Envelope` is fail-OPEN on a nil schema
+  through. `get_schema/3` with a binary `:workspace_id` now falls back to the
+  shared `workspace_id IS NULL` row itself (`shared_fallback/4`), so the retry
+  below mostly re-reads what the first call found; it stays because it also
+  covers a project-pinned read with no workspace key. `Barkpark.Content.Envelope` is fail-OPEN on a nil schema
   (an undeclared field is public, for legacy parity), so a single scoped lookup
   that misses renders every `private` / `owner_only` / `readable_by` field of
   that type to whoever is reading. The retry — the same lookup with the tenant
@@ -329,27 +353,78 @@ defmodule Barkpark.Content.Schema do
       case name && do_get_schema_raw(name, dataset, opts) do
         {:ok, existing} ->
           if owned_by_other_workspace?(existing, attrs) do
-            insert_schema(attrs, dataset, opts)
+            insert_or_converge(attrs, dataset, opts)
           else
-            existing
-            |> SchemaDefinition.changeset(attrs)
-            |> check_named_types(dataset, opts)
-            |> Repo.update()
-            |> reset_read_memo()
+            update_schema(existing, attrs, dataset, opts)
           end
 
         _ ->
-          insert_schema(attrs, dataset, opts)
+          insert_or_converge(attrs, dataset, opts)
       end
     end
   end
 
-  defp insert_schema(attrs, dataset, opts) do
-    %SchemaDefinition{}
+  defp update_schema(existing, attrs, dataset, opts) do
+    existing
     |> SchemaDefinition.changeset(attrs)
     |> check_named_types(dataset, opts)
-    |> Repo.insert()
+    |> Repo.update()
     |> reset_read_memo()
+  end
+
+  # task-3748d052b83a9a2e — two first upserts of one name raced the read above:
+  # both saw no row, both inserted, and the loser answered 422 "name has already
+  # been taken" (58 of 60 in a real two-process race). `on_conflict: :nothing`
+  # with no target skips ANY unique violation — the schema has three unique
+  # indexes, two of them partial on a NULL dataset_id, so no single conflict
+  # target covers them — and, unlike a raised violation, it never aborts a
+  # surrounding transaction. A skipped insert still returns `{:ok, struct}`
+  # carrying the id Ecto generated, so the row is re-read (the reload rule
+  # `Tenancy.create_dataset/2` uses): another id means the concurrent writer's
+  # row won, and this write lands on it as an update, so both writers converge
+  # on one row and the later write's fields. Never onto a row another
+  # workspace owns: that case keeps today's insert verdict.
+  defp taken(changeset) do
+    reset_read_memo(
+      {:error,
+       Ecto.Changeset.add_error(changeset, :name, "has already been taken",
+         constraint: :unique,
+         constraint_name: "schema_definitions_name_dataset_id_index"
+       )}
+    )
+  end
+
+  @doc false
+  # Public only so a test can drive the losing racer's path (the row exists,
+  # the read before it did not see it) without a real second process.
+  def insert_or_converge(attrs, dataset, opts) do
+    changeset =
+      %SchemaDefinition{}
+      |> SchemaDefinition.changeset(attrs)
+      |> check_named_types(dataset, opts)
+
+    with {:ok, %SchemaDefinition{id: id} = inserted} <-
+           Repo.insert(changeset, on_conflict: :nothing) do
+      name = Ecto.Changeset.get_field(changeset, :name)
+
+      case do_get_schema_raw(name, dataset, opts) do
+        {:ok, %SchemaDefinition{id: ^id}} ->
+          reset_read_memo({:ok, inserted})
+
+        {:ok, %SchemaDefinition{} = winner} ->
+          if owned_by_other_workspace?(winner, attrs),
+            do: taken(changeset),
+            else: update_schema(winner, attrs, dataset, opts)
+
+        # Skipped, and the row it collided with is not readable here: the same
+        # 422 the raised violation used to give, never an `{:ok, _}` for a row
+        # that was not written.
+        _ ->
+          taken(changeset)
+      end
+    else
+      error -> reset_read_memo(error)
+    end
   end
 
   # A schema write drops the calling process's request memo, so the same
@@ -405,7 +480,7 @@ defmodule Barkpark.Content.Schema do
            |> Map.put("dataset", dataset)
            |> Content.put_scope_attrs(opts) do
       base =
-        case name && get_schema_raw(name, dataset, opts) do
+        case name && do_get_schema_raw(name, dataset, opts) do
           {:ok, existing} ->
             if owned_by_other_workspace?(existing, attrs),
               do: %SchemaDefinition{},
@@ -465,7 +540,8 @@ defmodule Barkpark.Content.Schema do
   and an empty-type delete is byte-identical to the prior behaviour.
   """
   def delete_schema(name, dataset, opts \\ []) do
-    case get_schema(name, dataset, opts) do
+    # Strict scope: a workspace that only reads the shared row must not delete it.
+    case do_get_schema_raw(name, dataset, opts) do
       {:ok, schema} ->
         force? = Keyword.get(opts, :force, false)
         doc_count = count_documents_of_type(name, dataset, opts)
@@ -552,7 +628,14 @@ defmodule Barkpark.Content.Schema do
   and the row-read could read visibility from two different tenants.
   """
   def schema_public?(type, dataset, opts \\ []) do
+    scoped? = is_binary(Keyword.get(opts, :workspace_id))
+
     case get_schema(type, dataset, opts) do
+      # A workspace-scoped read only reaches a shared row through
+      # `shared_fallback/4`. Its `visibility` is the plugin's, not this
+      # workspace's choice, so it never opens the workspace's documents to
+      # anonymous readers (task-be5eaec4a5b9e524).
+      {:ok, %{workspace_id: nil}} when scoped? -> false
       {:ok, %{visibility: "public"}} -> true
       _ -> false
     end
@@ -811,7 +894,18 @@ defmodule Barkpark.Content.Schema do
       crossValidations: schema.cross_validations || [],
       # Generic list-row preview declaration (badge + meta content fields);
       # empty map == no declaration, SDK/TUI rows render unchanged.
-      listPreview: schema.list_preview || %{}
+      listPreview: schema.list_preview || %{},
+      # task-28082a4cf187403d: `create` already applies `initial_values` on a
+      # new document (post.featured=false lands), but the read never echoed
+      # it back, so a Studio showing a brand-new doc before its first write
+      # had no way to know a non-false/non-empty default existed. `layout`
+      # (the Expectation) and `prefill` round-trip VERBATIM, as POSTed —
+      # never through `resolve_expectation/1`'s "or synthesize a default"
+      # fallback, which is a SEPARATE concern for whichever caller wants a
+      # default layout/prefill when none was stored.
+      initialValues: schema.initial_values || %{},
+      layout: schema.layout || [],
+      prefill: schema.prefill || %{}
     }
   end
 
@@ -1160,14 +1254,14 @@ defmodule Barkpark.Content.Schema do
     type = f["type"] || f[:type]
 
     cond do
-      type == "composite" ->
-        walk_named_types(f["fields"] || [], dataset, opts, visited)
-
-      type == "arrayOf" ->
-        walk_named_type(f["of"] || %{}, dataset, opts, visited)
-
+      # Every position parse/2 walks (task-fecf7cc2ae7b04d5): a composite's or
+      # an image/file's `fields`, an arrayOf `of` (one shape or a list of
+      # member types), a v1 `array.of` list, a richText `blocks.of` object
+      # block's `fields`, and a `blocks.inline` inline object's `fields`.
+      # Before, only composite and a single arrayOf.of map were walked, so
+      # `strng` inside the others landed with a 201.
       builtin_type?(type) ->
-        :ok
+        walk_named_types(nested_fields(f), dataset, opts, visited)
 
       MapSet.member?(visited, type) ->
         {:cycle, type}
@@ -1184,4 +1278,27 @@ defmodule Barkpark.Content.Schema do
   end
 
   defp walk_named_type(_f, _dataset, _opts, _visited), do: :ok
+
+  defp nested_fields(f) do
+    of =
+      case f["of"] || f[:of] do
+        %{} = one -> [one]
+        list when is_list(list) -> Enum.filter(list, &is_map/1)
+        _ -> []
+      end
+
+    blocks =
+      case f["blocks"] || f[:blocks] do
+        %{} = b ->
+          for %{} = entry <-
+                List.wrap(b["of"] || b[:of]) ++ List.wrap(b["inline"] || b[:inline]),
+              %{} = field <- List.wrap(entry["fields"] || entry[:fields]),
+              do: field
+
+        _ ->
+          []
+      end
+
+    Enum.filter(List.wrap(f["fields"] || f[:fields]), &is_map/1) ++ of ++ blocks
+  end
 end

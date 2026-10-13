@@ -6,8 +6,6 @@ This paragraph mixes bold, italic, inline code() and a link
 several lines of running prose.                                                 
                                                                                 
                                                                                 
-                                                                                
-                                                                                
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
                                                                                 
 A level-two heading                                                             

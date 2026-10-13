@@ -236,6 +236,356 @@ defmodule Barkpark.Content.Envelope do
   end
 
   @doc """
+  Content source map (task-f18edb4599e06308, candidate 1) — a `{result path
+  -> source document + field}` map for click-to-edit, computed from an
+  ALREADY-RENDERED envelope rather than by re-deriving field visibility: a
+  key present in `rendered` already survived `render/3`'s redaction (a
+  `private`/`owner_only`/encrypted field was deleted from the map, never
+  merely hidden), so iterating `rendered`'s own keys gets "a redacted field
+  never appears in the map" for free — no separate visibility check, no risk
+  of the two decisions drifting apart.
+
+  FLAT FIELDS ONLY (scope cut, recorded on the task row): a nested
+  object/array value's OWN sub-fields are not walked — the whole value is one
+  mapping entry naming its top-level key. Provenance through `?expand=`
+  (a different source document), computed fields (no single source to name)
+  and aggregate/derived views each need their own rule, filed separately as
+  task-0e0cb2167c6fcdea rather than guessed at here.
+
+  Returns `nil` for a non-document result (nothing to map) or a `rendered`
+  with no user-content keys at all.
+
+  Shape mirrors `@sanity/client`'s `resultSourceMap` loosely (documents/paths/
+  mappings, JSON-Pointer-ish result keys) — NOT byte-compatible, since
+  Barkpark has no stega/visual-editing client to match today; the shape is
+  chosen to be obviously extensible toward that if it is ever built.
+
+  Third arg `expanded` (task-0e0cb2167c6fcdea) — the SAME document's envelope
+  AFTER `Expand.expand/4` ran, if the caller asked for `?expand=`. `nil`
+  (the default) keeps this byte-identical to the flat-fields-only version
+  this function shipped as originally.
+
+  Expand provenance is computed by DIFFING `rendered` (pre-expand) against
+  `expanded` (post-expand) field by field — never by asking the schema which
+  fields are references. `Expand.put_expanded/3` only ever REPLACES a field's
+  value (with the resolved reference's own already-rendered, already-redacted
+  envelope) or leaves it untouched (unresolved ref, non-ref field, or a field
+  redacted away before expansion ever ran); a changed value that is itself a
+  map carrying `"_id"` — or a list containing one — is an expanded reference,
+  and anything else (an ordinary nested object/array field the caller wrote)
+  never changes shape between the two calls, so it can never be mistaken for
+  one. This is the same "walk what render already decided, never re-derive
+  visibility" posture `source_map/2` itself was built on — applied to a
+  second render pass instead of the first.
+
+  Each expanded sub-document gets its OWN entry appended to `documents`
+  (after the root document at index 0) and its own flat-field mappings,
+  addressed by the result path INTO the parent — `$["author"]["name"]` for a
+  single reference, `$["authors"][1]["name"]` for the second element of an
+  array-of-references. A sub-document's own fields are walked exactly like
+  `source_map/2` walks the root (flat only — one more level of `?expand=`
+  nesting is out of scope here, same as `Expand.expand/4` itself never
+  recurses). Redaction is already correct for free: `expanded`'s sub-document
+  values were rendered through `Envelope.render/3` with the SAME
+  `caller_context` before `Expand` ever swapped them in.
+  """
+  @spec source_map(Content.Document.t(), map(), map() | nil) :: map() | nil
+  def source_map(doc, rendered, expanded \\ nil)
+
+  def source_map(%{doc_id: doc_id, type: type}, rendered, expanded) when is_map(rendered) do
+    case rendered |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort() do
+      [] ->
+        nil
+
+      keys ->
+        {mappings, table} =
+          Enum.reduce(keys, {%{}, path_table_new()}, fn key, {m_acc, table} ->
+            {idx, table} = path_table_index(table, result_path(key))
+
+            {Map.put(m_acc, result_path(key), %{
+               "source" => %{"document" => 0, "path" => idx},
+               "type" => "value"
+             }), table}
+          end)
+
+        {expand_mappings, expand_docs, _next_doc_idx, table} =
+          expand_source_map(rendered, expanded, 1, &result_path/1, table)
+
+        %{
+          "documents" => [%{"_id" => doc_id, "_type" => type} | expand_docs],
+          "paths" => path_table_to_list(table),
+          "mappings" => Map.merge(mappings, expand_mappings)
+        }
+    end
+  end
+
+  def source_map(_doc, _rendered, _expanded), do: nil
+
+  @doc """
+  List-result sibling of `source_map/2` (task-b54d854d43769266). A list page
+  (home-page cards, a title+author listing) reads `/v1/data/query`, which
+  answers no source map, so a click-to-edit overlay could only mark up a
+  list's rows with one doc-get per row. Same rule as `source_map/2` — walk
+  an ALREADY-RENDERED envelope, never re-derive visibility — applied once
+  per ROW instead of once per document.
+
+  `docs` and `rendered_list` must be the SAME LENGTH, in the SAME ORDER
+  `Envelope.render_many/3` produced: the ROW INDEX is what addresses a
+  mapping's `"document"` entry, so `documents[i]` is always row `i`'s
+  source, 1:1 and NEVER deduped — two rows that happen to share a document
+  still get two independent addresses, so an edit anchored to one row can
+  never alias the other's. A row with no visible user-content field still
+  gets a `documents` entry (keeping the index correspondence intact for
+  every later row) but contributes no mapping.
+
+  Flat fields only, same scope cut as `source_map/2` — see that function's
+  doc for what is deliberately NOT covered here (computed fields, aggregate
+  views — `?expand=` is now covered, via the optional third arg below).
+  Returns `nil` when no row has a single visible field at all (an empty
+  result set, or every row fully redacted).
+
+  Third arg `expanded_list \\ nil` (task-0e0cb2167c6fcdea) — `rendered_list`'s
+  sibling AFTER `Expand.expand/4` ran, same length/order, or `nil` (the
+  default) for byte-identical flat-only behaviour. Each row's expanded
+  reference fields get their OWN `documents` entries, appended AFTER every
+  row's own slot (`documents[0..length(docs)-1]` stay the rows, so the
+  existing "row index == document index" contract is untouched) and
+  addressed by a row-qualified result path — `$[3]["author"]["name"]` for
+  row 3's expanded `author` reference. See `source_map/3`'s doc for how the
+  diff against `rendered_list` detects an expansion and why it needs no
+  schema lookup.
+  """
+  @spec source_map_many([Content.Document.t()], [map()], [map()] | nil) :: map() | nil
+  def source_map_many(docs, rendered_list, expanded_list \\ nil)
+
+  def source_map_many(docs, rendered_list, expanded_list)
+      when is_list(docs) and is_list(rendered_list) do
+    expanded_list = expanded_list || List.duplicate(nil, length(rendered_list))
+
+    {documents, mappings, expand_documents, _next_doc_idx, table, any_mapped?} =
+      [docs, rendered_list, expanded_list]
+      |> Enum.zip()
+      |> Enum.with_index()
+      |> Enum.reduce(
+        {[], %{}, [], length(docs), path_table_new(), false},
+        &reduce_row_source_map/2
+      )
+
+    if any_mapped? do
+      %{
+        "documents" => Enum.reverse(documents) ++ expand_documents,
+        "paths" => path_table_to_list(table),
+        "mappings" => mappings
+      }
+    end
+  end
+
+  def source_map_many(_docs, _rendered_list, _expanded_list), do: nil
+
+  defp reduce_row_source_map(
+         {{%{doc_id: doc_id, type: type}, rendered, expanded}, row_idx},
+         {docs_acc, mappings_acc, expand_docs_acc, next_doc_idx, table, any_mapped?}
+       )
+       when is_map(rendered) do
+    doc_entry = %{"_id" => doc_id, "_type" => type}
+
+    {row_mappings, table, row_mapped?} =
+      case rendered |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort() do
+        [] ->
+          {%{}, table, false}
+
+        keys ->
+          {m, table} =
+            Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+              {idx, table} = path_table_index(table, result_path(key))
+
+              {Map.put(m_acc, row_result_path(row_idx, key), %{
+                 "source" => %{"document" => row_idx, "path" => idx},
+                 "type" => "value"
+               }), table}
+            end)
+
+          {m, table, true}
+      end
+
+    {expand_mappings, row_expand_docs, next_doc_idx, table} =
+      expand_source_map(rendered, expanded, next_doc_idx, &row_result_path(row_idx, &1), table)
+
+    {
+      [doc_entry | docs_acc],
+      mappings_acc |> Map.merge(row_mappings) |> Map.merge(expand_mappings),
+      expand_docs_acc ++ row_expand_docs,
+      next_doc_idx,
+      table,
+      any_mapped? or row_mapped? or expand_mappings != %{}
+    }
+  end
+
+  # A row whose document/rendered/expanded triple doesn't match the expected
+  # shape (it should never happen — render_many/3 always returns one map per
+  # input doc, and the caller passes expanded_list the same length — but this
+  # function takes lists a CALLER zips, not ones it derives itself) contributes
+  # no entry rather than raising, same fail-soft posture `source_map/2`'s own
+  # no-match clause takes.
+  defp reduce_row_source_map(_pair, acc), do: acc
+
+  # Shared by `source_map/3` and `source_map_many/3`. `field_prefix_fun` turns
+  # a top-level field key into ITS OWN result-path prefix in the caller's
+  # outer context (row-qualified for `source_map_many/3`, bare for
+  # `source_map/3`); everything below the field — a sub-document's own flat
+  # keys, and an array-reference's element index — is addressed the same way
+  # regardless of which caller is walking.
+  #
+  # Detects an expansion by DIFFING `base_rendered` (pre-expand) against
+  # `expanded` (post-expand), never by asking the schema which fields are
+  # references: `Expand.put_expanded/3` only ever REPLACES a reference
+  # field's value with the resolved target's own already-rendered envelope
+  # (always carrying `_id` + `_type`) or leaves it byte-identical (unresolved,
+  # non-reference, or redacted away before expansion ran) — so "changed, and
+  # now shaped like a rendered document" can only ever BE one.
+  defp expand_source_map(_base_rendered, nil, next_doc_idx, _field_prefix_fun, table),
+    do: {%{}, [], next_doc_idx, table}
+
+  defp expand_source_map(base_rendered, expanded, next_doc_idx, field_prefix_fun, table)
+       when is_map(expanded) do
+    {mappings, docs_rev, final_doc_idx, table} =
+      expanded
+      |> Map.keys()
+      |> Enum.reject(&(&1 in @reserved))
+      |> Enum.sort()
+      |> Enum.reduce({%{}, [], next_doc_idx, table}, fn key,
+                                                        {mappings_acc, docs_acc, doc_idx, table} ->
+        base_val = Map.get(base_rendered, key)
+        exp_val = Map.get(expanded, key)
+
+        case diff_expanded_field(base_val, exp_val) do
+          :unchanged ->
+            {mappings_acc, docs_acc, doc_idx, table}
+
+          {:single, sub_doc} ->
+            {sub_mappings, sub_entry, table} =
+              sub_document_source_map(sub_doc, field_prefix_fun.(key), doc_idx, table)
+
+            {Map.merge(mappings_acc, sub_mappings), [sub_entry | docs_acc], doc_idx + 1, table}
+
+          {:array, elements} ->
+            Enum.reduce(elements, {mappings_acc, docs_acc, doc_idx, table}, fn {el_idx, sub_doc},
+                                                                               {m_acc, d_acc,
+                                                                                cur_idx, table} ->
+              prefix = field_prefix_fun.(key) <> "[#{el_idx}]"
+
+              {sub_mappings, sub_entry, table} =
+                sub_document_source_map(sub_doc, prefix, cur_idx, table)
+
+              {Map.merge(m_acc, sub_mappings), [sub_entry | d_acc], cur_idx + 1, table}
+            end)
+        end
+      end)
+
+    {mappings, Enum.reverse(docs_rev), final_doc_idx, table}
+  end
+
+  defp expand_source_map(_base_rendered, _expanded, next_doc_idx, _field_prefix_fun, table),
+    do: {%{}, [], next_doc_idx, table}
+
+  # A value Expand left byte-identical — not a reference field, an
+  # unresolvable reference, or a field redacted away before expansion ran.
+  # `===` (not `==`) so a raw `1` field never spuriously "unchanges" against
+  # a `1.0` Expand happened to produce — the strict form every other
+  # raw-term comparison in this module already uses.
+  defp diff_expanded_field(base, exp) when base === exp, do: :unchanged
+
+  # A single reference field, resolved: Expand swapped the raw pointer for
+  # the target's own rendered envelope.
+  defp diff_expanded_field(_base, %{"_id" => _, "_type" => _} = exp_doc), do: {:single, exp_doc}
+
+  # An array-of-references field: each element that changed AND now looks
+  # like a rendered document is one resolved member; an element Expand left
+  # untouched (unresolved) is skipped, same as the single-ref nil case.
+  defp diff_expanded_field(base, exp) when is_list(exp) do
+    base_list = if is_list(base), do: base, else: []
+
+    elements =
+      exp
+      |> Enum.with_index()
+      |> Enum.filter(fn {el, i} ->
+        is_map(el) and Map.has_key?(el, "_id") and Map.has_key?(el, "_type") and
+          Enum.at(base_list, i) !== el
+      end)
+      |> Enum.map(fn {el, i} -> {i, el} end)
+
+    if elements == [], do: :unchanged, else: {:array, elements}
+  end
+
+  defp diff_expanded_field(_base, _exp), do: :unchanged
+
+  # An expanded sub-document's own flat-field mapping, exactly the same walk
+  # `source_map/3` does for the root — one more level of `?expand=` nesting
+  # is out of scope (same as `Expand.expand/4` itself never recursing).
+  defp sub_document_source_map(
+         %{"_id" => sub_id, "_type" => sub_type} = sub_doc,
+         prefix,
+         doc_index,
+         table
+       ) do
+    keys = sub_doc |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort()
+
+    {mappings, table} =
+      Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+        {idx, table} = path_table_index(table, result_path(key))
+
+        {Map.put(m_acc, append_path(prefix, key), %{
+           "source" => %{"document" => doc_index, "path" => idx},
+           "type" => "value"
+         }), table}
+      end)
+
+    {mappings, %{"_id" => sub_id, "_type" => sub_type}, table}
+  end
+
+  defp result_path(key), do: "$[#{inspect(key)}]"
+
+  # One more `[...]` segment onto an EXISTING result-path prefix — never a
+  # new leading `$`, unlike `result_path/1`. `field_prefix_fun` callers
+  # (`result_path/1`, `row_result_path/2`) already produced the one-and-only
+  # `$`; appending `result_path(key)` again here would double it
+  # (`$["author"]$["name"]` instead of `$["author"]["name"]`).
+  defp append_path(prefix, key), do: prefix <> "[#{inspect(key)}]"
+
+  defp row_result_path(row_idx, key), do: "$[#{row_idx}][#{inspect(key)}]"
+
+  # THE PATH TABLE (task-d0c2bd670e2d8a87) — a single, shared, deduplicated
+  # list of BARE in-document path strings (`result_path/1`'s own output,
+  # e.g. `$["title"]`, never row- or ref-prefixed), built once across every
+  # row and every expanded sub-document a `source_map/3` or
+  # `source_map_many/3` call walks. Every mapping's `"source" => %{"path" =>
+  # idx}` indexes THIS table, never a per-row or per-sub-document-local
+  # count: two different rows (or a row and its own expanded sub-document)
+  # that both carry a "title" field correctly reuse the SAME slot, and two
+  # different field names always get two different slots, regardless of
+  # alphabetical sort order or which row/document introduced the name
+  # first. Before this, `path_idx` for a sub-document's or a row's fields
+  # was an index into THAT ONE document's own locally-sorted key list, while
+  # the emitted `"paths"` array was built from a totally different
+  # enumeration (`Map.keys(expand_mappings)`, or a global alphabetical sort
+  # of every row's RESULT-side mapping keys) — the two numberings had no
+  # relationship, so `paths[path_idx]` could — and in a live query with
+  # `?expand=`, did — name the wrong field entirely.
+  defp path_table_new, do: {[], %{}, 0}
+
+  defp path_table_index({list_rev, index_of, next_idx} = table, bare_path) do
+    case Map.fetch(index_of, bare_path) do
+      {:ok, idx} ->
+        {idx, table}
+
+      :error ->
+        {next_idx, {[bare_path | list_rev], Map.put(index_of, bare_path, next_idx), next_idx + 1}}
+    end
+  end
+
+  defp path_table_to_list({list_rev, _index_of, _next_idx}), do: Enum.reverse(list_rev)
+
+  @doc """
   Redact an ALREADY-rendered envelope map under a subscriber's caller context —
   the same single chokepoint as `render/3`, but for the rare path that holds a
   frozen envelope snapshot rather than a live `%Document{}`.

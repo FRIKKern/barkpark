@@ -5,6 +5,7 @@ defmodule BarkparkWeb.ListenController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
+  alias Barkpark.Realtime.DrainSignal
   alias BarkparkWeb.{ErrorResponse, ListenFilter, ReadPerspective}
 
   def listen(conn, %{"dataset" => dataset} = params) do
@@ -54,6 +55,21 @@ defmodule BarkparkWeb.ListenController do
     # invariant. An admin caller ⇒ render/3 is a no-op ⇒ byte-identical stream.
     scope = scope_opts(conn)
     caller_context = Keyword.get(scope, :caller_context)
+
+    # A stream opened on a project URL carries only that project (owner ruling
+    # #50, task-d60479a7749b0ca5): `pass_meta?/2` drops a sibling project's live
+    # event and the replay query below never reads one. A flat URL stays
+    # workspace-wide, as the ruling chose.
+    lf = ListenFilter.narrow_to_project(lf, project_path_project_id(conn, scope))
+
+    # task-78dc25a4f117fa07: a doc-scoped Barkpark.PreviewToken (owner ruling
+    # #17) threads `:only_doc_ids` into `scope` the same way it already does
+    # for every other read (`ScopeHelpers.scope_opts/1`'s `maybe_only_doc_ids/2`)
+    # — this is the ONE line that makes a /v1/preview/listen connection fence
+    # to the token's own documents instead of the whole dataset topic. A
+    # bearer-token caller's scope never carries this key, so this is a no-op
+    # for every pre-existing /v1/data/listen connection.
+    lf = ListenFilter.narrow_to_only_doc_ids(lf, Keyword.get(scope, :only_doc_ids))
 
     # Tenancy scope for BOTH stream legs, read from the SAME `scope_opts/1` the
     # field-visibility scope above comes from — not from a private re-read of
@@ -116,14 +132,14 @@ defmodule BarkparkWeb.ListenController do
     # the census above is the evidence. The change is a strict widening — the
     # {:ok, _} path is behaviourally identical.
     conn =
-      case chunk(conn, "event: welcome\ndata: {\"type\":\"welcome\"}\n\n") do
+      case chunk(conn, welcome_frame(dataset, workspace_id, lf)) do
         {:ok, c} -> c
         _ -> conn
       end
 
     conn =
       if since do
-        Enum.reduce(replay_since(dataset, since, workspace_id), conn, fn ev, c ->
+        Enum.reduce(replay_since(dataset, since, workspace_id, replay_opts(lf)), conn, fn ev, c ->
           # The replay path reads the STORED mutation_events.document — a frozen,
           # unredacted snapshot. Re-render from the CURRENT document so a privacy
           # change since write is honoured; fall back to redacting the snapshot
@@ -151,6 +167,11 @@ defmodule BarkparkWeb.ListenController do
     conn = arm_reauth(conn, workspace_id)
 
     try do
+      schedule_keepalive()
+      # task-2bcada0faa01ebb2 — so a blue/green flip can end THIS stream at
+      # once instead of leaving it alive-but-deaf on the retiring slot. See
+      # `Barkpark.Realtime.DrainSignal`.
+      DrainSignal.subscribe()
       listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
       send(forwarder, :stop)
@@ -182,11 +203,56 @@ defmodule BarkparkWeb.ListenController do
   """
   defdelegate replay_since(dataset, since, workspace_id \\ nil, opts \\ []), to: EventLog
 
+  @doc """
+  Transport-thin delegate to `Barkpark.Content.EventLog.head_event_id/3` —
+  same seam convention as `replay_since/4` above.
+  """
+  defdelegate head_event_id(dataset, workspace_id \\ nil, opts \\ []), to: EventLog
+
+  # The project half of the replay query (owner ruling #50).
+  defp replay_opts(%ListenFilter{project_id: project_id}) when is_binary(project_id),
+    do: [project_id: project_id]
+
+  defp replay_opts(_lf), do: []
+
+  # task-399143cf7ac6b952. `since` isn't known yet at welcome-frame time (and
+  # wouldn't help: this id must be the HEAD of the backlog FOR THIS SCOPE, not
+  # whatever Last-Event-ID an already-reconnecting client happened to send).
+  # Scoped with the SAME workspace_id + replay_opts(lf) the later `since`
+  # replay call uses, so a reconnect with this id replays EXACTLY what was
+  # written after it — never more (no scope mismatch), never less (no
+  # fabricated id when nothing exists to anchor to: head_event_id/3 returns
+  # nil for an empty backlog, and the welcome frame is emitted exactly as
+  # before in that case — a frame no SSE client would read an id: line from
+  # either way).
+  defp welcome_frame(dataset, workspace_id, lf) do
+    case head_event_id(dataset, workspace_id, replay_opts(lf)) do
+      nil -> "event: welcome\ndata: {\"type\":\"welcome\"}\n\n"
+      id -> "id: #{id}\nevent: welcome\ndata: {\"type\":\"welcome\"}\n\n"
+    end
+  end
+
+  # The project this stream is narrowed to: the scope's resolved project, but
+  # only when the URL itself named one (`/w/:ws/p/:proj/...`).
+  @doc false
+  def project_path_project_id(%Plug.Conn{path_info: ["w", _ws, "p", _proj | _]}, scope),
+    do: Keyword.get(scope, :project_id)
+
+  def project_path_project_id(_conn, _scope), do: nil
+
   @doc false
   def format_event(ev, dataset) do
     pub_id = Content.published_id(ev.doc_id)
+    {ws_slug, project_slug} = scope_slugs(Map.get(ev, :workspace_id), Map.get(ev, :project_id))
+    scoped = "bp:ws:#{ws_slug}:p:#{project_slug}:ds:#{dataset}"
 
+    # The webhook's tag set (Webhooks.Dispatcher.build_payload/6): scoped doc:
+    # and type: tags, then the legacy flat pair. A consumer that tags scoped
+    # reads (the Next SDK with workspace + project set) can revalidate from
+    # either channel. task-0951e10cb60b409c.
     sync_tags = [
+      "#{scoped}:doc:#{pub_id}",
+      "#{scoped}:type:#{ev.type}",
       "bp:ds:#{dataset}:doc:#{pub_id}",
       "bp:ds:#{dataset}:type:#{ev.type}"
     ]
@@ -224,8 +290,28 @@ defmodule BarkparkWeb.ListenController do
       doc_id: msg.doc_id,
       rev: msg.rev,
       previous_rev: Map.get(msg, :previous_rev),
+      workspace_id: Map.get(msg, :workspace_id),
+      project_id: Map.get(msg, :project_id),
       document: result
     }
+  end
+
+  # `Tenancy.resolve_scope_slugs/2`, memoised for the life of this stream's
+  # process: a stream sees few workspace/project pairs, and two lookups per
+  # event per listener would add up. nil ids resolve to "default", as on the
+  # webhook path.
+  defp scope_slugs(workspace_id, project_id) do
+    key = {__MODULE__, :scope_slugs, workspace_id, project_id}
+
+    case Process.get(key) do
+      nil ->
+        slugs = Barkpark.Tenancy.resolve_scope_slugs(workspace_id, project_id)
+        Process.put(key, slugs)
+        slugs
+
+      slugs ->
+        slugs
+    end
   end
 
   # --- Subscriber backpressure (Barkpark scar: unbounded BEAM mailbox) ---
@@ -269,17 +355,46 @@ defmodule BarkparkWeb.ListenController do
       # Ignore legacy messages without event_id (defensive)
       {:document_changed, _} ->
         listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
-    after
-      30_000 ->
+
+      # task-a0fcffbe8799abe5 — scheduled with `Process.send_after/3`, NOT a `receive
+      # ... after` timeout: an `after` clause's clock restarts on EVERY
+      # message this `receive` handles, so a busy dataset whose other
+      # activity kept landing here (even a `:document_changed` for a type/
+      # perspective this subscriber's filter drops, or the legacy
+      # no-event-id shape above) could starve the keepalive indefinitely —
+      # the exact bug found and fixed in `PresenceController`'s loop
+      # (task-936472b77285df5b). A timer fired by `self()` keeps its own
+      # schedule no matter what else lands in this mailbox.
+      :keepalive ->
         with {:ok, conn} <- reauth_step(conn),
              {:ok, c} <- chunk(conn, ": keepalive\n\n") do
+          schedule_keepalive()
           listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
         else
           {:revoked, conn} -> conn
           _ -> conn
         end
+
+      # task-2bcada0faa01ebb2 — the slot this stream is on is retiring
+      # (DeployController.retire_sse/2, called by instance-deploy.sh right
+      # after the Caddy flip). End it NOW with a distinguishable final frame
+      # instead of sitting alive-but-deaf until systemd's drain/SIGKILL: the
+      # client sees the stream close, reconnects through Caddy to the slot
+      # that's actually live, and replays via Last-Event-ID — nothing lost,
+      # just no 20-30s blackout. Does NOT recurse: returning conn here ends
+      # listen_recv/6 (and the controller action), which closes the chunked
+      # response.
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
+          _ -> conn
+        end
     end
   end
+
+  defp schedule_keepalive, do: Process.send_after(self(), :keepalive, keepalive_ms())
+
+  defp keepalive_ms, do: Application.get_env(:barkpark, :listen_keepalive_ms, 30_000)
 
   defp forward_live(conn, msg, dataset, workspace_id, caller_context, scope, lf) do
     if forward_event?(msg, workspace_id) and ListenFilter.pass_meta?(lf, msg) do
@@ -331,8 +446,21 @@ defmodule BarkparkWeb.ListenController do
   # stream's workspace, is it still one? A failure writes one `unauthorized`
   # frame and ends the stream. A grant-admitted caller is held to token
   # liveness; its grant narrowing is the read path's job.
+  #
+  # A member's login-session bearer (task-cc6ad07a8aa36338) is held to the same
+  # two questions: does the bearer still verify as that user's session (logout,
+  # expiry and the org session policy, through `Accounts.verify_user_session/1`,
+  # #22764's resolver), and is the user still a member?
   defp arm_reauth(conn, workspace_id) do
-    case conn.assigns[:api_token] do
+    case conn.assigns[:api_token] || member_session_bearer(conn) do
+      {:session, raw, user_id} ->
+        put_private(conn, :listen_reauth, %{
+          session: raw,
+          user_id: user_id,
+          workspace_id: workspace_id,
+          checked_at: System.monotonic_time(:millisecond)
+        })
+
       %Barkpark.Auth.ApiToken{} = token ->
         member? =
           is_binary(workspace_id) and
@@ -370,9 +498,31 @@ defmodule BarkparkWeb.ListenController do
 
   defp reauth_step(conn), do: {:ok, conn}
 
+  defp still_authorized?(%{session: raw, user_id: user_id, workspace_id: ws_id}) do
+    case Barkpark.Accounts.verify_user_session(raw) do
+      {%Barkpark.Accounts.User{id: ^user_id} = user, _session} ->
+        is_binary(ws_id) and Barkpark.Tenancy.Auth.authorize(user, ws_id, :read) == :ok
+
+      _ ->
+        false
+    end
+  end
+
   defp still_authorized?(%{token: token, workspace_id: ws_id, member?: member?}) do
     Barkpark.Auth.token_live?(token) and
       (not member? or Barkpark.Tenancy.Auth.authorize(token, ws_id, :read) == :ok)
+  end
+
+  # Only the caller `RequireTokenOrMemberSession` admits by session: a member,
+  # with the session as the bearer.
+  defp member_session_bearer(%Plug.Conn{assigns: assigns} = conn) do
+    with true <- assigns[:member_user] == true and assigns[:current_user_via] == :bearer,
+         %Barkpark.Accounts.User{id: user_id} <- assigns[:current_user],
+         ["Bearer " <> raw] <- get_req_header(conn, "authorization") do
+      {:session, String.trim(raw), user_id}
+    else
+      _ -> nil
+    end
   end
 
   defp reauth_interval_ms,

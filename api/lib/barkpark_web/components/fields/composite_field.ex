@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
 
@@ -42,6 +43,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :dataset, :string, default: "production"
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document root a `visibleWhen` with the default "document" scope reads;
+  # nil reads this object's own value, as before (task-9905a69475b1ff3b).
+  attr :root, :map, default: nil
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -59,6 +63,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:dataset, "production")
       |> Map.put_new(:scope_prefix, "")
       |> Map.put_new(:api_token_raw, "")
+      |> Map.put_new(:root, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -72,7 +77,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         <.composite_body
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -81,7 +86,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
           />
         </details>
       <% true -> %>
@@ -91,7 +96,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
           />
         </fieldset>
     <% end %>
@@ -121,6 +126,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :dataset, :string, default: "production"
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document root a `visibleWhen` with the default "document" scope reads;
+  # nil reads this object's own value, as before (task-9905a69475b1ff3b).
+  attr :root, :map, default: nil
 
   defp composite_body(assigns) do
     ~H"""
@@ -138,9 +146,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           role="tab"
           data-group={g["name"]}
           aria-selected={to_string(g["name"] == default_group(@groups))}
+          tabindex={if g["name"] == default_group(@groups), do: "0", else: "-1"}
         ><%= g["title"] || g["name"] %></button>
       </div>
-      <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
+      <%= for sub <- @subfields, Visibility.visible?(sub, @root || @value, @value) do %>
         <div class="bp-subfield" data-subfield-name={sub.name} data-group={subfield_group(sub)}>
           <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
             <%= title_for(sub) %>
@@ -190,7 +199,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     ~H"""
     <div data-readonly-field={@name} data-structured-value>
       <pre class="bp-input" style="margin:0;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @json %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — stored as structured data this field's editor cannot show; saved unchanged") %></span>
     </div>
     """
   end
@@ -208,7 +217,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       readonly: assigns.readonly,
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
-      api_token_raw: Map.get(assigns, :api_token_raw) || ""
+      api_token_raw: Map.get(assigns, :api_token_raw) || "",
+      root: Map.get(assigns, :root)
     }
 
     composite_field(sub_assigns)
@@ -226,7 +236,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       readonly: assigns.readonly,
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
-      api_token_raw: Map.get(assigns, :api_token_raw) || ""
+      api_token_raw: Map.get(assigns, :api_token_raw) || "",
+      root: Map.get(assigns, :root)
     }
 
     ArrayField.array_field(sub_assigns)
@@ -425,7 +436,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         disabled={@readonly}
       />
       <span class="form-switch-track" aria-hidden="true"></span>
-      <span class="form-switch-state"><%= if @checked, do: "On", else: "Off" %></span>
+      <%!-- Both words ship and CSS `:checked` shows the true one, so the word
+            follows a click before any re-render, in the Studio language
+            (task-70fd7cef5d0266aa). aria-hidden: the checkbox announces its state. --%>
+      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off"><%= gettext("Off") %></span><span class="form-switch-state-on"><%= gettext("On") %></span></span>
     </label>
     """
   end
@@ -458,6 +472,32 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       />
       """
     end
+  end
+
+  # A datetime subfield: the same hidden-value + local picker pair as the
+  # top-level datetime input (owner ruling #46, BarkparkDatetimeField).
+  # The subfield's <label for> names the hidden input, so the picker the
+  # author types into carries the same title as its own aria-label.
+  defp leaf_input(%{field: %{type: "datetime"}} = assigns) do
+    ~H"""
+    <span id={"#{@input_id}-dt"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+      <input
+        type="hidden"
+        id={@input_id}
+        name={@input_name}
+        value={to_string(@value || "")}
+        data-datetime-value
+        phx-change={@on_change}
+        disabled={@readonly}
+      />
+      <input
+        type="datetime-local"
+        class="bp-input"
+        aria-label={title_for(@field)}
+        disabled={@readonly}
+      />
+    </span>
+    """
   end
 
   defp leaf_input(assigns) do
@@ -527,7 +567,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       phx-change={@on_change}
       disabled={@readonly}
     >
-      <option value="" selected={is_nil(@value) or @value == ""}>— Select —</option>
+      <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
       <%= for opt <- @options do %>
         <option value={opt.value} selected={to_string(@value) == opt.value}>
           <%= opt.label %>

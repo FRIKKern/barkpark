@@ -1,0 +1,397 @@
+defmodule BarkparkWeb.PaperOpsControllerTest do
+  @moduledoc """
+  task-7ee817f37630d669 (P1, blocks barkpark-studio's Freeform papers) —
+  `POST /w/:ws/p/:proj/v1/papers/:slug/ops`, the member-token twin of the
+  `:ingest`-only `POST /v1/plugins/bulldocs/papers/:slug/ops`, exposing
+  `Content.apply_paper_block_ops_once/6` to the same write tier
+  `PaperMastersController` already rides.
+  """
+  # async: false — the op path's idempotency store is a shared table (see
+  # Barkpark.Plugins.Bulldocs.MastersTest's own note, and
+  # PaperMastersControllerTest mirrors it for the same reason).
+  use BarkparkWeb.ConnCase, async: false
+
+  import Barkpark.TenancyFixtures
+
+  alias Barkpark.{Accounts, Auth, Content, Repo}
+  alias Barkpark.Accounts.Privacy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  @dataset "production"
+
+  setup do
+    ws = create_workspace!("po-#{System.unique_integer([:positive])}")
+    project = create_project!(ws)
+
+    member_raw = "po-member-#{System.unique_integer([:positive])}"
+    {:ok, member} = Auth.create_token(member_raw, "po-member", @dataset, ["read", "write"])
+    {:ok, _} = TenancyAuth.create_membership(ws.id, member.id, "member", "api_token")
+
+    reader_raw = "po-reader-#{System.unique_integer([:positive])}"
+    {:ok, reader} = Auth.create_token(reader_raw, "po-reader", @dataset, ["read"])
+    {:ok, _} = TenancyAuth.create_membership(ws.id, reader.id, "member", "api_token")
+
+    outsider_raw = "po-outsider-#{System.unique_integer([:positive])}"
+    {:ok, _outsider} = Auth.create_token(outsider_raw, "po-outsider", @dataset, ["read", "write"])
+
+    slug = "paper-ops-http-#{System.unique_integer([:positive])}"
+
+    attrs =
+      Barkpark.LabelFixtures.paper_attrs(%{
+        slug: slug,
+        blocks: [
+          %{
+            "id" => "t",
+            "type" => "heading",
+            "level" => 1,
+            "role" => "title",
+            "locked" => true,
+            "text" => "T"
+          },
+          %{"id" => "lead", "type" => "paragraph", "text" => "Lead"}
+        ],
+        workspace_id: ws.id,
+        project_id: project.id
+      })
+
+    {:ok, paper} = Content.upsert_paper(attrs)
+    rev = get_in(paper.content, ["rev"])
+
+    %{
+      ws: ws,
+      project: project,
+      member: member,
+      member_raw: member_raw,
+      reader_raw: reader_raw,
+      outsider_raw: outsider_raw,
+      slug: slug,
+      rev: rev
+    }
+  end
+
+  defp req(raw) do
+    scoped_conn()
+    |> put_req_header("authorization", "Bearer #{raw}")
+    |> put_req_header("content-type", "application/json")
+  end
+
+  defp ops_path(ws, project, slug), do: "/w/#{ws.slug}/p/#{project.slug}/v1/papers/#{slug}/ops"
+
+  defp append_op(id, text),
+    do: %{
+      "op" => "append-block",
+      "block" => %{"id" => id, "type" => "paragraph", "text" => text}
+    }
+
+  describe "POST /v1/papers/:slug/ops — member token, happy path" do
+    test "applies a batch of ops and answers the new rev", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn =
+        post(req(raw), ops_path(ws, project, slug), %{
+          "ops" => [append_op("b1", "one"), append_op("b2", "two")],
+          "ifRev" => rev
+        })
+
+      body = json_response(conn, 200)
+      assert body["slug"] == slug
+      assert body["opCount"] == 2
+      assert body["blockIds"] == ["b1", "b2"]
+      assert is_integer(body["rev"])
+      refute body["rev"] == rev
+
+      # The write actually landed — read it back.
+      reloaded = Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+      ids = get_in(reloaded.content, ["blocks"]) |> Enum.map(& &1["id"])
+      assert "b1" in ids and "b2" in ids
+    end
+
+    test "the same requestId replays the same receipt instead of applying twice", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      request_id = Ecto.UUID.generate()
+
+      body = %{
+        "ops" => [append_op("r1", "once")],
+        "ifRev" => rev,
+        "requestId" => request_id
+      }
+
+      first = json_response(post(req(raw), ops_path(ws, project, slug), body), 200)
+      second = json_response(post(req(raw), ops_path(ws, project, slug), body), 200)
+
+      assert first == second
+    end
+  end
+
+  describe "POST /v1/papers/:slug/ops — a stale ifRev" do
+    test "answers 412 precondition_failed with details.actual, and writes nothing", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn =
+        post(req(raw), ops_path(ws, project, slug), %{
+          "ops" => [append_op("stale1", "x")],
+          "ifRev" => rev + 1000
+        })
+
+      body = json_response(conn, 412)
+      assert body["error"]["code"] == "precondition_failed"
+      assert body["error"]["details"]["actual"] == rev
+      assert body["error"]["details"]["expected"] == rev + 1000
+
+      reloaded = Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+      assert get_in(reloaded.content, ["rev"]) == rev
+      ids = get_in(reloaded.content, ["blocks"]) |> Enum.map(& &1["id"])
+      refute "stale1" in ids
+    end
+  end
+
+  describe "POST /v1/papers/:slug/ops — security: write authorization" do
+    test "a read-only member token is refused (write permission required)", %{
+      ws: ws,
+      project: project,
+      reader_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn =
+        post(req(raw), ops_path(ws, project, slug), %{
+          "ops" => [append_op("ro1", "x")],
+          "ifRev" => rev
+        })
+
+      assert conn.status in [401, 403]
+
+      reloaded = Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+      ids = get_in(reloaded.content, ["blocks"]) |> Enum.map(& &1["id"])
+      refute "ro1" in ids
+    end
+
+    test "a non-member token (write-capable elsewhere) is refused", %{
+      ws: ws,
+      project: project,
+      outsider_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn =
+        post(req(raw), ops_path(ws, project, slug), %{
+          "ops" => [append_op("out1", "x")],
+          "ifRev" => rev
+        })
+
+      assert conn.status in [401, 403, 404]
+
+      reloaded = Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+      ids = get_in(reloaded.content, ["blocks"]) |> Enum.map(& &1["id"])
+      refute "out1" in ids
+    end
+
+    test "an anonymous caller is refused", %{ws: ws, project: project, slug: slug, rev: rev} do
+      conn =
+        post(scoped_conn(), ops_path(ws, project, slug), %{
+          "ops" => [append_op("anon1", "x")],
+          "ifRev" => rev
+        })
+
+      assert conn.status in [401, 403]
+    end
+  end
+
+  describe "POST /v1/papers/:slug/ops — malformed requests" do
+    test "missing ops is 422 malformed_op", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn = post(req(raw), ops_path(ws, project, slug), %{"ifRev" => rev})
+      assert %{"error" => %{"code" => "malformed_op"}} = json_response(conn, 422)
+    end
+
+    test "an empty ops list is 422 malformed_op", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn = post(req(raw), ops_path(ws, project, slug), %{"ops" => [], "ifRev" => rev})
+      assert %{"error" => %{"code" => "malformed_op"}} = json_response(conn, 422)
+    end
+
+    test "missing ifRev is 422 malformed_op", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug
+    } do
+      conn = post(req(raw), ops_path(ws, project, slug), %{"ops" => [append_op("n1", "x")]})
+      assert %{"error" => %{"code" => "malformed_op"}} = json_response(conn, 422)
+    end
+
+    test "an unknown paper slug is a 404", %{ws: ws, project: project, member_raw: raw} do
+      conn =
+        post(req(raw), ops_path(ws, project, "no-such-paper"), %{
+          "ops" => [append_op("n1", "x")],
+          "ifRev" => 0
+        })
+
+      assert %{"error" => %{"code" => "not_found"}} = json_response(conn, 404)
+    end
+
+    test "an invalid requestId is a 422 malformed_request", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      conn =
+        post(req(raw), ops_path(ws, project, slug), %{
+          "ops" => [append_op("n1", "x")],
+          "ifRev" => rev,
+          "requestId" => "not-a-uuid"
+        })
+
+      assert %{"error" => %{"code" => "malformed_request"}} = json_response(conn, 422)
+    end
+  end
+
+  # ── author attribution (task-1ecebe46ef50e427) ───────────────────────────
+
+  describe "POST /v1/papers/:slug/ops — writes an attributed history row" do
+    test "a plain member token's edit shows that member in history", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      member: member,
+      slug: slug,
+      rev: rev
+    } do
+      post(req(raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("att1", "attributed")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      [latest | _] =
+        Content.list_revisions(slug, "paper", @dataset,
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      assert latest.action == "api-ops"
+      assert latest.actor_kind == "api_token"
+      assert latest.actor_id == member.id
+      # This token has no owner, so it stays an unlabelled api_token --
+      # Privacy.redact_actor_labels/1's generic resolution has nothing to
+      # resolve it TO, honestly.
+      assert [%{actor_label: nil}] = Privacy.redact_actor_labels([Map.from_struct(latest)])
+    end
+
+    test "an owned app token's edit shows the OWNER's display name in history", %{
+      ws: ws,
+      project: project,
+      slug: slug,
+      rev: rev
+    } do
+      email = "paper-editor-#{System.unique_integer([:positive])}@example.com"
+      {:ok, user} = Accounts.register_user(%{email: email, password: "a-long-enough-password-1"})
+
+      owned_raw = "po-owned-#{System.unique_integer([:positive])}"
+      {:ok, owned} = Auth.create_token(owned_raw, "owned app token", @dataset, ["read", "write"])
+      {:ok, owned} = owned |> Ecto.Changeset.change(owner_user_id: user.id) |> Repo.update()
+      # A user-owned token's seat decision requires TWO rows (Tenancy.Auth's
+      # own `holder_seat_decision/3`): the token's OWN membership (its seat)
+      # AND its owner's own user membership (the token "never outlives its
+      # holder's demotion or removal" rule) -- both at `role: "member"`.
+      {:ok, _} = TenancyAuth.create_membership(ws.id, owned.id, "member", "api_token")
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
+
+      post(req(owned_raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("att2", "owned")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      [latest | _] =
+        Content.list_revisions(slug, "paper", @dataset,
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      assert latest.actor_kind == "api_token"
+      assert latest.actor_id == owned.id
+      # The SAME generic read-time resolution a document op's history already
+      # gets -- this door stamps no special-cased label of its own.
+      assert [%{actor_label: ^email}] = Privacy.redact_actor_labels([Map.from_struct(latest)])
+    end
+  end
+
+  describe "POST /v1/papers/:slug/ops — emits an IMMEDIATE /v1/data/listen frame (task-dba598ed804f02a5)" do
+    test "a listener on the paper's workspace receives a document_changed frame carrying the new rev",
+         %{ws: ws, project: project, member_raw: raw, slug: slug, rev: rev} do
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Barkpark.Content.Broadcast.workspace_list_topic(@dataset, ws.id)
+      )
+
+      post(req(raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("listen1", "live")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      # Document ops/mutate deliver this frame WITHOUT the editor waiting on
+      # Papers.ChangeEvents' settle debounce (settle_seconds/0, default 10s) —
+      # a plain `assert_receive` default timeout only catches an IMMEDIATE
+      # frame, which is the whole point of this test. The broadcast's `rev`
+      # is the Document row's own storage rev (an opaque hex string), NOT
+      # the paper's logical `content["rev"]` block-op counter the HTTP
+      # receipt's `body["rev"]` reports — compare against the reloaded row.
+      assert_receive {:document_changed, %{doc_id: ^slug, rev: new_rev, type: "paper"}}
+
+      reloaded =
+        Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+
+      assert new_rev == reloaded.rev
+    end
+
+    test "a listener on a DIFFERENT workspace gets nothing from this paper's op", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      other_ws = create_workspace!("po-other-#{System.unique_integer([:positive])}")
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Barkpark.Content.Broadcast.workspace_list_topic(@dataset, other_ws.id)
+      )
+
+      post(req(raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("listen2", "cross-ws")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      refute_receive {:document_changed, _}, 200
+    end
+  end
+end

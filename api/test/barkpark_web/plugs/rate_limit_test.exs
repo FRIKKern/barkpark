@@ -438,4 +438,264 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       assert RateLimit.call(read_with(raw), RateLimit.init([])).halted
     end
   end
+
+  # task-2c31de0cf6597d32 — a Studio editor authenticated by SESSION COOKIE
+  # alone (no Bearer) gets their OWN write bucket, at the wider
+  # :session_write_per_minute default, instead of sharing the per-IP bucket
+  # every other cookie-only caller shares. Both session shapes
+  # OptionalSessionToken recognises: the token-sign-in cookie
+  # (`session["api_token"]`) and the account/SSO login
+  # (`session["user_session"]`).
+  describe "a session-cookie editor, holding no Bearer" do
+    defp session_conn(method, path, path_params, session) do
+      build(method, path, path_params, [])
+      |> Plug.Test.init_test_session(session)
+    end
+
+    defp mutate_with_session(session) do
+      session_conn(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, session)
+    end
+
+    defp token_session(label) do
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, _token} = Barkpark.Auth.create_token(raw, label, "production", ["read", "write"])
+      %{"api_token" => raw}
+    end
+
+    defp account_session(email) do
+      user = Barkpark.AccountsFixtures.register_user(email)
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      %{"user_session" => raw}
+    end
+
+    test "two editors signed in via the token-sign-in cookie get independent buckets, " <>
+           "each at the session default (180/min), not the 60/min token default" do
+      with_limits([])
+
+      a = token_session("editor-a")
+      b = token_session("editor-b")
+
+      # 60 calls would exhaust the OLD shared/token default; the session
+      # default (180) must still have allowance left for BOTH editors past it.
+      results_a = for _ <- 1..65, do: RateLimit.call(mutate_with_session(a), RateLimit.init([]))
+
+      refute Enum.any?(results_a, & &1.halted),
+             "editor A hit a write 429 before 65 writes — session budget is not wider than 60/min"
+
+      results_b = for _ <- 1..65, do: RateLimit.call(mutate_with_session(b), RateLimit.init([]))
+
+      refute Enum.any?(results_b, & &1.halted),
+             "editor B hit a write 429 before 65 writes — editors are sharing ONE bucket again"
+    end
+
+    test "an account-session (user_session) editor also gets the session default, " <>
+           "and two account editors do not share a bucket" do
+      with_limits([])
+
+      a = account_session("session-editor-a@example.com")
+      b = account_session("session-editor-b@example.com")
+
+      results_a = for _ <- 1..65, do: RateLimit.call(mutate_with_session(a), RateLimit.init([]))
+      refute Enum.any?(results_a, & &1.halted)
+
+      results_b = for _ <- 1..65, do: RateLimit.call(mutate_with_session(b), RateLimit.init([]))
+      refute Enum.any?(results_b, & &1.halted)
+    end
+
+    test "the session write budget is independently configurable and still per-editor" do
+      with_limits(session_write_per_minute: 3)
+
+      a = token_session("editor-small-a")
+      b = token_session("editor-small-b")
+
+      assert not RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      assert not RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      assert not RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      # A has spent its 3; B, a DIFFERENT editor, still has all 3 of its own.
+      assert RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      assert not RateLimit.call(mutate_with_session(b), RateLimit.init([])).halted
+    end
+
+    test "abuse limits for anonymous and token traffic are UNCHANGED by the session class" do
+      with_limits(write_per_minute: 1)
+
+      # Anonymous (no Bearer, no session at all) still gets the small
+      # write_per_minute default, not the wider session one.
+      anon = build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [])
+      assert not RateLimit.call(anon, RateLimit.init([])).halted
+      assert RateLimit.call(anon, RateLimit.init([])).halted
+
+      # A live api_token presented as a BEARER (not a session cookie) still
+      # gets write_per_minute too — the session widen is session-ONLY.
+      raw = mint("editor-bearer")
+
+      bearer_write =
+        build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+          {"authorization", "Bearer " <> raw}
+        ])
+
+      assert not RateLimit.call(bearer_write, RateLimit.init([])).halted
+      assert RateLimit.call(bearer_write, RateLimit.init([])).halted
+    end
+
+    test "a Bearer still wins over a session cookie on the SAME request" do
+      with_limits(write_per_minute: 1, session_write_per_minute: 180)
+
+      raw = mint("editor-bearer-precedence")
+      session = token_session("editor-session-precedence")
+
+      conn =
+        session_conn(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, session)
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+
+      # Bearer resolves first (same precedence OptionalSessionToken documents),
+      # so this request is billed at write_per_minute (1), not the wider
+      # session default, even though a valid session cookie also rides along.
+      assert not RateLimit.call(conn, RateLimit.init([])).halted
+      assert RateLimit.call(conn, RateLimit.init([])).halted
+    end
+  end
+
+  # task-db8de40bbc928c54 — presence/focus must never share a bucket with
+  # content writes, for the SAME principal.
+  describe "the :presence_focus class (task-db8de40bbc928c54)" do
+    defp mint_presence(label) do
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, _token} = Barkpark.Auth.create_token(raw, label, "production", ["read", "write"])
+      raw
+    end
+
+    defp focus_conn(raw) do
+      build(:post, "/v1/data/presence/production/focus", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    defp write_conn(raw) do
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    test "a presence_focus burst never debits the content-write bucket", %{} do
+      with_limits(write_per_minute: 1, presence_focus_per_minute: 200)
+      raw = mint_presence("focus-isolation")
+
+      for _ <- 1..200 do
+        refute RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus)).halted
+      end
+
+      # The SAME principal's content-write bucket is untouched: its own
+      # budget (1/min) is still fully unspent after 200 focus calls.
+      refute RateLimit.call(write_conn(raw), RateLimit.init([])).halted
+    end
+
+    test "a content write never debits the presence_focus bucket, either way", %{} do
+      with_limits(write_per_minute: 1, presence_focus_per_minute: 50)
+      raw = mint_presence("write-isolation")
+
+      refute RateLimit.call(write_conn(raw), RateLimit.init([])).halted
+      # The write bucket (1/min) is now spent...
+      assert RateLimit.call(write_conn(raw), RateLimit.init([])).halted
+      # ...but presence_focus (50/min) is untouched by it.
+      refute RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus)).halted
+    end
+
+    test "a presence_focus flood is STILL bounded — it is a real class, not shadow-only" do
+      with_limits(presence_focus_per_minute: 3)
+      raw = mint_presence("focus-flood")
+
+      for _ <- 1..3 do
+        refute RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus)).halted
+      end
+
+      limited = RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus))
+      assert limited.halted
+      assert limited.status == 429
+      body = Jason.decode!(limited.resp_body)
+      assert body["error"]["code"] == "rate_limited"
+    end
+  end
+
+  # task-2c31de0cf6597d32 follow-up — measured live on guerrilla by the
+  # barkpark-studio lead: Studio's editors authenticate to Barkpark with a
+  # per-editor BEARER (the editor's own app token, or a shared studio token),
+  # never a session cookie, so the session-only fix above left them on the
+  # flat 60/min default. A Bearer whose `owner_user_id` names ONE human now
+  # gets the SAME wider session_write_per_minute default. App tokens from
+  # POST /v1/auth/app-tokens qualify by construction: `AppTokenController.mint/2`
+  # sets `owner_user_id: user.id` on every mint, one per editor email — so
+  # they need no separate class check, just the owner check.
+  describe "a Bearer token whose owner_user_id names one human (task-2c31de0cf6597d32 follow-up)" do
+    defp mint_owned(label, email) do
+      user = Barkpark.AccountsFixtures.register_user(email)
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+
+      {:ok, _token} =
+        Barkpark.Auth.create_token(raw, label, "production", ["read", "write"], nil,
+          owner_user_id: user.id
+        )
+
+      raw
+    end
+
+    defp mutate_with_bearer(raw) do
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    test "an owner-token sustains 65+ writes/min with no 429" do
+      with_limits([])
+
+      raw = mint_owned("owner-editor", "owner-editor@example.com")
+
+      results = for _ <- 1..65, do: RateLimit.call(mutate_with_bearer(raw), RateLimit.init([]))
+
+      refute Enum.any?(results, & &1.halted),
+             "an owned Bearer token hit a write 429 before 65 writes — " <>
+               "it is not getting the wider session_write_per_minute default"
+    end
+
+    test "an ownerless (shared/service) token still 429s at 61" do
+      with_limits([])
+
+      # No owner_user_id option -- the exact shape a shared studio token (or
+      # any service credential) has always minted as.
+      raw = mint("shared-service-token")
+
+      results = for _ <- 1..61, do: RateLimit.call(mutate_with_bearer(raw), RateLimit.init([]))
+
+      assert List.last(results).halted,
+             "an ownerless token sustained 61 writes/min -- it leaked onto the " <>
+               "wider owner budget it must not get"
+
+      refute Enum.take(results, 60) |> Enum.any?(& &1.halted),
+             "an ownerless token 429'd before its own 60/min default was spent"
+    end
+
+    test "a class: :app token with owner_user_id set also widens (the budget keys on " <>
+           "owner_user_id alone, not on class)" do
+      with_limits([])
+
+      user = Barkpark.AccountsFixtures.register_user("app-editor@example.com")
+      raw = "app-editor-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+
+      {:ok, _token} =
+        Barkpark.Auth.create_token(
+          raw,
+          "app:app-editor@example.com",
+          "production",
+          ["read", "write"],
+          nil,
+          class: :app,
+          owner_user_id: user.id
+        )
+
+      results = for _ <- 1..65, do: RateLimit.call(mutate_with_bearer(raw), RateLimit.init([]))
+
+      refute Enum.any?(results, & &1.halted),
+             "a class: :app token with owner_user_id set did not get the owner budget"
+    end
+  end
 end

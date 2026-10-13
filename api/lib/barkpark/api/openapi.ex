@@ -508,7 +508,26 @@ defmodule Barkpark.Api.OpenApi do
                 "type" => "string",
                 "description" => "An imperative one-line fix suggestion, when available."
               },
-              "details" => %{"type" => "object", "additionalProperties" => true}
+              "details" => %{"type" => "object", "additionalProperties" => true},
+              "findings" => %{
+                "type" => "array",
+                "description" =>
+                  "Structured form of `details`, on content-schema `validation_failed` " <>
+                    "responses: one entry per finding, `message` byte-identical to the " <>
+                    "string under `details`, plus a stable `code` and a `params` map " <>
+                    "(task-1dac662bed153203). Additive — a client reading only `details` " <>
+                    "is unaffected.",
+                "items" => %{
+                  "type" => "object",
+                  "required" => ["path", "message", "code"],
+                  "properties" => %{
+                    "path" => %{"type" => "string"},
+                    "message" => %{"type" => "string"},
+                    "code" => %{"type" => "string"},
+                    "params" => %{"type" => "object", "additionalProperties" => true}
+                  }
+                }
+              }
             }
           }
         }

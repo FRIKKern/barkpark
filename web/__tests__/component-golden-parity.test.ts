@@ -584,13 +584,14 @@ test("web task-board RENDER realizes every projection column (role order · labe
     }
 
     // The glyph-role realizes at the MANIFEST glyph char. Spinner roles emit
-    // the empty CSS-animated span (aria-labelled), never a literal char.
+    // the empty CSS-animated span, a named image (role="img" + aria-label,
+    // task-21231dd5be0ca72c), never a literal char.
     const lrow = legendByRole.get(col.glyph_role);
     assert.ok(lrow, `legend fixture has no row for glyph role ${col.glyph_role}`);
     if (lrow!.spinner) {
       present(
         seg,
-        `<span class="bp-g bp-g--${col.glyph_role}" aria-label=`,
+        `<span class="bp-g bp-g--${col.glyph_role}" role="img" aria-label=`,
         `board spinner glyph ${col.glyph_role}`,
       );
     } else {

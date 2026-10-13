@@ -130,7 +130,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
           case Session.peek(
                  socket.assigns.slug,
                  socket.assigns.dataset,
-                 GridData.session_workspace_id(socket)
+                 GridData.session_scope(socket)
                ) do
             {:ok, content} -> assign(socket, content: content, rev: rev)
             {:error, :no_session} -> assign(socket, rev: rev)
@@ -475,7 +475,7 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
                socket.assigns.dataset,
                chunk,
                nil,
-               GridData.session_workspace_id(socket)
+               GridData.session_scope(socket)
              ) do
           {:ok, %{errors: chunk_errors}} ->
             acc = errors ++ chunk_errors

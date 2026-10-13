@@ -45,6 +45,7 @@ import {
 } from "../convert.js";
 // Merged cells (plan #24): the grid <-> visible-rows model (spans on the block, covered placeholders).
 import { gridToVisible, visibleToGrid, PLACEHOLDER_CELL } from "./table-grid.js";
+import { toFieldNumber } from "./field-node.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
 // switch). These project to a native ProseMirror textblock and diff via
@@ -284,15 +285,16 @@ const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = {
   bpFiletree: "filetree",
 };
 
-// S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
+// S3.5: the 8 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
 // nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
 // in an attr and is edited by a NATIVE HTML control (input / textarea / checkbox /
-// select / datetime-local / color; see field-node.js). UNLIKE the code/diagram
+// select / datetime-local / color / number; see field-node.js). UNLIKE the code/diagram
 // attr-atoms (one bpType per TipTap node, body text in a free textarea), the field
-// control-atom serves 7 bpTypes through ONE node (`bpField`), the edit surface is a
+// control-atom serves 8 bpTypes through ONE node (`bpField`), the edit surface is a
 // TYPED control, and the value is COERCED BY FIELD TYPE exactly like the shipped
-// BarkparkFieldBlockBridge (field-boolean → a BOOLEAN via control.checked; every
-// other native type → a STRING via control.value).
+// BarkparkFieldBlockBridge (field-boolean → a BOOLEAN via control.checked;
+// field-number → a NUMBER or null; every other native type → a STRING via
+// control.value).
 //
 // RUN-SPLITTER TAIL (part 1): field-image (bp-media-picker WC) and field-reference
 // (bp-reference-picker WC) now ALSO ride the canvas through the SAME `bpField` atom —
@@ -318,6 +320,7 @@ const CANVAS_NATIVE_FIELD_TYPES = new Set([
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
 ]);
 const CANVAS_PICKER_FIELD_TYPES = new Set(["field-image", "field-reference"]);
 const CANVAS_FIELD_TYPES = new Set([
@@ -773,6 +776,25 @@ export function runToTiptap(blocks) {
   return { type: "doc", content: (blocks || []).map(blockToNode) };
 }
 
+// Declared object block names that WIN over a same-named canvas-native type
+// (task-5bc7771edf30199a). A field that declares `blocks.of: [{name:"callout",
+// fields:[…]}]` means ITS callout (Sanity's `{tone, text}`), not the canvas's
+// built-in: such a block projects as a bpOpaque carry, edited through the field
+// dialog (inline-object.js), never through the built-in node. Scoped to ONE
+// synchronous call by withObjectOverrides, so two canvases with different
+// vocabularies on one page never see each other's set.
+let OBJECT_OVERRIDES = null;
+
+export function withObjectOverrides(names, fn) {
+  const prev = OBJECT_OVERRIDES;
+  OBJECT_OVERRIDES = names && names.size ? names : null;
+  try {
+    return fn();
+  } finally {
+    OBJECT_OVERRIDES = prev;
+  }
+}
+
 // blockToNode(block) → ONE ProseMirror node. The per-block dispatch runToTiptap maps
 // over its block list — factored out so a CONTAINER (section) can recurse it over its
 // nested children (sectionBlockToNode). The container branch is checked BEFORE the
@@ -781,6 +803,10 @@ function blockToNode(block) {
   {
     const bpId = block && block.id;
     const bpType = block && block.type;
+
+    if (OBJECT_OVERRIDES && OBJECT_OVERRIDES.has(bpType)) {
+      return { type: "bpOpaque", attrs: { bpId, bpType, bpBlock: deepClone(block) } };
+    }
 
     if (isProseType(bpType)) {
       // Lift the single prose node convert.js produced and merge our stamp into
@@ -2919,6 +2945,8 @@ function normalizeFieldValue(bpType, value) {
   if (bpType === "field-boolean") {
     return value === true || value === "true";
   }
+  // field-number stores a NUMBER, or null when empty (blocks.ex default_block).
+  if (bpType === "field-number") return toFieldNumber(value);
   if (value == null) return "";
   return typeof value === "string" ? value : String(value);
 }
@@ -2933,6 +2961,8 @@ function normalizeFieldValue(bpType, value) {
 //   * label     — only when present (label is a string; carry it as-is when set).
 //   * options   — only when present (field-select carries it; others don't).
 //   * rows      — only when present (field-text's optional row count).
+const FIELD_NUMBER_CONFIG = ["min", "max", "step", "unit"];
+
 function fieldBlockToNode(block, bpId, bpType) {
   const attrs = {
     bpId,
@@ -2944,6 +2974,8 @@ function fieldBlockToNode(block, bpId, bpType) {
   if (block && block.label != null) attrs.label = block.label;
   if (block && block.options != null) attrs.options = block.options;
   if (block && block.rows != null) attrs.rows = block.rows;
+  // field-number config: min / max / step / unit, only when present.
+  for (const k of FIELD_NUMBER_CONFIG) if (block && block[k] != null) attrs[k] = block[k];
   // PICKER config (field-image / field-reference) carried verbatim so the round-trip is
   // byte-identical: refType (field-reference's target schema) + dataset (a per-block
   // fetch-scope override). Carried ONLY when present so an untouched picker's getJSON
@@ -2980,6 +3012,7 @@ function fieldNodeToBlock(node, id) {
   if (attrs.label != null) block.label = attrs.label;
   if (attrs.options != null) block.options = attrs.options;
   if (attrs.rows != null) block.rows = attrs.rows;
+  for (const k of FIELD_NUMBER_CONFIG) if (attrs[k] != null) block[k] = attrs[k];
   // PICKER config (field-image / field-reference): refType + dataset threaded ONLY when
   // present so the reconstructed block is byte-identical to one that round-tripped
   // through the per-block path (no stray refType/dataset on a native field). The inverse
@@ -3010,8 +3043,15 @@ function fieldNodeToPatch(node, prevNode) {
   const patch = {};
   if (canonicalJSON(value) !== canonicalJSON(normalizeFieldValue(prev.bpType || bpType, prev.value))) patch.value = value;
   if ((attrs.label ?? null) !== (prev.label ?? null)) patch.label = attrs.label ?? null;
+  // Config edited in the field's settings disclosure: a select's options, a number's
+  // min / max / step / unit. Each rides only when it changed.
+  for (const k of FIELD_SETTINGS_CONFIG) {
+    if (canonicalJSON(attrs[k] ?? null) !== canonicalJSON(prev[k] ?? null)) patch[k] = attrs[k] ?? null;
+  }
   return Object.keys(patch).length ? patch : { value };
 }
+
+const FIELD_SETTINGS_CONFIG = ["options", ...FIELD_NUMBER_CONFIG];
 
 // True when a field node's VALUE changed (the only mutable datum). Canonical
 // (key-order-insensitive) compare of the normalized value, so a value edit flips it
@@ -3025,7 +3065,9 @@ function fieldNodeChanged(prevNode, nextNode) {
 function stableFieldKey(node) {
   const a = (node && node.attrs) || {};
   const bpType = a.bpType || "field-string";
-  return canonicalJSON({ value: normalizeFieldValue(bpType, a.value), label: a.label ?? null });
+  const key = { value: normalizeFieldValue(bpType, a.value), label: a.label ?? null };
+  for (const k of FIELD_SETTINGS_CONFIG) key[k] = a[k] ?? null;
+  return canonicalJSON(key);
 }
 
 // ── action ⇄ canvas control-atom node (editable-action) ──────────────────────
@@ -3988,6 +4030,41 @@ export function hasOverlappingOps(ops, baseline, remote) {
   });
 }
 
+// Whether a batch of id-keyed ops authored against `baseline` can be resent on
+// a NEWER stored version `server` of the same run without losing either writer's
+// edit (task-e0987185b4de61e3). Two tabs editing different paragraphs of one
+// paper must both land. Safe when the other writer left the run's block list as
+// it was (no insert, remove or move there), every op is one that addresses a
+// block by id that the newer version still holds, and no op touches a field the
+// other writer changed. Anything else is held for the author to decide.
+export function opsRebaseSafe(ops, baseline, server) {
+  if (!Array.isArray(ops) || !ops.length || !Array.isArray(baseline) || !Array.isArray(server)) {
+    return false;
+  }
+  const order = (blocks) => blocks.map((block) => (block && block.id) || "").join("\n");
+  if (order(baseline) !== order(server)) return false;
+  const known = new Set(server.map((block) => block && block.id));
+  for (const op of ops) {
+    if (op.op === "insert-after" || op.op === "append-block") {
+      if (op.block && op.block.id) known.add(op.block.id);
+    }
+  }
+  const addressable = ops.every((op) => {
+    switch (op.op) {
+      case "patch-block":
+      case "remove-block":
+        return known.has(op.id);
+      case "insert-after":
+        return op.afterId == null || known.has(op.afterId);
+      case "append-block":
+        return true;
+      default:
+        return false;
+    }
+  });
+  return addressable && !hasOverlappingOps(ops, baseline, server);
+}
+
 // The byte-significant projection of a prose node for change detection: its
 // type, heading level (if any), and content — i.e. exactly the inputs to
 // buildPatchBlockOp / tiptapToBlock. bpId/bpType are excluded so an identity
@@ -4127,20 +4204,69 @@ function classifyNode(node) {
 // (bpId:null) is CLIENT-MINTED a unique id here (so blocksToMarkdown has a stable
 // key and the exit realign can donate it back). The `taken` set guards uniqueness
 // within the call. PURE, DOM-free — like runToOps it touches no editor.
-export function docToBlocks(doc) {
+//
+// `options.reuse(index)` (the canvas emit's fast path, task-fb938eb8be3bce48) may
+// answer the block a top-level node projected to at an earlier call, when the
+// caller KNOWS the node is unchanged since then; that node is not re-projected.
+// The default answers nothing, so every node is projected as before.
+export function docToBlocks(doc, options = {}) {
   const nodes = (doc && doc.content) || [];
+  const reuse = typeof options.reuse === "function" ? options.reuse : null;
   const taken = new Set();
   // Seed `taken` with every id ALREADY on a node so a mint can never collide with a
   // surviving id. RECURSIVE (descend bpSection bodies at any depth) — the make-or-break
   // duplicate_id-abort guard: a nested child id is invisible to a top-level-only seed,
   // so a mint could collide with it and abort the whole atomic batch.
   walkNodeIds(nodes, taken);
-  return nodes.map((node) => {
+  return nodes.map((node, index) => {
+    const reused = reuse && reuse(index);
+    if (reused) return reused;
     const cls = classifyNode(node);
     const bpId = node.attrs && node.attrs.bpId;
     const id = bpId != null ? bpId : mintId(taken);
     return nextNodeToBlock({ ...cls, id, isNew: bpId == null }, taken);
   });
+}
+
+// The fewest move-block ops that fold `running` into nextSeq's order, or null when
+// the batch would not reproduce it. Stable = the longest increasing subsequence
+// of running positions in nextSeq order, plus every locked id (a locked block
+// never moves). Each other id moves right after its nextSeq predecessor, left to
+// right: nothing is ever spliced between a moved id and its predecessor, so the
+// fold lands exactly on nextSeq. The fold is simulated to prove it.
+function minimalMoves(running, nextSeq, lockedIds) {
+  const ids = nextSeq.map((e) => e.id);
+  if (running.length !== ids.length) return null;
+  const pos = new Map(running.map((id, i) => [id, i]));
+  if (ids.some((id) => !pos.has(id))) return null;
+  const seq = ids.map((id) => pos.get(id));
+  // Longest increasing subsequence of `seq` (patience sorting, O(n log n)).
+  const tails = [];
+  const prev = new Array(seq.length).fill(-1);
+  for (let i = 0; i < seq.length; i++) {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (seq[tails[mid]] < seq[i]) lo = mid + 1;
+      else hi = mid;
+    }
+    if (lo > 0) prev[i] = tails[lo - 1];
+    tails[lo] = i;
+  }
+  const stable = new Set(lockedIds);
+  for (let i = tails.length ? tails[tails.length - 1] : -1; i !== -1; i = prev[i]) stable.add(ids[i]);
+  const ops = [];
+  const order = running.slice();
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    if (stable.has(id)) continue;
+    const after = i === 0 ? null : ids[i - 1];
+    ops.push({ op: "move-block", id, after });
+    order.splice(order.indexOf(id), 1);
+    order.splice(after == null ? 0 : order.indexOf(after) + 1, 0, id);
+  }
+  return order.every((id, i) => id === ids[i]) ? ops : null;
 }
 
 // runToOps(prevBlocks, nextDoc) → [ op, … ] (ordered)
@@ -4163,9 +4289,27 @@ export function docToBlocks(doc) {
 //   3. moves permute the running list — now exactly nextSeq's id SET in some
 //      order — into nextSeq ORDER. An already-correct subsequence emits nothing.
 //   4. interior patches mutate surviving prose content in place (order-free).
+// A pasted or dropped picture is not a block until its upload gives it a src: while it
+// uploads, or after the upload failed, a NEW top-level image node with no src stays in
+// the canvas (its badge says why) and out of the ops. Emitted, the host saved an empty
+// image block that outlived the error on reload (task-797f973032044a56). The upload
+// flags are transient attrs, so this reads the LIVE doc (before docToBlocks drops them)
+// and answers top-level indexes. An image the server already holds is never held back.
+export function pendingUploadIndexes(liveDoc, prevBlocks) {
+  const held = new Set();
+  const known = new Set((prevBlocks || []).map((b) => b && b.id).filter((id) => id != null));
+  ((liveDoc && liveDoc.content) || []).forEach((node, i) => {
+    if (!node || node.type !== CANVAS_IMAGE_NODE_NAME) return;
+    const a = node.attrs || {};
+    if (a.src || (!a.uploading && !a.uploadError)) return;
+    if (a.bpId != null && known.has(a.bpId)) return;
+    held.add(i);
+  });
+  return held;
+}
+
 export function runToOps(prevBlocks, nextDoc, options = {}) {
   const prev = prevBlocks || [];
-  const nextNodes = (nextDoc && nextDoc.content) || [];
 
   // prev id → index, and the block.
   const prevIndex = new Map();
@@ -4177,6 +4321,8 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
       prevById.set(id, block);
     }
   });
+
+  const nextNodes = (nextDoc && nextDoc.content) || [];
 
   // ── 0) BUILD nextSeq: every next node gets a KNOWN id (existing or minted) ──
   //
@@ -4303,7 +4449,24 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // an already-correct subsequence (e.g. a pure interior edit) emits zero moves.
   // We apply each move to `running` as we go, so subsequent checks see the
   // post-move order and we never emit a redundant move.
-  for (let i = 0; i < nextSeq.length; i++) {
+  // Already in order (every interior edit, every keystroke): each entry sits one
+  // slot after its predecessor, so the walk below would emit nothing. Checking
+  // that is linear; the walk's indexOf per entry is quadratic in the run's length
+  // (task-fb938eb8be3bce48).
+  const inOrder = running.length === nextSeq.length && nextSeq.every((e, i) => running[i] === e.id);
+  // MINIMAL MOVES (task-d20a8200b28f0d7a). The longest run of blocks already in
+  // nextSeq's relative order stays put, and only the others move. Dragging one
+  // block from [a, X, b, c] to [a, b, c, X] is ONE move-block for X; the greedy
+  // walk below would emit moves for b and c, blocks the author never touched.
+  // The minimal batch is checked by folding it; if it does not reproduce
+  // nextSeq, the greedy walk runs instead.
+  const minimal = inOrder ? [] : minimalMoves(running, nextSeq, lockedIds);
+  if (minimal) {
+    for (const op of minimal) ops.push(op);
+    running.length = 0;
+    for (const e of nextSeq) running.push(e.id);
+  }
+  for (let i = 0; !inOrder && !minimal && i < nextSeq.length; i++) {
     const id = nextSeq[i].id;
     // A LOCKED block holds its position (pdd-t2): never emit a move for it. The
     // filterTransaction veto keeps a locked node at its fixed index, so `running`
@@ -4343,8 +4506,27 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // field — a sheet's `ref`, an embed's `target` — which the canvas now retargets
   // through the reference picker, so an atom whose reference CHANGED emits exactly one
   // patch-block and one whose reference did not emits nothing.
+  // `options.unchangedIds` (the canvas emit's fast path, task-fb938eb8be3bce48)
+  // names surviving ids whose node the caller KNOWS still equals its prev block:
+  // their compare below could only find nothing to patch, so it is skipped.
+  const unchangedIds = options.unchangedIds instanceof Set ? options.unchangedIds : null;
   for (const entry of nextSeq) {
+    // A surviving opaque block whose CARRIED block changed → ONE replace-block with
+    // the edited block. Only a declared custom object block's field dialog
+    // (inline-object.js, task-aebfe6c1b3c3f881) rewrites a carried block, so an
+    // untouched carry compares equal (id excluded, key order ignored) and emits
+    // nothing, exactly as before.
+    if (entry.isOpaque && !entry.isNew) {
+      if (unchangedIds && unchangedIds.has(entry.id)) continue;
+      const carried = entry.node.attrs && entry.node.attrs.bpBlock;
+      const before = prevById.get(entry.id);
+      if (before && carried && canonicalJSON(stripId(before)) !== canonicalJSON(stripId(carried))) {
+        ops.push({ op: "replace-block", id: entry.id, block: { ...deepClone(carried), id: entry.id } });
+      }
+      continue;
+    }
     if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
+    if (unchangedIds && unchangedIds.has(entry.id)) continue;
     // A read-only atom with no retargetable reference keeps the original
     // zero-ops-by-construction guarantee.
     if (entry.isReadOnlyAtom && !(entry.bpType in READ_ONLY_ATOM_RETARGET_KEY)) continue;

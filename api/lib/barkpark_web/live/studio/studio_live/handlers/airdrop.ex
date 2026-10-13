@@ -29,6 +29,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias Barkpark.Access
   alias Barkpark.Accounts
 
@@ -51,10 +53,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
 
     cond do
       is_nil(principal) ->
-        {:noreply, put_flash(socket, :error, "Sign in to share access.")}
+        {:noreply, put_flash(socket, :error, gettext("Sign in to share access."))}
 
       is_nil(ws) ->
-        {:noreply, put_flash(socket, :error, "No workspace in context.")}
+        {:noreply, put_flash(socket, :error, gettext("No workspace in context."))}
 
       true ->
         type =
@@ -67,6 +69,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Airdrop do
          assign(socket,
            airdrop_open: true,
            airdrop_type: type,
+           airdrop_type_word:
+             type &&
+               BarkparkWeb.Studio.PaneBuilder.type_word_for(
+                 type,
+                 socket.assigns.dataset,
+                 BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               ),
            airdrop_caps: held_capabilities(principal, ws.id),
            airdrop_error: nil,
            airdrop_link: nil,

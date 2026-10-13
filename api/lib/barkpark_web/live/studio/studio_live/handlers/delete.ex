@@ -3,11 +3,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   Delete-with-reference-check. Behaviour-preserving extraction of the
   StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.PaneBuilder
+  alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def delete_doc(socket) do
@@ -46,12 +51,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   # and how many references the disconnect removed.
   @doc false
   def deleted_sentence(doc, disconnected?, refs) do
-    title = if is_binary(doc.title) and doc.title != "", do: doc.title, else: doc.doc_id
+    # The desk row's own name for the document (task-5443f7448d259c66): an
+    # untitled draft used to be named by its raw `drafts.<type>-<hex>` id.
+    title = PaneBuilder.display_title(doc)
 
     cond do
-      disconnected? and refs == 1 -> "Deleted “#{title}” and removed 1 reference to it."
-      disconnected? and refs > 1 -> "Deleted “#{title}” and removed #{refs} references to it."
-      true -> "Deleted “#{title}”."
+      disconnected? and refs >= 1 ->
+        ngettext(
+          "Deleted “%{title}” and removed 1 reference to it.",
+          "Deleted “%{title}” and removed %{count} references to it.",
+          refs,
+          title: title
+        )
+
+      true ->
+        gettext("Deleted “%{title}”.", title: title)
     end
   end
 
@@ -59,26 +73,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
-    if doc && type do
-      if params["disconnect"] == "true" do
-        Content.disconnect_references(
-          doc.doc_id,
-          socket.assigns.dataset,
-          ScopeHelpers.scope_opts(socket)
-        )
-      end
+    disconnect =
+      if doc && type && params["disconnect"] == "true",
+        do:
+          Content.disconnect_references(
+            doc.doc_id,
+            socket.assigns.dataset,
+            Shared.disconnect_opts(socket)
+          ),
+        else: :ok
 
-      case Content.delete_document(
-             doc.doc_id,
-             type,
-             socket.assigns.dataset,
-             Shared.hook_opts(socket)
-           ) do
+    case disconnect do
+      {:error, {:outside_write_grant, denied}} ->
+        {:noreply,
+         socket
+         |> assign(show_delete: false, delete_refs: [])
+         |> put_flash(:error, Shared.outside_grant_disconnect_message(denied, "deleted"))}
+
+      _ ->
+        do_confirm_delete(params, socket, doc, type)
+    end
+  end
+
+  defp do_confirm_delete(params, socket, doc, type) do
+    if doc && type do
+      case delete_open_doc(socket, doc, type) do
         {:error, {:halted, reason}} ->
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
-           |> put_flash(:error, "Delete cancelled: #{reason}")}
+           |> put_flash(:error, gettext("Delete cancelled: %{reason}", reason: reason))}
 
         {:ok, _} ->
           new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
@@ -88,7 +112,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
            socket
            |> assign(show_delete: false, delete_refs: [])
            |> put_flash(:info, deleted_sentence(doc, params["disconnect"] == "true", refs))
-           |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+           |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))
+           |> focus_after_delete(doc, type)}
 
         # A generic failure (not_found, rev_mismatch, …) must NOT be mistaken
         # for success: the doc still exists, so close the modal but stay put
@@ -97,10 +122,65 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
-           |> put_flash(:error, "Failed to delete")}
+           |> put_flash(:error, gettext("Failed to delete"))}
       end
     else
       {:noreply, socket}
     end
+  end
+
+  # A sheet's live session would persist its unflushed ops after the delete
+  # (debounce or terminate) and upsert the sheet back. Discard it on both
+  # sides of the delete: before, so nothing is pending; after, in case a
+  # collaborator's edit restarted it in between.
+  defp delete_open_doc(socket, doc, "sheet") do
+    slug = Content.published_id(doc.doc_id)
+    scope = GridData.session_scope(%{doc: doc})
+
+    :ok = Session.discard(slug, socket.assigns.dataset, scope)
+
+    result =
+      Content.delete_document(
+        doc.doc_id,
+        "sheet",
+        socket.assigns.dataset,
+        Shared.hook_opts(socket)
+      )
+
+    :ok = Session.discard(slug, socket.assigns.dataset, scope)
+    result
+  end
+
+  defp delete_open_doc(socket, doc, type) do
+    Content.delete_document(doc.doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
+  end
+
+  # The editor that held focus is gone after a delete, so focus fell to
+  # <body> (task-bad96a2a1c3da132). Tell the client where the document sat in
+  # its list, so it can focus the row that takes its place — or the pane's New
+  # button when none is left.
+  defp focus_after_delete(socket, doc, type) do
+    published = Content.published_id(doc.doc_id)
+
+    index =
+      (socket.assigns[:panes] || [])
+      |> Enum.filter(&(Map.get(&1, :role) == :list and Map.get(&1, :type_name) == type))
+      |> List.last()
+      |> case do
+        %{items: items} when is_list(items) ->
+          Enum.find_index(items, fn item ->
+            id = Map.get(item, :id)
+            id == doc.doc_id or (is_binary(id) and Content.published_id(id) == published)
+          end)
+
+        _ ->
+          nil
+      end
+
+    push_event(socket, "bp:focus-after-delete", %{
+      type: type,
+      id: published,
+      index: index || 0
+    })
   end
 end

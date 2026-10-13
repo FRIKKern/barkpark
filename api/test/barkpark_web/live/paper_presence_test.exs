@@ -230,23 +230,27 @@ defmodule BarkparkWeb.PaperPresenceTest do
   end
 
   describe "the presence room itself" do
-    test "the topic is keyed per workspace, dataset and slug" do
-      assert PaperPresence.topic("ws-1", "production", "a") ==
-               "paper_presence:ws:ws-1:production:a"
+    test "the topic is keyed per workspace, project, dataset and slug" do
+      assert PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               "paper_presence:ws:ws-1:p:p-1:production:a"
 
-      # Different tenant, different dataset, different paper: three different
-      # rooms. Two tenants' same-slug papers must never see each other.
-      refute PaperPresence.topic("ws-1", "production", "a") ==
-               PaperPresence.topic("ws-2", "production", "a")
+      # Different tenant, project, dataset or paper: different rooms. Two
+      # tenants' (or two projects') same-slug papers must never see each other.
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-2", "p-1", "production", "a")
 
-      refute PaperPresence.topic("ws-1", "production", "a") ==
-               PaperPresence.topic("ws-1", "staging", "a")
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-1", "p-2", "production", "a")
 
-      refute PaperPresence.topic("ws-1", "production", "a") ==
-               PaperPresence.topic("ws-1", "production", "b")
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-1", "p-1", "staging", "a")
 
-      # A legacy NULL-workspace paper gets its OWN room, not a shared global.
-      assert PaperPresence.topic(nil, nil, "a") == "paper_presence:ws:none:default:a"
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-1", "p-1", "production", "b")
+
+      # A legacy NULL-scope paper gets its OWN room, not a shared global.
+      assert PaperPresence.topic(nil, nil, nil, "a") ==
+               "paper_presence:ws:none:p:none:default:a"
     end
 
     test "every anonymous viewer shares one key; each identified one has her own" do
@@ -292,6 +296,16 @@ defmodule BarkparkWeb.PaperPresenceTest do
       assert PaperPresence.display(%{label: "a@b.c", id: "u1"}) == "a@b.c"
       assert PaperPresence.display(%{label: nil, id: "0123456789abcdef"}) == "01234567"
       assert PaperPresence.display(%{label: nil, id: nil}) == "someone"
+    end
+
+    # task-a4a7d0465c57fd1e: the share link id read as "65371907" on the page.
+    test "a share-link presence without a label reads Link visitor, not its id" do
+      share = %{kind: "share", label: nil, id: "65371907-49af-47a7-b109-39349fc322f5"}
+      assert PaperPresence.display(share) == "Link visitor"
+      assert PaperPresence.display(%{share | label: "Kari"}) == "Kari"
+
+      assert PaperPresence.display(%{kind: "user", label: nil, id: "0123456789abcdef"}) ==
+               "01234567"
     end
   end
 end

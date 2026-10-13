@@ -95,7 +95,8 @@ defmodule BarkparkWeb.Studio.InFlightActivationGuardTest do
      "stopImmediatePropagation ends the event for every later listener in any phase, which is what makes the wrong server event impossible rather than merely unlikely"},
     {"the default-action stop", ~S|ev.preventDefault();|,
      "a swallowed press must not take the default action either — a link navigation, a checkbox toggle, an implicit form submit — all of which pointer-events:none also suppressed"},
-    {"the words", ~S|var say = "Still working on your last press — that one was not sent.";|,
+    {"the words",
+     ~S{var say = words["Still working on your last press — that one was not sent."] || "Still working on your last press — that one was not sent.";},
      "this guard now runs BEFORE the press-answer hook's bubble listener, so without it the hook's named discard (D263) would silently become silence again"}
   ]
 

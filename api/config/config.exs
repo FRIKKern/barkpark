@@ -394,6 +394,14 @@ config :barkpark, Oban,
        # Window: `:paper_access_log_ttl_days` below. Core (not a plugin), so it
        # lives in this static crontab and rides the `default` queue.
        {"15 4 * * *", Barkpark.Content.Workers.PaperAccessSweeper},
+       # Owner ruling #33 — redacts copies of DELETED content older than the
+       # window in mutation_events.document / webhook_deliveries.payload_snapshot.
+       # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
+       {"30 4 * * *", Barkpark.Content.Workers.DeletedPayloadSweeper},
+       # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation, Mondays
+       # 03:00 UTC (the slot of the never-installed systemd timer it replaces).
+       # A no-op tick unless `:public_read_rotation, enabled:` (below) is on.
+       {"0 3 * * 1", Barkpark.Auth.PublicReadRotationWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -450,6 +458,21 @@ config :barkpark, Oban,
        # static `default` queue; the worker bounds one tick by construction
        # (`PreviewToken.sweep_batch/1`).
        {"43 * * * *", Barkpark.PreviewToken.Sweeper},
+       # task-781cc7f06c5f4335 — GC for `token_sessions` (ruling #16 rework
+       # half, task-57f23825b18ab55d's browser token-sign-in sessions). A live
+       # row holds a Cloak-encrypted raw bearer — the same retention concern
+       # `LoginTicketSweeper` documents for `login_tickets` — and logout
+       # already DELETES the row it names, so what this worker reaps is the
+       # population logout never reaches: a session that expired naturally
+       # (no explicit sign-out) or a row some other path flagged `revoked_at`
+       # without deleting it. Hourly, not per-minute, because the retention
+       # FLOOR is the 30-day default validity, not the cadence — see
+       # `Barkpark.Auth.TokenSessionSweeper`'s moduledoc. Offset from both
+       # `:17` and `:43` so this hourly GC's range delete never opens in the
+       # same tick as the idempotency or preview-token sweeps. Runs on the
+       # static `default` queue; the worker bounds one tick by construction
+       # (`Auth.sweep_token_sessions_batch/1`).
+       {"50 * * * *", Barkpark.Auth.TokenSessionSweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
@@ -497,6 +520,23 @@ config :barkpark, :task_lease_ttl_seconds, 2700
 # the job args rather than overriding this. Runtime override:
 # BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS (see runtime.exs).
 config :barkpark, :paper_access_log_ttl_days, 90
+
+# Owner ruling #33 (2026-10-03) — retention for copies of DELETED content in
+# `mutation_events.document` and media `webhook_deliveries.payload_snapshot`:
+# payloads older than `days` whose document (or media file) is gone are
+# redacted to a stub; rows are kept. SHIPS DISABLED — an operator turns it on
+# with BARKPARK_DELETED_PAYLOAD_RETENTION=on (window:
+# BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS, see runtime.exs) after reading the
+# `mix barkpark.deleted_payload_retention` census. Policy:
+# Barkpark.Content.DeletedPayloadRetention.
+config :barkpark, :deleted_payload_retention, enabled: false, days: 90
+
+# task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation
+# (Barkpark.Auth.PublicReadRotationWorker). SHIPS DISABLED: switched on it mints
+# a new token every Monday and purges the previous one after 8 days, so every
+# consumer must be reached by the token file or VERCEL_DEPLOY_HOOK first. An
+# operator turns it on with BARKPARK_PUBLIC_READ_ROTATION=on (runtime.exs).
+config :barkpark, :public_read_rotation, enabled: false
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`
@@ -630,4 +670,20 @@ config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
+# Canonical value-shape WRITES (owner rulings #42 {_ref}, #43 {current},
+# #44 Portable Text). OFF by default: a Studio save keeps each field's stored
+# shape and the shape convert tasks refuse --apply. The owner turns it on per
+# box (BARKPARK_CANONICAL_SHAPE_WRITES=true, runtime.exs) once that box's
+# consumers read both shapes. Readers accept both shapes either way.
+# `Barkpark.Content.CanonicalShapes`.
+config :barkpark, canonical_shape_writes: false
+
+# The publish wall (`Barkpark.Content.AuthoringWall`: label spine, tag
+# registry, dedup) is an INSTALL setting, declared by the installing door
+# (task-8edd8e147c648a36). The library default is OFF, so a fresh install and
+# @barkpark/engine publish a paper with only a slug, a title and blocks.
+# Barkpark's own instances turn it on: dev.exs, test.exs, and prod runtime.exs
+# (unless BARKPARK_AUTHORING_WALL is falsy).
+config :barkpark, :authoring_wall, false
+
 import_config "#{config_env()}.exs"

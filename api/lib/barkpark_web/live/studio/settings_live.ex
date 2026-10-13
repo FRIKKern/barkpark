@@ -63,11 +63,15 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
-  @placement_labels [
-    {"main", "Main structure"},
-    {"plugins", "Plugins folder"},
-    {"top_menu", "Top menu only"}
-  ]
+  # Placement choices, in the viewer's Studio language (task-bc4ff44023a41186).
+  # A function, not a module attribute: the locale is per request.
+  defp placement_labels do
+    [
+      {"main", gettext("Main structure")},
+      {"plugins", gettext("Plugins folder")},
+      {"top_menu", gettext("Top menu only")}
+    ]
+  end
 
   # Scoped mount (ssp-w3, charter D15). On `/w/:ws/p/:proj/d/:dataset/studio/
   # settings` LiveScope has already bound `current_workspace` from the URL — the
@@ -80,7 +84,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # in the StudioLive catch-all and trips studio-link-lint).
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign_page(socket)}
+    {:ok,
+     socket |> assign_page() |> assign(credentials_authority?: credentials_authority?(socket))}
   end
 
   # Re-derive the URL-bound view on every scoped patch. A scope switch fired
@@ -116,7 +121,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp assign_page(socket) do
     socket
     |> assign(
-      page_title: "Workspace Settings",
+      page_title: gettext("Workspace Settings"),
       plugin_name: "",
       settings_json: "",
       settings_fields: [],
@@ -125,12 +130,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       masked: true,
       loaded?: false,
       error: nil,
-      placement_labels: @placement_labels,
+      placement_labels: placement_labels(),
       # Workspace theme picker (ts-w4e). `current_workspace` + `bp_theme` are
       # resolved by LiveScope + StudioChrome (nil on an unseeded tenancy).
       known_themes: Tenancy.known_themes(),
       # Workspace Studio locale (Gyldendal parity E7) — same bag, same guards.
-      known_locales: Tenancy.known_locales(),
+      known_locales: locale_options(Tenancy.known_locales()),
       # A scope switch fired from Settings re-opens Settings under the NEW
       # scope, not the desk (chrome D16 seam) — StudioChrome appends this to
       # the target's studio_root.
@@ -231,17 +236,23 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                  socket
                  |> assign(:current_workspace, updated)
                  |> assign(:bp_locale, Tenancy.workspace_locale(updated))
-                 |> put_flash(:info, "Studio language set to #{locale}.")}
+                 |> put_flash(:info, gettext("Studio language set to %{locale}.", locale: locale))}
 
               {:error, :unknown_locale} ->
-                {:noreply, put_flash(socket, :error, "Unknown locale #{inspect(locale)}.")}
+                {:noreply,
+                 put_flash(
+                   socket,
+                   :error,
+                   gettext("Unknown locale %{locale}.", locale: inspect(locale))
+                 )}
 
               {:error, _} ->
-                {:noreply, put_flash(socket, :error, "Could not save the Studio language.")}
+                {:noreply,
+                 put_flash(socket, :error, gettext("Could not save the Studio language."))}
             end
 
           _ ->
-            {:noreply, put_flash(socket, :error, "No workspace in scope.")}
+            {:noreply, put_flash(socket, :error, gettext("No workspace in scope."))}
         end
       end)
     end)
@@ -263,13 +274,20 @@ defmodule BarkparkWeb.Studio.SettingsLive do
             put_plugin_override(socket, name, %{"enabled" => not enabled},
               flash:
                 if(enabled,
-                  do: "Disabled #{display_name(name)} for this workspace.",
-                  else: "Enabled #{display_name(name)} for this workspace."
+                  do:
+                    gettext("Disabled %{plugin} for this workspace.", plugin: display_name(name)),
+                  else:
+                    gettext("Enabled %{plugin} for this workspace.", plugin: display_name(name))
                 )
             )
 
           nil ->
-            {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+            {:noreply,
+             put_flash(
+               socket,
+               :error,
+               gettext("Unknown plugin %{plugin}.", plugin: inspect(name))
+             )}
         end
       end)
     end)
@@ -288,11 +306,20 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         case current_row(socket, name) do
           %{} ->
             put_plugin_override(socket, name, %{"placement" => placement},
-              flash: "Moved #{display_name(name)} to #{placement_label(placement)}."
+              flash:
+                gettext("Moved %{plugin} to %{placement}.",
+                  plugin: display_name(name),
+                  placement: placement_label(placement)
+                )
             )
 
           nil ->
-            {:noreply, put_flash(socket, :error, "Unknown plugin #{inspect(name)}.")}
+            {:noreply,
+             put_flash(
+               socket,
+               :error,
+               gettext("Unknown plugin %{plugin}.", plugin: inspect(name))
+             )}
         end
       end)
     end)
@@ -380,10 +407,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
             )
           end
 
-        {:noreply, put_flash(socket, :info, "Revealed (audited).")}
+        {:noreply, put_flash(socket, :info, gettext("Revealed (audited)."))}
 
       {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "No settings to reveal.")}
+        {:noreply, put_flash(socket, :error, gettext("No settings to reveal."))}
     end
   end
 
@@ -407,10 +434,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
              masked: not all_masked_revealed?(fields, revealed),
              error: nil
            )
-           |> put_flash(:info, "Revealed #{field} (audited).")}
+           |> put_flash(:info, gettext("Revealed %{field} (audited).", field: field))}
 
         {:error, :not_found} ->
-          {:noreply, put_flash(socket, :error, "No settings to reveal.")}
+          {:noreply, put_flash(socket, :error, gettext("No settings to reveal."))}
       end
     else
       {:noreply, socket}
@@ -432,10 +459,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
            loaded?: false,
            error: nil
          )
-         |> put_flash(:info, "Deleted #{name}.")}
+         |> put_flash(:info, gettext("Deleted %{plugin}.", plugin: name))}
 
       {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Nothing to delete.")}
+        {:noreply, put_flash(socket, :error, gettext("Nothing to delete."))}
     end
   end
 
@@ -450,7 +477,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
     cond do
       is_nil(bound) ->
-        {:noreply, put_flash(socket, :error, "No workspace in scope to configure.")}
+        {:noreply, put_flash(socket, :error, gettext("No workspace in scope to configure."))}
 
       is_binary(rendered) and rendered != bound ->
         {:noreply,
@@ -458,7 +485,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          |> assign_plugin_rows()
          |> put_flash(
            :error,
-           "Scope changed — nothing was saved. Reloaded this workspace's settings."
+           gettext("Scope changed — nothing was saved. Reloaded this workspace's settings.")
          )}
 
       true ->
@@ -481,6 +508,13 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # owner/admin of the bound workspace is REFUSED with ZERO writes. This is the
   # per-target-workspace authority check `guard_bound_ws/3` (the stale-scope
   # belt) does not perform; the two compose, guard_bound_ws first.
+  # The setting a refused write was for, in the viewer's language.
+  defp admin_thing("theme"), do: gettext("theme")
+  defp admin_thing("locale"), do: gettext("locale")
+  defp admin_thing("plugins"), do: gettext("plugins")
+  defp admin_thing("plugin placement"), do: gettext("plugin placement")
+  defp admin_thing(thing), do: thing
+
   defp guard_ws_admin(socket, thing, fun) do
     ws = socket.assigns[:current_workspace]
     principal = socket.assigns[:api_token] || socket.assigns[:current_user]
@@ -492,7 +526,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          put_flash(
            socket,
            :error,
-           "You need to be an owner or admin of this workspace to change its #{thing}."
+           gettext("You need to be an owner or admin of this workspace to change its %{thing}.",
+             thing: admin_thing(thing)
+           )
          )}
 
       true ->
@@ -525,6 +561,18 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # a mask-strength tweak — the leak is a SCOPE MISMATCH (mount authorizes
   # workspace-admin-of-the-URL, the store is installation-global), and only an
   # authority check closes a scope mismatch.
+  # The same two checks `guard_installation_admin/2` makes, asked once at
+  # mount so the page shows the credential editor only to someone it can work
+  # for (task-65e83bfe222337f0). A workspace admin without installation
+  # authority got the full editor and learned on submit that every action is
+  # refused. The handlers keep their own guard: this decides display only.
+  defp credentials_authority?(socket) do
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    installation_admin?(principal) and
+      BarkparkWeb.Plugs.RequirePlatformOperator.permits?(principal)
+  end
+
   defp guard_installation_admin(socket, fun) do
     principal = socket.assigns[:api_token] || socket.assigns[:current_user]
 
@@ -534,7 +582,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          put_flash(
            socket,
            :error,
-           "Plugin credentials are installation-wide — viewing or managing them requires installation-admin authority."
+           gettext(
+             "Plugin credentials are installation-wide — viewing or managing them requires installation-admin authority."
+           )
          )}
 
       # The REST twin (GET|PUT|DELETE /v1/plugins/settings/:name) sits behind
@@ -545,7 +595,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          put_flash(
            socket,
            :error,
-           "Plugin credentials are installation-wide — viewing or managing them requires the platform operator."
+           gettext(
+             "Plugin credentials are installation-wide — viewing or managing them requires the platform operator."
+           )
          )}
 
       true ->
@@ -577,17 +629,18 @@ defmodule BarkparkWeb.Studio.SettingsLive do
              socket
              |> assign(:current_workspace, updated)
              |> assign(:bp_theme, Tenancy.workspace_theme(updated))
-             |> put_flash(:info, "Workspace theme set to #{theme}.")}
+             |> put_flash(:info, gettext("Workspace theme set to %{theme}.", theme: theme))}
 
           {:error, :unknown_theme} ->
-            {:noreply, put_flash(socket, :error, "Unknown theme #{inspect(theme)}.")}
+            {:noreply,
+             put_flash(socket, :error, gettext("Unknown theme %{theme}.", theme: inspect(theme)))}
 
           {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Could not save the workspace theme.")}
+            {:noreply, put_flash(socket, :error, gettext("Could not save the workspace theme."))}
         end
 
       _ ->
-        {:noreply, put_flash(socket, :error, "No workspace in scope to theme.")}
+        {:noreply, put_flash(socket, :error, gettext("No workspace in scope to theme."))}
     end
   end
 
@@ -608,7 +661,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          put_flash(
            socket,
            :error,
-           "You need to be an owner or admin of this workspace to change its execution profile."
+           gettext(
+             "You need to be an owner or admin of this workspace to change its execution profile."
+           )
          )}
 
       true ->
@@ -628,7 +683,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
             save_execution_profile(socket, ws, chat, next)
 
           true ->
-            {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
+            {:noreply, put_flash(socket, :error, gettext("Unknown execution profile."))}
         end
     end
   end
@@ -645,7 +700,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
          |> put_flash(:info, execution_profile_flash(next))}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
+        {:noreply, put_flash(socket, :error, gettext("Could not save the execution profile."))}
     end
   end
 
@@ -657,10 +712,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   end
 
   defp execution_profile_flash("cloud"),
-    do: "Chat turns for this workspace now run in the cloud sandbox."
+    do: gettext("Chat turns for this workspace now run in the cloud sandbox.")
 
   defp execution_profile_flash("self_hosted"),
-    do: "Chat turns for this workspace now run on the self-hosted runner."
+    do: gettext("Chat turns for this workspace now run on the self-hosted runner.")
 
   @impl true
   def render(assigns) do
@@ -672,10 +727,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
           below is unchanged, so the reading measure is too. --%>
     <.studio_page_scroll>
     <div class="settings-live" style="max-width: 720px; margin: 32px auto; padding: 0 24px; font-family: var(--font);">
-      <h1 class="h1" style="margin-bottom: 4px;">Workspace Settings</h1>
+      <h1 class="h1" style="margin-bottom: 4px;">{gettext("Workspace Settings")}</h1>
       <%= if @current_workspace do %>
         <p style="color: var(--fg-muted); margin-top:0; display:flex; align-items:center; gap:.5rem; flex-wrap:wrap;">
-          <span>Theme, plugins and credentials for</span>
+          <span>{gettext("Theme, plugins and credentials for")}</span>
           <span
             data-test-id="settings-bound-workspace"
             data-workspace-id={@current_workspace.id}
@@ -685,12 +740,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
           </span>
         </p>
         <p style="color: var(--fg-muted); margin-top:0; font-size:.9em;">
-          Everything here writes to <strong>{@current_workspace.name}</strong>.
-          Switch workspace from the top bar to configure another.
+          {gettext("Everything here writes to")} <strong>{@current_workspace.name}</strong>.
+          {gettext("Switch workspace from the top bar to configure another.")}
         </p>
       <% else %>
         <p style="color: var(--fg-muted); margin-top:0;">
-          Theme, plugins and credentials for this workspace.
+          {gettext("Theme, plugins and credentials for this workspace.")}
         </p>
       <% end %>
 
@@ -709,24 +764,36 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       {render_plugins_section(assigns)}
 
       <.bp_card aria-labelledby="credentials-heading">
-        <.bp_section_header id="credentials-heading" title="Plugin credentials">
-          Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
-          to fetch unmasked (audited). Credentials are global to the installation,
-          not per-workspace.
+        <.bp_section_header id="credentials-heading" title={gettext("Plugin credentials")}>
+          <%= if @credentials_authority? do %>
+            {gettext("Encrypted JSON store. Values are masked on load — click Reveal to fetch unmasked (audited).")}
+          <% end %>
+          {gettext("Credentials are global to the installation, not per-workspace.")}
         </.bp_section_header>
 
+        <p
+          :if={not @credentials_authority?}
+          style="color: var(--fg-muted); margin: 0;"
+          data-test-id="settings-credentials-no-authority"
+        >
+          {gettext(
+            "Only the installation admin can view or change plugin credentials, because they are shared by every workspace on this installation."
+          )}
+        </p>
+
+        <%= if @credentials_authority? do %>
         <form phx-change="update_name" phx-submit="load" style="margin-bottom: 16px;">
-          <.bp_field_row label="Plugin name" for="plugin_name" required>
+          <.bp_field_row label={gettext("Plugin name")} for="plugin_name" required>
             <div style="display: flex; gap: 8px;">
               <.bp_input
                 id="plugin_name"
                 name="plugin_name"
                 value={@plugin_name}
-                placeholder="e.g. onixedit, bokbasen"
+                placeholder={gettext("e.g. onixedit, bokbasen")}
                 autocomplete="off"
                 required
               />
-              <button type="submit" class="btn btn-primary">Load</button>
+              <button type="submit" class="btn btn-primary">{gettext("Load")}</button>
             </div>
           </.bp_field_row>
         </form>
@@ -742,8 +809,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <% end %>
 
         <p style="margin-top: 16px; color: var(--fg-muted); font-size: 13px;">
-          Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
+          {gettext("Status:")} {if @loaded?, do: gettext("loaded"), else: gettext("empty")} · {if @masked, do: gettext("masked"), else: gettext("revealed")}
         </p>
+        <% end %>
       </.bp_card>
     </div>
     </.studio_page_scroll>
@@ -761,7 +829,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp render_theme_section(assigns) do
     ~H"""
     <.bp_card aria-labelledby="theme-heading">
-      <.bp_section_header id="theme-heading" title="Workspace theme" />
+      <.bp_section_header id="theme-heading" title={gettext("Workspace theme")} />
 
       <div
         id="bp-theme-mirror"
@@ -774,7 +842,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <%= if @current_workspace do %>
         <form phx-change="set_workspace_theme">
           <input type="hidden" name="ws" value={@current_workspace.id} />
-          <.bp_field_row label="Theme" for="workspace-theme">
+          <.bp_field_row label={gettext("Theme")} for="workspace-theme">
             <.bp_select
               id="workspace-theme"
               name="theme"
@@ -782,20 +850,19 @@ defmodule BarkparkWeb.Studio.SettingsLive do
               options={@known_themes}
             />
             <:hint>
-              The theme identity for <strong>{@current_workspace.name}</strong>.
-              Applies to the reader, Studio and emailed papers — light/dark mode
-              stays a separate switch.
+              {gettext("The theme identity for")} <strong>{@current_workspace.name}</strong>.
+              {gettext("Applies to the reader, Studio and emailed papers — light/dark mode stays a separate switch.")}
               <%= if length(@known_themes) == 1 do %>
-                One theme ships today; more land as the compiler emits them.
+                {gettext("One theme ships today; more land as the compiler emits them.")}
               <% else %>
-                Saved server-side and stamped on the first byte — no flash.
+                {gettext("Saved server-side and stamped on the first byte — no flash.")}
               <% end %>
             </:hint>
           </.bp_field_row>
         </form>
         <form phx-change="set_workspace_locale">
           <input type="hidden" name="ws" value={@current_workspace.id} />
-          <.bp_field_row label="Studio language" for="workspace-locale">
+          <.bp_field_row label={gettext("Studio language")} for="workspace-locale">
             <.bp_select
               id="workspace-locale"
               name="locale"
@@ -803,15 +870,14 @@ defmodule BarkparkWeb.Studio.SettingsLive do
               options={@known_locales}
             />
             <:hint>
-              The language of the Studio chrome (buttons, cards, row fallbacks) for
-              <strong>{@current_workspace.name}</strong>. Schema titles and descriptions
-              are never translated — they are yours.
+              {gettext("The language of the Studio chrome (buttons, cards, row fallbacks) for")}
+              <strong>{@current_workspace.name}</strong>. {gettext("Schema titles and descriptions are never translated — they are yours.")}
             </:hint>
           </.bp_field_row>
         </form>
       <% else %>
         <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
-          No workspace in scope to theme.
+          {gettext("No workspace in scope to theme.")}
         </p>
       <% end %>
     </.bp_card>
@@ -830,7 +896,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp render_execution_profile_section(assigns) do
     ~H"""
     <.bp_card aria-labelledby="execution-profile-heading">
-      <.bp_section_header id="execution-profile-heading" title="Chat execution profile" />
+      <.bp_section_header id="execution-profile-heading" title={gettext("Chat execution profile")} />
 
       <%= if @current_workspace do %>
         <div
@@ -840,26 +906,25 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         >
           <div style="flex:1 1 16rem; min-width:14rem;">
             <p style="margin:0; color:var(--fg-muted);">
-              Where <strong>{@current_workspace.name}</strong>'s Studio chat turns run.
-              <strong>Self-hosted</strong> uses this instance's runner;
-              <strong>Cloud</strong> routes each turn into an isolated cloud sandbox.
-              Only an owner or admin of this workspace can change it, and a flip
-              takes effect on the workspace's next chat turn.
+              {gettext("Where %{workspace}'s Studio chat turns run.", workspace: @current_workspace.name)}
+              <strong>{gettext("Self-hosted")}</strong> {gettext("uses this instance's runner;")}
+              <strong>{gettext("Cloud")}</strong> {gettext("routes each turn into an isolated cloud sandbox.")}
+              {gettext("Only an owner or admin of this workspace can change it, and a flip takes effect on the workspace's next chat turn.")}
             </p>
           </div>
 
           <.bp_switch
             checked={@execution_profile == "cloud"}
-            on_label="Cloud"
-            off_label="Self-hosted"
+            on_label={gettext("Cloud")}
+            off_label={gettext("Self-hosted")}
             phx-click="toggle_execution_profile"
             phx-value-ws={@current_workspace.id}
-            aria-label="Run this workspace's chat turns in the cloud sandbox"
+            aria-label={gettext("Run this workspace's chat turns in the cloud sandbox")}
           />
         </div>
       <% else %>
         <p role="status" style="color: var(--fg-muted); margin-bottom: 0;">
-          No workspace in scope to configure.
+          {gettext("No workspace in scope to configure.")}
         </p>
       <% end %>
     </.bp_card>
@@ -875,22 +940,22 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp render_plugins_section(assigns) do
     ~H"""
     <.bp_card aria-labelledby="plugins-heading">
-      <.bp_section_header id="plugins-heading" title="Plugins" />
+      <.bp_section_header id="plugins-heading" title={gettext("Plugins")} />
 
       <%= cond do %>
         <% is_nil(@current_workspace) -> %>
           <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
-            No workspace in scope to configure.
+            {gettext("No workspace in scope to configure.")}
           </p>
         <% @plugin_rows == [] -> %>
           <p role="status" style="color: var(--fg-muted); margin-bottom:0;">
-            No plugins are installed on this server.
+            {gettext("No plugins are installed on this server.")}
           </p>
         <% true -> %>
           <p style="color: var(--fg-muted);">
-            Turn a plugin off to keep this workspace clean, or move where it lands
-            in the Desk Structure. Disabling never deletes content — its document
-            types move to the <strong>…Rest</strong> folder, still fully readable.
+            {gettext(
+              "Turn a plugin off to keep this workspace clean, or move where it lands in the Desk Structure. Disabling never deletes content — its document types move to the …Rest folder, still fully readable."
+            )}
           </p>
 
           <ul style="list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:.5rem;">
@@ -910,7 +975,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                         title={default_badge_title(row)}
                         style="font-size:.72em; text-transform:uppercase; letter-spacing:.04em; border:1px solid var(--border); color:var(--fg-muted); border-radius:999px; padding:.05rem .5rem;"
                       >
-                        default
+                        {gettext("default")}
                       </span>
                     <% end %>
                   </div>
@@ -921,21 +986,22 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
                 <.bp_switch
                   checked={row.enabled}
-                  on_label="Enabled"
-                  off_label="Disabled"
+                  on_label={gettext("Enabled")}
+                  off_label={gettext("Disabled")}
                   phx-click="toggle_plugin"
                   phx-value-plugin={row.name}
                   phx-value-ws={@current_workspace.id}
-                  aria-label={"Enable #{row.display} for this workspace"}
+                  aria-label={gettext("Enable %{plugin} for this workspace", plugin: row.display)}
                 />
 
                 <form phx-change="set_plugin_placement" style="margin: 0;">
                   <input type="hidden" name="plugin" value={row.name} />
                   <input type="hidden" name="ws" value={@current_workspace.id} />
                   <label style="display: inline-flex; align-items: center; gap: 8px; color: var(--fg-muted); font-size: 13px;">
-                    Placement
+                    {gettext("Placement")}
                     <.bp_select
                       name="placement"
+                      aria-label={gettext("Placement of %{plugin}", plugin: row.display)}
                       value={to_string(row.placement)}
                       options={@placement_labels}
                       disabled={not row.enabled}
@@ -958,8 +1024,9 @@ defmodule BarkparkWeb.Studio.SettingsLive do
           </ul>
 
           <p style="color: var(--fg-muted); font-size: 13px; margin-bottom: 0;">
-            Installed plugins always keep their schemas, routes and background jobs
-            registered — these controls decide only what THIS workspace surfaces.
+            {gettext(
+              "Installed plugins always keep their schemas, routes and background jobs registered — these controls decide only what THIS workspace surfaces."
+            )}
           </p>
       <% end %>
     </.bp_card>
@@ -976,10 +1043,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <button
           type="submit"
           class="btn btn-primary"
-          phx-disable-with="Saving..."
+          phx-disable-with={gettext("Saving...")}
           disabled={@plugin_name == ""}
         >
-          Save
+          {gettext("Save")}
         </button>
         <button
           type="button"
@@ -988,18 +1055,18 @@ defmodule BarkparkWeb.Studio.SettingsLive do
           phx-value-plugin_name={@plugin_name}
           disabled={not @loaded? or not @masked}
         >
-          Reveal
+          {gettext("Reveal")}
         </button>
         <button
           type="button"
           class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
-          phx-disable-with="Deleting..."
-          data-confirm="Delete settings for this plugin?"
+          phx-disable-with={gettext("Deleting...")}
+          data-confirm={gettext("Delete settings for this plugin?")}
           disabled={not @loaded?}
         >
-          Delete
+          {gettext("Delete")}
         </button>
       </div>
     </form>
@@ -1012,7 +1079,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       <input type="hidden" name="plugin_name" value={@plugin_name} />
 
       <fieldset style="border: 1px solid var(--border-muted); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 12px;">
-        <legend style="padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--fg);">{@plugin_name} settings</legend>
+        <legend style="padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--fg);">{gettext("%{plugin} settings", plugin: @plugin_name)}</legend>
 
         <%= for field <- @settings_fields do %>
           {render_field(Map.merge(assigns, %{field: field, key: flat_key(field)}))}
@@ -1020,17 +1087,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       </fieldset>
 
       <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button type="submit" class="btn btn-primary" phx-disable-with="Saving...">Save</button>
+        <button type="submit" class="btn btn-primary" phx-disable-with={gettext("Saving...")}>{gettext("Save")}</button>
         <button
           type="button"
           class="btn btn-destructive"
           phx-click="delete"
           phx-value-plugin_name={@plugin_name}
-          phx-disable-with="Deleting..."
-          data-confirm={"Delete settings for #{@plugin_name}?"}
+          phx-disable-with={gettext("Deleting...")}
+          data-confirm={gettext("Delete settings for %{plugin}?", plugin: @plugin_name)}
           disabled={not @loaded?}
         >
-          Delete
+          {gettext("Delete")}
         </button>
       </div>
     </form>
@@ -1057,7 +1124,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
             phx-value-field={@key}
             disabled={not @loaded?}
           >
-            Reveal
+            {gettext("Reveal")}
           </button>
         <% end %>
       </div>
@@ -1225,10 +1292,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
     cond do
       registered_owned == [] ->
-        "Enabled — no content types in this workspace yet"
+        gettext("Enabled — no content types in this workspace yet")
 
       Enum.all?(registered_owned, &(Map.get(census, &1, 0) == 0)) ->
-        "Enabled — types registered, no documents yet"
+        gettext("Enabled — types registered, no documents yet")
 
       true ->
         nil
@@ -1268,11 +1335,11 @@ defmodule BarkparkWeb.Studio.SettingsLive do
              |> put_flash(:info, Keyword.fetch!(opts, :flash))}
 
           {:error, _} ->
-            {:noreply, put_flash(socket, :error, "Could not save plugin settings.")}
+            {:noreply, put_flash(socket, :error, gettext("Could not save plugin settings."))}
         end
 
       _ ->
-        {:noreply, put_flash(socket, :error, "No workspace in scope to configure.")}
+        {:noreply, put_flash(socket, :error, gettext("No workspace in scope to configure."))}
     end
   end
 
@@ -1296,7 +1363,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp display_name(name), do: to_string(name)
 
   defp placement_label(value) do
-    case List.keyfind(@placement_labels, value, 0) do
+    case List.keyfind(placement_labels(), value, 0) do
       {_, label} -> label
       _ -> value
     end
@@ -1305,8 +1372,11 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # The "default" badge microcopy — what the plugin's own declaration says when
   # the workspace holds no override.
   defp default_badge_title(%{default_enabled: enabled, default_placement: placement}) do
-    on_off = if enabled, do: "on", else: "off"
-    "#{on_off} by default · #{placement_label(to_string(placement))}"
+    placement = placement_label(to_string(placement))
+
+    if enabled,
+      do: gettext("on by default · %{placement}", placement: placement),
+      else: gettext("off by default · %{placement}", placement: placement)
   end
 
   # ── Load paths ─────────────────────────────────────────────────────────
@@ -1342,7 +1412,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
            loaded?: false,
            error: nil
          )
-         |> put_flash(:info, "No settings yet for #{name} — fill in and Save.")}
+         |> put_flash(
+           :info,
+           gettext("No settings yet for %{plugin} — fill in and Save.", plugin: name)
+         )}
     end
   end
 
@@ -1373,7 +1446,10 @@ defmodule BarkparkWeb.Studio.SettingsLive do
            loaded?: false,
            error: nil
          )
-         |> put_flash(:info, "No settings yet for #{name} — start with {} and Save.")}
+         |> put_flash(
+           :info,
+           gettext("No settings yet for %{plugin} — start with {} and Save.", plugin: name)
+         )}
     end
   end
 
@@ -1404,7 +1480,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                loaded?: true,
                error: nil
              )
-             |> put_flash(:info, "Saved #{name}.")}
+             |> put_flash(:info, gettext("Saved %{plugin}.", plugin: name))}
 
           {:error, %Ecto.Changeset{} = cs} ->
             {:noreply, assign(socket, typed_form: form, error: format_changeset(cs))}
@@ -1433,22 +1509,23 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                loaded?: true,
                error: nil
              )
-             |> put_flash(:info, "Saved #{name}.")}
+             |> put_flash(:info, gettext("Saved %{plugin}.", plugin: name))}
 
           {:error, %Ecto.Changeset{} = cs} ->
             {:noreply, assign(socket, error: format_changeset(cs))}
         end
 
       {:ok, _other} ->
-        {:noreply, assign(socket, error: "JSON must be an object at the top level.")}
+        {:noreply, assign(socket, error: gettext("JSON must be an object at the top level."))}
 
       {:error, %Jason.DecodeError{} = err} ->
-        {:noreply, assign(socket, error: "Invalid JSON: #{Exception.message(err)}")}
+        {:noreply,
+         assign(socket, error: gettext("Invalid JSON: %{reason}", reason: Exception.message(err)))}
     end
   end
 
   defp save_generic(socket, _name, _params) do
-    {:noreply, assign(socket, error: "Missing settings_json.")}
+    {:noreply, assign(socket, error: gettext("Missing settings_json."))}
   end
 
   # Secrets render masked (see `typed_form_from`/`Masking.mask`), so a routine
@@ -1579,7 +1656,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   defp truthy?(_), do: false
 
   defp format_missing(missing) do
-    "Missing or invalid: " <> Enum.join(missing, ", ")
+    gettext("Missing or invalid: %{fields}", fields: Enum.join(missing, ", "))
   end
 
   defp pretty(map), do: Jason.encode!(map, pretty: true)
@@ -1596,4 +1673,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     |> Enum.map(fn {field, {msg, _}} -> "#{field}: #{msg}" end)
     |> Enum.join("; ")
   end
+
+  # The Studio language picker names each language in itself, the same in
+  # every UI language, so a reader finds their own (task-a1b3ef2e5475f9c5).
+  # The value stays the locale code; a code with no name here reads as the code.
+  @locale_names %{"en" => "English", "nb-NO" => "Norsk bokmål"}
+
+  defp locale_options(codes),
+    do: Enum.map(codes, &{&1, Map.get(@locale_names, &1, &1)})
 end

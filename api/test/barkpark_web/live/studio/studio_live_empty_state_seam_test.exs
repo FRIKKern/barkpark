@@ -101,6 +101,31 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyStateSeamTest do
     refute html =~ "Select a document to edit"
   end
 
+  # task-6e6de3764438c5cf: with no document open the desk had no main landmark
+  # and no h1 (axe landmark-one-main, page-has-heading-one, region).
+  test "the desk with nothing open has exactly one main region and one h1, outside every pane",
+       %{conn: conn} do
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
+    doc = LazyHTML.from_document(html)
+
+    mains = LazyHTML.query(doc, ~s(main, [role="main"]))
+    assert Enum.count(mains) == 1
+    assert LazyHTML.attribute(mains, "data-test-id") == ["studio-editor-nothing-selected"]
+    assert Enum.count(LazyHTML.query(doc, "h1")) == 1
+    assert Enum.count(LazyHTML.query(doc, ~s(.pane-column main, .pane-column [role="main"]))) == 0
+  end
+
+  # task-6e6de3764438c5cf: the presence avatars sat outside every landmark (axe region).
+  test "the Studio bar is the page's one banner, so its avatars sit in a landmark",
+       %{conn: conn} do
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
+    doc = LazyHTML.from_document(html)
+
+    banners = LazyHTML.query(doc, ~s([role="banner"], body > header))
+    assert Enum.count(banners) == 1
+    assert LazyHTML.attribute(banners, "id") == ["studio-bar"]
+  end
+
   test "a document that DOES resolve renders the editor, not the notice", %{conn: conn} do
     {:ok, _} =
       Content.create_document(

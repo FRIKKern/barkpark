@@ -415,10 +415,34 @@ defmodule Barkpark.Content.Papers do
         # foreign" there, so it lands on the rewrite arm; only `is_nil(sv)` rows
         # with drifted bytes are report-only, and those are exactly the ones the
         # reader now heals itself.
-        if Map.get(content, "body_html_sv") == Render.body_html_render_version(),
-          do: :divergent,
-          else: {:stale, rendered}
+        cond do
+          Map.get(content, "body_html_sv") != Render.body_html_render_version() ->
+            {:stale, rendered}
+
+          # LOCALE DRIFT (task-8e96278fc4ee7097): the renderer's own words follow
+          # the workspace locale, which is a render INPUT the stamp does not carry.
+          # A workspace that switches language leaves its stored body in the old
+          # words under a current stamp; that is these blocks rendered by this
+          # renderer in another locale — stale, not divergent. Without this arm
+          # every such paper would answer 422 to every reader.
+          rendered_in_another_locale?(html, blocks, dataset, style, scope) ->
+            {:stale, rendered}
+
+          true ->
+            :divergent
+        end
     end
+  end
+
+  # Does `html` equal these blocks rendered in some OTHER known locale? Runs only
+  # on the rare byte-mismatch-under-a-current-stamp path, so the extra renders
+  # never touch a coherent read.
+  defp rendered_in_another_locale?(html, blocks, dataset, style, scope) do
+    opts = Labels.paper_render_opts(dataset, style, scope)
+
+    Barkpark.Tenancy.known_locales()
+    |> Enum.reject(&(&1 == opts[:locale]))
+    |> Enum.any?(fn locale -> Render.render_blocks(blocks, %{opts | locale: locale}) == html end)
   end
 
   # Does any block in the list resolve an EXTERNAL referent at render time?
@@ -1458,19 +1482,24 @@ defmodule Barkpark.Content.Papers do
         Barkpark.PortableDoc.TaskResolver.mark_unavailable(blocks)
 
       resolver ->
-        Barkpark.PortableDoc.TaskResolver.resolve(
-          blocks,
-          fn query ->
-            query
-            |> task_query_dataset(dataset)
-            |> resolver.rows_for_query(scope, dataset: dataset)
-          end,
-          fn query ->
-            query
-            |> task_query_dataset(dataset)
-            |> resolver.agg_for_query(scope, dataset: dataset)
-          end
-        )
+        # One RenderCache per render: every block's fetch shares it, so the
+        # resolver reads what all blocks need (the task schema) once
+        # (ctx-b6-memoized-visibility-gate).
+        Barkpark.Content.RenderCache.with_cache(fn cache ->
+          Barkpark.PortableDoc.TaskResolver.resolve(
+            blocks,
+            fn query ->
+              query
+              |> task_query_dataset(dataset)
+              |> resolver.rows_for_query(scope, dataset: dataset, render_cache: cache)
+            end,
+            fn query ->
+              query
+              |> task_query_dataset(dataset)
+              |> resolver.agg_for_query(scope, dataset: dataset, render_cache: cache)
+            end
+          )
+        end)
     end
   end
 
@@ -1740,7 +1769,9 @@ defmodule Barkpark.Content.Papers do
 
     case content do
       %{"blocks" => blocks} ->
-        block_authority(blocks, "blocks")
+        blocks
+        |> block_authority("blocks")
+        |> drop_region_shadow(doc, type, dataset)
 
       %{"body" => %{"blocks" => blocks}} ->
         block_authority(blocks, "body.blocks")
@@ -1756,6 +1787,38 @@ defmodule Barkpark.Content.Papers do
 
       _ ->
         {synthesize_blocks(doc, type, dataset), true}
+    end
+  end
+
+  # A STORED block list written before task-9f230ad6d5b50fb0 can carry a bound
+  # field block for a richText field named like the body region (`body`): the
+  # old default layout derived both, so the document binds `content.body` twice
+  # and Beta shows a stale "body" row over the block editor
+  # (task-c60a40c9a0990c0d). Drop that block and report the list as
+  # synthesized, so the first block op persists the repaired list; views and
+  # ops read this same function, so their indexes agree. A body field of any
+  # other type keeps its block (it owns `content.body`; there is no region).
+  defp drop_region_shadow({blocks, false}, %Document{} = doc, type, dataset)
+       when type != @paper_type do
+    if Enum.any?(blocks, &region_shadow?/1) and richtext_body?(doc, type, dataset),
+      do: {Enum.reject(blocks, &region_shadow?/1), true},
+      else: {blocks, false}
+  end
+
+  defp drop_region_shadow(result, _doc, _type, _dataset), do: result
+
+  defp region_shadow?(%{"fieldName" => "body", "type" => "field-" <> _}), do: true
+  defp region_shadow?(_block), do: false
+
+  defp richtext_body?(doc, type, dataset) do
+    case doc_scoped_schema(doc, type, dataset) do
+      {:ok, %{fields: fields}} when is_list(fields) ->
+        Enum.any?(fields, fn f ->
+          (f["name"] || f[:name]) == "body" and to_string(f["type"] || f[:type]) == "richText"
+        end)
+
+      _ ->
+        false
     end
   end
 
@@ -2029,6 +2092,9 @@ defmodule Barkpark.Content.Papers do
   `Barkpark.Content.Papers.BlockOps.apply_document_block_op/5`.
   """
   defdelegate apply_document_block_op(doc_id, type, op, dataset, opts \\ []), to: BlockOps
+
+  @doc "Batch of document block ops, one write — `Barkpark.Content.Papers.BlockOps.apply_document_block_ops/5`."
+  defdelegate apply_document_block_ops(doc_id, type, ops, dataset, opts \\ []), to: BlockOps
 
   defdelegate apply_document_block_op_once(
                 doc_id,

@@ -7,7 +7,7 @@
       the no-JS fallback, so reader-dark-parity stays green. This attribute
       only selects WHICH theme. Omitted for the default (evergreen) theme, so a
       default paper is byte-identical to before this feature. --%>
-<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
+<html lang={BarkparkWeb.StudioLocale.html_lang()} data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -118,7 +118,7 @@
        `bp-paper-surface`) so they WIN over the shared source's fallback
        `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline
        `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on
-       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,
+       the reader on the bp-theme (a shared ink #15211d, rule #e2e6e5,
        etc.). Dark-mode note: the reader stamps `html[data-theme]` only via
        its pre-paint toggle script (localStorage `barkpark_theme`, shared
        with Studio); before that script runs — and with JS off — the
@@ -135,7 +135,7 @@
       --paper-bg-deep:    #eaf1ee;
       --paper-ink:        #15211d;
       --paper-ink-soft:   #55635e;
-      --paper-rule:       #dde7e2;
+      --paper-rule:       #e2e6e5;
       --paper-accent:     #1e5347;
       /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links
          read it). Light value matches the shared source's fallback; the dark
@@ -178,7 +178,7 @@
         --paper-bg-deep:    #131d19;
         --paper-ink:        #e7ede9;
         --paper-ink-soft:   #9aaaa3;
-        --paper-rule:       rgba(231, 237, 233, 0.13);
+        --paper-rule:       rgba(255, 255, 255, 0.10);
         --paper-accent:     #45b394;
         /* Warm-dark link border (same value as Studio's html[data-theme=dark]
            block in paper-surface.css) — without it links keep the light-theme
@@ -195,9 +195,10 @@
            `html[data-theme="dark"] .bp-paper-surface` block. Edit surfaces
            stamp data-theme and get those directly; this is the reader's
            prefers-color-scheme companion. */
-        --paper-ink-faint:    #6c7a74;
+        --paper-ink-faint:    #788680;
+        --paper-ink-faint-line: #6c7a74;
         --paper-chrome-bg:    #131d19;
-        --paper-chrome-border: rgba(231, 237, 233, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
         --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
         --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -212,12 +213,12 @@
        client showing a light HTML email; the served email bytes never change
        with the theme. */
     #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     @media (prefers-color-scheme: dark) {
       #bp-mailapp {
-        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
     }
@@ -235,7 +236,7 @@
       --paper-bg-deep:    #eaf1ee;
       --paper-ink:        #15211d;
       --paper-ink-soft:   #55635e;
-      --paper-rule:       #dde7e2;
+      --paper-rule:       #e2e6e5;
       --paper-accent:     #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
@@ -244,9 +245,10 @@
          fallbacks, so WITHOUT these a forced-light reader under an OS-dark
          scheme keeps dark callout tones / faint ink / chrome (the mirror
          image of the #1217 bug). Values match the un-stamped light path. */
-      --paper-ink-faint:    #82918b;
+      --paper-ink-faint:    #62706b;
+      --paper-ink-faint-line: #82918b;
       --paper-chrome-bg:    #f6faf9;
-      --paper-chrome-border: rgba(21, 33, 29, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
       --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
       --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -259,13 +261,14 @@
       --paper-bg-deep:    #131d19;
       --paper-ink:        #e7ede9;
       --paper-ink-soft:   #9aaaa3;
-      --paper-rule:       rgba(231, 237, 233, 0.13);
+      --paper-rule:       rgba(255, 255, 255, 0.10);
       --paper-accent:     #45b394;
       --paper-accent-soft: rgba(70, 179, 148, 0.16);
       --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
-      --paper-ink-faint:    #6c7a74;
+      --paper-ink-faint:    #788680;
+      --paper-ink-faint-line: #6c7a74;
       --paper-chrome-bg:    #131d19;
-      --paper-chrome-border: rgba(231, 237, 233, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
       --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
       --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -273,11 +276,11 @@
       --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
     }
     html[data-theme="light"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     html[data-theme="dark"] #bp-mailapp {
-      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
       --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -294,13 +297,14 @@
         --paper-bg-deep:    #eaf1ee;
         --paper-ink:        #15211d;
         --paper-ink-soft:   #55635e;
-        --paper-rule:       #dde7e2;
+        --paper-rule:       #e2e6e5;
         --paper-accent:     #1e5347;
         --paper-accent-soft: rgba(30, 83, 71, 0.10);
         --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
-        --paper-ink-faint:    #82918b;
+        --paper-ink-faint:    #62706b;
+        --paper-ink-faint-line: #82918b;
         --paper-chrome-bg:    #f6faf9;
-        --paper-chrome-border: rgba(21, 33, 29, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
         --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
         --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -315,7 +319,7 @@
       --paper-bg-deep: #eaf1ee;
       --paper-ink: #15211d;
       --paper-ink-soft: #55635e;
-      --paper-rule: #dde7e2;
+      --paper-rule: #e2e6e5;
       --paper-accent: #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925;
@@ -327,13 +331,14 @@
         --paper-bg-deep: #131d19;
         --paper-ink: #e7ede9;
         --paper-ink-soft: #9aaaa3;
-        --paper-rule: rgba(231, 237, 233, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #45b394;
         --paper-accent-soft: rgba(70, 179, 148, 0.16);
         --paper-reading-accent: #d98a6a;
-        --paper-ink-faint: #6c7a74;
+        --paper-ink-faint: #788680;
+        --paper-ink-faint-line: #6c7a74;
         --paper-chrome-bg: #131d19;
-        --paper-chrome-border: rgba(231, 237, 233, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #172032; --bp-tone-info-fg: #9db8ff;
         --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
         --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -342,12 +347,12 @@
       }
     }
     html[data-bp-theme="evergreen"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="evergreen"] #bp-mailapp {
-        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
     }
@@ -357,13 +362,14 @@
       --paper-bg-deep: #eaf1ee;
       --paper-ink: #15211d;
       --paper-ink-soft: #55635e;
-      --paper-rule: #dde7e2;
+      --paper-rule: #e2e6e5;
       --paper-accent: #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925;
-      --paper-ink-faint: #82918b;
+      --paper-ink-faint: #62706b;
+      --paper-ink-faint-line: #82918b;
       --paper-chrome-bg: #f6faf9;
-      --paper-chrome-border: rgba(21, 33, 29, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e9eff7; --bp-tone-info-fg: #2d5e8f;
       --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
       --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -376,13 +382,14 @@
       --paper-bg-deep: #131d19;
       --paper-ink: #e7ede9;
       --paper-ink-soft: #9aaaa3;
-      --paper-rule: rgba(231, 237, 233, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #45b394;
       --paper-accent-soft: rgba(70, 179, 148, 0.16);
       --paper-reading-accent: #d98a6a;
-      --paper-ink-faint: #6c7a74;
+      --paper-ink-faint: #788680;
+      --paper-ink-faint-line: #6c7a74;
       --paper-chrome-bg: #131d19;
-      --paper-chrome-border: rgba(231, 237, 233, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #172032; --bp-tone-info-fg: #9db8ff;
       --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
       --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -390,11 +397,11 @@
       --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
     }
     html[data-bp-theme="evergreen"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     html[data-bp-theme="evergreen"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
       --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -411,13 +418,14 @@
         --paper-bg-deep: #eaf1ee;
         --paper-ink: #15211d;
         --paper-ink-soft: #55635e;
-        --paper-rule: #dde7e2;
+        --paper-rule: #e2e6e5;
         --paper-accent: #1e5347;
         --paper-accent-soft: rgba(30, 83, 71, 0.10);
         --paper-reading-accent: #a23925;
-        --paper-ink-faint: #82918b;
+        --paper-ink-faint: #62706b;
+        --paper-ink-faint-line: #82918b;
         --paper-chrome-bg: #f6faf9;
-        --paper-chrome-border: rgba(21, 33, 29, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e9eff7; --bp-tone-info-fg: #2d5e8f;
         --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
         --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -431,7 +439,7 @@
       --paper-bg-deep: #f0ecf3;
       --paper-ink: #241e27;
       --paper-ink-soft: #565059;
-      --paper-rule: #e0dde1;
+      --paper-rule: #e8e5e9;
       --paper-accent: #7b3a96;
       --paper-accent-soft: rgba(123, 58, 150, 0.10);
       --paper-reading-accent: #302ba5;
@@ -443,13 +451,14 @@
         --paper-bg-deep: #151117;
         --paper-ink: #e1dde3;
         --paper-ink-soft: #a29da4;
-        --paper-rule: rgba(225, 221, 227, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #c78ae0;
         --paper-accent-soft: rgba(199, 138, 224, 0.16);
         --paper-reading-accent: #8480ea;
-        --paper-ink-faint: #6f6b70;
+        --paper-ink-faint: #807c81;
+        --paper-ink-faint-line: #6f6b70;
         --paper-chrome-bg: #151117;
-        --paper-chrome-border: rgba(225, 221, 227, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8beea;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9fcba7;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d8b88d;
@@ -458,12 +467,12 @@
       }
     }
     html[data-bp-theme="charple"] #bp-mailapp {
-      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e0dde1;
+      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e8e5e9;
       --mail-ink: #241e27; --mail-soft: #565059; --mail-accent: #7b3a96;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="charple"] #bp-mailapp {
-        --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #363337;
+        --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #282629;
         --mail-ink: #e1dde3; --mail-soft: #a29da4; --mail-accent: #c78ae0;
       }
     }
@@ -473,13 +482,14 @@
       --paper-bg-deep: #f0ecf3;
       --paper-ink: #241e27;
       --paper-ink-soft: #565059;
-      --paper-rule: #e0dde1;
+      --paper-rule: #e8e5e9;
       --paper-accent: #7b3a96;
       --paper-accent-soft: rgba(123, 58, 150, 0.10);
       --paper-reading-accent: #302ba5;
-      --paper-ink-faint: #7e7a81;
+      --paper-ink-faint: #6e6a71;
+      --paper-ink-faint-line: #7e7a81;
       --paper-chrome-bg: #fcf9fd;
-      --paper-chrome-border: rgba(36, 30, 39, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3a538a;
       --bp-tone-success-bg: #def6e2; --bp-tone-success-fg: #276438;
       --bp-tone-warning-bg: #feecd4; --bp-tone-warning-fg: #734c00;
@@ -492,13 +502,14 @@
       --paper-bg-deep: #151117;
       --paper-ink: #e1dde3;
       --paper-ink-soft: #a29da4;
-      --paper-rule: rgba(225, 221, 227, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #c78ae0;
       --paper-accent-soft: rgba(199, 138, 224, 0.16);
       --paper-reading-accent: #8480ea;
-      --paper-ink-faint: #6f6b70;
+      --paper-ink-faint: #807c81;
+      --paper-ink-faint-line: #6f6b70;
       --paper-chrome-bg: #151117;
-      --paper-chrome-border: rgba(225, 221, 227, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8beea;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9fcba7;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d8b88d;
@@ -506,11 +517,11 @@
       --bp-tone-neutral-bg: #0d0c0d; --bp-tone-neutral-fg: #bfbdbf;
     }
     html[data-bp-theme="charple"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e0dde1;
+      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e8e5e9;
       --mail-ink: #241e27; --mail-soft: #565059; --mail-accent: #7b3a96;
     }
     html[data-bp-theme="charple"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #363337;
+      --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #282629;
       --mail-ink: #e1dde3; --mail-soft: #a29da4; --mail-accent: #c78ae0;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -527,13 +538,14 @@
         --paper-bg-deep: #f0ecf3;
         --paper-ink: #241e27;
         --paper-ink-soft: #565059;
-        --paper-rule: #e0dde1;
+        --paper-rule: #e8e5e9;
         --paper-accent: #7b3a96;
         --paper-accent-soft: rgba(123, 58, 150, 0.10);
         --paper-reading-accent: #302ba5;
-        --paper-ink-faint: #7e7a81;
+        --paper-ink-faint: #6e6a71;
+        --paper-ink-faint-line: #7e7a81;
         --paper-chrome-bg: #fcf9fd;
-        --paper-chrome-border: rgba(36, 30, 39, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3a538a;
         --bp-tone-success-bg: #def6e2; --bp-tone-success-fg: #276438;
         --bp-tone-warning-bg: #feecd4; --bp-tone-warning-fg: #734c00;
@@ -547,7 +559,7 @@
       --paper-bg-deep: #f4ece9;
       --paper-ink: #291d19;
       --paper-ink-soft: #5b504c;
-      --paper-rule: #e2dcda;
+      --paper-rule: #eae5e3;
       --paper-accent: #b34e1e;
       --paper-accent-soft: rgba(179, 78, 30, 0.10);
       --paper-reading-accent: #bf321d;
@@ -559,13 +571,14 @@
         --paper-bg-deep: #18110e;
         --paper-ink: #e5ddd9;
         --paper-ink-soft: #a69d99;
-        --paper-rule: rgba(229, 221, 217, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #e8875a;
         --paper-accent-soft: rgba(232, 135, 90, 0.16);
         --paper-reading-accent: #f5855c;
-        --paper-ink-faint: #726b68;
+        --paper-ink-faint: #837c79;
+        --paper-ink-faint-line: #726b68;
         --paper-chrome-bg: #18110e;
-        --paper-chrome-border: rgba(229, 221, 217, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8bee9;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a0caa7;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d7b88e;
@@ -574,12 +587,12 @@
       }
     }
     html[data-bp-theme="ember"] #bp-mailapp {
-      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #e2dcda;
+      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #eae5e3;
       --mail-ink: #291d19; --mail-soft: #5b504c; --mail-accent: #b34e1e;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="ember"] #bp-mailapp {
-        --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #383330;
+        --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #2a2624;
         --mail-ink: #e5ddd9; --mail-soft: #a69d99; --mail-accent: #e8875a;
       }
     }
@@ -589,13 +602,14 @@
       --paper-bg-deep: #f4ece9;
       --paper-ink: #291d19;
       --paper-ink-soft: #5b504c;
-      --paper-rule: #e2dcda;
+      --paper-rule: #eae5e3;
       --paper-accent: #b34e1e;
       --paper-accent-soft: rgba(179, 78, 30, 0.10);
       --paper-reading-accent: #bf321d;
-      --paper-ink-faint: #827a76;
+      --paper-ink-faint: #726a66;
+      --paper-ink-faint-line: #827a76;
       --paper-chrome-bg: #fef9f7;
-      --paper-chrome-border: rgba(41, 29, 25, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3b5487;
       --bp-tone-success-bg: #dff6e3; --bp-tone-success-fg: #2a6339;
       --bp-tone-warning-bg: #fdecd5; --bp-tone-warning-fg: #724d0a;
@@ -608,13 +622,14 @@
       --paper-bg-deep: #18110e;
       --paper-ink: #e5ddd9;
       --paper-ink-soft: #a69d99;
-      --paper-rule: rgba(229, 221, 217, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #e8875a;
       --paper-accent-soft: rgba(232, 135, 90, 0.16);
       --paper-reading-accent: #f5855c;
-      --paper-ink-faint: #726b68;
+      --paper-ink-faint: #837c79;
+      --paper-ink-faint-line: #726b68;
       --paper-chrome-bg: #18110e;
-      --paper-chrome-border: rgba(229, 221, 217, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8bee9;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a0caa7;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d7b88e;
@@ -622,11 +637,11 @@
       --bp-tone-neutral-bg: #0e0c0b; --bp-tone-neutral-fg: #c0bdbb;
     }
     html[data-bp-theme="ember"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #e2dcda;
+      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #eae5e3;
       --mail-ink: #291d19; --mail-soft: #5b504c; --mail-accent: #b34e1e;
     }
     html[data-bp-theme="ember"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #383330;
+      --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #2a2624;
       --mail-ink: #e5ddd9; --mail-soft: #a69d99; --mail-accent: #e8875a;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -643,13 +658,14 @@
         --paper-bg-deep: #f4ece9;
         --paper-ink: #291d19;
         --paper-ink-soft: #5b504c;
-        --paper-rule: #e2dcda;
+        --paper-rule: #eae5e3;
         --paper-accent: #b34e1e;
         --paper-accent-soft: rgba(179, 78, 30, 0.10);
         --paper-reading-accent: #bf321d;
-        --paper-ink-faint: #827a76;
+        --paper-ink-faint: #726a66;
+        --paper-ink-faint-line: #827a76;
         --paper-chrome-bg: #fef9f7;
-        --paper-chrome-border: rgba(41, 29, 25, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3b5487;
         --bp-tone-success-bg: #dff6e3; --bp-tone-success-fg: #2a6339;
         --bp-tone-warning-bg: #fdecd5; --bp-tone-warning-fg: #724d0a;
@@ -663,7 +679,7 @@
       --paper-bg-deep: #e7f0f2;
       --paper-ink: #162327;
       --paper-ink-soft: #495559;
-      --paper-rule: #d9dfe1;
+      --paper-rule: #e2e7e9;
       --paper-accent: #0e6e85;
       --paper-accent-soft: rgba(14, 110, 133, 0.10);
       --paper-reading-accent: #0f8299;
@@ -675,13 +691,14 @@
         --paper-bg-deep: #0c1417;
         --paper-ink: #d8e0e3;
         --paper-ink-soft: #97a1a4;
-        --paper-rule: rgba(216, 224, 227, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #6cc4dd;
         --paper-accent-soft: rgba(108, 196, 221, 0.16);
         --paper-reading-accent: #53d6ea;
-        --paper-ink-faint: #666e70;
+        --paper-ink-faint: #777f81;
+        --paper-ink-faint-line: #666e70;
         --paper-chrome-bg: #0c1417;
-        --paper-chrome-border: rgba(216, 224, 227, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #040b1f; --bp-tone-info-fg: #adbedf;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a7c7ad;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d1ba9a;
@@ -690,12 +707,12 @@
       }
     }
     html[data-bp-theme="fjord"] #bp-mailapp {
-      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #d9dfe1;
+      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #e2e7e9;
       --mail-ink: #162327; --mail-soft: #495559; --mail-accent: #0e6e85;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="fjord"] #bp-mailapp {
-        --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #2f3537;
+        --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #232729;
         --mail-ink: #d8e0e3; --mail-soft: #97a1a4; --mail-accent: #6cc4dd;
       }
     }
@@ -705,13 +722,14 @@
       --paper-bg-deep: #e7f0f2;
       --paper-ink: #162327;
       --paper-ink-soft: #495559;
-      --paper-rule: #d9dfe1;
+      --paper-rule: #e2e7e9;
       --paper-accent: #0e6e85;
       --paper-accent-soft: rgba(14, 110, 133, 0.10);
       --paper-reading-accent: #0f8299;
-      --paper-ink-faint: #747e81;
+      --paper-ink-faint: #646e71;
+      --paper-ink-faint-line: #747e81;
       --paper-chrome-bg: #f6fbfd;
-      --paper-chrome-border: rgba(22, 35, 39, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #435579;
       --bp-tone-success-bg: #e4f4e6; --bp-tone-success-fg: #3b5f42;
       --bp-tone-warning-bg: #f9eddd; --bp-tone-warning-fg: #6a502b;
@@ -724,13 +742,14 @@
       --paper-bg-deep: #0c1417;
       --paper-ink: #d8e0e3;
       --paper-ink-soft: #97a1a4;
-      --paper-rule: rgba(216, 224, 227, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #6cc4dd;
       --paper-accent-soft: rgba(108, 196, 221, 0.16);
       --paper-reading-accent: #53d6ea;
-      --paper-ink-faint: #666e70;
+      --paper-ink-faint: #777f81;
+      --paper-ink-faint-line: #666e70;
       --paper-chrome-bg: #0c1417;
-      --paper-chrome-border: rgba(216, 224, 227, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #040b1f; --bp-tone-info-fg: #adbedf;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a7c7ad;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d1ba9a;
@@ -738,11 +757,11 @@
       --bp-tone-neutral-bg: #0b0d0d; --bp-tone-neutral-fg: #bbbebf;
     }
     html[data-bp-theme="fjord"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #d9dfe1;
+      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #e2e7e9;
       --mail-ink: #162327; --mail-soft: #495559; --mail-accent: #0e6e85;
     }
     html[data-bp-theme="fjord"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #2f3537;
+      --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #232729;
       --mail-ink: #d8e0e3; --mail-soft: #97a1a4; --mail-accent: #6cc4dd;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -759,13 +778,14 @@
         --paper-bg-deep: #e7f0f2;
         --paper-ink: #162327;
         --paper-ink-soft: #495559;
-        --paper-rule: #d9dfe1;
+        --paper-rule: #e2e7e9;
         --paper-accent: #0e6e85;
         --paper-accent-soft: rgba(14, 110, 133, 0.10);
         --paper-reading-accent: #0f8299;
-        --paper-ink-faint: #747e81;
+        --paper-ink-faint: #646e71;
+        --paper-ink-faint-line: #747e81;
         --paper-chrome-bg: #f6fbfd;
-        --paper-chrome-border: rgba(22, 35, 39, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #435579;
         --bp-tone-success-bg: #e4f4e6; --bp-tone-success-fg: #3b5f42;
         --bp-tone-warning-bg: #f9eddd; --bp-tone-warning-fg: #6a502b;
@@ -779,7 +799,7 @@
       --paper-bg-deep: #ecedf5;
       --paper-ink: #1f1f2a;
       --paper-ink-soft: #51525b;
-      --paper-rule: #dddee2;
+      --paper-rule: #e5e6ea;
       --paper-accent: #5b46d6;
       --paper-accent-soft: rgba(91, 70, 214, 0.10);
       --paper-reading-accent: #3692e6;
@@ -791,13 +811,14 @@
         --paper-bg-deep: #121219;
         --paper-ink: #dedee5;
         --paper-ink-soft: #9e9ea6;
-        --paper-rule: rgba(222, 222, 229, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #9d8cff;
         --paper-accent-soft: rgba(157, 140, 255, 0.16);
         --paper-reading-accent: #8cc8ff;
-        --paper-ink-faint: #6c6c72;
+        --paper-ink-faint: #7d7d83;
+        --paper-ink-faint-line: #6c6c72;
         --paper-chrome-bg: #121219;
-        --paper-chrome-border: rgba(222, 222, 229, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #010828; --bp-tone-info-fg: #a4bef1;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9acca4;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #dcb785;
@@ -806,12 +827,12 @@
       }
     }
     html[data-bp-theme="iris"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #dddee2;
+      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #e5e6ea;
       --mail-ink: #1f1f2a; --mail-soft: #51525b; --mail-accent: #5b46d6;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="iris"] #bp-mailapp {
-        --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #343339;
+        --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #27262b;
         --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
       }
     }
@@ -821,13 +842,14 @@
       --paper-bg-deep: #ecedf5;
       --paper-ink: #1f1f2a;
       --paper-ink-soft: #51525b;
-      --paper-rule: #dddee2;
+      --paper-rule: #e5e6ea;
       --paper-accent: #5b46d6;
       --paper-accent-soft: rgba(91, 70, 214, 0.10);
       --paper-reading-accent: #3692e6;
-      --paper-ink-faint: #7a7b83;
+      --paper-ink-faint: #6a6b73;
+      --paper-ink-faint-line: #7a7b83;
       --paper-chrome-bg: #f9fafe;
-      --paper-chrome-border: rgba(31, 31, 42, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #335296;
       --bp-tone-success-bg: #daf8df; --bp-tone-success-fg: #0f662f;
       --bp-tone-warning-bg: #ffecd2; --bp-tone-warning-fg: #734c00;
@@ -840,13 +862,14 @@
       --paper-bg-deep: #121219;
       --paper-ink: #dedee5;
       --paper-ink-soft: #9e9ea6;
-      --paper-rule: rgba(222, 222, 229, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #9d8cff;
       --paper-accent-soft: rgba(157, 140, 255, 0.16);
       --paper-reading-accent: #8cc8ff;
-      --paper-ink-faint: #6c6c72;
+      --paper-ink-faint: #7d7d83;
+      --paper-ink-faint-line: #6c6c72;
       --paper-chrome-bg: #121219;
-      --paper-chrome-border: rgba(222, 222, 229, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #010828; --bp-tone-info-fg: #a4bef1;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9acca4;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #dcb785;
@@ -854,11 +877,11 @@
       --bp-tone-neutral-bg: #0c0c0e; --bp-tone-neutral-fg: #bdbdc0;
     }
     html[data-bp-theme="iris"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #dddee2;
+      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #e5e6ea;
       --mail-ink: #1f1f2a; --mail-soft: #51525b; --mail-accent: #5b46d6;
     }
     html[data-bp-theme="iris"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #343339;
+      --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #27262b;
       --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -875,13 +898,14 @@
         --paper-bg-deep: #ecedf5;
         --paper-ink: #1f1f2a;
         --paper-ink-soft: #51525b;
-        --paper-rule: #dddee2;
+        --paper-rule: #e5e6ea;
         --paper-accent: #5b46d6;
         --paper-accent-soft: rgba(91, 70, 214, 0.10);
         --paper-reading-accent: #3692e6;
-        --paper-ink-faint: #7a7b83;
+        --paper-ink-faint: #6a6b73;
+        --paper-ink-faint-line: #7a7b83;
         --paper-chrome-bg: #f9fafe;
-        --paper-chrome-border: rgba(31, 31, 42, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #335296;
         --bp-tone-success-bg: #daf8df; --bp-tone-success-fg: #0f662f;
         --bp-tone-warning-bg: #ffecd2; --bp-tone-warning-fg: #734c00;
@@ -1508,6 +1532,11 @@
     }
     .bp-paper-article .bp-goal-rail-event {
       display: flex;
+      width: 100%;
+      border: 0;
+      background: none;
+      font: inherit;
+      text-align: left;
       align-items: baseline;
       gap: 0.5rem;
       margin: 0.1rem 0;
@@ -1518,7 +1547,8 @@
       cursor: pointer;
       transition: background 0.12s ease;
     }
-    .bp-paper-article .bp-goal-rail-event:hover {
+    .bp-paper-article .bp-goal-rail-event:hover,
+    .bp-paper-article .bp-goal-rail-event:focus-visible {
       background: var(--paper-accent-soft);
     }
     .bp-paper-article .bp-goal-rail-event.is-selected {
@@ -2021,22 +2051,34 @@
     }
   </style>
 </head>
-<body>
+<body
+  data-bp-t-open-image={gettext("Open enlarged image")}
+  data-bp-t-go-to={gettext("Go to %{title}", title: "%{title}")}
+  data-bp-t-chapter={gettext("chapter")}
+  data-bp-t-light-mode={gettext("Light mode")}
+  data-bp-t-dark-mode={gettext("Dark mode")}
+  data-bp-t-reader-view={gettext("Reader view")}
+  data-bp-t-tui-view={gettext("TUI view")}
+  data-bp-t-email-view={gettext("Email view")}
+  data-bp-t-rendering={gettext("rendering…")}
+  data-bp-t-editor-failed-title={gettext("Editor failed to load. Reload the page to try again.")}
+  data-bp-t-editor-failed={gettext("Editor failed to load. Your paper is still readable; reload to try editing again.")}
+>
   {@inner_content}
 
-  <dialog id="bp-image-lightbox" class="bp-image-lightbox" aria-label="Enlarged paper image">
+  <dialog id="bp-image-lightbox" class="bp-image-lightbox" aria-label={gettext("Enlarged paper image")}>
     <button
       type="button"
       class="bp-image-lightbox__close"
-      aria-label="Close enlarged image"
+      aria-label={gettext("Close enlarged image")}
     >×</button>
     <div class="bp-image-lightbox__stage">
-      <div class="bp-image-lightbox__toolbar" aria-label="Image size">
+      <div class="bp-image-lightbox__toolbar" aria-label={gettext("Image size")}>
         <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="actual" aria-pressed="false">100%</button>
-        <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="fit" aria-pressed="false">Fit image</button>
-        <span class="bp-image-lightbox__hint">Drag or scroll to inspect</span>
+        <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="fit" aria-pressed="false">{gettext("Fit image")}</button>
+        <span class="bp-image-lightbox__hint">{gettext("Drag or scroll to inspect")}</span>
       </div>
-      <div class="bp-image-lightbox__viewport" tabindex="0" aria-label="Scrollable enlarged image">
+      <div class="bp-image-lightbox__viewport" tabindex="0" aria-label={gettext("Scrollable enlarged image")}>
         <div class="bp-image-lightbox__canvas">
           <img class="bp-image-lightbox__image" src="" alt="" />
         </div>
@@ -2068,7 +2110,7 @@
         images.filter(isEligible).forEach(function (image) {
           image.tabIndex = 0;
           image.setAttribute("role", "button");
-          image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + "Open enlarged image");
+          image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + (document.body.dataset.bpTOpenImage || "Open enlarged image"));
         });
       }
 
@@ -2185,7 +2227,7 @@
           card.dataset.bpChapterTarget = target.id;
           card.tabIndex = 0;
           card.setAttribute("role", "link");
-          card.setAttribute("aria-label", "Go to " + (title ? title.textContent.trim() : "chapter"));
+          card.setAttribute("aria-label", (document.body.dataset.bpTGoTo || "Go to %{title}").replace("%{title}", title ? title.textContent.trim() : (document.body.dataset.bpTChapter || "chapter")));
         });
       }
 
@@ -2256,74 +2298,76 @@
   <div id="bp-mailapp" aria-live="polite">
     <div class="bp-mail-bar">
       <span class="bp-mail-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="bp-mail-title"><b>Barkpark Mail</b> · Inbox<span class="bp-mail-unread" id="bp-mail-unread"> (1)</span></span>
+      <span class="bp-mail-title"><b>Barkpark Mail</b> · {gettext("Inbox")}<span class="bp-mail-unread" id="bp-mail-unread"> (1)</span></span>
       <span style="width:52px" aria-hidden="true"></span>
     </div>
     <div class="bp-mail-toolbar">
-      <button type="button" class="bp-mail-tool" data-mail-exit title="Back to inbox" aria-label="Back — return to the reader">
+      <button type="button" class="bp-mail-tool" data-mail-exit title={gettext("Back to inbox")} aria-label={gettext("Back — return to the reader")}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
       <span class="bp-mail-tooldiv" aria-hidden="true"></span>
-      <button type="button" class="bp-mail-tool" data-mail-exit title="Archive" aria-label="Archive — return to the reader">
+      <button type="button" class="bp-mail-tool" data-mail-exit title={gettext("Archive")} aria-label={gettext("Archive — return to the reader")}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
       </button>
-      <button type="button" class="bp-mail-tool" data-mail-exit title="Delete" aria-label="Delete — return to the reader">
+      <button type="button" class="bp-mail-tool" data-mail-exit title={gettext("Delete")} aria-label={gettext("Delete — return to the reader")}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
       </button>
       <span class="bp-mail-toolsp" aria-hidden="true"></span>
-      <button type="button" class="bp-mail-tool" id="bp-mail-star" title="Star" aria-label="Star this message" aria-pressed="false">
+      <button type="button" class="bp-mail-tool" id="bp-mail-star" title={gettext("Star")} aria-label={gettext("Star this message")} aria-pressed="false">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
       </button>
     </div>
     <div class="bp-mail-head">
       <div class="bp-mail-subjrow">
         <span class="bp-mail-dot" aria-hidden="true"></span>
-        <h2 class="bp-mail-subject" id="bp-mail-subject">Paper</h2>
+        <h2 class="bp-mail-subject" id="bp-mail-subject">{gettext("Paper")}</h2>
       </div>
       <div class="bp-mail-fromrow">
         <span class="bp-mail-avatar" aria-hidden="true">BP</span>
         <div class="bp-mail-who">
           <div class="bp-mail-fromline"><b>Barkpark Papers</b> <span class="bp-mail-addr">&lt;papers@barkpark.cloud&gt;</span></div>
-          <div class="bp-mail-toline">to me ▾</div>
+          <div class="bp-mail-toline">{gettext("to me")} ▾</div>
         </div>
         <span class="bp-mail-date" id="bp-mail-date"></span>
       </div>
     </div>
     <div class="bp-mail-bodywrap">
-      <iframe id="bp-mail-frame" title="This paper rendered as the email subscribers receive"></iframe>
+      <iframe id="bp-mail-frame" title={gettext("This paper rendered as the email subscribers receive")}></iframe>
     </div>
     <div class="bp-mail-foot">
       <a class="bp-mail-btn" id="bp-mail-reply" href="#">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-        Reply
+        {gettext("Reply")}
       </a>
       <a class="bp-mail-btn" id="bp-mail-forward" href="#">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
-        Forward
+        {gettext("Forward")}
       </a>
-      <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">View in browser ↗</a>
+      <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">{gettext("View in browser")} ↗</a>
     </div>
   </div>
   <%!-- CSP layer-2: every control is bound via addEventListener in the nonced
         IIFEs below, never through an inline onclick. --%>
-  <div class="bp-view-controls" role="group" aria-label="Paper view controls">
+  <%!-- A named region, not a group: outside main/aside a group is in no
+        landmark at all (axe region; task-b46266af433288e3). --%>
+  <div class="bp-view-controls" role="region" aria-label={gettext("Paper view controls")}>
     <button
       type="button"
       class="bp-view-toggle"
       aria-pressed="false"
-      aria-label="Toggle terminal (TUI) view"
+      aria-label={gettext("Toggle terminal (TUI) view")}
     >
       <span class="bp-vt-dot" aria-hidden="true"></span>
-      <span class="bp-vt-label">TUI view</span>
+      <span class="bp-vt-label">{gettext("TUI view")}</span>
     </button>
     <button
       type="button"
       class="bp-view-toggle bp-view-toggle--email"
       aria-pressed="false"
-      aria-label="Toggle email view"
+      aria-label={gettext("Toggle email view")}
     >
       <span class="bp-vt-dot" aria-hidden="true"></span>
-      <span class="bp-vt-label">Email view</span>
+      <span class="bp-vt-label">{gettext("Email view")}</span>
     </button>
     <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
           below, never an inline onclick. aria-pressed mirrors "dark mode on";
@@ -2332,10 +2376,10 @@
       type="button"
       class="bp-view-toggle bp-mode-toggle"
       aria-pressed="false"
-      aria-label="Switch between dark and light mode"
+      aria-label={gettext("Switch between dark and light mode")}
     >
       <span class="bp-vt-dot" aria-hidden="true"></span>
-      <span class="bp-vt-label">Mode</span>
+      <span class="bp-vt-label">{gettext("Mode")}</span>
     </button>
   </div>
   <script nonce={assigns[:csp_nonce]}>
@@ -2350,7 +2394,7 @@
       var last = mode();
       function paint() {
         var m = mode();
-        if (label) label.textContent = m === "dark" ? "Light mode" : "Dark mode";
+        if (label) label.textContent = m === "dark" ? (document.body.dataset.bpTLightMode || "Light mode") : (document.body.dataset.bpTDarkMode || "Dark mode");
         btn.setAttribute("aria-pressed", m === "dark" ? "true" : "false");
       }
       // Broadcast only on an EFFECTIVE change — consumers that bake colors in
@@ -2392,9 +2436,9 @@
       function setLabels(mode) {
         var tui = mode === "tui", email = mode === "email";
         if (btn) btn.setAttribute("aria-pressed", tui ? "true" : "false");
-        if (label) label.textContent = tui ? "Reader view" : "TUI view";
+        if (label) label.textContent = tui ? (document.body.dataset.bpTReaderView || "Reader view") : (document.body.dataset.bpTTuiView || "TUI view");
         if (emailBtn) emailBtn.setAttribute("aria-pressed", email ? "true" : "false");
-        if (emailLabel) emailLabel.textContent = email ? "Reader view" : "Email view";
+        if (emailLabel) emailLabel.textContent = email ? (document.body.dataset.bpTReaderView || "Reader view") : (document.body.dataset.bpTEmailView || "Email view");
       }
 
       function currentSlug() {
@@ -2597,7 +2641,8 @@
         // pin the CSS grid width + the "$ bp paper view <slug>" prompt line
         document.documentElement.style.setProperty("--bp-cols", TUI_COLS);
         if (slug) out.setAttribute("data-slug", slug);
-        out.innerHTML = '<div class="bp-tui-loading">rendering…</div>';
+        out.innerHTML = '<div class="bp-tui-loading"></div>';
+        out.firstChild.textContent = document.body.dataset.bpTRendering || "rendering…";
         try {
           if (!slug) throw new Error("no paper slug in the URL");
           var blocksP = fetchBlocks(slug);
@@ -2755,6 +2800,9 @@
         LiveSocket below registers hooks. Only the /finder page mounts it —
         every other reader page pays one cached script fetch, no execution. --%>
   <script src="/assets/bp-graph.js"></script>
+  <%!-- The shared modal-dialog focus manager (also root.html.heex's): the
+        goal-path diff dialog uses it. NON-DEFER, before PaperHooks is built. --%>
+  <script src="/assets/bp-modal-focus.js"></script>
   <%!-- THE shared Mermaid hook + evergreen palette — the SAME asset
         root.html.heex loads for the Studio chat transcript
         (task-e96ac3b80506cf32: the reader used to carry a byte-identical
@@ -3015,6 +3063,12 @@
         mounted() {
           if (typeof document === "undefined" || !this.el) return;
           this.selected = [];
+          // Shift+Enter on a focused row is the keyboard Shift+click. Handled on
+          // keydown (preventDefault stops the button's synthesized click), so it
+          // does not depend on the browser copying shiftKey onto that click.
+          this.onKey = (e) => {
+            if (e.key === "Enter" && e.shiftKey) this.onClick(e);
+          };
           this.onClick = (e) => {
             if (!e.shiftKey) return; // plain click → rail-select unaffected
             let row = e.target.closest("[phx-value-event-id]");
@@ -3032,6 +3086,9 @@
             } else if (this.selected.length === 1) {
               if (id === this.selected[0]) return; // same row twice → ignore
               row.classList.add("is-diff-b");
+              // The diff dialog's close pops focus back here. JS.push_focus()
+              // on the dialog itself would push the dialog, not this row.
+              this.liveSocket.execJS(row, '[["push_focus",{}]]');
               this.pushEvent("open-diff", { from: this.selected[0], to: id });
               this.selected = [];
               this.clearMarks();
@@ -3040,6 +3097,7 @@
           // Capture phase so we intercept the shift+click before the row's own
           // phx-click handler runs.
           this.el.addEventListener("click", this.onClick, true);
+          this.el.addEventListener("keydown", this.onKey, true);
         },
         clearMarks() {
           this.el.querySelectorAll(".is-diff-a, .is-diff-b").forEach((n) => {
@@ -3049,6 +3107,7 @@
         destroyed() {
           if (this.el && this.onClick) {
             this.el.removeEventListener("click", this.onClick, true);
+            this.el.removeEventListener("keydown", this.onKey, true);
           }
         }
       }
@@ -3089,6 +3148,7 @@
     // hook itself (window.BarkparkGraph, the same object Studio registers as
     // GraphPane); guarded so a missing asset never breaks the reader's hooks.
     if (window.BarkparkGraph) PaperHooks.FinderGraph = window.BarkparkGraph;
+    if (window.BarkparkModalFocus) PaperHooks.ModalFocus = window.BarkparkModalFocus;
 
     const publicBootNonce = document.currentScript && document.currentScript.nonce;
     const paperEditorHookNames = [
@@ -3180,7 +3240,7 @@
         if (failed) {
           toggle.setAttribute("aria-disabled", "true");
           toggle.removeAttribute("aria-busy");
-          toggle.title = "Editor failed to load. Reload the page to try again.";
+          toggle.title = document.body.dataset.bpTEditorFailedTitle || "Editor failed to load. Reload the page to try again.";
         } else {
           toggle.setAttribute("aria-busy", "true");
         }
@@ -3193,7 +3253,7 @@
 
       const message = document.createElement("p");
       message.setAttribute("role", "alert");
-      message.textContent = "Editor failed to load. Your paper is still readable; reload to try editing again.";
+      message.textContent = document.body.dataset.bpTEditorFailed || "Editor failed to load. Your paper is still readable; reload to try editing again.";
       (document.getElementById("paper-edit-bar") || document.body).appendChild(message);
       console.error("Barkpark public editor assets failed to load", error);
     }

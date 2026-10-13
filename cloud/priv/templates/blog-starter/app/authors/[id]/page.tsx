@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { POST_ORDER, getAllDocs, getDocById } from '../../../lib/barkpark'
 import { slugOf, type SlugValue } from '../../../lib/slug'
+import { refOf, type RefValue } from '../../../lib/ref'
 
 interface Author {
   _id: string
@@ -18,7 +19,7 @@ interface Post {
   slug?: SlugValue
   excerpt?: string
   publishedAt?: string
-  author?: { _ref: string }
+  author?: RefValue
 }
 
 export async function generateMetadata({
@@ -49,7 +50,7 @@ export default async function AuthorPage({
   // Every post, not one page: getDocs reads the query route's default page
   // (100 rows), so filtering it here dropped every match past the first 100.
   const allPosts = await getAllDocs<Post>('post', POST_ORDER)
-  const posts = allPosts.filter((p) => p.author?._ref === id)
+  const posts = allPosts.filter((p) => refOf(p.author) === id)
 
   return (
     <div className="space-y-8">

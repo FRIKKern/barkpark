@@ -5,12 +5,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   action to exactly ONE DocPatchOp through `Shared.paper_op/2`.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
   alias Barkpark.Content
   alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
@@ -575,7 +578,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       opts =
         [
           if_rev: socket.assigns[:paper_rev],
-          actor_user_id: socket.assigns[:user_id]
+          actor_user_id: Shared.actor_user_id(socket)
         ] ++ ScopeHelpers.scope_opts(socket)
 
       case Content.accept_valueref_baseline(
@@ -590,26 +593,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           {:noreply,
            socket
            |> Shared.refetch_paper()
-           |> put_flash(:info, "Baseline accepted — pinned literal updated to the current value")}
+           |> put_flash(
+             :info,
+             gettext("Baseline accepted — pinned literal updated to the current value")
+           )}
 
         {:error, :precondition_failed} ->
           {:noreply,
            socket
            |> Shared.refetch_paper()
-           |> put_flash(:error, "Paper changed since this view — re-rendered, retry the accept")}
+           |> put_flash(
+             :error,
+             gettext("Paper changed since this view — re-rendered, retry the accept")
+           )}
 
         {:error, :not_drifted} ->
           {:noreply,
            socket
            |> Shared.refetch_paper()
-           |> put_flash(:info, "Baseline already matches the current value")}
+           |> put_flash(:info, gettext("Baseline already matches the current value"))}
 
         {:error, :dangling} ->
           {:noreply,
-           put_flash(socket, :error, "Value is unresolvable (dangling) — no baseline to accept")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Value is unresolvable (dangling) — no baseline to accept")
+           )}
 
         {:error, _reason} ->
-          {:noreply, put_flash(socket, :error, "Accept baseline failed")}
+          {:noreply, put_flash(socket, :error, gettext("Accept baseline failed"))}
       end
     end
   end
@@ -642,13 +655,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # Ingress ghost), saw nothing, and typed into the void. On an accepted write,
   # ask the canvas to put the caret in the new block — the canvas focuses it if
   # the block is in its run, so the scaffold opens where the author is looking.
-  defp focus_new_block(socket, %{"id" => id, "type" => "paragraph"}) when is_binary(id) do
-    if socket.assigns[:last_paper_save_ok?] == true,
-      do: push_event(socket, "bp:focus-block", %{id: id}),
-      else: socket
+  #
+  # Any other added block takes the caret too (task-44f900b38fac79e9): a text
+  # block in the canvas run through `focusBlock/1`, a block that renders as its
+  # own boundary editor through `bp:focus-boundary`. An atom or field node view
+  # inside the run gets neither — the canvas would put the caret beside it —
+  # except a field block (String, Select, Date & time, the Image/Reference
+  # pickers…): its node view holds its own control, and the canvas focuses that
+  # control on bp:focus-block (task-13abe9408c006c96).
+  @focus_field_types ~w(field-string field-slug field-text field-boolean field-select
+                        field-datetime field-color field-number field-image field-reference)
+
+  defp focus_new_block(%{assigns: %{last_paper_save_ok?: true}} = socket, %{"id" => id} = block)
+       when is_binary(id) do
+    cond do
+      PaperCanvas.caret_block?(block) -> push_event(socket, "bp:focus-block", %{id: id})
+      block["type"] in @focus_field_types -> push_event(socket, "bp:focus-block", %{id: id})
+      not PaperCanvas.canvas?(block) -> push_event(socket, "bp:focus-boundary", %{id: id})
+      true -> socket
+    end
   end
 
   defp focus_new_block(socket, _block), do: socket
+
+  # An image or equation picked in the canvas is built here (it is not a
+  # canvas-run type) and renders as its own boundary editor outside the canvas.
+  # Put the caret in that editor, so what the author types next lands on the
+  # block (task-f92354b415b486f5). The hook focuses it once it is in the DOM.
+  @focus_boundary_types ~w(image equation)
+
+  defp focus_boundary_block(socket, %{"id" => id, "type" => type})
+       when is_binary(id) and type in @focus_boundary_types do
+    if socket.assigns[:last_paper_save_ok?] == true,
+      do: push_event(socket, "bp:focus-boundary", %{id: id}),
+      else: socket
+  end
+
+  defp focus_boundary_block(socket, _block), do: socket
 
   @doc """
   pdd-t20c: MATERIALIZE an optional ghost slot. The editor offers each absent
@@ -713,7 +756,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       when is_binary(fname) and fname != "" do
     if Shared.expected_field_blocked?(socket, fname) do
       socket
-      |> put_flash(:error, "That field is already at its limit.")
+      |> put_flash(:error, gettext("That field is already at its limit."))
       |> failed_reply(params)
     else
       new =
@@ -754,12 +797,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_slash_insert(%{"type" => type} = params, socket) do
     new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
-    paper_reply(
-      Shared.paper_op(
-        socket,
-        write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
-      )
+    socket
+    |> Shared.paper_op(
+      write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
     )
+    |> focus_boundary_block(new)
+    |> paper_reply()
   end
 
   def paper_slash_insert(params, socket), do: failed_reply(socket, params)
@@ -789,7 +832,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     cond do
       Shared.expected_field_blocked?(socket, fname) ->
         socket
-        |> put_flash(:error, "That field is already at its limit.")
+        |> put_flash(:error, gettext("That field is already at its limit."))
         |> failed_reply(params)
 
       true ->
@@ -809,7 +852,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
           _ ->
             socket
-            |> put_flash(:error, "Unknown property.")
+            |> put_flash(:error, gettext("Unknown property."))
             |> failed_reply(params)
         end
     end
@@ -947,25 +990,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   Blank query or query exceeding 100 chars → empty result (short-circuit
   before hitting the DB). Otherwise delegates to `Content.search_papers/3`
   (which is already capped at 20 results) using the same dataset + scope
-  that every other paper handler reads from socket assigns.
+  that every other paper handler reads from socket assigns. `scope_overrides`
+  replaces scope keys the socket cannot supply — the flat paper reader has no
+  `:current_workspace`, so it passes the paper's own workspace and project.
 
-  Returns `{:reply, %{results: [%{title, id, type}]}, socket}` — LiveView
+  Returns `{:reply, %{results: [%{title, id, type, type_label}]}, socket}` — LiveView
   forwards the map to the client's pushEvent callback, which resolves the
   Promise exposed on `el.wikilinkSource`.
   """
-  def paper_wikilink_search(q, socket)
+  def paper_wikilink_search(q, socket, scope_overrides \\ [])
+
+  def paper_wikilink_search(q, socket, _scope_overrides)
       when not is_binary(q) or byte_size(q) == 0 or byte_size(q) > 100 do
     {:reply, %{results: []}, socket}
   end
 
-  def paper_wikilink_search(q, socket) do
+  def paper_wikilink_search(q, socket, scope_overrides) do
     dataset = socket.assigns.dataset
-    opts = ScopeHelpers.scope_opts(socket)
+    opts = Keyword.merge(ScopeHelpers.scope_opts(socket), scope_overrides)
+
+    # The badge's word, in the viewer's language; `type` stays the id.
+    type_label = PaneBuilder.type_word("paper")
 
     results =
       Content.search_papers(q, dataset, opts)
       |> Enum.map(fn %{id: id, title: title} ->
-        %{title: title, id: to_string(id), type: "paper"}
+        %{title: title, id: to_string(id), type: "paper", type_label: type_label}
       end)
 
     {:reply, %{results: results}, socket}
@@ -988,14 +1038,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   strings, which the client's pushEvent callback resolves onto the Promise
   exposed by `el.tagSource`.
   """
-  def paper_tag_search(q, socket)
+  def paper_tag_search(q, socket, scope_overrides \\ [])
+
+  def paper_tag_search(q, socket, _scope_overrides)
       when not is_binary(q) or byte_size(q) == 0 or byte_size(q) > 100 do
     {:reply, %{results: []}, socket}
   end
 
-  def paper_tag_search(q, socket) do
+  def paper_tag_search(q, socket, scope_overrides) do
     dataset = socket.assigns.dataset
-    opts = ScopeHelpers.scope_opts(socket)
+    opts = Keyword.merge(ScopeHelpers.scope_opts(socket), scope_overrides)
 
     results = Content.search_tags(q, dataset, opts)
 
@@ -1055,7 +1107,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
              |> refresh_paper_values()
              |> put_flash(
                :info,
-               "Canonical value written to #{target} — changes #{impact.count} doc(s)"
+               ngettext(
+                 "Canonical value written to %{target} — changes %{count} doc(s)",
+                 "Canonical value written to %{target} — changes %{count} doc(s)",
+                 impact.count,
+                 target: target
+               )
              )}
 
           {:error, {:rev_mismatch, _}} ->

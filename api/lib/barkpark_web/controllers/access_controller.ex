@@ -205,16 +205,40 @@ defmodule BarkparkWeb.AccessController do
   def index(conn, params) do
     principal = conn.assigns[:api_token]
 
-    with workspace_id when is_binary(workspace_id) <- fetch_workspace_id(params),
+    with workspace_id when is_binary(workspace_id) <- index_workspace_id(params, principal),
          :ok <- Auth.authorize(principal, workspace_id, :read) do
       grants = Access.list_grants_for_workspace(workspace_id)
       json(conn, %{grants: Enum.map(grants, &render_grant/1)})
     else
       :missing ->
-        unprocessable(conn, "workspace_id is required")
+        unprocessable(
+          conn,
+          "workspace_id is required: this token is not bound to one workspace and is a member of none or several, so pass workspace_id"
+        )
 
       _ ->
         forbidden(conn, "you are not authorized in that workspace")
+    end
+  end
+
+  # task-1640b4d8feff6ae8: `bp access ls` with no flag. An absent workspace_id
+  # defaults to the token's bound workspace, else to its only membership. Two or
+  # more memberships stay a 422: picking one would be a guess. The default is
+  # authorized like an explicit id, so it can never widen what a caller sees.
+  defp index_workspace_id(params, _principal) when is_map_key(params, "workspace_id"),
+    do: fetch_workspace_id(params)
+
+  defp index_workspace_id(_params, principal) do
+    case principal do
+      %ApiToken{workspace_id: ws} when is_binary(ws) and ws != "" -> ws
+      _ -> sole_workspace_id(principal)
+    end
+  end
+
+  defp sole_workspace_id(principal) do
+    case Auth.list_workspaces_for(principal) do
+      [%{id: ws}] -> ws
+      _ -> :missing
     end
   end
 
@@ -346,8 +370,10 @@ defmodule BarkparkWeb.AccessController do
   end
 
   # Grantor-or-workspace-admin — the same authority Access.revoke enforces.
+  # A FORMER grantor (seat gone) is no longer a manager (owner ruling #2).
   defp authorized_manager?(principal, %Access.Grant{} = grant) do
-    principal_matches?(principal, grant.grantor_id) or
+    (principal_matches?(principal, grant.grantor_id) and
+       Auth.authorize(principal, grant.workspace_id, :read) == :ok) or
       Auth.authorize(principal, grant.workspace_id, :admin) == :ok
   end
 

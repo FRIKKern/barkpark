@@ -8,8 +8,35 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
+
+  # A sheet's cells live in its session, not in `editor_form`, and the session
+  # persists on a debounce. Flush it first so the published row carries the
+  # cells the editor last saw; a failed flush publishes nothing. The field-form
+  # validation below reads a form the sheet editor never shows, so it is
+  # skipped; the publish wall in `Content.publish_document` still runs.
+  def publish(%{assigns: %{editor_type: "sheet", editor_doc: %{} = doc}} = socket) do
+    slug = Content.published_id(doc.doc_id)
+
+    case Session.flush(slug, socket.assigns.dataset, GridData.session_scope(%{doc: doc})) do
+      :ok ->
+        publish_open_doc(socket)
+
+      {:error, _} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext(
+             "The sheet's latest edits could not be saved, so it was not published. Try again."
+           )
+         )}
+    end
+  end
 
   def publish(socket) do
     doc = socket.assigns[:editor_doc]
@@ -64,7 +91,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     else
       # Same rule as the refusal arms above: an ERROR arm of this case already
       # flashes, so a press that never ran must not answer with silence.
-      {:noreply, put_flash(socket, :error, "Nothing to publish — open a document first")}
+      {:noreply, put_flash(socket, :error, gettext("Nothing to publish — open a document first"))}
     end
   end
 
@@ -123,20 +150,61 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
   defp publish_open_doc(socket) do
     opts = Shared.hook_opts(socket)
+    previous_rev = socket.assigns[:editor_doc] && socket.assigns.editor_doc.rev
 
-    Shared.do_action(
-      socket,
-      fn d, t ->
-        Content.publish_document(
-          Content.published_id(d.doc_id),
-          t,
-          socket.assigns.dataset,
-          opts
+    {:noreply, socket} =
+      Shared.do_action(
+        socket,
+        fn d, t ->
+          Content.publish_document(
+            Content.published_id(d.doc_id),
+            t,
+            socket.assigns.dataset,
+            opts
+          )
+        end,
+        publish_success_message(
+          socket.assigns[:editor_type],
+          socket.assigns[:editor_doc],
+          socket.assigns.dataset
         )
-      end,
-      "Published"
-    )
+      )
+
+    # Publish moves the revision outside the editor's save path; tell the
+    # open editors, or their next edit pauses for review.
+    {:noreply, Paper.push_document_revision(socket, previous_rev)}
   end
+
+  # Owner ruling #58 (2026-10-03): a published sheet is public. The
+  # `/sheets/:slug` reader serves only the seeded Default workspace's
+  # `production` sheets (`Content.get_public_document/3`), so the flash names
+  # that page only where it exists; elsewhere it says what is true today
+  # (lead ruling on task-976a2df147626749). A scoped, share-gated sheet reader
+  # is the owner's decision.
+  @doc false
+  def publish_success_message("sheet", doc, dataset) do
+    slug = doc && Content.published_id(doc.doc_id)
+
+    if slug && public_sheet_reader?(doc, dataset) do
+      gettext(
+        "Published. Published sheets are public, so anyone can now read this one at /sheets/%{slug}.",
+        slug: slug
+      )
+    else
+      gettext(
+        "Published. It is readable through the API under this workspace's sharing rules; this workspace has no public page for sheets yet."
+      )
+    end
+  end
+
+  def publish_success_message(_type, _doc, _dataset), do: gettext("Published")
+
+  defp public_sheet_reader?(%{workspace_id: ws_id}, dataset) when is_binary(ws_id) do
+    dataset == Barkpark.Content.Papers.paper_default_dataset() and
+      match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace())
+  end
+
+  defp public_sheet_reader?(_doc, _dataset), do: false
 
   # ── [studio-tag-name-is-the-id] task-655768f4fa3c9fed ─────────────────────
   #
@@ -173,8 +241,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
          put_flash(
            socket,
            :error,
-           "Name the tag before publishing. Documents use the tag by a name made from its title " <>
-             "(lowercase letters, digits and hyphens), so the title needs at least one letter or digit."
+           gettext(
+             "Name the tag before publishing. Documents use the tag by a name made from its title (lowercase letters, digits and hyphens), so the title needs at least one letter or digit."
+           )
          )}
 
       tag_name_taken?(name, dataset, opts) ->
@@ -182,7 +251,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
          put_flash(
            socket,
            :error,
-           "A tag named “#{name}” already exists. Open that tag to change it, or give this one a different title."
+           gettext(
+             "A tag named “%{name}” already exists. Open that tag to change it, or give this one a different title.",
+             name: name
+           )
          )}
 
       true ->
@@ -197,7 +269,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
            socket
            |> put_flash(
              :info,
-             "Published tag “#{name}”. Documents and tasks use it by that name."
+             gettext("Published tag “%{name}”. Documents and tasks use it by that name.",
+               name: name
+             )
            )
            |> push_patch(to: Shared.studio_path(socket, path, dataset))}
         else
@@ -208,7 +282,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
              put_flash(
                socket,
                :error,
-               "Publish failed: the tag “#{name}” could not be saved (#{inspect(error)}). Your draft is unchanged."
+               gettext(
+                 "Publish failed: the tag “%{name}” could not be saved (%{inspect}). Your draft is unchanged.",
+                 name: name,
+                 inspect: inspect(error)
+               )
              )}
         end
     end
@@ -245,7 +323,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
         {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
       end
     else
-      {:noreply, put_flash(socket, :error, "Nothing to unpublish — open a document first")}
+      {:noreply,
+       put_flash(socket, :error, gettext("Nothing to unpublish — open a document first"))}
     end
   end
 
@@ -257,33 +336,50 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     doc = socket.assigns[:editor_doc]
 
     if doc && socket.assigns[:editor_type] do
-      socket =
-        if params["disconnect"] == "true" do
-          Content.disconnect_references(
-            doc.doc_id,
-            socket.assigns.dataset,
-            ScopeHelpers.scope_opts(socket)
-          )
+      disconnect =
+        if params["disconnect"] == "true",
+          do:
+            Content.disconnect_references(
+              doc.doc_id,
+              socket.assigns.dataset,
+              Shared.disconnect_opts(socket)
+            ),
+          else: :ok
 
-          socket
-        else
-          socket
-        end
+      case disconnect do
+        {:error, {:outside_write_grant, denied}} ->
+          {:noreply,
+           socket
+           |> assign(show_unpublish_guard: false, unpublish_refs: [])
+           |> put_flash(:error, Shared.outside_grant_disconnect_message(denied, "unpublished"))}
 
-      socket
-      |> assign(show_unpublish_guard: false, unpublish_refs: [])
-      |> Shared.do_unpublish()
+        _ ->
+          socket
+          |> assign(show_unpublish_guard: false, unpublish_refs: [])
+          |> Shared.do_unpublish()
+      end
     else
       {:noreply, assign(socket, show_unpublish_guard: false, unpublish_refs: [])}
     end
   end
+
+  # The copy's title, which is what the author recognises in the desk; the raw
+  # id only for a copy with no title (task-a69f860810cbcfc3).
+  defp duplicated_message(%{title: title}, _pub_id) when is_binary(title) and title != "",
+    do: gettext("Duplicated as “%{title}”", title: title)
+
+  defp duplicated_message(_doc, pub_id), do: gettext("Duplicated as %{id}", id: pub_id)
 
   def duplicate_doc(socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      case Content.clone_document(doc, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      # The copy's suffix in the Studio language (task-141c0bba8070ef02): it is
+      # stored in the title, so the English " (copy)" read English everywhere.
+      opts = Shared.hook_opts(socket) ++ [title_suffix: gettext(" (copy)")]
+
+      case Content.clone_document(doc, type, socket.assigns.dataset, opts) do
         {:ok, new_doc} ->
           pub_id = Content.published_id(new_doc.doc_id)
           base = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
@@ -291,17 +387,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
           {:noreply,
            socket
-           |> put_flash(:info, "Duplicated as #{pub_id}")
+           |> put_flash(:info, duplicated_message(new_doc, pub_id))
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, {:halted, reason}} ->
-          {:noreply, put_flash(socket, :error, "Duplicate cancelled: #{reason}")}
+          {:noreply,
+           put_flash(socket, :error, gettext("Duplicate cancelled: %{reason}", reason: reason))}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Failed to duplicate")}
+          {:noreply, put_flash(socket, :error, gettext("Failed to duplicate"))}
       end
     else
-      {:noreply, put_flash(socket, :error, "Nothing to duplicate — open a document first")}
+      {:noreply,
+       put_flash(socket, :error, gettext("Nothing to duplicate — open a document first"))}
     end
   end
 end

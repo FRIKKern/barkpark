@@ -35,6 +35,26 @@ defmodule Barkpark.PortableDoc.Render.ComponentsTest do
       assert html =~ ~s(<span class="bp-g bp-g--cancel">✕</span>)
     end
 
+    # task-21231dd5be0ca72c: axe's aria-prohibited-attr — an aria-label on a span
+    # with no role is never announced. The spinner glyph names itself as an image;
+    # no element in a task list carries an aria-label without a role.
+    test "the spinner glyph is a named image, and no aria-label sits on a role-less element" do
+      html =
+        Components.tasks_html(%{
+          "snapshot" => [
+            %{"title" => "c", "status" => "in_progress"},
+            %{"title" => "e", "status" => "done"}
+          ]
+        })
+
+      assert html =~
+               ~s(<span class="bp-g bp-g--progress" role="img" aria-label="in progress"></span>)
+
+      labelled = Regex.scan(~r/<[a-z]+\b[^>]*\baria-label="[^"]*"[^>]*>/, html) |> List.flatten()
+      assert labelled != []
+      for tag <- labelled, do: assert(tag =~ ~r/\brole="/, "aria-label without a role: #{tag}")
+    end
+
     test "closed folds to the done role" do
       html = Components.tasks_html(%{"snapshot" => [%{"title" => "x", "status" => "closed"}]})
       assert html =~ ~s(bp-trow--done)

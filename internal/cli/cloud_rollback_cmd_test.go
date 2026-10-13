@@ -147,6 +147,20 @@ func TestRunCloudRollbackNotSupported(t *testing.T) {
 	}
 }
 
+// TestRunCloudRollbackV2SealsUnsupported: the box refuses a rollback whose
+// target predates bound field seals (owner ruling #18); the CLI names it and
+// says nothing was flipped.
+func TestRunCloudRollbackV2SealsUnsupported(t *testing.T) {
+	newRollbackServer(t, 409, `{"error":{"code":"v2_seals_unreadable"}}`)
+	_, stderr, code := runRollback(t, "table", testInstanceID)
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want %d (conflict)", code, exitConflict)
+	}
+	if !strings.Contains(stderr, "Fix forward instead. Nothing was flipped.") {
+		t.Fatalf("want the v2-seals sentence:\n%s", stderr)
+	}
+}
+
 // TestRunCloudRollbackNotFound: the team-scoped 404 (flat error shape, no
 // existence leak) maps to the no-such-instance sentence, exit not_found.
 func TestRunCloudRollbackNotFound(t *testing.T) {

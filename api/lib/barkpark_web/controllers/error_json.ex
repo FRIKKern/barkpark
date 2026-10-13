@@ -35,6 +35,12 @@ defmodule BarkparkWeb.ErrorJSON do
   (`BarkparkCloud.Sites.Deploy.transient_refusal?/1`) grants its retry grace by
   matching the CODE, never the message. Moving the code — even to a "better"
   one — turns that grace terminal. Only the message changes here.
+
+  One fault is typed instead: a raised `DBConnection.ConnectionError` that is a
+  pool SHED (`BarkparkWeb.PoolOverload.status/1` == 503, a queue drop) answers
+  `storage_unavailable` / `connection_unavailable`, the same 503 the controller
+  arms give, and the poller lists `storage_unavailable` as transient in the same
+  change (task-f8233616de3513d4). Every other fault keeps `internal_error`.
   """
 
   alias Barkpark.Content.Errors
@@ -87,7 +93,49 @@ defmodule BarkparkWeb.ErrorJSON do
        }),
        do: {:error, e}
 
-  defp reason_for_template(_template, assigns) do
+  # A refused or lost DATABASE CONNECTION is a transient refusal, not a server
+  # fault (task-f8233616de3513d4). Under pool shedding it raises from the plugs
+  # before any controller runs (`Auth.verify_token/1`, `AssignDefaultScope`,
+  # `DeriveWorkspaceFromToken`) and from any read a controller does not rescue,
+  # and every one of them used to answer `internal_error`. It now answers the
+  # typed 503 the controller arms already give: `storage_unavailable`, reason
+  # `connection_unavailable`. A GET/HEAD takes the READ arm (it changed nothing,
+  # resend); any other method takes the WRITE arm (check whether it landed),
+  # which is the safe advice wherever in the request the connection was lost.
+  # The message is fixed — never the exception's own text.
+  #
+  # The cloud deploy poller keys its retry grace on the code, so
+  # `BarkparkCloud.Sites.Deploy.transient_refusal?/1` lists
+  # `storage_unavailable` beside `internal_error` in the same change.
+  #
+  # ONLY the shed (`BarkparkWeb.PoolOverload.status/1` == 503, a queue drop).
+  # Every other connection fault keeps HTTP 500, and a typed 503 code on a 500
+  # would be one code at two statuses (`errors_api_parity_test.go`), so those
+  # keep the `internal_error` family.
+  defp reason_for_template(
+         _template,
+         %{kind: :error, reason: %DBConnection.ConnectionError{} = e} = assigns
+       ) do
+    if BarkparkWeb.PoolOverload.status(e) == 503,
+      do: connection_unavailable(assigns),
+      else: family_reason(assigns)
+  end
+
+  defp reason_for_template(_template, assigns), do: family_reason(assigns)
+
+  defp connection_unavailable(assigns) do
+    message = "the database connection was refused or lost while serving this request"
+
+    case assigns do
+      %{conn: %Plug.Conn{method: method}} when method in ["GET", "HEAD"] ->
+        {:error, {:connection_unavailable, :read, message}}
+
+      _ ->
+        {:error, {:connection_unavailable, message}}
+    end
+  end
+
+  defp family_reason(assigns) do
     # A BINARY reason is carried verbatim as the message under the SAME
     # `internal_error` code (Errors.build/1); anything else falls back to the
     # generic builder text. Rendering with an empty assigns map (no fault in

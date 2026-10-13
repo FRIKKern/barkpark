@@ -63,6 +63,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";
 // Merged cells (plan #24): the grid <-> visible-rows model and its structural transforms.
 import { visibleToGrid, gridToVisible, gridTransforms, coverMap, normalizeSpans, width as gridWidth } from "./table-grid.js";
+import { t } from "../i18n.js";
 
 // Shared bpId/bpType attr skeleton (the role-nodes.js roleAttributes shape). Only the
 // bpTable carries identity — rows/cells are INTERNAL PM structure with NO bpId (one id
@@ -463,7 +464,7 @@ export const BpTable = Node.create({
       colRail.className = "bp-canvas-table__cols";
       colRail.contentEditable = "false";
       colRail.setAttribute("role", "group");
-      colRail.setAttribute("aria-label", "Table columns");
+      colRail.setAttribute("aria-label", t("Table columns"));
 
       const table = document.createElement("table");
       // The READER table element + class, byte-identical to walk.ex.
@@ -497,7 +498,7 @@ export const BpTable = Node.create({
         while (resizers.childNodes.length < count) {
           const grip = document.createElement("div");
           grip.className = "bp-canvas-table__resize";
-          grip.title = "Drag to resize the column";
+          grip.title = t("Drag to resize the column");
           grip.setAttribute("data-col", String(resizers.childNodes.length));
           grip.addEventListener("pointerdown", (e) => startResize(e, Number(grip.getAttribute("data-col"))));
           resizers.appendChild(grip);
@@ -558,12 +559,12 @@ export const BpTable = Node.create({
       rowRail.className = "bp-canvas-table__rows";
       rowRail.contentEditable = "false";
       rowRail.setAttribute("role", "group");
-      rowRail.setAttribute("aria-label", "Table rows");
+      rowRail.setAttribute("aria-label", t("Table rows"));
       const controls = document.createElement("details");
       controls.className = "bp-canvas-table__controls";
       controls.contentEditable = "false";
       const summary = document.createElement("summary");
-      summary.textContent = "Configure table";
+      summary.textContent = t("Configure table");
       controls.append(summary, colRail, rowRail);
       const contextualHost = editor.options.element?.closest?.(
         'bp-paper-editor[data-editor-mode="table"]',

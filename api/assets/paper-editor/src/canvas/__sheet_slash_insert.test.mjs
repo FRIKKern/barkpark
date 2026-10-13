@@ -37,6 +37,8 @@ window.BP_PAPER_EDITOR_NO_INJECT = true;
 
 await import("../index.js");
 const { insertSlashTypeAtSelection } = await import("./command-palette.js");
+// The block holds the slash's own "/query", so the pick replaces it.
+const SLASH_PICK = { replaceText: true };
 
 const canvas = document.createElement("bp-paper-canvas");
 canvas.blocks = [{ id: "p-1", type: "paragraph", content: [{ type: "text", value: "Intro." }] }];
@@ -51,7 +53,7 @@ try {
 
   // The caret at the end of the paragraph, as after typing "/sheet".
   editor.commands.setTextSelection(editor.state.doc.content.size - 1);
-  assert.equal(insertSlashTypeAtSelection(editor, "sheet"), true, "Sheet is insertable");
+  assert.equal(insertSlashTypeAtSelection(editor, "sheet", undefined, SLASH_PICK), true, "Sheet is insertable");
 
   let sheet = null;
   editor.state.doc.forEach((node) => {

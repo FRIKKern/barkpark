@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.DocumentOpsController do
   @moduledoc """
-  `POST /v1/data/doc/:dataset/:type/:doc_id/ops` — apply one PortableDoc block
-  op to any document type, over HTTP.
+  `POST /v1/data/doc/:dataset/:type/:doc_id/ops` — apply PortableDoc block ops
+  to any document type, over HTTP.
 
   The product-era core rule (docs/contracts/product-era.md): anything Studio can
   do, the API can do too. Studio's block editor writes a non-paper document by
@@ -9,7 +9,12 @@ defmodule BarkparkWeb.DocumentOpsController do
   HTTP caller could, so an app outside the Phoenix process could not edit the
   blocks Studio edits. This controller is the same call behind the write tier.
 
-  Body: `{"op": {...}, "ifRev": "<the document's current _rev>"}`.
+  Body: `{"op": {...}, "ifRev": "<the document's current _rev>"}` for one op,
+  or `{"ops": [...], "ifRev": ...}` for a batch. A batch folds in memory, each op
+  over the result of the one before, and lands in one write
+  (`Content.apply_document_block_ops/5`): one invalid op and nothing is written.
+  It answers `{"result": {"results": [one receipt per op], "rev", ...}}`; a
+  single op keeps its own receipt shape.
 
   - `ifRev` is required, as it is for Studio's editor: an op without a
     revision fence could overwrite a newer edit.
@@ -20,6 +25,16 @@ defmodule BarkparkWeb.DocumentOpsController do
   - Draft first: when `drafts.<doc_id>` exists the op edits the draft, as
     Studio's editor does and as `?perspective=raw` reads it. Otherwise it edits
     the document itself.
+
+  `POST /v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops` is the field
+  twin: Studio's field canvas (`handlers/field_blocks.ex`) edits one
+  block-editor `richText` field through `Content.apply_field_block_ops/6`, and
+  this route makes the same call. Body: `{"ops": [...], "ifRev": "<_rev>"}`.
+  The ops apply in order to `content[field]` and land in one write, so the
+  batch applies whole or not at all. The same `ifRev`, draft-first and
+  papers/sessions rules apply. A field that is missing or not a block-editor
+  field answers 422 `invalid_op`, as does a block outside the field's
+  vocabulary. Success: `{"result": {"field", "blocks", "written_doc_id", "rev"}}`.
   """
   use BarkparkWeb, :controller
 
@@ -30,17 +45,18 @@ defmodule BarkparkWeb.DocumentOpsController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   def apply_op(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    op = params["op"]
+    body = op_body(params)
     if_rev = params["ifRev"]
     opts = [source: :api] ++ scope_opts(conn)
 
     cond do
-      not (is_map(op) and is_binary(op["op"])) ->
+      body == :malformed ->
         ErrorResponse.emit_custom(
           conn,
           :unprocessable_entity,
           "malformed_op",
-          "body must carry an op object naming a DocPatchOp in its \"op\" key"
+          "body must carry an op object naming a DocPatchOp in its \"op\" key, " <>
+            "or a non-empty \"ops\" list of them, not both"
         )
 
       not (is_binary(if_rev) and if_rev != "") ->
@@ -63,17 +79,99 @@ defmodule BarkparkWeb.DocumentOpsController do
         ErrorResponse.emit(conn, {:error, :not_found}, "no schema for type #{type}")
 
       true ->
-        run_op(conn, doc_id, type, op, dataset, opts ++ [if_rev: if_rev])
+        run_op(conn, doc_id, type, body, dataset, opts ++ [if_rev: if_rev])
     end
   end
 
-  defp run_op(conn, doc_id, type, op, dataset, opts) do
+  defp op_body(%{"op" => op} = params) when not is_map_key(params, "ops"),
+    do: if(valid_op?(op), do: {:single, op}, else: :malformed)
+
+  defp op_body(%{"ops" => ops} = params) when not is_map_key(params, "op"),
+    do: if(valid_ops?(ops), do: {:batch, ops}, else: :malformed)
+
+  defp op_body(_params), do: :malformed
+
+  defp valid_op?(op), do: is_map(op) and is_binary(op["op"])
+  defp valid_ops?(ops), do: is_list(ops) and ops != [] and Enum.all?(ops, &valid_op?/1)
+
+  def apply_field_ops(
+        conn,
+        %{"dataset" => dataset, "type" => type, "doc_id" => doc_id, "field" => field} = params
+      ) do
+    ops = params["ops"]
+    if_rev = params["ifRev"]
+    opts = [source: :api] ++ scope_opts(conn)
+
+    cond do
+      not valid_ops?(ops) ->
+        ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "malformed_op",
+          "body must carry a non-empty \"ops\" list, each entry naming a DocPatchOp in its \"op\" key"
+        )
+
+      not (is_binary(if_rev) and if_rev != "") ->
+        ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "malformed_op",
+          "ifRev is required: read the document and send its current _rev"
+        )
+
+      Content.blocks_type?(type) ->
+        ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "invalid_op",
+          "#{type} documents take ops at /v1/plugins/bulldocs/#{type}s/:slug/ops"
+        )
+
+      not match?({:ok, _}, Content.get_schema(type, dataset, opts)) ->
+        ErrorResponse.emit(conn, {:error, :not_found}, "no schema for type #{type}")
+
+      true ->
+        target = edit_target(doc_id, type, dataset, opts)
+
+        Content.apply_field_block_ops(target, type, field, ops, dataset, opts ++ [if_rev: if_rev])
+        |> field_ops_response(conn)
+    end
+  end
+
+  defp field_ops_response({:ok, result}, conn), do: json(conn, %{result: result})
+
+  defp field_ops_response({:error, {:no_such_field, field}}, conn),
+    do: invalid_op(conn, "#{inspect(field)} is not a field of this type")
+
+  defp field_ops_response({:error, {:not_a_blocks_field, field}}, conn),
+    do: invalid_op(conn, "#{inspect(field)} is not a block-editor field (editor: blocks)")
+
+  defp field_ops_response({:error, {:out_of_vocabulary, why}}, conn),
+    do: invalid_op(conn, "not allowed in this field: #{why}")
+
+  defp field_ops_response(error, conn), do: op_error_response(error, conn)
+
+  defp invalid_op(conn, message),
+    do: ErrorResponse.emit_custom(conn, :unprocessable_entity, "invalid_op", message)
+
+  defp run_op(conn, doc_id, type, body, dataset, opts) do
     target = edit_target(doc_id, type, dataset, opts)
 
-    case Content.apply_document_block_op(target, type, op, dataset, opts) do
-      {:ok, result} ->
-        json(conn, %{result: result})
+    result =
+      case body do
+        {:single, op} -> Content.apply_document_block_op(target, type, op, dataset, opts)
+        {:batch, ops} -> Content.apply_document_block_ops(target, type, ops, dataset, opts)
+      end
 
+    case result do
+      {:ok, result} -> json(conn, %{result: result})
+      error -> op_error_response(error, conn)
+    end
+  end
+
+  # The refusals both doors share: one envelope per reason, whichever route ran.
+  defp op_error_response(error, conn) do
+    case error do
       {:error, :not_found} ->
         ErrorResponse.emit(conn, {:error, :not_found})
 
@@ -95,6 +193,10 @@ defmodule BarkparkWeb.DocumentOpsController do
       # writer's task validation: the same 422 `validation_failed` with
       # per-field details that /v1/data/mutate answers (owner ruling #35).
       {:error, {:invalid_task_content, %{}} = reason} ->
+        ErrorResponse.emit(conn, {:error, reason})
+
+      # A non-admin op changed a schema `readOnly` field (owner ruling #35).
+      {:error, {:read_only_fields, _fields} = reason} ->
         ErrorResponse.emit(conn, {:error, reason})
 
       # C083: a held instance refuses the write at the door. 503 transient, never an op fault.

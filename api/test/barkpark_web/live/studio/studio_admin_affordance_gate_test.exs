@@ -165,6 +165,30 @@ defmodule BarkparkWeb.Studio.StudioAdminAffordanceGateTest do
     end
   end
 
+  # task-e10d059c7fb4976a: the bulk bar offers a member nothing but Clear, so a
+  # member's list row does not offer the checkbox that opens it. The row itself
+  # is the non-vacuity control: it renders for both, only the checkbox differs.
+  describe "the list row's select checkbox" do
+    defp open_list(conn, token) do
+      conn
+      |> Plug.Test.init_test_session(%{"api_token" => token})
+      |> live(scoped_studio("/d/#{@dataset}/studio/#{@type_name}"))
+    end
+
+    test "a WRITE-tier member's row has no select checkbox", %{conn: conn} do
+      {:ok, view, _html} = open_list(conn, @member)
+      assert caps(view) == %{read: true, write: true, admin: false}
+      assert has_element?(view, "#doc-#{@slug}"), "the document row must render"
+      refute has_element?(view, "#doc-#{@slug} .bp-doc-checkbox")
+    end
+
+    test "an ADMIN's row keeps it", %{conn: conn} do
+      {:ok, view, _html} = open_list(conn, @admin)
+      assert caps(view).admin == true
+      assert has_element?(view, "#doc-#{@slug} .bp-doc-checkbox")
+    end
+  end
+
   describe "the answer has ONE owner" do
     test "Caps.admin_affordance?/1 reads the derived caps map and fails closed" do
       assert BarkparkWeb.Studio.Caps.admin_affordance?(%{read: true, write: true, admin: true})

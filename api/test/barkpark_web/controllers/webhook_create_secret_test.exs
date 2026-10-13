@@ -58,8 +58,9 @@ defmodule BarkparkWeb.WebhookCreateSecretTest do
     |> post("/v1/webhooks/test", Jason.encode!(body))
   end
 
-  # "patch" never auto-dispatches, so creating the hook fires nothing on its own.
-  @base %{"name" => "Hook", "url" => "http://example.test/hook", "events" => ["patch"]}
+  # "discardDraft" never auto-dispatches here, so creating the hook fires
+  # nothing on its own (no draft is discarded in this file's tests).
+  @base %{"name" => "Hook", "url" => "http://example.test/hook", "events" => ["discardDraft"]}
 
   test "no secret → the 201 returns a generated secret once, and deliveries are signed with it",
        %{conn: conn} do
@@ -79,6 +80,9 @@ defmodule BarkparkWeb.WebhookCreateSecretTest do
       %MutationEvent{}
       |> Ecto.Changeset.change(%{
         dataset: "test",
+        # Same workspace as the hook: a workspace-less event replays only to a
+        # shared-layer webhook (owner ruling #51, RQ2).
+        workspace_id: wh.workspace_id,
         type: "widget",
         doc_id: "d1",
         mutation: "publish",
@@ -90,7 +94,10 @@ defmodule BarkparkWeb.WebhookCreateSecretTest do
 
     replayed =
       conn
-      |> recycle()
+      # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+      # conn.private's rate-limit test scope, silently sharing the whole-suite
+      # IP bucket on this METERED route (RateLimit plug in its pipeline).
+      |> recycle_scoped()
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{ev.id}/replay")
 
@@ -126,7 +133,7 @@ defmodule BarkparkWeb.WebhookCreateSecretTest do
 
     shown =
       conn
-      |> recycle()
+      |> recycle_scoped()
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> get("/v1/webhooks/test/#{id}")
 

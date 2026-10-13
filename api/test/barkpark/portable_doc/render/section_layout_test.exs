@@ -392,9 +392,9 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
 
       html = Render.render_block(section, @email)
       # The callout renders through its OWN :email emitter — an inline-styled box
-      # (border-left chrome), NEVER the stylesheet-only `bp-callout` class that
-      # Outlook would strip.
-      assert String.contains?(html, "border-left:3px solid"),
+      # (a hairline frame since 2026-10-05), NEVER the stylesheet-only `bp-callout`
+      # class that Outlook would strip.
+      assert String.contains?(html, "border:1px solid #e2e6e5;border-radius:12px"),
              "callout child renders through its own inline-safe :email emitter"
 
       refute String.contains?(html, "bp-callout"),

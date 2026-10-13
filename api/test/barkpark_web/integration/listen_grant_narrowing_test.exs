@@ -262,7 +262,8 @@ defmodule BarkparkWeb.Integration.ListenGrantNarrowingTest do
 
       assert frame["documentId"] == ctx.doc_out.doc_id
       assert is_binary(frame["rev"])
-      assert is_list(frame["syncTags"]) and length(frame["syncTags"]) == 2
+      # Scoped + flat doc:/type: (task-0951e10cb60b409c).
+      assert is_list(frame["syncTags"]) and length(frame["syncTags"]) == 4
       assert frame["result"]["title"] == "out-of-grant"
       assert frame["result"]["_type"] == @out_of_grant_type
       assert is_binary(frame["result"]["_rev"])

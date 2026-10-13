@@ -3,14 +3,14 @@
   <div class="bp-auth-card">
     <.auth_brand />
 
-    <h1 class="bp-auth-title">Set a new password</h1>
-    <p class="bp-auth-sub">Choose a new password for your account.</p>
+    <h1 class="bp-auth-title"><%= gettext("Set a new password") %></h1>
+    <p class="bp-auth-sub"><%= gettext("Choose a new password for your account.") %></p>
 
     <.auth_flash flash={@flash} />
 
     <.form :let={_f} for={%{}} as={:reset} action={~p"/auth/reset/#{@token}"} method="post">
       <div class="form-group">
-        <label class="form-label" for="reset_password">New password</label>
+        <label class="form-label" for="reset_password"><%= gettext("New password") %></label>
         <div class="bp-auth-input-affix">
           <input
             type="password"
@@ -28,7 +28,9 @@
             class="bp-auth-eye"
             data-eye-for="reset_password"
             tabindex="-1"
-            aria-label="Show password"
+            aria-label={gettext("Show password")}
+            data-show-label={gettext("Show password")}
+            data-hide-label={gettext("Hide password")}
           >
             <svg
               width="16"
@@ -45,15 +47,15 @@
           </button>
         </div>
         <p class="bp-auth-sub" style="margin: 6px 0 0;">
-          At least {Barkpark.Accounts.User.min_password_length()} characters.
+          <%= gettext("At least %{count} characters.", count: Barkpark.Accounts.User.min_password_length()) %>
         </p>
       </div>
 
-      <button type="submit" class="bp-auth-btn">Set new password</button>
+      <button type="submit" class="bp-auth-btn"><%= gettext("Set new password") %></button>
     </.form>
 
     <p class="bp-auth-foot">
-      <a href={~p"/login"}>Back to sign in</a>
+      <a href={~p"/login"}><%= gettext("Back to sign in") %></a>
     </p>
   </div>
 
@@ -64,7 +66,7 @@
         if (!input) return;
         var show = input.type === "password";
         input.type = show ? "text" : "password";
-        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        btn.setAttribute("aria-label", show ? btn.dataset.hideLabel : btn.dataset.showLabel);
       });
     });
   </script>

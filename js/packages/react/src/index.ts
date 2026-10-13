@@ -20,7 +20,8 @@ export type {
 // PortableText, which stays the legacy `PortableText` shim above). Context-free,
 // so it is mirrored verbatim in server.ts for RSC.
 export { PortableDoc, renderPortableDocument } from './PortableDoc'
-export type { PortableDocProps, Block, Inline } from './PortableDoc'
+export type { PortableDocProps, Block, Inline, InlineObjectRenderer } from './PortableDoc'
+export type { ChromeStrings } from './blocks/chrome'
 
 // Plain-text extraction (excerpts / meta descriptions / reading time) — pure,
 // so it works in a Server Component too. Mirrored in server.ts.

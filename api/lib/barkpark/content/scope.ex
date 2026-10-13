@@ -81,6 +81,13 @@ defmodule Barkpark.Content.Scope do
   """
   @spec scope_to_owner(Ecto.Queryable.t(), CallerContext.t() | nil) :: Ecto.Queryable.t()
   def scope_to_owner(query, %CallerContext{is_admin: true}), do: query
+
+  # OWNER RULING 2026-10-03 #9: a token tied to a user (`user_id` set from its
+  # `owner_user_id`) acts as that user; only a service token keeps see-all.
+  def scope_to_owner(query, %CallerContext{principal_type: :api_token, user_id: uid})
+      when is_binary(uid),
+      do: where(query, [x], x.owner_id == ^uid or is_nil(x.owner_id))
+
   def scope_to_owner(query, %CallerContext{principal_type: :api_token}), do: query
 
   def scope_to_owner(query, %CallerContext{principal_type: :user, user_id: uid})

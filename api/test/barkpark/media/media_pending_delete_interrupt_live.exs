@@ -2,13 +2,15 @@
 # internal operation returns but while this outer transaction remains open.
 input = System.fetch_env!("C105_PROOF_INPUT") |> File.read!() |> Jason.decode!()
 item = Enum.at(input["fixtures"], 1)
-opts = [where_used: :cascade] ++
-  Enum.flat_map([:workspace_id, :project_id], fn key ->
-    case item["rawRow"][Atom.to_string(key)] do
-      nil -> []
-      value -> [{key, value}]
-    end
-  end)
+
+opts =
+  [where_used: :cascade] ++
+    Enum.flat_map([:workspace_id, :project_id], fn key ->
+      case item["rawRow"][Atom.to_string(key)] do
+        nil -> []
+        value -> [{key, value}]
+      end
+    end)
 
 Barkpark.Content.Broadcast.with_deferred_queue(fn ->
   Barkpark.Repo.transaction(fn ->

@@ -119,6 +119,77 @@ defmodule BarkparkWeb.Components.Fields.CodelistFieldTest do
       refute html =~ "no codelist registered"
     end
 
+    # task-88ccab21dd4989e9: the combobox placeholder was the literal "Search …".
+    # Over 100 flat codes render the <datalist> combobox, which carries it.
+    test "the combobox placeholder reads in the Studio language" do
+      {:ok, _} =
+        Codelists.register("onixedit", "onixedit:big_flat", %{
+          issue: "1",
+          values:
+            for i <- 1..101 do
+              %{
+                code: "C#{i}",
+                position: i,
+                translations: [%{language: "eng", label: "Code #{i}"}]
+              }
+            end
+        })
+
+      field = %Field{name: "big", type: "codelist", codelist_id: "onixedit:big_flat", version: 1}
+
+      render = fn ->
+        render_component(&CodelistField.codelist_field/1, %{
+          field: field,
+          value: "",
+          plugin_name: "onixedit"
+        })
+      end
+
+      assert render.() =~ ~s(data-codelist-combobox="true")
+      assert render.() =~ ~s(placeholder="Search onixedit:onixedit:big_flat…")
+
+      nb = Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", render)
+      assert nb =~ ~s(placeholder="Søk i onixedit:onixedit:big_flat…")
+    end
+
+    # task-05710d91d03d7fc9: the editor's field label cannot point at this
+    # control, so the select and the combobox had no accessible name at all
+    # (axe select-name on Media "Role"). Each now carries the field title.
+    test "the select and the combobox are named by the field title" do
+      select =
+        render_component(&CodelistField.codelist_field/1, %{
+          field: %Field{
+            name: "role",
+            title: "Contributor role",
+            type: "codelist",
+            codelist_id: "onixedit:contributor_role",
+            version: 73
+          },
+          value: nil,
+          plugin_name: "onixedit"
+        })
+
+      assert select =~ ~r/<select[^>]*aria-label="Contributor role"/
+
+      {:ok, _} =
+        Codelists.register("onixedit", "onixedit:named_big", %{
+          issue: "1",
+          values:
+            for i <- 1..101 do
+              %{code: "N#{i}", position: i, translations: [%{language: "eng", label: "N #{i}"}]}
+            end
+        })
+
+      combobox =
+        render_component(&CodelistField.codelist_field/1, %{
+          field: %Field{name: "series_code", type: "codelist", codelist_id: "onixedit:named_big"},
+          value: "",
+          plugin_name: "onixedit"
+        })
+
+      assert combobox =~ ~r/<input[^>]*data-codelist-combobox="true"[^>]*aria-label="Series Code"/
+    end
+
     test "phx-change wires through to the select element" do
       field = %Field{
         name: "role",

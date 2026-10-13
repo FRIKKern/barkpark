@@ -125,8 +125,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   use Oban.Worker,
     queue: :github_mirror,
     max_attempts: 5,
+    # `workspace_id` / `project_id` join the key (owner ruling #51, RQ6): a
+    # same-id task in another tenant is a different mirror, not a duplicate.
     unique: [
-      keys: [:doc_id, :dataset],
+      keys: [:doc_id, :dataset, :workspace_id, :project_id],
       states: [:available, :scheduled, :executing],
       period: 60
     ]
@@ -274,7 +276,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           # a child that is already synced still re-runs to link its now-mirrored
           # parent. The issue create/PATCH stays idempotent (nothing changed → a
           # redundant no-op PATCH); the point of the re-run is the relations pass.
-          not relink?(opts) and Link.synced?(task_doc) ->
+          # A `restrip: true` job (owner ruling #11, `Github.RestripJob`) also
+          # bypasses it: the task has not moved, but its issue body was written
+          # before the body strip and must be re-PATCHed to the stripped shape.
+          not relink?(opts) and not restrip?(opts) and Link.synced?(task_doc) ->
             :ok
 
           true ->
@@ -330,9 +335,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # MINT an issue for a task that was never published. This arm handles the
   # OPPOSITE history: a task that WAS published, WAS mirrored, and has since
   # been UNPUBLISHED — `Content.Lifecycle.unpublish_document/4` deletes the
-  # published row and copies its content (`content.github` INCLUDED) onto the
-  # draft, so `load_task/3` still finds the doc and `Link.get/1` still yields a
-  # live issue number, while `published?/3` is now false.
+  # published row and keeps the draft: an existing draft as it is, otherwise a
+  # new one copied from the published content (`content.github` INCLUDED). So
+  # `load_task/3`, which already reads the draft first, still finds the doc and
+  # `Link.get/1` yields the issue number the draft carries, while `published?/3`
+  # is now false.
   #
   # Cancelling there would leave that issue OPEN with no published row behind
   # it — the very orphan class the gate exists to prevent (D86 /
@@ -395,7 +402,12 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # Record the issue number first (so a retry PATCHes, never re-CREATEs), then
   # converge `state` with a follow-up idempotent PATCH in the SAME reconcile.
   defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, opts, task_doc) do
-    case stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"}, opts) do
+    case stamp(
+           doc_id,
+           dataset,
+           %{repo: repo, issue: num, synced_rev: rev, state: "synced", stripped: true},
+           opts
+         ) do
       # The issue mirror converged (created + stamped). NOW the issue number is
       # known and the issue write returned :ok, so run the failure-isolated
       # Projects + relations projections. A fresh create carries no prior link, so
@@ -448,9 +460,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         # ADVANCE an `adopted` link to `synced` here: the born create path stamps
         # `synced` in after_create, but an intake→adopt task first reaches
         # `synced` ONLY through this update PATCH — without it the state field
-        # lies `adopted` forever (task-eb5ac970477f9308).
+        # lies `adopted` forever (task-eb5ac970477f9308). `stripped: true`
+        # records that this body was written under the body strip (owner
+        # ruling #11), so `Github.Restrip.plan/2` can count what is left.
         stamp_fields =
-          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)}
+          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired), stripped: true}
           |> advance_adopted_state(link)
 
         case stamp(doc_id, dataset, stamp_fields, opts) do
@@ -1243,6 +1257,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp cfg, do: Application.get_env(:barkpark, @config_key, [])
 
   defp relink?(opts), do: opts[:relink] == true
+  defp restrip?(opts), do: opts[:restrip] == true
 
   defp relink_attempt(opts) do
     case opts[:relink_attempt] do

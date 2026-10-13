@@ -16,6 +16,7 @@ import {
   LEGEND_ROLES,
   STATUS_ROLES,
 } from '../src/inline'
+import { EN } from '../src/blocks/chrome'
 
 describe('status vocabulary — thought states + fail-open', () => {
   it('considering/researching resolve to their OWN roles with the correct glyphs', () => {
@@ -34,7 +35,7 @@ describe('status vocabulary — thought states + fail-open', () => {
     expect(glyphChar('unknown')).toBe('◦') // U+25E6 white bullet
     expect(glyphChar('unknown')).not.toBe('○') // not open's ring
     // and it renders a static glyph span, not a spinner.
-    expect(glyphHtml('unknown')).toBe('<span class="bp-g bp-g--unknown">◦</span>')
+    expect(glyphHtml('unknown', EN)).toBe('<span class="bp-g bp-g--unknown">◦</span>')
   })
 
   it('ABSENT / empty status keeps the open default (nothing about blank rows changes)', () => {

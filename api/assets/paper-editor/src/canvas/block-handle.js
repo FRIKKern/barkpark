@@ -8,6 +8,7 @@
 // runToOps diff turns it into patch/insert/remove/move ops with no new wire
 // shapes. The handle is purely additive: read-mode canvases never mount it.
 import { Selection, TextSelection, NodeSelection } from "@tiptap/pm/state";
+import { t, te } from "../i18n.js";
 
 // Six-dot braille cell: reads as a drag grip without letter-spacing tricks.
 const GRIP = "⠿";
@@ -102,7 +103,7 @@ export function insertParagraphAfter(editor, index) {
 }
 
 // "Turn into" for prose blocks. Non-prose targets are handled by the caller through the slash insert path.
-export function turnTopLevelInto(editor, index, kind) {
+export function turnTopLevelInto(editor, index, kind, { quoteType = "blockquote" } = {}) {
   const { state } = editor;
   const src = topLevelAt(state, index);
   if (!src) return false;
@@ -130,8 +131,29 @@ export function turnTopLevelInto(editor, index, kind) {
     }
     return ok;
   };
+  // Paragraph <-> quote (owner ruling 2026-10-03 #62): both hold the same inline
+  // content, so the block is swapped in place with its id kept — the save is a
+  // same-id replace-block, never a remove + insert that would orphan references.
+  const swapTextblock = (typeName) => {
+    const type = state.schema.nodes[typeName];
+    if (!type || !src.node.isTextblock) return false;
+    let node;
+    try {
+      node = type.create({ bpId: src.node.attrs?.bpId ?? null, bpType: typeName }, src.node.content);
+    } catch (_e) {
+      return false;
+    }
+    const tr = state.tr.replaceWith(src.from, src.to, node);
+    try { tr.setSelection(TextSelection.near(tr.doc.resolve(src.from + 1))); } catch (_e) { /* keep selection */ }
+    editor.view.dispatch(tr);
+    return true;
+  };
   switch (kind) {
-    case "paragraph": return chain.setParagraph().run();
+    case "paragraph":
+      return src.node.type.name === "blockquote" || src.node.type.name === "pullquote" ? swapTextblock("paragraph") : chain.setParagraph().run();
+    case "quote":
+      // `quoteType`: the quote a field admits (vocabulary.js quoteTypeFor), as `> ` makes.
+      return src.node.type.name === quoteType ? true : swapTextblock(quoteType);
     case "h1": return chain.setHeading({ level: 1 }).run();
     case "h2": return chain.setHeading({ level: 2 }).run();
     case "h3": return chain.setHeading({ level: 3 }).run();
@@ -156,6 +178,14 @@ export const TURN_INTO = [
   { kind: "bullet", label: "Bulleted list", glyph: "•" },
   { kind: "ordered", label: "Numbered list", glyph: "1." },
   { kind: "task", label: "Checklist", glyph: "☑" },
+  { kind: "quote", label: "Quote", glyph: "❝" },
+];
+
+// The tokens .bp-block-menu paints with (styles.css), carried onto the
+// portalled menu from its host.
+const MENU_TOKENS = [
+  "--paper-chrome-bg", "--paper-chrome-border", "--paper-ink", "--paper-ink-soft",
+  "--paper-rule", "--paper-edit-hover", "--bp-tone-danger-fg", "--paper-font-sans",
 ];
 
 export class BlockHandle {
@@ -163,12 +193,16 @@ export class BlockHandle {
   // openSlash(): host callback that opens the slash menu at the caret.
   // canSaveMaster(node) / saveMaster(node): optional paper-masters seam — when
   // canSaveMaster answers true the menu offers "Save as master".
-  constructor({ host, editor, openSlash, canSaveMaster, saveMaster }) {
+  // canEdit(node) / edit(pos): optional — when canEdit answers true the menu offers
+  // "Edit" first (a declared object block's field editor).
+  constructor({ host, editor, openSlash, canSaveMaster, saveMaster, canEdit, edit }) {
     this._host = host;
     this._editor = editor;
     this._openSlash = openSlash;
     this._canSaveMaster = typeof canSaveMaster === "function" ? canSaveMaster : () => false;
     this._saveMaster = typeof saveMaster === "function" ? saveMaster : () => false;
+    this._canEdit = typeof canEdit === "function" ? canEdit : () => false;
+    this._edit = typeof edit === "function" ? edit : () => false;
     this._index = -1;
     this._menu = null;
     this._drag = null;
@@ -176,7 +210,7 @@ export class BlockHandle {
     this._el = document.createElement("div");
     this._el.className = "bp-block-handle";
     this._el.style.display = "none";
-    this._el.innerHTML = `<button type="button" class="bp-block-handle__btn bp-block-handle__add" title="Add a block below (click)" aria-label="Add a block below">+</button><button type="button" class="bp-block-handle__btn bp-block-handle__grip" title="Drag to move · click for options" aria-label="Block options">${GRIP}</button>`;
+    this._el.innerHTML = `<button type="button" class="bp-block-handle__btn bp-block-handle__add" title="${te("Add a block below (click)")}" aria-label="${te("Add a block below")}">+</button><button type="button" class="bp-block-handle__btn bp-block-handle__grip" title="${te("Drag to move · click for options")}" aria-label="${te("Block options")}">${GRIP}</button>`;
     this._drop = document.createElement("div");
     this._drop.className = "bp-block-drop";
     this._drop.style.display = "none";
@@ -185,7 +219,8 @@ export class BlockHandle {
 
     this._onMove = (e) => this._track(e);
     this._onLeave = () => this._scheduleHide();
-    this._onScroll = () => this._reposition();
+    this._onScroll = () => { this._reposition(); this._placeMenu(); };
+    this._onResize = () => this._placeMenu();
     this._onDocDown = (e) => { if (this._menu && !this._menu.contains(e.target) && !this._el.contains(e.target)) this._closeMenu(); };
     host.addEventListener("mousemove", this._onMove);
     host.addEventListener("mouseleave", this._onLeave);
@@ -197,10 +232,34 @@ export class BlockHandle {
     this._el.querySelector(".bp-block-handle__add").addEventListener("click", () => this._add());
     const grip = this._el.querySelector(".bp-block-handle__grip");
     grip.addEventListener("pointerdown", (e) => this._startDrag(e));
+
+    // A touch screen has no hover, so the handle never appeared there and a touch
+    // author had no Duplicate / Move / Delete for a block (task-be754bd628311c5f).
+    // There it follows the CARET: the block the author is in shows its handle.
+    this._touch = typeof window !== "undefined" && typeof window.matchMedia === "function" &&
+      window.matchMedia("(hover: none)").matches;
+    this._onSelection = () => this._followCaret();
+    if (this._touch && editor && typeof editor.on === "function") {
+      this._el.classList.add("bp-block-handle--touch");
+      editor.on("selectionUpdate", this._onSelection);
+      editor.on("focus", this._onSelection);
+    }
+  }
+
+  _followCaret() {
+    if (this._drag || this._menu || !this._editor || this._editor.isDestroyed) return;
+    const index = topLevelIndexAtSelection(this._editor);
+    if (index === -1) { this.hide(); return; }
+    this._index = index;
+    this._reposition();
   }
 
   destroy() {
     this._closeMenu();
+    if (this._touch && this._editor && typeof this._editor.off === "function") {
+      this._editor.off("selectionUpdate", this._onSelection);
+      this._editor.off("focus", this._onSelection);
+    }
     this._host.removeEventListener("mousemove", this._onMove);
     this._host.removeEventListener("mouseleave", this._onLeave);
     window.removeEventListener("scroll", this._onScroll, true);
@@ -241,7 +300,15 @@ export class BlockHandle {
     // the text start would take the click aimed at a block's first word. Where no
     // gutter exists (the block starts within 52px of the viewport edge — a phone),
     // there is no handle; the slash menu and the keyboard still add blocks.
-    if (r.left - 52 < 0) { this.hide(); return; }
+    // On a touch screen with no gutter the handle sits at the block's top-right
+    // corner instead, with 44px targets (CSS: .bp-block-handle--touch).
+    if (r.left - 52 < 0) {
+      if (!this._touch) { this.hide(); return; }
+      this._el.style.display = "flex";
+      this._el.style.top = `${r.top - h.top + this._host.scrollTop}px`;
+      this._el.style.left = `${Math.max(0, r.right - h.left - 92)}px`;
+      return;
+    }
     this._el.style.display = "flex";
     this._el.style.top = `${r.top - h.top + this._host.scrollTop + Math.max(0, (line - 22) / 2)}px`;
     this._el.style.left = `${r.left - h.left - 52}px`;
@@ -332,17 +399,26 @@ export class BlockHandle {
     const menu = document.createElement("div");
     menu.className = "bp-block-menu";
     menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", t("Block options"));
     const node = this._editor.state.doc.child(index);
     const prose = ["paragraph", "heading", "bulletList", "orderedList"].includes(node.type.name);
-    const item = (label, glyph, action, extra = "") => `<button type="button" class="bp-block-menu__item ${extra}" data-action="${action}"><span class="bp-block-menu__glyph">${glyph}</span>${label}</button>`;
+    // A role=menu owns menuitems, grouped (axe aria-required-children): each
+    // visible heading names its role=group, and the heading itself is hidden
+    // from the tree so it is not read twice.
+    // Labels are English keys, shown in the viewer's language (escaped: a
+    // translation is text, never markup).
+    const item = (label, glyph, action, extra = "") => `<button type="button" role="menuitem" class="bp-block-menu__item ${extra}" data-action="${action}"><span class="bp-block-menu__glyph" aria-hidden="true">${glyph}</span>${te(label)}</button>`;
+    const group = (title, items) => `<div role="group" aria-label="${te(title)}"><div class="bp-block-menu__group" aria-hidden="true">${te(title)}</div>${items.join("")}</div>`;
     menu.innerHTML = [
-      prose ? `<div class="bp-block-menu__group">Turn into</div>${TURN_INTO.map((t) => item(t.label, t.glyph, "turn:" + t.kind)).join("")}` : "",
-      `<div class="bp-block-menu__group">Block</div>`,
-      item("Duplicate", "⧉", "duplicate"),
-      item("Move up", "↑", "up"),
-      item("Move down", "↓", "down"),
-      this._canSaveMaster(node) ? item("Save as master", "★", "save-master") : "",
-      item("Delete", "✕", "delete", "bp-block-menu__item--danger"),
+      prose ? group("Turn into", TURN_INTO.map((t) => item(t.label, t.glyph, "turn:" + t.kind))) : "",
+      group("Block", [
+        this._canEdit(node) ? item("Edit", "✎", "edit") : "",
+        item("Duplicate", "⧉", "duplicate"),
+        item("Move up", "↑", "up"),
+        item("Move down", "↓", "down"),
+        this._canSaveMaster(node) ? item("Save as master", "★", "save-master") : "",
+        item("Delete", "✕", "delete", "bp-block-menu__item--danger"),
+      ]),
     ].join("");
     menu.addEventListener("mousedown", (e) => e.preventDefault());
     menu.addEventListener("click", (e) => {
@@ -352,22 +428,71 @@ export class BlockHandle {
       this._closeMenu();
     });
     menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); this._closeMenu(); this._editor.commands.focus(); } });
-    this._host.appendChild(menu);
-    const h = this._host.getBoundingClientRect();
-    const r = this._el.getBoundingClientRect();
-    menu.style.top = `${r.bottom - h.top + this._host.scrollTop + 4}px`;
-    menu.style.left = `${r.left - h.left}px`;
+    // A BODY PORTAL, like the slash and [[ menus: fixed positioning inside the
+    // editor panel would resolve against any containing block the panel grows
+    // (transform, filter, contain) and the canvas host clips with
+    // overflow:auto. Out of the host it loses the surface-scoped --paper-*
+    // tokens, so the ones it paints with are copied from the host as resolved
+    // there: the menu keeps the canvas theme in both modes.
+    for (const name of MENU_TOKENS) {
+      const value = getComputedStyle(this._host).getPropertyValue(name);
+      if (value) menu.style.setProperty(name, value.trim());
+    }
+    document.body.appendChild(menu);
     this._menu = menu;
+    this._placeMenu();
+    window.addEventListener("resize", this._onResize);
     const first = menu.querySelector("[data-action]");
     if (first) first.focus();
   }
 
+  // The menu is placed in the VIEWPORT (task-be754bd628311c5f): on a phone it
+  // opened under a handle near the right/bottom edge and ran off both, and the
+  // host's overflow:auto canvas clipped it, so no item was reachable.
+  // position:fixed escapes that clip; the menu is clamped inside the viewport
+  // with a margin, flips above the handle when there is no room below, and is
+  // capped to the viewport height (it scrolls inside). With room, it sits where
+  // it always did: just under the handle, aligned with its left edge.
+  _placeMenu() {
+    const menu = this._menu;
+    if (!menu) return;
+    const margin = 8;
+    const gap = 4;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const r = this._el.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.maxHeight = `${Math.max(0, vh - 2 * margin)}px`;
+    menu.style.overflowY = "auto";
+    const m = menu.getBoundingClientRect();
+    const mw = m.width;
+    const mh = Math.min(m.height, Math.max(0, vh - 2 * margin));
+    const left = Math.max(margin, Math.min(r.left, vw - margin - mw));
+    let top = r.bottom + gap;
+    if (top + mh > vh - margin) {
+      const above = r.top - gap - mh;
+      top = above >= margin ? above : Math.max(margin, vh - margin - mh);
+    }
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
   _closeMenu() {
+    window.removeEventListener("resize", this._onResize);
     if (this._menu) { this._menu.remove(); this._menu = null; }
   }
 
   _runAction(action, index) {
     if (action.startsWith("turn:")) { turnTopLevelInto(this._editor, index, action.slice(5)); return; }
+    if (action === "edit") {
+      // Hide first: the editor that opens takes focus, and the handle must not linger.
+      this._index = -1;
+      this.hide();
+      let pos = 0;
+      for (let i = 0; i < index && i < this._editor.state.doc.childCount; i++) pos += this._editor.state.doc.child(i).nodeSize;
+      if (index >= 0 && index < this._editor.state.doc.childCount) this._edit(pos);
+      return;
+    }
     if (action === "save-master") {
       const node = index >= 0 && index < this._editor.state.doc.childCount
         ? this._editor.state.doc.child(index)

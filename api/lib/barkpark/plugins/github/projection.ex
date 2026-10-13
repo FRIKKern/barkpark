@@ -65,6 +65,21 @@ defmodule Barkpark.Plugins.Github.Projection do
   projector hydrates `task_edges`. Absent → no marker block (leave it ABSENT
   when unknown; never fabricate a blocker).
 
+  ## Body strip and allowlist (exposure ruling 2026-09-02, owner ruling #11)
+
+  The mirror repo is PUBLIC. A task's brief (`content.description`) is internal
+  engineering detail — file paths, worker names, open security holes — and is
+  published ONLY for an allow-listed task (`public_brief?/2`):
+
+    * an adopted intake task (`gh-<num>`): its brief IS the outsider's own
+      issue text, already public, and stripping it would erase their report;
+    * a task labelled `public` (`content.labels`), the deliberate opt-in.
+
+  Every other task's body is the stripped shape: the acceptance checkboxes,
+  the blocks / parent markers and the `Task:` trailer, nothing else.
+  `mix barkpark.github.restrip_issues` re-PATCHes issues mirrored before the
+  strip (dry run by default).
+
   ## Sentinel safety
 
   Barkpark authors EVERY `<!-- barkpark:… -->` sentinel. The human brief (which,
@@ -228,11 +243,15 @@ defmodule Barkpark.Plugins.Github.Projection do
 
   defp body(content, doc_id, refs, parent_marker) do
     brief =
-      case get(content, "description") do
+      case {public_brief?(content, doc_id), get(content, "description")} do
         # Scrub any forged barkpark sentinel out of the human brief BEFORE we lay
         # down our own fences — Barkpark authors every sentinel (see moduledoc).
-        d when is_binary(d) and d != "" -> d |> neutralize_sentinels() |> String.trim_trailing()
-        _ -> ""
+        {true, d} when is_binary(d) and d != "" ->
+          d |> neutralize_sentinels() |> String.trim_trailing()
+
+        # Not allow-listed (or no brief): the stripped body.
+        _ ->
+          ""
       end
 
     brief
@@ -240,6 +259,29 @@ defmodule Barkpark.Plugins.Github.Projection do
     |> upsert_blocks_marker(refs)
     |> upsert_parent_marker(parent_marker)
     |> append_trailer(doc_id)
+  end
+
+  @public_label "public"
+
+  @doc """
+  May this task's brief be published on the public mirror? See "Body strip and
+  allowlist" in the moduledoc. Pure.
+  """
+  @spec public_brief?(map(), String.t() | nil) :: boolean()
+  def public_brief?(content, doc_id) do
+    adopted_intake?(doc_id) or @public_label in task_labels(content)
+  end
+
+  defp adopted_intake?(doc_id) when is_binary(doc_id),
+    do: doc_id |> String.replace_prefix("drafts.", "") |> String.starts_with?("gh-")
+
+  defp adopted_intake?(_), do: false
+
+  defp task_labels(content) do
+    case get(content, "labels") do
+      labels when is_list(labels) -> Enum.filter(labels, &is_binary/1)
+      _ -> []
+    end
   end
 
   # Labels from priority / status / worker / goal. Absent input → absent label

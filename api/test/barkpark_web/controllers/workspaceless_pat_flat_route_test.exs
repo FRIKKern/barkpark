@@ -74,7 +74,7 @@ defmodule BarkparkWeb.WorkspacelessPatFlatRouteTest do
       scoped_conn()
       |> put_req_header("authorization", "Bearer " <> session)
       |> put_req_header("content-type", "application/json")
-      |> post("/v1/auth/tokens", %{"name" => "cli"})
+      |> post("/v1/auth/tokens", %{"name" => "cli", "current_password" => @password})
 
     assert %{"token" => raw} = json_response(resp, 201)
     raw

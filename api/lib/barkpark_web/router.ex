@@ -15,6 +15,10 @@ defmodule BarkparkWeb.Router do
   pipeline :browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -269,6 +273,71 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
+  # task-db8de40bbc928c54 — :scoped_api with two lines swapped: the credential
+  # step (`scoped_presence_credential`) and RateLimit, with `class: :presence_focus` instead of the bare
+  # method-verb classification every other :scoped_api route gets. Without
+  # this, `POST .../presence/:dataset/focus` (a POST, so `method_class/1`
+  # bills it :write) shared the SAME write bucket #22206 raised for a
+  # session principal (180/min) with every real content mutation that
+  # principal makes — an editor's ordinary cursor/selection churn can
+  # exceed that in normal use and starve a real save's budget. `class:
+  # :presence_focus` is a REAL enforced class (unlike :browser's shadow-only
+  # one): RateLimit.limited/4's catch-all clause already refuses any
+  # non-:browser class with the standard JSON 429, so no new refusal code
+  # is needed — only its own budget (rate_limit.ex's limit_per_minute/3,
+  # default_per_minute/3) and its own bucket key, so a focus burst can never
+  # debit (or be debited by) the write bucket.
+  pipeline :scoped_api_presence_focus do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit, class: :presence_focus)
+    plug(:scoped_presence_credential)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
+  # task-88e9094df76d31c6 — byte-identical to :scoped_api, ONE line inserted:
+  # `BarkparkWeb.Plugs.PreviewToken, optional: true` runs BEFORE
+  # `ResolveWorkspace`. A caller presenting `Authorization: Preview <jwt>`
+  # (the flat /v1/preview/* tunnel's own credential) is verified here — and,
+  # new in this task, the JWT's signed `workspace_id`/`project_id` claims are
+  # checked against THIS URL's :workspace_slug/:project_slug (a mismatch is
+  # refused, never silently re-scoped) — before `ResolveWorkspace` ever runs
+  # its session/Bearer membership gate. `optional: true` is what makes this
+  # ADDITIVE rather than a replacement: a request with no Preview header (the
+  # existing editor-session/Bearer callers every other :scoped_api route
+  # already serves) passes through unchanged into the SAME membership gate
+  # :scoped_api always ran. Only a VERIFIED, scope-matched Preview JWT short-
+  # circuits that gate — via a bypass clause ResolveWorkspace itself carries
+  # (keyed on `assigns[:preview_claims]`, mirroring its existing
+  # `share_public` bypass), since a session/Bearer-shaped membership check
+  # cannot admit a credential that is neither.
+  #
+  # Before this pipeline existed, a Preview JWT presented on
+  # `/w/:ws/p/:proj/v1/preview/*` fell through `scoped_api_optional_credential`
+  # unresolved (OptionalToken only matches a `Bearer ` prefix, never
+  # `Preview `), reached `ResolveWorkspace` as a bare anonymous caller, and
+  # was refused `forbidden_membership` ("not_a_member") — the WRONG reason
+  # for a scope mismatch, and a dead end for the real case this fixes: a
+  # non-Default workspace's site previewing its own drafts without holding
+  # an editor's bearer token server-side (task-8f7cba7f65cb343c's mint is
+  # flat-only, so it could only ever scope a token to Default).
+  pipeline :scoped_api_preview do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.PreviewToken, optional: true)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
   # Soft credential resolution for :scoped_api — bearer ALWAYS, browser session
   # only where it cannot drive a forged state change (gyldendal field report
   # #15).
@@ -335,15 +404,23 @@ defmodule BarkparkWeb.Router do
   # `conn.path_params["workspace_slug"]` is absent, and EVERY :scoped_api route
   # is mounted under /w/:workspace_slug, so the predicate is false on this
   # pipeline by construction.
+  # task-2366a212d58a1700 — `strict_on_presented: true` on BOTH branches: a
+  # PRESENTED-but-invalid bearer (revoked, expired, never existed) halts 401
+  # here instead of silently degrading to anonymous and letting
+  # `ResolveWorkspace` answer the misleading 403 `not_a_member` every
+  # anonymous caller gets. Each plug's own `strict_on_presented` fallback
+  # (a valid session, or a valid `:current_user`, recovering the request) is
+  # unchanged — this only tightens the ONE row that used to fall all the
+  # way through to pure anonymous.
   defp scoped_api_optional_credential(%Plug.Conn{} = conn, _opts) do
     if cookie_credential_admissible?(conn) do
       conn
       |> Plug.Conn.fetch_session()
-      |> BarkparkWeb.Plugs.OptionalSessionToken.call([])
+      |> BarkparkWeb.Plugs.OptionalSessionToken.call(strict_on_presented: true)
     else
       BarkparkWeb.Plugs.OptionalToken.call(
         conn,
-        BarkparkWeb.Plugs.OptionalToken.init([])
+        BarkparkWeb.Plugs.OptionalToken.init(strict_on_presented: true)
       )
     end
   end
@@ -436,7 +513,10 @@ defmodule BarkparkWeb.Router do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict: a revoked/expired bearer halts 401 here
+    # instead of degrading to anonymous and landing on ResolveWorkspace's
+    # misleading not_a_member 403. A valid session still recovers it, unchanged.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :media)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -456,12 +536,36 @@ defmodule BarkparkWeb.Router do
 
   # Docs writes (mutate) — mirrors [:scoped_api, :require_token, :require_write,
   # :idempotent] with the edit-token grant spliced in.
+  #
+  # Cookie-aware (task-27006bc488ad1570): a seated member signed in at
+  # `/v1/auth/login` (or holding a token-sign-in `api_token_session` cookie,
+  # post ruling #16 rework) carries no Bearer header, only the session
+  # cookie — `OptionalToken` left `:api_token`/`:current_user` both nil and
+  # `ResolveWorkspace` 403'd `not_a_member` for a real member of the very
+  # workspace their own browser session belongs to, while the sibling
+  # `:scoped_media_mutate` pipeline already admitted the identical cookie
+  # (gfr-w1-account-session-bearer-gap). Mirrors that precedent exactly:
+  # `OptionalSessionToken` resolves the cookie (bearer still wins when
+  # present — ANONYMOUS passes through untouched, denied below as before),
+  # `RequireBearerOrSessionToken` is the hard gate — it halts an anonymous
+  # conn, and CSRF-guards the cookie branch with the same `x-requested-with`
+  # check (every route on this pipeline is a POST, so the check always
+  # applies; a bearer caller returns before it and is unaffected, same as
+  # `:scoped_media_mutate`). `RequireWritePermission` already has an ACCOUNT
+  # arm (`account_write?/1`) that authorizes a `:current_user` member on
+  # their workspace role — built for this exact gap, just never reachable
+  # here because nothing upstream populated `:current_user` on this
+  # pipeline. No change to RequireWritePermission itself.
   pipeline :scoped_mutate do
+    plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalToken)
+    # task-2366a212d58a1700 — strict: a revoked/expired bearer halts 401 here
+    # instead of degrading to anonymous and landing on ResolveWorkspace's
+    # misleading not_a_member 403. A valid session still recovers it, unchanged.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -469,7 +573,7 @@ defmodule BarkparkWeb.Router do
     # tenant-attributable in the logs (the blast-radius question includes denied
     # attempts).
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
-    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     # Per-workspace quota gate (perfect-plan-build W1, D11) — AFTER
     # ResolveWorkspace (current_workspace is set) and BEFORE the write gate. Doc
     # writes are metered by the [:barkpark, :content, :mutate] span, so no
@@ -499,7 +603,9 @@ defmodule BarkparkWeb.Router do
     # session (browser Studio member), so the membership gate below sees a
     # session-only browser member too — and a bearer edit token reaches
     # RequireShareEditToken. Anon passes through to be denied by ResolveWorkspace.
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict: a PRESENTED-but-invalid bearer (revoked,
+    # expired) halts 401 here instead; a valid session still recovers it.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :media)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -538,6 +644,10 @@ defmodule BarkparkWeb.Router do
   pipeline :scoped_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -603,6 +713,10 @@ defmodule BarkparkWeb.Router do
   pipeline :shared_studio_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -652,6 +766,10 @@ defmodule BarkparkWeb.Router do
   pipeline :shared_paper_browser do
     plug(:accepts, ["html"])
     plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
     plug(:fetch_live_flash)
     plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
     plug(:protect_from_forgery)
@@ -812,7 +930,13 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict, the SAME fix `:api_grant_read` already
+    # carries for its sibling flat pipeline: this bucket falls to
+    # AssignDefaultScope's Default-workspace branch for anything that isn't a
+    # verified token (see the DeriveWorkspaceFromToken comment below), so a
+    # revoked/expired bearer must halt here rather than silently resolve
+    # Default. A valid session still recovers it, unchanged.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     # TENANCY (task-298e4a93456b1fc3). This bucket was hand-copied from `:api`'s
     # SHAPE and missed the ONE line that makes that shape safe. Its sibling
     # `:token_root` is `[:api, :require_token, ...]`, so it INHERITS this plug;
@@ -980,6 +1104,31 @@ defmodule BarkparkWeb.Router do
     # RequireBearerOrSessionToken always assigns :api_token on success, so the
     # permits?(:write) check has a principal. Mirrors the doc :mutate gate.
     plug(BarkparkWeb.Plugs.RequireWritePermission)
+  end
+
+  # task-cc6ad07a8aa36338 — the scoped editor streams (listen, presence and
+  # presence's focus/leave): an API token, or a member's login session as the
+  # bearer. See `Plugs.RequireTokenOrMemberSession`: it reads what
+  # `OptionalSessionToken` (#22764) and `ResolveWorkspace` already decided and
+  # adds no resolver of its own; an API token takes the `:require_token` chain
+  # unchanged.
+  pipeline :require_token_or_member_session do
+    plug(BarkparkWeb.Plugs.RequireTokenOrMemberSession)
+  end
+
+  # Credential resolution for presence's focus/leave (POST/DELETE): as
+  # `:scoped_api_optional_credential`, except that a request carrying a Bearer
+  # also resolves through `OptionalSessionToken`, so a login-session bearer is
+  # read as one (#22764's resolver). A bearer is not an ambient credential; a
+  # cookie-only write still needs the CSRF header exactly as before.
+  defp scoped_presence_credential(%Plug.Conn{} = conn, opts) do
+    if match?(["Bearer " <> _], Plug.Conn.get_req_header(conn, "authorization")) do
+      conn
+      |> Plug.Conn.fetch_session()
+      |> BarkparkWeb.Plugs.OptionalSessionToken.call(strict_on_presented: true)
+    else
+      scoped_api_optional_credential(conn, opts)
+    end
   end
 
   # Ingest endpoints: JSON in, shared-secret bearer auth (NOT the api_tokens
@@ -1255,6 +1404,17 @@ defmodule BarkparkWeb.Router do
     # (return_to resumes the claim); every other failure is one no-oracle
     # response. See BarkparkWeb.GrantController.
     get("/grant/:token", GrantController, :claim)
+
+    # The invited user's browser door (task-5306379c9be40c89): list, accept
+    # and decline the signed-in account's pending workspace invitations.
+    get("/invitations", InvitationPageController, :index)
+  end
+
+  scope "/", BarkparkWeb do
+    pipe_through([:browser, :soft_token, :browser_auth_write_meter])
+
+    post("/invitations/:id/accept", InvitationPageController, :accept)
+    post("/invitations/:id/decline", InvitationPageController, :decline)
   end
 
   # ── Session login (paste API token) ─────────────────────────────────
@@ -1281,6 +1441,14 @@ defmodule BarkparkWeb.Router do
     # second-factor step as password login (no 2FA bypass).
     get("/login/magic", SessionController, :magic_request_form)
     get("/auth/magic/:token", SessionController, :magic)
+
+    # Landing page for the emailed confirmation link (task-bd5e1aa94cf67a18):
+    # AuthController.register/2 mails /auth/confirm/<token>, which 404'd in a
+    # browser before this — only the JSON POST /v1/auth/verify-email existed.
+    # GET renders a "Confirm email" button and never consumes the token (so a
+    # mail-scanner's link-prefetch can't burn it); POST is the only consumer.
+    get("/auth/confirm/:token", SessionController, :confirm_form)
+    post("/auth/confirm/:token", SessionController, :confirm_submit)
 
     # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
     # session api_token (no paste), redirect to /studio. Minted by
@@ -1310,6 +1478,23 @@ defmodule BarkparkWeb.Router do
     post("/login/magic", SessionController, :magic_request)
   end
 
+  # `GET /v1/auth/token` only: an API token (RequireToken + PublicRead, as on
+  # :require_token) or a login-session bearer (task-a89ef18ee88ba6a0).
+  pipeline :require_token_or_login_session do
+    plug(BarkparkWeb.Plugs.RequireTokenOrLoginSession)
+  end
+
+  # The bearer describes itself — permissions, tier, dataset, workspace, seat
+  # (task-bc2541aca8541ff1). /me needs a session; this needs only the bearer.
+  # task-a89ef18ee88ba6a0: the bearer may also be a LOGIN session (the token
+  # `/v1/auth/login` answers), which then describes its user's seats. An API
+  # token takes the unchanged RequireToken + PublicRead path.
+  scope "/v1/auth", BarkparkWeb do
+    pipe_through([:api, :require_token_or_login_session])
+
+    get("/token", TokenSelfController, :show)
+  end
+
   # ── dwb-7: login-ticket mint (api_token bearer) ─────────────────────────
   # POST /v1/auth/login-tickets — the caller proves possession of an api_token
   # (typically the control plane's stored per-instance admin token) and gets a
@@ -1319,6 +1504,11 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token])
 
     post("/login-tickets", LoginTicketController, :create)
+
+    # Owner ruling #26 — the control plane takes a removed team member OFF this
+    # instance: sessions revoked, seats dropped, owned tokens revoked. Admin
+    # bearer + operator allowlist, like the email form of /login-tickets.
+    post("/cloud-users/deprovision", CloudUserController, :deprovision)
 
     # ── Mobile app-token exchange, instance half (mobile charter D4) ──────
     # POST /v1/auth/app-tokens — admin-bearer-gated in the controller (the
@@ -1613,6 +1803,17 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :public_api)
   end
 
+  # ── i18n: UI chrome strings for a non-LiveView host (task-84fa11e11dacdc1b) ─
+  # `:public_api` core's first non-plugin mount: public, no auth, CORS-open —
+  # the Studio's own LiveView render already shows this exact text to an
+  # anonymous visitor, so a GET here discloses nothing a browser can't already
+  # see.
+  scope "/v1/i18n", BarkparkWeb do
+    pipe_through(:public_api)
+
+    get("/paper_canvas", I18nController, :paper_canvas)
+  end
+
   # ── Plugin-contributed routes — GitHub webhook (`auth: :github_webhook`) ──
   # The signature-gated, server-to-server sibling of `:public_api` (github-bridge
   # Wave 3). Same `/v1/plugins/<slug>/…` mount, but on the `:github_webhook`
@@ -1735,6 +1936,12 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :public_root)
   end
 
+  # A public page with no workspace speaks the browser's language (the finder;
+  # lead ruling, run 8). See BarkparkWeb.AcceptLanguage.
+  pipeline :accept_locale do
+    plug(BarkparkWeb.AcceptLanguage)
+  end
+
   # ── Public finder (LiveView) — the flagship search, Phoenix-native ──────
   # search-template W3: the same premium experience the Next/Astro starters
   # ship, as pure LiveView — per-keystroke search round-trips into the same
@@ -1742,9 +1949,13 @@ defmodule BarkparkWeb.Router do
   # topology into the shared Canvas2D renderer. Same public pipeline + reader
   # layout as the flat /papers reader it links into.
   scope "/", BarkparkWeb do
-    pipe_through([:browser, :paper_reader_csp])
+    pipe_through([:browser, :paper_reader_csp, :accept_locale])
 
-    live_session :finder, root_layout: {BarkparkWeb.Layouts, :bulldocs} do
+    # LiveMeter: the socket half of the :browser meter (charter D4 Gate B),
+    # shadow-only — hooked here so finder_live.ex itself is untouched.
+    live_session :finder,
+      root_layout: {BarkparkWeb.Layouts, :bulldocs},
+      on_mount: [{BarkparkWeb.LiveMeter, :public}] do
       live("/finder", FinderLive, :index)
     end
   end
@@ -1969,6 +2180,42 @@ defmodule BarkparkWeb.Router do
     end
   end
 
+  # ── Bare workspace URL → its Studio (task-5e0c5c2533936e77) ─────────────
+  # `/w/:workspace_slug` answered a plain 404. It now runs the SAME admission
+  # as every Studio URL in that workspace, `:scoped_browser` minus
+  # `ResolveProject` (there is no project segment to resolve): a member gets a
+  # 302 to the workspace's default project/dataset Studio; a signed-in
+  # non-member and an unknown slug get ResolveWorkspace's one refusal page,
+  # byte-identical for both; a signed-out browser goes to sign-in with this
+  # URL as return_to. Kept beside its scope, below every line-keyed Sobelow
+  # baseline row, and a mirror of :scoped_browser — change both together.
+  pipeline :workspace_browser do
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    # Shadow-only browser meter (anonymous-metering D4 Gate A, slice 8): logs
+    # and counts `would_429` past the browser budget, refuses nobody unless a
+    # human sets BARKPARK_RATE_LIMIT_BROWSER_ENFORCE. See RateLimit's moduledoc.
+    plug(BarkparkWeb.Plugs.RateLimit, class: :browser)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+    plug(:protect_from_forgery)
+
+    plug(:put_secure_browser_headers, %{
+      "content-security-policy" =>
+        "script-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'self'"
+    })
+
+    plug(BarkparkWeb.Plugs.BrowserCsp)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace, allow_anonymous_default: :studio_demo)
+  end
+
+  scope "/w/:workspace_slug", BarkparkWeb do
+    pipe_through(:workspace_browser)
+
+    get("/", StudioRedirectController, :workspace)
+  end
+
   # ── Old scoped Studio form → /d/ canonical 302 ───────────────────────────
   # Back-compat for the pre-/d/ canonical `/w/:ws/p/:proj/studio/:dataset`.
   # Pure URL rewrite (every segment is already in the URL — no session
@@ -2138,11 +2385,19 @@ defmodule BarkparkWeb.Router do
     # ONLY mint a token owned by themselves (no-escalation). Raw token returned
     # ONCE. Powers the terminal `bp access claim`/`mine` grantee verbs.
     post("/tokens", AuthController, :create_token)
+    # Seat consent (owner ruling #7): the invited user's side.
+    get("/invitations", InvitationController, :index)
+    post("/invitations/:id/accept", InvitationController, :accept)
+    delete("/invitations/:id", InvitationController, :decline)
     get("/export", AuthController, :export)
     post("/erase", AuthController, :erase)
     # Self-service password change, gated on the current password — same
     # re-auth shape as /erase. See AuthController.change_password/2.
     patch("/password", AuthController, :change_password)
+    # Self-service display name (task-cfb6ca3f5ffaf099) — not sensitive, no
+    # reauth. Media.Storage.Actor.display/2 renders it in place of "another
+    # editor" for a "user:<id>" checkout-lock stamp.
+    patch("/display-name", AuthController, :update_display_name)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
     # Present a current factor to make this session step-up-fresh (clears a
@@ -2195,8 +2450,12 @@ defmodule BarkparkWeb.Router do
   # Authed with the SAME Bearer-token seam the agent health gate probes
   # (`RequireToken`); never unauthenticated. Contract owned by
   # `BarkparkWeb.RequestStats` and pinned by `RequestStatsControllerTest`:
+  # EIGHT keys (anonymous-metering D10, additive over the original four):
   # {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s": float|null,
-  #  "window_s": int}.
+  #  "window_s": int, "count": int, "elapsed_s": float, "sampled_at": iso8601,
+  #  "classes": {class: {"count", "req_per_s", "authed", "anon",
+  #  "auth_unknown"}}}, `classes` keyed by the five-class route enum and `{}` on
+  # an empty window.
   # Both nullable keys are `null` — never 0 — on an empty window: the agent maps
   # a null (or an absent key, from an instance that predates it) to its -1
   # unmeasured sentinel, and the control plane renders that unmetered.
@@ -2342,6 +2601,7 @@ defmodule BarkparkWeb.Router do
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/locations/:dataset/:id", QueryController, :locations)
     # Related documents — shared weighted tags fused with inbound references
     # (authoring-excellence D68–D71 / manifest `doc.related`). Token/preview
     # only (existence-hiding, like backlinks); tenancy fail-closed via
@@ -2373,6 +2633,18 @@ defmodule BarkparkWeb.Router do
     get("/local/search/:dataset", SearchController, :search_local)
   end
 
+  # ── Deploy-flip SSE retire hook (task-2bcada0faa01ebb2) ───────────────────
+  # `deploy/instance-deploy.sh` POSTs here, on the OLD slot's own port, right
+  # after the Caddy flip lands — before the 5s sleep + `systemctl disable
+  # --now` that used to leave open SSE streams alive-but-deaf on that slot
+  # for ~20-30s. Same RequireLoopback-only trust boundary as local search
+  # above: the caller IS the box.
+  scope "/v1/internal", BarkparkWeb do
+    pipe_through(:api_local)
+
+    post("/retire-sse", DeployController, :retire_sse)
+  end
+
   # ── Preview — same reads, forces perspective=drafts via preview JWT ─────
   scope "/v1/preview", BarkparkWeb do
     pipe_through(:api_preview)
@@ -2380,9 +2652,18 @@ defmodule BarkparkWeb.Router do
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/locations/:dataset/:id", QueryController, :locations)
     get("/related/:dataset/:id", QueryController, :related)
     get("/tags/:dataset", QueryController, :tag_browse)
     get("/tags/:dataset/:tag", QueryController, :tag_docs)
+
+    # task-78dc25a4f117fa07 — SAME action /v1/data/listen/:dataset uses
+    # (ListenController.listen/2), mounted a second time under the preview
+    # JWT's auth pipeline instead of a bearer token's. Zero new controller
+    # logic for the route itself: listen_filter.ex's only_doc_ids fences a
+    # doc-scoped token's stream to its own documents (see that module and
+    # Plugs.PreviewToken's moduledoc for the auth/scope contract).
+    get("/listen/:dataset", ListenController, :listen)
   end
 
   # ── Private API — full CRUD, requires token ─────────────────────────────
@@ -2608,6 +2889,11 @@ defmodule BarkparkWeb.Router do
     # One PortableDoc block op on any document type: the HTTP twin of the call
     # Studio's block editor makes in-process (docs/contracts/product-era.md).
     post("/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
+    # The field twin: a batch of block ops on one block-editor richText field,
+    # the call Studio's field canvas makes in-process.
+    post("/doc/:dataset/:type/:doc_id/fields/:field/ops", DocumentOpsController, :apply_field_ops)
+    # Remove every reference to a document (the unpublish guard's disconnect).
+    post("/disconnect/:dataset/:doc_id", DisconnectController, :create)
   end
 
   # ── Tasks API surface ───────────────────────────────────────────────────
@@ -2736,6 +3022,37 @@ defmodule BarkparkWeb.Router do
     pipe_through(:flat_admin_api)
 
     get("/:dataset", StructureController, :show)
+  end
+
+  # ── Preview JWT mint — admin-only (task-8f7cba7f65cb343c) ───────────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: no existing admin route
+  # minted a preview token before this one, so there is no naive pipeline to
+  # regress — picked to match every other flat admin-management surface on
+  # this list (schemas, structure, plugin roster) rather than invent a
+  # second convention. Not under `/v1/preview/*`: that prefix is the UNRELATED
+  # :api_preview read-tunnel pipeline a minted token is presented TO, and
+  # PreviewLinkController's own moduledoc already warns against colliding a
+  # second auth scheme into that path.
+  #
+  # NO revoke route here, deliberately: this is `:flat_admin_api`, which
+  # resolves the admin's OWN scope, not a URL-named one, so there's no
+  # per-request workspace to test a revoke's confinement against. The
+  # tenant-scoped revoke (task-49a6a686bb88d9e5) lives on the SCOPED twin
+  # below instead, now that `preview_token_jti` carries owner_workspace_id/
+  # owner_project_id (named with the `owner_` prefix, NOT `workspace_id`,
+  # deliberately — see the migration's moduledoc: that literal column name
+  # would pull this table into the tenant-bundle export/teardown system,
+  # which these short-lived, TTL-swept rows have nothing to do with). A
+  # token minted HERE (flat) is still revocable there: its
+  # row is recorded under whatever workspace this pipeline's
+  # `scope_opts(conn)` resolved at mint time — the seeded Default workspace
+  # absent a `DeriveWorkspaceFromToken` hit — so `DELETE
+  # /w/default/p/default/v1/preview-tokens/:jti` (an admin of Default)
+  # reaches it. No second revoke route needed.
+  scope "/v1/preview-tokens", BarkparkWeb do
+    pipe_through(:flat_admin_api)
+
+    post("/", PreviewTokenController, :mint)
   end
 
   # ── Schema management — requires admin token ────────────────────────────
@@ -2917,6 +3234,45 @@ defmodule BarkparkWeb.Router do
     get("/links", ShareLinkController, :list)
     post("/links", ShareLinkController, :mint)
     delete("/links/:id", ShareLinkController, :revoke)
+
+    # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of /links
+    # above, not a branch of it: Links.create/1 strips a `drafts.` prefix off
+    # ref_id unconditionally, so it can never name an unpublished row.
+    # list/revoke/mint all moved below (task-0548f06277c4712e widened
+    # list/revoke to a write-capable member's own links, after
+    # task-9cfe08fe1e91b6c9 widened mint the same way) — none of the three
+    # preview-link actions carries `:require_admin` any more; public reader
+    # is GET /sp/:token below.
+  end
+
+  # task-9cfe08fe1e91b6c9 — PreviewLinkController.mint/2 widened from
+  # admin-only to any write-capable WORKSPACE MEMBER, after
+  # task-ea6c9abb868593f8's preview tokens. The share-link mint
+  # (`POST /v1/shares/links`, above) was NOT widened: #22484 closed unmerged
+  # and the owner decision of 2026-10-10 keeps it under `:require_admin`.
+  # A SEPARATE scope so `:require_admin` is not on this route's pipeline at
+  # all — same combo as the flat `/v1/data/mutate` family (router.ex
+  # `:require_write` precedent). The
+  # workspace-specific authorization (admin OR a write-capable member of the
+  # SPECIFIC workspace named in the request's `scope` param) lives in the
+  # controller's own `ensure_can_mint/2` — the workspace here comes from the
+  # request BODY, not the URL, so no `:scoped_api`/`ResolveWorkspace`
+  # membership gate exists on this flat route to lean on.
+  scope "/v1/shares", BarkparkWeb do
+    pipe_through([:api, :require_token, :flat_within_quota, :require_write])
+
+    post("/preview-links", PreviewLinkController, :mint)
+
+    # task-0548f06277c4712e — list/revoke widened the SAME way mint already
+    # was: a write-capable member sees/revokes only the links THEY minted
+    # (`ensure_can_list/2`, `PreviewLinks.revoke_scoped/2`'s creator check);
+    # an admin keeps list-all/revoke-all. Moved out of the `:require_admin`
+    # scope above for exactly that reason — a plain member with no global
+    # "admin" permission must still reach these two actions to manage their
+    # own links; the fine-grained admin-vs-own-creator split lives in the
+    # controller, not the pipeline.
+    get("/preview-links", PreviewLinkController, :list)
+    delete("/preview-links/:id", PreviewLinkController, :revoke)
   end
 
   # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound
@@ -2927,6 +3283,18 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     get("/s/:token", ShareLinkController, :show)
+  end
+
+  # task-6812c3100d7aedbc preview-link PUBLIC reader. JSON-only :api pipeline,
+  # not :browser — there is no paper/media kind to special-case the way /s/
+  # does, only ever a document. Not under /v1/preview/*: that prefix is
+  # already the unrelated PreviewToken JWT mechanism (header-borne signed
+  # token, :api_preview pipeline); reusing the word there would collide two
+  # different auth schemes under one path.
+  scope "/", BarkparkWeb do
+    pipe_through(:api)
+
+    get("/sp/:token", PreviewLinkController, :show)
   end
 
   pipeline :media_processing_callback do
@@ -3098,6 +3466,7 @@ defmodule BarkparkWeb.Router do
   scope "/v1/media", BarkparkWeb do
     pipe_through(:media_mutate)
 
+    post("/:dataset/collections", V1.MediaCollectionsController, :create)
     post("/:dataset/collections/:id/share", V1.MediaCollectionsController, :share)
     delete("/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share)
     post("/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member)
@@ -3165,14 +3534,45 @@ defmodule BarkparkWeb.Router do
     post("/v1/data/search/:dataset/correction", SearchController, :correction)
     get("/v1/data/search/:dataset", SearchController, :search)
     get("/v1/search/:dataset", FederatedSearchController, :search)
+  end
 
-    # Preview reads
+  # task-88e9094df76d31c6 — Preview reads, split out of the block above onto
+  # `:scoped_api_preview` so a `Preview <jwt>` credential scoped to THIS
+  # workspace/project is admitted alongside the session/Bearer members
+  # `:scoped_api` already served (see that pipeline's own comment for why).
+  # `listen` is NEW here — the flat `:api_preview` scope has carried it since
+  # task-78dc25a4f117fa07, but nothing mounted its scoped twin until now.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_api_preview)
+
     get("/v1/preview/query/:dataset/:type", QueryController, :index)
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/v1/preview/locations/:dataset/:id", QueryController, :locations)
     get("/v1/preview/related/:dataset/:id", QueryController, :related)
     get("/v1/preview/tags/:dataset", QueryController, :tag_browse)
     get("/v1/preview/tags/:dataset/:tag", QueryController, :tag_docs)
+    get("/v1/preview/listen/:dataset", ListenController, :listen)
+  end
+
+  # Per-account prefs (task-7d2a48dbf7e4bf34) — NOT public: a member identity
+  # is required, but the controller enforces that itself
+  # (`UserPrefController.resolve_user_id/1`, 403 `no_user_identity` on an
+  # anonymous caller or an un-owned shared token) rather than a route-level
+  # `:require_token`, because that plug re-verifies ONLY the bearer header
+  # and would refuse a legitimate account-session (cookie) caller —
+  # `ResolveWorkspace`'s membership gate and `:scoped_api`'s own
+  # `x-requested-with` CSRF check on the cookie branch (non-GET) are the
+  # gates this route needs, and both already run on plain `:scoped_api`.
+  # Self-scoped data (the caller's OWN prefs), so no `:require_write`
+  # either — unlike `:scoped_mutate`, nothing here is workspace-shared
+  # content.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_api)
+
+    get("/v1/prefs/:dataset/:key", UserPrefController, :show)
+    put("/v1/prefs/:dataset/:key", UserPrefController, :update)
+    delete("/v1/prefs/:dataset/:key", UserPrefController, :delete)
   end
 
   scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
@@ -3240,6 +3640,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/query/:dataset/:type", QueryController, :index)
     get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/data/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/v1/data/locations/:dataset/:id", QueryController, :locations)
     get("/v1/data/related/:dataset/:id", QueryController, :related)
     get("/v1/data/tags/:dataset", QueryController, :tag_browse)
     get("/v1/data/tags/:dataset/:tag", QueryController, :tag_docs)
@@ -3286,15 +3687,60 @@ defmodule BarkparkWeb.Router do
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
   end
 
-  # Token-required scoped reads (listen/export/analytics/history/revision).
+  # Token-required scoped reads (listen/export/analytics/history/revision/locale/codelists).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token])
 
-    get("/v1/data/listen/:dataset", ListenController, :listen)
+    # Studio chrome locale read (task-9a82d5dc67e5b7e0) — any member token;
+    # the admin-gated PATCH below this block is the only write.
+    get("/v1/workspace/locale", WorkspaceLocaleController, :show)
+
+    # A codelist registry read (task-93b24f20348f6df0) — any member token.
+    # Not tenant data (Codelists keys on plugin_name/list_id/issue, no
+    # workspace scope); scoped here only for member-token authentication
+    # parity with the rest of this block.
+    get("/v1/codelists/:codelist_id", CodelistController, :show)
+
     get("/v1/data/export/:dataset", ExportController, :export)
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+    # Paper masters, member-token read half (task-2dc7b441443f3aaf) — the
+    # masters an author may insert into paper :slug. Writes (save/insert/
+    # pin/detach) ride the scoped-mutate pipeline below.
+    get("/v1/papers/:slug/masters", PaperMastersController, :index)
+    # A paper's fleet blocks (task list/board/detail, roadmap, …), rendered
+    # server-side (task-4feb8efa46a0ed33) — read-only, so it rides this
+    # token-required scoped-read pipeline like the masters list above.
+    get("/v1/papers/:slug/fleet-blocks", PaperFleetBlocksController, :show)
+  end
+
+  # The editor streams: an API token or a member's login-session bearer
+  # (task-cc6ad07a8aa36338, `:require_token_or_member_session`). A signed-in
+  # editor's studio joins presence and listens with their own session.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token_or_member_session])
+
+    get("/v1/data/listen/:dataset", ListenController, :listen)
+    # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
+    # GET rides this read pipeline; the POST moves to its own scope right
+    # below (task-db8de40bbc928c54) so it gets the presence_focus rate
+    # class rather than the generic write bucket. Scoped only: the room is
+    # workspace + project.
+    get("/v1/data/presence/:dataset", PresenceController, :stream)
+  end
+
+  # task-db8de40bbc928c54 — the presence-focus POST, split out of the scoped
+  # reads above into its own rate class, with the same credentials as its GET
+  # sibling; `:scoped_api_presence_focus` differs from `:scoped_api` in its
+  # RateLimit class and in reading a login-session bearer on a write.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api_presence_focus, :require_token_or_member_session])
+
+    post("/v1/data/presence/:dataset/focus", PresenceController, :focus)
+    # task-936472b77285df5b — explicit leave, same rate class and pipeline
+    # as focus (a quick, session-scoped write, not the generic write bucket).
+    delete("/v1/data/presence/:dataset/leave", PresenceController, :leave)
   end
 
   # Scoped revision restore — a WRITE, so it carries :require_write on top of the
@@ -3315,6 +3761,27 @@ defmodule BarkparkWeb.Router do
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
     post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
+    post("/v1/data/disconnect/:dataset/:doc_id", DisconnectController, :create)
+
+    post(
+      "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops",
+      DocumentOpsController,
+      :apply_field_ops
+    )
+
+    # Paper masters, write half (task-2dc7b441443f3aaf) — save/insert/pin/
+    # detach, the same checks the Studio canvas's events get in-process.
+    post("/v1/papers/:slug/masters", PaperMastersController, :create)
+    post("/v1/papers/:slug/masters/:master_id/insert", PaperMastersController, :insert)
+    post("/v1/papers/:slug/masters/blocks/:block_id/pin", PaperMastersController, :pin)
+    post("/v1/papers/:slug/masters/blocks/:block_id/detach", PaperMastersController, :detach)
+
+    # Member-token, ifRev-fenced batch block ops for a paper's own block list
+    # (task-7ee817f37630d669, P1) — the write DocumentOpsController refuses
+    # for type "paper" (that route stays :ingest-only), now reachable with a
+    # member token through the same scoped-mutate write gate the masters
+    # routes above already ride.
+    post("/v1/papers/:slug/ops", PaperOpsController, :apply_op)
   end
 
   # Scoped admin reads (search insights/synonyms).
@@ -3327,13 +3794,42 @@ defmodule BarkparkWeb.Router do
     delete("/v1/data/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
+  # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
+  # membership at :read). An editing Studio on a member token needs the schema
+  # to render a form (task-23c4ac86976c46a9); writes below stay admin.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token])
+
+    get("/v1/schemas/:dataset", SchemaController, :index)
+    get("/v1/schemas/:dataset/:name", SchemaController, :show)
+  end
+
+  # Scoped document actions (task-bd311f4b5ea2b3b8) — the schema-declared
+  # action registry `BarkparkWeb.Studio.StudioLive.DocActions` resolves today
+  # ONLY through the LiveView socket (`DocActions.dispatch_action/5`,
+  # `studio_live.ex`); GET /v1/schemas carries just the schema's STATIC
+  # `actions` array, never the resolver-filtered live list (OnixEdit hides
+  # publish_to_bokbasen while a submission is pending, a state that never
+  # reaches this flat array). :scoped_admin, the SAME tier Studio's own editor
+  # mount requires, is "admin tier as in LiveView" from the row — not a new
+  # tier invented for this route.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    get("/v1/data/doc/:dataset/:type/:doc_id/actions", DocumentActionsController, :index)
+
+    post(
+      "/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
+      DocumentActionsController,
+      :dispatch
+    )
+  end
+
   # Scoped schema management (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
     get("/v1/structure/:dataset", StructureController, :show)
-    get("/v1/schemas/:dataset", SchemaController, :index)
-    get("/v1/schemas/:dataset/:name", SchemaController, :show)
     post("/v1/schemas/:dataset", SchemaController, :upsert)
     delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end
@@ -3351,6 +3847,41 @@ defmodule BarkparkWeb.Router do
     # `admin` permission and the never-escalate cap live in
     # `Auth.mint_delegated_token/3`.
     post("/v1/tokens/elevated", ElevatedTokenController, :create)
+  end
+
+  # Scoped preview-JWT mint (task-88e9094df76d31c6, widened to any WRITE
+  # member by task-ea6c9abb868593f8 — barkpark-studio's gap: Sanity lets any
+  # editor mint a preview link, not just an admin). A write-capable member of
+  # workspace A reaches 403 at ResolveWorkspace on `/w/B/...`, never the
+  # controller — mirrors the (write, not admin) gate `HistoryController.restore/2`
+  # already uses on this same pipeline shape. `PreviewTokenController.mint/2`
+  # is UNCHANGED from the flat mint (#22299): it already signs workspace_id/
+  # project_id from `ScopeHelpers.scope_opts(conn)`, never from a request
+  # param, and on THIS pipeline `:scoped_api` has already resolved those
+  # assigns from the URL (membership-gated) rather than from the caller's own
+  # token scope — the flat route's "defaults to whatever the admin's OWN
+  # token resolves to, usually Default" gap task-88e9094df76d31c6 closed.
+  # `multi_use: true` stays admin-only — `mint/2` itself refuses it for a
+  # non-admin caller, since its wider TTL/no-record_jti-replay shape is a
+  # bigger blast radius than the single-use default every member gets.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :flat_within_quota, :require_write])
+
+    post("/v1/preview-tokens", PreviewTokenController, :mint)
+  end
+
+  # Tenant-scoped revoke (task-49a6a686bb88d9e5) — the flat mint deliberately
+  # grew no revoke twin (preview_token_jti carried no tenant column; see
+  # PreviewTokenController's own moduledoc). STAYS admin-only (task-ea6c9abb868593f8
+  # widened mint, not revoke): revoking a token is a privileged action over
+  # whatever OTHER members/integrations already hold it, not a "manage my own
+  # read" action the mint widening is about. An admin of A reaches 403 on
+  # `/w/B/.../:jti`, never the controller; `revoke/2` additionally checks the
+  # ROW's own stored owner_workspace_id before touching it.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    delete("/v1/preview-tokens/:jti", PreviewTokenController, :revoke)
   end
 
   # Scoped MEMBER administration (admin) — the workspace roster: who holds a
@@ -3372,6 +3903,9 @@ defmodule BarkparkWeb.Router do
     post("/v1/members", MemberController, :create)
     patch("/v1/members/:principal_ref", MemberController, :update)
     delete("/v1/members/:principal_ref", MemberController, :delete)
+    # Seat consent (owner ruling #7): an existing account is invited, not seated.
+    get("/v1/invitations", MemberController, :invitations)
+    delete("/v1/invitations/:id", MemberController, :cancel_invitation)
 
     # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
     # `bp workspace set-locale <locale>` lands here.
@@ -3484,6 +4018,16 @@ defmodule BarkparkWeb.Router do
     post("/v1/media/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout)
   end
 
+  # The Media library's "New folder" (task-c09196a99fad3d3a), on the
+  # cookie-aware :scoped_media_mutate rather than :scoped_mutate, which stays
+  # token-only. Its own block so the upload block below keeps the exact bytes
+  # scaffy's ensure-router-zones template anchors on.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_media_mutate)
+
+    post("/v1/media/:dataset/collections", V1.MediaCollectionsController, :create)
+  end
+
   # Scoped v1 media — asset upload/update/delete. The :scoped_media_mutate
   # pipeline serves a member (membership) AND a :media-edit-token holder (P5).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
@@ -3509,6 +4053,37 @@ defmodule BarkparkWeb.Router do
   # beside the scoped plugin scopes. Sweeps: move this comment only whole,
   # on its own lines. MARK:zone-scoped-mirrors
 
+  # task-6224d34a5a8a6017 — the switcher's three LISTs also take a login session
+  # as the bearer (`:require_token_or_login_session`, #22783's gate), so a
+  # signed-in editor's studio can list where it may switch to, as the scoped
+  # data API (#22764) and its streams (#23023) already let it work there. The
+  # actions decide membership for either principal (`Tenancy.Auth` takes a
+  # `%User{}`): a session lists only the workspaces its user is seated in, and
+  # their projects and datasets. An API token's path is `RequireToken` +
+  # `PublicRead`, which on these GETs is what `:require_token` does
+  # (`RequireWriteForMutation` passes a GET). Bearer only: no cookie is read.
+  scope "/api", BarkparkWeb do
+    pipe_through([:api, :require_token_or_login_session, :managed_refusal])
+
+    get("/workspaces", WorkspaceController, :index,
+      private: %{
+        barkpark_archived_workspace_exempt: true,
+        barkpark_workspaceless_token_allowed: true
+      }
+    )
+
+    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
+
+    get(
+      "/workspaces/:workspace_slug/projects/:project_slug/datasets",
+      WorkspaceController,
+      :datasets,
+      private: %{barkpark_workspaceless_token_allowed: true}
+    )
+  end
+
   # ── Workspace / project switcher — membership-scoped LIST ───────────────
   # The web switcher's read surface: which workspaces (and their projects) the
   # bearer token's principal can reach. Membership-scoped in the context layer
@@ -3528,23 +4103,8 @@ defmodule BarkparkWeb.Router do
     # workspace, so an owner-bound token with NO workspace — a signup PAT — may
     # use them. That is how such a user creates their FIRST workspace. The
     # plug refuses that token everywhere else on the flat routes.
-    get("/workspaces", WorkspaceController, :index,
-      private: %{
-        barkpark_archived_workspace_exempt: true,
-        barkpark_workspaceless_token_allowed: true
-      }
-    )
-
-    get("/workspaces/:workspace_slug/projects", WorkspaceController, :projects,
-      private: %{barkpark_workspaceless_token_allowed: true}
-    )
-
-    get(
-      "/workspaces/:workspace_slug/projects/:project_slug/datasets",
-      WorkspaceController,
-      :datasets,
-      private: %{barkpark_workspaceless_token_allowed: true}
-    )
+    # The three LISTs (GET /workspaces, …/projects, …/datasets) are in the scope
+    # just above: they also take a login-session bearer (task-6224d34a5a8a6017).
 
     # Create surface: any authenticated token may create a workspace (becomes
     # its owner-member, + Default project + production dataset); project

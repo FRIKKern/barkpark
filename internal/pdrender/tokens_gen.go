@@ -85,15 +85,15 @@ var GenRuleGlyph = map[string]string{
 
 // GenAirRowSplit is the collapse threshold (a ratio at or above it earns a
 // SECOND blank row). GenAirRowsDefault is the air a block that is not on the
-// ladder opens with. GenSectionGapRows is space.section.beat (4.18 air beats ≈
-// 92px, the benchmark artifact's section margin) rounded to whole rows: the air
+// ladder opens with. GenSectionGapRows is space.section.beat (2.2 air beats ≈
+// 48px of section air) rounded to whole rows: the air
 // that says one section ENDED, the half of the boundary device the rule glyph
 // completes. GenSectionHeadGapRows is space.section.gap (the artifact's 16px
 // .sec-head padding-top) in rows: the air between the rule and the words.
 const (
 	GenAirRowSplit        = 1.6
 	GenAirRowsDefault     = 1
-	GenSectionGapRows     = 4
+	GenSectionGapRows     = 2
 	GenSectionHeadGapRows = 1
 )
 

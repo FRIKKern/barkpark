@@ -47,6 +47,79 @@ defmodule BarkparkWeb.Studio.StudioTabTitleTest do
     assert page_title(desk) == "Studio · Barkpark"
   end
 
+  # task-fee30130f015c416: with a document open every tab still read
+  # "Studio · Barkpark". The open document's title names the tab, and moving
+  # to another document renames it.
+  # task-6e0b0f0ae9a665e1: the API tester set no page_title and rendered no h1.
+  test "the API tester names its tab and its page", %{conn: conn} do
+    {:ok, view, html} = live(conn, scoped_studio("/d/production/studio/api-tester"))
+    assert page_title(view) == "API · Barkpark"
+    assert [_] = html |> LazyHTML.from_fragment() |> LazyHTML.query("h1") |> Enum.to_list()
+    assert html =~ ~s(<h1 class="sr-only">API</h1>)
+  end
+
+  test "an open document names the tab, and navigating renames it", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Content.upsert_schema(
+        %{
+          "name" => "tab_title_note",
+          "title" => "Note",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        "production"
+      )
+
+    for {id, title} <- [{"tt-1", "Fjellsanger"}, {"tt-2", "Kystsanger"}] do
+      {:ok, _} =
+        Barkpark.Content.create_document(
+          "tab_title_note",
+          %{"doc_id" => id, "title" => title},
+          "production"
+        )
+    end
+
+    {:ok, view, _} = live(conn, scoped_studio("/d/production/studio/tab_title_note/tt-1"))
+    assert page_title(view) == "Fjellsanger · Barkpark"
+
+    # After a patch the test client reports the bare title; the browser's
+    # live_title adds the suffix (checked in the browser).
+    view |> render_patch(scoped_studio("/d/production/studio/tab_title_note/tt-2"))
+    assert page_title(view) =~ ~r/^Kystsanger/
+
+    view |> render_patch(scoped_studio("/d/production/studio"))
+    assert page_title(view) =~ ~r/^Studio/
+  end
+
+  # task-72e1de4c53c5ed9f: the title was set only on navigation, so typing a
+  # new title renamed the header and the desk row while the tab kept the old
+  # one until the editor navigated away and back.
+  test "saving a new title renames the tab in place", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Content.upsert_schema(
+        %{
+          "name" => "tab_rename_note",
+          "title" => "Note",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        "production"
+      )
+
+    {:ok, _} =
+      Barkpark.Content.create_document(
+        "tab_rename_note",
+        %{"doc_id" => "tr-1", "title" => "Vinterreise"},
+        "production"
+      )
+
+    {:ok, view, _} = live(conn, scoped_studio("/d/production/studio/tab_rename_note/tr-1"))
+    assert page_title(view) == "Vinterreise · Barkpark"
+
+    render_change(view, "autosave", %{"doc" => %{"title" => "Sommerreise"}})
+    assert page_title(view) =~ ~r/^Sommerreise/
+  end
+
   test "the root layout no longer hardcodes the tab title" do
     root = File.read!(Path.expand("../../../../lib/barkpark_web/layouts/root.html.heex", __DIR__))
 

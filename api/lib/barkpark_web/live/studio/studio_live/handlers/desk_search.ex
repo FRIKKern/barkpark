@@ -43,22 +43,55 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
     if String.length(trimmed) < @min_query do
       []
     else
-      trimmed
-      |> Content.search_documents_across_types(
-        socket.assigns.dataset,
-        ScopeHelpers.scope_opts(socket),
-        @limit
-      )
-      |> Enum.map(fn d ->
+      scope = ScopeHelpers.scope_opts(socket)
+
+      found =
+        Content.search_documents_across_types(trimmed, socket.assigns.dataset, scope, @limit)
+
+      titles = type_titles(found, socket.assigns.dataset, scope)
+
+      Enum.map(found, fn d ->
         %{
           # A draft-only document's row is `drafts.<id>`; the Studio path
           # addresses every document by its published id.
           id: Content.published_id(d.doc_id),
           type: d.type,
+          # The label an editor reads is the schema's title ("Utgivelse"), as
+          # on the desk and the pane headers; the id stays in the link.
+          type_title: Map.get(titles, d.type, d.type),
           title: ((is_binary(d.title) and d.title != "") && d.title) || d.doc_id,
           status: d.status || ""
         }
       end)
     end
   end
+
+  # One schema read per search, only when there are hits; a type without a
+  # title keeps its id.
+  defp type_titles([], _dataset, _scope), do: %{}
+
+  defp type_titles(found, dataset, scope) do
+    listed =
+      dataset
+      |> Content.list_schemas(scope)
+      |> Map.new(fn schema -> {schema.name, title_or_name(schema)} end)
+
+    # The listed catalog leaves out a plugin's SHARED schema row (workspace_id
+    # NULL) in a non-Default workspace, so a paper hit read "paper"
+    # (task-b4e6fba573777ba3). Resolve each missing type through the scoped
+    # resolver, which has the shared-row rung; a type it cannot find keeps its id.
+    found
+    |> Enum.map(& &1.type)
+    |> Enum.uniq()
+    |> Enum.reject(&Map.has_key?(listed, &1))
+    |> Enum.reduce(listed, fn type, acc ->
+      case Content.resolve_schema(type, dataset, scope) do
+        {:ok, schema} -> Map.put(acc, type, title_or_name(schema))
+        _ -> acc
+      end
+    end)
+  end
+
+  defp title_or_name(%{title: title}) when is_binary(title) and title != "", do: title
+  defp title_or_name(%{name: name}), do: name
 end

@@ -76,7 +76,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     {:ok,
      socket
      |> assign(
-       page_title: "OnixEdit Codelist Staleness",
+       page_title: gettext("OnixEdit Codelist Staleness"),
        current_issue: current_issue,
        rows: rows,
        coverage: coverage_of(rows),
@@ -90,17 +90,20 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   def handle_event("revalidate", %{"doc_id" => doc_id}, socket) do
     case Enum.find(socket.assigns.rows, fn r -> r.doc_id == doc_id end) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Book #{doc_id} not loaded in this view.")}
+        {:noreply,
+         put_flash(socket, :error, gettext("Book %{id} not loaded in this view.", id: doc_id))}
 
       row ->
         registry = current_registry_snapshot()
         diff = StalenessChecker.revalidate(row.doc, registry)
 
         msg =
-          "Re-validated #{doc_id}: " <>
-            "#{length(diff.changed)} changed, " <>
-            "#{length(diff.removed)} removed, " <>
-            "#{length(diff.added)} added"
+          gettext("Re-validated %{id}: %{changed} changed, %{removed} removed, %{added} added",
+            id: doc_id,
+            changed: length(diff.changed),
+            removed: length(diff.removed),
+            added: length(diff.added)
+          )
 
         {:noreply,
          socket
@@ -109,8 +112,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     end
   end
 
-  def handle_event("acknowledge", %{"doc_id" => doc_id}, socket) do
-    with {:ok, doc} <- fetch_doc(doc_id),
+  def handle_event("acknowledge", %{"doc_id" => doc_id} = params, socket) do
+    with {:ok, doc} <- fetch_listed_doc(socket.assigns.rows, doc_id, params["id"]),
          updated_content <- Map.put(doc.content || %{}, "staleness_acknowledged", true),
          {:ok, updated_doc} <- acknowledge_write(doc, updated_content) do
       rows =
@@ -125,13 +128,28 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
       {:noreply,
        socket
        |> assign(rows: rows, coverage: coverage_of(rows))
-       |> put_flash(:info, "Marked #{doc_id} as accepted as-is.")}
+       |> put_flash(:info, gettext("Marked %{id} as accepted as-is.", id: doc_id))}
     else
       {:error, :not_found} ->
-        {:noreply, put_flash(socket, :error, "Book #{doc_id} no longer exists.")}
+        {:noreply, put_flash(socket, :error, gettext("Book %{id} no longer exists.", id: doc_id))}
+
+      {:error, :ambiguous} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext("Book %{id} exists in more than one workspace. Reload the page and try again.",
+             id: doc_id
+           )
+         )}
 
       {:error, %Ecto.Changeset{} = cs} ->
-        {:noreply, put_flash(socket, :error, "Acknowledge failed: #{inspect(cs.errors)}")}
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext("Acknowledge failed: %{reason}", reason: inspect(cs.errors))
+         )}
     end
   end
 
@@ -140,10 +158,10 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="bp-admin-onixedit-staleness" data-test-id="onixedit-staleness-admin">
-      <h1>OnixEdit Codelist Staleness</h1>
+    <main class="bp-admin-onixedit-staleness" data-test-id="onixedit-staleness-admin">
+      <h1>{gettext("OnixEdit Codelist Staleness")}</h1>
       <p class="bp-meta" data-test-id="current-issue">
-        Current registry issue: <strong>{@current_issue}</strong>
+        {gettext("Current registry issue:")} <strong>{@current_issue}</strong>
       </p>
 
       <%= if @coverage == :blind do %>
@@ -151,30 +169,28 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
           class="bp-staleness-blind bg-red-100 text-red-800"
           data-test-id="onixedit-staleness-blind"
         >
-          <strong>Drift is UNMEASURED, not absent.</strong>
-          Scanned {length(@rows)} book document(s) and recognized
-          <strong>0</strong> codelist refs across all of them. This analyzer only
-          counts a ref when one map carries both <code>codelistId</code> and
-          <code>issue_version</code>; no writer produces that shape, so every row
-          below reports <code>unmeasured</code> rather than a clean bill of health.
-          Treat this page as offline until refs are annotated.
+          <strong>{gettext("Drift is UNMEASURED, not absent.")}</strong>
+          {gettext("Scanned %{count} book document(s) and recognized 0 codelist refs across all of them.", count: length(@rows))}
+          {gettext("This analyzer only counts a ref when one map carries both")} <code>codelistId</code> {gettext("and")}
+          <code>issue_version</code>; {gettext("no writer produces that shape, so every row below reports")} <code>unmeasured</code> {gettext("rather than a clean bill of health.")}
+          {gettext("Treat this page as offline until refs are annotated.")}
         </p>
       <% end %>
 
       <%= if Enum.empty?(@rows) do %>
         <p data-test-id="onixedit-staleness-empty">
-          No book documents in the production dataset yet.
+          {gettext("No book documents in the production dataset yet.")}
         </p>
       <% else %>
         <table class="bp-table" data-test-id="onixedit-staleness-table">
           <thead>
             <tr>
-              <th>Book title</th>
-              <th>Codelist refs</th>
-              <th>Ref issue versions</th>
-              <th>Current registry version</th>
-              <th>Status</th>
-              <th>Actions</th>
+              <th>{gettext("Book title")}</th>
+              <th>{gettext("Codelist refs")}</th>
+              <th>{gettext("Ref issue versions")}</th>
+              <th>{gettext("Current registry version")}</th>
+              <th>{gettext("Status")}</th>
+              <th>{gettext("Actions")}</th>
             </tr>
           </thead>
           <tbody>
@@ -188,7 +204,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
                   {row.ref_count}
                   <%= if row.ref_count > 0 do %>
                     <details>
-                      <summary>view</summary>
+                      <summary>{gettext("view")}</summary>
                       <ul class="bp-codelist-list">
                         <%= for ref <- row.refs do %>
                           <li>
@@ -207,7 +223,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
                     class={"bp-pill " <> pill_class(row.aggregate_status)}
                     data-test-pill={Atom.to_string(row.aggregate_status)}
                   >
-                    {Atom.to_string(row.aggregate_status)}
+                    {status_label(row.aggregate_status)}
                   </span>
                 </td>
                 <td>
@@ -217,16 +233,17 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
                     phx-value-doc_id={row.doc_id}
                     data-test-action="revalidate"
                   >
-                    Re-validate
+                    {gettext("Re-validate")}
                   </button>
                   <button
                     type="button"
                     phx-click="acknowledge"
                     phx-value-doc_id={row.doc_id}
+                    phx-value-id={row.doc.id}
                     data-test-action="acknowledge"
                     disabled={row.acknowledged}
                   >
-                    Mark accepted as-is
+                    {gettext("Mark accepted as-is")}
                   </button>
                 </td>
               </tr>
@@ -237,13 +254,13 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
       <%= if @last_diff do %>
         <section class="bp-revalidate-diff" data-test-id="last-diff">
-          <h2>Last re-validate diff — {@last_diff.doc_id}</h2>
-          <p>changed: {length(@last_diff.diff.changed)}</p>
-          <p>removed: {length(@last_diff.diff.removed)}</p>
-          <p>added: {length(@last_diff.diff.added)}</p>
+          <h2>{gettext("Last re-validate diff —")} {@last_diff.doc_id}</h2>
+          <p>{gettext("changed: %{count}", count: length(@last_diff.diff.changed))}</p>
+          <p>{gettext("removed: %{count}", count: length(@last_diff.diff.removed))}</p>
+          <p>{gettext("added: %{count}", count: length(@last_diff.diff.added))}</p>
         </section>
       <% end %>
-    </div>
+    </main>
     """
   end
 
@@ -306,12 +323,32 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     |> Repo.all()
   end
 
-  # global-read: FLAT-POSTURE admin console (see load_books/0) — single-row twin
-  # of the unscoped list read; narrowed by doc_id + type + dataset, not workspace.
-  defp fetch_doc(doc_id) do
-    case Repo.get_by(Document, doc_id: doc_id, type: @type_default, dataset: @dataset_default) do
-      nil -> {:error, :not_found}
-      doc -> {:ok, doc}
+  # The acknowledge target is the ROW THIS VIEW LISTED, re-read by primary key
+  # (owner ruling #30 Q12, 2026-10-03). It used to be a global
+  # `Repo.get_by(doc_id:, type:, dataset:)`: the console lists every
+  # workspace's books, two workspaces can hold the same doc_id, and the read
+  # then raised (MultipleResultsError) or picked a row the operator did not
+  # click. The button carries the row's id; an id-less event still resolves
+  # when exactly one listed row has that doc_id, and refuses otherwise.
+  defp fetch_listed_doc(rows, doc_id, id) do
+    listed =
+      Enum.filter(rows, fn r ->
+        r.doc_id == doc_id and (is_nil(id) or r.doc.id == id)
+      end)
+
+    case listed do
+      [%{doc: %Document{id: pk}}] ->
+        # global-read: same flat-posture ops console as load_books/0 — pk is a row this view listed
+        case Repo.get(Document, pk) do
+          %Document{type: @type_default, dataset: @dataset_default} = doc -> {:ok, doc}
+          _ -> {:error, :not_found}
+        end
+
+      [] ->
+        {:error, :not_found}
+
+      _many ->
+        {:error, :ambiguous}
     end
   end
 
@@ -383,6 +420,14 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
   # WI5 will extract these into a shared StatusPill helper. Keep the
   # colour mapping aligned across consoles when refactoring.
+  # The pill's words; `data-test-pill` keeps the atom.
+  defp status_label(:current), do: gettext("current")
+  defp status_label(:unmeasured), do: gettext("unmeasured")
+  defp status_label(:stale), do: gettext("stale")
+  defp status_label(:deprecated), do: gettext("deprecated")
+  defp status_label(:acknowledged), do: gettext("acknowledged")
+  defp status_label(other), do: Atom.to_string(other)
+
   defp pill_class(:current), do: "bg-green-100 text-green-800"
   defp pill_class(:unmeasured), do: "bg-yellow-100 text-yellow-800"
   defp pill_class(:stale), do: "bg-yellow-100 text-yellow-800"
