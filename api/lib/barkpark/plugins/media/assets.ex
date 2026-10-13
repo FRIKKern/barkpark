@@ -92,6 +92,16 @@ defmodule Barkpark.Plugins.Media.Assets do
     end)
   end
 
+  @doc false
+  def pending_delete_snapshot(%MediaFile{} = file) do
+    Document
+    |> asset_doc_scope(file.id, file.dataset, MediaFile.scope_opts(file))
+    |> order_by([d], asc: d.id)
+    |> lock("FOR UPDATE")
+    |> select([d], fragment("to_jsonb(?)", d))
+    |> Repo.all()
+  end
+
   @doc """
   Linked `mediaAsset` document for a blob id, if any.
 

@@ -46,7 +46,8 @@ defmodule Barkpark.SchemaOwnership do
     access_grants api_tokens audit_events audit_export_sinks authoring_exemptions
     codelist_value_translations codelist_values codelists
     collapsed_schema_definitions_backup content_edges data_keys datasets documents
-    idempotency_keys login_tickets media_files mutation_events oban_jobs oban_peers
+    idempotency_keys login_tickets media_delete_operations_v1 media_files
+    media_object_reservations_v1 mutation_events oban_jobs oban_peers
     oidc_connections org_domains organizations paper_access_log paper_events
     plugin_doc_state plugin_settings plugin_settings_audit preview_links preview_token_jti projects
     pulse_counters pulse_events pulse_meters revisions role_permissions roles
@@ -105,7 +106,10 @@ defmodule Barkpark.SchemaOwnership do
     "bp_search_field_restricted(jsonb)",
     "bp_search_item_field(jsonb)",
     "bp_search_redact(jsonb,jsonb,integer)",
-    "bp_search_vector_of(text,jsonb)"
+    "bp_search_vector_of(text,jsonb)",
+    "media_object_address_v1(text)",
+    "prepare_media_delete_v1(jsonb)",
+    "reserve_media_object_v1()"
   ]
 
   # Signatures as `to_regprocedure` reads them. The order is the order
