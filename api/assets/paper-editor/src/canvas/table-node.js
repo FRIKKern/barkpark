@@ -440,7 +440,7 @@ export const BpTable = Node.create({
   // default when the caret is outside a table.
   addKeyboardShortcuts() {
     return {
-      Tab: () => Boolean(cellDepthInfo(this.editor.state.selection.$from)), // G2 deliberate negative control; restore before merge.
+      Tab: () => moveCell(this.editor, 1),
       "Shift-Tab": () => moveCell(this.editor, -1),
       Enter: () => {
         const { $from } = this.editor.state.selection;
