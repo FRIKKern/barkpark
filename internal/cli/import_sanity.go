@@ -41,9 +41,10 @@ const sanityAssetsSuffix = ".assets.json"
 // confirmation checks, so a refused import uploads nothing.
 const sanityPending = "bp-sanity-asset:"
 
-// sanityAssetTypes are Sanity's own asset documents. Their files become
-// Barkpark media, so the documents themselves are not imported.
-var sanityAssetTypes = map[string]bool{"sanity.imageAsset": true, "sanity.fileAsset": true}
+// sanitySystemType: Sanity's own documents (`sanity.imageAsset`,
+// `sanity.fileAsset`, `sanity.previewUrlSecret`, …). An asset's file becomes
+// Barkpark media; none of the documents themselves is imported.
+func sanitySystemType(t string) bool { return strings.HasPrefix(t, "sanity.") }
 
 var (
 	sanityImageID = regexp.MustCompile(`^image-([0-9a-f]+)-(\d+x\d+)-([a-z0-9]+)$`)
@@ -60,8 +61,12 @@ type sanityImport struct {
 	// assets are the Sanity asset ids the documents reference, sorted.
 	assets []string
 	refs   int // asset values rewritten
-	// skipped counts the Sanity asset documents left out, by line.
+	// skipped counts the Sanity system documents left out, by line.
 	skipped int
+	// blocks are the target's block-editor richText fields, whose Portable
+	// Text bodies become PortableDoc; conv tallies that conversion.
+	blocks sanityBlocksFields
+	conv   sanityConversion
 	// ids maps a Sanity asset id to its Barkpark asset id once uploaded or
 	// read from the sidecar for this scope.
 	ids map[string]string
@@ -76,14 +81,15 @@ func (s *sanityImport) cleanup() { _ = os.RemoveAll(s.dir) }
 
 // sanityPrepare unpacks the tarball, checks that every asset value has its
 // file, and writes data.ndjson back out with each asset value rewritten to a
-// placeholder ref and each Sanity asset document blanked (kept as an empty
-// line, so line numbers and --from-line still match the export).
-func sanityPrepare(tarball, scope string) (*sanityImport, error) {
+// placeholder ref, each Portable Text body of a block-editor field (blocks)
+// converted to PortableDoc, and each Sanity system document blanked (kept as
+// an empty line, so line numbers and --from-line still match the export).
+func sanityPrepare(tarball, scope string, blocks sanityBlocksFields) (*sanityImport, error) {
 	dir, err := os.MkdirTemp("", "bp-sanity-import-")
 	if err != nil {
 		return nil, err
 	}
-	s := &sanityImport{tarball: tarball, dir: dir, names: map[string]string{}, ids: map[string]string{}}
+	s := &sanityImport{tarball: tarball, dir: dir, names: map[string]string{}, ids: map[string]string{}, blocks: blocks}
 	if err := s.unpack(); err != nil {
 		s.cleanup()
 		return nil, err
@@ -203,9 +209,10 @@ func sanityAssetID(v string) (string, error) {
 	return id, nil
 }
 
-// rewrite reads data.ndjson, swaps each asset value for a placeholder and
-// writes the result beside it. A line with no asset value is copied byte for
-// byte. Every referenced file must exist, or nothing is imported.
+// rewrite reads data.ndjson, swaps each asset value for a placeholder,
+// converts Portable Text bodies (sanityConvertDoc) and writes the result beside
+// it. A line with neither is copied byte for byte. Every referenced file must
+// exist, or nothing is imported.
 func (s *sanityImport) rewrite() error {
 	in, err := os.Open(filepath.Join(s.root, "data.ndjson"))
 	if err != nil {
@@ -232,14 +239,15 @@ func (s *sanityImport) rewrite() error {
 		if len(raw) > 0 {
 			line++
 			body := bytes.TrimSpace(raw)
-			if len(body) > 0 && (bytes.Contains(body, []byte(`"_sanityAsset"`)) || bytes.Contains(body, []byte(`"sanity.`)) || bytes.Contains(body, []byte(`"_ref"`))) {
+			pt := len(s.blocks) > 0 && bytes.Contains(body, []byte(`"_type":"block"`))
+			if len(body) > 0 && (pt || bytes.Contains(body, []byte(`"_sanityAsset"`)) || bytes.Contains(body, []byte(`"sanity.`)) || bytes.Contains(body, []byte(`"_ref"`))) {
 				dec := json.NewDecoder(bytes.NewReader(body))
 				dec.UseNumber()
 				var doc map[string]any
 				if err := dec.Decode(&doc); err != nil {
 					return fmt.Errorf("line %d is not a JSON object: %v", line, err)
 				}
-				if t, _ := doc["_type"].(string); sanityAssetTypes[t] {
+				if t, _ := doc["_type"].(string); sanitySystemType(t) {
 					s.skipped++
 					body = nil
 				} else {
@@ -258,6 +266,9 @@ func (s *sanityImport) rewrite() error {
 					}, &werr)
 					if werr != nil {
 						return fmt.Errorf("line %d: %v", line, werr)
+					}
+					if pt && sanityConvertDoc(doc, s.blocks, &s.conv) {
+						changed = true
 					}
 					if changed {
 						if body, err = json.Marshal(doc); err != nil {
@@ -473,6 +484,30 @@ func sanityWriteSidecar(tarball, scope string, ids map[string]string) error {
 func (s *sanityImport) summary() map[string]any {
 	return map[string]any{
 		"assets": len(s.assets), "refs": s.refs, "to_upload": s.pending(),
-		"asset_documents_skipped": s.skipped, "assets_file": s.tarball + sanityAssetsSuffix,
+		"system_documents_skipped": s.skipped, "assets_file": s.tarball + sanityAssetsSuffix,
+		"portable_text": map[string]any{
+			"converted": s.conv.fields, "kept": append([]string{}, s.conv.kept...),
+			"list_items_flattened": s.conv.flattened, "marks_dropped": s.conv.dropped,
+		},
+	}
+}
+
+// reportPortableText says what became of the Portable Text bodies.
+func (s *sanityImport) reportPortableText(out *writer, dry bool) {
+	c := s.conv
+	if c.fields == 0 && len(c.kept) == 0 {
+		return
+	}
+	verb := "were"
+	if dry {
+		verb = "would be"
+	}
+	out.outf("%d Portable Text body(ies) %s converted to PortableDoc (%d list item(s) flattened, %d mark(s) or style(s) dropped, their text kept)",
+		c.fields, verb, c.flattened, c.dropped)
+	if len(c.kept) > 0 {
+		out.outf("%d body(ies) %s kept as Portable Text:", len(c.kept), verb)
+		for _, k := range c.kept {
+			out.outf("  %s", k)
+		}
 	}
 }
