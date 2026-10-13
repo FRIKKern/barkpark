@@ -22,6 +22,8 @@ builder.image(post.mainImage).width(800).height(600).auto('format').url()
 
 `@sanity/image-url` 1.x takes the same options through its default export. Crop and hotspot need no change: the builder sends them as `rect`. For file URLs, replace `https://cdn.sanity.io` with the same prefix.
 
+3. Browsers load the images without a token, so run `bp share publish-media <workspace>/<project>/<dataset>` once. Without it every anonymous request answers 403: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.md).
+
 ## URLs
 
 ```
