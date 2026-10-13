@@ -20,7 +20,8 @@ defmodule Barkpark.Groq.DocumentSource do
   containment on `content`, and `references()` against an expression index
   over the `_ref` values in `content`. Everything else runs in memory over the
   loaded documents. An equality on `title` reads the `documents.title`
-  column, where the writer keeps it. Both GIN indexes are created by
+  column, where the writer keeps it. Containment uses `documents_content_path_idx`
+  (`20260702130000_add_documents_content_gin_index.exs`); the `_ref` index is
   `20261013180000_add_documents_groq_pushdown_indexes.exs`.
 
   ## Scope and visibility
@@ -454,9 +455,9 @@ defmodule Barkpark.Groq.DocumentSource do
     end)
   end
 
-  # A row matches one of the probes. Containment probes use the GIN index on
-  # `content`, `{:refs, ids}` the GIN index on the `_ref` values, `{:ids, ids}`
-  # the `doc_id` index. An empty list matches nothing.
+  # A row matches one of the probes. A containment map uses the GIN index on
+  # `content`, `{:refs, ids}` the GIN index on the `_ref` values and
+  # `{:ids, ids}` the `doc_id` index. An empty list matches nothing.
   defp probes_condition(probes, perspective) do
     {maps, refs, ids} =
       Enum.reduce(probes, {[], [], []}, fn

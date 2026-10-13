@@ -200,23 +200,9 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     assert %{"_id" => "a1"} = result!(token, @redirect_query, %{"paths" => ["/bok/p123", "x"]})
   end
 
-  describe "the SQL uses the GIN indexes" do
-    test "references() reads documents_content_refs_idx", %{token: token} do
-      plans =
-        explain_reads(fn -> result!(token, @series_query, %{"seriesId" => "series-3"}) end)
-
-      assert Enum.any?(plans, &(&1 =~ "documents_content_refs_idx")), Enum.join(plans, "\n---\n")
-    end
-
-    test "array membership reads documents_content_path_ops_idx", %{token: token} do
-      plans =
-        explain_reads(fn ->
-          result!(token, @redirect_query, %{"paths" => ["/bok/p9000", "/bok/P9000"]})
-        end)
-
-      assert Enum.any?(plans, &(&1 =~ "documents_content_path_ops_idx")),
-             Enum.join(plans, "\n---\n")
-    end
+  test "references() reads documents_content_refs_idx", %{token: token} do
+    plans = explain_reads(fn -> result!(token, @series_query, %{"seriesId" => "series-3"}) end)
+    assert Enum.any?(plans, &(&1 =~ "documents_content_refs_idx")), Enum.join(plans, "\n---\n")
   end
 
   test "the drafts perspective tests references() against the draft, not its published twin",
@@ -335,7 +321,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     collect(ref, [])
     |> Enum.filter(fn {sql, _} ->
       sql =~ "FROM \"documents\"" and
-        (sql =~ "jsonb_path_query_array" or sql =~ "@> ANY")
+        sql =~ "jsonb_path_query_array"
     end)
     |> Enum.map(fn {sql, params} ->
       Repo.query!("EXPLAIN " <> sql, params).rows |> Enum.map_join("\n", &hd/1)

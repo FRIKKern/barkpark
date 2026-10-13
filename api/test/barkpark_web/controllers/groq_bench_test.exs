@@ -1,8 +1,8 @@
 defmodule BarkparkWeb.GroqBenchTest do
   @moduledoc """
   Server time of the GROQ page-query shapes over 20,000 synthetic products
-  (`Barkpark.Test.GroqSyntheticProducts`), with the pushdown indexes and then
-  with them dropped inside the test transaction. Prints a table; asserts only
+  (`Barkpark.Test.GroqSyntheticProducts`), with the `_ref` index and then with
+  it dropped inside the test transaction, plus the index's size. Prints a table; asserts only
   that every shape answers. Excluded by default. Run:
 
       mix test --include groq_bench test/barkpark_web/controllers/groq_bench_test.exs
@@ -87,12 +87,13 @@ defmodule BarkparkWeb.GroqBenchTest do
   test "page-query shapes over 20,000 products", %{token: token} do
     indexed = Enum.map(@shapes, &measure(token, &1))
 
+    sizes = index_sizes()
     Repo.query!("DROP INDEX documents_content_refs_idx")
-    Repo.query!("DROP INDEX documents_content_path_ops_idx")
     unindexed = Enum.map(@shapes, &measure(token, &1))
 
     IO.puts("\nGROQ over #{@products} products, median of #{@runs} runs (server ms)")
-    IO.puts("| shape | status | with indexes | without indexes |")
+    IO.puts(sizes)
+    IO.puts("| shape | status | with the _ref index | without it |")
     IO.puts("|---|---|---|---|")
 
     for {{name, status, ms}, {_, _, ms_off}} <- Enum.zip(indexed, unindexed) do
@@ -100,6 +101,27 @@ defmodule BarkparkWeb.GroqBenchTest do
     end
 
     assert Enum.all?(indexed, fn {_, status, _} -> status == 200 end)
+  end
+
+  # The documents table (heap, TOAST and every index) and the _ref index, as
+  # this test transaction sees them.
+  defp index_sizes do
+    %{rows: [[table, heap, refs, entries, bytes]]} =
+      Repo.query!("""
+      SELECT pg_total_relation_size('documents'), pg_relation_size('documents'),
+             pg_relation_size('documents_content_refs_idx'),
+             sum(jsonb_array_length(a)), sum(octet_length(a::text))
+      FROM (SELECT jsonb_path_query_array(content, 'strict $.** ? (exists(@._ref))._ref') AS a
+            FROM documents) s
+      """)
+
+    # The migration's estimate, over the whole table instead of a sample.
+    estimate = bytes + 64 * entries
+
+    "documents: #{div(table, 1024)} KiB in all, #{div(heap, 1024)} KiB heap; " <>
+      "documents_content_refs_idx: #{div(refs, 1024)} KiB for #{entries} _ref values " <>
+      "(#{Float.round(refs / max(entries, 1), 1)} bytes each); the migration's formula " <>
+      "estimates #{div(estimate, 1024)} KiB"
   end
 
   defp measure(token, {name, query, params}) do
