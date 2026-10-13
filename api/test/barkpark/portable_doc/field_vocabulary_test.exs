@@ -41,6 +41,27 @@ defmodule Barkpark.PortableDoc.FieldVocabularyTest do
     assert V.allowed_inline_types(vocab) == MapSet.new(["text", "strong", "em", "link"])
   end
 
+  # A declared `internalLink` (Sanity's link to a document) is portable-doc's
+  # document link: the field admits `wikilink`; without it, a wikilink is refused.
+  test "a declared internalLink admits a wikilink; undeclared, it is refused" do
+    declared =
+      put_in(@agency, ["blocks", "annotations"], [
+        %{"name" => "link"},
+        %{"name" => "internalLink"}
+      ])
+
+    link = %{
+      "type" => "wikilink",
+      "target" => "author-ada",
+      "docId" => "author-ada",
+      "children" => [%{"type" => "text", "value" => "Ada"}]
+    }
+
+    assert "wikilink" in V.allowed_inline_types(V.from_field(declared))
+    assert :ok == V.validate(V.from_field(declared), [p(nil, [link])])
+    assert {:error, {:out_of_vocabulary, _}} = V.validate(V.from_field(@agency), [p(nil, [link])])
+  end
+
   # An EXPLICITLY empty declaration still admits nothing — a schema author who
   # writes `"blocks": {}` said "nothing", and is taken at their word.
   test "an explicitly empty declaration admits nothing but text-less nothing" do

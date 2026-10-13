@@ -146,12 +146,15 @@ export function allowedHeadingLevels(vocab) {
   return out;
 }
 
-// Portable-doc inline types the vocabulary admits (text always).
+// Portable-doc inline types the vocabulary admits (text always). A declared
+// `internalLink` annotation (Sanity's link to a document) is portable-doc's
+// `wikilink`: the same document link, stored as { target, docId } (FieldVocabulary).
 export function allowedInlineTypes(vocab) {
   return new Set([
     "text",
     ...vocab.marks,
     ...vocab.annotations,
+    ...(vocab.annotations.includes("internalLink") ? ["wikilink"] : []),
     ...(vocab.inlineObjects || []).map((o) => o.name),
   ]);
 }

@@ -23,7 +23,9 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
     * `bullet`      → `list` with `ordered: false`; `number` → `ordered: true`
     * `marks`       → the inline node types allowed inside prose
                       (`text` is always allowed)
-    * `annotations` → inline `link` (the only annotation portable-doc carries)
+    * `annotations` → inline `link`; a declared `internalLink` (Sanity's link
+                      to a document) also admits portable-doc's `wikilink`,
+                      the document link stored as `target` + `docId`
     * `of`          → extra block types (`image`, `divider`, `code`, `diagram`),
                       or a custom object block `{"name": "callout", "fields": […]}`
                       whose fields every block of that type must satisfy
@@ -197,7 +199,9 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
     MapSet.new(
       @inline_always ++
         Enum.filter(marks, &(&1 in @inline_marks)) ++
-        annotations ++ Map.keys(Map.get(vocab, :inline_objects, %{}))
+        annotations ++
+        if("internalLink" in annotations, do: ["wikilink"], else: []) ++
+        Map.keys(Map.get(vocab, :inline_objects, %{}))
     )
   end
 
