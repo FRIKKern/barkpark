@@ -52,7 +52,13 @@ defmodule BarkparkWeb.GroqBenchTest do
     {"5 count(*[_type == \"product\"])", ~s'count(*[_type == "product"])', %{}},
     {"6 count per department via ^",
      ~s'*[_type == "department"]{_id, "n": count(*[_type == "product" && department._ref == ^._id])}',
-     %{}}
+     %{}},
+    {"7 count(*[... && count(onix.contributors) > 0])",
+     ~s'count(*[_type == "product" && count(onix.contributors) > 0])', %{}},
+    {"8 count(*[... && defined(bokbasen.languageFormatVariants[0])])",
+     ~s'count(*[_type == "product" && defined(bokbasen.languageFormatVariants[0])])', %{}},
+    {"9 count(*[...]) scanned in chunks, isbn > \"0\"",
+     ~s'count(*[_type == "product" && isbn > "0"])', %{}}
   ]
 
   setup do

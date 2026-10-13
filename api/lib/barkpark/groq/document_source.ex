@@ -47,8 +47,10 @@ defmodule Barkpark.Groq.DocumentSource do
   `:max_documents_per_fetch` documents (default 10 000) or more than
   `:max_bytes_per_fetch` of stored content (default 32 MiB, measured with
   `pg_column_size` before anything is loaded), or the query as a whole more
-  than `:max_documents_loaded` documents (default 25 000). Keys live in the
-  application env `config :barkpark, Barkpark.Groq`.
+  than `:max_documents_loaded` documents (default 25 000). A `count(*[...])`
+  keeps no documents: SQL counts it, or `scan_count/4` reads it in chunks, so
+  these limits do not apply to it. Keys live in the application env
+  `config :barkpark, Barkpark.Groq`.
   """
 
   @behaviour Barkpark.Groq.Source
@@ -62,6 +64,7 @@ defmodule Barkpark.Groq.DocumentSource do
   alias Barkpark.Repo
 
   @max_rounds 8
+  @scan_chunk 500
   @drafts_prefix "drafts."
 
   @type perspective :: :published | :drafts | :raw
@@ -155,7 +158,8 @@ defmodule Barkpark.Groq.DocumentSource do
       constraints.types == nil or "paper" in constraints.types ->
         :error
 
-      constraints.eq != [] and not Enum.all?(constraints.types, &renders_all_fields?(&1, state)) ->
+      (constraints.eq != [] or constraints.checks != []) and
+          not Enum.all?(constraints.types, &renders_all_fields?(&1, state)) ->
         :error
 
       true ->
@@ -176,6 +180,30 @@ defmodule Barkpark.Groq.DocumentSource do
           n ->
             {:ok, n}
         end
+    end
+  end
+
+  # A count whose filter SQL cannot match exactly reads the rows SQL narrows
+  # to in chunks of `@scan_chunk` and keeps only the running total, so it is
+  # not held to the per-fetch or per-query document limits; the query's
+  # timeout still bounds it. A scan whose filter recorded something to load
+  # this round counted without it, so its result is not kept.
+  @impl true
+  def scan_count(state, constraints, cache, keep?) do
+    key = cache_key(constraints)
+
+    case cache && Process.get({:groq_src_scan, key, cache}) do
+      n when is_integer(n) ->
+        {:ok, n}
+
+      _ ->
+        missing = Process.get(:groq_src_missing)
+        n = scan(state, key, keep?)
+
+        if cache != nil and Process.get(:groq_src_missing) == missing,
+          do: Process.put({:groq_src_scan, key, cache}, n)
+
+        {:ok, n}
     end
   end
 
@@ -241,7 +269,8 @@ defmodule Barkpark.Groq.DocumentSource do
       c.types && c.types |> Enum.uniq() |> Enum.sort(),
       c.ids && c.ids |> Enum.uniq() |> Enum.sort(),
       c.eq |> Enum.uniq() |> Enum.sort(),
-      c.any |> Enum.map(fn probes -> probes |> Enum.uniq() |> Enum.sort() end) |> Enum.sort()
+      c.any |> Enum.map(fn probes -> probes |> Enum.uniq() |> Enum.sort() end) |> Enum.sort(),
+      c.checks |> Enum.uniq() |> Enum.sort()
     }
   end
 
@@ -256,11 +285,11 @@ defmodule Barkpark.Groq.DocumentSource do
     keys = Enum.with_index(keys)
 
     [first | rest] =
-      Enum.map(keys, fn {{types, ids, eq, _any}, i} ->
+      Enum.map(keys, fn {{types, ids, eq, _any, checks}, i} ->
         state
         |> counted_rows()
         |> maybe_where_types(types)
-        |> where(^exact_condition(ids, eq, state.perspective))
+        |> where(^exact_condition(ids, eq, checks, state.perspective))
         |> select([d], %{i: type(^i, :integer), n: count(d.id)})
       end)
 
@@ -270,7 +299,7 @@ defmodule Barkpark.Groq.DocumentSource do
       |> Repo.all()
       |> Map.new(&{&1.i, &1.n})
 
-    Enum.each(keys, fn {{types, _ids, _eq, _any} = key, i} ->
+    Enum.each(keys, fn {{types, _ids, _eq, _any, _checks} = key, i} ->
       Process.put({:groq_src_count, key}, Map.get(counts, i, 0))
       Enum.each(types || [], &touch_type/1)
     end)
@@ -300,8 +329,11 @@ defmodule Barkpark.Groq.DocumentSource do
   # `a.b == v` exactly: containment narrows through the GIN index, and the
   # value at the path must equal `v` (containment alone also matches an array
   # holding `v`).
-  defp exact_condition(ids, eq, perspective) do
+  defp exact_condition(ids, eq, checks, perspective) do
     condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
+
+    condition =
+      Enum.reduce(checks, condition, fn c, acc -> dynamic(^acc and ^check_condition(c)) end)
 
     Enum.reduce(eq, condition, fn {path, value}, acc ->
       dynamic(
@@ -317,6 +349,37 @@ defmodule Barkpark.Groq.DocumentSource do
     end)
   end
 
+  # `counted_rows/1` leaves out a published row whose draft replaces it, so
+  # each chunk renders on its own. Rows are read in `id` order, each chunk
+  # after the last id of the one before.
+  defp scan(state, {types, _ids, _eq, _any, _checks} = key, keep?) do
+    query =
+      state
+      |> counted_rows()
+      |> maybe_where_types(types)
+      |> where(^key_condition(key, state.perspective))
+      |> order_by([d], asc: d.id)
+      |> limit(@scan_chunk)
+
+    Enum.each(types || [], &touch_type/1)
+    scan_chunks(state, query, nil, keep?, 0)
+  end
+
+  defp scan_chunks(state, query, after_id, keep?, total) do
+    rows =
+      if after_id,
+        do: query |> where([d], d.id > ^after_id) |> Repo.all(),
+        else: Repo.all(query)
+
+    docs = render(rows, state)
+    Enum.each(docs, &touch_type(&1["_type"]))
+    total = total + Enum.count(docs, keep?)
+
+    if length(rows) < @scan_chunk,
+      do: total,
+      else: scan_chunks(state, query, List.last(rows).id, keep?, total)
+  end
+
   defp load_key(state, key), do: load_keys(state, [key])
 
   # Keys that scan the same types are read in one query: their conditions are
@@ -325,7 +388,7 @@ defmodule Barkpark.Groq.DocumentSource do
   # per round, however many parent documents it runs for.
   defp load_keys(state, keys) do
     keys
-    |> Enum.group_by(fn {types, _ids, _eq, _any} -> types end)
+    |> Enum.group_by(fn {types, _ids, _eq, _any, _checks} -> types end)
     |> Enum.each(fn {types, group} -> load_group(state, types, group) end)
   end
 
@@ -346,7 +409,7 @@ defmodule Barkpark.Groq.DocumentSource do
       |> where(^condition)
 
     rows =
-      if Enum.all?(keys, fn {_types, ids, _eq, _any} -> ids != nil end) do
+      if Enum.all?(keys, fn {_types, ids, _eq, _any, _checks} -> ids != nil end) do
         # Reads by id are bounded by the ids the query named.
         Repo.all(matching)
       else
@@ -361,7 +424,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
     # A read by id depends on those documents; any other read depends on every
     # document of the types it scanned, so it is tagged by type.
-    if Enum.all?(keys, fn {_types, ids, _eq, _any} -> ids != nil end),
+    if Enum.all?(keys, fn {_types, ids, _eq, _any, _checks} -> ids != nil end),
       do: Enum.each(docs, &touch/1),
       else: Enum.each(docs, &touch_type(&1["_type"]))
 
@@ -407,7 +470,10 @@ defmodule Barkpark.Groq.DocumentSource do
   # Loading the twin of every matched row lets the overlay pick the draft and
   # the evaluator reject it.
   defp twins_needed?(%{perspective: :drafts}, keys),
-    do: Enum.any?(keys, fn {_types, _ids, eq, any} -> eq != [] or any != [] end)
+    do:
+      Enum.any?(keys, fn {_types, _ids, eq, any, checks} ->
+        eq != [] or any != [] or checks != []
+      end)
 
   defp twins_needed?(_state, _keys), do: false
 
@@ -439,11 +505,14 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
-  defp unconstrained?({_types, nil, [], []}), do: true
+  defp unconstrained?({_types, nil, [], [], []}), do: true
   defp unconstrained?(_key), do: false
 
-  defp key_condition({_types, ids, eq, any}, perspective) do
+  defp key_condition({_types, ids, eq, any, checks}, perspective) do
     condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
+
+    condition =
+      Enum.reduce(checks, condition, fn c, acc -> dynamic(^acc and ^check_condition(c)) end)
 
     condition =
       Enum.reduce(eq, condition, fn {path, value}, acc ->
@@ -500,6 +569,102 @@ defmodule Barkpark.Groq.DocumentSource do
         "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref') \\?| ?",
         d.content,
         type(^ids, {:array, :string})
+      )
+    )
+  end
+
+  # `count(path) op n`. The CASE yields null for anything but an array, as
+  # GROQ's count() does, and keeps `jsonb_array_length` from raising on one.
+  defp check_condition({:length, path, "<", n}) do
+    dynamic(
+      [d],
+      fragment(
+        "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END < ?",
+        d.content,
+        type(^path, {:array, :string}),
+        d.content,
+        type(^path, {:array, :string}),
+        ^n
+      )
+    )
+  end
+
+  defp check_condition({:length, path, "<=", n}) do
+    dynamic(
+      [d],
+      fragment(
+        "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END <= ?",
+        d.content,
+        type(^path, {:array, :string}),
+        d.content,
+        type(^path, {:array, :string}),
+        ^n
+      )
+    )
+  end
+
+  defp check_condition({:length, path, ">", n}) do
+    dynamic(
+      [d],
+      fragment(
+        "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END > ?",
+        d.content,
+        type(^path, {:array, :string}),
+        d.content,
+        type(^path, {:array, :string}),
+        ^n
+      )
+    )
+  end
+
+  defp check_condition({:length, path, ">=", n}) do
+    dynamic(
+      [d],
+      fragment(
+        "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END >= ?",
+        d.content,
+        type(^path, {:array, :string}),
+        d.content,
+        type(^path, {:array, :string}),
+        ^n
+      )
+    )
+  end
+
+  defp check_condition({:length, path, "==", n}) do
+    dynamic(
+      [d],
+      fragment(
+        "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END = ?",
+        d.content,
+        type(^path, {:array, :string}),
+        d.content,
+        type(^path, {:array, :string}),
+        ^n
+      )
+    )
+  end
+
+  # `defined(path)`: present and not JSON null. `defined(path[i])` also needs
+  # an array: Postgres reads `-> 0` of a scalar as the scalar itself, where
+  # GROQ gives null.
+  defp check_condition({:defined, path, nil}) do
+    dynamic(
+      [d],
+      fragment("jsonb_typeof(? #> ?) <> 'null'", d.content, type(^path, {:array, :string}))
+    )
+  end
+
+  defp check_condition({:defined, path, i}) do
+    dynamic(
+      [d],
+      fragment(
+        "(jsonb_typeof(? #> ?) = 'array' AND jsonb_typeof((? #> ?) -> CAST(? AS integer)) <> 'null')",
+        d.content,
+        type(^path, {:array, :string}),
+        d.content,
+        type(^path, {:array, :string}),
+        ^i
       )
     )
   end

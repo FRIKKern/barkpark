@@ -698,19 +698,34 @@ defmodule Barkpark.Groq.Evaluator do
   end
 
   # `count(*[...])` whose filter SQL matches exactly is counted by the source,
-  # without loading the documents.
-  defp source_count({:memo, inner}, scope, ctx), do: source_count(inner, scope, ctx)
+  # without loading the documents. Any other filter is counted by a scan that
+  # holds one chunk of documents at a time, so the per-fetch limits, which
+  # protect memory, do not apply to it. A closed subquery (`{:memo, _}`) gives
+  # the same count in every scope, so the source may keep its result.
+  defp source_count({:memo, inner}, scope, ctx), do: source_count(inner, scope, ctx, inner)
+  defp source_count(arg, scope, ctx), do: source_count(arg, scope, ctx, nil)
 
-  defp source_count({:filter, {:everything}, expr}, scope, ctx) do
+  defp source_count({:filter, {:everything}, expr}, scope, ctx, cache) do
     resolve = fn outer_expr -> eval(outer_expr, nested(scope, nil), ctx) end
 
+    with :error <- exact_count(expr, resolve, ctx) do
+      Source.scan_count(ctx.source, Pushdown.constraints(expr, resolve), cache, fn doc ->
+        kept = eval(expr, nested(scope, doc), ctx) === true
+        # references?/2 caches per document; a scanned one is not seen again.
+        Process.delete({:groq_refs, doc["_id"]})
+        kept
+      end)
+    end
+  end
+
+  defp source_count(_arg, _scope, _ctx, _cache), do: :error
+
+  defp exact_count(expr, resolve, ctx) do
     case Pushdown.exact(expr, resolve) do
       {:ok, constraints} -> Source.count(ctx.source, constraints)
       :error -> :error
     end
   end
-
-  defp source_count(_arg, _scope, _ctx), do: :error
 
   # `references()` walks the whole value. A document straight from the source
   # is walked once per query and its id set reused, which matters for the

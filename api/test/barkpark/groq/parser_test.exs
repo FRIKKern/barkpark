@@ -166,6 +166,49 @@ defmodule Barkpark.Groq.ParserTest do
       assert c.any == []
     end
 
+    test "count() against an integer and defined() become checks" do
+      c =
+        constraints(
+          ~s|*[_type == "p" && count(onix.contributors) > 0 && 1 <= count(tags) && count(a.b) == $n]|,
+          %{"n" => 0}
+        )
+
+      assert Enum.sort(c.checks) == [
+               {:length, ["a", "b"], "==", 0},
+               {:length, ["onix", "contributors"], ">", 0},
+               {:length, ["tags"], ">=", 1}
+             ]
+
+      c = constraints(~s|*[defined(bokbasen.themaCodes[0]) && defined(isbn) && defined(x[-1])]|)
+
+      assert Enum.sort(c.checks) == [
+               {:defined, ["bokbasen", "themaCodes"], 0},
+               {:defined, ["isbn"], nil},
+               {:defined, ["x"], -1}
+             ]
+    end
+
+    test "a filter of checks and equalities is exact" do
+      {:ok, tree} = Parser.parse(~s|*[_type == "p" && count(tags) >= 1 && defined(tags[0])]|)
+
+      assert {:ok, %{types: ["p"], checks: [_, _]}} = Pushdown.exact(filter_expr(tree))
+    end
+
+    test "count() != n, a non-integer bound and a system path stay in memory" do
+      for filter <- [
+            ~s|count(tags) != 0|,
+            ~s|count(tags) > 0.5|,
+            ~s|count(tags) > count(other)|,
+            ~s|count(_keys) > 0|,
+            ~s|count(title) > 0|,
+            ~s|count(tags[_type == "x"]) > 0|
+          ] do
+        {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]")
+        assert Pushdown.constraints(filter_expr(tree)).checks == [], filter
+        assert Pushdown.exact(filter_expr(tree)) == :error, filter
+      end
+    end
+
     test "or, functions and ^ stay in memory" do
       c = constraints(~s'*[_type == "a" || _type == "b"]')
       assert c.types == nil

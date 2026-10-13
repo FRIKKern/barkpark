@@ -16,6 +16,11 @@ defmodule Barkpark.Groq.Pushdown do
     * `a.b in ["x", "y"]` with scalar members -> `any`, a list of probes of
       which a document must match at least one
     * `references("x", ...)` -> `any` with the probe `{:refs, ids}`
+    * `count(a.b) > 0` and `<`, `<=`, `>`, `>=`, `==` against an integer, on
+      a content path -> `checks` as `{:length, path, op, n}`, which the
+      source tests with `jsonb_array_length`
+    * `defined(a.b)` and `defined(a.b[0])` on a content path -> `checks` as
+      `{:defined, path, index}`, with `index` nil for no index
     * an `||` -> `any` with one probe per disjunct. A disjunct is a single
       condition or an `&&` of conditions; it gives the probe of its most
       selective condition: `_id` (`{:ids, ids}`), then `references()`, then a
@@ -47,15 +52,19 @@ defmodule Barkpark.Groq.Pushdown do
   @pure_functions ~w(defined count length lower upper coalesce string)
 
   @type probe :: map() | {:refs, [String.t()]} | {:ids, [String.t()]}
+  @type check ::
+          {:length, [String.t()], String.t(), integer()}
+          | {:defined, [String.t()], integer() | nil}
   @type t :: %{
           types: [String.t()] | nil,
           ids: [String.t()] | nil,
           eq: list(),
-          any: [[probe()]]
+          any: [[probe()]],
+          checks: [check()]
         }
 
   @spec empty() :: t()
-  def empty, do: %{types: nil, ids: nil, eq: [], any: []}
+  def empty, do: %{types: nil, ids: nil, eq: [], any: [], checks: []}
 
   @doc """
   Constraints for the filter `expr`. `resolve` evaluates an expression that
@@ -72,10 +81,11 @@ defmodule Barkpark.Groq.Pushdown do
   Constraints that match exactly the documents `expr` keeps, or `:error`.
 
   A source may then count in SQL without loading anything. Only these
-  conjuncts qualify: `_type ==` and `in` with strings, `_id ==` and `in`, and
-  a content path `==` a string, number or boolean whose first segment does
-  not start with `_` and whose segments are not array indexes. `title`, `null`, `||`, functions and
-  everything else make the filter inexact. The source still checks that
+  conjuncts qualify: `_type ==` and `in` with strings, `_id ==` and `in`, a
+  content path `==` a string, number or boolean, and the `checks` above. A
+  content path's first segment does not start with `_` and its segments are
+  not array indexes. `title`, `null`, `||`, other functions and everything
+  else make the filter inexact. The source still checks that
   rendering hides no field before it trusts the count.
   """
   @spec exact(tuple(), (tuple() -> term()) | nil) :: {:ok, t()} | :error
@@ -90,7 +100,14 @@ defmodule Barkpark.Groq.Pushdown do
     end)
   end
 
-  defp exact_conjunct({:op, op, _l, _r} = node, acc, resolve) when op in ["==", "in"] do
+  defp exact_conjunct(node, acc, resolve) do
+    case check(node, resolve) do
+      {:ok, check} -> {:ok, %{acc | checks: [check | acc.checks]}}
+      :error -> exact_match(node, acc, resolve)
+    end
+  end
+
+  defp exact_match({:op, op, _l, _r} = node, acc, resolve) when op in ["==", "in"] do
     case orient(node, resolve) do
       {:ok, ["_type"], v} when op == "==" and is_binary(v) ->
         {:ok, add(acc, op, ["_type"], v)}
@@ -114,7 +131,50 @@ defmodule Barkpark.Groq.Pushdown do
     end
   end
 
-  defp exact_conjunct(_node, _acc, _resolve), do: :error
+  defp exact_match(_node, _acc, _resolve), do: :error
+
+  # `count(path) > n`: GROQ's count() is null for anything but an array, and
+  # a comparison with null is not true, so SQL needs only the array's length.
+  # `!=` is left out: `null != 0` is true.
+  @length_ops %{"<" => ">", "<=" => ">=", ">" => "<", ">=" => "<=", "==" => "=="}
+
+  defp check({:op, op, l, r}, resolve) when is_map_key(@length_ops, op) do
+    case {count_path(l), count_path(r)} do
+      {{:ok, path}, _} -> length_check(path, op, r, resolve)
+      {_, {:ok, path}} -> length_check(path, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
+  # `defined(a.b[i])` with a literal index; Postgres `->` counts a negative
+  # index from the end, as GROQ does.
+  defp check({:func, "global", "defined", [{:elem, base, i}]}, _resolve) when is_integer(i) do
+    with {:ok, path} <- content_path(base), do: {:ok, {:defined, path, i}}
+  end
+
+  defp check({:func, "global", "defined", [arg]}, _resolve) do
+    with {:ok, path} <- content_path(arg), do: {:ok, {:defined, path, nil}}
+  end
+
+  defp check({:group, inner}, resolve), do: check(inner, resolve)
+  defp check(_node, _resolve), do: :error
+
+  defp length_check(path, op, n, resolve) do
+    case value(n, resolve) do
+      {:ok, n} when is_integer(n) -> {:ok, {:length, path, op, n}}
+      _ -> :error
+    end
+  end
+
+  defp count_path({:func, "global", "count", [arg]}), do: content_path(arg)
+  defp count_path(_node), do: :error
+
+  defp content_path(expr) do
+    case attr_path(expr) do
+      {:ok, path} -> if exact_path?(path), do: {:ok, path}, else: :error
+      :error -> :error
+    end
+  end
 
   # The renderer sets or drops the top-level `_` keys and `title`; an
   # all-digit segment would index an array in SQL but not in GROQ.
@@ -157,14 +217,21 @@ defmodule Barkpark.Groq.Pushdown do
   defp conjuncts({:group, inner}), do: conjuncts(inner)
   defp conjuncts(other), do: [other]
 
-  defp apply_conjunct({:op, op, _l, _r} = node, acc, resolve) when op in ["==", "in"] do
+  defp apply_conjunct(node, acc, resolve) do
+    case check(node, resolve) do
+      {:ok, check} -> %{acc | checks: [check | acc.checks]}
+      :error -> apply_match(node, acc, resolve)
+    end
+  end
+
+  defp apply_match({:op, op, _l, _r} = node, acc, resolve) when op in ["==", "in"] do
     case orient(node, resolve) do
       {:ok, path, value} -> add(acc, op, path, value)
       :error -> add_probes(acc, node, resolve)
     end
   end
 
-  defp apply_conjunct(node, acc, resolve), do: add_probes(acc, node, resolve)
+  defp apply_match(node, acc, resolve), do: add_probes(acc, node, resolve)
 
   defp add_probes(acc, node, resolve) do
     case probes(node, resolve) do
