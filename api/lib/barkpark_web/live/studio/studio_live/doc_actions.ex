@@ -41,7 +41,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     assigns = socket_to_assigns(socket_or_assigns)
     ctx = doc_actions_ctx(assigns)
     baseline = default_doc_actions(assigns, ctx)
-    disabled = Barkpark.Plugins.Registry.ResolverChain.disabled_action_names(ctx)
+    disabled = disabled_action_names(ctx)
 
     [baseline: baseline, ctx: ctx]
     |> Barkpark.Plugins.Registry.collect_doc_actions()
@@ -62,6 +62,26 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       doc: assigns[:editor_doc],
       workspace_id: workspace_id_from_assigns(assigns)
     }
+  end
+
+  # The action names of plugins disabled where this doc is edited
+  # (task-a11fcaa6d46a5fa4). With no workspace in the assigns, that is the
+  # Default workspace, which a flat (workspace-less) surface acts on; with no
+  # Default seeded either, nothing is gated.
+  defp disabled_action_names(ctx) do
+    workspace_id = ctx[:workspace_id] || default_workspace_id()
+
+    Barkpark.Plugins.Registry.ResolverChain.disabled_action_names(%{
+      ctx
+      | workspace_id: workspace_id
+    })
+  end
+
+  defp default_workspace_id do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} -> id
+      _ -> nil
+    end
   end
 
   defp workspace_id_from_assigns(assigns) do
@@ -461,7 +481,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
 
     # The plugin that owns this action is off in this workspace: not listed,
     # so not dispatchable either (task-a11fcaa6d46a5fa4).
-    if MapSet.member?(Barkpark.Plugins.Registry.ResolverChain.disabled_action_names(ctx), name) do
+    if MapSet.member?(disabled_action_names(ctx), name) do
       {:error, {:plugin_disabled, name}}
     else
       dispatch_enabled(ctx, name, doc_id, dataset, mode)

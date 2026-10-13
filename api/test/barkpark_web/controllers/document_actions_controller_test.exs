@@ -17,6 +17,7 @@ defmodule BarkparkWeb.DocumentActionsControllerTest do
   alias Barkpark.Content
   alias Barkpark.Plugins.Registry
   alias Barkpark.Tenancy
+  alias BarkparkWeb.Studio.StudioLive.DocActions
 
   @dataset "doc-actions-test"
 
@@ -337,6 +338,40 @@ defmodule BarkparkWeb.DocumentActionsControllerTest do
         assert body["error"]["code"] == "plugin_disabled"
         assert body["error"]["message"] =~ "turned off in this workspace"
       end
+    end
+
+    test "no workspace in the assigns: checked against the Default workspace" do
+      {default, _} = ensure_default_scope!()
+      register_stub!()
+      prior = Tenancy.workspace_plugin_settings(default)
+      on_exit(fn -> Tenancy.set_workspace_plugin_settings(default.id, prior) end)
+
+      {:ok, _} =
+        Tenancy.set_workspace_plugin_settings(default.id, %{
+          "stub-action-plugin" => %{"enabled" => false}
+        })
+
+      schema = %{actions: [%{"name" => "stub-ok", "label" => "Stub OK", "kind" => "modal"}]}
+
+      assigns = %{
+        dataset: @dataset,
+        editor_type: "post",
+        editor_doc: %{doc_id: "pd-flat"},
+        editor_schema: schema
+      }
+
+      refute "stub-ok" in Enum.map(DocActions.resolved_doc_actions(assigns), & &1["name"])
+
+      socket = %Phoenix.LiveView.Socket{assigns: Map.put(assigns, :__changed__, %{})}
+
+      assert DocActions.dispatch_action(
+               socket,
+               "stub-ok",
+               "pd-flat",
+               @dataset,
+               :dryrun
+             ) ==
+               {:error, {:plugin_disabled, "stub-ok"}}
     end
 
     test "a token from another workspace neither lists nor dispatches" do
