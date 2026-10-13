@@ -26,6 +26,7 @@ defmodule Barkpark.Bench.MediaUploadBenchTest do
   @dir System.get_env("MEDIA_BENCH_IMAGES")
 
   @moduletag timeout: :infinity
+  @moduletag ownership_timeout: 3_600_000
 
   if is_nil(@dir) do
     @moduletag :skip
@@ -33,6 +34,17 @@ defmodule Barkpark.Bench.MediaUploadBenchTest do
 
   setup do
     Auth.create_token("barkpark-dev-token", "dev", "media-bench", ["read", "write", "admin"])
+
+    # Measure the media path, not the per-token request budget.
+    original = Application.get_env(:barkpark, :rate_limits, [])
+
+    Application.put_env(
+      :barkpark,
+      :rate_limits,
+      Keyword.merge(original, read_per_minute: 1_000_000, write_per_minute: 1_000_000)
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, :rate_limits, original) end)
     :ok
   end
 
