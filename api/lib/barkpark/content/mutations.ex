@@ -677,6 +677,60 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # ── Direct publish (task-6e2552cdeb223fa2) ─────────────────────────────────
+  #
+  # `{"createOrReplace": doc, "publish": true}` lands the document on its
+  # PUBLISHED row in one row write, with one revision, event and audit row. The
+  # two-step `createOrReplace` + `publish` costs a draft insert, a published
+  # write and a draft delete, each with its own revision, event and audit row.
+  # Nothing is skipped on the way: `Writer.build_document/4` runs the whole
+  # create pipeline (fences, `:before_save`, schema check, encryption) and
+  # returns the draft unsaved, and `Lifecycle.publish_built_draft/4` runs every
+  # publish gate on it. An existing draft is deleted, as the two-step path
+  # deletes it. `ifRevisionID` is checked against the published row, the row
+  # this replaces. Not offered for system types and papers, whose writes carry
+  # their own fences (`@direct_publish_refused_types`).
+  @direct_publish_refused_types ["paper" | Writer.system_types()]
+
+  defp apply_one(%{"createOrReplace" => attrs, "publish" => true}, dataset, opts)
+       when is_map(attrs) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+    expected = if_rev(attrs)
+
+    if type in @direct_publish_refused_types do
+      {:error, {:direct_publish_unsupported, type}}
+    else
+      existing =
+        case id && type && Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+          {:ok, doc} -> doc
+          _ -> nil
+        end
+
+      with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
+           :ok <- ensure_rev(existing, expected),
+           :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+           :ok <-
+             ensure_read_only_unchanged(
+               type,
+               existing,
+               incoming_content(attrs),
+               id,
+               dataset,
+               opts
+             ),
+           {:ok, draft} <- Writer.build_document(type, attrs, dataset, opts),
+           {:ok, published} <-
+             Content.publish_built_draft(draft, type, dataset, [incumbent: existing] ++ opts) do
+        {:ok, published, "createOrReplace"}
+      end
+    end
+  end
+
+  defp apply_one(%{"createOrReplace" => _attrs, "publish" => flag}, _dataset, _opts)
+       when flag not in [true, false],
+       do: {:error, {:invalid_publish_flag, flag}}
+
   defp apply_one(%{"createOrReplace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]

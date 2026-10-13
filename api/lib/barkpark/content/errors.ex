@@ -752,6 +752,28 @@ defmodule Barkpark.Content.Errors do
          details: %{mutation: verb, missing: missing}
        }
 
+  # Direct publish (`{"createOrReplace": doc, "publish": true}`,
+  # task-6e2552cdeb223fa2) is for content types. A task, a paper and the other
+  # system types are written through their own doors and fences, so the option
+  # is refused for them under the registered `validation_failed` code.
+  defp build({:error, {:direct_publish_unsupported, type}}) when is_binary(type),
+    do: %{
+      code: "validation_failed",
+      message:
+        "createOrReplace with publish: true is not supported for type #{inspect(type)}; " <>
+          "send createOrReplace and then publish",
+      status: 422,
+      details: %{mutation: "createOrReplace", publish: true, type: type}
+    }
+
+  defp build({:error, {:invalid_publish_flag, value}}),
+    do: %{
+      code: "malformed",
+      message: "createOrReplace publish must be true or false, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "publish"}
+    }
+
   # A block list carrying an element that is not an object. `render_blocks/2`
   # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
   # (`is_map`), so `{"body":{"blocks":["notamap"]}}` used to clear the outer

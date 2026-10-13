@@ -5,7 +5,7 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
-**JS/TS:** use `@barkpark/core` (queries, mutations, media, listen) and `@barkpark/nextjs` (App Router). [SDK guide](cards/js-sdk.md).
+**JS/TS:** `@barkpark/core`, `@barkpark/nextjs`; [SDK guide](cards/js-sdk.md).
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
@@ -54,7 +54,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each parses like a lone `filter=`; clauses **AND** (no OR); different ops on one field compose; **same field+op twice → 400 `invalid_filter`** (use `in`); **one unparseable element fails the request** (400, never an unfiltered 200) |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs, §5a) |
 
-**Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` when more.
+**Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page — so **never infer truncation from `count == limit`**; `nextOffset` when more.
 
 ## 4a. `GET|POST /w/:workspace_slug/p/:project_slug/v{apiVersion}/data/query/:dataset` [token]
 
@@ -62,7 +62,7 @@ GROQ as Sanity's query API (client `apiHost`: `/w/…/p/…`): [contracts/groq-q
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so a bare `_publishedId` reaches an unpublished doc under both, as `patch`/`publish`/`discardDraft`/`delete` do.
+One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin ; a bare `_publishedId` reaches an unpublished doc under both.
 
 **Read-after-write is immediate** (`cache-control: max-age=0, private, must-revalidate`; ETags include `_id:_rev`). Writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row; `published` and `bp task get` read the exact ID.
 
@@ -80,21 +80,23 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 **Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
-**`Idempotency-Key`** (optional, this route). A repeat replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
+**`Idempotency-Key`** (optional). A repeat replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
 
-**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact draft ID + revision (missing →404, stale →412). Removes only that draft, with recovery history; a bare-id `delete` removes both. On a lost reply, reconcile; never retry against a recreated row.
+**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact id + rev (missing →404, stale →412); removes only that draft, keeping history. Lost reply: reconcile, never retry.
 
 **`create`** — new draft (`conflict` if one exists): `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
 **`createOrReplace`** — upserts the draft; **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
 
+**Direct publish** — `{ "createOrReplace": {…}, "publish": true }` is one write to `<id>` (one revision, event, audit row; no draft); publish gates run; drafts deleted; `ifRevisionID` checks `<id>`; `task`/`paper`/system types → 422.
+
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-All three create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`), else a `create.forked_published` warning. `patch` edits a published task in place.
+The create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`), else a `create.forked_published` warning. `patch` edits a published task in place.
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched item → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`. One doc's patches serialize.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID`: mismatch → `412` (`ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched item → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`. One doc's patches serialize.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 `validation_failed`:
 
@@ -105,7 +107,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. May add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
-Failures: §9. Searchable text (title + every `content` string) over Postgres' **1 048 575-byte** tsvector cap → `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`), nothing written. A document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) → `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` skips the duplicate scan.
+Failures: §9. Searchable text over the **1 048 575-byte** tsvector cap → `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`), nothing written. A document's JSON over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) → `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` skips the duplicate scan.
 
 ### 6a. `POST /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops` [token]
 
@@ -115,11 +117,11 @@ PortableDoc block ops on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
-SSE mutation stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
+SSE stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
 
 **Narrowing:** `?types=a,b`; `?ids=a,b`; `?perspective=published` drops drafts; `filter[f]=v1,v2`: any-of equality on redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (browsers: `?lastEventId=<int>`) replays later events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (or `?lastEventId=`) replays later events oldest-first, then live.
 
 First frame: `event: welcome`.
 
