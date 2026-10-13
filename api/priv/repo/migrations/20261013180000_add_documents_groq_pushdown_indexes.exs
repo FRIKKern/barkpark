@@ -30,11 +30,11 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsGroqPushdownIndexes do
   ## Disk headroom
 
   Before building, the migration estimates the index from a 5% page sample of
-  `documents` (the bytes of the sampled `_ref` arrays plus 64 bytes per
-  entry, times 20; over 20,000 synthetic products the index measured 72
-  bytes per `_ref` value and this formula gave 74) and reads the free space of the filesystem that holds the
-  database: `df` on `SHOW data_directory`, else `/var/lib/postgresql`, else
-  `/`. That works only when Postgres runs on the machine that runs the
+  `documents`: the bytes of the sampled `_ref` arrays plus 64 bytes per
+  entry, times 20. Over 20,000 synthetic products the index measured 72 bytes
+  per `_ref` value and this formula gave 74. It then reads the free space of
+  the filesystem that holds the database: `df` on `SHOW data_directory`, else
+  `/var/lib/postgresql`, else `/`. That works only when Postgres runs on the machine that runs the
   migration, which is the case on an instance (`DATABASE_URL` points at
   localhost). It needs four times the estimate free, and at least 1 GiB: the
   index, the WAL its build writes, and room to spare. Below that it logs a
