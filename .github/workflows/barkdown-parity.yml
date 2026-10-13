@@ -116,6 +116,7 @@ jobs:
         working-directory: barkdown/app
         env:
           PARITY_ROWS: ${{ github.event.inputs.rows }}
+          BARKDOWN_PARITY_QUOTE_BACKSPACE: paragraph
           BARKDOWN_PROVIDER: api
           ELECTRON_DISABLE_SANDBOX: '1'
         run: xvfb-run -a --server-args="-screen 0 1600x1000x24" node tests/parity.mjs
@@ -131,6 +132,7 @@ jobs:
             barkdown/app/test-results/parity.json
             barkdown/app/test-results/parity-*.log
             barkdown/app/test-results/*.png
+            barkdown/app/test-results/editor-gap-assertions/
           if-no-files-found: ignore
   gate:
     name: Barkdown parity gate

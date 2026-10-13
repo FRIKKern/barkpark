@@ -396,10 +396,10 @@ alone does not establish merge enforcement. Barkdown's separate weekly/dispatch
 policy is unchanged. G2 acceptance still needs a live deliberately broken Tab
 failure and the owner’s cadence/enforcement decision.
 
-<!-- doc-exec: allowlisted deps=scripts/barkdown-parity-dispatch.mjs,scripts/barkdown-parity-dispatch.test.mjs,scripts/node-test-floor.mjs -->
+<!-- doc-exec: allowlisted deps=scripts/barkdown-parity-dispatch.mjs,scripts/barkdown-parity-dispatch.test.mjs -->
 ```sh
 cd "${DOC_DRIFT_REPO:-.}"
-node scripts/node-test-floor.mjs --floor 1 scripts/barkdown-parity-dispatch.test.mjs
+node --test scripts/barkdown-parity-dispatch.test.mjs
 ```
 
 ### The required set governs the MERGE, not main's health afterwards
