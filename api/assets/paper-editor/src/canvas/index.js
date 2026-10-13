@@ -32,6 +32,7 @@
 import { Editor } from "@tiptap/core";
 import { clipboardPastePolicy, stripPastedImages } from "./clipboard-paste-policy.js";
 import { cleanPastedHTML } from "./paste-html.js";
+import { safeUrl } from "../safe-url.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -757,6 +758,14 @@ class BpPaperCanvas extends HTMLElement {
     // injected async (file) => { src, alt?, width?, height? } — where a pasted or dropped
     // picture goes (the host's Barkpark media); unset → the image node says so.
     this._mediaUploader = null;
+    // injected async ({ kind, current }) => { src, alt?, width? } | null — the host's own
+    // image picker (upload / library): the Image insert and an image's Select open it.
+    this._mediaPicker = null;
+    // An image's Select asks for the host's picker on that image (image-node.js).
+    this.addEventListener("bp-canvas-image-pick", (event) => {
+      event.stopPropagation();
+      if (event.detail && Number.isInteger(event.detail.pos)) void this._pickImageAt(event.detail.pos);
+    });
     // Shared carets: the host's last setRemoteSelections list (re-applied on
     // mount), and the rAF-coalesced bp-canvas-selection emit.
     this._remoteSelections = [];
@@ -840,6 +849,7 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
     this._upgradeProperty("mediaUploader");
+    this._upgradeProperty("mediaPicker");
     this._upgradeProperty("linkPreviewSource");
 
     // Default true; only the literal string "false" disables editing. Mount-time
@@ -1771,7 +1781,9 @@ class BpPaperCanvas extends HTMLElement {
     if (item.object || this._objectOverrides().has(type)) return this._insertDeclaredObject(type);
     if (serverBuildsInsert(type, this._hostBuildsInserts())) return this._insertViaServer(type, { replaceSlashLine: false });
     const level = attrs && Number.isInteger(attrs.level) ? attrs.level : item.level;
-    return insertSlashTypeAtSelection(this._editor, type, undefined, level ? { level } : undefined);
+    const done = insertSlashTypeAtSelection(this._editor, type, undefined, level ? { level } : undefined);
+    if (done && type === "image") this._pickInsertedImage();
+    return done;
   }
 
   _scheduleToolbarState() {
@@ -2734,6 +2746,67 @@ class BpPaperCanvas extends HTMLElement {
     this._mediaUploader = fn;
   }
 
+  // The host's image picker. Set: an Image insert opens it for the new block, and each
+  // image offers Select (CSS shows it on [data-media-picker]). Unset: today's image block.
+  set mediaPicker(fn) {
+    this._mediaPicker = typeof fn === "function" ? fn : null;
+    this.toggleAttribute("data-media-picker", !!this._mediaPicker);
+  }
+
+  get mediaPicker() {
+    return this._mediaPicker;
+  }
+
+  // Run the host's picker for the image at `pos`; its answer becomes the image's src
+  // (and alt / width when given) in one undo step. null, a throw or a refused src
+  // leaves it as it was.
+  async _pickImageAt(pos) {
+    const picker = this._mediaPicker;
+    const editor = this._editor;
+    if (typeof picker !== "function" || !editor || editor.isDestroyed || !this._editable) return false;
+    const node = editor.state.doc.nodeAt(pos);
+    if (!node || node.type.name !== "bpImage") return false;
+    const id = node.attrs.bpId;
+    let picked = null;
+    try {
+      picked = await picker({ kind: node.attrs.src ? "replace" : "insert", current: node.attrs.src ? { src: node.attrs.src, alt: node.attrs.alt || null } : null });
+    } catch (_e) {
+      return false;
+    }
+    if (this._editor !== editor || editor.isDestroyed || !picked || typeof picked.src !== "string") return false;
+    // The image node paints src through the reader's allowlist (safeUrl): a src it would
+    // refuse (javascript:, data:, protocol-relative) is not stored at all.
+    const src = safeUrl(picked.src.trim());
+    if (src === "#" || src.trim() === "") return false;
+    // The image may have moved meanwhile: find it again, by id when it has one.
+    let at = null;
+    editor.state.doc.descendants((n, p) => {
+      if (at != null) return false;
+      if (n.type.name === "bpImage" && (id ? n.attrs.bpId === id : p === pos)) at = p;
+      return true;
+    });
+    const cur = at != null ? editor.state.doc.nodeAt(at) : null;
+    if (!cur) return false;
+    const attrs = { ...cur.attrs, src, uploadError: null };
+    if (typeof picked.alt === "string") attrs.alt = picked.alt;
+    if (Number.isFinite(picked.width) && picked.width >= 16) attrs.width = Math.round(picked.width);
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, attrs));
+    return true;
+  }
+
+  // After an Image insert: open the picker for the empty image the insert left at the caret.
+  _pickInsertedImage() {
+    const editor = this._editor;
+    if (!this._mediaPicker || !editor) return;
+    const { from } = editor.state.selection;
+    let best = null;
+    editor.state.doc.descendants((n, p) => {
+      if (n.type.name === "bpImage" && !n.attrs.src && !n.attrs.uploadKey && (best == null || Math.abs(p - from) < Math.abs(best - from))) best = p;
+      return true;
+    });
+    if (best != null) void this._pickImageAt(best);
+  }
+
   get mediaUploader() {
     return this._mediaUploader;
   }
@@ -3621,6 +3694,7 @@ class BpPaperCanvas extends HTMLElement {
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
     // `replaceText`: the block's text is the slash's own "/query", so it is replaced.
     insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level, replaceText: true });
+    if (item.type === "image") this._pickInsertedImage();
   }
 
   // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
@@ -3818,6 +3892,8 @@ class BpPaperCanvas extends HTMLElement {
       // (task-441e0c1cc08acc5e, the palette twin of the slash rule).
       declaredObjects: this._objectOverrides(),
       onObjectInsert: (type) => this._insertDeclaredObject(type),
+      // Insert Image opens the host's picker for the new block (mediaPicker).
+      onImageInserted: () => this._pickInsertedImage(),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({

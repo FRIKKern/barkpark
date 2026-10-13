@@ -455,7 +455,11 @@ export function buildCommandRegistry(editor, opts) {
         : opts && typeof opts.onServerInsert === "function" &&
           (typeof opts.serverBuilds === "function" ? opts.serverBuilds(type) : CANVAS_SERVER_INSERT_TYPES.has(type))
           ? () => opts.onServerInsert(type)
-          : (ed) => insertSlashTypeAtSelection(ed, type),
+          : (ed) => {
+              const done = insertSlashTypeAtSelection(ed, type);
+              if (done && type === "image" && opts && typeof opts.onImageInserted === "function") opts.onImageInserted();
+              return done;
+            },
     });
   }
 
