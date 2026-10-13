@@ -798,15 +798,7 @@ defmodule Barkpark.Media do
   def get_file_by_path(relative_path, opts \\ []) when is_binary(relative_path) do
     MediaFile
     |> where([m], m.path == ^relative_path)
-    |> Content.Scope.scope_to_workspace_or_global(
-      Keyword.get(opts, :workspace_id),
-      Keyword.get(opts, :project_id)
-    )
-    |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      file -> {:ok, file}
-    end
+    |> scoped_one(opts)
   end
 
   @doc """
@@ -840,6 +832,8 @@ defmodule Barkpark.Media do
     |> scoped_one(opts)
   end
 
+  # The one scoped single-row read behind the path, source id and sha1
+  # lookups. The controllers confine its result with `confine_one/2`.
   defp scoped_one(query, opts) do
     query
     |> Content.Scope.scope_to_workspace_or_global(
