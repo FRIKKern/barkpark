@@ -219,9 +219,13 @@ class Oracle {
   async evaluate(query, params, now) {
     if (!this.worker) await this.start()
     const reply = new Promise((resolve) => this.worker.once('message', resolve))
-    const timeout = new Promise((resolve) => setTimeout(() => resolve({timeout: true}), this.timeoutMs))
+    let timer
+    const timeout = new Promise((resolve) => {
+      timer = setTimeout(() => resolve({timeout: true}), this.timeoutMs)
+    })
     this.worker.postMessage({query, params, now})
     const result = await Promise.race([reply, timeout])
+    clearTimeout(timer)
     if (result.timeout) {
       await this.worker.terminate()
       this.worker = null
