@@ -32,6 +32,7 @@
 import { Editor } from "@tiptap/core";
 import { clipboardPastePolicy, stripPastedImages } from "./clipboard-paste-policy.js";
 import { cleanPastedHTML } from "./paste-html.js";
+import { safeUrl } from "../safe-url.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -2757,7 +2758,8 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   // Run the host's picker for the image at `pos`; its answer becomes the image's src
-  // (and alt / width when given) in one undo step. null or a throw leaves it as it was.
+  // (and alt / width when given) in one undo step. null, a throw or a refused src
+  // leaves it as it was.
   async _pickImageAt(pos) {
     const picker = this._mediaPicker;
     const editor = this._editor;
@@ -2771,7 +2773,11 @@ class BpPaperCanvas extends HTMLElement {
     } catch (_e) {
       return false;
     }
-    if (this._editor !== editor || editor.isDestroyed || !picked || typeof picked.src !== "string" || picked.src.trim() === "") return false;
+    if (this._editor !== editor || editor.isDestroyed || !picked || typeof picked.src !== "string") return false;
+    // The image node paints src through the reader's allowlist (safeUrl): a src it would
+    // refuse (javascript:, data:, protocol-relative) is not stored at all.
+    const src = safeUrl(picked.src.trim());
+    if (src === "#" || src.trim() === "") return false;
     // The image may have moved meanwhile: find it again, by id when it has one.
     let at = null;
     editor.state.doc.descendants((n, p) => {
@@ -2781,7 +2787,7 @@ class BpPaperCanvas extends HTMLElement {
     });
     const cur = at != null ? editor.state.doc.nodeAt(at) : null;
     if (!cur) return false;
-    const attrs = { ...cur.attrs, src: picked.src.trim(), uploadError: null };
+    const attrs = { ...cur.attrs, src, uploadError: null };
     if (typeof picked.alt === "string") attrs.alt = picked.alt;
     if (Number.isFinite(picked.width) && picked.width >= 16) attrs.width = Math.round(picked.width);
     editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, attrs));

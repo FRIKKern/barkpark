@@ -115,7 +115,9 @@ dialog (upload or library): an Image insert (slash menu, palette, `insertBlock`)
 opens it for the new block, and each image's Select opens it for that image
 (the canvas carries `data-media-picker` while one is set, which shows Select). Its
 answer becomes the image's `src`, and `alt` / `width` when given; an insert and its
-pick are one undo step. `null`, a blank `src` or a throw leaves the image as it was.
+pick are one undo step. The `src` goes through the reader's URL allowlist (`safeUrl`:
+http(s), mailto, tel, relative, `#`); one it refuses (`javascript:`, `data:`,
+protocol-relative), a blank `src`, `null` or a throw leaves the image as it was.
 
 ### Outbound (canvas → host)
 

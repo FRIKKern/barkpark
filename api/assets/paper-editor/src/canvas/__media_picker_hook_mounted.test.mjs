@@ -98,14 +98,27 @@ try {
   assert.equal(images(editor).at(-1).src, "https://cdn.example/picked.png", "replaced");
   await sleep(600);
 
-  // Cancel (null) or a failing picker: nothing changes.
-  for (const next of [null, () => { throw new Error("closed"); }, { src: "  " }]) {
+  // Cancel (null), a failing picker, or a src the reader would refuse: nothing changes,
+  // and no refused address reaches the wire.
+  const refused = ["javascript:alert(1)", " JAVASCRIPT:alert(1)", "java\tscript:alert(1)", "data:text/html,<script>alert(1)</script>", "data:image/svg+xml,<svg onload=alert(1)>", "//evil.example/x.png", "vbscript:msgbox(1)"];
+  const sent = batches.length;
+  for (const next of [null, () => { throw new Error("closed"); }, { src: "  " }, ...refused.map((src) => ({ src, alt: "x" }))]) {
     answer = next;
     const doc = editor.getJSON();
     canvas.querySelector(".bp-canvas-image-pick").click();
     await sleep(20);
     assert.deepEqual(editor.getJSON(), doc, "no pick, no change");
   }
+  await sleep(600);
+  const wire = JSON.stringify(batches.slice(sent)).toLowerCase();
+  for (const bad of ["javascript:", "data:", "vbscript:", "//evil"]) assert.ok(!wire.includes(bad), `no ${bad} on the wire`);
+  assert.equal(canvas.querySelector(".bp-canvas-image-img[src^='javascript' i]"), null, "and none painted");
+
+  // A relative or https src passes, as the reader keeps it.
+  answer = { src: "/media/files/a.png" };
+  canvas.querySelector(".bp-canvas-image-pick").click();
+  await sleep(20);
+  assert.equal(images(editor).at(-1).src, "/media/files/a.png", "a relative src is kept");
 
   // Unset: no attribute, and an Image insert is today's empty block.
   canvas.mediaPicker = null;
@@ -117,7 +130,7 @@ try {
   assert.equal(calls.length, count, "no picker is asked");
   assert.equal(images(editor)[0].src, "", "an empty image block, as before");
 
-  console.log("PASS media_picker_hook: insert and Select open the host's picker; the pick lands in one undo step; cancel and unset change nothing");
+  console.log("PASS media_picker_hook: insert and Select open the host's picker; the pick lands in one undo step; cancel, refused src (javascript:, data:, //) and unset change nothing");
 } catch (error) {
   failed = true;
   throw error;
