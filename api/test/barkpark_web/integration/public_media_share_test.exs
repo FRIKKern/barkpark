@@ -183,9 +183,9 @@ defmodule BarkparkWeb.Integration.PublicMediaShareTest do
 
       for {name, url} <- urls do
         resp = anon() |> get(url)
-        assert [cache] = get_resp_header(resp, "cache-control"), "#{name}"
+        assert [cache] = get_resp_header(resp, "cache-control")
         assert String.starts_with?(cache, "public, max-age="), "#{name}: #{cache}"
-        assert [etag] = get_resp_header(resp, "etag"), "#{name}"
+        assert [etag] = get_resp_header(resp, "etag")
 
         again = anon() |> put_req_header("if-none-match", etag) |> get(url)
         assert again.status == 304, "#{name}"
