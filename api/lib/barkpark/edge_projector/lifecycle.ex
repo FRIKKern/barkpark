@@ -361,6 +361,8 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
       _ = Repo.query!("SELECT pg_advisory_lock(hashtext($1))", [key])
 
       try do
+        # The row this write itself committed; the upsert scopes its edges.
+        # global-read: by-PK re-read of the queued row, tenancy is its own
         case Repo.get(Barkpark.Content.Document, pk) do
           nil -> :ok
           current -> flush_one_deferred_upsert({current, id, dataset})
