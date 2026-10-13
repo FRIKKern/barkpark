@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.4.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.5.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -234,6 +234,18 @@ export interface BpPaperCanvasElement extends HTMLElement {
   /** The host's image dialog: an Image insert and an image's Select open it. */
   mediaPicker:
     | ((request: { kind: "insert" | "replace"; current: { src: string; alt: string | null } | null }) => MaybePromise<{ src: string; alt?: string; width?: number } | null>)
+    | null
+    | undefined;
+  /** The host's editor for a declared block or inline object, instead of the popover. */
+  editBlockObject:
+    | ((request: {
+        type: string;
+        title: string;
+        inline: boolean;
+        fields: Array<{ name: string; title?: string; type?: string; [key: string]: unknown }>;
+        value: { type: string; [key: string]: unknown };
+        error: { field: string | null; message: string } | null;
+      }) => MaybePromise<Record<string, unknown> | null>)
     | null
     | undefined;
 

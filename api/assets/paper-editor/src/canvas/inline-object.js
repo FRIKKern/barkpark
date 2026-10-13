@@ -415,6 +415,75 @@ export class InlineObjectDialog {
   }
 }
 
+// The host's own editor for a declared object (editBlockObject, EMBED-CONTRACT):
+// the same open/close surface as InlineObjectDialog, so every insert and edit path
+// goes through it unchanged. The host gets { type, title, inline, fields, value,
+// error } and answers the new value or null. Only the declared fields are taken
+// from the answer; type, id and undeclared keys stay as stored. A missing required
+// value asks again with that field's error.
+export class HostObjectDialog {
+  constructor(hook) {
+    this._hook = hook;
+    this._ticket = 0;
+    this._open = false;
+  }
+
+  isOpen() {
+    return this._open;
+  }
+
+  focusFirst() {}
+
+  open({ kind, stored, onSave, onClose, error, inline = false }) {
+    this.close(false);
+    const ticket = ++this._ticket;
+    this._open = true;
+    this._onClose = onClose;
+    const k = editableKind(kind);
+    const base = stored && typeof stored === "object" ? stored : { type: k.name };
+    const ask = async (err) => {
+      let answer = null;
+      try {
+        answer = await this._hook({
+          type: k.name,
+          title: k.title || k.name,
+          inline: !!inline,
+          fields: JSON.parse(JSON.stringify(k.fields)),
+          value: JSON.parse(JSON.stringify(base)),
+          error: err && err.message ? { field: err.field || null, message: err.message } : null,
+        });
+      } catch (_e) {
+        answer = null;
+      }
+      if (ticket !== this._ticket || !this._open) return;
+      if (!answer || typeof answer !== "object") return this.close();
+      const values = { ...base, type: k.name };
+      for (const field of k.fields) {
+        const v = answer[field.name];
+        if (v === undefined || v === null || v === "") delete values[field.name];
+        else values[field.name] = v;
+      }
+      const missing = k.fields.find((f) => fieldRequired(f) && values[f.name] === undefined);
+      if (missing) return ask({ field: missing.name, message: t("Required") });
+      this.close();
+      if (typeof onSave === "function") onSave(values);
+    };
+    void ask(error);
+    return null;
+  }
+
+  close(notify = true) {
+    if (!this._open) return;
+    this._open = false;
+    this._ticket++;
+    const done = this._onClose;
+    this._onClose = null;
+    if (notify && typeof done === "function") done();
+  }
+
+  showError() {}
+}
+
 // ── editor wiring ──────────────────────────────────────────────────────────
 
 // Open the dialog for the atom at `pos`. Save rewrites its stored node in one
@@ -434,6 +503,7 @@ export function editInlineObjectAt(host, editor, pos, error) {
     stored,
     anchorRect: rect,
     error,
+    inline: true,
     onSave: (values) => {
       const at = findAtom(editor.state.doc, pos, stored);
       if (at == null) return;
@@ -529,6 +599,7 @@ export function insertInlineObject(host, editor, name, { replaceRange } = {}) {
     kind,
     stored: { type: name },
     anchorRect: caret,
+    inline: true,
     onSave: (values) => {
       host.noteInlineObjectSave(values);
       const pos = Math.min(at, editor.state.doc.content.size);
