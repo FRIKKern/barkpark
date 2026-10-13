@@ -160,17 +160,30 @@ async function runEndpoint(args, query, params) {
   return {status: res.status, body, elapsed}
 }
 
+// Latency of one query: wall time seen by this client, and the `ms` the
+// endpoint reports (server time, without connection and dev-only plug costs).
 async function bench(args, entry, params) {
   const runs = Number(args.runs || 50)
-  const times = []
+  const wall = []
+  const server = []
   for (let i = 0; i < runs; i++) {
     const r = await runEndpoint(args, entry.query, params)
     if (r.status !== 200) throw new Error(`bench query failed: ${r.status}`)
-    times.push(r.elapsed)
+    wall.push(r.elapsed)
+    server.push(r.body.ms)
   }
-  times.sort((a, b) => a - b)
-  const pct = (p) => times[Math.min(times.length - 1, Math.ceil((p / 100) * times.length) - 1)]
-  console.log(JSON.stringify({id: entry.id, runs, p50: pct(50), p95: pct(95), max: times.at(-1)}))
+  const pct = (list, p) => {
+    const sorted = [...list].sort((a, b) => a - b)
+    return Math.round(sorted[Math.min(sorted.length - 1, Math.ceil((p / 100) * sorted.length) - 1)])
+  }
+  console.log(
+    JSON.stringify({
+      id: entry.id,
+      runs,
+      server_ms: {p50: pct(server, 50), p95: pct(server, 95), max: Math.max(...server)},
+      wall_ms: {p50: pct(wall, 50), p95: pct(wall, 95), max: Math.round(Math.max(...wall))},
+    }),
+  )
 }
 
 // The oracle worker: holds the dataset and evaluates one query per message.
