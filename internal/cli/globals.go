@@ -73,6 +73,12 @@ type globals struct {
 	// silently repairing it.
 	noCache bool
 
+	// noRetry is --no-retry: send every request once. It turns off the 429
+	// and transient-500 retries, the manifest fetch's 429 re-ask and the task
+	// ledger write retry, for a caller that backs off on its own. Same effect
+	// as BARKPARK_NO_RETRY=1 (internal/apiclient/retry_optout.go).
+	noRetry bool
+
 	// manifestPath is the --manifest <path> override: load the manifest from a
 	// local file instead of GET /v1/capabilities. Lets the CLI run before the
 	// capabilities endpoint is deployed. Empty means no override.
@@ -104,6 +110,7 @@ var boolFlags = map[string]bool{
 	"--no-color": true, "--dry-run": true,
 	"--yes": true, "--all": true, "--full": true,
 	"--no-cache": true,
+	"--no-retry": true,
 	"-h":         true, "--help": true,
 	"--version": true, "-V": true,
 }
@@ -250,6 +257,8 @@ func (g *globals) set(key, val string) error {
 		g.full = true
 	case "--no-cache":
 		g.noCache = true
+	case "--no-retry":
+		g.noRetry = true
 	case "--limit":
 		n, err := strconv.Atoi(val)
 		if err != nil {

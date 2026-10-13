@@ -606,7 +606,7 @@ var completionGlobals = []string{
 	"-s", "--server", "--token", "-w", "--workspace", "-p", "--project",
 	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest", "--session",
 	"--json", "-q", "--quiet", "-v", "--verbose", "--no-color", "--dry-run",
-	"--yes", "--all", "--full", "--no-cache", "-h", "--help", "--version", "-V",
+	"--yes", "--all", "--full", "--no-cache", "--no-retry", "-h", "--help", "--version", "-V",
 }
 
 // runCompletion emits a shell completion script for `bp` (`bash`, `zsh`, or

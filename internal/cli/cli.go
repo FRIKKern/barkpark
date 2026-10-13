@@ -78,6 +78,10 @@ func Execute(args []string) int {
 	}
 	out.applyGlobals(g)
 
+	// --no-retry (retry_optout.go in internal/apiclient): every HTTP client in
+	// this process reads the switch, so it is set once, before any request.
+	apiclient.SetNoRetry(g.noRetry)
+
 	// `bp --version` / `bp -V` print the version and exit, before any noun
 	// dispatch — so it works offline, with no manifest fetch.
 	if g.version {

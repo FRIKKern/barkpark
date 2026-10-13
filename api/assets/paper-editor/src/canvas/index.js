@@ -1740,6 +1740,19 @@ class BpPaperCanvas extends HTMLElement {
   // Each runs the transaction the canvas's own surfaces run, on the current
   // selection, and answers whether it applied. Unmounted or read-only: false.
 
+  // ProseMirror takes a keyboard (or script) selection change on the browser's
+  // selectionchange, a task later: a toolbar press in between would act on the old
+  // selection. Read the DOM's pending selection first, so a command acts on what the
+  // author sees (task-ee29b37ca1c6139d).
+  _flushDomSelection() {
+    const view = this._editor && !this._editor.isDestroyed ? this._editor.view : null;
+    try {
+      if (view && view.domObserver && typeof view.domObserver.flush === "function") view.domObserver.flush();
+    } catch (_e) {
+      // A view mid-teardown: the command reads the state it has.
+    }
+  }
+
   run(command, args = {}) {
     if (!this.can(command, args)) return false;
     const editor = this._editor;
@@ -1763,6 +1776,7 @@ class BpPaperCanvas extends HTMLElement {
   can(command, args = {}) {
     const editor = this._editor;
     if (!editor || editor.isDestroyed || !this._editable) return false;
+    this._flushDomSelection();
     const a = args && typeof args === "object" ? args : {};
     const vocab = this._toolbarVocabulary();
     switch (command) {
@@ -1776,6 +1790,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   state() {
+    this._flushDomSelection();
     const editor = this._editor;
     return editor && !editor.isDestroyed ? toolbarState(editor) : emptyToolbarState();
   }

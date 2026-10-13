@@ -222,7 +222,9 @@ mount `findSet`/`findState` return `{ query: "", count: 0, index: -1 }` and
 ### Toolbar commands
 
 For a host that draws its own toolbar (a field's chrome). Each command acts on
-the current selection and returns `true` when it applied; unmounted or read-only
+the current selection (the one on screen: `run`, `can` and `state` first read a DOM
+selection change the browser has not yet reported, so a press right after
+Shift+Arrow covers the whole selection) and returns `true` when it applied; unmounted or read-only
 it returns `false` and does nothing. Each runs the transaction the canvas's own
 surfaces run (the format bubble, the block menu's Turn into, the palette's
 Insert), so a press is one undo step and the same ops on the wire. Commands
