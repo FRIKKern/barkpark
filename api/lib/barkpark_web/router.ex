@@ -482,23 +482,6 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PublicRead)
   end
 
-  # :shared_docs_api for the POST form of the GROQ query read. Sanity's client
-  # sends a query too long for a URL as POST; it reads and writes nothing, so
-  # RateLimit bills it to the read bucket instead of the method's write bucket.
-  pipeline :shared_docs_query_post do
-    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
-    plug(:accepts, ["json"])
-    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
-    plug(BarkparkWeb.Plugs.RateLimit, class: :read)
-    plug(:scoped_api_optional_credential)
-    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
-    plug(BarkparkWeb.Plugs.ResolveWorkspace)
-    plug(BarkparkWeb.Plugs.ResolveProject)
-    plug(BarkparkWeb.Plugs.TenantLogMetadata)
-    plug(BarkparkWeb.Plugs.PublicRead)
-  end
-
   # Tenancy-aware READ pipeline for the scoped media surface (P3) — the
   # :shared_docs_api shape but gated on the :media surface. A `:media`-shared
   # scope is reachable by an anonymous caller (RequireShareScope is method-aware
@@ -1357,6 +1340,23 @@ defmodule BarkparkWeb.Router do
   # below and works). Ordering INSIDE a pipeline (plug order) is that
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
+
+  # :shared_docs_api for the POST form of the GROQ query read. Sanity's client
+  # sends a query too long for a URL as POST; it reads and writes nothing, so
+  # RateLimit bills it to the read bucket instead of the method's write bucket.
+  pipeline :shared_docs_query_post do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit, class: :read)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    plug(BarkparkWeb.Plugs.PublicRead)
+  end
 
   # The grant fold WITHOUT `:api_grant_read`'s PublicRead clamp, for the flat
   # federated search route (task-e6939d27b7e0b3aa). `ResolveTokenOwner` maps an
