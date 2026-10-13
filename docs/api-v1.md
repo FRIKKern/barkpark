@@ -56,6 +56,10 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` when more.
 
+## 4a. `GET|POST /w/:workspace_slug/p/:project_slug/v{apiVersion}/data/query/:dataset` [token]
+
+GROQ as Sanity's query API (client `apiHost`: `/w/…/p/…`): [contracts/groq-query.md](contracts/groq-query.md).
+
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
 One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so a bare `_publishedId` reaches an unpublished doc under both, as `patch`/`publish`/`discardDraft`/`delete` do.
@@ -136,7 +140,7 @@ Flat `/v1/schemas/*` needs global `admin`. Scoped `P` reads: any workspace membe
 
 ## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`, Bulldocs paper ops
 
-Contract: [plugin HTTP](contracts/plugin-http-api.md) covers ticket keys/limits, Sheets individual ops and Paper create-only `/papers/:slug/create` (native blocks, 201; existing published/draft targets 409). Paper `/papers/:slug/ops` edits with `ratchet_hollow/2` + `reject_new_field_loss/2`, no AuthoringWall; its five publish floors reapply at publish. Ordinary `/papers` remains upsert.
+Contract: [plugin HTTP](contracts/plugin-http-api.md) covers ticket keys/limits, Sheets individual ops, Paper create-only `/papers/:slug/create` and paper ops; `/papers` remains upsert.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 

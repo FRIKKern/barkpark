@@ -482,6 +482,23 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PublicRead)
   end
 
+  # :shared_docs_api for the POST form of the GROQ query read. Sanity's client
+  # sends a query too long for a URL as POST; it reads and writes nothing, so
+  # RateLimit bills it to the read bucket instead of the method's write bucket.
+  pipeline :shared_docs_query_post do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit, class: :read)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    plug(BarkparkWeb.Plugs.PublicRead)
+  end
+
   # Tenancy-aware READ pipeline for the scoped media surface (P3) — the
   # :shared_docs_api shape but gated on the :media surface. A `:media`-shared
   # scope is reachable by an anonymous caller (RequireShareScope is method-aware
@@ -3647,6 +3664,23 @@ defmodule BarkparkWeb.Router do
     # Scoped mirror of the flat bundled-counts read (AXI decision 19) — a scoped
     # caller resolves its real workspace/project, so counts stay tenant-true.
     get("/v1/data/counts/:dataset", QueryController, :counts)
+  end
+
+  # Sanity-compatible GROQ query read (docs/api-v1.md §4a). `v:api_version`
+  # matches Sanity's dated version segment (`/v2025-02-19/...`), so a Sanity
+  # client whose apiHost is `https://<host>/w/<ws>/p/<proj>` reaches it with its
+  # own URL scheme. GET and POST share the controller; POST is the client's
+  # form for a query too long for a URL.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:shared_docs_api)
+
+    get("/v:api_version/data/query/:dataset", GroqController, :query)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:shared_docs_query_post)
+
+    post("/v:api_version/data/query/:dataset", GroqController, :query)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public

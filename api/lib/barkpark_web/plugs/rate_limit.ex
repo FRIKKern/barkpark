@@ -113,7 +113,8 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     case class_opt(opts) do
       :browser -> browser_plan(conn)
       :presence_focus -> presence_focus_plan(conn)
-      _ -> method_plan(conn)
+      :read -> class_plan(conn, :read)
+      _ -> class_plan(conn, method_class(conn.method))
     end
   end
 
@@ -121,8 +122,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp class_opt(%{} = opts), do: Map.get(opts, :class)
   defp class_opt(_), do: nil
 
-  defp method_plan(conn) do
-    class = method_class(conn.method)
+  # `class: :read` bills a POST that only reads (the GROQ query endpoint takes
+  # long queries as POST, as Sanity's does) to the read bucket.
+  defp class_plan(conn, class) do
     dataset = conn.path_params["dataset"]
     {principal_class, key} = bucket_key(conn, class, dataset)
     per_minute = limit_per_minute(class, dataset, principal_class)
