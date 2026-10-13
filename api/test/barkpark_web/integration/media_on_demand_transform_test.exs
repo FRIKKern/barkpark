@@ -26,7 +26,7 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
     @behaviour Barkpark.Media.ImageBackend
     alias Barkpark.Media.ImageBackend.Vix
 
-    def count, do: :counters.get(:persistent_term.get({__MODULE__, :c}), 1)
+    def count, do: :counters.get(Application.fetch_env!(:barkpark, __MODULE__), 1)
 
     @impl true
     def render(src, dest, spec, wm) do
@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
     @impl true
     def avif?, do: Vix.avif?()
 
-    defp bump, do: :counters.add(:persistent_term.get({__MODULE__, :c}), 1, 1)
+    defp bump, do: :counters.add(Application.fetch_env!(:barkpark, __MODULE__), 1, 1)
   end
 
   setup do
@@ -256,7 +256,16 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
 
     test "concurrent first requests render the transform once", %{conn: conn} do
       result = upload(conn)
-      :persistent_term.put({CountingBackend, :c}, :counters.new(1, []))
+      prev = Application.get_env(:barkpark, CountingBackend)
+      Application.put_env(:barkpark, CountingBackend, :counters.new(1, []))
+
+      on_exit(fn ->
+        case prev do
+          nil -> Application.delete_env(:barkpark, CountingBackend)
+          val -> Application.put_env(:barkpark, CountingBackend, val)
+        end
+      end)
+
       swap_backend(CountingBackend)
 
       url = result["originalUrl"] <> "?w=240&h=240&fit=crop"
