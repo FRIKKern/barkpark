@@ -253,13 +253,9 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
                "d" => "dept-big"
              }) == 10_200
 
-      # A filter SQL cannot match exactly still loads, and is refused.
-      body =
-        token
-        |> query(~s'count(*[_type == "product" && isbn > "0"])', %{})
-        |> json_response(422)
-
-      assert body["error"]["type"] == "queryLimitError"
+      # A filter SQL cannot match exactly is scanned in chunks, which keep
+      # nothing, so the limits do not refuse it.
+      assert result!(token, ~s'count(*[_type == "product" && isbn > "0"])', %{}) == @products
     end
 
     test "the SQL count equals the evaluator's count of the loaded documents", %{
@@ -296,6 +292,220 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
                "perspective" => "raw"
              }) == 211
     end
+  end
+
+  describe "count() over array lengths and defined()" do
+    # Each shape, its count over the 10,500 products plus the three below.
+    # Every product has one contributor; p<g> with g mod 4 == 1 in 5..397
+    # has one language variant.
+    @shapes [
+      {~s'count(onix.contributors) > 0', @products + 1},
+      {~s'count(onix.contributors) >= 1', @products + 1},
+      {~s'0 < count(onix.contributors)', @products + 1},
+      {~s'count(onix.contributors) == 0', 1},
+      {~s'count(onix.contributors) < 2', @products + 1},
+      {~s'count(onix.contributors) <= 1', @products + 1},
+      {~s'count(onix.contributors) == 2', 1},
+      {~s'defined(onix.contributors[0])', @products},
+      {~s'defined(onix.contributors[1])', 1},
+      {~s'defined(onix.contributors[-1])', @products + 1},
+      {~s'defined(onix.contributors)', @products + 3},
+      {~s'count(bokbasen.languageFormatVariants) > 0', 99},
+      {~s'defined(bokbasen.languageFormatVariants[0])', 99}
+    ]
+
+    setup %{scope: scope} do
+      # e1 has no contributors, e2 a string where the array would be, e3 a
+      # null first contributor.
+      for {id, contributors} <- [{"e1", []}, {"e2", "none"}, {"e3", [nil, %{"_key" => "k"}]}] do
+        doc = %{"_id" => id, "onix" => %{"contributors" => contributors}}
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      :ok
+    end
+
+    test "each shape is a SQL count equal to the evaluator's count of the loaded documents",
+         %{token: token} do
+      sql =
+        sql_reads(fn ->
+          for {shape, expected} <- @shapes do
+            q = ~s'count(*[_type == "product" && #{shape}])'
+            assert result!(token, q, %{}) == expected, shape
+          end
+        end)
+
+      # One count(*) per shape, and no chunked scan.
+      assert Enum.count(sql, &(&1 =~ ~r/SELECT .*count\(/i)) >= length(@shapes)
+      refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/))
+
+      with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+
+      for {shape, expected} <- @shapes do
+        q = ~s'count(*[_type == "product" && #{shape}][0...100000])'
+        assert result!(token, q, %{}) == expected, shape
+      end
+    end
+
+    test "the shapes narrow a fetch in SQL", %{token: token} do
+      with_groq_config(max_documents_per_fetch: 150)
+
+      assert token
+             |> result!(
+               ~s'*[_type == "product" && defined(bokbasen.languageFormatVariants[0])]._id',
+               %{}
+             )
+             |> length() == 99
+
+      assert result!(token, ~s'*[_type == "product" && count(onix.contributors) == 0]._id', %{}) ==
+               ["e1"]
+    end
+
+    test "the drafts perspective counts the draft, not its published twin",
+         %{token: token, scope: scope} do
+      # e1's draft gains a contributor; p8's draft loses its contributors.
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          %{"_id" => "e1", "onix" => %{"contributors" => [%{"_key" => "k"}]}},
+          @dataset,
+          scope
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          %{"_id" => "p8", "onix" => %{"contributors" => []}},
+          @dataset,
+          scope
+        )
+
+      for perspective <- ["published", "drafts", "raw"],
+          shape <- [~s'count(onix.contributors) > 0', ~s'count(onix.contributors) == 0'] do
+        filter = ~s'_type == "product" && #{shape}'
+        extra = %{"perspective" => perspective}
+        counted = result!(token, "count(*[#{filter}])", %{}, extra)
+
+        with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+        loaded = result!(token, "count(*[#{filter}][0...100000])", %{}, extra)
+        with_groq_config([])
+
+        assert counted == loaded, "#{perspective} #{shape}: #{counted} != #{loaded}"
+      end
+
+      assert result!(
+               token,
+               ~s'count(*[_type == "product" && count(onix.contributors) == 0])',
+               %{},
+               %{
+                 "perspective" => "drafts"
+               }
+             ) == 1
+    end
+  end
+
+  describe "count() over a filter SQL cannot match exactly" do
+    test "reads in chunks and keeps only the total, so the limits do not apply",
+         %{token: token} do
+      with_groq_config(max_documents_per_fetch: 5, max_documents_loaded: 5)
+
+      sql =
+        sql_reads(fn ->
+          # Even products have role A01.
+          assert result!(
+                   token,
+                   ~s'count(*[_type == "product" && count(onix.contributors[role._ref == "A01"]) > 0])',
+                   %{}
+                 ) == div(@products, 2)
+        end)
+
+      assert Enum.count(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/)) == div(@products + 1, 500) + 1
+
+      # A chunk does not count toward the documents a query loads.
+      assert result!(
+               token,
+               ~s'{"n": count(*[_type == "product" && isbn > "0"]), "p": *[_id == "p5"][0]._id}',
+               %{}
+             ) == %{"n" => @products, "p" => "p5"}
+    end
+
+    test "inside a projection, per parent, with ^ and a -> in the filter", %{token: token} do
+      q = """
+      *[_type == "department"] | order(_id asc){
+        _id,
+        "n": count(*[_type == "product" && department->_id == ^._id && isbn > "0"])
+      }
+      """
+
+      assert result!(token, q, %{}) == [
+               %{"_id" => "dept-big", "n" => 10_200},
+               %{"_id" => "dept-small", "n" => 300}
+             ]
+    end
+
+    test "equals the evaluator's count of the loaded documents in each perspective",
+         %{token: token, scope: scope} do
+      %{rows: [[content]]} =
+        Repo.query!("SELECT content FROM documents WHERE doc_id = 'p8' AND dataset = $1", [
+          @dataset
+        ])
+
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          Map.merge(content, %{"_id" => "p8", "isbn" => "0"}),
+          @dataset,
+          scope
+        )
+
+      for perspective <- ["published", "drafts", "raw"] do
+        extra = %{"perspective" => perspective}
+        counted = result!(token, ~s'count(*[_type == "product" && isbn > "0"])', %{}, extra)
+
+        with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+
+        loaded =
+          result!(token, ~s'count(*[_type == "product" && isbn > "0"][0...100000])', %{}, extra)
+
+        with_groq_config([])
+
+        assert counted == loaded, "#{perspective}: #{counted} != #{loaded}"
+      end
+    end
+
+    test "the query timeout still applies", %{token: token} do
+      with_groq_config(timeout_ms: 50)
+
+      body =
+        token
+        |> query(~s'count(*[_type == "product" && isbn > "0"])', %{})
+        |> json_response(422)
+
+      assert body["error"]["description"] =~ "ran longer than 50 ms"
+    end
+  end
+
+  # The SQL of every query the function sends.
+  defp sql_reads(fun) do
+    ref = make_ref()
+    parent = self()
+    handler = "groq-sql-#{inspect(ref)}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _, _, meta, _ -> send(parent, {ref, meta.query, meta.params}) end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+
+    ref |> collect([]) |> Enum.map(&elem(&1, 0))
   end
 
   # EXPLAIN for every documents read the function sends that carries a GROQ
