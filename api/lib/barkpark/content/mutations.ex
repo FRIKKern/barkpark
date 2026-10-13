@@ -77,6 +77,7 @@ defmodule Barkpark.Content.Mutations do
     ReadOnlyFields,
     ReferenceIntegrity,
     Warnings,
+    WriteScope,
     Writer
   }
 
@@ -126,7 +127,19 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = Door.admit(fn -> apply_with_stale_retry(mutations, dataset, opts) end)
+        result =
+          Door.admit(fn ->
+            # One schema read per type for the whole batch (task-6e2552cdeb223fa2).
+            # The validation and publish reads pass bare scope keys, without the
+            # door's `memoize: true`, so each document re-read its schema and
+            # re-expanded its named types. The process memo covers every read
+            # in the batch and is emptied when the batch returns; a schema
+            # write inside the batch resets it.
+            WriteScope.with_process_memo(fn ->
+              apply_with_stale_retry(mutations, dataset, opts)
+            end)
+          end)
+
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )

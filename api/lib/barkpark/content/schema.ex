@@ -136,10 +136,23 @@ defmodule Barkpark.Content.Schema do
   # chokepoint with a nil-workspace-only fallback: `get_schema_for_redaction/3`.
   # @canonical capability:schema-resolution-tenant-scoped aka:get_schema,schema definition lookup,type schema doc:docs/contracts/tenancy.md
   def get_schema(name, dataset, opts \\ []) do
-    case get_schema_raw(name, dataset, opts) do
-      {:ok, schema} -> {:ok, inline_named_types(schema, dataset, opts)}
-      other -> other
-    end
+    # The INLINED schema is memoized beside the stored row: inlining resolves
+    # each named object type through up to three scope rungs, and a write path
+    # asks for the same type several times per document (validation, title
+    # derivation, encryption, publish). Same key shape and lifetime as
+    # `get_schema_raw/3`; every schema write resets both.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      {:get_schema, name, dataset, Keyword.fetch(opts, :workspace_id),
+       Keyword.fetch(opts, :project_id)},
+      fn ->
+        case get_schema_raw(name, dataset, opts) do
+          {:ok, schema} -> {:ok, inline_named_types(schema, dataset, opts)}
+          other -> other
+        end
+      end,
+      8
+    )
   end
 
   @doc false
