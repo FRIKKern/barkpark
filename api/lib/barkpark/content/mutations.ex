@@ -207,6 +207,13 @@ defmodule Barkpark.Content.Mutations do
     Broadcast.claim_deferred_queue()
     if dry_run?, do: Process.put(@dry_run_key, true)
 
+    # The batch's audit rows are buffered and appended in ONE insert as the
+    # transaction's last statement, so the workspace's audit-chain lock is held
+    # for that append and the commit, not for the whole batch (see
+    # `Barkpark.Audit.defer_emits/0`). `:nested` when an enclosing batch owns
+    # the buffer; only the owner flushes.
+    audit_owner? = Barkpark.Audit.defer_emits() == :owner
+
     try do
       result =
         Repo.transaction(fn ->
@@ -227,6 +234,8 @@ defmodule Barkpark.Content.Mutations do
 
           results = apply_all(mutations, dataset, opts, caller)
 
+          if audit_owner? and not dry_run?, do: Barkpark.Audit.flush_deferred!()
+
           # DRY RUN: every gate, fence and write above ran for real, so the
           # results are exactly what a real batch would answer — then the whole
           # transaction is thrown away.
@@ -235,6 +244,7 @@ defmodule Barkpark.Content.Mutations do
 
       case result do
         {:ok, _} ->
+          if audit_owner?, do: Barkpark.Audit.finish_deferred(:committed)
           Broadcast.flush_deferred_broadcasts()
           result
 
@@ -284,6 +294,7 @@ defmodule Barkpark.Content.Mutations do
         end
     after
       Process.delete(@dry_run_key)
+      if audit_owner?, do: Barkpark.Audit.finish_deferred(:rolled_back)
     end
   end
 
@@ -425,6 +436,11 @@ defmodule Barkpark.Content.Mutations do
   # close a cycle with one either. `lock_chain!/1` is re-entrant, so a nil-
   # workspace document's own emit later in the batch does not wait on itself.
   # Scoped batches are untouched.
+  #
+  # Since the batch buffers its audit rows (`Audit.defer_emits/0`), its emits
+  # take no chain lock mid-batch; the flush takes every chain it needs in sorted
+  # key order. Other locks still take a chain lock mid-batch
+  # (`DedupWall.lock_publish_scope!/3`), so the serializer stays.
   defp serialize_unscoped_batch(opts) do
     if is_nil(Keyword.get(opts, :workspace_id)), do: Barkpark.Audit.lock_chain!(nil), else: :ok
   end
