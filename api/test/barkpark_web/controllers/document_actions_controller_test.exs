@@ -48,6 +48,7 @@ defmodule BarkparkWeb.DocumentActionsControllerTest do
       |> Map.put("stub-fail-dryrun", fn _doc_id, _dataset, :dryrun ->
         {:error, {:xsd_invalid, ["line 1: bad element"]}}
       end)
+      |> Map.put("stub-not-a-book", fn _doc_id, _dataset, _mode -> {:error, :not_a_book} end)
     end
   end
 
@@ -207,6 +208,22 @@ defmodule BarkparkWeb.DocumentActionsControllerTest do
 
       assert resp["preview"]["kind"] == "error"
       assert resp["preview"]["message"] =~ "ONIX failed XSD validation"
+    end
+
+    test "an action that can't act on the doc's type answers 422, not a 200 preview" do
+      %{ws: ws, proj: proj, raw: raw} = admin_setup!()
+      doc = create_post!(ws, proj, "pa-nb")
+      path = actions_path(ws, proj, doc.doc_id) <> "/stub-not-a-book"
+
+      resp =
+        scoped_conn()
+        |> as(raw)
+        |> put_req_header("content-type", "application/json")
+        |> post(path, Jason.encode!(%{"mode" => "dryrun"}))
+        |> json_response(422)
+
+      assert resp["error"]["code"] == "action_not_applicable"
+      assert resp["error"]["message"] == "This action works on book documents only"
     end
 
     test "an unknown action name answers 404 unknown_action" do
