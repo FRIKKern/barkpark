@@ -57,7 +57,7 @@ A Sanity-shaped image value stores `crop` `{top, bottom, left, right}` and `hots
 - `w` and `h` are capped at 4096 and values above 100 round up to a multiple of 10. One asset keeps at most 100 cached transforms; a new one past that answers 429 `transform_variant_limit`, while cached ones still serve. Set them in `config :barkpark, Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).
 - Access is the same check as the original (`:original`). A watermark profile on the asset is applied to the transform.
 
-Errors: 400 `invalid_transform_param` (bad value, `details.param`), 400 `not_transformable` (not png, jpeg, gif or webp), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
+Errors: 400 `invalid_transform_param` (bad value, `details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
 
 ## Named presets
 
