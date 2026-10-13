@@ -45,7 +45,7 @@ const client = createClient({
 
 ## Evaluation and limits
 
-The outermost `_type`, `_id` and field-equality conditions of each `*[...]` become SQL, including values read through `^` (`*[_type == "series" && _id == ^.series._ref]`). Everything else runs in memory over the loaded documents. Dereferences and subqueries are read in rounds: one SQL read per level of `->` nesting, and one per subquery shape, however many documents they run for. A subquery that does not read `^` runs once per query.
+The top-level `_type`, `_id` and field-equality conditions of each `*[...]`, and an `||` of field equalities, become SQL, including values read through `^` (`*[_type == "series" && _id == ^.series._ref]`). Everything else runs in memory over the loaded documents. Dereferences and subqueries are read in rounds: one SQL read per level of `->` nesting, and one per subquery shape, however many documents they run for. A subquery that does not read `^` runs once per query.
 
 | Limit | Default | Config key (`config :barkpark, Barkpark.Groq`) |
 |---|---|---|

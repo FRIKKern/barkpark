@@ -68,7 +68,12 @@ defmodule Barkpark.Groq.ParserTest do
     test "in with constant lists" do
       c = constraints(~s|*[_type in ["a", "b"] && isbn in $isbns]|, %{"isbns" => ["1", "2"]})
       assert c.types == ["a", "b"]
-      assert c.any == [{["isbn"], ["1", "2"]}]
+      assert c.any == [[%{"isbn" => "1"}, %{"isbn" => "2"}]]
+    end
+
+    test "an || of field equalities becomes one any-of constraint" do
+      c = constraints(~s'*[_type == "p" && (isbn == $i || onix.isbn == $i)]', %{"i" => "9"})
+      assert c.any == [[%{"isbn" => "9"}, %{"onix" => %{"isbn" => "9"}}]]
     end
 
     test "or, functions and ^ stay in memory" do

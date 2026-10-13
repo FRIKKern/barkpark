@@ -53,7 +53,7 @@ defmodule Barkpark.Groq.DocumentSource do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, DraftId, Envelope, Schema, Scope}
   alias Barkpark.Content.WriteScope
-  alias Barkpark.Groq.{Evaluator, LimitError}
+  alias Barkpark.Groq.{Evaluator, LimitError, Pushdown}
   alias Barkpark.Repo
 
   @max_rounds 8
@@ -295,16 +295,19 @@ defmodule Barkpark.Groq.DocumentSource do
 
     condition =
       Enum.reduce(eq, condition, fn {path, value}, acc ->
-        dynamic([d], ^acc and fragment("? @> ?", d.content, type(^nest(path, value), :map)))
+        dynamic(
+          [d],
+          ^acc and fragment("? @> ?", d.content, type(^Pushdown.nest(path, value), :map))
+        )
       end)
 
-    Enum.reduce(any, condition, fn {path, values}, acc ->
-      probes = Enum.map(values, &Jason.encode!(nest(path, &1)))
+    Enum.reduce(any, condition, fn probes, acc ->
+      json = Enum.map(probes, &Jason.encode!/1)
 
       dynamic(
         [d],
         ^acc and
-          fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^probes, {:array, :string}))
+          fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^json, {:array, :string}))
       )
     end)
   end
@@ -414,9 +417,6 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp maybe_where_types(query, nil), do: query
   defp maybe_where_types(query, types), do: where(query, [d], d.type in ^types)
-
-  defp nest(path, value),
-    do: path |> Enum.reverse() |> Enum.reduce(value, fn key, acc -> %{key => acc} end)
 
   # ── Rendering ────────────────────────────────────────────────────────────
 

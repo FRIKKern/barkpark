@@ -9,7 +9,9 @@ defmodule Barkpark.Groq.Pushdown do
     * `_type == "t"`, `_type in ["a", "b"]` -> `types`
     * `_id == "x"`, `_id in [...]` -> `ids`
     * `a.b == "x"` on a content path -> `eq` (JSON containment)
-    * `a.b in ["x", "y"]` with scalar members -> `any`
+    * `a.b in ["x", "y"]` with scalar members, and `a == "x" || b.c == "y"`
+      over content paths -> `any`, a list of containment probes of which a
+      document must match at least one
 
   The value side is a literal, a parameter, arithmetic over them, or an
   expression over `^` (such as `^._id` or `^.author._ref`). The caller passes a
@@ -66,7 +68,44 @@ defmodule Barkpark.Groq.Pushdown do
     end
   end
 
+  defp apply_conjunct({:or, _l, _r} = node, acc, resolve) do
+    case or_probes(node, resolve) do
+      {:ok, probes} -> %{acc | any: [probes | acc.any]}
+      :error -> acc
+    end
+  end
+
   defp apply_conjunct(_other, acc, _resolve), do: acc
+
+  # Every disjunct must be a content-path equality (or `in`) with scalar
+  # values; one that is not makes the whole `||` stay in memory.
+  defp or_probes({:or, l, r}, resolve) do
+    with {:ok, a} <- or_probes(l, resolve), {:ok, b} <- or_probes(r, resolve) do
+      {:ok, a ++ b}
+    end
+  end
+
+  defp or_probes({:group, inner}, resolve), do: or_probes(inner, resolve)
+
+  defp or_probes({:op, op, _l, _r} = node, resolve) when op in ["==", "in"] do
+    with {:ok, [first | _] = path, value} <- orient(node, resolve),
+         false <- system_path?(first),
+         values = if(op == "in", do: value, else: [value]),
+         true <- is_list(values) and values != [] and Enum.all?(values, &scalar?/1) do
+      {:ok, Enum.map(values, &nest(path, &1))}
+    else
+      _ -> :error
+    end
+  end
+
+  defp or_probes(_node, _resolve), do: :error
+
+  defp scalar?(v), do: is_binary(v) or is_number(v) or is_boolean(v)
+
+  @doc "The JSON containment probe for `path == value`."
+  @spec nest([String.t()], term()) :: map()
+  def nest(path, value),
+    do: path |> Enum.reverse() |> Enum.reduce(value, fn key, acc -> %{key => acc} end)
 
   defp orient({:op, "==", l, r}, resolve) do
     with {:l, {:ok, path}} <- {:l, attr_path(l)},
@@ -107,7 +146,7 @@ defmodule Barkpark.Groq.Pushdown do
     scalars? = vs != [] and Enum.all?(vs, &(is_binary(&1) or is_number(&1) or is_boolean(&1)))
 
     if scalars? and not system_path?(first),
-      do: %{acc | any: [{path, vs} | acc.any]},
+      do: %{acc | any: [Enum.map(vs, &nest(path, &1)) | acc.any]},
       else: acc
   end
 
