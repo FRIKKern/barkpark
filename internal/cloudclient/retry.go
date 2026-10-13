@@ -11,8 +11,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // BACKPRESSURE IS NOT A FAULT — the control-plane half.
@@ -263,18 +264,11 @@ func numberOrNumericString(raw json.RawMessage) (float64, bool) {
 	return 0, false
 }
 
-// parseRetryAfterSeconds reads the delta-seconds form. The HTTP-date form is
-// NOT parsed: this service never emits it, and guessing at a date form would be
-// honouring a clock skew rather than a wait.
+// parseRetryAfterSeconds reads Retry-After in either form RFC 9110 allows,
+// delay-seconds or an HTTP-date. One parser for both clients:
+// apiclient.ParseRetryAfter.
 func parseRetryAfterSeconds(v string) (float64, bool) {
-	if v == "" {
-		return 0, false
-	}
-	n, err := strconv.ParseFloat(v, 64)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
+	return apiclient.ParseRetryAfter(v)
 }
 
 // restoredBody hands back a body that reads the peeked prefix and then whatever
@@ -401,6 +395,10 @@ func (t *retryTransport) sleepFor(ctx context.Context, d time.Duration) error {
 // RoundTrip repeats a 429 — and ONLY a 429 — up to the attempt cap, honouring
 // the server's own retry_after and bounded by the total-wait ceiling.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// --no-retry / BARKPARK_NO_RETRY: send once, hand the 429 back as sent.
+	if apiclient.RetryDisabled() {
+		return t.roundTripper().RoundTrip(req)
+	}
 	ctx := req.Context()
 	cap := t.attemptCap()
 	ceiling := t.waitCeiling()

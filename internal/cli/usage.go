@@ -81,6 +81,7 @@ func usageTop(out *writer) {
 	out.errf("  -q                     minimal receipt (writes: rev + ids)")
 	out.errf("  -v                     verbose (diagnostics on stderr)")
 	out.errf("      --no-color         disable colour")
+	out.errf("      --no-retry         send each request once: no 429/5xx retry (or BARKPARK_NO_RETRY=1)")
 	out.errf("      --set <k=v>        write body field (repeatable); --file <path>|- for JSON")
 	out.errf("  -f <path>              alias for --file (JSON body from a file or '-' for stdin)")
 	out.errf("      --dry-run          print the request, do not send")
