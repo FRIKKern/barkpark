@@ -55,10 +55,10 @@
     "msw": "^2.15.0",
     "size-limit": "^11.1.0",
     "@size-limit/preset-small-lib": "^11.1.0",
-    "@cloudflare/vitest-pool-workers": "^0.22.0",
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
     "@vitest/browser": "^4.1.0",
     "@vitest/browser-playwright": "^4.1.0",
-    "playwright": "^1.63.0",
-    "happy-dom": "^20.14.5"
+    "playwright": "^1.64.0",
+    "happy-dom": "^20.14.6"
   }
 }
