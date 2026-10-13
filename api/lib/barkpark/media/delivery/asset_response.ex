@@ -112,6 +112,9 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
       # Hex SHA-1 of the bytes (task-b6e57c37f6928344); null on a row born
       # before the column until `mix barkpark.media.backfill_sha1` runs.
       sha1: file.sha1,
+      # The id the asset had in the system it was imported from, such as a
+      # Sanity asset id (task-0bc9247eca1bd741); null when none was set.
+      sourceId: file.source_id,
       createdAt: file.inserted_at,
       updatedAt: file.updated_at,
       visibility: Access.visibility(asset_doc),
