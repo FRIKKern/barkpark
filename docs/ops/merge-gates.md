@@ -377,6 +377,31 @@ this shape must record that choice and its reason where it is documented
 (`docs/contracts/canonical-impl-markers.md` is the worked example). What the rule
 forbids is advisory while read as blocking.
 
+### Barkdown editor parity
+
+`barkdown-parity.yml` has an unfiltered PR trigger. Its dispatcher runs the
+original editor/PortableDoc path selection plus its own workflow/helper paths;
+empty diffs and explicit dispatch run the full matrix, while unknown refs or
+failed/truncated diffs fail. Public Barkdown checkout uses the standard read-only
+workflow token. A missing private-read secret cannot skip the rows.
+
+The always-running `Barkdown parity gate` requires a successful dispatcher and,
+when selected, a successful matrix job. Failed, cancelled or unknown dependencies
+fail the gate. An unrelated nonempty diff emits NOT APPLICABLE, explicitly saying
+no row ran. The matrix records both checkout commits and retains its results.
+
+This name is **not currently required**. Promotion must update/apply the required
+spec and classify this PR-scoped context for the main watcher; workflow success
+alone does not establish merge enforcement. Barkdown's separate weekly/dispatch
+policy is unchanged. G2 acceptance still needs a live deliberately broken Tab
+failure and the owner’s cadence/enforcement decision.
+
+<!-- doc-exec: allowlisted deps=scripts/barkdown-parity-dispatch.mjs,scripts/barkdown-parity-dispatch.test.mjs,scripts/node-test-floor.mjs -->
+```sh
+cd "${DOC_DRIFT_REPO:-.}"
+node scripts/node-test-floor.mjs --floor 1 scripts/barkdown-parity-dispatch.test.mjs
+```
+
 ### The required set governs the MERGE, not main's health afterwards
 
 **These are two different properties and nothing above distinguishes them.** The
