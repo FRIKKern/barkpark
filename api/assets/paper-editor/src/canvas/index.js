@@ -693,7 +693,7 @@ function focusableControlIn(dom) {
 
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
-    return ["editable"];
+    return ["editable", "format-bubble"];
   }
 
   constructor() {
@@ -1354,7 +1354,8 @@ class BpPaperCanvas extends HTMLElement {
     // text selection, including one spanning multiple blocks. Skipped in read
     // mode; every consumer is `if (this._bubble)` guarded.
     if (this._editable) {
-      this._bubble = new FormatBubble({ editor: this._editor });
+      // A host that draws its own toolbar turns the bubble off (format-bubble="off").
+      if (this._wantsBubble()) this._bubble = new FormatBubble({ editor: this._editor });
       // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
       this._handle = new BlockHandle({
         host: this,
@@ -1385,6 +1386,7 @@ class BpPaperCanvas extends HTMLElement {
       onEdit: (detail) => {
         if (detail.kind === "link" && this._bubble) this._bubble.openLink();
         else if (this._bubble) this._bubble.update();
+        else if (detail.kind === "link") this._requestHostLink();
       },
     });
 
@@ -1401,6 +1403,17 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   attributeChangedCallback(name, _old, val) {
+    if (name === "format-bubble") {
+      if (!this._editor || this._editor.isDestroyed || !this._editable) return;
+      if (!this._wantsBubble() && this._bubble) {
+        this._bubble.destroy();
+        this._bubble = null;
+      } else if (this._wantsBubble() && !this._bubble) {
+        this._bubble = new FormatBubble({ editor: this._editor });
+        this._bubble.update();
+      }
+      return;
+    }
     if (name === "editable") {
       // A run that failed to mount stays read-only whatever the host asks.
       this._editable = val !== "false" && !this._mountFailure;
@@ -1679,6 +1692,19 @@ class BpPaperCanvas extends HTMLElement {
       this._lastSelectionDetail = key;
       this.dispatchEvent(new CustomEvent("bp-canvas-selection", { bubbles: true, composed: true, detail }));
     });
+  }
+
+  _wantsBubble() {
+    return this.getAttribute("format-bubble") !== "off";
+  }
+
+  // With the bubble off, the host opens its own link input: a cancelable
+  // bp-canvas-link-request carrying the selection's current href (or null).
+  _requestHostLink() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed) return false;
+    const href = editor.isActive("link") ? editor.getAttributes("link").href || null : null;
+    return this.dispatchEvent(new CustomEvent("bp-canvas-link-request", { detail: { href }, bubbles: true, composed: true, cancelable: true }));
   }
 
   // ── toolbar commands (EMBED-CONTRACT "Toolbar commands"; canvas/host-commands.js) ──
@@ -2300,6 +2326,12 @@ class BpPaperCanvas extends HTMLElement {
         event.preventDefault();
         this._bubble.update();
         this._bubble.openLink();
+        return true;
+      }
+      // No bubble: the host's toolbar edits the link (bp-canvas-link-request).
+      if (!event.shiftKey && (key === "k" || key === "K") && !this._bubble && this._editable && !this._editor.state.selection.empty) {
+        event.preventDefault();
+        this._requestHostLink();
         return true;
       }
     }

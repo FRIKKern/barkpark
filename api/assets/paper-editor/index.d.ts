@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.2.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.3.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -135,6 +135,8 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-canvas-selection": CustomEvent<CanvasSelection | null>;
   /** The toolbar state, one per animation frame when it changes; detail equals state(). */
   "bp-selection-change": CustomEvent<ToolbarState>;
+  /** With format-bubble="off": Mod+K or the link card's Edit. Cancelable; detail.href is the current link or null. */
+  "bp-canvas-link-request": CustomEvent<{ href: string | null }>;
 }
 
 /** A mark a toolbar toggles (portable-doc names). */
