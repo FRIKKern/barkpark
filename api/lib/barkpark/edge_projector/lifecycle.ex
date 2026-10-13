@@ -314,6 +314,63 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
     :ok
   end
 
+  @doc """
+  Take the deferred edge-upsert queue out of this process, in queue order, for
+  `run_upserts/1` to run elsewhere (a `visibility: :async` mutate batch hands
+  it to a post-commit task, task-6e2552cdeb223fa2).
+  """
+  @spec take_deferred_upserts() :: [{map(), String.t(), String.t()}]
+  def take_deferred_upserts do
+    (Process.delete(@deferred_edge_upserts_key) || []) |> Enum.reverse()
+  end
+
+  @doc """
+  Run upserts taken by `take_deferred_upserts/0`, off the request.
+
+  The queued document is the row as it was at ITS commit. A later write of the
+  same document can commit, and its own task can run, before this one does, so
+  each upsert takes a per-document advisory lock and re-reads the row inside
+  it: whichever task runs last projects the newest committed row, in either
+  order. A row that is gone by then (unpublished, deleted) is skipped; its own
+  delete op removes its edges.
+  """
+  @spec run_upserts([{map(), String.t(), String.t()}]) :: :ok
+  def run_upserts(queue) when is_list(queue) do
+    Enum.each(queue, &run_one_upsert/1)
+  end
+
+  # A SESSION lock on one checked-out connection, not a transaction: the
+  # upsert opens its own transaction, and a raise inside a nested one would
+  # poison an outer one (see "Why a batch publish is DEFERRED" above).
+  defp run_one_upsert({%{id: pk} = doc, id, dataset}) when not is_nil(pk) do
+    key = "edge-upsert:#{pk}"
+
+    Repo.checkout(fn ->
+      _ = Repo.query!("SELECT pg_advisory_lock(hashtext($1))", [key])
+
+      try do
+        case Repo.get(Barkpark.Content.Document, pk) do
+          nil -> :ok
+          current -> flush_one_deferred_upsert({current, id, dataset})
+        end
+      after
+        Repo.query!("SELECT pg_advisory_unlock(hashtext($1))", [key])
+      end
+    end)
+
+    :ok
+  rescue
+    e ->
+      Logger.error(
+        "EdgeProjector.Lifecycle: post-commit upsert RAISED for _id=#{id} " <>
+          "dataset=#{dataset}, falling back to the debounced path: " <> Exception.message(e)
+      )
+
+      do_enqueue_upsert(doc, dataset)
+  end
+
+  defp run_one_upsert(item), do: flush_one_deferred_upsert(item)
+
   # ONE queued upsert, isolated — mirrors `Broadcast.flush_one_webhook/1`
   # exactly in intent: a raise here must not abort the `Enum.each` and drop
   # every LATER queued upsert of the same committed batch. `upsert_now/3`

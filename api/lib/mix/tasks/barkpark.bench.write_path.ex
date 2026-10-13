@@ -39,6 +39,7 @@ defmodule Mix.Tasks.Barkpark.Bench.WritePath do
     * `--concurrency` comma list of concurrent writers (default `1,4`)
     * `--modes` comma list of modes (default `two_step,direct`)
     * `--warmup` documents written once before timing (default 50)
+    * `--visibility` `sync` (default) or `async`, the mutate door's option
   """
   use Mix.Task
 
@@ -51,7 +52,8 @@ defmodule Mix.Tasks.Barkpark.Bench.WritePath do
     batch: :integer,
     concurrency: :string,
     modes: :string,
-    warmup: :integer
+    warmup: :integer,
+    visibility: :string
   ]
 
   @impl Mix.Task
@@ -80,11 +82,12 @@ defmodule Mix.Tasks.Barkpark.Bench.WritePath do
     concurrency = opts |> Keyword.get(:concurrency, "1,4") |> parse_ints()
     modes = opts |> Keyword.get(:modes, "two_step,direct") |> String.split(",", trim: true)
 
-    scope = setup_workspace!()
+    visibility = if Keyword.get(opts, :visibility) == "async", do: :async, else: :sync
+    scope = setup_workspace!() ++ [visibility: visibility]
     brands = seed_brands!(scope)
 
     Mix.shell().info(
-      "write path bench: #{docs} docs, batch #{batch}, git #{git_sha()}, " <>
+      "write path bench: #{docs} docs, batch #{batch}, visibility #{visibility}, git #{git_sha()}, " <>
         "edge incremental #{Barkpark.EdgeProjector.Settings.get().incremental_project}"
     )
 

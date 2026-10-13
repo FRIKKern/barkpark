@@ -258,7 +258,7 @@ defmodule Barkpark.Content.Mutations do
       case result do
         {:ok, _} ->
           if audit_owner?, do: Barkpark.Audit.finish_deferred(:committed)
-          Broadcast.flush_deferred_broadcasts()
+          Broadcast.flush_deferred_broadcasts(visibility: Keyword.get(opts, :visibility, :sync))
           result
 
         {:error, {@dry_run_key, would_be}} ->

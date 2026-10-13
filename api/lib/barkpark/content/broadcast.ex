@@ -505,7 +505,7 @@ defmodule Barkpark.Content.Broadcast do
   for real, each isolated exactly like `flush_one_webhook/1` below, so one
   doc's projector failure never drops the rest.
   """
-  def flush_deferred_broadcasts do
+  def flush_deferred_broadcasts(opts \\ []) do
     Process.delete(@deferred_owner_key)
     queue = Process.delete(:barkpark_deferred_broadcasts) || []
 
@@ -515,13 +515,74 @@ defmodule Barkpark.Content.Broadcast do
       Phoenix.PubSub.broadcast(Barkpark.PubSub, topic, msg)
     end)
 
-    webhook_queue = Process.delete(:barkpark_deferred_webhooks) || []
+    webhook_queue = (Process.delete(:barkpark_deferred_webhooks) || []) |> Enum.reverse()
 
-    webhook_queue
-    |> Enum.reverse()
-    |> Enum.each(&flush_one_webhook/1)
+    # POST-COMMIT, OUTSIDE THE REQUEST (task-6e2552cdeb223fa2). Each queued
+    # webhook used to encode its payload and run the `active_webhooks_for`
+    # selection query here, in the request process, one query per write.
+    # Delivery was already a spawned task; now the selection runs there too,
+    # once per distinct (dataset, action, type, scope) in this commit, in queue
+    # order. The edge upserts follow in the same task when the caller asked
+    # for `visibility: :async`; by default they stay inline, so a sync caller
+    # reads its own edges when the call returns.
+    if Keyword.get(opts, :visibility) == :async do
+      upserts = EdgeProjectorLifecycle.take_deferred_upserts()
 
-    EdgeProjectorLifecycle.flush_deferred_upserts()
+      after_commit(fn ->
+        flush_webhooks(webhook_queue)
+        EdgeProjectorLifecycle.run_upserts(upserts)
+      end)
+    else
+      after_commit(fn -> flush_webhooks(webhook_queue) end)
+      EdgeProjectorLifecycle.flush_deferred_upserts()
+    end
+  end
+
+  # Run post-commit work in a supervised task, so the response does not wait on
+  # it. `config :barkpark, :post_commit_async, false` (config/test.exs) runs it
+  # inline instead: a test then reads the result in its own sandbox
+  # connection, and no task outlives its test.
+  defp after_commit(fun) do
+    if Application.get_env(:barkpark, :post_commit_async, true) do
+      {:ok, _pid} = Task.Supervisor.start_child(Barkpark.TaskSupervisor, fun)
+      :ok
+    else
+      fun.()
+      :ok
+    end
+  end
+
+  defp flush_webhooks([]), do: :ok
+
+  defp flush_webhooks(webhook_queue) do
+    Enum.reduce(webhook_queue, %{}, fn item, selected ->
+      {key, webhooks} = select_webhooks(item, selected)
+      flush_one_webhook(item, webhooks)
+      Map.put(selected, key, webhooks)
+    end)
+
+    :ok
+  end
+
+  # One selection query per distinct (dataset, action, type, scope): a batch
+  # of 100 writes of one type selects once. Returns `{key, nil}` when the
+  # query raised, so `flush_one_webhook/2` falls back to the dispatcher's own
+  # lookup and reports the failure for that item alone.
+  defp select_webhooks({dataset, action, type, _doc_id, _document, _event_id, opts}, selected) do
+    key =
+      {dataset, action, type, Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id)}
+
+    case Map.fetch(selected, key) do
+      {:ok, webhooks} when is_list(webhooks) ->
+        {key, webhooks}
+
+      _ ->
+        try do
+          {key, Barkpark.Webhooks.active_webhooks_for(dataset, action, type, opts)}
+        rescue
+          _ -> {key, nil}
+        end
+    end
   end
 
   # ONE queued webhook, isolated (r2c webhook audit). `Dispatcher.dispatch_async/7`
@@ -532,7 +593,9 @@ defmodule Barkpark.Content.Broadcast do
   # surfaced as a 500 on a write that had already committed. Each item now
   # fails alone, loudly: logged at error with its event, and counted on
   # `[:barkpark, :webhooks, :flush, :error]`.
-  defp flush_one_webhook({dataset, action, type, doc_id, document, event_id, opts}) do
+  defp flush_one_webhook({dataset, action, type, doc_id, document, event_id, opts}, webhooks) do
+    opts = if is_list(webhooks), do: Keyword.put(opts, :selected_webhooks, webhooks), else: opts
+
     Barkpark.Webhooks.Dispatcher.dispatch_async(
       dataset,
       action,

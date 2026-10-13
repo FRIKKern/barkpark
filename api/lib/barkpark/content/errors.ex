@@ -766,6 +766,14 @@ defmodule Barkpark.Content.Errors do
       details: %{mutation: "createOrReplace", publish: true, type: type}
     }
 
+  defp build({:error, {:invalid_visibility, value}}),
+    do: %{
+      code: "malformed",
+      message: "visibility must be sync, async or deferred, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "visibility"}
+    }
+
   defp build({:error, {:invalid_publish_flag, value}}),
     do: %{
       code: "malformed",

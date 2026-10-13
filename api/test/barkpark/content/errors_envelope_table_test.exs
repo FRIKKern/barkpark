@@ -161,6 +161,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "validation_failed", 422, [:details]},
       {"invalid_publish_flag", {:error, {:invalid_publish_flag, "yes"}}, "malformed", 400,
        [:details]},
+      # The mutate door's `visibility` was not sync, async or deferred.
+      {"invalid_visibility", {:error, {:invalid_visibility, "later"}}, "malformed", 400,
+       [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",

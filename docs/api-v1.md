@@ -76,7 +76,7 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true` (or `?dryRun=true`): runs, rolls back, answers `results` + `dryRun:true`; non-boolean → `400`. Unknown keys → `mutate.unknown_key` warning.
+Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true` (or `?dryRun=true`): runs, rolls back, answers `results` + `dryRun:true`; non-boolean → `400`. `"visibility":"async"`/`deferred` answers at commit; graph edges follow (`sync`, default, waits). Unknown keys → `mutate.unknown_key` warning.
 
 **Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
