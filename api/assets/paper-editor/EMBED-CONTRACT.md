@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.4.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.5.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.4.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.5.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback.
 
 ## The element
 
@@ -89,7 +89,7 @@ instance. Barkdown and Studio mount it.
 | `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
 
-All seven properties (`blocks`, `acknowledgedSaves` and the five callbacks) may be
+All eight properties (`blocks`, `acknowledgedSaves` and the six callbacks) may be
 set before the element upgrades; `connectedCallback` reclaims them through the setters.
 
 ### Host callbacks
@@ -104,6 +104,7 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 | `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href? } \| null` | the hover card shows the address only |
 | `mediaUploader` | `(file) => url \| { src?, url?, alt? }` | a pasted or dropped image shows `no media uploader is connected` |
 | `mediaPicker` | `({ kind: "insert" \| "replace", current: { src, alt } \| null }) => { src, alt?, width? } \| null` | an Image insert is the empty image block, and images offer no Select |
+| `editBlockObject` | `({ type, title, inline, fields, value, error }) => value \| null` | declared objects are edited in the canvas's own popover |
 
 The menus drop a result that arrives after a newer query or after close. A
 `linkPreviewSource` that throws or rejects is ignored. For a `link`, `kind`/`href`
@@ -118,6 +119,19 @@ answer becomes the image's `src`, and `alt` / `width` when given; an insert and 
 pick are one undo step. The `src` goes through the reader's URL allowlist (`safeUrl`:
 http(s), mailto, tel, relative, `#`); one it refuses (`javascript:`, `data:`,
 protocol-relative), a blank `src`, `null` or a throw leaves the image as it was.
+
+`editBlockObject` is the host's own editor for an object the field declares (a
+block under `blocks.of`, an inline object under `blocks.inline`): set, every insert
+and edit of one asks it instead of opening the popover — the slash and palette
+pick, Enter or a double-click on a block or chip, and a server refusal of a save.
+It gets the kind (`type`, `title`, `inline`, its declared `fields` as declared) and
+the current `value` (`{ type }` for a new one; a block's `id` and undeclared keys
+included), plus `error` (`{ field, message }`, or `null`) when asked again. Only the
+declared fields are taken from the answer (`null`, `undefined` or `""` removes
+one); `type`, `id` and undeclared keys stay as stored. A required field left
+empty asks again with `{ field, message: "Required" }`, its `value` what the host
+answered. `null` or a throw inserts
+or changes nothing. The canvas still owns where the object lands and the undo step.
 
 ### Outbound (canvas → host)
 

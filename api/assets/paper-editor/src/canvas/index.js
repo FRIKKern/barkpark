@@ -86,7 +86,7 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
-import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
+import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
 import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
 import { exactClipboardSerializer, exactSliceFromClipboard } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
@@ -766,6 +766,9 @@ class BpPaperCanvas extends HTMLElement {
       event.stopPropagation();
       if (event.detail && Number.isInteger(event.detail.pos)) void this._pickImageAt(event.detail.pos);
     });
+    // injected async ({ type, title, inline, fields, value, error }) => value | null — the
+    // host's own editor for a declared block or inline object (instead of the popover).
+    this._editBlockObject = null;
     // Shared carets: the host's last setRemoteSelections list (re-applied on
     // mount), and the rAF-coalesced bp-canvas-selection emit.
     this._remoteSelections = [];
@@ -850,6 +853,7 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("tagSource");
     this._upgradeProperty("mediaUploader");
     this._upgradeProperty("mediaPicker");
+    this._upgradeProperty("editBlockObject");
     this._upgradeProperty("linkPreviewSource");
 
     // Default true; only the literal string "false" disables editing. Mount-time
@@ -2241,8 +2245,28 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   inlineObjectDialog() {
+    // A host editor (editBlockObject) takes every object insert and edit; else the popover.
+    if (this._editBlockObject) {
+      if (!this._hostObjectDialog) this._hostObjectDialog = new HostObjectDialog((request) => this._editBlockObject(request));
+      return this._hostObjectDialog;
+    }
     if (!this._inlineDialog) this._inlineDialog = new InlineObjectDialog();
     return this._inlineDialog;
+  }
+
+  // The host's editor for declared objects. Set: inserting or editing a block or
+  // inline object asks it instead of opening the popover. Unset: the popover.
+  set editBlockObject(fn) {
+    const next = typeof fn === "function" ? fn : null;
+    if (next !== this._editBlockObject) {
+      if (this._hostObjectDialog) this._hostObjectDialog.close(false);
+      if (this._inlineDialog) this._inlineDialog.close(false);
+    }
+    this._editBlockObject = next;
+  }
+
+  get editBlockObject() {
+    return this._editBlockObject;
   }
 
   // The value the dialog just saved: the batch that carries it is the one a
