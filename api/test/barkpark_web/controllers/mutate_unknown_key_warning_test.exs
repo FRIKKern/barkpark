@@ -65,4 +65,17 @@ defmodule BarkparkWeb.MutateUnknownKeyWarningTest do
              mutate(%{"mutations" => create(id <> "-dry"), "dryRun" => true})
              |> unknown_key_warnings()
   end
+
+  test "visibility is a known key; a value other than sync, async or deferred is refused" do
+    id = "visibility-#{System.unique_integer([:positive])}"
+
+    resp = mutate(%{"mutations" => create(id), "visibility" => "async"})
+    assert resp.status == 200, resp.resp_body
+    assert [] = unknown_key_warnings(resp)
+
+    resp = mutate(%{"mutations" => create(id <> "-bad"), "visibility" => "later"})
+    assert resp.status == 400
+    assert Jason.decode!(resp.resp_body)["error"]["code"] == "malformed"
+    assert {:error, _} = Content.get_document("drafts." <> id <> "-bad", "post", @dataset)
+  end
 end

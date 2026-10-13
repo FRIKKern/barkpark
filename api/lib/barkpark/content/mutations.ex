@@ -77,6 +77,7 @@ defmodule Barkpark.Content.Mutations do
     ReadOnlyFields,
     ReferenceIntegrity,
     Warnings,
+    WriteScope,
     Writer
   }
 
@@ -126,7 +127,19 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = Door.admit(fn -> apply_with_stale_retry(mutations, dataset, opts) end)
+        result =
+          Door.admit(fn ->
+            # One schema read per type for the whole batch (task-6e2552cdeb223fa2).
+            # The validation and publish reads pass bare scope keys, without the
+            # door's `memoize: true`, so each document re-read its schema and
+            # re-expanded its named types. The process memo covers every read
+            # in the batch and is emptied when the batch returns; a schema
+            # write inside the batch resets it.
+            WriteScope.with_process_memo(fn ->
+              apply_with_stale_retry(mutations, dataset, opts)
+            end)
+          end)
+
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )
@@ -207,6 +220,13 @@ defmodule Barkpark.Content.Mutations do
     Broadcast.claim_deferred_queue()
     if dry_run?, do: Process.put(@dry_run_key, true)
 
+    # The batch's audit rows are buffered and appended in ONE insert as the
+    # transaction's last statement, so the workspace's audit-chain lock is held
+    # for that append and the commit, not for the whole batch (see
+    # `Barkpark.Audit.defer_emits/0`). `:nested` when an enclosing batch owns
+    # the buffer; only the owner flushes.
+    audit_owner? = Barkpark.Audit.defer_emits() == :owner
+
     try do
       result =
         Repo.transaction(fn ->
@@ -227,6 +247,8 @@ defmodule Barkpark.Content.Mutations do
 
           results = apply_all(mutations, dataset, opts, caller)
 
+          if audit_owner? and not dry_run?, do: Barkpark.Audit.flush_deferred!()
+
           # DRY RUN: every gate, fence and write above ran for real, so the
           # results are exactly what a real batch would answer — then the whole
           # transaction is thrown away.
@@ -235,7 +257,8 @@ defmodule Barkpark.Content.Mutations do
 
       case result do
         {:ok, _} ->
-          Broadcast.flush_deferred_broadcasts()
+          if audit_owner?, do: Barkpark.Audit.finish_deferred(:committed)
+          Broadcast.flush_deferred_broadcasts(visibility: Keyword.get(opts, :visibility, :sync))
           result
 
         {:error, {@dry_run_key, would_be}} ->
@@ -284,6 +307,7 @@ defmodule Barkpark.Content.Mutations do
         end
     after
       Process.delete(@dry_run_key)
+      if audit_owner?, do: Barkpark.Audit.finish_deferred(:rolled_back)
     end
   end
 
@@ -425,6 +449,11 @@ defmodule Barkpark.Content.Mutations do
   # close a cycle with one either. `lock_chain!/1` is re-entrant, so a nil-
   # workspace document's own emit later in the batch does not wait on itself.
   # Scoped batches are untouched.
+  #
+  # Since the batch buffers its audit rows (`Audit.defer_emits/0`), its emits
+  # take no chain lock mid-batch; the flush takes every chain it needs in sorted
+  # key order. Other locks still take a chain lock mid-batch
+  # (`DedupWall.lock_publish_scope!/3`), so the serializer stays.
   defp serialize_unscoped_batch(opts) do
     if is_nil(Keyword.get(opts, :workspace_id)), do: Barkpark.Audit.lock_chain!(nil), else: :ok
   end
@@ -647,6 +676,60 @@ defmodule Barkpark.Content.Mutations do
         end
     end
   end
+
+  # ── Direct publish (task-6e2552cdeb223fa2) ─────────────────────────────────
+  #
+  # `{"createOrReplace": doc, "publish": true}` lands the document on its
+  # PUBLISHED row in one row write, with one revision, event and audit row. The
+  # two-step `createOrReplace` + `publish` costs a draft insert, a published
+  # write and a draft delete, each with its own revision, event and audit row.
+  # Nothing is skipped on the way: `Writer.build_document/4` runs the whole
+  # create pipeline (fences, `:before_save`, schema check, encryption) and
+  # returns the draft unsaved, and `Lifecycle.publish_built_draft/4` runs every
+  # publish gate on it. An existing draft is deleted, as the two-step path
+  # deletes it. `ifRevisionID` is checked against the published row, the row
+  # this replaces. Not offered for system types and papers, whose writes carry
+  # their own fences (`@direct_publish_refused_types`).
+  @direct_publish_refused_types ["paper" | Writer.system_types()]
+
+  defp apply_one(%{"createOrReplace" => attrs, "publish" => true}, dataset, opts)
+       when is_map(attrs) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+    expected = if_rev(attrs)
+
+    if type in @direct_publish_refused_types do
+      {:error, {:direct_publish_unsupported, type}}
+    else
+      existing =
+        case id && type && Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+          {:ok, doc} -> doc
+          _ -> nil
+        end
+
+      with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
+           :ok <- ensure_rev(existing, expected),
+           :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+           :ok <-
+             ensure_read_only_unchanged(
+               type,
+               existing,
+               incoming_content(attrs),
+               id,
+               dataset,
+               opts
+             ),
+           {:ok, draft} <- Writer.build_document(type, attrs, dataset, opts),
+           {:ok, published} <-
+             Content.publish_built_draft(draft, type, dataset, [incumbent: existing] ++ opts) do
+        {:ok, published, "createOrReplace"}
+      end
+    end
+  end
+
+  defp apply_one(%{"createOrReplace" => _attrs, "publish" => flag}, _dataset, _opts)
+       when flag not in [true, false],
+       do: {:error, {:invalid_publish_flag, flag}}
 
   defp apply_one(%{"createOrReplace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]

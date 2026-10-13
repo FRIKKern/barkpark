@@ -450,6 +450,23 @@ defmodule Barkpark.Content.Writer do
   def create_document(type, attrs, dataset, opts \\ []),
     do: Door.admit(fn -> admitted_create_document(type, attrs, dataset, opts) end)
 
+  @doc """
+  Run the whole `create_document/4` pipeline and return the draft it WOULD
+  write, without writing it: every refusal, pre-write fence, `:before_save`
+  hook, schema check and field encryption runs, and the result is an unsaved
+  `%Document{}` (its `id` is the existing draft row's id when one exists, else
+  nil). No revision, event, audit row or `:after_save` hook.
+
+  The mutate door's direct publish (`{"createOrReplace": doc, "publish": true}`)
+  hands this to `Lifecycle.publish_built_draft/4`, so a document lands on its
+  published row in one row write instead of a draft insert, a publish and a
+  draft delete (task-6e2552cdeb223fa2).
+  """
+  @spec build_document(String.t(), map(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def build_document(type, attrs, dataset, opts \\ []),
+    do: create_document(type, attrs, dataset, Keyword.put(opts, :build_only, true))
+
   defp admitted_create_document(type, attrs, dataset, opts) do
     # Two envelope/user-field NAME COLLISIONS, refused BEFORE the envelope
     # coercion — [collide-refusal] for the mixed shape, [status-collision] for
@@ -752,20 +769,26 @@ defmodule Barkpark.Content.Writer do
                 # committed document no consumer ever hears about. The wrap is
                 # deliberately narrow — encryption and paper-body rendering stay
                 # OUTSIDE, so the transaction covers two INSERTs and nothing else.
-                Broadcast.write_atomically(fn ->
+                if Keyword.get(opts, :build_only) do
                   existing
                   |> Document.changeset(enc_attrs)
-                  |> fenced_or_plain_update(existing, opts)
-                  |> Broadcast.tap_broadcast(
-                    dataset,
-                    type,
-                    "update",
-                    existing.rev,
-                    Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id),
-                    caller_context: Keyword.get(opts, :caller_context)
-                  )
-                end)
+                  |> Ecto.Changeset.apply_action(:update)
+                else
+                  Broadcast.write_atomically(fn ->
+                    existing
+                    |> Document.changeset(enc_attrs)
+                    |> fenced_or_plain_update(existing, opts)
+                    |> Broadcast.tap_broadcast(
+                      dataset,
+                      type,
+                      "update",
+                      existing.rev,
+                      Keyword.get(opts, :source, :api),
+                      Keyword.get(opts, :user_id),
+                      caller_context: Keyword.get(opts, :caller_context)
+                    )
+                  end)
+                end
               end
 
             _ ->
@@ -795,24 +818,32 @@ defmodule Barkpark.Content.Writer do
                 # [acrc-publish-atomicity-txn-boundary] See the update branch:
                 # birth is wrapped for the same reason, and a failed
                 # `save_event` now un-births the row instead of stranding it.
-                Broadcast.write_atomically(fn ->
+                if Keyword.get(opts, :build_only) do
                   %Document{}
                   |> Document.changeset(enc_attrs)
-                  |> Repo.insert()
-                  |> Broadcast.tap_broadcast(
-                    dataset,
-                    type,
-                    "create",
-                    nil,
-                    Keyword.get(opts, :source, :api),
-                    Keyword.get(opts, :user_id),
-                    caller_context: Keyword.get(opts, :caller_context)
-                  )
-                end)
+                  |> Ecto.Changeset.apply_action(:insert)
+                else
+                  Broadcast.write_atomically(fn ->
+                    %Document{}
+                    |> Document.changeset(enc_attrs)
+                    |> Repo.insert()
+                    |> Broadcast.tap_broadcast(
+                      dataset,
+                      type,
+                      "create",
+                      nil,
+                      Keyword.get(opts, :source, :api),
+                      Keyword.get(opts, :user_id),
+                      caller_context: Keyword.get(opts, :caller_context)
+                    )
+                  end)
+                end
               end
           end
 
-        finish_deferred_after_save(result, payload)
+        if Keyword.get(opts, :build_only),
+          do: result,
+          else: finish_deferred_after_save(result, payload)
     end
   end
 

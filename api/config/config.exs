@@ -236,6 +236,13 @@ config :barkpark, :media_webhooks, endpoints: []
 # `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
 config :barkpark, :audit_dispatch_async, true
 
+# Post-commit work of a content write (task-6e2552cdeb223fa2): the webhook
+# selection query, and the graph-edge upserts of a `visibility: async` mutate
+# batch. TRUE = it runs on a supervised task after commit, outside the request.
+# config/test.exs flips it FALSE for the same reason as the line above. Read by
+# `Barkpark.Content.Broadcast.flush_deferred_broadcasts/1`.
+config :barkpark, :post_commit_async, true
+
 # Auto-disable a webhook endpoint after this many CONSECUTIVE terminal delivery
 # give-ups (permanent 4xx / SSRF block / retry exhaustion). The counter resets to
 # 0 on any successful delivery, so only a persistently-dead endpoint trips it.

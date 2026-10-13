@@ -40,6 +40,17 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
   @dataset "production"
 
   setup do
+    # These tests pin the REBUILD wiring, which runs with incremental edge
+    # projection OFF. ON is the default since task-6e2552cdeb223fa2.
+    prev = Application.get_env(:barkpark, Barkpark.EdgeProjector)
+    Application.put_env(:barkpark, Barkpark.EdgeProjector, incremental_project: false)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, Barkpark.EdgeProjector, prev),
+        else: Application.delete_env(:barkpark, Barkpark.EdgeProjector)
+    end)
+
     # E3 tag registry: the fixture weighted tags (fixture-tag-N) these tests
     # publish must resolve to PUBLISHED type:tag docs in the dataset scope.
     Barkpark.LabelFixtures.register_tags!(@dataset)
@@ -527,7 +538,7 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       # producers. The invariant here is semantic: this edit must leave BOTH
       # the task and paper rebuild shapes runnable; unrelated duplicates do not
       # weaken that proof and must not make the assertion order-dependent.
-      jobs = all_enqueued(worker: ProjectorWorker)
+      jobs = rebuild_jobs()
       type_sets = jobs |> Enum.map(& &1.args["types"]) |> Enum.sort()
       assert ["paper"] in type_sets
       assert ["task"] in type_sets
@@ -585,7 +596,7 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
 
       {:ok, _} = Content.apply_paper_block_op(slug, op, @dataset)
 
-      for job <- all_enqueued(worker: ProjectorWorker) do
+      for job <- rebuild_jobs() do
         assert :ok = perform_job(ProjectorWorker, job.args)
       end
 
@@ -644,5 +655,15 @@ defmodule Barkpark.EdgeProjector.PaperBodyEdgesTest do
       {:ok, _} = Backfill.run(dry_run: false, dataset: @dataset)
       assert edge_pairs(paper.id) == pairs
     end
+  end
+
+  # The REBUILD jobs this module's writers enqueue (the flag is pinned off
+  # above). The queue is process-global, and a test elsewhere that commits real
+  # rows leaves per-document UPSERT jobs behind (incremental projection is the
+  # default since task-6e2552cdeb223fa2); those name documents this test's
+  # sandbox cannot see and cancel as :doc_gone, so they are not ours to perform.
+  defp rebuild_jobs do
+    all_enqueued(worker: ProjectorWorker)
+    |> Enum.filter(&(Map.get(&1.args, "op", "rebuild") == "rebuild"))
   end
 end

@@ -11,9 +11,10 @@ defmodule BarkparkWeb.MutateController do
 
   def mutate(conn, %{"dataset" => dataset, "mutations" => mutations}) when is_list(mutations) do
     with {:ok, dry_run} <- dry_run_flag(conn.params["dryRun"]),
+         {:ok, visibility} <- visibility_flag(conn.params["visibility"]),
          {:ok, mutations} <- apply_if_match_header(conn, mutations),
          {:ok, scope, resolved} <- resolve_write_scope(conn) do
-      opts = [source: :api, dry_run: dry_run] ++ scope
+      opts = [source: :api, dry_run: dry_run, visibility: visibility] ++ scope
 
       # The advisory channel (authoring-excellence D5): the publish wall queues
       # non-blocking warnings ([{code, severity, message}]) while the batch
@@ -69,11 +70,21 @@ defmodule BarkparkWeb.MutateController do
   defp dry_run_flag(flag) when flag in [false, "false"], do: {:ok, false}
   defp dry_run_flag(other), do: {:error, {:invalid_dry_run, other}}
 
+  # `visibility` (task-6e2552cdeb223fa2), Sanity's name for it. `sync`, the
+  # default, answers once the batch has committed AND its published documents'
+  # graph edges are written. `async` answers once the batch has committed; the
+  # edges are written right after, outside the request. Webhook selection runs
+  # outside the request in both.
+  defp visibility_flag(nil), do: {:ok, :sync}
+  defp visibility_flag("sync"), do: {:ok, :sync}
+  defp visibility_flag(v) when v in ["async", "deferred"], do: {:ok, :async}
+  defp visibility_flag(other), do: {:error, {:invalid_visibility, other}}
+
   # A top-level body key the door does not read used to vanish without a
   # trace — that is how `dryRun` wrote for real before the door honoured it
   # (task-778e3617070bce11). Named in a non-fatal warning, never refused: a
   # 400 here could break clients that send harmless extras.
-  @known_body_keys ~w(mutations dryRun)
+  @known_body_keys ~w(mutations dryRun visibility)
 
   defp warn_unknown_keys(%{} = body) do
     case body |> Map.keys() |> Enum.reject(&(&1 in @known_body_keys)) |> Enum.sort() do

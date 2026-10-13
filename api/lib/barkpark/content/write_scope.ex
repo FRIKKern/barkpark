@@ -523,15 +523,18 @@ defmodule Barkpark.Content.WriteScope do
   # list is slug-ordered). Returns nil when the workspace has no projects —
   # the caller then keeps the nil project_id (and the dataset_id resolver
   # keeps dataset_id NULL), never crashing.
+  # Memoized per request or batch: a mutate batch resolved it once per document.
   defp default_project_id_for_workspace(ws_id) when is_binary(ws_id) do
-    case Barkpark.Tenancy.list_projects(ws_id) do
-      [] ->
-        nil
+    request_memo([], {:default_project_id_for_workspace, ws_id}, fn ->
+      case Barkpark.Tenancy.list_projects(ws_id) do
+        [] ->
+          nil
 
-      projects ->
-        project = Enum.find(projects, &(&1.slug == "default")) || hd(projects)
-        project.id
-    end
+        projects ->
+          project = Enum.find(projects, &(&1.slug == "default")) || hd(projects)
+          project.id
+      end
+    end)
   end
 
   defp default_project_id_for_workspace(_), do: nil
