@@ -23,7 +23,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { readerPaintClass } from "./embed-node.js";
-import { objectBlockFor, objectBlockPreview } from "./inline-object.js";
+import { objectBlockFor, objectBlockValue } from "./inline-object.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -109,7 +109,7 @@ export const Opaque = Node.create({
 
       const chip = document.createElement("span");
       chip.className = "bp-canvas-readonly-chip";
-      chip.textContent = opaqueChipLabel(bpType, block, view && view.dom);
+      paintChip(dom, chip, bpType, block, view && view.dom);
       dom.appendChild(chip);
 
       return {
@@ -119,7 +119,7 @@ export const Opaque = Node.create({
           const b = (updated.attrs && updated.attrs.bpBlock) || {};
           const t = (updated.attrs && updated.attrs.bpType) || b.type || "block";
           if (t === "note") return false;
-          chip.textContent = opaqueChipLabel(t, b, dom);
+          paintChip(dom, chip, t, b, dom);
           return true;
         },
         stopEvent: () => true,
@@ -130,15 +130,39 @@ export const Opaque = Node.create({
 });
 
 // A calm read-only label for a carried block (e.g. "section", "composite", "codelist").
-// A custom object block the field DECLARES shows its preview instead — the kind
-// title plus a field value, "Callout · warning" (task-65fb83593b2d1c29) — read
-// off the host canvas's vocabulary.
-function opaqueChipLabel(bpType, block, el) {
+// A custom object block the field DECLARES is a row instead, as Sanity draws one: an
+// icon, the kind title and a preview line (a field value, task-65fb83593b2d1c29),
+// each its own element a host can style (.bp-canvas-object-row, [data-object-type]).
+// The chip's text stays "Callout · warning" (the separator is in the text, not
+// shown), so its name and text read the same.
+function paintChip(dom, chip, bpType, block, el) {
   const host = el && typeof el.closest === "function" ? el.closest("bp-paper-canvas") : null;
   const vocab = host && typeof host.inlineObjectVocabulary === "function" ? host.inlineObjectVocabulary() : null;
   const kind = objectBlockFor(vocab, bpType);
-  if (kind && Array.isArray(kind.fields) && kind.fields.length) return objectBlockPreview(kind, block || {});
-  return bpType ? `↪ ${bpType}` : "↪ block";
+  const row = !!(kind && Array.isArray(kind.fields) && kind.fields.length);
+  dom.classList.toggle("bp-canvas-object-row", row);
+  if (!row) {
+    dom.removeAttribute("data-object-type");
+    chip.textContent = bpType ? `↪ ${bpType}` : "↪ block";
+    return;
+  }
+  dom.setAttribute("data-object-type", bpType);
+  const value = objectBlockValue(kind, block || {});
+  const span = (cls, text) => {
+    const s = document.createElement("span");
+    s.className = cls;
+    if (text != null) s.textContent = text;
+    return s;
+  };
+  const icon = span("bp-canvas-object-icon");
+  icon.setAttribute("aria-hidden", "true");
+  const text = span("bp-canvas-object-text");
+  text.appendChild(span("bp-canvas-object-title", kind.title));
+  if (value !== "") {
+    text.appendChild(span("bp-canvas-object-sep", " · "));
+    text.appendChild(span("bp-canvas-object-preview", value));
+  }
+  chip.replaceChildren(icon, text);
 }
 
 // Unsafe note carriers stay opaque. Only the canonical server producer supplies

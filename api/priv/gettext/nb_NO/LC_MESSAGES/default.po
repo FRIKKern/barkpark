@@ -12898,3 +12898,8 @@ msgstr[1] "%{count} treff"
 #, elixir-autogen, elixir-format
 msgid "This action works on book documents only"
 msgstr "Denne handlingen virker bare på bokdokumenter"
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Action %{name} belongs to a plugin that is turned off in this workspace"
+msgstr "Handlingen %{name} hører til et tillegg som er slått av i dette arbeidsområdet"
