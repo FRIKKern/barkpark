@@ -690,12 +690,22 @@ defmodule BarkparkWeb.Studio.Caps do
           true -> {:halt, deny(socket)}
         end
 
-      # :publish — everything :write needs, and a seat that may publish.
+      # :publish — everything :write needs, and a seat that may publish. A
+      # read seat publishing a readerWrites type it just created or patched
+      # (task-97702b326b8bfd6d) takes the same reader arm as :write; it holds
+      # no contributor seat, so publish_refused?/1 never applies to it.
       :publish ->
         cond do
-          not write_capable?(socket.assigns, derive(socket)) -> {:halt, deny(socket)}
-          publish_refused?(socket.assigns) -> {:halt, deny_publish(socket)}
-          true -> {:cont, socket}
+          write_capable?(socket.assigns, derive(socket)) ->
+            if publish_refused?(socket.assigns),
+              do: {:halt, deny_publish(socket)},
+              else: {:cont, socket}
+
+          reader_write_allowed?(event, params, socket.assigns) ->
+            {:cont, socket}
+
+          true ->
+            {:halt, deny(socket)}
         end
 
       # :admin and :deny (default) both require admin, enforced on ALL sockets.
