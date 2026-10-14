@@ -269,7 +269,7 @@ inline atom or hard break counting as one.
 
 | Method | Effect | Returns |
 |---|---|---|
-| `setRemoteSelections(list)` | replace the remote set: `[{ id, name, color, anchor: Point, head: Point }]`. Each draws a caret bar with a `name` label in `color`, plus a translucent range when `anchor` ≠ `head`. `[]` clears; set before mount, it waits for the editor | nothing |
+| `setRemoteSelections(list)` | replace the remote set: `[{ id, name, color, anchor: Point, head: Point }]`. Each draws a caret bar with a `name` label in `color`, plus a translucent range when `anchor` ≠ `head`. `[]` clears; set before mount, it waits for the editor. It never moves the local selection, even a Shift+Arrow the browser has not yet reported | nothing |
 
 Remote selections are decorations: no ops, no history entry, and the local
 caret never moves. They map through local typing and `applyServerBlocks`; an
