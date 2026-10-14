@@ -8537,6 +8537,7 @@ else
 fi
 
 
+
 section "33. the pending Barkdown aggregate keeps the four-context floor and its leaves together"
 
 # These names were added after the frozen suite heads. Use the actual workflow
@@ -8574,44 +8575,8 @@ fi
 # Remove only the named pending-promotion decision. A healthy future window
 # must then promote the aggregate; this proves the hold is not decorative.
 sed '/^  "Barkdown parity gate"$/d' "$GEN" > "$RC33/unheld.sh"
-if [ "$(grep -c '^  "Barkdown parity gate" §10 and §11's live half (4 clauses, all of them GitHub API reads)"
-  echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
-else
-  api_stage
-fi
-
-[ "$LIVE" -eq 1 ] && live_stage
-
-echo
-echo "════════════════════════════════════════════════════════════"
-echo "required-checks: $PASS passed, $FAIL failed, $BLOCKED blocked$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
-if [ "$BLOCKED" -gt 0 ]; then
-  echo "required-checks: $BLOCKED site(s) BLOCKED — an input could not be read or a producer refused, so this run has NO verdict about the required set. Exit 4 means HOLD, not drift."
-fi
-# The run reached its own end. Anything that exits 0 without passing through
-# this line is a crash, and the EXIT trap turns it into a 70.
-RC_TALLY_REACHED=1
-exit "$(rc_exit_code "$FAIL" "$BLOCKED")"
- "$GEN" || true)" -eq 1 ] &&
-   ! grep -q '^  "Barkdown parity gate" §10 and §11's live half (4 clauses, all of them GitHub API reads)"
-  echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
-else
-  api_stage
-fi
-
-[ "$LIVE" -eq 1 ] && live_stage
-
-echo
-echo "════════════════════════════════════════════════════════════"
-echo "required-checks: $PASS passed, $FAIL failed, $BLOCKED blocked$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
-if [ "$BLOCKED" -gt 0 ]; then
-  echo "required-checks: $BLOCKED site(s) BLOCKED — an input could not be read or a producer refused, so this run has NO verdict about the required set. Exit 4 means HOLD, not drift."
-fi
-# The run reached its own end. Anything that exits 0 without passing through
-# this line is a crash, and the EXIT trap turns it into a 70.
-RC_TALLY_REACHED=1
-exit "$(rc_exit_code "$FAIL" "$BLOCKED")"
- "$RC33/unheld.sh"; then
+if [ "$(grep -c '^  "Barkdown parity gate"$' "$GEN" || true)" -eq 1 ] &&
+   ! grep -q '^  "Barkdown parity gate"$' "$RC33/unheld.sh"; then
   if emit_spec "$RC33/unheld.json" bash "$RC33/unheld.sh" \
       --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$RC33/fixtures" \
       --sha acctA --sha acctB --no-merge --out "$RC33/unheld.json"; then
@@ -8627,6 +8592,7 @@ exit "$(rc_exit_code "$FAIL" "$BLOCKED")"
 else
   bad "the named Barkdown decision mutation did not apply exactly once"
 fi
+
 
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
