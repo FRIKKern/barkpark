@@ -395,6 +395,11 @@ config :barkpark, Oban,
        # nightly reads never kick off in the same tick.
        {"31 3 * * *", Barkpark.Workers.TagDistribution},
        {"0 4 * * *", Barkpark.Search.Workers.Prune},
+       # Document view counts (task-5feac4e826cff9a5) — rewrites
+       # `document_popularity` from the last 30 days of `document_view_days`
+       # and prunes day rows past 90 days. Every 10 minutes, so a sort by
+       # views is at most about 10 minutes behind the views it counts.
+       {"*/10 * * * *", Barkpark.Search.Workers.ViewsRollup},
        # edit-on-the-link slice 4 — retention sweep for the paper view/edit
        # trail (`paper_access_log`). Daily, fifteen minutes after the search
        # prune so the two range deletes never open their scans in one tick.

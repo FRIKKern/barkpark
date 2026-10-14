@@ -1341,6 +1341,25 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  # task-5feac4e826cff9a5 — the view counter, `POST .../v1/data/views/:dataset`.
+  # :shared_docs_query_post with two changes. RateLimit bills `class: :view`
+  # (60 a minute per anonymous IP, 6000 per token; rate_limit.ex). A `:docs`
+  # `:read` share admits POST here, so a public site's browsers can record
+  # views of documents they may already read anonymously. The route changes no
+  # content: it adds to `document_view_days` and nothing else.
+  pipeline :scoped_views_ingest do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit, class: :view)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.RequireShareScope, surface: :docs, read_methods: ~w(GET HEAD POST))
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
   # :shared_docs_api for the POST form of the GROQ query read. Sanity's client
   # sends a query too long for a URL as POST; it reads and writes nothing, so
   # RateLimit bills it to the read bucket instead of the method's write bucket.
@@ -3706,6 +3725,13 @@ defmodule BarkparkWeb.Router do
     pipe_through(:shared_docs_query_post)
 
     post("/v:api_version/data/query/:dataset", GroqController, :read_post)
+  end
+
+  # Document view counts (task-5feac4e826cff9a5, docs/search/VIEWS.md).
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_views_ingest)
+
+    post("/v1/data/views/:dataset", ViewsController, :record)
   end
 
   # Scoped media surface (P3) — READ-only. A `:media`-shared scope is public

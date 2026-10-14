@@ -238,7 +238,7 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
   describe "the existing pipeline mounts are untouched (criterion 3)" do
     @router Path.expand("../../../lib/barkpark_web/router.ex", __DIR__)
 
-    test "the only RateLimit mounts with options are :presence_focus, the GROQ POST read and the five browser pipelines" do
+    test "the only RateLimit mounts with options are :presence_focus, :view, the GROQ POST read and the five browser pipelines" do
       src = File.read!(@router)
 
       mounts =
@@ -277,7 +277,17 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
       # SECOND DELIBERATE EXCEPTION: `class: :read` on `:shared_docs_query_post`,
       # the POST form of the GROQ query read. It meters a read as a read
       # (one of the two existing method classes), so it adds no class.
-      assert Enum.all?(others, &(&1 in [", class: :presence_focus", ", class: :read"])),
+      #
+      # THIRD DELIBERATE EXCEPTION (task-5feac4e826cff9a5): `class: :view` on
+      # `:scoped_views_ingest`, the document view counter. A REAL enforced
+      # class like :presence_focus: its own bucket key and budget (60 a minute
+      # per anonymous IP, 6000 per token, rate_limit.ex), refused with the
+      # standard JSON 429 by `limited/4`'s catch-all, so a burst of views never
+      # debits the caller's write budget.
+      assert Enum.all?(
+               others,
+               &(&1 in [", class: :presence_focus", ", class: :read", ", class: :view"])
+             ),
              "a RateLimit mount now passes options: #{inspect(others)} — a new class must be " <>
                "reasoned about here deliberately, not silently"
     end

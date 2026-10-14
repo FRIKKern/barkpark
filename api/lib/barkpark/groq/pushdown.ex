@@ -37,6 +37,10 @@ defmodule Barkpark.Groq.Pushdown do
       `{:not, check}`; `!(count(a.b[cond]) > 0)` and `!("x" in a.b)` ->
       `{:none, path, pairs}`: `a.b` is an array and no element matches,
       since the inner test is null, not false, for anything but an array
+    * `_views7d`, `_views30d` or `_popularity` compared with `<`, `<=`,
+      `>`, `>=` or `==` to a number -> `checks` as `{:views, column, op, n}`,
+      which the source tests against `document_popularity`
+      (`Barkpark.Search.Views`)
     * `count(a.b[cond]) > 0`, `>= 1`, `length(a.b[cond]) > 0` and
       `defined(a.b[cond][0])` on a content path, where `cond` is an `&&` of
       `x.y == v` and `x.y in [...]` on element fields (or `@`) with scalar
@@ -81,6 +85,10 @@ defmodule Barkpark.Groq.Pushdown do
 
   @system_paths ~w(_rev _createdAt _updatedAt _originalId title)
 
+  # `_views7d`, `_views30d`, `_popularity` -> their `document_popularity`
+  # column (`Barkpark.Search.Views`).
+  @views_fields %{"_views7d" => :views_7d, "_views30d" => :views_30d, "_popularity" => :score}
+
   # Functions with no hidden input: a call over `^` values and literals has
   # one value per parent document. `references()` reads the filtered
   # document and is not one of them.
@@ -98,8 +106,14 @@ defmodule Barkpark.Groq.Pushdown do
           | {:not, check()}
           | {:none, [String.t()], [{[String.t()], [scalar()]}]}
           | {:range, [String.t()], String.t(), scalar()}
+          | {:views, :views_7d | :views_30d | :score, String.t(), number()}
   @type scalar :: String.t() | number() | boolean()
-  @type order_key :: {:path, [String.t()]} | :_id | :_createdAt | :_updatedAt
+  @type order_key ::
+          {:path, [String.t()]}
+          | {:views, :views_7d | :views_30d | :score}
+          | :_id
+          | :_createdAt
+          | :_updatedAt
   @type t :: %{
           types: [String.t()] | nil,
           ids: [String.t()] | nil,
@@ -192,7 +206,8 @@ defmodule Barkpark.Groq.Pushdown do
   @length_ops %{"<" => ">", "<=" => ">=", ">" => "<", ">=" => "<=", "==" => "=="}
 
   defp check({:op, op, l, r} = node, resolve) when is_map_key(@length_ops, op) do
-    with :error <- some_check(node, :exact),
+    with :error <- views_check(op, l, r, resolve),
+         :error <- some_check(node, :exact),
          :error <- length_check(op, l, r, resolve) do
       range_check(op, l, r, resolve)
     end
@@ -269,6 +284,33 @@ defmodule Barkpark.Groq.Pushdown do
   end
 
   defp not_check(_node, _resolve), do: :error
+
+  # `_views30d > 10`, either side, against a number: the document source
+  # renders the view fields as numbers whenever the query names one, so SQL
+  # matches exactly what GROQ matches.
+  defp views_check(op, l, r, resolve) do
+    case {views_column(l), views_column(r)} do
+      {{:ok, column}, _} -> views_n(column, op, r, resolve)
+      {_, {:ok, column}} -> views_n(column, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
+  defp views_n(column, op, n, resolve) do
+    case value(n, resolve) do
+      {:ok, n} when is_number(n) -> {:ok, {:views, column, op, n}}
+      _ -> :error
+    end
+  end
+
+  defp views_column(expr) do
+    with {:ok, [name]} <- attr_path(expr),
+         {:ok, column} <- Map.fetch(@views_fields, name) do
+      {:ok, column}
+    else
+      _ -> :error
+    end
+  end
 
   defp length_check(op, l, r, resolve) do
     case {count_path(l), count_path(r)} do
@@ -457,7 +499,8 @@ defmodule Barkpark.Groq.Pushdown do
   The sort keys a source can order by in SQL for the `order()` arguments
   `args`, each with its direction, or `:error` when one is anything else. A
   key is `{:path, path}` for a content path, as in `checks`, or `:_id`,
-  `:_createdAt` or `:_updatedAt`. `title` and functions stay in memory.
+  `:_createdAt` or `:_updatedAt`, or `{:views, column}` for `_views7d`,
+  `_views30d` and `_popularity`. `title` and functions stay in memory.
   """
   @spec order_keys([tuple()]) :: {:ok, [{order_key(), :asc | :desc}]} | :error
   def order_keys(args) do
@@ -481,6 +524,7 @@ defmodule Barkpark.Groq.Pushdown do
       {:ok, ["_id"]} -> {:ok, :_id}
       {:ok, ["_createdAt"]} -> {:ok, :_createdAt}
       {:ok, ["_updatedAt"]} -> {:ok, :_updatedAt}
+      {:ok, [name]} when is_map_key(@views_fields, name) -> {:ok, {:views, @views_fields[name]}}
       {:ok, path} -> if exact_path?(path), do: {:ok, {:path, path}}, else: :error
       :error -> :error
     end

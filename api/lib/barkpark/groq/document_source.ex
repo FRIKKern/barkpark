@@ -69,6 +69,7 @@ defmodule Barkpark.Groq.DocumentSource do
   alias Barkpark.Content.WriteScope
   alias Barkpark.Groq.{Evaluator, LimitError, Pushdown}
   alias Barkpark.Repo
+  alias Barkpark.Search.Views
 
   @max_rounds 8
   @scan_chunk 500
@@ -101,9 +102,19 @@ defmodule Barkpark.Groq.DocumentSource do
       caller_context: Keyword.get(opts, :caller_context),
       max_per_fetch: config(:max_documents_per_fetch, 10_000),
       max_bytes_per_fetch: config(:max_bytes_per_fetch, 33_554_432),
-      max_loaded: config(:max_documents_loaded, 25_000)
+      max_loaded: config(:max_documents_loaded, 25_000),
+      views: false
     }
   end
+
+  @doc """
+  Turns on the view fields `_views7d`, `_views30d` and `_popularity`
+  (`Barkpark.Search.Views`) when `tree` names one of them. Every document
+  the source renders then carries all three, 0 for a document with no views,
+  and `order()` and comparisons on them run in SQL.
+  """
+  @spec with_views(map(), tuple()) :: map()
+  def with_views(state, tree), do: %{state | views: Views.referenced?(tree)}
 
   @doc """
   Evaluates `tree` against the dataset in batched rounds. Returns the
@@ -322,7 +333,11 @@ defmodule Barkpark.Groq.DocumentSource do
 
     {ors, plain} = Enum.split_with(constraints.checks, &match?({:or, _}, &1))
 
-    checks = Enum.map(plain, &check_path/1)
+    # A view count is not a content field; no schema hides it.
+    checks =
+      plain
+      |> Enum.reject(&match?({:views, _column, _op, _n}, &1))
+      |> Enum.map(&check_path/1)
 
     branches = for {:or, branches} <- ors, branch <- branches, do: filter_paths(branch)
 
@@ -576,6 +591,7 @@ defmodule Barkpark.Groq.DocumentSource do
       |> counted_rows()
       |> maybe_where_types(types)
       |> where(^exact_condition(ids, eq, checks, state.perspective))
+      |> maybe_join_views(keys, state.perspective)
       |> order_by(^order_terms(keys, state.perspective))
       |> offset(^from)
       |> admit!(state, to - from)
@@ -599,6 +615,12 @@ defmodule Barkpark.Groq.DocumentSource do
     count_loaded!(state, length(docs))
     Enum.each(docs, &touch_type(&1["_type"]))
     docs
+  end
+
+  defp maybe_join_views(query, keys, perspective) do
+    if Enum.any?(keys, &match?({{:views, _}, _}, &1)),
+      do: Views.join_popularity(query, perspective == :published),
+      else: query
   end
 
   # The SQL sort order of `keys`, then the evaluator's own order: `_id`,
@@ -681,6 +703,10 @@ defmodule Barkpark.Groq.DocumentSource do
       )
     ]
   end
+
+  # A view count is always a number (0 without views), so one numeric key
+  # orders it as GROQ does. It reads the `:bp_views` join `load_slice/5` adds.
+  defp sort_exprs({:views, column}, _perspective), do: [Views.joined_value(column)]
 
   defp sort_exprs(:_createdAt, _perspective),
     do: [dynamic([d], is_nil(d.inserted_at)), dynamic([d], d.inserted_at)]
@@ -906,6 +932,11 @@ defmodule Barkpark.Groq.DocumentSource do
     |> Enum.map(&branch_condition(&1, perspective))
     |> Enum.reduce(fn c, acc -> dynamic(^acc or ^c) end)
   end
+
+  # `_views30d > n` and the like: the count from `document_popularity`, 0
+  # for a document with no row, as the renderer attaches it.
+  defp check_condition({:views, column, op, n}, perspective),
+    do: Views.sql_condition(column, op, n, perspective == :published)
 
   defp check_condition(check, _perspective), do: check_condition(check)
 
@@ -1312,11 +1343,34 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp render(rows, state) do
     rendered = Envelope.render_many_by_type(rows, &schema_for(&1, state), state.caller_context)
+    counts = if state.views, do: view_counts(rows), else: nil
 
     rows
     |> Enum.zip(rendered)
-    |> Enum.map(fn {_row, doc} -> to_sanity(doc) end)
+    |> Enum.map(fn {row, doc} -> doc |> to_sanity() |> put_views(row, counts) end)
     |> apply_overlay(state.perspective)
+  end
+
+  # One read per dataset among `rows` (a query reads one dataset, so one
+  # read), keyed by the published id: a draft carries its published
+  # document's counts.
+  defp view_counts(rows) do
+    rows
+    |> Enum.group_by(& &1.dataset_id, &DraftId.published_id(&1.doc_id))
+    |> Map.new(fn {dataset_id, ids} ->
+      {dataset_id, if(dataset_id, do: Views.lookup(dataset_id, Enum.uniq(ids)), else: %{})}
+    end)
+  end
+
+  defp put_views(doc, _row, nil), do: doc
+
+  defp put_views(doc, row, counts) do
+    values =
+      counts
+      |> Map.get(row.dataset_id, %{})
+      |> Map.get(DraftId.published_id(row.doc_id), Views.zero())
+
+    Map.merge(doc, values)
   end
 
   defp schema_for(type, state) do

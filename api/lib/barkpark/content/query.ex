@@ -2348,6 +2348,15 @@ defmodule Barkpark.Content.Query do
   defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)
   defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
 
+  # View counts (task-5feac4e826cff9a5): `_views7d`, `_views30d` and
+  # `_popularity` (alias `popularity`) sort by the document's row in
+  # `document_popularity`, 0 without one. A draft sorts by its published id.
+  defp apply_order(q, {:views, column, dir}) do
+    q
+    |> Barkpark.Search.Views.join_popularity(false)
+    |> order_by(^[{dir, Barkpark.Search.Views.joined_value(column)}])
+  end
+
   # Content-field ordering: `title`/`status` are promoted columns (mirroring the
   # filter ops above); every other field sorts by its JSONB value. `field` rides
   # as a bound parameter in the fragment, so it is injection-safe.

@@ -1776,6 +1776,21 @@ defmodule BarkparkWeb.QueryController do
   defp parse_order("_createdAt:asc"), do: :created_at_asc
   defp parse_order("_createdAt:desc"), do: :created_at_desc
 
+  # View counts (task-5feac4e826cff9a5, docs/search/VIEWS.md). `popularity` is
+  # the plain-word alias of `_popularity`, the decayed 30-day score.
+  defp parse_order(spec) when spec in ~w(popularity:asc popularity:desc) do
+    parse_order("_" <> spec)
+  end
+
+  defp parse_order("_popularity:" <> dir) when dir in ~w(asc desc),
+    do: {:views, :score, String.to_existing_atom(dir)}
+
+  defp parse_order("_views7d:" <> dir) when dir in ~w(asc desc),
+    do: {:views, :views_7d, String.to_existing_atom(dir)}
+
+  defp parse_order("_views30d:" <> dir) when dir in ~w(asc desc),
+    do: {:views, :views_30d, String.to_existing_atom(dir)}
+
   # `<field>:asc` / `<field>:desc` — order by any document field, including a
   # dot-path into JSONB content (`price.amount:desc`). apply_order in
   # Content.Query resolves it against the promoted columns / nested JSONB content
@@ -1815,7 +1830,8 @@ defmodule BarkparkWeb.QueryController do
       %{
         "order" => [
           "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
-            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, or _createdAt:asc|desc"
+            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, _createdAt:asc|desc, " <>
+            "or a view count: popularity, _popularity, _views7d or _views30d with :asc|desc"
         ]
       }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
   end

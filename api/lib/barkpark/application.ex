@@ -479,6 +479,10 @@ defmodule Barkpark.Application do
       Barkpark.HostVitals.Sampler,
       Barkpark.Repo,
       Barkpark.Vault,
+      # Document view counts (task-5feac4e826cff9a5): owns the ETS buffer and
+      # flushes it to `document_view_days` every few seconds. After Repo so a
+      # flush can write; it flushes once more when it stops.
+      Barkpark.Search.Views.Buffer,
       # WI1: plugin registry — must come up before workers/endpoint so any
       # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
       Barkpark.Plugins.Registry,

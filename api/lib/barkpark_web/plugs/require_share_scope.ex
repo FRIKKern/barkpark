@@ -122,7 +122,7 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
   legal `Barkpark.Sharing` surfaces; anything else raises at compile/boot so a
   miswired route fails loudly rather than silently never-sharing.
   """
-  @spec init(keyword()) :: %{surface: Sharing.Share.surface()}
+  @spec init(keyword()) :: %{surface: Sharing.Share.surface(), read_methods: [String.t()]}
   def init(opts) do
     surface = Keyword.fetch!(opts, :surface)
 
@@ -132,11 +132,14 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
               "got #{inspect(surface)}"
     end
 
-    %{surface: surface}
+    %{surface: surface, read_methods: Keyword.get(opts, :read_methods, @safe_read_methods)}
   end
 
-  @spec call(Plug.Conn.t(), %{surface: Sharing.Share.surface()}) :: Plug.Conn.t()
-  def call(conn, %{surface: surface}) do
+  @spec call(Plug.Conn.t(), %{
+          required(:surface) => Sharing.Share.surface(),
+          optional(:read_methods) => [String.t()]
+        }) :: Plug.Conn.t()
+  def call(conn, %{surface: surface} = opts) do
     conn = fetch_query_params(conn)
     ws_slug = conn.path_params["workspace_slug"]
     project_slug = conn.path_params["project_slug"]
@@ -161,7 +164,13 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
         conn
 
       Sharing.shared?(ws_slug, project_slug, dataset, surface) ->
-        grant_if_resolvable(conn, ws_slug, project_slug, dataset)
+        grant_if_resolvable(
+          conn,
+          ws_slug,
+          project_slug,
+          dataset,
+          Map.get(opts, :read_methods, @safe_read_methods)
+        )
 
       true ->
         # P4 (Scoped-by-URL): `?share=<item-token>` on a SCOPED route.
@@ -183,8 +192,8 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
   # resolve to real rows (a grant for a non-existent scope must NOT open the
   # route — fail-closed). When either guard fails, leave the conn untouched so
   # the normal membership gate runs and denies the anonymous caller.
-  defp grant_if_resolvable(conn, ws_slug, project_slug, dataset) do
-    if method_access_allows?(conn, ws_slug, project_slug, dataset) do
+  defp grant_if_resolvable(conn, ws_slug, project_slug, dataset, read_methods) do
+    if method_access_allows?(conn, ws_slug, project_slug, dataset, read_methods) do
       with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws_slug),
            %Tenancy.Project{} = project <- Tenancy.get_project(ws_slug, project_slug) do
         conn
@@ -206,8 +215,13 @@ defmodule BarkparkWeb.Plugs.RequireShareScope do
   # a shared surface, regardless of access level. Any unsafe method (POST/PUT/
   # PATCH/DELETE/…) is allowed ONLY when the share grants `:edit`. This is the
   # invariant that keeps a `:docs:read` share from ever opening the mutate route.
-  defp method_access_allows?(conn, ws_slug, project_slug, dataset) do
-    conn.method in @safe_read_methods or
+  #
+  # `read_methods` widens the read set for ONE route that takes a POST but
+  # changes no content: the view counter (`ViewsController`), mounted with
+  # `read_methods: ~w(GET HEAD POST)` on its own pipeline, so a `:read` share
+  # lets anonymous visitors record views and nothing else.
+  defp method_access_allows?(conn, ws_slug, project_slug, dataset, read_methods) do
+    conn.method in read_methods or
       Sharing.access_for(ws_slug, project_slug, dataset) == :edit
   end
 

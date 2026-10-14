@@ -119,9 +119,10 @@ defmodule BarkparkWeb.SearchController do
         # the cap and answer with the unbounded payload the caller explicitly
         # asked NOT to receive — a 14 MB "success" for a typo. Pure input
         # refusal, reveals nothing about the dataset or the tenant.
-        case BodyBound.parse(params["bodyChars"]) do
-          {:ok, body_chars} -> do_search(conn, dataset, params, body_chars)
-          :error -> invalid_body_chars(conn, params["bodyChars"])
+        case {BodyBound.parse(params["bodyChars"]), parse_boost(params["boost"])} do
+          {:error, _} -> invalid_body_chars(conn, params["bodyChars"])
+          {_, :error} -> invalid_boost(conn, params["boost"])
+          {{:ok, body_chars}, {:ok, _boost}} -> do_search(conn, dataset, params, body_chars)
         end
 
       bad ->
@@ -138,6 +139,25 @@ defmodule BarkparkWeb.SearchController do
   # would have dropped `request_id`, which is the whole point of §9. That guard
   # greps the SOURCE, so even naming the offending shape literally in a comment
   # reds it — which is why this sentence spells it out in prose.
+  # `?boost=popularity` adds the document's view score to relevance
+  # (task-5feac4e826cff9a5, docs/search/VIEWS.md). Absent or empty: no boost.
+  # Anything else is refused like a bad `bodyChars`, so a typo does not
+  # silently rank without the boost the caller asked for.
+  defp parse_boost(nil), do: {:ok, nil}
+  defp parse_boost(""), do: {:ok, nil}
+  defp parse_boost("popularity"), do: {:ok, :popularity}
+  defp parse_boost(_), do: :error
+
+  defp invalid_boost(conn, value) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "boost must be \"popularity\" or absent; got " <> inspect(value),
+      %{parameter: "boost", received: value}
+    )
+  end
+
   defp invalid_body_chars(conn, value) do
     ErrorResponse.emit_custom(
       conn,
@@ -177,7 +197,8 @@ defmodule BarkparkWeb.SearchController do
             # Retrieval column projection (search-latency slice a) — see
             # search_local/2. Threads the response's `fields=` allowlist to the
             # retriever so heavy content is dropped at the DB.
-            fields: bin(params["fields"])
+            fields: bin(params["fields"]),
+            boost: elem(parse_boost(params["boost"]), 1)
           ] ++ scope_opts(conn)
 
         {docs, count, meta} = Content.search_documents(query, dataset, opts)

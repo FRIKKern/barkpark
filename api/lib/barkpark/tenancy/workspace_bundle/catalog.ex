@@ -130,6 +130,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     chat_runtime_usage_receipts content_edges cycle_build_plans
     cycle_release_gate_captures cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes datasets
+    document_popularity document_view_days
     epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
     epic_benchmark_attempts plugin_doc_state role_permissions task_edges
     token_sessions webhook_deliveries
@@ -216,6 +217,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @e2_joins %{
     "datasets" => {"JOIN projects p ON p.id = t.project_id", "p.workspace_id"},
     "role_permissions" => {"JOIN roles r ON r.id = t.role_id", "r.workspace_id"},
+    # Document view counts (task-5feac4e826cff9a5): keyed by `dataset_id`,
+    # NOT NULL, so the two many-to-one joins reach the workspace without
+    # fanning out or dropping a row.
+    "document_view_days" =>
+      {"JOIN datasets ds ON ds.id = t.dataset_id JOIN projects p ON p.id = ds.project_id",
+       "p.workspace_id"},
+    "document_popularity" =>
+      {"JOIN datasets ds ON ds.id = t.dataset_id JOIN projects p ON p.id = ds.project_id",
+       "p.workspace_id"},
     # SECURITY INVARIANT (pds-bl-pin-webhook-deliveries-inner-join): this INNER
     # JOIN is the ONLY thing keeping media signing secrets out of every bundle.
     # Media deliveries are the one delivery kind whose `payload_snapshot` embeds
@@ -742,6 +752,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #     :copy only together with a declared safe-key contract over `value`
   #     (or a @dev_scrub entry) and a test that fails on an undeclared key.
 
+  #   * view counts (task-5feac4e826cff9a5): document_view_days and
+  #     document_popularity hold no identity, but they are the source site's
+  #     traffic and a dev target rebuilds its own from its own views. Denied
+  #     so a dev bundle does not carry production readership numbers.
+
   @dev_doc_type_deny ~w(ticket)
 
   @dev_copy ~w(
@@ -760,7 +775,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_release_gate_admissions cycle_release_gate_captures
     cycle_release_gate_challenges cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes cycle_waves
-    data_keys epic_assignment_results epic_assignment_runtime_attempts
+    data_keys document_popularity document_view_days
+    epic_assignment_results epic_assignment_runtime_attempts
     epic_assignment_tasks epic_assignments epic_benchmark_attempts
     epic_benchmark_experiments github_sync_conflicts mutation_events
     paper_access_log plugin_doc_state preview_token_jti registered_chat_hosts
