@@ -636,6 +636,142 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     end
   end
 
+  describe "a slice of *[...] over more documents than one read may load" do
+    # Every shape is refused when it loads all 10,500 products. `rank` is
+    # missing on the products; the x documents below hold one of each kind of
+    # value GROQ's order() ranks.
+    @slice_shapes [
+      ~s'*[_type == "product"][0]',
+      ~s'*[_type == "product"][0]._id',
+      ~s'*[_type == "product"][3...15]._id',
+      ~s'*[_type == "product"][10490..10520]._id',
+      ~s'*[_type == "product" && isMainProduct == true][7]._id',
+      ~s'*[_type == "product" && $s in seriesIds][2...4]._id',
+      ~s'*[_type == "product"] | order(isbn desc)[0...12]._id',
+      ~s'*[_type == "product"] | order(rank asc)[0...20]{_id, rank}',
+      ~s'*[_type == "product"] | order(rank desc)[0...20]{_id, rank}',
+      ~s'*[_type == "product"] | order(rank desc, isbn asc)[0...20]._id',
+      ~s'*[_type == "product"] | order(_updatedAt desc)[0...5]._id',
+      ~s'*[_type == "product"] | order(_createdAt asc, _id desc)[0..2]._id',
+      ~s'*[_type == "product"] | order(_id desc)[0...3]._id',
+      ~s'*[_type == "product" && isbn > "0"][0...12]._id',
+      ~s'*[_type == "product" && isbn > "0"][9000...9010]._id',
+      ~s'*[_type == "product" && isbn > "0"] | order(isbn desc)[0...12]._id',
+      ~s'*[_type == "product"] | order(lower(isbn) desc)[1]._id',
+      ~s'*[_type == "product" && count(slugHistory[match == "url"]) > 0] | order(rank desc)[0...10]{_id, rank}',
+      ~s'{"first": *[_type == "product"][0]._id, "n": count(*[_type == "product"][0...5])}'
+    ]
+
+    setup %{scope: scope} do
+      # Numbers, strings, booleans, null, an array and an object, a character
+      # above U+FFFF and one in U+E000..U+FFFF, which UTF-16 orders the other
+      # way round from code points.
+      ranks = [
+        3,
+        2.5,
+        -1,
+        "b",
+        "a",
+        "Z",
+        true,
+        false,
+        nil,
+        [1],
+        %{"a" => 1},
+        "\u{1F600}",
+        "\u{E000}"
+      ]
+
+      for {rank, i} <- Enum.with_index(ranks) do
+        id = "x#{i}"
+        doc = %{"_id" => id, "rank" => rank, "isbn" => "x#{i}", "seriesIds" => ["series-3"]}
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      # Drafts: p5 gains a rank and an isbn that sorts first, x3 a new rank,
+      # and y1 exists only as a draft.
+      %{rows: [[content]]} =
+        Repo.query!("SELECT content FROM documents WHERE doc_id = 'p5' AND dataset = $1", [
+          @dataset
+        ])
+
+      for doc <- [
+            Map.merge(content, %{"_id" => "p5", "rank" => 2, "isbn" => "999"}),
+            %{"_id" => "x3", "rank" => "c", "isbn" => "x3", "seriesIds" => ["series-3"]},
+            %{"_id" => "y1", "rank" => 10, "isbn" => "y1", "seriesIds" => ["series-3"]}
+          ] do
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+      end
+
+      :ok
+    end
+
+    test "each shape answers within the limits and equals in-memory evaluation in every perspective",
+         %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        expected =
+          Map.new(@slice_shapes, &{&1, in_memory(token, perspective, &1, %{"s" => "series-3"})})
+
+        for q <- @slice_shapes do
+          got = result!(token, q, %{"s" => "series-3"}, %{"perspective" => perspective})
+          assert got == expected[q], "#{perspective} #{q}"
+        end
+      end
+
+      assert result!(token, ~s'*[_type == "product"] | order(rank asc)[0...13].rank', %{}) ==
+               [-1, 2.5, 3, "Z", "a", "b", "\u{1F600}", "\u{E000}", false, true, nil, nil, nil]
+    end
+
+    test "an exact filter reads only the rows the slice needs", %{token: token} do
+      sql =
+        sql_reads(fn ->
+          assert result!(token, ~s'*[_type == "product"][0]._id', %{}) == "p1"
+
+          # `desc` puts the template, which has no isbn, first.
+          assert result!(token, ~s'*[_type == "product"] | order(isbn desc)[0...2]._id', %{}) ==
+                   ["template", "x9"]
+        end)
+
+      sized = Enum.filter(sql, &(&1 =~ "pg_column_size"))
+      assert length(sized) == 2
+      assert Enum.all?(sized, &(&1 =~ ~r/LIMIT \$\d+ OFFSET \$\d+/)), Enum.join(sized, "\n")
+      refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/))
+    end
+
+    test "an unordered slice over any other filter stops at the chunk that fills it",
+         %{token: token} do
+      sql =
+        sql_reads(fn ->
+          assert result!(token, ~s'*[_type == "product" && isbn > "0"][0...3]._id', %{}) ==
+                   ["p1", "p10", "p100"]
+        end)
+
+      assert Enum.count(sql, &(&1 =~ ~r/COLLATE "C"/)) == 1
+    end
+
+    test "a slice wider than the per-fetch limit is still refused", %{token: token} do
+      for q <- [
+            ~s'*[_type == "product"][0...10501]',
+            ~s'*[_type == "product" && isbn > "0"][0...10001]'
+          ] do
+        body = token |> query(q, %{}) |> json_response(422)
+        assert body["error"]["type"] == "queryLimitError", q
+      end
+    end
+
+    test "the query timeout still applies", %{token: token} do
+      with_groq_config(timeout_ms: 50)
+
+      body =
+        token
+        |> query(~s'*[_type == "product" && isbn > "0"] | order(lower(isbn) desc)[0]', %{})
+        |> json_response(422)
+
+      assert body["error"]["description"] =~ "ran longer than 50 ms"
+    end
+  end
+
   # The SQL of every query the function sends.
   defp sql_reads(fun) do
     ref = make_ref()

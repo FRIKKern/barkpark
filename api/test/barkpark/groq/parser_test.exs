@@ -261,6 +261,27 @@ defmodule Barkpark.Groq.ParserTest do
       end
     end
 
+    test "order() over content paths and _id, _createdAt, _updatedAt gives SQL sort keys" do
+      {:ok, {:slice, {:memo, {:pipe, _base, "order", args}}, 0, 12, false}} =
+        Parser.parse(
+          ~s'*[_type == "p"] | order(a.b desc, _updatedAt, _createdAt asc, _id desc)[0...12]'
+        )
+
+      assert Pushdown.order_keys(args) ==
+               {:ok,
+                [
+                  {{:path, ["a", "b"]}, :desc},
+                  {:_updatedAt, :asc},
+                  {:_createdAt, :asc},
+                  {:_id, :desc}
+                ]}
+
+      for order <- ["lower(a)", "title", "_rev", "a[0]", "a.b, x->y"] do
+        {:ok, {:pipe, _base, "order", args}} = Parser.parse(~s'*[_type == "p"] | order(#{order})')
+        assert Pushdown.order_keys(args) == :error, order
+      end
+    end
+
     test "or, functions and ^ stay in memory" do
       c = constraints(~s'*[_type == "a" || _type == "b"]')
       assert c.types == nil

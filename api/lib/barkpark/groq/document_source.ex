@@ -50,7 +50,10 @@ defmodule Barkpark.Groq.DocumentSource do
   `pg_column_size` before anything is loaded), or the query as a whole more
   than `:max_documents_loaded` documents (default 25 000). A `count(*[...])`
   keeps no documents: SQL counts it, or `scan_count/4` reads it in chunks, so
-  these limits do not apply to it. Keys live in the application env
+  these limits do not apply to it. A slice of a `*[...]` keeps only the
+  documents it returns: `slice/5` reads them with OFFSET and LIMIT, or
+  `scan_slice/6` reads the matches in chunks, so the limits apply to the slice
+  and not to every match. Keys live in the application env
   `config :barkpark, Barkpark.Groq`.
   """
 
@@ -216,13 +219,85 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
+  # A slice whose filter is exact is one SQL read: the matching rows in the
+  # order the evaluator gives them, with OFFSET and LIMIT. The same rules as
+  # `count/2` decide when SQL matches exactly, and every content path the sort
+  # keys read must be readable too. `order_terms/2` holds the sort order. The
+  # read is sized before it loads, as `admit!/2` sizes any other. A filter on
+  # `_id` is bounded by its ids and loads as before.
+  @impl true
+  def slice(state, constraints, keys, from, to) do
+    paths = for {{:path, path}, _dir} <- keys, do: path
+
+    cond do
+      constraints.ids != nil or constraints.types == nil or "paper" in constraints.types ->
+        :error
+
+      not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state, paths)) ->
+        :error
+
+      true ->
+        key = cache_key(constraints)
+        slot = {:groq_src_slice, key, keys, from, to}
+
+        case Process.get(slot) do
+          nil ->
+            docs = load_slice(state, key, keys, from, to)
+            Process.put(slot, docs)
+            {:ok, docs}
+
+          docs ->
+            {:ok, docs}
+        end
+    end
+  end
+
+  # Any other slice reads the rows SQL narrows to in chunks of `@scan_chunk`
+  # and holds only the documents the slice needs, so the per-fetch limit on
+  # matches does not refuse it; the query's timeout still bounds it. Without
+  # `rank` the chunks come in `_id` order and the read stops at the `take`th
+  # kept document. With `rank` every row is read and the best `take` kept. A
+  # slice that keeps more documents than `:max_documents_per_fetch` loads as
+  # before, and so does one narrowed by `_id`, which that read bounds and tags
+  # by document. A scan whose filter recorded something to load this round ran
+  # without it, so its result is not kept.
+  @impl true
+  def scan_slice(state, constraints, _cache, _keep?, _rank, take)
+      when take > state.max_per_fetch or constraints.ids != nil,
+      do: :error
+
+  def scan_slice(state, constraints, cache, keep?, rank, take) do
+    key = cache_key(constraints)
+    slot = {:groq_src_scan_slice, key, cache}
+
+    case Process.get(slot) do
+      nil ->
+        missing = Process.get(:groq_src_missing)
+
+        docs =
+          if rank,
+            do: scan_ranked(state, key, keep?, rank, take),
+            else: scan_first(state, key, keep?, take)
+
+        if Process.get(:groq_src_missing) == missing do
+          count_loaded!(state, length(docs))
+          Process.put(slot, docs)
+        end
+
+        {:ok, docs}
+
+      docs ->
+        {:ok, docs}
+    end
+  end
+
   # True when rendering a document of `type` for this caller keeps every
   # field the filter's equalities and checks read. When the type hides no
   # field from the caller, nothing more is asked. Otherwise each path is
   # judged by `Envelope.field_readable?/3`, which walks every segment, so a
   # filter on another field of the same type still counts in SQL.
-  defp reads_filter_paths?(type, constraints, state) do
-    case filter_paths(constraints) do
+  defp reads_filter_paths?(type, constraints, state, extra \\ []) do
+    case Enum.uniq(filter_paths(constraints) ++ extra) do
       [] ->
         true
 
@@ -397,33 +472,214 @@ defmodule Barkpark.Groq.DocumentSource do
   # `counted_rows/1` leaves out a published row whose draft replaces it, so
   # each chunk renders on its own. Rows are read in `id` order, each chunk
   # after the last id of the one before.
-  defp scan(state, {types, _ids, _eq, _any, _checks} = key, keep?) do
-    query =
+  defp scan(state, key, keep?) do
+    state
+    |> scan_query(key)
+    |> order_by([d], asc: d.id)
+    |> scan_reduce(state, &after_row_id/2, 0, fn docs, total ->
+      {:cont, total + Enum.count(docs, keep?)}
+    end)
+  end
+
+  defp scan_ranked(state, key, keep?, rank, take) do
+    state
+    |> scan_query(key)
+    |> order_by([d], asc: d.id)
+    |> scan_reduce(state, &after_row_id/2, [], fn docs, best ->
+      {:cont, best |> Enum.concat(Enum.filter(docs, keep?)) |> rank.() |> Enum.take(take)}
+    end)
+  end
+
+  # Chunks in the evaluator's `_id` order, each after the `_id` and row id of
+  # the last row of the one before; the read stops once `take` are kept.
+  defp scan_first(state, key, keep?, take) do
+    perspective = state.perspective
+
+    state
+    |> scan_query(key)
+    |> order_by(^[asc: id_order(perspective), asc: dynamic([d], d.id)])
+    |> scan_reduce(state, &after_row_key(&1, &2, perspective), [], fn docs, kept ->
+      kept = kept ++ (docs |> sort_by_id() |> Enum.filter(keep?))
+
+      if length(kept) >= take,
+        do: {:halt, Enum.take(kept, take)},
+        else: {:cont, kept}
+    end)
+  end
+
+  defp scan_query(state, {types, _ids, _eq, _any, _checks} = key) do
+    Enum.each(types || [], &touch_type/1)
+
+    state
+    |> counted_rows()
+    |> maybe_where_types(types)
+    |> where(^key_condition(key, state.perspective))
+    |> limit(@scan_chunk)
+  end
+
+  defp scan_reduce(query, state, after_row, acc, step),
+    do: scan_reduce(query, state, after_row, nil, acc, step)
+
+  defp scan_reduce(query, state, after_row, last, acc, step) do
+    rows = query |> after_row.(last) |> Repo.all(@planned_per_call)
+    docs = render(rows, state)
+    Enum.each(docs, &touch_type(&1["_type"]))
+
+    case step.(docs, acc) do
+      {:halt, acc} -> acc
+      {:cont, acc} when length(rows) < @scan_chunk -> acc
+      {:cont, acc} -> scan_reduce(query, state, after_row, List.last(rows), acc, step)
+    end
+  end
+
+  defp after_row_id(query, nil), do: query
+  defp after_row_id(query, row), do: where(query, [d], d.id > ^row.id)
+
+  defp after_row_key(query, nil, _perspective), do: query
+
+  defp after_row_key(query, row, perspective) do
+    id = if perspective == :drafts, do: DraftId.published_id(row.doc_id), else: row.doc_id
+
+    after_key =
+      dynamic(
+        [d],
+        fragment("(?) COLLATE \"C\" > ?", ^id_expr(perspective), ^id) or
+          (^id_expr(perspective) == ^id and d.id > ^row.id)
+      )
+
+    where(query, ^after_key)
+  end
+
+  # The exact matches from `from` up to `to`, sized before they load.
+  defp load_slice(state, {types, ids, eq, _any, checks}, keys, from, to) do
+    Enum.each(types || [], &touch_type/1)
+
+    ids =
       state
       |> counted_rows()
       |> maybe_where_types(types)
-      |> where(^key_condition(key, state.perspective))
-      |> order_by([d], asc: d.id)
-      |> limit(@scan_chunk)
+      |> where(^exact_condition(ids, eq, checks, state.perspective))
+      |> order_by(^order_terms(keys, state.perspective))
+      |> offset(^from)
+      |> admit!(state, to - from)
 
-    Enum.each(types || [], &touch_type/1)
-    scan_chunks(state, query, nil, keep?, 0)
-  end
+    position = ids |> Enum.with_index() |> Map.new()
 
-  defp scan_chunks(state, query, after_id, keep?, total) do
     rows =
-      if after_id,
-        do: query |> where([d], d.id > ^after_id) |> Repo.all(@planned_per_call),
-        else: Repo.all(query, @planned_per_call)
+      from(d in Document, where: d.id in ^ids)
+      |> Repo.all()
+      |> Enum.sort_by(&Map.fetch!(position, &1.id))
 
-    docs = render(rows, state)
+    # The drafts overlay regroups the documents; each row is its own group,
+    # so the rendered documents are put back in the rows' order.
+    rank = rows |> Enum.with_index() |> Map.new(fn {r, i} -> {{r.type, r.doc_id}, i} end)
+
+    docs =
+      rows
+      |> render(state)
+      |> Enum.sort_by(&Map.fetch!(rank, {&1["_type"], &1["_originalId"] || &1["_id"]}))
+
+    count_loaded!(state, length(docs))
     Enum.each(docs, &touch_type(&1["_type"]))
-    total = total + Enum.count(docs, keep?)
-
-    if length(rows) < @scan_chunk,
-      do: total,
-      else: scan_chunks(state, query, List.last(rows).id, keep?, total)
+    docs
   end
+
+  # The SQL sort order of `keys`, then the evaluator's own order: `_id`,
+  # compared byte by byte as Elixir compares strings, then the row id.
+  #
+  # GROQ's `order()` ranks values by type: number, then string, then boolean,
+  # then everything else (null, a missing field, an array, an object), which
+  # all tie. `desc` reverses the whole ranking, so null comes first. Numbers
+  # compare as `numeric`, booleans false before true. Strings compare by UTF-16
+  # code unit as JavaScript does. Byte order (`COLLATE "C"`) is code point
+  # order, which differs only where a character above U+FFFF meets one in
+  # U+E000..U+FFFF; the sort key puts U+10FFFF before each of the latter, so
+  # they sort after every character above U+FFFF, as UTF-16 puts them. Ties
+  # keep the order `*[...]` gives, which is `_id`. `_createdAt` and
+  # `_updatedAt` render as ISO 8601 strings of one fixed width, so the column
+  # orders them as the strings do.
+  defp order_terms(keys, perspective) do
+    Enum.flat_map(keys, fn {key, dir} -> Enum.map(sort_exprs(key, perspective), &{dir, &1}) end) ++
+      [asc: id_order(perspective), asc: dynamic([d], d.id)]
+  end
+
+  @utf16_pattern "([\u{E000}-\u{FFFF}])"
+  @utf16_replacement "\u{10FFFF}\\1"
+
+  defp sort_exprs({:path, path}, _perspective) do
+    [
+      dynamic(
+        [d],
+        fragment(
+          "CASE jsonb_typeof(? #> ?) WHEN 'number' THEN 2 WHEN 'string' THEN 3 WHEN 'boolean' THEN 4 ELSE 100 END",
+          d.content,
+          type(^path, {:array, :string})
+        )
+      ),
+      dynamic(
+        [d],
+        fragment(
+          "CASE WHEN jsonb_typeof(? #> ?) = 'number' THEN CAST(? #> ? AS numeric) END",
+          d.content,
+          type(^path, {:array, :string}),
+          d.content,
+          type(^path, {:array, :string})
+        )
+      ),
+      dynamic(
+        [d],
+        fragment(
+          "(CASE WHEN jsonb_typeof(? #> ?) = 'string' THEN regexp_replace(? #>> ?, ?, ?, 'g') END) COLLATE \"C\"",
+          d.content,
+          type(^path, {:array, :string}),
+          d.content,
+          type(^path, {:array, :string}),
+          ^@utf16_pattern,
+          ^@utf16_replacement
+        )
+      ),
+      dynamic(
+        [d],
+        fragment(
+          "CASE WHEN jsonb_typeof(? #> ?) = 'boolean' THEN CAST(? #> ? AS boolean) END",
+          d.content,
+          type(^path, {:array, :string}),
+          d.content,
+          type(^path, {:array, :string})
+        )
+      )
+    ]
+  end
+
+  defp sort_exprs(:_id, perspective) do
+    [
+      dynamic(
+        [d],
+        fragment(
+          "regexp_replace(?, ?, ?, 'g') COLLATE \"C\"",
+          ^id_expr(perspective),
+          ^@utf16_pattern,
+          ^@utf16_replacement
+        )
+      )
+    ]
+  end
+
+  defp sort_exprs(:_createdAt, _perspective),
+    do: [dynamic([d], is_nil(d.inserted_at)), dynamic([d], d.inserted_at)]
+
+  defp sort_exprs(:_updatedAt, _perspective),
+    do: [dynamic([d], is_nil(d.updated_at)), dynamic([d], d.updated_at)]
+
+  # The `_id` the evaluator sees: the published id in the drafts perspective,
+  # the stored id otherwise.
+  defp id_expr(:drafts),
+    do: dynamic([d], fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id))
+
+  defp id_expr(_perspective), do: dynamic([d], d.doc_id)
+
+  defp id_order(perspective),
+    do: dynamic([d], fragment("(?) COLLATE \"C\"", ^id_expr(perspective)))
 
   defp load_key(state, key), do: load_keys(state, [key])
 
@@ -481,11 +737,11 @@ defmodule Barkpark.Groq.DocumentSource do
   # Sizes the read before loading it: row ids and stored content sizes only.
   # Loading first and counting after would hold the whole oversized set in the
   # evaluating process, which the heap limit then kills with a vaguer message.
-  defp admit!(query, state) do
+  defp admit!(query, state, take \\ nil) do
     sized =
       query
       |> select([d], {d.id, fragment("pg_column_size(?)", d.content)})
-      |> limit(^(state.max_per_fetch + 1))
+      |> limit(^min(take || state.max_per_fetch + 1, state.max_per_fetch + 1))
       |> Repo.all(@planned_per_call)
 
     bytes = Enum.reduce(sized, 0, fn {_id, size}, acc -> acc + (size || 0) end)

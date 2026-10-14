@@ -70,7 +70,19 @@ defmodule BarkparkWeb.GroqBenchTest do
     {"12 isbn in *[... && references($c)].isbn",
      ~s'*[_type == "product" && isbn in *[_type == "product" && references($c)].isbn]._id',
      %{"c" => "c-8"}},
-    {"13 $s in seriesIds", ~s'*[_type == "product" && $s in seriesIds]._id', %{"s" => "series-3"}}
+    {"13 $s in seriesIds", ~s'*[_type == "product" && $s in seriesIds]._id',
+     %{"s" => "series-3"}},
+    {"14 *[_type == \"product\"][0]", ~s'*[_type == "product"][0]._id', %{}},
+    {"15 *[...][0...12]", ~s'*[_type == "product"][0...12]._id', %{}},
+    {"16 *[...][19990...20000]", ~s'*[_type == "product"][19990...20000]._id', %{}},
+    {"17 | order(isbn desc)[0...12]", ~s'*[_type == "product"] | order(isbn desc)[0...12]._id',
+     %{}},
+    {"18 | order(_updatedAt desc)[0...12]",
+     ~s'*[_type == "product"] | order(_updatedAt desc)[0...12]._id', %{}},
+    {"19 inexact filter [0...12], scanned until full",
+     ~s'*[_type == "product" && isbn > "0"][0...12]._id', %{}},
+    {"20 inexact filter | order(isbn desc)[0...12], scanned in full",
+     ~s'*[_type == "product" && isbn > "0"] | order(isbn desc)[0...12]._id', %{}}
   ]
 
   setup do
