@@ -318,6 +318,7 @@ defmodule Barkpark.Groq.DocumentSource do
         {:defined, path, _index} -> path
         {:in, path, _values} -> path
         {:member, path, _value} -> path
+        {:some, path, _pairs} -> path
       end)
 
     Enum.uniq(eq ++ checks)
@@ -980,25 +981,44 @@ defmodule Barkpark.Groq.DocumentSource do
   defp check_condition({:in, _path, []}), do: dynamic(false)
 
   defp check_condition({:in, path, values}),
-    do: jsonpath_condition("strict " <> jsonpath(path) <> " ? (" <> any_equal(values) <> ")")
+    do: jsonpath_condition("strict " <> jsonpath(path) <> " ? (" <> any_equal("@", values) <> ")")
 
   defp check_condition({:member, path, value}),
-    do: jsonpath_condition("strict " <> jsonpath(path) <> "[*] ? (" <> any_equal([value]) <> ")")
+    do:
+      jsonpath_condition(
+        "strict " <> jsonpath(path) <> "[*] ? (" <> any_equal("@", [value]) <> ")"
+      )
+
+  # Some element of the array at `path` matches every `{field, values}` pair:
+  # `strict $."a"."b"[*] ? (@."x"."_ref" == "v" && (@."y" == 1 || @."y" == 2))`.
+  # Strict mode does not unwrap an array at a field or step into a non-array
+  # at `path`, and a field missing from an element makes that element's test
+  # unknown, so only an element GROQ's filter keeps matches.
+  defp check_condition({:some, path, pairs}) do
+    test =
+      Enum.map_join(pairs, " && ", fn {field, values} ->
+        "(" <> any_equal("@" <> jsonpath_fields(field), values) <> ")"
+      end)
+
+    jsonpath_condition("strict " <> jsonpath(path) <> "[*] ? (" <> test <> ")")
+  end
 
   defp jsonpath_condition(path) do
     dynamic([d], fragment("? @\\? CAST(? AS jsonpath)", d.content, type(^path, :string)))
   end
 
-  defp jsonpath(path), do: "$" <> Enum.map_join(path, &("." <> Jason.encode!(&1)))
+  defp jsonpath(path), do: "$" <> jsonpath_fields(path)
+
+  defp jsonpath_fields(path), do: Enum.map_join(path, &("." <> Jason.encode!(&1)))
 
   # `@ == v1 || @ == v2 || ...` as a balanced tree, so a list of thousands of
   # values (a closed subquery's result) nests only as deep as its logarithm.
   # Jason writes strings and numbers in forms the jsonpath grammar reads.
-  defp any_equal([value]), do: "@ == " <> Jason.encode!(value)
+  defp any_equal(target, [value]), do: target <> " == " <> Jason.encode!(value)
 
-  defp any_equal(values) do
+  defp any_equal(target, values) do
     {left, right} = Enum.split(values, div(length(values), 2))
-    "(" <> any_equal(left) <> " || " <> any_equal(right) <> ")"
+    "(" <> any_equal(target, left) <> " || " <> any_equal(target, right) <> ")"
   end
 
   # `title` lives in the `documents.title` column. `Envelope.render/3` emits

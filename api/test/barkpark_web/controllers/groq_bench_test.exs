@@ -82,7 +82,25 @@ defmodule BarkparkWeb.GroqBenchTest do
     {"19 inexact filter [0...12], scanned until full",
      ~s'*[_type == "product" && isbn > "0"][0...12]._id', %{}},
     {"20 inexact filter | order(isbn desc)[0...12], scanned in full",
-     ~s'*[_type == "product" && isbn > "0"] | order(isbn desc)[0...12]._id', %{}}
+     ~s'*[_type == "product" && isbn > "0"] | order(isbn desc)[0...12]._id', %{}},
+    {"21 more by this author, count(onix.contributors[...]) > 0",
+     """
+     *[_type == "product" && !(_id in path("drafts.**")) && isHidden != true &&
+       isMainProduct == true && defined(title) && defined(onix.isbn) &&
+       count(onix.contributors[role._ref == "A01" && contributor._ref in $authorIds]) > 0 &&
+       !(onix.isbn in $excludeIsbns) && !(title in $excludeTitles) &&
+       onix.publicationStatus.value in $validPublishingStatuses &&
+       onix.availability.value in $validAvailabilityCodes && access.buyStatus != "sold_out"
+     ] | order(onix.publishingDate desc, onix.isbn asc) [0...$limit] {_id, title, "isbn": onix.isbn}
+     """,
+     %{
+       "authorIds" => ["c-8"],
+       "excludeIsbns" => ["9780000708"],
+       "excludeTitles" => [],
+       "validPublishingStatuses" => ["04"],
+       "validAvailabilityCodes" => ["21"],
+       "limit" => 10
+     }}
   ]
 
   setup do
