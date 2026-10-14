@@ -574,6 +574,24 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # ScheduleController.index
+    {"GET", "/v1/data/schedules/:dataset"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into ScheduledPublishes, whose reads and cancel " <>
+         "go through Content.Scope.scope_to_workspace/3 (fail-closed) and whose new row " <>
+         "stamps the pipeline-derived :current_workspace (task-8e88b5539acafdae)."},
+    # ScheduleController.create
+    {"POST", "/v1/data/schedules/:dataset"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into ScheduledPublishes, whose reads and cancel " <>
+         "go through Content.Scope.scope_to_workspace/3 (fail-closed) and whose new row " <>
+         "stamps the pipeline-derived :current_workspace (task-8e88b5539acafdae)."},
+    # ScheduleController.delete
+    {"DELETE", "/v1/data/schedules/:dataset/:schedule_id"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into ScheduledPublishes, whose reads and cancel " <>
+         "go through Content.Scope.scope_to_workspace/3 (fail-closed) and whose new row " <>
+         "stamps the pipeline-derived :current_workspace (task-8e88b5539acafdae)."},
     # SearchController.search
     {"GET", "/v1/data/search/:dataset"} =>
       {:workspace_derived,

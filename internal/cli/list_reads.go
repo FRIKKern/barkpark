@@ -57,6 +57,7 @@ var listReadCommands = map[string]bool{
 	// the row would make TestEveryNonPaginatedCoreReadIsClassified measure a
 	// command the API source no longer classifies this way.
 	"doc.related":             true, // query_controller.ex   -> result.related
+	"doc.schedules":           true, // schedule_controller.ex -> result.schedules
 	"graph.corpus":            true, // tasks_controller.ex  -> nodes
 	"graph.dangling":          true, // tasks_controller.ex  -> dangling
 	"graph.orphans":           true, // tasks_controller.ex  -> orphans
