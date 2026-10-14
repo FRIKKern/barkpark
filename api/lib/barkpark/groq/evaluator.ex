@@ -93,19 +93,22 @@ defmodule Barkpark.Groq.Evaluator do
   end
 
   def eval({:elem, base, index}, scope, ctx) do
-    with list when is_list(list) <- eval(base, scope, ctx),
-         i when is_integer(i) <- Values.num(index) do
-      i = if i < 0, do: i + length(list), else: i
-      if i >= 0, do: Enum.at(list, i), else: nil
-    else
-      _ -> nil
+    case elem_from_source(base, index, scope, ctx) do
+      {:ok, value} -> value
+      :error -> elem_of(base, index, scope, ctx)
     end
   end
 
   def eval({:slice, base, left, right, inclusive?}, scope, ctx) do
-    case eval(base, scope, ctx) do
-      list when is_list(list) -> slice(list, left, right, inclusive?)
-      _ -> nil
+    case slice_from_source(base, left, right, inclusive?, scope, ctx) do
+      {:ok, list} ->
+        list
+
+      :error ->
+        case eval(base, scope, ctx) do
+          list when is_list(list) -> slice(list, left, right, inclusive?)
+          _ -> nil
+        end
     end
   end
 
@@ -289,6 +292,16 @@ defmodule Barkpark.Groq.Evaluator do
   end
 
   def eval({:func, ns, name, args}, scope, ctx), do: func(ns, name, args, scope, ctx)
+
+  defp elem_of(base, index, scope, ctx) do
+    with list when is_list(list) <- eval(base, scope, ctx),
+         i when is_integer(i) <- Values.num(index) do
+      i = if i < 0, do: i + length(list), else: i
+      if i >= 0, do: Enum.at(list, i), else: nil
+    else
+      _ -> nil
+    end
+  end
 
   defp eval_base(nil, scope, _ctx), do: scope.value
   defp eval_base(base, scope, ctx), do: eval(base, scope, ctx)
@@ -725,6 +738,118 @@ defmodule Barkpark.Groq.Evaluator do
       {:ok, constraints} -> Source.count(ctx.source, constraints)
       :error -> :error
     end
+  end
+
+  # A slice of `*[...]` or of `*[...] | order(...)` asks the source for the
+  # documents it needs instead of loading every match. An exact filter
+  # (`Pushdown.exact/2`) with sort keys SQL can order by is answered by one
+  # read with LIMIT and OFFSET. Any other is scanned in chunks that keep only
+  # the documents the slice needs. Only a query whose `*[...]` gives the same
+  # documents in every scope qualifies: a closed subquery (`{:memo, _}`) or a
+  # query at the root. A subquery that reads `^` is still read once for all
+  # parents. A negative index needs the length, so it loads.
+  defp elem_from_source(base, index, scope, ctx) do
+    case is_number(index) and Values.num(index) do
+      i when is_integer(i) and i >= 0 ->
+        case source_slice(base, i, i + 1, scope, ctx) do
+          {:ok, [doc | _]} -> {:ok, doc}
+          {:ok, []} -> {:ok, nil}
+          :error -> :error
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp slice_from_source(base, left, right, inclusive?, scope, ctx)
+       when is_number(left) and is_number(right) and left >= 0 and right >= 0 do
+    from = trunc(left)
+    to = trunc(right) + if(inclusive?, do: 1, else: 0)
+    source_slice(base, from, to, scope, ctx)
+  end
+
+  defp slice_from_source(_base, _left, _right, _inclusive?, _scope, _ctx), do: :error
+
+  defp source_slice(base, from, to, scope, ctx) do
+    root? = scope.value == nil and scope.parent == nil
+
+    case slice_base(base, root?) do
+      {:ok, _expr, _order} when to <= from ->
+        {:ok, []}
+
+      {:ok, expr, order} ->
+        resolve = fn outer_expr -> eval(outer_expr, nested(scope, nil), ctx) end
+
+        with :error <- exact_slice(expr, order, resolve, from, to, ctx) do
+          scan_slice(base, expr, order, from, to, scope, ctx, resolve)
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  defp slice_base({:memo, inner}, _closed?), do: slice_base(inner, true)
+  defp slice_base({:group, inner}, closed?), do: slice_base(inner, closed?)
+  defp slice_base({:filter, {:everything}, expr}, true), do: {:ok, expr, []}
+
+  defp slice_base({:pipe, base, "order", args}, closed?) do
+    case slice_base(base, closed?) do
+      {:ok, expr, []} -> {:ok, expr, args}
+      _ -> :error
+    end
+  end
+
+  defp slice_base(_base, _closed?), do: :error
+
+  defp exact_slice(expr, order, resolve, from, to, ctx) do
+    with {:ok, constraints} <- Pushdown.exact(expr, resolve),
+         {:ok, keys} <- Pushdown.order_keys(order) do
+      Source.slice(ctx.source, constraints, keys, from, to)
+    end
+  end
+
+  defp scan_slice(base, expr, order, from, to, scope, ctx, resolve) do
+    keep? = fn doc ->
+      kept = eval(expr, nested(scope, doc), ctx) === true
+      # references?/2 caches per document; a scanned one is not seen again.
+      Process.delete({:groq_refs, doc["_id"]})
+      kept
+    end
+
+    rank = if order != [], do: &rank(&1, order, scope, ctx)
+
+    case Source.scan_slice(
+           ctx.source,
+           Pushdown.constraints(expr, resolve),
+           {base, to},
+           keep?,
+           rank,
+           to
+         ) do
+      {:ok, docs} -> {:ok, Enum.drop(docs, from)}
+      :error -> :error
+    end
+  end
+
+  # `order()` over documents in any order: ties fall back to `_id`, the order
+  # `*[...]` gives them before `order()` sorts.
+  defp rank(docs, order, scope, ctx) do
+    specs =
+      Enum.map(order, fn
+        {:desc, e} -> {e, :desc}
+        {:asc, e} -> {e, :asc}
+        e -> {e, :asc}
+      end)
+
+    docs
+    |> Enum.map(fn doc ->
+      doc_scope = nested(scope, doc)
+      {doc, doc["_id"], Enum.map(specs, fn {e, dir} -> {eval(e, doc_scope, ctx), dir} end)}
+    end)
+    |> Enum.sort(fn {_, ia, ka}, {_, ib, kb} -> order_le?(ka, kb, ia, ib) end)
+    |> Enum.map(&elem(&1, 0))
   end
 
   # `references()` walks the whole value. A document straight from the source

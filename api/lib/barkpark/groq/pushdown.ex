@@ -64,6 +64,7 @@ defmodule Barkpark.Groq.Pushdown do
           | {:in, [String.t()], [scalar()]}
           | {:member, [String.t()], scalar()}
   @type scalar :: String.t() | number() | boolean()
+  @type order_key :: {:path, [String.t()]} | :_id | :_createdAt | :_updatedAt
   @type t :: %{
           types: [String.t()] | nil,
           ids: [String.t()] | nil,
@@ -220,6 +221,39 @@ defmodule Barkpark.Groq.Pushdown do
   defp exact_path?([first | _] = path) do
     not String.starts_with?(first, "_") and
       Enum.all?(path, &(is_binary(&1) and not (&1 =~ ~r/^-?\d+$/)))
+  end
+
+  @doc """
+  The sort keys a source can order by in SQL for the `order()` arguments
+  `args`, each with its direction, or `:error` when one is anything else. A
+  key is `{:path, path}` for a content path, as in `checks`, or `:_id`,
+  `:_createdAt` or `:_updatedAt`. `title` and functions stay in memory.
+  """
+  @spec order_keys([tuple()]) :: {:ok, [{order_key(), :asc | :desc}]} | :error
+  def order_keys(args) do
+    Enum.reduce_while(args, {:ok, []}, fn arg, {:ok, acc} ->
+      {expr, dir} =
+        case arg do
+          {:desc, e} -> {e, :desc}
+          {:asc, e} -> {e, :asc}
+          e -> {e, :asc}
+        end
+
+      case order_key(expr) do
+        {:ok, key} -> {:cont, {:ok, acc ++ [{key, dir}]}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp order_key(expr) do
+    case attr_path(expr) do
+      {:ok, ["_id"]} -> {:ok, :_id}
+      {:ok, ["_createdAt"]} -> {:ok, :_createdAt}
+      {:ok, ["_updatedAt"]} -> {:ok, :_updatedAt}
+      {:ok, path} -> if exact_path?(path), do: {:ok, {:path, path}}, else: :error
+      :error -> :error
+    end
   end
 
   @doc "True when `expr` reads nothing but literals and `^` scopes."
