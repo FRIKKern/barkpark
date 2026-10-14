@@ -68,7 +68,59 @@ defmodule Barkpark.Groq.ParserTest do
     test "in with constant lists" do
       c = constraints(~s|*[_type in ["a", "b"] && isbn in $isbns]|, %{"isbns" => ["1", "2"]})
       assert c.types == ["a", "b"]
-      assert c.any == [[%{"isbn" => "1"}, %{"isbn" => "2"}]]
+      assert c.checks == [{:in, ["isbn"], ["1", "2"]}]
+      assert c.any == []
+    end
+
+    test "path in a list and value in an array path become exact checks" do
+      {:ok, tree} =
+        Parser.parse(
+          ~s|*[_type == "p" && a.b in [1, "x", true, 1] && $s in seriesIds && n in []]|,
+          %{"s" => "series-3"}
+        )
+
+      assert {:ok, c} = Pushdown.exact(filter_expr(tree))
+
+      assert Enum.sort(c.checks) == [
+               {:in, ["a", "b"], [1, "x", true]},
+               {:in, ["n"], []},
+               {:member, ["seriesIds"], "series-3"}
+             ]
+    end
+
+    test "in with null, an object member or a system path is not a check" do
+      for {filter, params} <- [
+            {~s|isbn in [null, "1"]|, %{}},
+            {~s|isbn in [{"a": 1}]|, %{}},
+            {~s|$x in seriesIds|, %{"x" => nil}},
+            {~s|$x in seriesIds|, %{"x" => ["a"]}},
+            {~s|title in ["a"]|, %{}},
+            {~s|_key in ["a"]|, %{}},
+            {~s|isbn in "abc"|, %{}}
+          ] do
+        {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]", params)
+        assert Pushdown.constraints(filter_expr(tree)).checks == [], filter
+      end
+    end
+
+    test "a closed subquery on the right side is resolved into the list" do
+      docs = [
+        %{"_id" => "a", "_type" => "product", "isbn" => "1"},
+        %{"_id" => "b", "_type" => "product", "isbn" => "2"},
+        %{"_id" => "c", "_type" => "other", "isbn" => "3"}
+      ]
+
+      {:ok, tree} =
+        Parser.parse(~s|*[_type == "search" && relewiseId in *[_type == "product"].isbn]|)
+
+      expr = filter_expr(tree)
+      ctx = %Evaluator{source: MemorySource.new(docs)}
+      scope = %{value: nil, parent: nil, hidden: false}
+      c = Pushdown.constraints(expr, &Evaluator.eval(&1, scope, ctx))
+      assert c.checks == [{:in, ["relewiseId"], ["1", "2"]}]
+
+      # Without a resolver the subquery is not evaluated.
+      assert Pushdown.constraints(expr).checks == []
     end
 
     test "an || of field equalities becomes one any-of constraint" do

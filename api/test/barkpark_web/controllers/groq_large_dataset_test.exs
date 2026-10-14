@@ -11,6 +11,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
   use BarkparkWeb.ConnCase, async: false
 
   alias Barkpark.{Auth, Content, Repo, Tenancy}
+  alias Barkpark.Groq.{Evaluator, MemorySource, Parser}
   alias Barkpark.Test.GroqSyntheticProducts
 
   @dataset "groq_big"
@@ -201,7 +202,11 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
   end
 
   test "references() reads documents_content_refs_idx", %{token: token} do
-    plans = explain_reads(fn -> result!(token, @series_query, %{"seriesId" => "series-3"}) end)
+    plans =
+      explain_reads("jsonb_path_query_array", fn ->
+        result!(token, @series_query, %{"seriesId" => "series-3"})
+      end)
+
     assert Enum.any?(plans, &(&1 =~ "documents_content_refs_idx")), Enum.join(plans, "\n---\n")
   end
 
@@ -486,6 +491,151 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     end
   end
 
+  describe "in over a list of values and over a closed subquery" do
+    # 31 isbns spread over the products, as a page's list of ids.
+    @isbns for g <- 1..31, do: "978" <> String.pad_leading(Integer.to_string(g * 331), 7, "0")
+
+    # Each shape with its parameters. Every product holds `seriesIds`, the
+    # array `["series-<g mod 50>"]`.
+    @in_shapes [
+      {~s'*[_type == "product" && isbn in $isbns]._id', %{"isbns" => @isbns}},
+      {~s'*[_type == "product" && isbn in $isbns && isMainProduct == true]._id',
+       %{"isbns" => @isbns}},
+      {~s'*[_type == "product" && isbn in *[_type == "product" && references($c)].isbn]._id',
+       %{"c" => "c-8"}},
+      {~s'*[_type == "product" && _id in *[_type == "product" && references($c)]._id]._id',
+       %{"c" => "c-8"}},
+      {~s'*[_type == "product" && $s in seriesIds]._id', %{"s" => "series-3"}},
+      {~s'*[_type == "product" && $s in seriesIds && isMainProduct == true]._id',
+       %{"s" => "series-3"}},
+      {~s'*[_type == "product" && code in [7, "x"]]._id', %{}},
+      {~s'*[_type == "product" && isbn in []]._id', %{}}
+    ]
+
+    setup %{scope: scope} do
+      first = hd(@isbns)
+
+      # GROQ's `in` against the shapes SQL could get wrong: an array or an
+      # object where the scalar is, a missing field, a number written as an
+      # integer and as a float, a string where the array is, and an array
+      # nested in the array.
+      for {id, doc} <- [
+            {"x1", %{"isbn" => [first], "seriesIds" => "series-3"}},
+            {"x2", %{"isbn" => %{"v" => first}, "seriesIds" => [["series-3"]]}},
+            {"x3", %{"code" => 7, "seriesIds" => ["other", "series-3"]}},
+            {"x4", %{"code" => 7.0, "isbn" => nil}},
+            {"x5", %{"code" => "7", "seriesIds" => []}}
+          ] do
+        {:ok, _} = Content.create_document("product", Map.put(doc, "_id", id), @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      # p331 holds the first isbn and series-31; its draft holds neither, and
+      # x5's draft joins series-3.
+      %{rows: [[content]]} =
+        Repo.query!("SELECT content FROM documents WHERE doc_id = 'p331' AND dataset = $1", [
+          @dataset
+        ])
+
+      draft = Map.merge(content, %{"_id" => "p331", "isbn" => "0", "seriesIds" => ["series-3"]})
+      {:ok, _} = Content.create_document("product", draft, @dataset, scope)
+
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          %{"_id" => "x5", "seriesIds" => ["series-3"]},
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    # Every product in `perspective`, read by type alone, then the query
+    # evaluated over them in memory.
+    defp in_memory(token, perspective, query, params) do
+      with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+      docs = result!(token, ~s'*[_type == "product"]', %{}, %{"perspective" => perspective})
+      with_groq_config([])
+
+      {:ok, tree} = Parser.parse(query, params)
+      {:ok, value} = Evaluator.evaluate(tree, source: MemorySource.new(docs))
+      value
+    end
+
+    test "each shape equals in-memory evaluation in every perspective", %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        expected =
+          Map.new(@in_shapes, fn {q, params} ->
+            {q, in_memory(token, perspective, q, params)}
+          end)
+
+        for {q, params} <- @in_shapes do
+          extra = %{"perspective" => perspective}
+          got = result!(token, q, params, extra)
+          want = expected[q]
+          assert Enum.sort(got) == Enum.sort(want), "#{perspective} #{q}"
+
+          counted =
+            result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), params, extra)
+
+          assert counted == length(want), "#{perspective} count #{q}"
+        end
+      end
+
+      # Spot checks against the seed, published.
+      assert length(
+               result!(token, ~s'*[_type == "product" && isbn in $isbns]', %{"isbns" => @isbns})
+             ) == 31
+
+      assert Enum.sort(result!(token, ~s'*[_type == "product" && code in [7, "x"]]._id', %{})) ==
+               ["x3", "x4"]
+
+      assert "x3" in result!(token, ~s'*[_type == "product" && $s in seriesIds]._id', %{
+               "s" => "series-3"
+             })
+    end
+
+    test "SQL narrows each shape before the per-fetch limit", %{token: token} do
+      with_groq_config(max_documents_per_fetch: 250)
+
+      for {q, params} <- @in_shapes do
+        assert is_list(result!(token, q, params)), q
+      end
+    end
+
+    test "the counts are SQL counts, not chunked scans", %{token: token} do
+      sql =
+        sql_reads(fn ->
+          for {q, params} <- @in_shapes do
+            result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), params)
+          end
+        end)
+
+      refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/))
+    end
+
+    test "the list is one jsonpath that documents_content_path_idx serves", %{token: token} do
+      plans =
+        explain_reads("@?", fn ->
+          result!(token, ~s'*[_type == "product" && isbn in $isbns]._id', %{"isbns" => @isbns})
+          result!(token, ~s'*[_type == "product" && $s in seriesIds]._id', %{"s" => "series-3"})
+        end)
+
+      assert length(plans) == 2
+      assert Enum.all?(plans, &(&1 =~ "documents_content_path_idx")), Enum.join(plans, "\n---\n")
+    end
+
+    test "a closed subquery runs once and its list narrows the outer read", %{token: token} do
+      q = ~s'*[_type == "product" && isbn in *[_type == "product" && references($c)].isbn]._id'
+
+      sql = sql_reads(fn -> assert length(result!(token, q, %{"c" => "c-8"})) == 15 end)
+
+      assert Enum.count(sql, &(&1 =~ "jsonb_path_query_array")) == 1
+      assert Enum.any?(sql, &(&1 =~ "@?"))
+    end
+  end
+
   # The SQL of every query the function sends.
   defp sql_reads(fun) do
     ref = make_ref()
@@ -508,9 +658,9 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     ref |> collect([]) |> Enum.map(&elem(&1, 0))
   end
 
-  # EXPLAIN for every documents read the function sends that carries a GROQ
-  # pushdown condition, with the parameters it ran with.
-  defp explain_reads(fun) do
+  # EXPLAIN for every documents read the function sends whose SQL holds
+  # `marker`, with the parameters it ran with.
+  defp explain_reads(marker, fun) do
     ref = make_ref()
     parent = self()
     handler = "groq-explain-#{inspect(ref)}"
@@ -531,7 +681,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     collect(ref, [])
     |> Enum.filter(fn {sql, _} ->
       sql =~ "FROM \"documents\"" and
-        sql =~ "jsonb_path_query_array"
+        sql =~ marker
     end)
     |> Enum.map(fn {sql, params} ->
       Repo.query!("EXPLAIN " <> sql, params).rows |> Enum.map_join("\n", &hd/1)

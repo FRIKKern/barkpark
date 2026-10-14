@@ -17,10 +17,11 @@ defmodule Barkpark.Groq.DocumentSource do
 
   The constraints `Barkpark.Groq.Pushdown` reads off each `*[...]` filter
   become SQL: `_type`, `_id`, field equalities and array membership as JSON
-  containment on `content`, and `references()` against an expression index
+  containment on `content`, `in` over a list of values as a jsonpath on
+  `content`, and `references()` against an expression index
   over the `_ref` values in `content`. Everything else runs in memory over the
   loaded documents. An equality on `title` reads the `documents.title`
-  column, where the writer keeps it. Containment uses `documents_content_path_idx`
+  column, where the writer keeps it. Containment and jsonpath use `documents_content_path_idx`
   (`20260702130000_add_documents_content_gin_index.exs`); the `_ref` index is
   `20261013180000_add_documents_groq_pushdown_indexes.exs`.
 
@@ -66,6 +67,13 @@ defmodule Barkpark.Groq.DocumentSource do
   @max_rounds 8
   @scan_chunk 500
   @drafts_prefix "drafts."
+
+  # A read whose condition holds content values is prepared unnamed, so
+  # Postgres plans it for the values it is sent. A named statement switches to
+  # a generic plan after five runs, and a generic plan cannot see which index
+  # entries a jsonpath or containment value selects: over 20,000 products
+  # `isbn in $isbns` went from 8 ms to 200 ms on the sixth run.
+  @planned_per_call [prepare: :unnamed]
 
   @type perspective :: :published | :drafts | :raw
 
@@ -233,6 +241,8 @@ defmodule Barkpark.Groq.DocumentSource do
       Enum.map(constraints.checks, fn
         {:length, path, _op, _n} -> path
         {:defined, path, _index} -> path
+        {:in, path, _values} -> path
+        {:member, path, _value} -> path
       end)
 
     Enum.uniq(eq ++ checks)
@@ -331,7 +341,7 @@ defmodule Barkpark.Groq.DocumentSource do
     counts =
       rest
       |> Enum.reduce(first, fn q, acc -> union_all(acc, ^q) end)
-      |> Repo.all()
+      |> Repo.all(@planned_per_call)
       |> Map.new(&{&1.i, &1.n})
 
     Enum.each(keys, fn {{types, _ids, _eq, _any, _checks} = key, i} ->
@@ -403,8 +413,8 @@ defmodule Barkpark.Groq.DocumentSource do
   defp scan_chunks(state, query, after_id, keep?, total) do
     rows =
       if after_id,
-        do: query |> where([d], d.id > ^after_id) |> Repo.all(),
-        else: Repo.all(query)
+        do: query |> where([d], d.id > ^after_id) |> Repo.all(@planned_per_call),
+        else: Repo.all(query, @planned_per_call)
 
     docs = render(rows, state)
     Enum.each(docs, &touch_type(&1["_type"]))
@@ -446,7 +456,7 @@ defmodule Barkpark.Groq.DocumentSource do
     rows =
       if Enum.all?(keys, fn {_types, ids, _eq, _any, _checks} -> ids != nil end) do
         # Reads by id are bounded by the ids the query named.
-        Repo.all(matching)
+        Repo.all(matching, @planned_per_call)
       else
         matching |> admit!(state) |> then(&Repo.all(from(d in Document, where: d.id in ^&1)))
       end
@@ -476,7 +486,7 @@ defmodule Barkpark.Groq.DocumentSource do
       query
       |> select([d], {d.id, fragment("pg_column_size(?)", d.content)})
       |> limit(^(state.max_per_fetch + 1))
-      |> Repo.all()
+      |> Repo.all(@planned_per_call)
 
     bytes = Enum.reduce(sized, 0, fn {_id, size}, acc -> acc + (size || 0) end)
 
@@ -702,6 +712,37 @@ defmodule Barkpark.Groq.DocumentSource do
         ^i
       )
     )
+  end
+
+  # `path in [values]` and `value in path` as one jsonpath, which
+  # `documents_content_path_idx` serves (jsonb_path_ops indexes `@?`). A row is
+  # read once per test, where `content @> ANY(...)` reads it once per value; a
+  # large stored document makes that the difference between milliseconds and
+  # seconds when the plan filters rows instead of using the index. Strict mode
+  # makes it exact: `$.a.b` does not step into an array, and comparing an
+  # array or an object to a scalar is not true. An empty list matches nothing.
+  defp check_condition({:in, _path, []}), do: dynamic(false)
+
+  defp check_condition({:in, path, values}),
+    do: jsonpath_condition("strict " <> jsonpath(path) <> " ? (" <> any_equal(values) <> ")")
+
+  defp check_condition({:member, path, value}),
+    do: jsonpath_condition("strict " <> jsonpath(path) <> "[*] ? (" <> any_equal([value]) <> ")")
+
+  defp jsonpath_condition(path) do
+    dynamic([d], fragment("? @\\? CAST(? AS jsonpath)", d.content, type(^path, :string)))
+  end
+
+  defp jsonpath(path), do: "$" <> Enum.map_join(path, &("." <> Jason.encode!(&1)))
+
+  # `@ == v1 || @ == v2 || ...` as a balanced tree, so a list of thousands of
+  # values (a closed subquery's result) nests only as deep as its logarithm.
+  # Jason writes strings and numbers in forms the jsonpath grammar reads.
+  defp any_equal([value]), do: "@ == " <> Jason.encode!(value)
+
+  defp any_equal(values) do
+    {left, right} = Enum.split(values, div(length(values), 2))
+    "(" <> any_equal(left) <> " || " <> any_equal(right) <> ")"
   end
 
   # `title` lives in the `documents.title` column. `Envelope.render/3` emits
