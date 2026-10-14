@@ -293,7 +293,6 @@ defmodule Barkpark.Content.ErrorsTest do
     assert MapSet.member?(Errors.known_codes(), "label_spine")
   end
 
-  # scaffy:add-error-shape not_acceptable MARK:error-test-not_acceptable
   test "maps :not_acceptable to its envelope and registers not_acceptable in known_codes" do
     Logger.metadata(request_id: nil)
 

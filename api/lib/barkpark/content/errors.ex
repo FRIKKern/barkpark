@@ -118,13 +118,13 @@ defmodule Barkpark.Content.Errors do
     # Owner ruling #21 (task-9a7298f03aad0c42) — `Content.BoundFieldGuard`.
     "private_field_bound" =>
       "The body is public, so it may not bind a field the schema keeps private (private, owner_only or readable_by). details.fields names them: remove those bound blocks (or unbind them), or make the field public in the schema.",
+    # A JSON route refused the request's Accept header (task-701191424b8d15e8).
+    "not_acceptable" =>
+      "This route answers JSON. Send Accept: application/json or */*, or leave the Accept header out.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
-      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.",
-    # scaffy:add-error-shape not_acceptable MARK:error-hint-not_acceptable
-    "not_acceptable" =>
-      "This route answers JSON. Send Accept: application/json or */*, or leave the Accept header out."
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
   }
 
   # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────
@@ -1479,7 +1479,6 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
 
-  # scaffy:add-error-shape not_acceptable MARK:error-shape-not_acceptable
   # A JSON route refused the request's Accept header: `plug(:accepts, ["json"])`
   # raised Phoenix.NotAcceptableError, which BarkparkWeb.ErrorJSON maps here
   # (task-701191424b8d15e8). It was an `internal_error` 406 with a "Retry
