@@ -552,6 +552,19 @@ defmodule Barkpark.Content.Errors do
         "A contributor seat edits drafts only. Publishing, unpublishing and deleting a published document need a member, admin or owner seat. Ask a workspace admin to publish the draft or to change your role. `GET /v1/auth/token` shows the seat (`seat.can.publish`)."
     }
 
+  # A READ seat sent a mutation its schemas do not open to readers
+  # (`Content.ReaderWrites`, task-97702b326b8bfd6d). The message names the
+  # mutation and the rule it broke.
+  defp build({:error, {:reader_write_refused, message}}) when is_binary(message),
+    do: %{
+      code: "forbidden",
+      message: message,
+      status: 403,
+      reason: "reader_write_not_permitted",
+      hint:
+        "This seat can read but not write. It may write only types whose schema declares readerWrites: create them, change the listed patchFields, and publish in the same batch. Anything else needs a write seat."
+    }
+
   # A dataset-BOUND token (minted with an explicit `dataset`) presented on a
   # request for another dataset (task-4418b517649a58ce). `code` and status match
   # the two arms above; `reason` names the remedy, which is neither a seat nor

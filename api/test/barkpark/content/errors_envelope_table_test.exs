@@ -82,6 +82,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # A dataset-bound token on another dataset (task-4418b517649a58ce).
       {"forbidden_dataset", {:error, :forbidden_dataset}, "forbidden", 403, [:reason]},
       {"publish_not_permitted", {:error, :publish_not_permitted}, "forbidden", 403, [:reason]},
+      {"reader_write_refused", {:error, {:reader_write_refused, "mutation 0: no"}}, "forbidden",
+       403, [:reason]},
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
