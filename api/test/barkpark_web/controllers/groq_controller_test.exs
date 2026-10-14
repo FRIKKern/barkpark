@@ -454,6 +454,136 @@ defmodule BarkparkWeb.GroqControllerTest do
     end
   end
 
+  describe "count(*[...]) on a type with one hidden field" do
+    # `record` hides `secret` and `meta.note` from a caller without admin.
+    # Four records: r1 and r2 hold secret "x"; r1, r2 and r3 have kind "a".
+    setup %{scope: scope} do
+      fields = [
+        %{"name" => "kind", "type" => "string"},
+        %{"name" => "secret", "type" => "string", "private" => true},
+        %{"name" => "tags", "type" => "array", "of" => [%{"type" => "string"}]},
+        %{
+          "name" => "meta",
+          "type" => "object",
+          "fields" => [
+            %{"name" => "kind", "type" => "string"},
+            %{"name" => "note", "type" => "string", "private" => true}
+          ]
+        }
+      ]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "record",
+            "title" => "record",
+            "visibility" => "public",
+            "fields" => fields
+          },
+          @dataset,
+          scope
+        )
+
+      for {id, kind, secret, tags} <- [
+            {"r1", "a", "x", ["t"]},
+            {"r2", "a", "x", []},
+            {"r3", "a", "y", ["t", "u"]},
+            {"r4", "b", "y", []}
+          ] do
+        publish!(
+          "record",
+          %{
+            "_id" => id,
+            "kind" => kind,
+            "secret" => secret,
+            "tags" => tags,
+            "meta" => %{"kind" => kind, "note" => secret}
+          },
+          scope
+        )
+      end
+
+      admin = "groq-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(admin, "groq admin", @dataset, ["read", "admin"], scope[:workspace_id])
+
+      {:ok, admin: admin}
+    end
+
+    defp count_query(token, query, sql_count?) do
+      {body, sql} =
+        sql_statements(fn ->
+          scoped_conn() |> get_query(token, query) |> json_response(200)
+        end)
+
+      counted_in_sql = Enum.any?(sql, &(&1 =~ ~r/SELECT .*count\(d\d\."id"\)/i))
+      assert counted_in_sql == sql_count?, "#{query}: SQL count #{counted_in_sql}"
+      body["result"]
+    end
+
+    test "a filter on another field counts in SQL", %{token: token} do
+      assert count_query(token, ~s'count(*[_type == "record" && kind == "a"])', true) == 3
+      assert count_query(token, ~s'count(*[_type == "record" && meta.kind == "a"])', true) == 3
+      assert count_query(token, ~s'count(*[_type == "record" && count(tags) > 0])', true) == 2
+      assert count_query(token, ~s'count(*[_type == "record" && defined(tags[1])])', true) == 1
+    end
+
+    test "a filter on the hidden field is not a SQL count and equals the in-memory evaluation",
+         %{token: token} do
+      for filter <- [
+            ~s'_type == "record" && secret == "x"',
+            ~s'_type == "record" && kind == "a" && secret == "x"',
+            ~s'_type == "record" && meta.note == "x"',
+            ~s'_type == "record" && defined(secret)',
+            ~s'_type == "record" && defined(meta.note)'
+          ] do
+        counted = count_query(token, "count(*[#{filter}])", false)
+        # `[0...100000]` makes the count read the loaded, rendered documents.
+        loaded = count_query(token, "count(*[#{filter}][0...100000])", false)
+
+        assert counted == loaded, "#{filter}: #{counted} != #{loaded}"
+        assert counted == 0, filter
+      end
+    end
+
+    test "a caller that sees every field counts the hidden field in SQL", %{admin: admin} do
+      assert count_query(admin, ~s'count(*[_type == "record" && secret == "x"])', true) == 2
+      assert count_query(admin, ~s'count(*[_type == "record" && meta.note == "x"])', true) == 2
+      assert count_query(admin, ~s'count(*[_type == "record" && kind == "a"])', true) == 3
+    end
+  end
+
+  defp sql_statements(fun) do
+    ref = make_ref()
+    parent = self()
+    handler = "groq-sql-#{inspect(ref)}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _, _, meta, _ -> send(parent, {ref, meta.query}) end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler)
+      end
+
+    {result, collect_statements(ref, [])}
+  end
+
+  defp collect_statements(ref, acc) do
+    receive do
+      {^ref, q} -> collect_statements(ref, [q | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
   defp count_repo_queries(fun) do
     ref = make_ref()
     parent = self()

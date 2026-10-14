@@ -150,16 +150,17 @@ defmodule Barkpark.Groq.DocumentSource do
 
   # A count is answered in SQL only when it equals the number of documents
   # the evaluator would load: the filter is exact (`Pushdown.exact/2`), it
-  # names its types, and rendering hides no field of those types from this
-  # caller, since SQL reads the stored fields.
+  # names its types, and every field path it tests is one this caller can
+  # read on each of those types. SQL reads the stored fields, so a filter on
+  # a field that rendering hides from this caller would count documents the
+  # evaluator cannot match.
   @impl true
   def count(state, constraints) do
     cond do
       constraints.types == nil or "paper" in constraints.types ->
         :error
 
-      (constraints.eq != [] or constraints.checks != []) and
-          not Enum.all?(constraints.types, &renders_all_fields?(&1, state)) ->
+      not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state)) ->
         :error
 
       true ->
@@ -207,8 +208,42 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
-  defp renders_all_fields?(type, state),
-    do: Envelope.renders_all_fields?(schema_for(type, state), state.caller_context)
+  # True when rendering a document of `type` for this caller keeps every
+  # field the filter's equalities and checks read. When the type hides no
+  # field from the caller, nothing more is asked. Otherwise each path is
+  # judged by `Envelope.field_readable?/3`, which walks every segment, so a
+  # filter on another field of the same type still counts in SQL.
+  defp reads_filter_paths?(type, constraints, state) do
+    case filter_paths(constraints) do
+      [] ->
+        true
+
+      paths ->
+        schema = schema_for(type, state)
+
+        Envelope.renders_all_fields?(schema, state.caller_context) or
+          Enum.all?(paths, &path_readable?(schema, &1, state.caller_context))
+    end
+  end
+
+  defp filter_paths(constraints) do
+    eq = Enum.map(constraints.eq, fn {path, _value} -> path end)
+
+    checks =
+      Enum.map(constraints.checks, fn
+        {:length, path, _op, _n} -> path
+        {:defined, path, _index} -> path
+      end)
+
+    Enum.uniq(eq ++ checks)
+  end
+
+  # `field_readable?/3` takes a dotted name, so a segment holding a dot
+  # cannot be judged and is treated as unreadable.
+  defp path_readable?(schema, path, caller_context) do
+    Enum.all?(path, &(is_binary(&1) and not String.contains?(&1, "."))) and
+      Envelope.field_readable?(schema, Enum.join(path, "."), caller_context)
+  end
 
   @impl true
   def get(state, id) do
