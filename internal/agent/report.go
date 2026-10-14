@@ -432,6 +432,21 @@ type Report struct {
 	// pair is never truncated, so this can never hide a slot unit.
 	SlotUnitsTruncated int `json:"slot_units_truncated"`
 
+	// ServiceRestarts lists the automatic restarts systemd made of the Barkpark
+	// service units in the last ServiceRestartsWindowS seconds, newest first and
+	// capped at restartsListLimit. A deploy restart is never in it. See
+	// service_restarts.go for how the two are told apart.
+	//
+	// Same nil-vs-empty law as SlotUnits: nil (a JSON null) is UNMEASURED, a
+	// non-nil empty list is measured and quiet.
+	ServiceRestarts []ServiceRestart `json:"service_restarts"`
+	// ServiceRestartsCount is the full number of restarts in the window, which
+	// the capped list cannot say. -1 when the probe did not run.
+	ServiceRestartsCount int `json:"service_restarts_count"`
+	// ServiceRestartsWindowS is the window the count covers, in seconds. -1
+	// when the probe did not run.
+	ServiceRestartsWindowS int `json:"service_restarts_window_s"`
+
 	// BackupState is the DISCRIMINATOR BackupOK cannot be. A plain bool has one
 	// false and this field has four distinct realities to report, so for the
 	// whole life of the beat `backup_ok:false` meant "no probe was ever wired"
@@ -1001,6 +1016,11 @@ type ReportConfig struct {
 	// pair, because a truncation count without its list says nothing. Wire the
 	// production implementation with NewSlotUnitsProbe().
 	SlotUnitsProbe func() ([]SlotUnit, int, error)
+	// ServiceRestartsProbe returns the recent automatic restarts of the service
+	// units (newest first, capped), the full count and the window in seconds.
+	// nil or an error leaves ServiceRestarts nil and both numbers -1. Wire the
+	// production implementation with NewServiceRestartsProbe().
+	ServiceRestartsProbe func() ([]ServiceRestart, int, int, error)
 	// SwapProbe returns (used percent 0..100, total swap bytes). nil → BOTH swap
 	// fields keep the -1 sentinel. Gathered fail-soft as ONE unit like
 	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
@@ -1075,6 +1095,9 @@ func gatherReport(cfg ReportConfig) Report {
 		// -1, not 0: 0 means "the cap hid nothing", which is a MEASUREMENT and
 		// would be a lie on a box whose unit probe never ran.
 		SlotUnitsTruncated: -1,
+		// -1, not 0: 0 restarts is a measurement.
+		ServiceRestartsCount:   -1,
+		ServiceRestartsWindowS: -1,
 		// Always measured, never probed: the fence's denominator (D52).
 		CPUCores: runtime.NumCPU(),
 	}
@@ -1174,6 +1197,19 @@ func gatherReport(cfg ReportConfig) Report {
 			}
 			r.SlotUnits = units
 			r.SlotUnitsTruncated = truncated
+		}
+	}
+
+	// Automatic restarts of the service units. The list, its count and its
+	// window land together or not at all.
+	if cfg.ServiceRestartsProbe != nil {
+		if restarts, count, window, err := cfg.ServiceRestartsProbe(); err == nil {
+			if restarts == nil {
+				restarts = []ServiceRestart{}
+			}
+			r.ServiceRestarts = restarts
+			r.ServiceRestartsCount = count
+			r.ServiceRestartsWindowS = window
 		}
 	}
 

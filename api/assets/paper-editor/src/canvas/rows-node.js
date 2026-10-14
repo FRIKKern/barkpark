@@ -101,7 +101,14 @@ function makeRow(spec) {
     },
 
     parseHTML() {
-      return [{ tag: `${spec.rowTag}[data-bp-type='${spec.rowName}']` }];
+      // Above StarterKit's generic `li` (list item) rule, which otherwise claims a
+      // pasted step row and the steps block comes back empty; the row's children
+      // live in its body element (task-d175b72aba4d5cd6).
+      return [{
+        tag: `${spec.rowTag}[data-bp-type='${spec.rowName}']`,
+        priority: 80,
+        contentElement: (dom) => dom.querySelector(":scope > [data-row-body]") || dom,
+      }];
     },
 
     renderHTML({ HTMLAttributes }) {
@@ -252,7 +259,8 @@ function makeContainer(spec, RowNode) {
     },
 
     parseHTML() {
-      return [{ tag: `${spec.containerTag}[data-bp-type='${spec.bpType}']` }];
+      // Above the generic `ol`/`ul` list rules (task-d175b72aba4d5cd6).
+      return [{ tag: `${spec.containerTag}[data-bp-type='${spec.bpType}']`, priority: 80 }];
     },
 
     renderHTML({ HTMLAttributes }) {

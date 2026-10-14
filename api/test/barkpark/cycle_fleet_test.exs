@@ -3301,11 +3301,11 @@ defmodule Barkpark.CycleFleetTest do
           {:ok, _document} =
             %Document{}
             |> Document.changeset(%{
-              doc_id: "drafts.cycle-oban-teardown-task",
+              doc_id: "cycle-oban-teardown-task",
               type: "task",
               dataset: "production",
               title: "Cycle oban teardown task",
-              status: "draft",
+              status: "published",
               rev: Ecto.UUID.generate(),
               workspace_id: workspace.id,
               project_id: project.id,
@@ -3313,10 +3313,12 @@ defmodule Barkpark.CycleFleetTest do
             })
             |> Repo.insert()
 
+          # A PUBLISHED row's save: under incremental projection (the default
+          # since task-6e2552cdeb223fa2) a draft save enqueues no job at all.
           Barkpark.EdgeProjector.Lifecycle.enqueue_rebuild(%{
             event: :after_save,
             doc: %{
-              doc_id: "drafts.cycle-oban-teardown-task",
+              doc_id: "cycle-oban-teardown-task",
               type: "task",
               dataset: "production",
               workspace_id: workspace.id,

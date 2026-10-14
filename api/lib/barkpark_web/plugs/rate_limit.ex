@@ -41,8 +41,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   never a sixth class (charter D9). It refuses nobody unless a human sets
   `BARKPARK_RATE_LIMIT_BROWSER_ENFORCE=true` against observed shadow data.
   `BARKPARK_RATE_LIMIT_BROWSER_ENABLED=false` is the kill switch and skips the
-  bucket entirely. NOTHING mounts this class yet — the router edit is charter
-  D7 / slice 8 — so on this commit the class is reachable only from tests.
+  bucket entirely. The five HTML browser pipelines mount it (`:browser`,
+  `:scoped_browser`, `:shared_studio_browser`, `:shared_paper_browser`,
+  `:workspace_browser` — charter D7, slice 8).
   """
 
   import Plug.Conn
@@ -72,12 +73,12 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
-  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # Every option-less `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
+  # has `opts` `[]` here and falls to the method
   # clause below — byte-identical keys, budgets and refusals to what those
   # pipelines got before `:browser` existed. A browser pipeline opts IN with
-  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
-  # charter D7/slice 8 work and is deliberately NOT part of this change.
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`, as the five HTML
+  # browser pipelines in router.ex do (charter D7, slice 8).
   def call(conn, opts) do
     # ONE `RateLimiter.check/2` CALL SITE, DELIBERATELY.
     # `rate_limiter_scoped_key_coverage_test.exs` walks the AST of every module
@@ -102,17 +103,19 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
-  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # Every option-less `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
+  # has `opts` `[]` here and falls to the method
   # clause — byte-identical keys, budgets and refusals to what those pipelines
   # got before `:browser` existed. A browser pipeline opts IN with
-  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
-  # charter D7 / slice 8 work and is deliberately NOT part of this change.
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`, as the five HTML
+  # browser pipelines in router.ex do (charter D7, slice 8).
   defp plan(conn, opts) do
     case class_opt(opts) do
       :browser -> browser_plan(conn)
       :presence_focus -> presence_focus_plan(conn)
-      _ -> method_plan(conn)
+      :view -> class_plan(conn, :view)
+      :read -> class_plan(conn, :read)
+      _ -> class_plan(conn, method_class(conn.method))
     end
   end
 
@@ -120,8 +123,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp class_opt(%{} = opts), do: Map.get(opts, :class)
   defp class_opt(_), do: nil
 
-  defp method_plan(conn) do
-    class = method_class(conn.method)
+  # `class: :read` bills a POST that only reads (the GROQ query endpoint takes
+  # long queries as POST, as Sanity's does) to the read bucket.
+  defp class_plan(conn, class) do
     dataset = conn.path_params["dataset"]
     {principal_class, key} = bucket_key(conn, class, dataset)
     per_minute = limit_per_minute(class, dataset, principal_class)
@@ -140,6 +144,26 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     per_minute = limit_per_minute(:presence_focus, dataset, nil)
     {:presence_focus, per_minute, key}
   end
+
+  @doc false
+  # Gate B's seam (`BarkparkWeb.LiveMeter`, charter D4): the /live socket meter
+  # reads the SAME kill switch, per-minute budget and bucket shape as this
+  # plug's `:browser` class, so the two gates cannot drift apart. `:skip` when
+  # the class is switched off.
+  @spec browser_budget() :: :skip | {pos_integer(), keyword()}
+  def browser_budget do
+    cfg = Application.get_env(:barkpark, :rate_limits, [])
+
+    if browser_enabled?(cfg) do
+      per_minute = browser_per_minute(cfg)
+      {per_minute, bucket_opts(per_minute)}
+    else
+      :skip
+    end
+  end
+
+  @doc false
+  def shadow_event, do: @shadow_event
 
   defp browser_plan(conn) do
     cfg = Application.get_env(:barkpark, :rate_limits, [])
@@ -320,6 +344,16 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # genuinely runaway client still cannot flood the presence room forever.
   defp default_per_minute(cfg, :presence_focus, _principal_class),
     do: Keyword.get(cfg, :presence_focus_per_minute, 600)
+
+  # task-5feac4e826cff9a5 — `POST .../v1/data/views/:dataset`. An anonymous
+  # caller is one browser, keyed by IP: 60 views a minute is far above a
+  # reader's pace and bounds a script inflating counts. A token caller is a
+  # site's server forwarding every visitor's views, so it gets 6000.
+  defp default_per_minute(cfg, :view, :anonymous),
+    do: Keyword.get(cfg, :view_per_minute, 60)
+
+  defp default_per_minute(cfg, :view, _principal_class),
+    do: Keyword.get(cfg, :view_token_per_minute, 6_000)
 
   defp dataset_override(_cfg, nil, _class), do: nil
 

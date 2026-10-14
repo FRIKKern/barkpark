@@ -88,4 +88,61 @@ defmodule BarkparkWeb.Studio.PresenceState do
   def on_doc(presences, doc_id, dataset) do
     Enum.filter(presences, &(&1.doc_id == doc_id and Map.get(&1, :dataset) == dataset))
   end
+
+  @doc """
+  Whether `selection` is a shared text selection: `%{"anchor" => point, "head" => point}`,
+  each point `%{"blockId" => id, "path" => path?, "offset" => n}`. The one shape
+  the presence API (#22510) and the Studio paper canvas both carry.
+  """
+  @spec selection_shape?(term()) :: boolean()
+  def selection_shape?(%{"anchor" => a, "head" => h} = sel) when map_size(sel) == 2,
+    do: point?(a) and point?(h)
+
+  def selection_shape?(_), do: false
+
+  defp point?(%{"blockId" => id, "offset" => off} = p)
+       when is_binary(id) and id != "" and is_integer(off) and off >= 0 do
+    case Map.drop(p, ["blockId", "offset"]) do
+      empty when empty == %{} -> true
+      %{"path" => path} when is_binary(path) and path != "" -> true
+      _ -> false
+    end
+  end
+
+  defp point?(_), do: false
+
+  @doc """
+  The other people's carets on `doc_id`, for the paper canvas's
+  `setRemoteSelections` (task-c522237b9f37de21): every presence on that
+  document with a selection, except the session `own_session_id`, as
+  `%{id, name, color, anchor, head}`, sorted by id so an unchanged list
+  compares equal.
+  """
+  @spec remote_selections([map()], String.t(), String.t() | nil, String.t() | nil) :: [map()]
+  def remote_selections(presences, doc_id, dataset, own_session_id) do
+    presences
+    |> on_doc(doc_id, dataset)
+    |> Enum.flat_map(fn p ->
+      id = Map.get(p, :session_id) || Map.get(p, :user_id)
+
+      case Map.get(p, :selection) do
+        %{"anchor" => anchor, "head" => head} = sel when id != own_session_id ->
+          if selection_shape?(sel),
+            do: [
+              %{
+                id: id,
+                name: Map.get(p, :name),
+                color: Map.get(p, :color),
+                anchor: anchor,
+                head: head
+              }
+            ],
+            else: []
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.sort_by(& &1.id)
+  end
 end

@@ -126,11 +126,74 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       ~s|<div class="bp-stat">| <>
         bar <>
         ~s|<div class="bp-stat__v#{verdict_mod}">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
+        dots_html(block) <>
         label_html <> body_html <> spark_svg(spark) <> kilde <> "</div>"
     end
   end
 
   def stat_html(_), do: empty("stat")
+
+  # ── trial dots (pe-bl-stat-tile-dots) ───────────────────────────────────────
+  #
+  # `dots: {on, of}` — a discrete array, "2 of 10 trials": `of` dots, the first
+  # `on` filled. A small field on the stat, not a new block. `of` must be a
+  # whole number 1..@max_dots and `on` is clamped into 0..of; anything else
+  # renders nothing, so a dot-less stat stays byte-identical. The array is ONE
+  # image to assistive tech (`role="img"` + "2 of 10" in the render's
+  # language); the dots themselves are hidden.
+  @max_dots 50
+
+  @doc false
+  def dots(block) do
+    case get(block, "dots") do
+      %{} = d ->
+        with of when is_integer(of) and of >= 1 and of <= @max_dots <- whole(get(d, "of")),
+             on when is_integer(on) <- whole(get(d, "on")) do
+          {min(max(on, 0), of), of}
+        else
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp whole(n) when is_integer(n), do: n
+  defp whole(n) when is_float(n) and n == trunc(n), do: trunc(n)
+
+  defp whole(n) when is_binary(n) do
+    case Integer.parse(String.trim(n)) do
+      {i, ""} -> i
+      _ -> nil
+    end
+  end
+
+  defp whole(_), do: nil
+
+  defp dots_html(block) do
+    case dots(block) do
+      {on, of} ->
+        label = Chrome.t("%{on} of %{total}", on: on, total: of)
+
+        ~s|<div class="bp-stat__dots" role="img" aria-label="#{escape_attr(label)}">| <>
+          String.duplicate(
+            ~s|<i class="bp-stat__dot bp-stat__dot--on" aria-hidden="true"></i>|,
+            on
+          ) <>
+          String.duplicate(~s|<i class="bp-stat__dot" aria-hidden="true"></i>|, of - on) <>
+          "</div>"
+
+      nil ->
+        ""
+    end
+  end
+
+  # Email and TUI degrade the array to TEXT: the glyphs plus "on/of", which
+  # reads the same in every language and every client.
+  @doc false
+  def dots_text({on, of}),
+    do: String.duplicate("●", on) <> String.duplicate("○", of - on) <> " #{on}/#{of}"
 
   @doc """
   The plural KPI grid: N stat cells in an auto-fit grid. Per-cell `source`
@@ -1449,10 +1512,19 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         |> List.wrap()
         |> kilde_email_html(sk)
 
+      dots_email =
+        case dots(block) do
+          nil ->
+            ""
+
+          d ->
+            ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:12px;color:#{sk.muted};margin-top:4px">#{escape_html(dots_text(d))}</div>|
+        end
+
       ~s|<div style="display:inline-block;min-width:120px;background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
         bar <>
         ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
-        label_html <> body_html <> kilde <> "</div>"
+        dots_email <> label_html <> body_html <> kilde <> "</div>"
     end
   end
 
@@ -1830,8 +1902,10 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   @route_w 640
   @route_max_h 400
   @route_pad 16
-  # Track/marker colors: article reads the paper accent token (falling back to
-  # the evergreen brand hex); email carries literal hex — a stylesheet-less
+  # Track/marker colors: article paints the track `currentColor` and the
+  # paper-surface stylesheet sets that colour (`.bp-route__map`) along with the
+  # meta, caption and separator inks, so no theme colour rides the markup
+  # (task-ef9f386f8cb5e32a). Email carries literal hex — a stylesheet-less
   # client must never paint the var() default (black blobs, see the email-skin
   # note above). Start/finish greens/terracotta are SEMANTIC, not authorable.
   @route_start "#2f9e63"
@@ -1848,8 +1922,18 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
       track =
         case style do
-          :article -> "var(--paper-accent, #{skin.accent})"
+          :article -> "currentColor"
           _ -> skin.accent
+        end
+
+      {meta_ink, sep, caption_ink} =
+        case style do
+          :article ->
+            {"", ~s| <span class="bp-route__sep">·</span> |, ""}
+
+          _ ->
+            {"color:#{skin.muted};", ~s| <span style="color:#{skin.border};">·</span> |,
+             "color:#{skin.muted};"}
         end
 
       meta =
@@ -1861,12 +1945,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         if meta == [] do
           ""
         else
-          ~s|<div class="bp-route__meta" style="font-size:13px;color:#{skin.muted};margin-top:6px;">| <>
-            Enum.map_join(
-              meta,
-              ~s| <span style="color:#{skin.border};">·</span> |,
-              &escape_html/1
-            ) <>
+          ~s|<div class="bp-route__meta" style="font-size:13px;#{meta_ink}margin-top:6px;">| <>
+            Enum.map_join(meta, sep, &escape_html/1) <>
             "</div>"
         end
 
@@ -1876,7 +1956,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         if caption == "",
           do: "",
           else:
-            ~s|<div class="bp-route__caption" style="font-size:13px;color:#{skin.muted};font-style:italic;margin-top:2px;">#{escape_html(caption)}</div>|
+            ~s|<div class="bp-route__caption" style="font-size:13px;#{caption_ink}font-style:italic;margin-top:2px;">#{escape_html(caption)}</div>|
 
       ~s|<div class="bp-route">| <>
         route_svg(points, track) <> meta_html <> caption_html <> "</div>"

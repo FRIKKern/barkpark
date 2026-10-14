@@ -55,7 +55,15 @@ type Task struct {
 	// in Barkpark.Tasks.Criteria). Malformed entries keep their slot with empty
 	// text so len(CriteriaItems) always equals Criteria.Total when both exist.
 	// Empty when the task has no criteria.
-	CriteriaItems   []CriterionItem
+	CriteriaItems []CriterionItem
+	// StrayParentKey is the content key of a near-miss spelling of parent_id
+	// (`parent`, `parentId`, `parent-id`, ...) the row carries, "" when none.
+	// StrayParent is that key's value when it is a string. No reader treats
+	// the key as a parent link, so a row carrying it with no ParentID sits
+	// outside its goal tree; `bp task lint` lists those rows
+	// (task-42823fba6f150b97). The api refuses new writes of the key.
+	StrayParentKey  string
+	StrayParent     string
 	Completeness    Completeness
 	DependencyCount int
 	DependentCount  int

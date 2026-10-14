@@ -308,6 +308,13 @@ defmodule BarkparkWeb.QueryController do
     caller_context = CallerContext.from_conn(conn)
 
     cond do
+      # task-341a5d9e63ffdcc3: a broken bracket spelling (`?filter[[=x`,
+      # `filter[title=x`) decodes to a top-level key nothing reads, and a blank
+      # or bracketed field (`filter[%20]=x`, `filter[a]]=x`) is no field at all.
+      # Either one used to run the query as if unfiltered. Refuse it by name.
+      param = malformed_filter_param(params) ->
+        {:error, {:malformed_filter_param, param}}
+
       # Owner ruling #53: `?expand=` naming a field that is not a reference
       # field on this type used to answer 200 with nothing expanded.
       refusal = expand_refusal(conn, params["expand"], expand_spec, type, dataset, schema) ->
@@ -1769,6 +1776,21 @@ defmodule BarkparkWeb.QueryController do
   defp parse_order("_createdAt:asc"), do: :created_at_asc
   defp parse_order("_createdAt:desc"), do: :created_at_desc
 
+  # View counts (task-5feac4e826cff9a5, docs/search/VIEWS.md). `popularity` is
+  # the plain-word alias of `_popularity`, the decayed 30-day score.
+  defp parse_order(spec) when spec in ~w(popularity:asc popularity:desc) do
+    parse_order("_" <> spec)
+  end
+
+  defp parse_order("_popularity:" <> dir) when dir in ~w(asc desc),
+    do: {:views, :score, String.to_existing_atom(dir)}
+
+  defp parse_order("_views7d:" <> dir) when dir in ~w(asc desc),
+    do: {:views, :views_7d, String.to_existing_atom(dir)}
+
+  defp parse_order("_views30d:" <> dir) when dir in ~w(asc desc),
+    do: {:views, :views_30d, String.to_existing_atom(dir)}
+
   # `<field>:asc` / `<field>:desc` — order by any document field, including a
   # dot-path into JSONB content (`price.amount:desc`). apply_order in
   # Content.Query resolves it against the promoted columns / nested JSONB content
@@ -1808,7 +1830,8 @@ defmodule BarkparkWeb.QueryController do
       %{
         "order" => [
           "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
-            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, or _createdAt:asc|desc"
+            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, _createdAt:asc|desc, " <>
+            "or a view count: popularity, _popularity, _views7d or _views30d with :asc|desc"
         ]
       }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
   end
@@ -1900,6 +1923,33 @@ defmodule BarkparkWeb.QueryController do
       {:error, _} = err -> err
     end
   end
+
+  # The first malformed filter param, spelled as the caller sent it, or nil. A
+  # PREDICATE, not a list of known typos: any top-level key that starts `filter`
+  # and then a bracket is a bracket form Plug could not nest, and any field key
+  # in a nested `filter` map that is blank or still carries a bracket is not a
+  # field name. `filters`/`fil` are other params and stay ignored.
+  defp malformed_filter_param(params) when is_map(params) do
+    stray =
+      params
+      |> Map.keys()
+      |> Enum.filter(&(is_binary(&1) and String.match?(&1, ~r/^filter[\[\]]/)))
+      |> Enum.sort()
+      |> List.first()
+
+    stray || malformed_filter_field(Map.get(params, "filter"))
+  end
+
+  defp malformed_filter_field(%{} = filter) do
+    filter
+    |> Map.keys()
+    |> Enum.filter(&(is_binary(&1) and (String.trim(&1) == "" or String.match?(&1, ~r/[\[\]]/))))
+    |> Enum.sort()
+    |> Enum.map(&"filter[#{&1}]")
+    |> List.first()
+  end
+
+  defp malformed_filter_field(_), do: nil
 
   defp normalize_filter_map(map) when is_map(map) do
     Enum.into(map, %{}, fn

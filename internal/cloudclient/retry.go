@@ -13,6 +13,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/FRIKKern/barkpark/internal/apiclient"
 )
 
 // BACKPRESSURE IS NOT A FAULT — the control-plane half.
@@ -401,6 +403,10 @@ func (t *retryTransport) sleepFor(ctx context.Context, d time.Duration) error {
 // RoundTrip repeats a 429 — and ONLY a 429 — up to the attempt cap, honouring
 // the server's own retry_after and bounded by the total-wait ceiling.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// --no-retry / BARKPARK_NO_RETRY: send once, hand the 429 back as sent.
+	if apiclient.RetryDisabled() {
+		return t.roundTripper().RoundTrip(req)
+	}
 	ctx := req.Context()
 	cap := t.attemptCap()
 	ceiling := t.waitCeiling()

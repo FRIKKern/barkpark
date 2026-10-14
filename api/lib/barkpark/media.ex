@@ -63,10 +63,18 @@ defmodule Barkpark.Media do
   `Barkpark.Content` write scoping):
     * `:workspace_id` — stamp the owning workspace (nil = unscoped / pre-tenancy).
     * `:project_id`   — stamp the owning project (nil = workspace-wide).
+    * `:asset_metadata` — `mediaAsset` metadata (`metadata_fields/0` keys,
+      string-keyed) for the media plugin to write in the same create as the
+      asset document, instead of a follow-up patch. Ignored for a dedupe hit.
     * `:dedupe` — when `true`, bytes whose SHA-1 already belongs to a file in
       the same dataset and workspace return `{:existing, file}` and store
       nothing (task-b6e57c37f6928344). Off by default: a caller that owns its
       file's lifecycle (a ticket attachment) must never share one.
+    * `:source_id` — the id the file had in the system it was imported from,
+      such as a Sanity asset id (task-0bc9247eca1bd741). When a file in the
+      same dataset and workspace already carries it, the upload returns
+      `{:existing, file}` and stores nothing, so a re-run import is
+      idempotent. A dedupe hit with no `source_id` of its own takes this one.
 
   Every new row stores the SHA-1 of its bytes in `sha1`.
   """
@@ -149,13 +157,15 @@ defmodule Barkpark.Media do
                mime_type: mime_type,
                size: size,
                dataset: dataset,
-               sha1: sha1
+               sha1: sha1,
+               source_id: Keyword.get(opts, :source_id)
              },
              opts
            ) do
-      case Keyword.get(opts, :dedupe, false) && find_duplicate(attrs) do
+      case find_by_source_id(attrs) ||
+             (Keyword.get(opts, :dedupe, false) && find_duplicate(attrs)) do
         %MediaFile{} = existing ->
-          {:existing, existing}
+          {:existing, adopt_source_id(existing, attrs.source_id)}
 
         _ ->
           persist_upload(
@@ -163,7 +173,8 @@ defmodule Barkpark.Media do
             blob_key(date_dir, filename, Map.get(attrs, :dataset_id)),
             temp_path,
             mime_type,
-            dataset
+            dataset,
+            Keyword.get(opts, :asset_metadata, %{})
           )
       end
     else
@@ -270,34 +281,70 @@ defmodule Barkpark.Media do
   end
 
   # An earlier file with the same bytes in the SAME dataset and workspace
-  # (task-b6e57c37f6928344). Never across a workspace: a NULL workspace only
-  # matches a NULL workspace, and a resolved dataset_id is matched exactly (a
-  # pre-tenancy row with no dataset_id matches on the dataset slug instead).
-  # The oldest match wins, so repeats keep answering with one id. Two
+  # (task-b6e57c37f6928344). The oldest match wins, so repeats keep answering with one id. Two
   # concurrent first uploads of the same bytes can both insert: there is no
   # unique index, by design, because rows born before the column are NULL.
   defp find_duplicate(%{sha1: sha1} = attrs) when is_binary(sha1) do
-    query =
-      from(m in MediaFile, where: m.sha1 == ^sha1, order_by: [asc: m.inserted_at], limit: 1)
+    from(m in MediaFile, where: m.sha1 == ^sha1, order_by: [asc: m.inserted_at], limit: 1)
+    |> same_dataset_and_workspace(attrs)
+    |> Repo.one()
+  end
 
+  defp find_duplicate(_attrs), do: nil
+
+  # A file that already carries the upload's `source_id` in the same dataset
+  # and workspace (task-0bc9247eca1bd741).
+  defp find_by_source_id(%{source_id: source_id} = attrs) when is_binary(source_id) do
+    from(m in MediaFile, where: m.source_id == ^source_id, limit: 1)
+    |> same_dataset_and_workspace(attrs)
+    |> Repo.one()
+  end
+
+  defp find_by_source_id(_attrs), do: nil
+
+  # Never across a workspace: a NULL workspace only matches a NULL workspace,
+  # and a resolved dataset_id is matched exactly (a pre-tenancy row with no
+  # dataset_id matches on the dataset slug instead).
+  defp same_dataset_and_workspace(query, attrs) do
     query =
       case Map.get(attrs, :dataset_id) do
         nil -> where(query, [m], is_nil(m.dataset_id) and m.dataset == ^attrs.dataset)
         dataset_id -> where(query, [m], m.dataset_id == ^dataset_id)
       end
 
-    query =
-      case Map.get(attrs, :workspace_id) do
-        nil -> where(query, [m], is_nil(m.workspace_id))
-        workspace_id -> where(query, [m], m.workspace_id == ^workspace_id)
-      end
-
-    Repo.one(query)
+    case Map.get(attrs, :workspace_id) do
+      nil -> where(query, [m], is_nil(m.workspace_id))
+      workspace_id -> where(query, [m], m.workspace_id == ^workspace_id)
+    end
   end
 
-  defp find_duplicate(_attrs), do: nil
+  # A dedupe hit with no source id of its own takes the upload's. One that
+  # already has a different id keeps it: the bytes are the same file, and the
+  # sha1 lookup still finds it.
+  defp adopt_source_id(%MediaFile{source_id: nil} = file, source_id) when is_binary(source_id) do
+    case set_source_id(file, source_id) do
+      {:ok, file} -> file
+      {:error, _} -> file
+    end
+  end
 
-  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset) do
+  defp adopt_source_id(file, _source_id), do: file
+
+  @doc """
+  Set (or, with `nil`, clear) the `source_id` of a media file: the id it had
+  in the system it was imported from, such as a Sanity asset id
+  (task-0bc9247eca1bd741). Returns `{:error, changeset}` when the id is
+  malformed or already names another file in the dataset.
+  """
+  @spec set_source_id(MediaFile.t(), String.t() | nil) ::
+          {:ok, MediaFile.t()} | {:error, Ecto.Changeset.t()}
+  def set_source_id(%MediaFile{} = file, source_id) do
+    file
+    |> MediaFile.source_id_changeset(source_id)
+    |> Repo.update()
+  end
+
+  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata) do
     # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
     # (see Blobstore.receipt/3). The row's `size` stays the SOURCE size (what the
     # client uploaded); the receipt is not persisted here, it is the seam that
@@ -305,7 +352,12 @@ defmodule Barkpark.Media do
     # a 503, instead of inserting a row over bytes that are not there.
     case Blobstore.put_file(relative_path, temp_path, content_type: mime_type) do
       {:ok, _receipt} ->
-        insert_uploaded_row(Map.put(attrs, :path, relative_path), relative_path, dataset)
+        insert_uploaded_row(
+          Map.put(attrs, :path, relative_path),
+          relative_path,
+          dataset,
+          asset_metadata
+        )
 
       {:error, _reason} ->
         # The backend write failed. A partial write may survive → best-effort
@@ -321,7 +373,7 @@ defmodule Barkpark.Media do
     end
   end
 
-  defp insert_uploaded_row(attrs, relative_path, dataset) do
+  defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata) do
     %MediaFile{}
     |> MediaFile.changeset(attrs)
     |> Repo.insert()
@@ -330,7 +382,8 @@ defmodule Barkpark.Media do
         _ =
           Barkpark.Plugins.Registry.run_after_media_upload(%{
             media_file: file,
-            dataset: dataset
+            dataset: dataset,
+            asset_metadata: asset_metadata
           })
 
         ok
@@ -560,6 +613,30 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  Every listed blob's linked `mediaAsset` document, resolved in batches
+  (task-55a32a11405d5e9b). First by the request's scope (`opts`, as
+  `asset_docs_for_files/3`), then — for blobs that found none — by each blob's
+  OWN workspace/project, one query per distinct scope. That second step is the
+  set form of the per-hit fallback `AssetResponse.render/3` used to run for
+  every hit without a doc. Render with `asset_doc_resolved: true` so an absent
+  entry is taken as final.
+  """
+  @spec resolve_asset_docs([MediaFile.t()], String.t(), keyword()) :: %{
+          String.t() => struct()
+        }
+  def resolve_asset_docs(files, dataset, opts \\ [])
+      when is_list(files) and is_binary(dataset) and is_list(opts) do
+    found = asset_docs_for_files(files, dataset, opts)
+
+    files
+    |> Enum.reject(&Map.has_key?(found, &1.id))
+    |> Enum.group_by(&MediaFile.scope_opts/1, & &1.id)
+    |> Enum.reduce(found, fn {scope, ids}, acc ->
+      Map.merge(Assets.find_by_media_file_ids(ids, dataset, scope), acc)
+    end)
+  end
+
+  @doc """
   Linked `mediaAsset` document for a blob row, if any.
 
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); threaded
@@ -721,6 +798,44 @@ defmodule Barkpark.Media do
   def get_file_by_path(relative_path, opts \\ []) when is_binary(relative_path) do
     MediaFile
     |> where([m], m.path == ^relative_path)
+    |> scoped_one(opts)
+  end
+
+  @doc """
+  Get a media file in `dataset` by its `source_id`, the id it had in the
+  system it was imported from. Scoped like `get_file_by_path/2`.
+  """
+  @spec get_file_by_source_id(String.t(), String.t(), keyword()) ::
+          {:ok, MediaFile.t()} | {:error, :not_found}
+  def get_file_by_source_id(source_id, dataset, opts \\ [])
+      when is_binary(source_id) and is_binary(dataset) do
+    from(m in MediaFile,
+      where: m.source_id == ^source_id and m.dataset == ^dataset,
+      order_by: [asc: m.inserted_at],
+      limit: 1
+    )
+    |> scoped_one(opts)
+  end
+
+  @doc """
+  Get the oldest media file in `dataset` whose stored bytes hash to `sha1`.
+  Scoped like `get_file_by_path/2`. Rows with no `sha1` yet never match.
+  """
+  @spec get_file_by_sha1(String.t(), String.t(), keyword()) ::
+          {:ok, MediaFile.t()} | {:error, :not_found}
+  def get_file_by_sha1(sha1, dataset, opts \\ []) when is_binary(sha1) and is_binary(dataset) do
+    from(m in MediaFile,
+      where: m.sha1 == ^String.downcase(sha1) and m.dataset == ^dataset,
+      order_by: [asc: m.inserted_at],
+      limit: 1
+    )
+    |> scoped_one(opts)
+  end
+
+  # The one scoped single-row read behind the path, source id and sha1
+  # lookups. The controllers confine its result with `confine_one/2`.
+  defp scoped_one(query, opts) do
+    query
     |> Content.Scope.scope_to_workspace_or_global(
       Keyword.get(opts, :workspace_id),
       Keyword.get(opts, :project_id)
@@ -730,6 +845,63 @@ defmodule Barkpark.Media do
       nil -> {:error, :not_found}
       file -> {:ok, file}
     end
+  end
+
+  @doc """
+  Internal local cleanup preparation. Removes database rows with a durable pending
+  operation; leaves original bytes and all media effects untouched. No HTTP door
+  calls this yet. An outer transaction must already own the content broadcast
+  queue and flush it only after commit (or clear it on rollback).
+  """
+  def commit_pending_delete(request, opts) when is_map(request) and is_list(opts) do
+    _policy = where_used_policy!(opts)
+
+    cond do
+      Blobstore.impl() != Barkpark.Media.Blobstore.Local ->
+        {:error, :unsupported_media_backend}
+
+      get_in(request, ["root", "path"]) != pending_delete_root() ->
+        {:error, :media_root_mismatch}
+
+      Repo.in_transaction?() and not Process.get(:barkpark_deferred_owner, false) ->
+        {:error, :content_transaction_owner_required}
+
+      true ->
+        Door.admit(fn ->
+          Barkpark.Content.Broadcast.with_deferred_queue(fn ->
+            Barkpark.Media.Storage.DeleteOperation.commit(
+              request,
+              pending_delete_context(opts),
+              fn ->
+                with {:ok, file} <-
+                       get_file(request["mediaId"], Keyword.drop(opts, [:where_used, :override])) do
+                  snapshots = Assets.pending_delete_snapshot(file)
+
+                  case delete_row_with_asset_doc(file) do
+                    {:ok, _deleted} -> {:ok, snapshots}
+                    error -> error
+                  end
+                end
+              end
+            )
+          end)
+        end)
+    end
+  end
+
+  defp pending_delete_root do
+    upload_dir()
+    |> Path.expand()
+    |> String.replace("/", "\\")
+    |> String.replace(~r/^[a-z]:/i, &String.upcase/1)
+  end
+
+  defp pending_delete_context(opts) do
+    opts
+    |> Keyword.take([:where_used, :workspace_id, :project_id, :override])
+    |> Map.new(fn {key, value} -> {Atom.to_string(key), value} end)
+    |> Jason.encode!()
+    |> Jason.decode!()
   end
 
   @doc """

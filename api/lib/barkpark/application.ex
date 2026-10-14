@@ -479,6 +479,10 @@ defmodule Barkpark.Application do
       Barkpark.HostVitals.Sampler,
       Barkpark.Repo,
       Barkpark.Vault,
+      # Document view counts (task-5feac4e826cff9a5): owns the ETS buffer and
+      # flushes it to `document_view_days` every few seconds. After Repo so a
+      # flush can write; it flushes once more when it stops.
+      Barkpark.Search.Views.Buffer,
       # WI1: plugin registry — must come up before workers/endpoint so any
       # later boot hook that calls Barkpark.Plugins.Registry has a live PID.
       Barkpark.Plugins.Registry,
@@ -553,6 +557,10 @@ defmodule Barkpark.Application do
         # unguarded" when it is not, which is the correct posture for a
         # contention remedy and the wrong one to rely on at boot.
         Barkpark.Tenancy.WorkspaceBundle.SingleFlight,
+        # Shared derivations (am-w2-s4): concurrent askers of one key share
+        # one computation, and its result for a short TTL. One small ETS
+        # table; no connections, no timers.
+        Barkpark.SingleFlight,
         # Dedicated supervisor for outbound webhook/media deliveries. The
         # generic TaskSupervisor has max_children: :infinity, so a webhook
         # storm or a slow endpoint (each child sleeps in-task on retry

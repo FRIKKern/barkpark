@@ -137,9 +137,7 @@ export function codeSource(b: Record<string, unknown> | null | undefined): strin
  * Twins: compose.ex `code_source_text/1`, code.go `codeSourceText`. */
 function codeSourceText(v: unknown): string {
   if (Array.isArray(v)) {
-    return v
-      .map((n) => (typeof n === 'string' ? n : isMap(n) ? textLeafValue(n) : ''))
-      .join('')
+    return v.map((n) => (typeof n === 'string' ? n : isMap(n) ? textLeafValue(n) : '')).join('')
   }
   return str(v)
 }
@@ -193,6 +191,8 @@ import {
   MANIFEST_STATUS_TO_ROLE,
 } from './status-vocab.gen'
 import type { RenderCtx } from './blocks/chrome'
+import { inlineObjectText } from './inline-object'
+export { inlineObjectText } from './inline-object'
 
 /** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
  * a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
@@ -287,10 +287,8 @@ export function draftHtml(r: Record<string, unknown>, ctx: RenderCtx): string {
  * unmarked text leaf emits BARE escaped text — no wrapping span (walk.ex renders
  * a string child through `escape_html` with no element). */
 
-// Article link colour — the evergreen `--paper-accent`, with the captured
-// paperEmail brand hex as the stylesheet-less fallback (Palettes.article_palette
-// link_color = `var(--paper-accent, #1e5347)`).
-const LINK_STYLE = 'color:var(--paper-accent, #1e5347)'
+// Article links carry no inline style: the `.bp-paper-surface a` rule owns their
+// colour, a THEME value (walk.ex link/3, task-10ca9c3597695db7).
 
 function markName(m: unknown): string {
   if (typeof m === 'string') return m
@@ -343,7 +341,7 @@ function applyMarks(escaped: string, marks: unknown[]): string {
         break
       case 'link': {
         const href = markAttr(m, 'href')
-        acc = `<a href="${safeUrl(href)}" style="${LINK_STYLE}">${acc}</a>`
+        acc = `<a href="${safeUrl(href)}">${acc}</a>`
         bare = false
         break
       }
@@ -555,7 +553,7 @@ export function renderInline(node: Inline): string {
       // `<code>` body stays escaped plain text exactly as the `value` path.
       return `<code>${escapeHtml(inlineCodeSource(node))}</code>`
     case 'link':
-      return `<a href="${safeUrl(str(node.href))}" style="${LINK_STYLE}">${renderInlineChildren(node.children)}</a>`
+      return `<a href="${safeUrl(str(node.href))}">${renderInlineChildren(node.children)}</a>`
     case 'wikilink': {
       const target = escapeHtml(str(node.target))
       const alias = str(node.alias)
@@ -581,10 +579,50 @@ export function renderInline(node: Inline): string {
         resolved: typeof node.resolved === 'string' ? node.resolved : undefined,
       })
     default: {
-      // Unknown inline → degrade to its children when present, else nothing.
+      // Unknown inline → degrade to its children when present. A childless one
+      // is an inline object (a schema's `blocks.inline` type): a registered
+      // renderer draws it, else its text shows in a span. Twin of
+      // inline.ex PdInlineObject + walk.ex inline_object/2.
       const kids = asList(node.children)
-      return kids.length ? renderInlineChildren(kids) : ''
+      // A block-shaped node (`content` key) is not an inline object.
+      if (kids.length || 'content' in node) return renderInlineChildren(kids)
+      const type = str(node.type)
+      const own = inlineObjectRenderers?.[type]
+      if (own) {
+        // A renderer that throws or returns a non-string falls back to the
+        // span, as walk.ex does.
+        try {
+          const html: unknown = own(node)
+          if (typeof html === 'string') return html
+        } catch {
+          /* fall through */
+        }
+      }
+      // Empty span when the node has no text: never dropped silently.
+      return `<span class="bp-inline-object" data-inline-type="${escapeHtml(type)}">${escapeHtml(inlineObjectText(node))}</span>`
     }
+  }
+}
+
+/** Renders one inline object node (`{type, ...fields}`) to an HTML string. The
+ * function owns escaping; `escapeHtml` is exported for it. */
+export type InlineObjectRenderer = (node: Record<string, unknown>) => string
+
+// The renderers registered for the current synchronous render (see
+// withInlineObjects). Module state is safe here: a render never yields.
+let inlineObjectRenderers: Record<string, InlineObjectRenderer> | undefined
+
+/** Run `fn` with `renderers` registered for inline objects, then restore. */
+export function withInlineObjects<T>(
+  renderers: Record<string, InlineObjectRenderer> | undefined,
+  fn: () => T,
+): T {
+  const prev = inlineObjectRenderers
+  inlineObjectRenderers = renderers
+  try {
+    return fn()
+  } finally {
+    inlineObjectRenderers = prev
   }
 }
 

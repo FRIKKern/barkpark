@@ -172,7 +172,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div class="bp-plugins-admin" data-test-id="plugins-admin">
+    <main class="bp-plugins-admin" data-test-id="plugins-admin">
       <div class="bp-plugins-header">
         <h1 class="h1">{gettext("Plugins")}</h1>
         <div class="bp-plugins-actions">
@@ -207,10 +207,12 @@ defmodule BarkparkWeb.Admin.PluginsLive do
               data-test-plugin={row.name}
             >
               <header class="bp-plugin-card-header">
-                <div class="bp-plugin-card-title">
+                <%!-- h2, so each card's "Callbacks implemented" h3 sits under a
+                      heading of its own (axe heading-order). --%>
+                <h2 class="bp-plugin-card-title">
                   <strong>{row.name}</strong>
                   <span class="bp-plugin-card-version">{row.version}</span>
-                </div>
+                </h2>
                 <div class="bp-plugin-card-header-actions">
                   <%= if row.has_settings do %>
                     <.link
@@ -283,7 +285,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
           <% end %>
         </div>
       <% end %>
-    </div>
+    </main>
     """
   end
 

@@ -376,7 +376,7 @@ func statusBucket(status int) (int, bool) {
 	switch {
 	case status >= 500:
 		return exitServer, true
-	case status == 400:
+	case status == 400, status == 406:
 		return exitUsage, true
 	case status == 401, status == 403:
 		return exitAuth, true

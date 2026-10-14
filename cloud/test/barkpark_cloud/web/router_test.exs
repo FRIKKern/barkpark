@@ -535,7 +535,10 @@ defmodule BarkparkCloud.Web.RouterTest do
       # 18 -> 21 (dr-w15-s5): `cd-1` (a measured site_deploy.configured=false on
       # a box with sites → cannot_deploy, rank 5) and the rung's two negative
       # arms, `nosite-1` (no deploy surface) and `unm-1` (capability null).
-      assert length(fixture_rows) == 21
+      # 21 -> 23 (task-9d72b5f86487cf9b): `rs-1` (5 automatic service restarts
+      # in the hour → restarting, rank 5) and its negative arm `rs-3` (exactly
+      # 3, the threshold → ok).
+      assert length(fixture_rows) == 23
 
       assert Enum.all?(fixture_rows, &Map.has_key?(&1, "queued_deploy_age_seconds")),
              "every Go ranking row must preserve the field the producer always emits"

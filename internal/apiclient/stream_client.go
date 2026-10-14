@@ -45,5 +45,10 @@ import "net/http"
 // WithCallerOwnedBackpressure(ctx) — the sanctioned opt-OUT — rather than by
 // dropping the transport, which also silently forfeits the transient-500 retry.
 func streamClient() *http.Client {
-	return &http.Client{Timeout: 0, Transport: NewRetryTransport(nil)}
+	return &http.Client{Timeout: 0, Transport: NewRetryTransport(streamBase)}
 }
+
+// streamBase is the transport streamClient's retry layer wraps. nil (always, in
+// the binary) means http.DefaultTransport; a test points it at an httptest
+// server's transport to stream over that server's TLS / HTTP/2.
+var streamBase http.RoundTripper

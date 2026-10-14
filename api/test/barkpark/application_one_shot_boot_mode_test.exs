@@ -848,6 +848,15 @@ defmodule Barkpark.ApplicationOneShotBootModeTest do
         "generates the checked-in OpenAPI/capabilities artifact off the FULL running tree; " <>
           "a narrowed tree would generate a contract the served node does not match",
 
+      # A dev-only measurement (task-6e2552cdeb223fa2): it refuses to run unless
+      # MIX_ENV=dev and BARKPARK_DEV_DATABASE names a throwaway database, so it
+      # never meets a live box. It times the write path a served node runs, and
+      # that path needs the parts `:one_shot` drops: Oban for edge jobs, the
+      # TaskSupervisor for post-commit work, PubSub for broadcasts.
+      "barkpark.bench.write_path.ex" =>
+        "dev-only benchmark against a throwaway database; it measures the full write path, " <>
+          "which needs Oban, the TaskSupervisor and PubSub that :one_shot drops",
+
       # NOT ALLOWLISTED, and the row's wording said they would be: the
       # `gen_golden_*` / `gen_*_parity` generators
       # (barkpark.chat.gen_golden_toolrows, barkpark.chat.gen_golden_transcript,

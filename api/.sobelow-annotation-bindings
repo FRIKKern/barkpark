@@ -1,4 +1,5 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
+lib/barkpark/auth/public_read.ex	write_token_file
 lib/barkpark/codelists/editeur.ex	parse_xml
 lib/barkpark/codelists/editeur.ex	seed_thema
 lib/barkpark/content/validation.ex	get_in_field
@@ -14,12 +15,19 @@ lib/barkpark/media/blobstore/s3.ex	delete
 lib/barkpark/media/blobstore/s3.ex	download
 lib/barkpark/media/blobstore/s3.ex	put_file
 lib/barkpark/media/blobstore/s3.ex	warm_cache
+lib/barkpark/media/dataset_id_backfill.ex	apply_plan
+lib/barkpark/media/dataset_id_backfill.ex	undo
 lib/barkpark/media/delivery/search.ex	run_tags_facet_sql
 lib/barkpark/media/image_backend/magick.ex	run_bounded
 lib/barkpark/media/image_metadata.ex	maybe_lqip
 lib/barkpark/media/probe.ex	read_prefix
+lib/barkpark/media/processing.ex	lqip
 lib/barkpark/media/renditions.ex	delete_for_file
+lib/barkpark/media/renditions.ex	do_generate
 lib/barkpark/media/renditions.ex	generate
+lib/barkpark/media/renditions.ex	promote
+lib/barkpark/media/renditions.ex	promote
+lib/barkpark/media/renditions.ex	variant_count
 lib/barkpark/migration_paths.ex	read_manifest
 lib/barkpark/plugins/bulldocs.ex	register_schemas
 lib/barkpark/plugins/bulldocs/web/bulldocs_email_controller.ex	show
@@ -124,7 +132,6 @@ lib/barkpark/studio_chat/provider/claude.ex	read_stderr_tail
 lib/barkpark/studio_chat/provider/claude.ex	rewrite_mcp_config
 lib/barkpark/studio_chat/provider/claude.ex	write_mcp_config
 lib/barkpark/studio_chat/runtime.ex	registered_provider_ready
-lib/barkpark/studio_chat/runtime/codex/readiness.ex	version
 lib/barkpark/studio_chat/titles.ex	run
 lib/barkpark/sync/pusher.ex	reason_atom
 lib/barkpark/tasks/queue_gate.ex	fetch

@@ -186,6 +186,11 @@ defmodule Barkpark.PortableDoc.Render do
       # cache, delta frames, and the public reader keep the default `false`,
       # so the control never leaks into shared caches or anonymous HTML.
       |> Map.put(:valueref_accept, Map.get(opts, :valueref_accept, false))
+      # Inline object renderers (task-85fee859cf3bfef6): `:inline_objects` is a
+      # caller-supplied `%{type => (node -> html_string)}` map. The function
+      # gets the stored node (`{type, ...fields}`) and returns HTML, so it owns
+      # escaping. Absent ⇒ %{} ⇒ an inline object shows its text in a span.
+      |> Map.put(:inline_objects, Map.get(opts, :inline_objects, %{}))
 
     width = Map.get(opts, :container_width, Map.fetch!(palette, :width))
     body = Walk.render_body(root, width, palette)

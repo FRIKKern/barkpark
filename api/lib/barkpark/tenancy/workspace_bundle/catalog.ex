@@ -130,6 +130,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     chat_runtime_usage_receipts content_edges cycle_build_plans
     cycle_release_gate_captures cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes datasets
+    document_popularity document_view_days
     epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
     epic_benchmark_attempts plugin_doc_state role_permissions task_edges
     token_sessions webhook_deliveries
@@ -201,6 +202,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     codelist_value_translations codelist_values
     codelists collapsed_schema_definitions_backup
     cycle_release_gate_migration_state_20260719020100 idempotency_keys login_tickets
+    media_delete_operations_v1 media_object_reservations_v1
     oban_jobs oban_peers oidc_connections org_domains organizations
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
@@ -215,6 +217,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @e2_joins %{
     "datasets" => {"JOIN projects p ON p.id = t.project_id", "p.workspace_id"},
     "role_permissions" => {"JOIN roles r ON r.id = t.role_id", "r.workspace_id"},
+    # Document view counts (task-5feac4e826cff9a5): keyed by `dataset_id`,
+    # NOT NULL. One join, because teardown turns it into `DELETE … USING`;
+    # the dataset's project names the workspace through a scalar subquery
+    # on the projects primary key, so nothing fans out or drops.
+    "document_view_days" =>
+      {"JOIN datasets ds ON ds.id = t.dataset_id",
+       "(SELECT p.workspace_id FROM projects p WHERE p.id = ds.project_id)"},
+    "document_popularity" =>
+      {"JOIN datasets ds ON ds.id = t.dataset_id",
+       "(SELECT p.workspace_id FROM projects p WHERE p.id = ds.project_id)"},
     # SECURITY INVARIANT (pds-bl-pin-webhook-deliveries-inner-join): this INNER
     # JOIN is the ONLY thing keeping media signing secrets out of every bundle.
     # Media deliveries are the one delivery kind whose `payload_snapshot` embeds
@@ -478,6 +490,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   """
   def assert_partition!(repo) do
     assert_connector_credential_exclusion!(repo)
+    assert_no_pending_media_cleanup!(repo)
 
     live_e1 = live_e1(repo)
     live_e2 = live_e2(repo)
@@ -545,6 +558,23 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     end
 
     assert_webhook_delivery_confinement!(repo)
+
+    :ok
+  end
+
+  # Native root/file identities are host-local recovery state. Reservations
+  # are rebuilt from media rows on another host. An unresolved operation must
+  # neither silently disappear nor travel as permission to delete a path.
+  @doc "Refuse export preflight while host-local media cleanup remains unresolved."
+  def assert_no_pending_media_cleanup!(repo) do
+    if "media_delete_operations_v1" in live_base_tables(repo) do
+      %{rows: [[pending]]} =
+        repo.query!("SELECT EXISTS (SELECT FROM public.media_delete_operations_v1)", [])
+
+      if pending do
+        raise "WorkspaceBundle.Catalog: pending host-local media cleanup must be reconciled before export"
+      end
+    end
 
     :ok
   end
@@ -723,6 +753,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #     :copy only together with a declared safe-key contract over `value`
   #     (or a @dev_scrub entry) and a test that fails on an undeclared key.
 
+  #   * view counts (task-5feac4e826cff9a5): document_view_days and
+  #     document_popularity hold no identity, but they are the source site's
+  #     traffic and a dev target rebuilds its own from its own views. Denied
+  #     so a dev bundle does not carry production readership numbers.
+
   @dev_doc_type_deny ~w(ticket)
 
   @dev_copy ~w(
@@ -741,7 +776,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     cycle_release_gate_admissions cycle_release_gate_captures
     cycle_release_gate_challenges cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes cycle_waves
-    data_keys epic_assignment_results epic_assignment_runtime_attempts
+    data_keys document_popularity document_view_days
+    epic_assignment_results epic_assignment_runtime_attempts
     epic_assignment_tasks epic_assignments epic_benchmark_attempts
     epic_benchmark_experiments github_sync_conflicts mutation_events
     paper_access_log plugin_doc_state preview_token_jti registered_chat_hosts
@@ -848,6 +884,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   """
   def assert_dev_partition!(repo, partition \\ @dev_partition) do
     assert_connector_credential_exclusion!(repo)
+    assert_no_pending_media_cleanup!(repo)
 
     malformed = for {table, c} <- partition, not valid_dev_classification?(c), do: table
 

@@ -552,6 +552,9 @@ defmodule BarkparkCloud.Web.Router do
     runaway_procs: nil,
     slot_units: nil,
     slot_units_truncated: nil,
+    service_restarts: nil,
+    service_restarts_count: nil,
+    service_restarts_window_s: nil,
     reported_at: nil
   }
 
@@ -1040,7 +1043,8 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   ## POST /v1/auth/device/inspect {user_code} (require_user)
-  ##   → 200 {client_name, ip_address, user_agent, expires_at} — for the confirm screen
+  ##   → 200 {client_name, ip_address, user_agent, expires_at, team_id} — for the confirm
+  ##     screen; ip_address + user_agent are omitted for a non-member of a team-bound login
   ##   → 404 {error: "expired_or_invalid"}
   ##   → 429 {error: "rate_limited"} — shares the approve:<user_id> budget: inspect
   ##     answers "is this user_code valid?", so an unmetered inspect would be the
@@ -1060,13 +1064,22 @@ defmodule BarkparkCloud.Web.Router do
         :ok ->
           case DeviceAuth.inspect(conn.body_params["user_code"] || "") do
             {:ok, row} ->
-              json(conn, 200, %{
+              body = %{
                 client_name: row.client_name,
-                ip_address: row.ip_address,
-                user_agent: row.user_agent,
                 expires_at: row.expires_at,
                 team_id: row.requested_team_id
-              })
+              }
+
+              # Who is asking (IP, user agent) goes only to someone who could
+              # approve: anyone for an unbound login, a member of the bound
+              # team otherwise. A non-member still gets the screen, so the
+              # Deny safety valve keeps working (task-c9560d84f704705d).
+              body =
+                if DeviceAuth.may_see_requester?(row, user.id),
+                  do: Map.merge(body, %{ip_address: row.ip_address, user_agent: row.user_agent}),
+                  else: body
+
+              json(conn, 200, body)
 
             {:error, :expired_or_invalid} ->
               json(conn, 404, %{error: "expired_or_invalid"})
@@ -1103,7 +1116,8 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  ## POST /v1/auth/device/deny {user_code} (require_user) → 200 {ok: true} (idempotent)
+  ## POST /v1/auth/device/deny {user_code} (require_user) → 200 {ok: true} (idempotent;
+  ##   deletes only a PENDING request — an approved login cannot be taken back)
   post "/v1/auth/device/deny" do
     conn = Auth.require_user(conn, [])
 
@@ -13650,6 +13664,20 @@ defmodule BarkparkCloud.Web.Router do
       # list is complete; nil means unmeasured (absent key, or the agent's -1
       # sentinel) — so a short list can never pass for a whole one.
       slot_units_truncated: measured_or_nil(Map.get(payload, "slot_units_truncated")),
+      # Automatic restarts of the service units that systemd made after the
+      # main process died (task-9d72b5f86487cf9b). A deploy restart is a manual
+      # job and never appears here, so this is the count of restarts nobody
+      # asked for. On 2026-10-13 gyl restarted about every 12 minutes with ~30 s
+      # of 503 each time, and this row read `ok` with nothing to say why.
+      #
+      # The agent reads the last `service_restarts_window_s` seconds of PID 1's
+      # journal lines on every beat. The list is newest first and capped; the
+      # count is not, so a short list never hides how many there were. Same
+      # three-state law as slot_units: nil is UNMEASURED, [] is measured and
+      # quiet, and the -1 sentinels on the two numbers render nil.
+      service_restarts: service_restarts(Map.get(payload, "service_restarts")),
+      service_restarts_count: measured_or_nil(Map.get(payload, "service_restarts_count")),
+      service_restarts_window_s: measured_or_nil(Map.get(payload, "service_restarts_window_s")),
       reported_at: at
     })
   end
@@ -13779,6 +13807,34 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp slot_unit(_), do: []
+
+  # The agent's `service_restarts` rows, newest first. A row survives on its
+  # unit and its time; the exit fields are optional and render nil when
+  # unreadable, because a restart with an unknown exit is still a restart.
+  defp service_restarts(rows) when is_list(rows), do: Enum.flat_map(rows, &service_restart/1)
+  defp service_restarts(_), do: nil
+
+  defp service_restart(row) when is_map(row) do
+    with unit when is_binary(unit) <- named_or_nil(Map.get(row, "unit")),
+         at when is_binary(at) <- named_or_nil(Map.get(row, "restarted_at")) do
+      [
+        %{
+          unit: unit,
+          restarted_at: at,
+          exit_kind: named_or_nil(Map.get(row, "exit_kind")),
+          exit_status: measured_or_nil(Map.get(row, "exit_status")),
+          exit_signal: named_or_nil(Map.get(row, "exit_signal")),
+          result: named_or_nil(Map.get(row, "result")),
+          oom_killed: Map.get(row, "oom_killed") == true,
+          restart_counter: measured_or_nil(Map.get(row, "restart_counter"))
+        }
+      ]
+    else
+      _ -> []
+    end
+  end
+
+  defp service_restart(_), do: []
 
   # The fleet-ops row shape (GET/POST /v1/internal/barkparks): the identity +
   # placement fields the `bp cloud hetzner instance` verbs cross-check, plus

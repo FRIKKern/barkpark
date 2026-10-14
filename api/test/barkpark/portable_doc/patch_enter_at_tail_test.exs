@@ -9,9 +9,11 @@ defmodule Barkpark.PortableDoc.PatchEnterAtTailTest do
   # TWO batches are folded, both captured verbatim from the jsdom harness
   # (api/assets/paper-editor/src/canvas/__enter_tail.test.mjs):
   #
-  #   1. WHAT MAIN ACTUALLY EMITS — insert-after(pp-001, new paragraph) + move-block x12.
+  #   1. WHAT MAIN ACTUALLY EMITS — insert-after(pp-001, new paragraph) + ONE move-block
+  #      taking it to the tail (task-d20a8200b28f0d7a; before, a greedy pass moved x12).
   #      13 blocks in, 14 out, the tail block byte-identical. A NORMALISATION.
-  #   2. THE FILED BATCH — remove-block(pp-013) + insert-after(pp-001) + move-block x11.
+  #   2. THE FILED BATCH — remove-block(pp-013) + insert-after(pp-001) + one move-block
+  #      (the filing itself carried x11 from the older move pass; the fold is the same).
   #      13 blocks in, 13 out, the tail block's content GONE. Real loss — but the harness
   #      proves this batch is emitted only when the tail node was never in the live doc
   #      (an unregistered node type dropped by ProseMirror on setContent, e.g. from a stale
@@ -43,21 +45,23 @@ defmodule Barkpark.PortableDoc.PatchEnterAtTailTest do
 
   defp new_paragraph, do: %{"id" => "c-1-deadbeef", "type" => "paragraph", "content" => []}
 
-  defp moves(count) do
-    Enum.map(1..count, fn i -> %{"op" => "move-block", "id" => pad(i + 1), "after" => pad(i)} end)
-  end
+  defp move_new_after(id), do: %{"op" => "move-block", "id" => "c-1-deadbeef", "after" => id}
 
   # What Enter at the tail emits on current main (harness Part A).
   defp main_batch do
-    [%{"op" => "insert-after", "afterId" => "pp-001", "block" => new_paragraph()}] ++ moves(12)
+    [
+      %{"op" => "insert-after", "afterId" => "pp-001", "block" => new_paragraph()},
+      move_new_after("pp-013")
+    ]
   end
 
   # The batch the task filed (harness Part B: only reachable when the tail never mounted).
   defp filed_batch do
     [
       %{"op" => "remove-block", "id" => @tail_id},
-      %{"op" => "insert-after", "afterId" => "pp-001", "block" => new_paragraph()}
-    ] ++ moves(11)
+      %{"op" => "insert-after", "afterId" => "pp-001", "block" => new_paragraph()},
+      move_new_after("pp-012")
+    ]
   end
 
   describe "the batch main actually emits (no remove-block)" do

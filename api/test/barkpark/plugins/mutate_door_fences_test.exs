@@ -33,9 +33,11 @@ defmodule Barkpark.Plugins.MutateDoorFencesTest do
 
   @fence_order [
     {:before_rev, Barkpark.Tasks.MutateGuards, :create_not_forking_published},
+    {:before_rev, Barkpark.Tasks.MutateGuards, :parent_key_spelled},
     {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_via_verb},
     {:after_claim, Barkpark.Tasks.MutateGuards, :adoption_adjudicated},
-    {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered}
+    {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered},
+    {:after_claim, Barkpark.Tasks.MutateGuards, :parent_key_spelled}
   ]
 
   setup do

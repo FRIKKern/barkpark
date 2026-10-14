@@ -85,6 +85,41 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksEyebrowInlineTest do
              Blocks.resolve_block_form([block], source(first, "slug", "elsewhere"))
   end
 
+  # task-ef9f386f8cb5e32a: the reader leaves theme colour to the paper-surface
+  # stylesheet, keyed by class. Edit carries the reader's exact classes on every
+  # owner, so both surfaces paint through the same rule, and no inline
+  # var(--paper-*) is left in the editor's paper-links markup.
+  test "Edit carries the reader's theme classes and no inline theme colour, in every layout" do
+    for layout <- [nil, "chapters", "timeline"] do
+      block =
+        paper_links(layout, [
+          ref(%{"eyebrow" => "02 Aug", "description" => "Why", "reason" => "Because"})
+        ])
+
+      html = render_fields(block)
+      tree = LazyHTML.from_fragment(html)
+      card = reader_card(block)
+      l = layout || "list"
+
+      for {selector, class} <- [
+            {".bp-paper-link-ref-card", card.card_class},
+            {".bp-paper-link-ref-title-owner", card.title_class},
+            {".bp-paper-link-ref-description-owner", card.description_class}
+          ] do
+        [classes] = LazyHTML.attribute(LazyHTML.query(tree, selector), "class")
+
+        for c <- String.split(class) do
+          assert Enum.member?(String.split(classes), c),
+                 "#{l}: #{selector} lacks #{c} (has #{classes})"
+        end
+      end
+
+      assert html =~ "bp-plinks--#{l}"
+      inlined = Regex.scan(~r/<[^<>]*var\(--paper-(?!font-)[^<>]*>/, html) |> List.flatten()
+      assert inlined == [], "#{l}: the editor still inlines a theme colour: #{inspect(inlined)}"
+    end
+  end
+
   defp render_fields(block),
     do: render_component(&PaperEditor.paper_block_fields/1, %{block: block, paper_links: %{}})
 

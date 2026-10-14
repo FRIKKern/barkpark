@@ -365,7 +365,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def expand_pane(%{"idx" => idx_str}, socket) do
     case Integer.parse(idx_str) do
       {idx, ""} when idx >= 0 ->
-        new_path = Enum.take(socket.assigns.nav_path, idx)
+        # Pane `idx`'s own address, as select/2 uses it (#35b): on a
+        # `/<type>/<id>` path the pane stack is longer than the URL, and a
+        # slice of the raw URL by index sent the type-list crumb back to the
+        # document it was on.
+        new_path =
+          case Enum.at(socket.assigns[:panes] || [], idx) do
+            %{path: path} when is_list(path) -> path
+            _ -> Enum.take(socket.assigns.nav_path, idx)
+          end
 
         {:noreply,
          socket

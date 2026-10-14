@@ -1,0 +1,15 @@
+{
+  "_comment": "THE INLINE OBJECT text contract (task-85fee859cf3bfef6), as ONE file read by every engine that renders an inline object without a registered renderer: api/test/barkpark/portable_doc/render/inline_object_parity_test.exs, js/packages/react/tests/inline-object.parity.test.ts, internal/pdrender/inline_object_parity_test.go. An inline object is a childless inline node {type: <name>, ...fields} whose type has no built-in renderer (a schema's blocks.inline type, e.g. Sanity's chip or mention). Law: its text is the first NON-EMPTY string among the keys text, title, label, name, value, in that order; a non-string value is skipped. Elixir and React render <span class=\"bp-inline-object\" data-inline-type=\"<type>\">text</span> (both escaped), an EMPTY span when the text is empty, so the node is never dropped silently. The Go TUI shows the text, or [type] when it is empty. Hand-authored; regenerate nothing.",
+  "cases": [
+    {"name": "text wins (post-11's Sanity chip, built-in chip excluded)", "node": {"type": "status", "_key": "k1", "text": "Reviewed", "tone": "positive"}, "text": "Reviewed"},
+    {"name": "title when there is no text", "node": {"type": "product", "title": "Wool socks", "sku": "W-1"}, "text": "Wool socks"},
+    {"name": "label after title", "node": {"type": "badge", "label": "Beta"}, "text": "Beta"},
+    {"name": "name after label", "node": {"type": "mention", "name": "Ada"}, "text": "Ada"},
+    {"name": "value last", "node": {"type": "mention", "value": "@alan"}, "text": "@alan"},
+    {"name": "an empty text falls through", "node": {"type": "mention", "text": "", "name": "Grace"}, "text": "Grace"},
+    {"name": "a non-string text is skipped", "node": {"type": "counter", "text": 42, "label": "Count"}, "text": "Count"},
+    {"name": "order: text beats value", "node": {"type": "mention", "value": "@loser", "text": "Winner"}, "text": "Winner"},
+    {"name": "no text-carrying key: an empty marked span", "node": {"type": "mystery", "size": 3}, "text": ""},
+    {"name": "markup in the text is escaped, not interpreted", "node": {"type": "mention", "text": "<b>x</b> & y"}, "text": "<b>x</b> & y"}
+  ]
+}

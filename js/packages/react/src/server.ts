@@ -35,7 +35,7 @@ export type {
 // Server Component drops in `<PortableDoc value={blocks} />` for Phoenix-faithful
 // output, or calls `renderPortableDocument(blocks)` for the raw HTML string.
 export { PortableDoc, renderPortableDocument } from './PortableDoc'
-export type { PortableDocProps, Block, Inline } from './PortableDoc'
+export type { PortableDocProps, Block, Inline, InlineObjectRenderer } from './PortableDoc'
 export type { ChromeStrings } from './blocks/chrome'
 
 // Plain-text extraction — pure and RSC-safe (the common `generateMetadata`

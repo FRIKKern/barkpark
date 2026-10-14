@@ -96,16 +96,33 @@ func NewSSHStepRunner(host string) *SSHStepRunner {
 }
 
 // sshKeyPath resolves the provisioning private key: BARKPARK_SSH_KEY_FILE when
-// set, else ~/.ssh/barkpark_indx (the key the warm pool seeds its hosts with).
+// set, else ~/.ssh/barkpark_indx (the key the warm pool seeds its hosts with)
+// when that file exists, else "". An empty path means "no -i": ssh then offers
+// the agent's keys and the default identities. Passing -i for a file that does
+// not exist only printed "Identity file ... not accessible" on every step of an
+// operator's run whose key sits in the agent (measured 2026-10-14 on fleet-1).
 func sshKeyPath() string {
 	if k := strings.TrimSpace(os.Getenv("BARKPARK_SSH_KEY_FILE")); k != "" {
 		return k
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return ".ssh/barkpark_indx"
+		return ""
 	}
-	return filepath.Join(home, ".ssh", "barkpark_indx")
+	p := filepath.Join(home, ".ssh", "barkpark_indx")
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
+	return p
+}
+
+// sshIdentityArgs is the "-i <key>" pair, or nothing when key is empty so ssh
+// falls back to the agent and its default identities.
+func sshIdentityArgs(key string) []string {
+	if strings.TrimSpace(key) == "" {
+		return nil
+	}
+	return []string{"-i", key}
 }
 
 // remoteCommand renders the single shell command to run on the box for a step.
@@ -231,7 +248,8 @@ func sshRunPrefix(sudo bool) string {
 // Host options are non-interactive, keepalive-bounded, and tolerant of a fresh
 // box's unknown key:
 //
-//	-i <key>                              the provisioning private key
+//	-i <key>                              the provisioning private key (omitted
+//	                                       when no key file resolves: the agent)
 //	-o UserKnownHostsFile=/dev/null       don't pollute ~/.ssh/known_hosts
 //	-o StrictHostKeyChecking=accept-new   accept a fresh box's key, reject changes
 //	-o BatchMode=yes                       never prompt (fail instead of hanging)
@@ -248,18 +266,17 @@ func sshStepArgv(user, host, key, cmd string, sudo bool) []string {
 	// `sudo -n bash …` when the runner is sudo-wrapped (an azure restore's non-root
 	// `barkpark` admin reaching root); a bare `bash …` — byte-unchanged — otherwise.
 	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; ` + sshRunPrefix(sudo) + ` "$b" </dev/null; rc=$?; rm -f "$b"; exit $rc`
-	return []string{
-		"ssh",
-		"-i", key,
+	argv := append([]string{"ssh"}, sshIdentityArgs(key)...)
+	return append(argv,
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=20",
 		"-o", "ServerAliveInterval=15",
 		"-o", "ServerAliveCountMax=4",
-		user + "@" + host,
+		user+"@"+host,
 		remote,
-	}
+	)
 }
 
 // sshFeedArgv is sshStepArgv's stdin-KEEPING twin: it runs the base64-decoded
@@ -276,18 +293,17 @@ func sshFeedArgv(user, host, key, cmd string, sudo bool) []string {
 	// No `</dev/null` here: the script READS stdin (the fed bundle bytes). sudo passes
 	// stdin through, so the sudo-wrapped azure feed still receives the bundle tar.
 	remote := `b=$(mktemp); echo ` + b64 + ` | base64 -d > "$b"; ` + sshRunPrefix(sudo) + ` "$b"; rc=$?; rm -f "$b"; exit $rc`
-	return []string{
-		"ssh",
-		"-i", key,
+	argv := append([]string{"ssh"}, sshIdentityArgs(key)...)
+	return append(argv,
 		"-o", "UserKnownHostsFile=/dev/null",
 		"-o", "StrictHostKeyChecking=accept-new",
 		"-o", "BatchMode=yes",
 		"-o", "ConnectTimeout=20",
 		"-o", "ServerAliveInterval=15",
 		"-o", "ServerAliveCountMax=4",
-		user + "@" + host,
+		user+"@"+host,
 		remote,
-	}
+	)
 }
 
 // RunFeed runs script ON r.Host over SSH with stdin streamed from r — the
@@ -368,6 +384,48 @@ func (r *SSHStepRunner) RunOutput(ctx context.Context, script string) (string, e
 // const) only so tests can shrink it; production never reassigns it.
 var sshReadyProbeInterval = 5 * time.Second
 
+// sshDeniedGrace is how long WaitReady keeps probing while sshd answers
+// "Permission denied" before it gives up early. A freshly booted box can refuse
+// a key for a few seconds while cloud-init writes authorized_keys, so a single
+// refusal is not proof. A refusal that lasts this long is: the box trusts a key
+// this machine does not hold, and waiting out the full timeout only hides that.
+var sshDeniedGrace = 45 * time.Second
+
+// SSHPermissionDeniedError is WaitReady's answer when sshd is up but refuses
+// every key this machine offers. It is a different failure from "not up": the
+// box is reachable and billing, and only a key change can fix it. Callers
+// type-assert it (errors.As) to name the key the box trusts.
+type SSHPermissionDeniedError struct {
+	Host   string
+	Key    string // the -i file offered, "" when only the agent was offered
+	Output string // ssh's last refusal, trimmed
+}
+
+func (e *SSHPermissionDeniedError) Error() string {
+	offered := "the ssh agent's keys"
+	if e.Key != "" {
+		offered = e.Key + " and the ssh agent's keys"
+	}
+	return fmt.Sprintf("ssh permission denied on %s: sshd is up but refuses %s (%s)", e.Host, offered, lastLine(e.Output))
+}
+
+// sshPermissionDenied reports whether a probe's captured output is sshd
+// refusing authentication, as opposed to a connection that never opened.
+func sshPermissionDenied(out string) bool {
+	return strings.Contains(out, "Permission denied (")
+}
+
+// lastLine returns the last non-blank line of s, trimmed.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if l := strings.TrimSpace(lines[i]); l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
 // WaitReady polls until the host accepts an SSH command — sshd is up and the key
 // is accepted — or timeout elapses. A freshly-CREATED cloud box is NOT SSH-ready
 // the instant the provider's create call returns: the OS is still booting, so the
@@ -375,9 +433,14 @@ var sshReadyProbeInterval = 5 * time.Second
 // Connection refused" (the warm-pool path masked this with incidental seed→pop
 // delay; the one-shot path creates-then-configures immediately and exposed it).
 // WaitReady closes the race by running a trivial `true` over SSH on a fixed
-// interval until it succeeds. It honors ctx cancellation and returns the last
-// probe error on timeout. A warm/already-booted host passes the first probe, so
-// the wait is effectively free there.
+// interval until it succeeds. It honors ctx cancellation. A warm/already-booted
+// host passes the first probe, so the wait is effectively free there.
+//
+// It tells two failures apart. When sshd keeps answering "Permission denied" for
+// sshDeniedGrace, it returns *SSHPermissionDeniedError early instead of waiting
+// out the timeout. Otherwise, on timeout, it returns "ssh not ready" with the
+// last probe's own output, so "Connection refused" or "timed out" reads as the
+// box not being up yet.
 func (r *SSHStepRunner) WaitReady(ctx context.Context, timeout time.Duration) error {
 	key := r.Key
 	if strings.TrimSpace(key) == "" {
@@ -390,13 +453,31 @@ func (r *SSHStepRunner) WaitReady(ctx context.Context, timeout time.Duration) er
 	argv := sshStepArgv(r.User, r.Host, key, "true", false)
 	deadline := time.Now().Add(timeout)
 	var lastErr error
+	var lastOut string
+	var deniedSince time.Time
 	for {
-		if _, err := r.run(ctx, argv[0], argv[1:]...); err == nil {
+		out, err := r.run(ctx, argv[0], argv[1:]...)
+		if err == nil {
 			return nil
+		}
+		lastErr, lastOut = err, out
+		if sshPermissionDenied(out) {
+			if deniedSince.IsZero() {
+				deniedSince = time.Now()
+			}
+			if time.Since(deniedSince) >= sshDeniedGrace {
+				return &SSHPermissionDeniedError{Host: r.Host, Key: key, Output: out}
+			}
 		} else {
-			lastErr = err
+			deniedSince = time.Time{}
 		}
 		if !time.Now().Before(deadline) {
+			if sshPermissionDenied(lastOut) {
+				return &SSHPermissionDeniedError{Host: r.Host, Key: key, Output: lastOut}
+			}
+			if l := lastLine(lastOut); l != "" {
+				return fmt.Errorf("ssh not ready on %s after %s (not up: %s): %w", r.Host, timeout, l, lastErr)
+			}
 			return fmt.Errorf("ssh not ready on %s after %s: %w", r.Host, timeout, lastErr)
 		}
 		select {

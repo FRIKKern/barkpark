@@ -120,6 +120,10 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
       |> Map.put(:use_combobox, use_combobox?)
       |> Map.put(:use_tree, use_tree?)
 
+    # The editor's field label cannot point at this control (`FieldInputs.
+    # label_target/3` has no id for it, and the tree variant has no single
+    # control), so the select and combobox carry the title as their own name
+    # (task-05710d91d03d7fc9).
     ~H"""
     <div class="bp-field bp-field-codelist" data-field-type="codelist" data-field-name={@field.name}>
       <%= cond do %>
@@ -130,6 +134,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             name={@input_name}
             disabled
             data-codelist-empty="true"
+            aria-label={@title}
             data-codelist-id={"#{@plugin_name}:#{@list_id}"}
           >
             <option value="">(<%= @empty_phrase %>: <%= @plugin_name %>:<%= @list_id %>)</option>
@@ -161,6 +166,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-id={"#{@plugin_name}:#{@list_id}"}
             data-codelist-version={@field.version && to_string(@field.version)}
             data-codelist-combobox="true"
+            aria-label={@title}
             placeholder={gettext("Search %{list}…", list: @plugin_name <> ":" <> @list_id)}
           />
           <datalist id={"datalist-" <> @input_id}>
@@ -177,6 +183,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             disabled={@readonly}
             data-codelist-id={"#{@plugin_name}:#{@list_id}"}
             data-codelist-version={@field.version && to_string(@field.version)}
+            aria-label={@title}
           >
             <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
             <%= for opt <- @options do %>

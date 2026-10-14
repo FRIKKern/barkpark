@@ -65,7 +65,7 @@ defmodule BarkparkWeb.QuizLiveTest do
 
     player |> element("button.c0") |> render_click()
 
-    assert render(host) =~ "1 answers in"
+    assert render(host) =~ "1 answer in"
   end
 
   test "a connected mount on a pin nobody hosts shows the honest no-host state and never spawns a room",

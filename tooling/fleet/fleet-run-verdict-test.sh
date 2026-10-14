@@ -246,6 +246,13 @@ else
   fi
 fi
 
+hr "beat — fleet_beat passes --yes (bp refuses a non-tty prod write without it) and says a refusal"
+: >"$BP_LOG"
+fleet_beat idle 1 >/dev/null 2>&1
+if grep -q '^bp fleet beat .* --yes' "$BP_LOG"; then ok "fleet_beat sends --yes"; else bad "fleet_beat beat without --yes: $(cat "$BP_LOG")"; fi
+BEAT_OUT=$(bp(){ echo "aborted: prod write not confirmed" >&2; return 2; }; FLEET_BEAT_LAST_ERR=""; fleet_beat idle 1 2>&1)
+if has "$BEAT_OUT" "beat refused (exit 2): aborted: prod write not confirmed"; then ok "a refused beat is said, not swallowed"; else bad "refused beat output: $BEAT_OUT"; fi
+
 printf '\n%d passed, %d failed\n' "$N_PASS" "$N_FAIL"
 [ "$N_FAIL" -eq 0 ] || exit 1
 exit 0

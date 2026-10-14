@@ -1993,6 +1993,9 @@
       flex-shrink: 0;
     }
     .bp-desk-search-icon { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; }
+    /* The clear button is a 24px target; as a flex item beside the input it
+       shrank to 19-21px wide. */
+    .bp-desk-search .pane-add-btn { flex-shrink: 0; }
     .bp-desk-search-input {
       flex: 1 1 auto; min-width: 0;
       background: transparent; border: 0; box-shadow: none;
@@ -3523,7 +3526,12 @@
       border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
     }
     .profile-colors { display: flex; gap: 8px; flex-wrap: wrap; }
-    .profile-color-option { cursor: pointer; }
+    .profile-color-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+    .profile-color-fieldset > legend { padding: 0; }
+    .profile-color-option { position: relative; cursor: pointer; }
+    .profile-color-input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+    .profile-color-input:checked + .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
+    .profile-color-input:focus-visible + .profile-color-swatch { outline: 2px solid var(--ring); outline-offset: 2px; }
     .profile-color-option.selected .profile-color-swatch { border-color: var(--fg); transform: scale(1.15); }
     .profile-color-swatch {
       display: block; width: 28px; height: 28px; border-radius: 50%;
@@ -3728,6 +3736,12 @@
          `safe` keeps the first line. */
       justify-content: safe flex-end;
     }
+    /* Items keep their own width. Allowed to shrink, the doc actions squeezed
+       from 32px to 23.8px at 390px (Publish from 46px) instead of overflowing,
+       so `scrollWidth` never passed `clientWidth`, the ••• trigger never
+       appeared, and every action sat below the 24px target size. With shrink
+       off the row overflows and the priority+ collapse does its job. */
+    bp-overflow-menu > * { flex-shrink: 0; }
     bp-overflow-menu > [data-overflowed] { display: none !important; }
     .bp-overflow-trigger {
       appearance: none; background: transparent;
@@ -4231,7 +4245,7 @@
       display: flex; align-items: center; justify-content: space-between;
       gap: 12px;
     }
-    .bp-plugin-card-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .bp-plugin-card-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; margin: 0; font: inherit; }
     .bp-plugin-card-title strong { font-size: 15px; } /* off-ladder: card title between sm (13) and lg (16), the same deliberate half-step as .bp-ae-inspector-title */
     .bp-plugin-card-version {
       font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--fg-dim);
@@ -5237,6 +5251,9 @@
         LiveView hook that consumes them, so — like bp-sheet-grid.js — they
         are NON-DEFER and load first. Bottom-of-body keeps Golden Rule #4
         (no blocking scripts in head) intact. --%>
+  <%!-- The shared modal-dialog focus manager (Hooks.ModalFocus): NON-DEFER so
+        window.BarkparkModalFocus exists when the hook map below is built. --%>
+  <script src="/assets/bp-modal-focus.js"></script>
   <script src="/assets/bp-sheet-formula.js"></script>
   <script src="/assets/bp-sheet-pointing.js"></script>
   <script src="/assets/bp-sheet-grid.js"></script>
@@ -5566,6 +5583,34 @@
       attempt();
     });
 
+    // task-4e10550394f87112: a desk search hit is a live navigation, which
+    // remounts the desk with focus on <body>. The server pushes
+    // `bp:focus-doc-header` for it, and the opened document's header takes
+    // focus: the target a desk row open uses. The join re-renders the panes
+    // once the width bucket arrives, which moves the header and blurs it, so
+    // keep it focused for a second while focus is idle on <body>; a key or a
+    // press means the user has moved on.
+    window.addEventListener("phx:bp:focus-doc-header", () => {
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const until = Date.now() + 1000;
+      const settle = () => {
+        if (interrupted) return;
+        const header = document.querySelector(".pane-header.editor-header");
+        const idle = !document.activeElement || document.activeElement === document.body;
+        if (header && idle) header.focus();
+        if (Date.now() < until) {
+          setTimeout(settle, 50);
+        } else {
+          document.removeEventListener("keydown", interrupt, { capture: true });
+          document.removeEventListener("pointerdown", interrupt, { capture: true });
+        }
+      };
+      settle();
+    });
+
     // task-e73be8429cfa08af: picking a dataset in the scope switcher navigates
     // (push_navigate), and the new view left focus on <body>. A pick arms a
     // one-shot flag; once the navigation lands, the scope trigger (now naming
@@ -5732,68 +5777,8 @@
     // aria-modal, yet none took focus: Tab walked the page behind it. On
     // mount, focus [data-modal-focus] / [autofocus] or the first control;
     // keep Tab and Shift+Tab inside; on close, give focus back to the trigger.
-    Hooks.ModalFocus = {
-      mounted() {
-        const a = document.activeElement;
-        this._returnTo = a && a !== document.body ? a : null;
-        this._returnId = this._returnTo && this._returnTo.id;
-        // A trigger with no id is re-found by what it does and says: its
-        // phx-click and its aria-label (a restore re-renders the editor header,
-        // so the Historikk button is a NEW node by the time the dialog closes).
-        this._returnClick = this._returnTo && this._returnTo.getAttribute("phx-click");
-        this._returnLabel = this._returnTo && this._returnTo.getAttribute("aria-label");
-        this._focusIn();
-        this._onKey = (e) => {
-          if (e.key !== "Tab") return;
-          const list = this._focusables();
-          if (!list.length) return;
-          const first = list[0];
-          const last = list[list.length - 1];
-          const active = document.activeElement;
-          if (!this.el.contains(active)) {
-            e.preventDefault();
-            (e.shiftKey ? last : first).focus();
-          } else if (e.shiftKey && active === first) {
-            e.preventDefault();
-            last.focus();
-          } else if (!e.shiftKey && active === last) {
-            e.preventDefault();
-            first.focus();
-          }
-        };
-        document.addEventListener("keydown", this._onKey, true);
-      },
-      // A re-render can remove the focused control (e.g. the share sheet
-      // swapping its form for the minted link); land inside again.
-      updated() {
-        if (!this.el.contains(document.activeElement)) this._focusIn();
-      },
-      destroyed() {
-        document.removeEventListener("keydown", this._onKey, true);
-        let back = this._returnTo;
-        if (back && !back.isConnected && this._returnId) back = document.getElementById(this._returnId);
-        if (back && !back.isConnected && this._returnClick) {
-          const click = this._returnClick;
-          const label = this._returnLabel;
-          back = Array.from(document.querySelectorAll("[phx-click]")).find(
-            (el) => el.getAttribute("phx-click") === click && el.getAttribute("aria-label") === label
-          ) || back;
-        }
-        if (back && back.isConnected) back.focus();
-      },
-      _focusIn() {
-        const target =
-          this.el.querySelector("[data-modal-focus], [autofocus]") || this._focusables()[0];
-        if (target) target.focus();
-      },
-      _focusables() {
-        return Array.from(
-          this.el.querySelectorAll(
-            'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
-          )
-        ).filter((el) => !el.closest("[hidden]"));
-      }
-    };
+    // The hook lives in /assets/bp-modal-focus.js, shared with the paper layout.
+    Hooks.ModalFocus = window.BarkparkModalFocus;
 
     Hooks.WidthBucket = {
       _compute() {
@@ -6897,7 +6882,9 @@
               return;
             }
             banner("refused", []);
-            if (seq != null) wc?.discardInflightOps?.(seq);
+            // The validation reason (path + message, never a stored value) lets
+            // the canvas show it on the field an inline object dialog saved.
+            if (seq != null) wc?.discardInflightOps?.(seq, reply.reason ? { reason: reply.reason } : undefined);
           });
         };
         this._onCanvasOps = (e) => {

@@ -224,7 +224,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
       path =
         fake_codex("0.144.1", ~s({"id":2,"result":{"account":null,"requiresOpenaiAuth":true}}))
 
-      put_probe_config(codex_binary: path, timeout_ms: 500)
+      put_probe_config(codex_binary: path, timeout_ms: :infinity)
 
       assert %Probe{
                provider: :codex,
@@ -244,7 +244,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
           ~s({"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}})
         )
 
-      put_probe_config(codex_binary: path, timeout_ms: 500)
+      put_probe_config(codex_binary: path, timeout_ms: :infinity)
 
       assert %Probe{
                version: "0.144.1",
@@ -262,7 +262,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
           ~s({"id":2,"result":{"account":{"type":"apiKey"},"requiresOpenaiAuth":true}})
         )
 
-      put_probe_config(codex_binary: path, timeout_ms: 500)
+      put_probe_config(codex_binary: path, timeout_ms: :infinity)
 
       assert %Probe{ready?: false, authed?: false, reason: :incompatible_version} =
                Probe.probe(:codex)
@@ -270,7 +270,7 @@ defmodule Barkpark.StudioChat.ProbeTest do
 
     test "garbage and timeout both degrade to named not-ready states" do
       garbage = fake_codex("0.144.1", "", :garbage)
-      put_probe_config(codex_binary: garbage, timeout_ms: 500)
+      put_probe_config(codex_binary: garbage, timeout_ms: :infinity)
       assert %Probe{ready?: false, reason: :malformed_response} = Probe.probe(:codex)
 
       stalled = fake_codex("0.144.1", "", :stall)

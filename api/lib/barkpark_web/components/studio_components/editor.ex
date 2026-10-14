@@ -75,9 +75,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def document_header(assigns) do
     ~H"""
+    <%!-- tabindex stays on, so the header is always a focus target: the
+          one-shot `phx-mounted` mark is spent by the next width-bucket
+          report, and a desk search hit's live navigation focuses it from the
+          client (`bp:focus-doc-header`) with no mark at all. --%>
     <div
       class="pane-header editor-header"
-      tabindex={@focus_on_mount && "-1"}
+      tabindex="-1"
       phx-mounted={@focus_on_mount && JS.focus()}
     >
       <%!-- spd-b35: `min-width: 0` + `max-width: 70%` are LOAD-BEARING, not
@@ -291,62 +295,67 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def unresolved_document_notice(assigns) do
     ~H"""
-    <div
-      class="bp-paper-unrenderable"
-      role="alert"
-      aria-live="assertive"
-      tabindex="-1"
-      data-test-id="studio-unresolved-document-notice"
-      data-reason={@reason}
-      data-doc-id={@doc_id}
-      data-doc-type={@doc_type}
-      data-cause={@cause}
-    >
-      <p class="bp-paper-unrenderable-title">
-        <%= gettext("Studio could not open this document.") %>
-      </p>
-      <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
-        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
-      </p>
-      <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
-        <%= gettext("Ask whoever shared access with you to widen the grant.") %>
-      </p>
-      <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
-        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
-      </p>
-      <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
-        <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
-        <%= gettext("Whatever is stored under that type is untouched.") %>
-      </p>
-      <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
-        <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
-      </p>
-      <div class="bp-paper-unrenderable-actions">
-        <a
-          :if={@cause == :elsewhere and @elsewhere_href}
-          href={@elsewhere_href}
-          class="btn btn-primary btn-sm"
-          data-test-id="studio-unresolved-open-elsewhere"
-        >
-          <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
-        </a>
-        <a
-          href={@list_href || @desk_href}
-          class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
-          data-test-id="studio-unresolved-recovery"
-        >
-          <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
-        </a>
-        <a
-          :if={@list_href}
-          href={@desk_href}
-          class="btn btn-ghost btn-sm"
-          data-test-id="studio-unresolved-back-to-desk"
-        >
-          <%= gettext("Back to the desk") %>
-        </a>
+    <%!-- Like the nothing-selected state, this card stands in for the editor
+          panel, so it is the page's main region and carries its one heading.
+          A wrapper holds the landmark: the card itself is the alert. --%>
+    <div role="main" class="bp-unresolved-main" data-test-id="studio-unresolved-document-main">
+      <div
+        class="bp-paper-unrenderable"
+        role="alert"
+        aria-live="assertive"
+        tabindex="-1"
+        data-test-id="studio-unresolved-document-notice"
+        data-reason={@reason}
+        data-doc-id={@doc_id}
+        data-doc-type={@doc_type}
+        data-cause={@cause}
+      >
+        <h1 class="bp-paper-unrenderable-title">
+          <%= gettext("Studio could not open this document.") %>
+        </h1>
+        <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
+          <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
+        </p>
+        <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
+          <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
+          <%= gettext("Ask whoever shared access with you to widen the grant.") %>
+        </p>
+        <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
+          <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
+        </p>
+        <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
+          <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
+          <%= gettext("Whatever is stored under that type is untouched.") %>
+        </p>
+        <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
+          <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
+          <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
+        </p>
+        <div class="bp-paper-unrenderable-actions">
+          <a
+            :if={@cause == :elsewhere and @elsewhere_href}
+            href={@elsewhere_href}
+            class="btn btn-primary btn-sm"
+            data-test-id="studio-unresolved-open-elsewhere"
+          >
+            <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
+          </a>
+          <a
+            href={@list_href || @desk_href}
+            class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
+            data-test-id="studio-unresolved-recovery"
+          >
+            <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
+          </a>
+          <a
+            :if={@list_href}
+            href={@desk_href}
+            class="btn btn-ghost btn-sm"
+            data-test-id="studio-unresolved-back-to-desk"
+          >
+            <%= gettext("Back to the desk") %>
+          </a>
+        </div>
       </div>
     </div>
     """
@@ -826,7 +835,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     phx-value-group={grp["name"]}
                     role="tab"
                     aria-selected={to_string(@nav_group == grp["name"])}
-                    aria-controls="editor-form"
+                    aria-controls="editor-tabpanel"
                     tabindex={if tab_stop_group(@editor_schema, @nav_group) == grp["name"], do: "0", else: "-1"}
                     title={grp["title"]}
                     aria-label={grp["title"]}
@@ -844,14 +853,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   — a draft with no keystroke, and before Forms.coerce_params a
                   corrupt one. Autosave already persists each change within its
                   500 ms debounce, so recovery has nothing to restore. --%>
-            <form
+            <%!-- The group tabs' panel is this wrapper, not the form: ARIA
+                  does not allow role="tabpanel" on a <form> (axe
+                  aria-allowed-role). --%>
+            <div
               :if={@nav_view == nil}
+              id="editor-tabpanel"
+              role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
+              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
+            >
+            <form
               phx-submit="save"
               phx-change="autosave"
               phx-auto-recover="ignore"
               id="editor-form"
-              role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
-              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
             >
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
@@ -900,6 +915,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 ><%= ngettext("%{count} warning — publishing is still allowed", "%{count} warnings — publishing is still allowed", warning_count) %></span>
               </div>
             </form>
+            </div>
           <% end %>
         </div>
         <BarkparkWeb.Components.OnixPreview.content_preview
@@ -1189,16 +1205,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="bp-violations" role="status" aria-live="polite" data-test-id="cross-violations">
         <div class="bp-violations-summary">
           <span class="bp-violations-count">
-            <%= length(@violations) %> issue<%= if length(@violations) != 1, do: "s" %>:
+            <%= ngettext("1 issue:", "%{count} issues:", length(@violations)) %>
           </span>
           <%= if @counts.error > 0 do %>
-            <span class="bp-violations-error"><%= @counts.error %> error<%= if @counts.error != 1, do: "s" %></span>
+            <span class="bp-violations-error"><%= ngettext("1 error", "%{count} errors", @counts.error) %></span>
           <% end %>
           <%= if @counts.error > 0 and @counts.warning > 0 do %>
             <span>·</span>
           <% end %>
           <%= if @counts.warning > 0 do %>
-            <span class="bp-violations-warning"><%= @counts.warning %> warning<%= if @counts.warning != 1, do: "s" %></span>
+            <span class="bp-violations-warning"><%= ngettext("1 warning", "%{count} warnings", @counts.warning) %></span>
           <% end %>
         </div>
         <ul class="bp-violations-list">

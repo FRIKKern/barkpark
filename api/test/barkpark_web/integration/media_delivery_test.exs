@@ -187,20 +187,27 @@ defmodule BarkparkWeb.Integration.MediaDeliveryTest do
   end
 
   describe "GET /media/files/* — dangerous-type neutralization" do
-    test "a stored .svg is served nosniff + attachment + non-executable type", %{conn: _conn} do
+    # task-3047d0a672092b0e: an SVG keeps its type so an <img> renders it. Its
+    # script is stopped by a CSP with script-src 'none' and sandbox instead of
+    # by the octet-stream collapse. The flat route serves it the same way with
+    # or without transform parameters.
+    test "a stored .svg is served as image/svg+xml with a script-blocking CSP + nosniff",
+         %{conn: _conn} do
       suffix = System.unique_integer([:positive])
       svg = ~s|<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>|
       {_file, full} = put_blob!("test/xss/evil-#{suffix}.svg", svg)
 
-      conn = get(scoped_conn(), "/media/files/test/xss/evil-#{suffix}.svg")
+      for query <- ["", "?auto=format", "?w=100"] do
+        conn = get(scoped_conn(), "/media/files/test/xss/evil-#{suffix}.svg#{query}")
 
-      assert conn.status == 200
-      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
-      assert get_resp_header(conn, "content-disposition") == ["attachment"]
-
-      content_type = List.first(get_resp_header(conn, "content-type"))
-      refute content_type =~ "image/svg+xml"
-      assert content_type =~ "application/octet-stream"
+        assert conn.status == 200, "#{query}: #{conn.resp_body}"
+        assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+        assert get_resp_header(conn, "content-type") == ["image/svg+xml"]
+        assert [csp] = get_resp_header(conn, "content-security-policy")
+        assert csp =~ "script-src 'none'"
+        assert csp =~ "sandbox"
+        assert conn.resp_body == svg
+      end
 
       File.rm(full)
     end

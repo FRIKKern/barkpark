@@ -287,6 +287,13 @@ defmodule Barkpark.Content do
     do: Lifecycle.publish_document(published_doc_id, type, dataset, opts)
 
   @doc """
+  Publish a draft built by `Writer.build_document/4` without storing it.
+  See `Barkpark.Content.Lifecycle.publish_built_draft/4`.
+  """
+  def publish_built_draft(draft, type, dataset, opts \\ []),
+    do: Lifecycle.publish_built_draft(draft, type, dataset, opts)
+
+  @doc """
   Unpublish: move published doc back to draft, delete published version.
   See `Barkpark.Content.Lifecycle.unpublish_document/4`.
   """

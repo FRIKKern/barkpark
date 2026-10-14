@@ -32,6 +32,7 @@
 import { Editor } from "@tiptap/core";
 import { clipboardPastePolicy, stripPastedImages } from "./clipboard-paste-policy.js";
 import { cleanPastedHTML } from "./paste-html.js";
+import { safeUrl } from "../safe-url.js";
 import StarterKit from "@tiptap/starter-kit";
 import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
@@ -79,10 +80,15 @@ import {
   hasOverlappingOps,
   opsRebaseSafe,
   pendingUploadIndexes,
+
+  withObjectOverrides,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
+import { inlineObjects, InlineObjectDialog, HostObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, canEditObjectBlock, openObjectBlockInsert, refusalField } from "./inline-object.js";
+import { BlockBoundary, paragraphAfterSelectedBlock } from "./block-boundary.js";
+import { exactClipboardSerializer, exactSliceFromClipboard } from "./clipboard-slice.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -216,6 +222,17 @@ import { Opaque } from "./opaque-node.js";
 import { Terminal, TerminalAtom } from "./terminal-node.js";
 // Reused verbatim from the shipped editor (imported, never copied).
 import { FormatBubble } from "../format-bubble.js";
+// Toolbar commands for a host's own field chrome (EMBED-CONTRACT "Toolbar commands").
+import {
+  canSetBlockStyle,
+  canToggleList,
+  canToggleMark,
+  emptyToolbarState,
+  setBlockStyle as hcSetBlockStyle,
+  toggleList as hcToggleList,
+  toggleMark as hcToggleMark,
+  toolbarState,
+} from "./host-commands.js";
 import { BlockHandle, moveTopLevel, duplicateTopLevel, topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 // P4 autocomplete port: the caret-anchored `[[`/`#` popup (WikilinkMenu, reused
 // for BOTH triggers via a row adapter) + the PURE, DOM-free trigger detectors and
@@ -677,7 +694,7 @@ function focusableControlIn(dom) {
 
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
-    return ["editable"];
+    return ["editable", "format-bubble"];
   }
 
   constructor() {
@@ -741,11 +758,25 @@ class BpPaperCanvas extends HTMLElement {
     // injected async (file) => { src, alt?, width?, height? } — where a pasted or dropped
     // picture goes (the host's Barkpark media); unset → the image node says so.
     this._mediaUploader = null;
+    // injected async ({ kind, current }) => { src, alt?, width? } | null — the host's own
+    // image picker (upload / library): the Image insert and an image's Select open it.
+    this._mediaPicker = null;
+    // An image's Select asks for the host's picker on that image (image-node.js).
+    this.addEventListener("bp-canvas-image-pick", (event) => {
+      event.stopPropagation();
+      if (event.detail && Number.isInteger(event.detail.pos)) void this._pickImageAt(event.detail.pos);
+    });
+    // injected async ({ type, title, inline, fields, value, error }) => value | null — the
+    // host's own editor for a declared block or inline object (instead of the popover).
+    this._editBlockObject = null;
     // Shared carets: the host's last setRemoteSelections list (re-applied on
     // mount), and the rAF-coalesced bp-canvas-selection emit.
     this._remoteSelections = [];
     this._selectionFrame = null;
     this._lastSelectionDetail = undefined;
+    // Toolbar state: the rAF-coalesced bp-selection-change emit.
+    this._toolbarFrame = null;
+    this._lastToolbarState = undefined;
     this._uploadSeq = 0;
     // Settled receipts survive native history while this editor is mounted.
     // They contain metadata only, never another upload request.
@@ -821,6 +852,8 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
     this._upgradeProperty("mediaUploader");
+    this._upgradeProperty("mediaPicker");
+    this._upgradeProperty("editBlockObject");
     this._upgradeProperty("linkPreviewSource");
 
     // Default true; only the literal string "false" disables editing. Mount-time
@@ -998,6 +1031,12 @@ class BpPaperCanvas extends HTMLElement {
         Tag,
         Valueref,
         InlineOpaque,
+        // Declared inline objects (blocks.inline): accessible names on the atoms,
+        // Enter / double-click opens the field dialog. See ./inline-object.js.
+        inlineObjects(this),
+        // No keystroke at a block boundary deletes a block the author did not
+        // Backspace/Delete. See ./block-boundary.js.
+        BlockBoundary,
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
@@ -1217,7 +1256,7 @@ class BpPaperCanvas extends HTMLElement {
         Terminal,
         TerminalAtom,
       ],
-      content: runToTiptap(this._blocks),
+      content: this._rt(this._blocks),
       editorProps: {
         // The editable root is ProseMirror's role=textbox: name it, or a screen
         // reader lands in an unnamed "edit text" (axe aria-input-field-name,
@@ -1230,6 +1269,10 @@ class BpPaperCanvas extends HTMLElement {
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
+        // The canvas's own copy carries the exact fragment, so its paste rebuilds
+        // the very nodes copied instead of re-parsing their HTML. See
+        // ./clipboard-slice.js.
+        clipboardSerializer: exactClipboardSerializer(() => this._editor.schema),
         // Word puts list items on the clipboard as <p style="mso-list:…"> with the
         // bullet as literal text; rebuild them as real lists before parsing, or
         // they land as paragraphs starting "·   ". See ./word-paste.js.
@@ -1271,6 +1314,17 @@ class BpPaperCanvas extends HTMLElement {
         // others shut so a stale popup never lingers (triggers disjoint by leading
         // token "[[" vs "#" vs "/", but the gate makes the single-popup invariant
         // code-enforced rather than incidental).
+        // An object editor open over the canvas (the popover, or the host's): its slash
+        // line stays until the answer, and an update meanwhile (the save echo stamping
+        // ids) must not reopen a menu behind it.
+        if (this._objectEditorOpen()) {
+          this._closeWikilink();
+          this._closeTag();
+          this._closeEmoji();
+          this._closeSlash();
+          if (this._bubble) this._bubble.update();
+          return;
+        }
         const consumed = this._maybeBlockShorthand() || this._maybeCalloutShorthand();
         if (!consumed) {
           if (this._maybeWikilink()) {
@@ -1295,6 +1349,9 @@ class BpPaperCanvas extends HTMLElement {
         if (this._bubble) this._bubble.update();
         this._scheduleSelectionEmit();
       },
+      // Every transaction may change what a host toolbar shows (a stored mark, a
+      // block turned into a heading): bp-selection-change, one per frame at most.
+      onTransaction: () => this._scheduleToolbarState(),
       onBlur: () => {
         const version = ++this._richFocusIntentVersion;
         queueMicrotask(() => {
@@ -1322,7 +1379,8 @@ class BpPaperCanvas extends HTMLElement {
     // text selection, including one spanning multiple blocks. Skipped in read
     // mode; every consumer is `if (this._bubble)` guarded.
     if (this._editable) {
-      this._bubble = new FormatBubble({ editor: this._editor });
+      // A host that draws its own toolbar turns the bubble off (format-bubble="off").
+      if (this._wantsBubble()) this._bubble = new FormatBubble({ editor: this._editor });
       // Notion-style block gutter: + to add below, ⋮⋮ to drag / open the block menu.
       this._handle = new BlockHandle({
         host: this,
@@ -1333,6 +1391,9 @@ class BpPaperCanvas extends HTMLElement {
         // block is one the server already holds.
         canSaveMaster: (node) => this._canSaveMaster(node),
         saveMaster: (node) => this._saveMaster(node),
+        // A declared object block's Edit opens its field editor, as a double-click does.
+        canEdit: (node) => this._editable && canEditObjectBlock(this, node),
+        edit: (pos) => editObjectBlockAt(this, this._editor, pos),
       });
     }
     // The link hover card works in both modes (a reader wants the address too); Edit shows only
@@ -1353,6 +1414,7 @@ class BpPaperCanvas extends HTMLElement {
       onEdit: (detail) => {
         if (detail.kind === "link" && this._bubble) this._bubble.openLink();
         else if (this._bubble) this._bubble.update();
+        else if (detail.kind === "link") this._requestHostLink();
       },
     });
 
@@ -1369,6 +1431,17 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   attributeChangedCallback(name, _old, val) {
+    if (name === "format-bubble") {
+      if (!this._editor || this._editor.isDestroyed || !this._editable) return;
+      if (!this._wantsBubble() && this._bubble) {
+        this._bubble.destroy();
+        this._bubble = null;
+      } else if (this._wantsBubble() && !this._bubble) {
+        this._bubble = new FormatBubble({ editor: this._editor });
+        this._bubble.update();
+      }
+      return;
+    }
     if (name === "editable") {
       // A run that failed to mount stays read-only whatever the host asks.
       this._editable = val !== "false" && !this._mountFailure;
@@ -1528,6 +1601,10 @@ class BpPaperCanvas extends HTMLElement {
       cancelAnimationFrame(this._selectionFrame);
       this._selectionFrame = null;
     }
+    if (this._toolbarFrame != null) {
+      cancelAnimationFrame(this._toolbarFrame);
+      this._toolbarFrame = null;
+    }
     this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -1642,6 +1719,143 @@ class BpPaperCanvas extends HTMLElement {
       if (key === this._lastSelectionDetail) return;
       this._lastSelectionDetail = key;
       this.dispatchEvent(new CustomEvent("bp-canvas-selection", { bubbles: true, composed: true, detail }));
+    });
+  }
+
+  _wantsBubble() {
+    return this.getAttribute("format-bubble") !== "off";
+  }
+
+  // With the bubble off, the host opens its own link input: a cancelable
+  // bp-canvas-link-request carrying the selection's current href (or null).
+  _requestHostLink() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed) return false;
+    const href = editor.isActive("link") ? editor.getAttributes("link").href || null : null;
+    return this.dispatchEvent(new CustomEvent("bp-canvas-link-request", { detail: { href }, bubbles: true, composed: true, cancelable: true }));
+  }
+
+  // ── toolbar commands (EMBED-CONTRACT "Toolbar commands"; canvas/host-commands.js) ──
+  //
+  // Each runs the transaction the canvas's own surfaces run, on the current
+  // selection, and answers whether it applied. Unmounted or read-only: false.
+
+  // ProseMirror takes a keyboard (or script) selection change on the browser's
+  // selectionchange, a task later: a toolbar press in between would act on the old
+  // selection. Read the DOM's pending selection first, so a command acts on what the
+  // author sees (task-ee29b37ca1c6139d).
+  _flushDomSelection() {
+    const view = this._editor && !this._editor.isDestroyed ? this._editor.view : null;
+    try {
+      if (view && view.domObserver && typeof view.domObserver.flush === "function") view.domObserver.flush();
+    } catch (_e) {
+      // A view mid-teardown: the command reads the state it has.
+    }
+  }
+
+  run(command, args = {}) {
+    if (!this.can(command, args)) return false;
+    const editor = this._editor;
+    const a = args && typeof args === "object" ? args : {};
+    switch (command) {
+      case "toggleMark": return hcToggleMark(editor, a.mark, a.href, a.docId, a.target) === true;
+      case "setBlockStyle": return hcSetBlockStyle(editor, a.style, this._toolbarVocabulary()) === true;
+      case "toggleList": return hcToggleList(editor, a.kind) === true;
+      case "insertBlock": return this._insertToolbarBlock(a.type, a.attrs) === true;
+      case "insertInline": return this._insertToolbarInline(a.type) === true;
+      default: return false;
+    }
+  }
+
+  toggleMark(mark, attrs) { return this.run("toggleMark", { mark, href: attrs && attrs.href, docId: attrs && attrs.docId, target: attrs && attrs.target }); }
+  setBlockStyle(style) { return this.run("setBlockStyle", { style }); }
+  toggleList(kind) { return this.run("toggleList", { kind }); }
+  insertBlock(type, attrs) { return this.run("insertBlock", { type, attrs }); }
+  insertInline(type) { return this.run("insertInline", { type }); }
+
+  can(command, args = {}) {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || !this._editable) return false;
+    this._flushDomSelection();
+    const a = args && typeof args === "object" ? args : {};
+    const vocab = this._toolbarVocabulary();
+    switch (command) {
+      case "toggleMark": return canToggleMark(editor, a.mark, a.href, vocab, a.docId);
+      case "setBlockStyle": return canSetBlockStyle(editor, a.style, vocab);
+      case "toggleList": return canToggleList(editor, a.kind, vocab);
+      case "insertBlock": return !!this._toolbarInsertItem(a.type);
+      case "insertInline": return this._canInsertInline(a.type, vocab);
+      default: return false;
+    }
+  }
+
+  state() {
+    this._flushDomSelection();
+    const editor = this._editor;
+    return editor && !editor.isDestroyed ? toolbarState(editor) : emptyToolbarState();
+  }
+
+  _toolbarVocabulary() {
+    return parseVocabulary(this.getAttribute("data-vocabulary"));
+  }
+
+  // The block types a toolbar may insert: the slash menu's own rows for this
+  // canvas (narrowed to the field's vocabulary), one per type.
+  _toolbarInsertItem(type) {
+    if (typeof type !== "string" || type === "") return null;
+    const items = slashItemsForVocabulary(CANVAS_SLASH_ITEMS, this._toolbarVocabulary());
+    return items.find((item) => item.type === type && !item.compound && !item.preset && !item.inline && !item.master) || null;
+  }
+
+  // A declared inline object (the field's blocks.inline) may go at the caret: inside
+  // text the field writes in, never in a code block.
+  _canInsertInline(type, vocab) {
+    if (typeof type !== "string" || type === "") return false;
+    if (!((vocab && vocab.inlineObjects) || []).some((o) => o.name === type)) return false;
+    const { $from } = this._editor.state.selection;
+    return $from.parent.inlineContent && !$from.parent.type.spec.code;
+  }
+
+  // At the caret, exactly as the slash and palette picks do: the field editor (the
+  // popover, or the host's editBlockObject) first; its answer puts the atom in.
+  _insertToolbarInline(type) {
+    this._editor.commands.focus();
+    if (!insertInlineObject(this, this._editor, type)) return false;
+    // TipTap's focus() takes the caret back on the next frame, after the popover
+    // focused its first field: give it back (as _insertDeclaredObject does).
+    const dialog = this.inlineObjectDialog();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
+    }
+    return true;
+  }
+
+  // Insert after the caret's block, exactly as the palette's Insert command does
+  // (a declared object block opens its fields first; a server-built type goes to
+  // the server; the rest through the slash seam).
+  _insertToolbarBlock(type, attrs) {
+    const item = this._toolbarInsertItem(type);
+    if (!item) return false;
+    this._editor.commands.focus();
+    if (item.object || this._objectOverrides().has(type)) return this._insertDeclaredObject(type);
+    if (serverBuildsInsert(type, this._hostBuildsInserts())) return this._insertViaServer(type, { replaceSlashLine: false });
+    const level = attrs && Number.isInteger(attrs.level) ? attrs.level : item.level;
+    const done = insertSlashTypeAtSelection(this._editor, type, undefined, level ? { level } : undefined);
+    if (done && type === "image") this._pickInsertedImage();
+    return done;
+  }
+
+  _scheduleToolbarState() {
+    if (this._toolbarFrame != null) return;
+    this._toolbarFrame = requestAnimationFrame(() => {
+      this._toolbarFrame = null;
+      const editor = this._editor;
+      if (!editor || editor.isDestroyed) return;
+      const detail = toolbarState(editor);
+      const key = JSON.stringify(detail);
+      if (key === this._lastToolbarState) return;
+      this._lastToolbarState = key;
+      this.dispatchEvent(new CustomEvent("bp-selection-change", { bubbles: true, composed: true, detail }));
     });
   }
 
@@ -1813,8 +2027,8 @@ class BpPaperCanvas extends HTMLElement {
     }
     const nextBlocks = docToBlocks(nextDoc, reusedAt.size ? { reuse: (i) => reusedAt.get(i)?.block } : {});
     const stableDoc = reusedAt.size
-      ? { type: "doc", content: nextBlocks.map((block, i) => reusedAt.has(i) ? reusedAt.get(i).node : runToTiptap([block]).content[0]) }
-      : runToTiptap(nextBlocks);
+      ? { type: "doc", content: nextBlocks.map((block, i) => reusedAt.has(i) ? reusedAt.get(i).node : this._rt([block]).content[0]) }
+      : this._rt(nextBlocks);
 
     // runToOps mints ids for null-id nodes. Materialize those ids in the live
     // document before another edit can diff, otherwise each cumulative diff
@@ -1838,7 +2052,7 @@ class BpPaperCanvas extends HTMLElement {
     // round-trip kept one top-level node per live node (otherwise nothing is held).
     const aligned = (nextDoc.content || []).length === (stableDoc.content || []).length;
     const opsDoc = held.size && aligned ? { ...stableDoc, content: (stableDoc.content || []).filter((_, i) => !held.has(i)) } : stableDoc;
-    const ops = runToOps(diffBaseline, opsDoc, { preserveNewIds: true, unchangedIds });
+    const ops = this._ro(diffBaseline, opsDoc, { preserveNewIds: true, unchangedIds });
     if (!ops || !ops.length) {
       // Nothing to save: the edits since the last batch cancelled out (typed,
       // then undone inside one debounce). Say so. The page's exit guard marked
@@ -1958,7 +2172,7 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
     const draftBase = inflight ? inflight.afterBlocks : (this._debounceBaselineBlocks || this._blocks);
-    const draft = runToOps(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
+    const draft = this._ro(draftBase, normalizeCanvasDoc(this._editor.getJSON()), { preserveNewIds: true }) || [];
     if (!draft.length) return true;
     // Behind an in-flight batch the run's shape was already checked above; the
     // draft only must not touch what the other writer changed.
@@ -1979,6 +2193,7 @@ class BpPaperCanvas extends HTMLElement {
     // that wants the other behaviour — drop the refused batch and fold it into the
     // next edit — calls discardInflightOps(seq) instead.
     if (saved !== true) return false;
+    this._inlineSavePending = null;
 
     // Diff against the local snapshot the author still sees. A canonical reply
     // can contain remote sibling changes queued for later display; advancing
@@ -2034,15 +2249,110 @@ class BpPaperCanvas extends HTMLElement {
   // resent on its own; resendPendingOps() is the host's explicit "try again".
   // Without this seam a refused batch pinned the pipeline: every later edit queued
   // behind it, never sent (found by Barkdown's editor-multiblock row: cut all, type).
-  discardInflightOps(seq) {
+  //
+  // `refusal` (optional) is the host's reason for the refusal, `{reason}`. When
+  // the refused batch carried an inline object the field dialog just saved, the
+  // dialog reopens on that object with the reason on the field it names
+  // (task-85fee859cf3bfef6), instead of only the host's generic notice.
+  discardInflightOps(seq, refusal) {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
     this._inflightOps = null;
+    this._reopenRefusedInlineObject(refusal);
     const dirty = this._dirtyWhileInflight;
     this._dirtyWhileInflight = false;
     if (dirty) this._emitOps();
     return true;
+  }
+
+  // ── inline objects (./inline-object.js) ───────────────────────────────────
+  // Declared object block names that win over a same-named built-in
+  // (task-5bc7771edf30199a), cached per data-vocabulary string. Every
+  // run-convert projection this canvas makes runs inside them (_rt/_ro/_re).
+  _objectOverrides() {
+    const raw = this.getAttribute("data-vocabulary") || "";
+    if (this._overridesFor !== raw) {
+      this._overridesFor = raw;
+      const vocab = parseVocabulary(raw);
+      this._overrides = new Set(((vocab && vocab.objects) || []).map((o) => o.name));
+    }
+    return this._overrides;
+  }
+
+  _rt(blocks) {
+    return withObjectOverrides(this._objectOverrides(), () => runToTiptap(blocks));
+  }
+
+  _ro(...args) {
+    return withObjectOverrides(this._objectOverrides(), () => runToOps(...args));
+  }
+
+  _re(...args) {
+    return withObjectOverrides(this._objectOverrides(), () => reconcileServerEcho(...args));
+  }
+
+  inlineObjectVocabulary() {
+    return parseVocabulary(this.getAttribute("data-vocabulary"));
+  }
+
+  inlineObjectDialog() {
+    // A host editor (editBlockObject) takes every object insert and edit; else the popover.
+    if (this._editBlockObject) {
+      if (!this._hostObjectDialog) this._hostObjectDialog = new HostObjectDialog((request) => this._editBlockObject(request));
+      return this._hostObjectDialog;
+    }
+    if (!this._inlineDialog) this._inlineDialog = new InlineObjectDialog();
+    return this._inlineDialog;
+  }
+
+  // The host's editor for declared objects. Set: inserting or editing a block or
+  // inline object asks it instead of opening the popover. Unset: the popover.
+  set editBlockObject(fn) {
+    const next = typeof fn === "function" ? fn : null;
+    if (next !== this._editBlockObject) {
+      if (this._hostObjectDialog) this._hostObjectDialog.close(false);
+      if (this._inlineDialog) this._inlineDialog.close(false);
+    }
+    this._editBlockObject = next;
+  }
+
+  get editBlockObject() {
+    return this._editBlockObject;
+  }
+
+  // Whether a declared object's editor is open (the popover or the host's).
+  _objectEditorOpen() {
+    return !!((this._inlineDialog && this._inlineDialog.isOpen()) || (this._hostObjectDialog && this._hostObjectDialog.isOpen()));
+  }
+
+  // The value the dialog just saved: the batch that carries it is the one a
+  // refusal would name.
+  noteInlineObjectSave(values) {
+    this._inlineSavePending = values;
+  }
+
+  _reopenRefusedInlineObject(refusal) {
+    const values = this._inlineSavePending;
+    this._inlineSavePending = null;
+    const reason = refusal && typeof refusal.reason === "string" ? refusal.reason : "";
+    if (!values || reason === "" || !this._editor) return false;
+    let at = null;
+    let block = false;
+    this._editor.state.doc.descendants((node, pos) => {
+      if (at != null) return;
+      if (node.type.name === "bpInlineOpaque" && JSON.stringify(node.attrs.node) === JSON.stringify(values)) at = pos;
+      if (node.type.name === "bpOpaque" && JSON.stringify(node.attrs.bpBlock) === JSON.stringify(values)) {
+        at = pos;
+        block = true;
+      }
+    });
+    if (at == null) return false;
+    const vocab = this.inlineObjectVocabulary();
+    const kind = ((block ? vocab?.objects : vocab?.inlineObjects) || []).find((o) => o.name === values.type);
+    const message = reason.replace(/^[^\s:]+: /, "");
+    const error = { field: refusalField(reason, kind ? kind.fields : []), message };
+    return block ? editObjectBlockAt(this, this._editor, at, error) : editInlineObjectAt(this, this._editor, at, error);
   }
 
   // Re-diff the live document against the saved baseline and emit the batch, if any
@@ -2112,6 +2422,12 @@ class BpPaperCanvas extends HTMLElement {
         event.preventDefault();
         this._bubble.update();
         this._bubble.openLink();
+        return true;
+      }
+      // No bubble: the host's toolbar edits the link (bp-canvas-link-request).
+      if (!event.shiftKey && (key === "k" || key === "K") && !this._bubble && this._editable && !this._editor.state.selection.empty) {
+        event.preventDefault();
+        this._requestHostLink();
         return true;
       }
     }
@@ -2354,8 +2670,22 @@ class BpPaperCanvas extends HTMLElement {
         this._showHTMLPasteNotice(`Nothing was pasted. ${policy.blocked}`);
         return true;
       }
+      // A paste over a selected non-text block lands in a new paragraph after it
+      // and never replaces the block (block-boundary.js).
+      const opened = paragraphAfterSelectedBlock(view.state);
+      if (opened) view.dispatch(opened);
       // Paste as plain text keeps Sanity's line rule too (see _pastePlainText).
       if (policy?.plain && !isFigureSingletonCanvas(this)) return this._pastePlainText(view, _event, true);
+      // The canvas's own clipboard: rebuild exactly what was copied, fitted to
+      // this canvas's vocabulary like any paste (clipboard-slice.js).
+      const exact = !isFigureSingletonCanvas(this) && exactSliceFromClipboard(view.state.schema, _event, view.state.doc);
+      if (exact) {
+        const fitted = this._fitPastedSlice(exact);
+        const single = fitted.openStart === 0 && fitted.openEnd === 0 && fitted.content.childCount === 1 ? fitted.content.firstChild : null;
+        const tr = single ? view.state.tr.replaceSelectionWith(single) : view.state.tr.replaceSelection(fitted);
+        view.dispatch(tr.scrollIntoView().setMeta("paste", true).setMeta("uiEvent", "paste"));
+        return true;
+      }
     }
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteImageFiles(view, _event, policy?.imageAlt)) return true;
     if (this._editable && !isFigureSingletonCanvas(this) && this._pasteHTMLTables(view, _event)) return true;
@@ -2500,6 +2830,67 @@ class BpPaperCanvas extends HTMLElement {
     this._mediaUploader = fn;
   }
 
+  // The host's image picker. Set: an Image insert opens it for the new block, and each
+  // image offers Select (CSS shows it on [data-media-picker]). Unset: today's image block.
+  set mediaPicker(fn) {
+    this._mediaPicker = typeof fn === "function" ? fn : null;
+    this.toggleAttribute("data-media-picker", !!this._mediaPicker);
+  }
+
+  get mediaPicker() {
+    return this._mediaPicker;
+  }
+
+  // Run the host's picker for the image at `pos`; its answer becomes the image's src
+  // (and alt / width when given) in one undo step. null, a throw or a refused src
+  // leaves it as it was.
+  async _pickImageAt(pos) {
+    const picker = this._mediaPicker;
+    const editor = this._editor;
+    if (typeof picker !== "function" || !editor || editor.isDestroyed || !this._editable) return false;
+    const node = editor.state.doc.nodeAt(pos);
+    if (!node || node.type.name !== "bpImage") return false;
+    const id = node.attrs.bpId;
+    let picked = null;
+    try {
+      picked = await picker({ kind: node.attrs.src ? "replace" : "insert", current: node.attrs.src ? { src: node.attrs.src, alt: node.attrs.alt || null } : null });
+    } catch (_e) {
+      return false;
+    }
+    if (this._editor !== editor || editor.isDestroyed || !picked || typeof picked.src !== "string") return false;
+    // The image node paints src through the reader's allowlist (safeUrl): a src it would
+    // refuse (javascript:, data:, protocol-relative) is not stored at all.
+    const src = safeUrl(picked.src.trim());
+    if (src === "#" || src.trim() === "") return false;
+    // The image may have moved meanwhile: find it again, by id when it has one.
+    let at = null;
+    editor.state.doc.descendants((n, p) => {
+      if (at != null) return false;
+      if (n.type.name === "bpImage" && (id ? n.attrs.bpId === id : p === pos)) at = p;
+      return true;
+    });
+    const cur = at != null ? editor.state.doc.nodeAt(at) : null;
+    if (!cur) return false;
+    const attrs = { ...cur.attrs, src, uploadError: null };
+    if (typeof picked.alt === "string") attrs.alt = picked.alt;
+    if (Number.isFinite(picked.width) && picked.width >= 16) attrs.width = Math.round(picked.width);
+    editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, attrs));
+    return true;
+  }
+
+  // After an Image insert: open the picker for the empty image the insert left at the caret.
+  _pickInsertedImage() {
+    const editor = this._editor;
+    if (!this._mediaPicker || !editor) return;
+    const { from } = editor.state.selection;
+    let best = null;
+    editor.state.doc.descendants((n, p) => {
+      if (n.type.name === "bpImage" && !n.attrs.src && !n.attrs.uploadKey && (best == null || Math.abs(p - from) < Math.abs(best - from))) best = p;
+      return true;
+    });
+    if (best != null) void this._pickImageAt(best);
+  }
+
   get mediaUploader() {
     return this._mediaUploader;
   }
@@ -2548,7 +2939,7 @@ class BpPaperCanvas extends HTMLElement {
       // block (or a paragraph) instead of vetoing the whole paste.
       const vocab = parseVocabulary(this.getAttribute("data-vocabulary"));
       if (vocab) ({ blocks, dropped } = fitBlocksToVocabulary(blocks, vocab));
-      nodes = runToTiptap(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
+      nodes = this._rt(blocks).content.map((json) => view.state.schema.nodeFromJSON(json));
     } catch (_e) {
       return false;
     }
@@ -2639,7 +3030,7 @@ class BpPaperCanvas extends HTMLElement {
     const schema = this._editor.schema;
     // Fresh nodes: an id the paste carried (copied from this or another paper)
     // must not collide with a block the doc already holds.
-    const nodes = runToTiptap(fit.blocks).content.map((json) =>
+    const nodes = this._rt(fit.blocks).content.map((json) =>
       schema.nodeFromJSON({ ...json, attrs: { ...(json.attrs || {}), bpId: null } }));
     return { slice: Slice.maxOpen(Fragment.from(nodes)), dropped: leftOut.concat(fit.dropped) };
   }
@@ -3176,7 +3567,7 @@ class BpPaperCanvas extends HTMLElement {
       return true;
     }
     const block = canvasDefaultBlock("divider");
-    const node = runToTiptap([block]).content[0];
+    const node = this._rt([block]).content[0];
     const { state, view } = this._editor;
     const start = $from.before(1);
     const end = $from.after(1);
@@ -3236,7 +3627,7 @@ class BpPaperCanvas extends HTMLElement {
     block.tone = tone;
     block.collapsible = true;
     block.collapsed = collapsed;
-    const node = runToTiptap([block]).content[0];
+    const node = this._rt([block]).content[0];
 
     // REPLACE the whole current block (the just-typed `> [!type] ` paragraph) with
     // the callout node. selectParentNode targets the textblock; replaceSelectionWith
@@ -3317,6 +3708,13 @@ class BpPaperCanvas extends HTMLElement {
 
   _chooseSlash(item) {
     this._closeSlash();
+    // An INLINE row (a declared blocks.inline kind): the object goes inside this
+    // paragraph, in place of the "/query" text, once its dialog is saved.
+    if (item && item.inline) {
+      const { $from } = this._editor.state.selection;
+      insertInlineObject(this, this._editor, item.inline, { replaceRange: { from: $from.start(), to: $from.end() } });
+      return;
+    }
     // A slash pick inside a list item first lifts the item out of the list, so the chosen block
     // lands at the top level where insertSlashTypeAtSelection replaces the paragraph.
     let guard = 0;
@@ -3346,7 +3744,11 @@ class BpPaperCanvas extends HTMLElement {
     // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
     // fence refuses a canvas batch that introduces one — task-f3c8acd1e09a0eda).
     if (item && item.object) {
-      this._insertObjectBlock(item.type);
+      // A declared object block with fields asks for them first (inline-object.js);
+      // one with none inserts at once.
+      if (!openObjectBlockInsert(this, this._editor, item.type, (values) => this._insertObjectBlock(item.type, values))) {
+        this._insertObjectBlock(item.type);
+      }
       return;
     }
     // A field's Quote row makes the block the field admits (vocabulary.js quoteTypeFor).
@@ -3376,12 +3778,16 @@ class BpPaperCanvas extends HTMLElement {
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
     // `replaceText`: the block's text is the slash's own "/query", so it is replaced.
     insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level, replaceText: true });
+    if (item.type === "image") this._pickInsertedImage();
   }
 
   // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
   // line with a verbatim bpOpaque carry of `{type}`. runToOps inserts it as a new
   // block (the opaque insert path), the server checks its declared fields.
-  _insertObjectBlock(type) {
+  // `opts.keepLine`: insert AFTER the caret's block instead of replacing it (the
+  // command palette's insert, where the caret's block holds real content); an
+  // empty paragraph is still replaced, as the slash pick replaces its "/query".
+  _insertObjectBlock(type, bpBlock, opts = {}) {
     const editor = this._editor;
     if (!editor || !this._editable || typeof type !== "string" || type === "") return false;
     const { state } = editor;
@@ -3391,8 +3797,32 @@ class BpPaperCanvas extends HTMLElement {
     let offset = 0;
     for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
     const line = state.doc.child(index);
-    const node = nodeType.create({ bpId: null, bpType: type, bpBlock: { type } });
-    editor.view.dispatch(state.tr.replaceWith(offset, offset + line.nodeSize, node));
+    const node = nodeType.create({ bpId: null, bpType: type, bpBlock: bpBlock || { type } });
+    const keep = opts.keepLine && !(line.type.name === "paragraph" && line.content.size === 0);
+    editor.view.dispatch(
+      keep
+        ? state.tr.insert(offset + line.nodeSize, node)
+        : state.tr.replaceWith(offset, offset + line.nodeSize, node),
+    );
+    return true;
+  }
+
+  // The palette's Insert command for a type the field DECLARES as an object
+  // block (task-441e0c1cc08acc5e): the same declared insert the slash pick
+  // makes (field dialog first), never the canvas built-in of that name.
+  _insertDeclaredObject(type) {
+    const insert = (values) => this._insertObjectBlock(type, values, { keepLine: true });
+    if (!openObjectBlockInsert(this, this._editor, type, insert)) {
+      insert(undefined);
+      return true;
+    }
+    // The palette refocused the editor before running this command, and TipTap's
+    // focus() takes the caret back on the next animation frame — after the dialog
+    // focused its first field. Take it back to the dialog (task-040407b85629d22b).
+    const dialog = this.inlineObjectDialog();
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => { if (dialog.isOpen()) dialog.focusFirst(); });
+    }
     return true;
   }
 
@@ -3539,6 +3969,15 @@ class BpPaperCanvas extends HTMLElement {
       // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
       onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
       serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
+      // Declared inline objects: inserted at the caret, anywhere in prose.
+      inlineObjects: this.inlineObjectVocabulary()?.inlineObjects || [],
+      onInlineInsert: (name) => insertInlineObject(this, this._editor, name),
+      // A declared object block wins over the same-named built-in insert
+      // (task-441e0c1cc08acc5e, the palette twin of the slash rule).
+      declaredObjects: this._objectOverrides(),
+      onObjectInsert: (type) => this._insertDeclaredObject(type),
+      // Insert Image opens the host's picker for the new block (mediaPicker).
+      onImageInserted: () => this._pickInsertedImage(),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({
@@ -3761,7 +4200,7 @@ class BpPaperCanvas extends HTMLElement {
         );
         // ONE projection of L1, used for BOTH the editor content and the emitted diff,
         // so the rich editor and the ops it sends are derived from the exact same doc.
-        const L1Doc = runToTiptap(L1);
+        const L1Doc = this._rt(L1);
 
         // (1) Apply L1 to the editor WITHOUT auto-emit (setContent second arg = false).
         // The rich editor now shows L1; onUpdate does NOT fire, so _emitOps never runs
@@ -3908,9 +4347,9 @@ class BpPaperCanvas extends HTMLElement {
     // edited beyond it. Recognize that snapshot as our own and advance only the
     // confirmed baseline; replacing the live doc here would erase the newer edit.
     if (this._inflightOps) {
-      const exactInflightEcho = reconcileServerEcho(
+      const exactInflightEcho = this._re(
         next,
-        runToTiptap(this._inflightOps.afterBlocks).content || [],
+        this._rt(this._inflightOps.afterBlocks).content || [],
       ).ownEcho;
       const foreignOwnRequest = coordinatorOwnMode && echoRequestId != null &&
         this._inflightOps.requestId != null && echoRequestId !== this._inflightOps.requestId;
@@ -3929,7 +4368,7 @@ class BpPaperCanvas extends HTMLElement {
     const awaitingIndex = this._awaitingOwnEchoes.findIndex((entry) =>
       !(coordinatorOwnMode && echoRequestId != null && entry.requestId != null &&
         echoRequestId !== entry.requestId) &&
-      reconcileServerEcho(next, runToTiptap(entry.blocks).content || []).ownEcho
+      this._re(next, this._rt(entry.blocks).content || []).ownEcho
     );
     if (awaitingIndex !== -1) {
       this._awaitingOwnEchoes.splice(0, awaitingIndex + 1);
@@ -3968,7 +4407,7 @@ class BpPaperCanvas extends HTMLElement {
     // against the same shape the emit path diffs (phantom nested attrs / split
     // dedup), exactly as runToOps was tested against.
     const liveContent = normalizeCanvasDoc(this._editor.getJSON()).content || [];
-    const { ownEcho, idWrites } = reconcileServerEcho(next, liveContent);
+    const { ownEcho, idWrites } = this._re(next, liveContent);
 
     // A genuinely external echo cannot safely replace local content while one
     // or more emitted snapshots are still awaiting confirmation. Defer it; a
@@ -4142,7 +4581,7 @@ class BpPaperCanvas extends HTMLElement {
   _applyExternalContent(blocks) {
     if (!this._editor) return;
     const { state } = this._editor;
-    const next = state.schema.nodeFromJSON(runToTiptap(blocks));
+    const next = state.schema.nodeFromJSON(this._rt(blocks));
     const previousIds = [];
     const nextIds = [];
     state.doc.forEach((node) => previousIds.push(node.attrs.bpId));
@@ -4212,7 +4651,7 @@ class BpPaperCanvas extends HTMLElement {
     const caret = this._captureCaret();
     this._editor
       .chain()
-      .setContent(runToTiptap(blocks), { emitUpdate: false })
+      .setContent(this._rt(blocks), { emitUpdate: false })
       .command(({ tr }) => {
         tr.setMeta("addToHistory", false);
         return true;
@@ -4492,7 +4931,7 @@ class BpPaperCanvas extends HTMLElement {
         // the empty pre-seed doc and ProseMirror threw (doc needs a block).
         this._editor
           .chain()
-          .setContent(runToTiptap(this._blocks), { emitUpdate: false })
+          .setContent(this._rt(this._blocks), { emitUpdate: false })
           .command(({ tr }) => {
             tr.setMeta("addToHistory", false);
             return true;

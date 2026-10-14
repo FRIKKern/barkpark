@@ -215,6 +215,13 @@ func run(args []string) int {
 			// ERROR, so slot_units stays null (UNMEASURED) rather than landing
 			// an empty list that would read "no failed units here".
 			SlotUnitsProbe: agent.NewSlotUnitsProbe(),
+			// Automatic restarts of the service units in the last hour, read
+			// from PID 1's own journal lines. A unit that crashed and came
+			// back 5 s later reads active/running on the next beat, so only
+			// the journal can say it restarted. Deploy restarts are manual
+			// jobs and never appear. On a box without journalctl it ERRORS,
+			// so service_restarts stays null (UNMEASURED).
+			ServiceRestartsProbe: agent.NewServiceRestartsProbe(),
 			// Backups. Declared since the beat existed and wired until now
 			// NOWHERE, so `backup_ok` was the Go zero value on every box in the
 			// fleet — a false that meant "nobody looked" and was

@@ -34,6 +34,13 @@
 # the cgroup SIGTERM may kill the probe mid-loop — that prints NO receipt at
 # all, which is silence, not a false claim, and is the correct failure mode.
 #
+# Since task-15e2eb3aa36b240b the engine runs under scripts/build-guard.sh, in
+# its own systemd scope outside barkpark.service's cgroup. Where that scope
+# exists the restart below no longer kills this script, and the health probe
+# runs to its end. Where it does not (no systemd-run), the old cgroup rule
+# above still holds. The engine also takes the CI-built artifact for this sha
+# when one matches the box's runtime, and compiles only when none does.
+#
 # Exit codes: 0 deployed (or service simply not running) · 1 build failed
 # (api/_build/prod untouched, still restartable, NO restart) · 13 migrate
 # failed (same guarantee: swap aborted, old code keeps serving, NO restart —
@@ -49,6 +56,21 @@ REPO="$PWD"
 if [ -d "$REPO/.slots" ]; then
   echo "[deploy-rebuild] blue/green slot layout detected — use deploy/instance-deploy.sh"
   exit 3
+fi
+
+# Run the whole engine under scripts/build-guard.sh (task-15e2eb3aa36b240b):
+# its own systemd scope OUTSIDE barkpark.service's cgroup, a memory cap, low CPU
+# and IO priority, one BEAM scheduler per mix process, and output through a log
+# file. Before this, the endpoint flow ran the compile inside the service's
+# cgroup with no cap: on the 2-core box gyl each restart of the service killed
+# the build, and the deploy never landed. Under the guard a service restart no
+# longer reaches the build, and the build's memory cannot push the serving BEAM
+# out. The guard execs in place, so the pid the runner recorded stays ours.
+# Here, not in self-update.sh, so a box whose OLD self-update.sh execs the NEW
+# copy of this file is guarded on its first fixed deploy. BP_BUILD_GUARD=0
+# opts out; a checkout without the guard (the hermetic harnesses) runs as before.
+if [ "${BP_BUILD_GUARDED:-0}" != 1 ] && [ "${BP_BUILD_GUARD:-1}" != 0 ] && [ -f scripts/build-guard.sh ]; then
+  exec bash scripts/build-guard.sh bash scripts/deploy-rebuild.sh "$@"
 fi
 
 # Source ASDF (Hetzner needs the shims) + .env, exactly like the hook did.
@@ -80,21 +102,47 @@ flock 8
 # Under the flock on purpose — one builder, one writer.
 STATUS_FILE="$REPO/.deploy-status.json"
 DEPLOY_SHA="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
+# The pid the runner matches this record on: its spawned child's pid. Under
+# build-guard.sh this script is a grandchild with a new pid, so the guard hands
+# down its own (the runner's child) as BP_DEPLOY_RECORD_PID.
+RECORD_PID="${BP_DEPLOY_RECORD_PID:-$$}"
+case "$RECORD_PID" in '' | *[!0-9]*) RECORD_PID=$$ ;; esac
 write_status() { # $1 = phase (build|migrate|restart), $2 = outcome (running|failed|applied)
   printf '{"engine":"deploy-rebuild","phase":"%s","outcome":"%s","sha":"%s","ts":"%s","pid":%d}\n' \
-    "$1" "$2" "$DEPLOY_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" \
+    "$1" "$2" "$DEPLOY_SHA" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$RECORD_PID" \
     > "$STATUS_FILE.tmp" 2>/dev/null && mv -f "$STATUS_FILE.tmp" "$STATUS_FILE" 2>/dev/null || true
 }
 
-echo "[deploy-rebuild] Building Phoenix aside (api/_build_next — old build keeps serving)..."
 write_status build running
 rm -rf api/_build_next
-if ! (
-  cd api &&
-  MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix deps.get &&
-  MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix deps.compile --force &&
-  MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix compile
-); then
+
+# Prefer the build CI already compiled for this exact sha (release-artifact.yml
+# publishes build-<sha> for every api-touching push to main). It lands in
+# api/_build_next, so the migrate, swap and restart below run unchanged. Any
+# reason it is not usable (404, runtime stamp mismatch, checksum) falls through
+# to the on-box compile. BP_PREBUILT=0 skips it (apply-update.sh sets that after
+# its own attempt failed, so the same 404 is not fetched twice).
+PREBUILT=0
+if [ "${BP_PREBUILT:-1}" != 0 ] && [ -f scripts/fetch-prebuilt.sh ] && [ "$DEPLOY_SHA" != unknown ]; then
+  echo "[deploy-rebuild] Trying the CI-built artifact for $DEPLOY_SHA..."
+  if bash scripts/fetch-prebuilt.sh --into api/_build_next "$DEPLOY_SHA"; then
+    PREBUILT=1
+  else
+    rm -rf api/_build_next
+  fi
+fi
+
+if [ "$PREBUILT" = 1 ]; then
+  echo "[deploy-rebuild] Using the CI-built artifact (api/_build_next — old build keeps serving)."
+elif ! {
+  echo "[deploy-rebuild] Building Phoenix aside (api/_build_next — old build keeps serving)..."
+  (
+    cd api &&
+      MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix deps.get &&
+      MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix deps.compile --force &&
+      MIX_ENV=prod MIX_BUILD_ROOT=_build_next mix compile
+  )
+}; then
   echo "[deploy-rebuild] BUILD FAILED — api/_build/prod is untouched and still restartable. NOT restarting."
   write_status build failed
   exit 1

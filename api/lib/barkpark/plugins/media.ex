@@ -22,6 +22,7 @@ defmodule Barkpark.Plugins.Media do
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.Document
   alias Barkpark.Media.Delivery.Events
+  alias Barkpark.Media.Processing
   alias Barkpark.Plugins.Media.{Assets, Codelists}
 
   @plugin_name "media"
@@ -79,17 +80,50 @@ defmodule Barkpark.Plugins.Media do
   @doc """
   Called by `Barkpark.Plugins.Registry.run_after_media_upload/1` after a
   blob lands in `media_files`. Creates the companion metadata document.
+
+  ONE document write per upload. Dimensions, the LQIP and the processing
+  status are read first (`Processing.extract/1`, header probe plus a 24 px
+  render) and go into the create, together with any inline metadata the
+  caller passed as `:asset_metadata` (alt text, tags, title). Renditions are
+  not built here: each one is made on its first request. Before this, upload
+  wrote the document four to six times and rendered five presets in series.
   """
   @spec after_media_upload(map()) :: :ok
-  def after_media_upload(%{media_file: media_file}) do
-    case Assets.ensure_for_upload(media_file) do
-      {:ok, doc} ->
+  def after_media_upload(%{media_file: media_file} = ctx) do
+    extracted = Processing.extract(media_file)
+    processed = Processing.asset_fields(extracted)
+    metadata = Map.get(ctx, :asset_metadata) || %{}
+
+    case create_asset(media_file, metadata, processed) do
+      {:ok, doc, created_or_existing} ->
         Events.dispatch(media_file.dataset, "media.uploaded", media_file, doc)
-        Barkpark.Media.Processing.process(media_file)
-        :ok
+
+        # A document that already existed (a re-run hook) did not take
+        # `fields` at create; record the metadata on it in one upsert.
+        doc =
+          if created_or_existing == :existing,
+            do: Processing.record(doc, media_file, extracted),
+            else: doc
+
+        Processing.finish(media_file, doc, extracted)
 
       {:error, reason} ->
         log_hook_failure("after_media_upload", reason)
+    end
+  end
+
+  # The caller's inline metadata rides the create. If the create refuses it
+  # (a value the schema rejects), create the document without it: the upload
+  # must still get its asset document, and the v1 upload action patches the
+  # metadata afterwards when the created document does not hold it, which
+  # surfaces the refusal there the way it always did.
+  defp create_asset(media_file, metadata, processed) when map_size(metadata) == 0,
+    do: Assets.ensure_for_upload(media_file, processed)
+
+  defp create_asset(media_file, metadata, processed) do
+    case Assets.ensure_for_upload(media_file, Map.merge(metadata, processed)) do
+      {:ok, _doc, _} = ok -> ok
+      {:error, _} -> Assets.ensure_for_upload(media_file, processed)
     end
   end
 

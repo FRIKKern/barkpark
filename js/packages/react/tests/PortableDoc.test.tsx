@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PortableDoc, renderPortableDocument, type Block } from '../src'
+import { fieldBlocks } from '../src/field-blocks'
+import { embedBlocks } from '../src/embed'
 import { REGISTERED_TYPES } from '../src/blocks/registry'
 
 // One authored block per IN-SCOPE type + the distinctive marker its :article
@@ -21,11 +23,15 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
       tabs: [
         {
           label: 'macOS',
-          blocks: [{ type: 'paragraph', content: [{ type: 'text', value: 'brew install barkpark' }] }],
+          blocks: [
+            { type: 'paragraph', content: [{ type: 'text', value: 'brew install barkpark' }] },
+          ],
         },
         {
           label: 'Linux',
-          blocks: [{ type: 'paragraph', content: [{ type: 'text', value: 'curl -fsSL install.sh | sh' }] }],
+          blocks: [
+            { type: 'paragraph', content: [{ type: 'text', value: 'curl -fsSL install.sh | sh' }] },
+          ],
         },
       ],
     },
@@ -115,7 +121,10 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     block: {
       type: 'steps',
       steps: [
-        { title: 'Claim the task', blocks: [{ type: 'paragraph', content: [{ type: 'text', value: 'Run bp task next.' }] }] },
+        {
+          title: 'Claim the task',
+          blocks: [{ type: 'paragraph', content: [{ type: 'text', value: 'Run bp task next.' }] }],
+        },
         { title: 'Stamp evidence' },
       ],
     },
@@ -133,7 +142,11 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
   // scaffy:add-block-type Blockquote MARK:js-case-blockquote
   {
     type: 'blockquote',
-    block: { type: 'blockquote', content: [{ type: 'text', value: 'Invent it.' }], cite: 'Alan Kay' },
+    block: {
+      type: 'blockquote',
+      content: [{ type: 'text', value: 'Invent it.' }],
+      cite: 'Alan Kay',
+    },
     marker: 'bp-blockquote__cite',
   },
   // authoring-drift aliases → list / blockquote (compose.ex alias choke point twins)
@@ -175,7 +188,10 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'h3', block: { type: 'h3', text: 'drifted h3' }, marker: '</h3>' },
   {
     type: 'ordered-list',
-    block: { type: 'ordered-list', items: [{ content: [{ type: 'text', value: 'kebab ordered point' }] }] },
+    block: {
+      type: 'ordered-list',
+      items: [{ content: [{ type: 'text', value: 'kebab ordered point' }] }],
+    },
     marker: '<ol>',
   },
   // scaffy:add-block-type Filetree MARK:js-case-filetree
@@ -441,7 +457,15 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
       type: 'duel',
       legendA: 'Med katalogen',
       legendB: 'Bare hendene',
-      rows: [{ label: 'jobb', delta: '−30 %', valueA: '1 478', valueB: '2 121', source: 'commit:591fdcd53' }],
+      rows: [
+        {
+          label: 'jobb',
+          delta: '−30 %',
+          valueA: '1 478',
+          valueB: '2 121',
+          source: 'commit:591fdcd53',
+        },
+      ],
     },
     marker: 'bp-duel',
   },
@@ -499,7 +523,12 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
   },
   {
     type: 'chat-approval',
-    block: { type: 'chat-approval', tool_name: 'Bash', summary: 'rm -rf x', approval_status: 'pending' },
+    block: {
+      type: 'chat-approval',
+      tool_name: 'Bash',
+      summary: 'rm -rf x',
+      approval_status: 'pending',
+    },
     marker: 'bp-chat-approval',
   },
   {
@@ -513,7 +542,12 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
   },
   {
     type: 'chat-plan',
-    block: { type: 'chat-plan', title: 'The plan', preview: 'Do the thing.', approval_status: 'pending' },
+    block: {
+      type: 'chat-plan',
+      title: 'The plan',
+      preview: 'Do the thing.',
+      approval_status: 'pending',
+    },
     marker: 'bp-chat-plan',
   },
   {
@@ -682,7 +716,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     expect(html).toContain('<span style="font-style:italic">em</span>')
     expect(html).toContain('<code>c</code>')
     expect(html).toContain(
-      '<a href="https://ex.com" style="color:var(--paper-accent, #1e5347)">link</a>',
+      '<a href="https://ex.com">link</a>',
     )
     // bare text carries no wrapping span
     expect(html).toContain('plain</p>')
@@ -823,7 +857,9 @@ describe('PortableDoc — the type-keyed renderer', () => {
           ],
         },
       ])
-      expect(html).toContain('<h2>The <span style="font-weight:bold">Operator</span>&#39;s Leash</h2>')
+      expect(html).toContain(
+        '<h2>The <span style="font-weight:bold">Operator</span>&#39;s Leash</h2>',
+      )
       expect(html).not.toContain('<h2></h2>')
     })
 
@@ -856,9 +892,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
       })
 
       it('a {text:…} map list item falls back to its bare text (the content||text law)', () => {
-        const html = renderPortableDocument([
-          { type: 'list', items: [{ text: 'plain & simple' }] },
-        ])
+        const html = renderPortableDocument([{ type: 'list', items: [{ text: 'plain & simple' }] }])
         expect(html).toBe('<ul><li><span>plain &amp; simple</span></li></ul>')
       })
 
@@ -978,22 +1012,19 @@ describe('PortableDoc — the type-keyed renderer', () => {
       }
     })
 
-    // The mount point's chrome is TOKENISED, not a bare hex: on a dark
-    // `.bp-paper-surface` a literal #e2e6e5 drew a light rule around a black
-    // terminal. Every sibling emitter (evidence figure, paper-link card,
-    // section divider) already reads `var(--paper-rule, …)`; the cast was the
-    // last bare literal in this file, and its Elixir twin
-    // (Figures.asciicast_html/5) carries the identical string — the pd-parity
+    // The mount point's chrome carries NO colour inline (task-2c5d3da1b7f7db25):
+    // the border keeps its width and style, and paper-surface.css paints its
+    // colour through `.bp-asciicast` — so a dark `.bp-paper-surface` never shows
+    // a light literal rule around a black terminal. Its Elixir twin
+    // (Figures.asciicast_html/5) carries the identical string, and the pd-parity
     // comparator diffs the style attribute, so the two cannot drift apart.
-    it('the asciicast mount border is var(--paper-rule, …), with the hex only as fallback', () => {
+    it('the asciicast mount border keeps its geometry inline and no colour', () => {
       const html = renderPortableDocument([
         { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },
       ])
-      expect(html).toContain('style="border:1px solid var(--paper-rule, #e2e6e5);')
-      // The negative leg: no BARE hex survives anywhere in the emitted block —
-      // `:#e2e6e5` would match `border:1px solid #e2e6e5` but never the
-      // `var(--paper-rule, #e2e6e5)` fallback (which is preceded by a space).
-      expect(html).not.toContain(':#e2e6e5')
+      expect(html).toContain('style="border:1px solid;border-radius:6px;overflow:hidden"')
+      expect(html).not.toContain('var(--paper-')
+      expect(html).not.toContain('#e2e6e5')
       expect(html).not.toContain('#55635e')
     })
 
@@ -1058,10 +1089,14 @@ describe('PortableDoc — the type-keyed renderer', () => {
     it('a whitespace-only paragraph is scaffold, not layout — emits NO element', () => {
       expect(renderPortableDocument([{ type: 'paragraph', text: '   ' }])).toBe('')
       expect(
-        renderPortableDocument([{ type: 'paragraph', content: [{ type: 'text', value: ' \n\t ' }] }]),
+        renderPortableDocument([
+          { type: 'paragraph', content: [{ type: 'text', value: ' \n\t ' }] },
+        ]),
       ).toBe('')
       expect(
-        renderPortableDocument([{ type: 'paragraph', content: ['  ', { type: 'text', value: ' ' }] }]),
+        renderPortableDocument([
+          { type: 'paragraph', content: ['  ', { type: 'text', value: ' ' }] },
+        ]),
       ).toBe('')
     })
 
@@ -1096,7 +1131,10 @@ describe('PortableDoc — the type-keyed renderer', () => {
       // Non-empty prose is byte-faithful — same output as before the doctrine flip.
       expect(
         renderPortableDocument([
-          { type: 'paragraph', content: [{ type: 'text', value: 'Store meaning; render rhythm.' }] },
+          {
+            type: 'paragraph',
+            content: [{ type: 'text', value: 'Store meaning; render rhythm.' }],
+          },
         ]),
       ).toBe('<p>Store meaning; render rhythm.</p>')
     })
@@ -1200,5 +1238,174 @@ describe('task-detail empty state (parity2-bug-taskdetail-empty-state)', () => {
     expect(html).toContain('<div class="bp-tdetail__title">real</div>')
     expect(html).not.toContain('bp-tdetail--empty')
     expect(html).not.toContain('No matching tasks.')
+  })
+})
+
+// The OPT-IN schema field blocks (task-7375ba22758155fa): they render only when
+// a caller passes `fieldBlocks` from @barkpark/react/field-blocks, so the core
+// registry (and its bundle) never carries them.
+const FIELD_CASES: Array<{ type: string; block: Block; marker: string }> = [
+  {
+    type: 'field-string',
+    block: { type: 'field-string', label: 'Title', value: 'Notes' },
+    marker: '<span>Notes</span>',
+  },
+  {
+    type: 'field-slug',
+    block: { type: 'field-slug', label: 'Slug', value: 'notes' },
+    marker: '<span>notes</span>',
+  },
+  {
+    type: 'field-text',
+    block: { type: 'field-text', label: 'Lead', value: 'Short.' },
+    marker: '<span>Short.</span>',
+  },
+  {
+    type: 'field-boolean',
+    block: { type: 'field-boolean', label: 'Live', value: true },
+    marker: '<span>Yes</span>',
+  },
+  {
+    type: 'field-select',
+    block: {
+      type: 'field-select',
+      label: 'Status',
+      value: 'live',
+      options: [{ value: 'live', label: 'Live' }],
+    },
+    marker: '<span>Live</span>',
+  },
+  {
+    type: 'field-datetime',
+    block: { type: 'field-datetime', label: 'At', value: '2026-10-10T09:30' },
+    marker: '2026-10-10 09:30',
+  },
+  {
+    type: 'field-color',
+    block: { type: 'field-color', label: 'Accent', value: '#1e5347' },
+    marker: 'bp-field__swatch',
+  },
+  {
+    type: 'field-reference',
+    block: { type: 'field-reference', label: 'Author', value: 'author-ada' },
+    marker: 'author-ada',
+  },
+  {
+    type: 'field-image',
+    block: { type: 'field-image', label: 'Cover', value: 'https://example.com/c.jpg' },
+    marker: 'bp-field__img',
+  },
+  {
+    type: 'composite',
+    block: { type: 'composite', label: 'SEO', fields: [{ name: 'title' }], value: { title: 'T' } },
+    marker: 'bp-field__sub',
+  },
+  {
+    type: 'arrayOf',
+    block: { type: 'arrayOf', label: 'Tags', value: ['a'] },
+    marker: 'bp-field__list',
+  },
+  {
+    type: 'codelist',
+    block: { type: 'codelist', label: 'Lang', value: 'nob' },
+    marker: '<span>nob</span>',
+  },
+  {
+    type: 'localizedText',
+    block: { type: 'localizedText', label: 'Tagline', languages: ['nob'], value: { nob: 'Hei' } },
+    marker: '<b>nob</b><span>Hei</span>',
+  },
+]
+
+describe('field blocks (opt-in @barkpark/react/field-blocks)', () => {
+  it('covers exactly the opt-in field types, none of them core', () => {
+    expect(FIELD_CASES.map((c) => c.type).sort()).toEqual(Object.keys(fieldBlocks).sort())
+    expect(Object.keys(fieldBlocks)).toHaveLength(13)
+    for (const t of Object.keys(fieldBlocks)) expect(REGISTERED_TYPES).not.toContain(t)
+  })
+
+  for (const c of FIELD_CASES) {
+    it(`${c.type} renders its row when opted in, and the placeholder when not`, () => {
+      const html = renderPortableDocument([c.block], { blocks: fieldBlocks })
+      expect(html).toContain('<div class="bp-field">')
+      expect(html).toContain(c.marker)
+      expect(renderPortableDocument([c.block])).toContain('bp-unknown-block')
+    })
+  }
+
+  it('an opt-in emitter never replaces a core type', () => {
+    const html = renderPortableDocument(
+      [{ type: 'paragraph', content: [{ type: 'text', value: 'x' }] }],
+      {
+        blocks: { paragraph: () => '<p>hijacked</p>' },
+      },
+    )
+    expect(html).not.toContain('hijacked')
+  })
+
+  it('reaches blocks nested in a container (the ctx rides the recursion)', () => {
+    const html = renderPortableDocument(
+      [
+        {
+          type: 'section',
+          title: 'S',
+          blocks: [{ type: 'field-string', label: 'T', value: 'Inner' }],
+        },
+      ],
+      { blocks: fieldBlocks },
+    )
+    expect(html).toContain('<span>Inner</span>')
+  })
+})
+
+// The OPT-IN `embed` emitter (@barkpark/react/embed; rpu-backlog-field-embed-coverage):
+// the walk.ex embed/2 twin at :article.
+describe('embed (opt-in @barkpark/react/embed)', () => {
+  const block = { type: 'embed', target: 'Field notes' } as Block
+
+  it('without the opt-in it is the core placeholder, not a transclusion', () => {
+    expect(renderPortableDocument([block])).toContain('bp-unknown-block')
+    expect(REGISTERED_TYPES).not.toContain('embed')
+  })
+
+  it('opted in with no map it draws the unresolved placeholder, byte-equal to the Elixir walker', () => {
+    expect(renderPortableDocument([block], { blocks: embedBlocks() })).toBe(
+      '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes">↪ Field notes</section>',
+    )
+  })
+
+  it('a target in the map injects its pre-rendered HTML inside the frame', () => {
+    const html = renderPortableDocument([block], {
+      blocks: embedBlocks({ 'Field notes': '<p>Inner</p>' }),
+    })
+    expect(html).toBe(
+      '<section class="paper-embed bp-embed" data-embed="Field notes"><p>Inner</p></section>',
+    )
+  })
+
+  it("HTML carried by the document itself is never injected — only the caller's map is", () => {
+    const forged = {
+      type: 'embed',
+      target: 'Field notes',
+      html: '<b>forged</b>',
+      content: '<script>alert(1)</script>',
+      embeds: { 'Field notes': '<b>forged</b>' },
+    } as Block
+    for (const blocks of [embedBlocks(), embedBlocks({ Other: '<p>x</p>' })]) {
+      const html = renderPortableDocument([forged], { blocks })
+      expect(html).toBe(
+        '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes">↪ Field notes</section>',
+      )
+    }
+  })
+
+  it('escapes the target and never resolves an inherited key', () => {
+    const hostile = { type: 'embed', target: '"><script>x</script>' } as Block
+    const html = renderPortableDocument([hostile], { blocks: embedBlocks({}) })
+    expect(html).not.toContain('<script>')
+    const proto = renderPortableDocument([{ type: 'embed', target: 'toString' } as Block], {
+      blocks: embedBlocks({}),
+    })
+    expect(proto).toContain('bp-embed--unresolved')
   })
 })

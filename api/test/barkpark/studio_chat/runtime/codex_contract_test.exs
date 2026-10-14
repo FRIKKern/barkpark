@@ -10,15 +10,9 @@ defmodule Barkpark.StudioChat.Runtime.CodexContractTest do
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
-  # A STARTUP BUDGET, not a latency assertion (task-697215d9d7dad3f7). A
-  # success-path call spawns the Python fake app server (twice for readiness:
-  # the version probe, then the session handshake) and must finish inside
-  # `timeout_ms`. At 500 ms a loaded runner's interpreter startup alone could
-  # spend it: main run 36589134658 failed `{:error, :timeout}` on a fixture
-  # that was answering correctly. These tests assert the WIRE, so they get a
-  # budget that only a hang can exhaust; they return as soon as the fake
-  # answers. The fail-closed timeout tests keep their short timeouts on purpose.
-  @startup_budget_ms 10_000
+  # NO CLOCK on the success path (task-2b9df7d705f9ea7a): with
+  # `timeout_ms: :infinity` the call returns when the Python fake answers or
+  # exits, never on elapsed time. ExUnit's per-test timeout is the backstop.
 
   test "Codex and Claude expose the same provider-neutral adapter callbacks" do
     Code.ensure_loaded!(Codex)
@@ -152,7 +146,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexContractTest do
              Codex.readiness(%{
                binary: @fake_app_server,
                args: ["--scenario", "normal", "--log", log],
-               timeout_ms: @startup_budget_ms
+               timeout_ms: :infinity
              })
 
     assert readiness.ready?

@@ -162,6 +162,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
   def walk(%{"kind" => "PdChip"} = n, _width, pal), do: chip(n, pal)
   def walk(%{"kind" => "PdValueref"} = n, _width, pal), do: valueref(n, pal)
+  def walk(%{"kind" => "PdInlineObject"} = n, _width, pal), do: inline_object(n, pal)
 
   def walk(%{"kind" => "PdButton"} = n, _width, pal), do: button(n, pal)
   def walk(%{"kind" => "PdHr"} = n, _width, pal), do: hr(n, pal)
@@ -736,19 +737,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    # Article links drop their inline at-rest treatment — the `.bp-paper-surface
-    # a` element rule (`text-decoration:none; border-bottom:1px solid
-    # var(--paper-accent-soft)`) owns it in both View and Edit by construction
-    # (moduledoc theme-vs-data contract). The accent link colour stays inline
-    # (the same `--paper-accent` token the CSS rule resolves, so no drift).
-    # Email/default keeps the real underline — the correct convention off-surface.
-    deco =
-      case pal do
-        %{style: :article} -> ""
-        _ -> ";text-decoration:underline"
-      end
+    # Article links carry NO inline style: the `.bp-paper-surface a` element rule
+    # owns the colour and the underline in both View and Edit by construction
+    # (moduledoc theme-vs-data contract), and the standalone export embeds that
+    # stylesheet. The link colour is a THEME value, so it never rides inline here
+    # (task-10ca9c3597695db7). Email/default keeps the inline colour and the real
+    # underline — a mail client strips `<style>`.
+    href = safe_url(Map.get(n, "href", ""))
 
-    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color}#{deco}">#{inner}</a>)
+    case pal do
+      %{style: :article} ->
+        ~s(<a href="#{href}">#{inner}</a>)
+
+      _ ->
+        ~s(<a href="#{href}" style="color:#{pal.link_color};text-decoration:underline">#{inner}</a>)
+    end
   end
 
   # Internal-link kinds. A RESOLVED target (present in the palette's `:wikilinks`
@@ -1167,6 +1170,38 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     href = escape_html("/tags/" <> URI.encode(raw, &URI.char_unreserved?/1))
 
     tag_node_html(href, name, pal)
+  end
+
+  # Inline object (PdInlineObject — a childless inline node with no built-in
+  # renderer, e.g. a schema's `blocks.inline` type). A renderer registered
+  # under the palette's `:inline_objects` gets the stored node and returns
+  # HTML; otherwise the node's text shows in a span (empty when it has none). Same markup on every style; @barkpark/react emits the
+  # same span (inline-object-text.json locks the text).
+  #
+  # A registered renderer that raises or returns a non-string falls back to the
+  # span: one bad renderer must not 500 the save, body_html or delta frames.
+  defp inline_object(n, pal) do
+    type = Map.get(n, "type", "")
+
+    with fun when is_function(fun, 1) <- Map.get(Map.get(pal, :inline_objects) || %{}, type),
+         html when is_binary(html) <- registered_inline_html(fun, Map.get(n, "node", %{})) do
+      html
+    else
+      _ -> inline_object_span(type, Map.get(n, "text", ""))
+    end
+  end
+
+  defp registered_inline_html(fun, node) do
+    fun.(node)
+  rescue
+    _ -> nil
+  end
+
+  # A node without text still leaves its marked span, so it is never dropped
+  # silently: the reader sees nothing, the HTML still names the type.
+  defp inline_object_span(type, text) do
+    ~s(<span class="bp-inline-object" data-inline-type="#{escape_html(type)}">) <>
+      escape_html(text) <> "</span>"
   end
 
   # Verdict chip (PdChip — inline `chip` node). `:article` carries the

@@ -300,7 +300,7 @@
         '<div class="bp-ae-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bp-ae-modal-title">' +
         '<div class="bp-ae-modal-backdrop"></div>' +
         '<div class="bp-ae-modal-card">' +
-        '<h3 id="bp-ae-modal-title" class="bp-ae-modal-title">' + this._e("New folder") + "</h3>" +
+        '<h2 id="bp-ae-modal-title" class="bp-ae-modal-title">' + this._e("New folder") + "</h2>" +
         '<p class="bp-ae-modal-hint text-sm text-muted">' + this._e("Folder collections hold curated sets of assets.") + "</p>" +
         '<input type="text" class="form-input bp-ae-modal-input" placeholder="' + this._e("Collection name") + '" maxlength="120" />' +
         '<div class="bp-ae-modal-actions">' +
@@ -414,7 +414,6 @@
       if (this._modalInput) {
         this._modalInput.addEventListener("keydown", (e) => {
           if (e.key === "Enter") this._submitCollectionModal();
-          if (e.key === "Escape") this._closeCollectionModal();
         });
       }
 
@@ -1561,9 +1560,10 @@
 
       this._inspectorBody.innerHTML =
         preview +
-        '<h3 class="bp-ae-inspector-title">' +
+        // h2: the page's h1 is the library; nothing sits between (axe heading-order).
+        '<h2 class="bp-ae-inspector-title">' +
         esc(doc.title || fi.originalName || doc._id) +
-        "</h3>" +
+        "</h2>" +
         '<div class="bp-ae-inspector-status">' +
         this._procBadge(payload.bp_processing_status) +
         this._statusBadge(this._t(doc.visibility || payload.bp_visibility || "public"), "visibility") +
@@ -1829,9 +1829,9 @@
         '<div class="bp-ae-collection-icon">' +
         (col.kind === "virtual" ? "⚡" : "📁") +
         "</div>" +
-        '<h3 class="bp-ae-inspector-title">' +
+        '<h2 class="bp-ae-inspector-title">' +
         esc(col.title || col.id) +
-        "</h3>" +
+        "</h2>" +
         '<div class="bp-ae-inspector-status">' +
         this._statusBadge(kindLabel, "visibility") +
         this._statusBadge(countLabel, "muted") +
@@ -1963,6 +1963,17 @@
     _openCollectionModal() {
       if (!this._modalEl || !this._modalInput) return;
       this._modalInput.value = this._t("New folder");
+      // The shared dialog focus manager (bp-modal-focus.js): Escape from any
+      // control closes, Tab stays inside, and closing gives focus back to
+      // the opener (task-3713c75065d471d4; one copy since the dialog sweep).
+      const mf = window.BarkparkModalFocus;
+      this._releaseModal =
+        mf && typeof mf.trap === "function"
+          ? mf.trap(this._modalEl, {
+              onEscape: () => this._closeCollectionModal(),
+              fallback: this.querySelector(".bp-ae-new-collection")
+            })
+          : null;
       this._modalEl.hidden = false;
       requestAnimationFrame(() => {
         this._modalInput.focus();
@@ -1971,7 +1982,11 @@
     }
 
     _closeCollectionModal() {
-      if (this._modalEl) this._modalEl.hidden = true;
+      if (!this._modalEl || this._modalEl.hidden) return;
+      this._modalEl.hidden = true;
+      const release = this._releaseModal;
+      this._releaseModal = null;
+      if (release) release();
     }
 
     _submitCollectionModal() {

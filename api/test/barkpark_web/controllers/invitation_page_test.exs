@@ -82,6 +82,34 @@ defmodule BarkparkWeb.InvitationPageTest do
              "not a member of this workspace"
   end
 
+  # task-a065eac6d95635f4: the declined row simply vanished; nothing said the
+  # decline worked. The page it returns to says so, under the heading and at the
+  # start of the title (what a screen reader reads first), once.
+  test "decline says so on the page it returns to, and only once",
+       %{conn: conn, n: n, home: home, target: target} do
+    {conn, user} = sign_in(conn, "declined-says-#{n}@example.com", home)
+    invitation = invite!(target, user)
+
+    declined = post(conn, "/invitations/#{invitation.id}/decline")
+    back = get(recycle(declined), "/invitations")
+
+    assert back.resp_body =~ "You declined the invitation to Fjord Forlag #{n}."
+    assert back.resp_body =~ "<title>Invitation declined · Studio · Invitations</title>"
+
+    again = get(recycle(back), "/invitations")
+    refute again.resp_body =~ "You declined"
+    assert again.resp_body =~ "<title>Studio · Invitations</title>"
+  end
+
+  test "an invited caller's not-a-member page is titled as an invitation; an uninvited one is not",
+       %{conn: conn, n: n, home: home, target: target, other: other} do
+    {conn, user} = sign_in(conn, "titled-#{n}@example.com", home)
+    invite!(target, user)
+
+    assert get(conn, studio(target.slug)).resp_body =~ "<title>Studio · Invitation</title>"
+    assert get(conn, studio(other.slug)).resp_body =~ "<title>Studio · Not a member</title>"
+  end
+
   test "with no invitation there, a real workspace and an unknown slug get the identical page",
        %{conn: conn, n: n, home: home, target: target, other: other} do
     {conn, user} = sign_in(conn, "elsewhere-#{n}@example.com", home)
@@ -146,5 +174,11 @@ defmodule BarkparkWeb.InvitationPageTest do
 
     list = get(conn, "/invitations").resp_body
     assert list =~ "Invitasjonene dine"
+
+    invitation = Repo.get_by!(Invitation, user_id: user.id)
+    declined = post(conn, "/invitations/#{invitation.id}/decline")
+    back = get(recycle(declined), "/invitations").resp_body
+    assert back =~ "Du avslo invitasjonen til Fjord Forlag #{n}."
+    assert back =~ "<title>Invitasjonen er avslått · Studio · Invitasjoner</title>"
   end
 end

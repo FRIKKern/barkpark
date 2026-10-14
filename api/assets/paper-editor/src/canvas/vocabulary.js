@@ -81,7 +81,36 @@ export function parseVocabulary(json) {
     annotations,
     of: [...stringList(parsed.of), ...objects.map((o) => o.name)],
     objects,
+    inlineObjects: inlineObjectEntries(parsed.inline),
   };
+}
+
+// Inline object types (task-85fee859cf3bfef6): a `blocks.inline` entry is
+// `{name, title?, fields}`, or a bare name with no fields. The server admits
+// the name inside prose and checks the fields (FieldVocabulary). An inline
+// object is stored flat in a paragraph: `{type: name, ...fields}`.
+function inlineObjectEntries(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  const seen = new Set();
+  for (const e of list) {
+    const name = typeof e === "string" ? e : e && typeof e === "object" && !Array.isArray(e) ? e.name : null;
+    if (typeof name !== "string" || name === "" || seen.has(name)) continue;
+    seen.add(name);
+    const entry = typeof e === "object" ? e : {};
+    out.push({
+      name,
+      title: typeof entry.title === "string" && entry.title !== "" ? entry.title : name,
+      fields: Array.isArray(entry.fields) ? entry.fields.filter((f) => f && typeof f === "object" && typeof f.name === "string") : [],
+    });
+  }
+  return out;
+}
+
+// The declared inline object type `name`, or null.
+export function inlineObjectFor(vocab, name) {
+  if (!vocab || !Array.isArray(vocab.inlineObjects)) return null;
+  return vocab.inlineObjects.find((o) => o.name === name) || null;
 }
 
 // Custom object blocks (task-96fce87b7b71c288): a `blocks.of` entry may be
@@ -117,9 +146,17 @@ export function allowedHeadingLevels(vocab) {
   return out;
 }
 
-// Portable-doc inline types the vocabulary admits (text always).
+// Portable-doc inline types the vocabulary admits (text always). A declared
+// `internalLink` annotation (Sanity's link to a document) is portable-doc's
+// `wikilink`: the same document link, stored as { target, docId } (FieldVocabulary).
 export function allowedInlineTypes(vocab) {
-  return new Set(["text", ...vocab.marks, ...vocab.annotations]);
+  return new Set([
+    "text",
+    ...vocab.marks,
+    ...vocab.annotations,
+    ...(vocab.annotations.includes("internalLink") ? ["wikilink"] : []),
+    ...(vocab.inlineObjects || []).map((o) => o.name),
+  ]);
 }
 
 // May a TipTap mark of this name sit in the field? (A paste unwraps the ones that
@@ -130,7 +167,7 @@ export function markAllowed(markName, vocab) {
 }
 
 // The portable-doc type a TipTap node JSON stands for, or null when unknown.
-function pdTypeOf(node) {
+export function pdTypeOf(node) {
   if (!node) return null;
   const a = node.attrs || {};
   if (typeof a.bpType === "string" && a.bpType !== "") return a.bpType;
@@ -149,6 +186,18 @@ function* marksOf(node) {
   }
   if (Array.isArray(node.content)) {
     for (const child of node.content) yield* marksOf(child);
+  }
+}
+
+// Every inline object atom's stored type under `node`, depth-first.
+function* inlineAtomTypesOf(node) {
+  if (!node) return;
+  if (node.type === "bpInlineOpaque") {
+    const stored = node.attrs && node.attrs.node;
+    if (stored && typeof stored.type === "string") yield stored.type;
+  }
+  if (Array.isArray(node.content)) {
+    for (const child of node.content) yield* inlineAtomTypesOf(child);
   }
 }
 
@@ -175,6 +224,10 @@ export function docVocabularyViolation(docJson, vocab) {
     for (const markName of marksOf(node)) {
       const pd = MARK_TO_PD[markName] || markName;
       if (!inlines.has(pd)) return `inline ${pd}`;
+    }
+    // An inline object atom (bpInlineOpaque) carries its stored type.
+    for (const kind of inlineAtomTypesOf(node)) {
+      if (!inlines.has(kind)) return `inline ${kind}`;
     }
   }
   return null;
@@ -214,13 +267,33 @@ export function slashItemsForVocabulary(items, vocab) {
   if (!vocab) return items;
   const types = allowedBlockTypes(vocab);
   const quoteAs = quoteTypeFor(vocab);
+  // A declared object block wins over a same-named built-in (task-5bc7771edf30199a):
+  // the built-in row is dropped and the declared one offered in its place.
+  const declared = new Set((vocab.objects || []).map((o) => o.name));
   const kept = (items || [])
-    .filter((it) => it && !it.compound && (types.has(it.type) || (it.type === "blockquote" && quoteAs === "pullquote")))
+    .filter((it) => it && !it.compound && !declared.has(it.type))
+    .filter((it) => types.has(it.type) || (it.type === "blockquote" && quoteAs === "pullquote"))
     // The Quote row stays a Quote row; the pick makes the block the field admits.
     .map((it) => (it.type === "blockquote" && quoteAs === "pullquote" ? { ...it, quoteAs } : it));
   const offered = new Set(kept.map((it) => it.type));
   const objectRows = (vocab.objects || [])
     .filter((o) => !offered.has(o.name))
     .map((o) => ({ group: "Blocks", type: o.name, label: o.title, hint: "◇", desc: "custom block", object: true }));
-  return [...kept, ...objectRows];
+  // One row per DECLARED inline object type, and only those: picking it puts the
+  // object at the caret inside the paragraph (index.js _insertInlineObject).
+  const inlineRows = inlineSlashRows(vocab);
+  return [...kept, ...objectRows, ...inlineRows];
+}
+
+// The slash / palette rows for the declared inline object types. `type` is
+// prefixed so a row never collides with a block row of the same name.
+export function inlineSlashRows(vocab) {
+  return ((vocab && vocab.inlineObjects) || []).map((o) => ({
+    group: "Inline",
+    type: `inline:${o.name}`,
+    label: o.title,
+    hint: "◦",
+    desc: "inside the paragraph",
+    inline: o.name,
+  }));
 }

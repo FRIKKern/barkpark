@@ -106,6 +106,14 @@
         e.stopPropagation();
         this._togglePopover();
       });
+      // Menu button keys (WAI-ARIA APG): ArrowDown opens on the first item,
+      // ArrowUp on the last.
+      btn.addEventListener("keydown", (e) => {
+        if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+        e.preventDefault();
+        if (!this._popover) this._openPopover();
+        this._focusItem(e.key === "ArrowDown" ? 0 : -1);
+      });
       this.appendChild(btn);
       this._trigger = btn;
     }
@@ -200,6 +208,8 @@
         clone.classList.add("bp-overflow-menuitem");
         clone.removeAttribute("data-overflowed");
         clone.setAttribute("role", "menuitem");
+        // Roving focus: the arrows move between items, Tab leaves the menu.
+        clone.setAttribute("tabindex", "-1");
         // Strip phx-* / id attributes from the clone so LiveView doesn't
         // try to bind to it (the clone lives outside the LV-managed
         // subtree once appended to <body>). We forward by clicking the
@@ -212,7 +222,9 @@
         clone.addEventListener("click", (e) => {
           e.preventDefault();
           e.stopPropagation();
-          this._closePopover();
+          // The original is display:none, so focus goes back to the trigger
+          // before the action runs: a dialog it opens returns focus there.
+          this._closePopover({ focusTrigger: true });
           orig.click();
         });
         popover.appendChild(clone);
@@ -228,13 +240,35 @@
       this._popover = popover;
       this._trigger.setAttribute("aria-expanded", "true");
 
+      // The popover lives at the end of <body>, so Tab from the trigger would
+      // walk the page and never reach it: the menu takes focus itself, the
+      // arrows move inside it, Escape closes it back onto the trigger, and
+      // Tab closes it and moves on from the trigger.
+      popover.addEventListener("keydown", (e) => {
+        const items = this._menuItems();
+        const at = items.indexOf(document.activeElement);
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          const step = e.key === "ArrowDown" ? 1 : -1;
+          this._focusItem((at + step + items.length) % items.length);
+        } else if (e.key === "Home" || e.key === "End") {
+          e.preventDefault();
+          this._focusItem(e.key === "Home" ? 0 : -1);
+        } else if (e.key === "Tab") {
+          this._closePopover({ focusTrigger: true });
+        }
+      });
+      this._focusItem(0);
+
       this._outsideHandler = (e) => {
         if (!popover.contains(e.target) && e.target !== this._trigger) {
           this._closePopover();
         }
       };
       this._escHandler = (e) => {
-        if (e.key === "Escape") this._closePopover();
+        if (e.key !== "Escape") return;
+        const inside = popover.contains(document.activeElement);
+        this._closePopover({ focusTrigger: inside });
       };
 
       // Defer wiring so the originating click doesn't immediately
@@ -245,10 +279,22 @@
       }, 0);
     }
 
-    _closePopover() {
+    _menuItems() {
+      return this._popover ? Array.from(this._popover.querySelectorAll('[role="menuitem"]')) : [];
+    }
+
+    // Focus item `i`; a negative index counts from the end.
+    _focusItem(i) {
+      const items = this._menuItems();
+      if (items.length === 0) return;
+      items[(i + items.length) % items.length].focus();
+    }
+
+    _closePopover({ focusTrigger = false } = {}) {
       if (this._popover && document.body.contains(this._popover)) {
         this._popover.remove();
       }
+      if (focusTrigger && this._trigger && this._trigger.isConnected) this._trigger.focus();
       this._popover = null;
       if (this._trigger) this._trigger.setAttribute("aria-expanded", "false");
       if (this._outsideHandler) {

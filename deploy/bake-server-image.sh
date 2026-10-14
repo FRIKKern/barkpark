@@ -213,6 +213,20 @@ timeout 120 git fetch origin --tags --prune || {
   echo "  Retry with: git -c protocol.version=0 fetch origin --tags --prune" >&2
   exit 11
 }
+# >>> restore-go-mod-churn
+# The snapshot lineage carries go.mod/go.sum rewritten by the `go mod tidy` that
+# deploy-rebuild.sh ran until #21539 (2026-10-03). With that churn in the tree the
+# --ff-only merge below aborts ("Your local changes ... go.mod go.sum"), so every
+# bake since has failed and the image stayed on bd27dba66 (measured 2026-10-14).
+# These two files are generated on a box, never authored there: put them back to
+# HEAD. Any other local edit still makes the merge refuse.
+for f in go.mod go.sum; do
+  if ! git diff --quiet -- "$f" 2>/dev/null; then
+    echo "[image-bake] discarding box-side churn in $f (written by an older rebuild's go mod tidy)"
+    git checkout -- "$f"
+  fi
+done
+# <<< restore-go-mod-churn
 git -c core.hooksPath=/dev/null merge --ff-only origin/main
 timeout 2400 bash scripts/deploy-rebuild.sh
 
@@ -284,6 +298,27 @@ fi
 rm -rf /opt/barkpark/api/_build_next
 apt-get clean 2>/dev/null || true
 journalctl --vacuum-size=10M >/dev/null 2>&1 || true
+
+# A provisioned box freshens with `git merge --ff-only`, which refuses a dirty
+# tracked file. Snapshot only a clean checkout, so no box inherits a tree its own
+# freshen cannot update. go.mod/go.sum churn from this bake's build is restored
+# first, the same way as before the merge; anything else left dirty fails the bake
+# and the resolver keeps serving the previous image.
+cd /opt/barkpark
+# >>> assert-clean-checkout
+for f in go.mod go.sum; do
+  if ! git diff --quiet -- "$f" 2>/dev/null; then
+    echo "[image-bake] discarding build churn in $f before the snapshot"
+    git checkout -- "$f"
+  fi
+done
+DIRTY="$(git status --porcelain --untracked-files=no)"
+if [ -n "$DIRTY" ]; then
+  echo "FATAL: /opt/barkpark has local edits to tracked files; refusing to snapshot a checkout that freshen cannot fast-forward:" >&2
+  printf '%s\n' "$DIRTY" >&2
+  exit 12
+fi
+# <<< assert-clean-checkout
 
 echo "BAKE_HEAD=$(git -C /opt/barkpark rev-parse HEAD)"
 echo "BAKE_REMOTE=$(git -C /opt/barkpark rev-parse origin/main)"

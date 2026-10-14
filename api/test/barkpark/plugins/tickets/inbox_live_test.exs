@@ -308,4 +308,19 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
       assert html =~ "shown"
     end
   end
+
+  # Run-8 nb + axe pass: the topbar was a top-level <header>, a SECOND banner
+  # beside Studio's own bar (axe landmark-no-duplicate-banner). It is a region
+  # named by its h1; the page carries no <header> outside its <main>.
+  test "the topbar is a region named by its heading, not a second banner" do
+    html =
+      render_component(&InboxLive.render/1, %{presenter: model([]), data_error: nil, view: :inbox})
+
+    doc = LazyHTML.from_fragment(html)
+    bar = LazyHTML.query(doc, ".bp-tk-topbar")
+    assert LazyHTML.attribute(bar, "role") == ["region"]
+    assert LazyHTML.attribute(bar, "aria-labelledby") == ["bp-tk-title"]
+    assert LazyHTML.query(doc, "#bp-tk-title") |> LazyHTML.text() == "Tickets"
+    assert Enum.count(LazyHTML.query(doc, "header")) == 0
+  end
 end

@@ -21,6 +21,12 @@ defmodule Barkpark.Media.Delivery.Urls do
   # so a client cannot revalidate its way back to gated bytes.
   @no_store_cache "no-store"
 
+  # A transform URL names its whole output: the blob at a path is written once,
+  # and every parameter, the watermark and the stored focal point are in the
+  # cache key. 30 days, not `immutable`: a focal-point or visibility change
+  # reuses the URL, so an edge copy must still expire.
+  @transform_cache "public, max-age=2592000"
+
   @doc "Original binary URL (WoodWing `originalUrl`)."
   @spec original_url(%MediaFile{}, keyword()) :: String.t()
   def original_url(%MediaFile{} = file, opts \\ []) do
@@ -130,6 +136,30 @@ defmodule Barkpark.Media.Delivery.Urls do
   def put_file_cache_headers(conn, _full_path, visibility) do
     Plug.Conn.put_resp_header(conn, "cache-control", file_cache_control(visibility))
   end
+
+  @doc """
+  Cache headers for an on-demand transform (`/media/files/<path>?w=...`).
+
+  The same visibility rule as `put_file_cache_headers/3`, with a longer
+  lifetime for public assets: `#{@transform_cache}`, a strong ETag and a 304
+  on a matching `If-None-Match`. A non-public asset gets `#{@no_store_cache}`
+  and no ETag.
+  """
+  @spec put_transform_cache_headers(Plug.Conn.t(), String.t(), String.t() | nil) ::
+          Plug.Conn.t()
+  def put_transform_cache_headers(conn, full_path, "public") do
+    etag = etag_for(full_path)
+
+    conn =
+      conn
+      |> Plug.Conn.put_resp_header("cache-control", @transform_cache)
+      |> Plug.Conn.put_resp_header("etag", etag)
+
+    if if_none_match_hit?(conn, etag), do: Plug.Conn.send_resp(conn, 304, ""), else: conn
+  end
+
+  def put_transform_cache_headers(conn, full_path, visibility),
+    do: put_file_cache_headers(conn, full_path, visibility)
 
   @doc """
   The D12 `cache-control` VALUE for an asset's bytes, by `bp_visibility`.

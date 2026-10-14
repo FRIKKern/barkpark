@@ -8,6 +8,9 @@
 ### to merge POT files into PO files.
 msgid ""
 msgstr ""
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
 "Language: en\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
@@ -1627,6 +1630,54 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:501
 #, elixir-autogen, elixir-format
 msgid "Color"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Blue"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Red"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Green"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Amber"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Violet"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Pink"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Cyan"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex
+#, elixir-autogen, elixir-format
+msgctxt "profile color"
+msgid "Orange"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:421
@@ -10603,6 +10654,11 @@ msgstr ""
 msgid "no translation available"
 msgstr ""
 
+#: lib/barkpark_web/components/fields/localized_text_field.ex
+#, elixir-autogen, elixir-format
+msgid "(primary, missing)"
+msgstr ""
+
 #: lib/barkpark_web/components/fields/localized_text_field.ex:101
 #, elixir-autogen, elixir-format
 msgid "primary translation `%{primary}` missing — using fallback `%{using}`"
@@ -11319,6 +11375,11 @@ msgctxt "data source"
 msgid "Source"
 msgstr ""
 
+#: lib/barkpark/portable_doc/render/chrome.ex:100
+#, elixir-autogen, elixir-format
+msgid "%{on} of %{total}"
+msgstr ""
+
 #: lib/barkpark/portable_doc/render/chrome.ex:98
 #, elixir-autogen, elixir-format
 msgctxt "data source"
@@ -11445,6 +11506,21 @@ msgstr ""
 msgid "Studio · Invitations"
 msgstr ""
 
+#: lib/barkpark_web/plugs/studio_refusal_html.ex
+#, elixir-autogen, elixir-format
+msgid "Studio · Invitation"
+msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex
+#, elixir-autogen, elixir-format
+msgid "You declined the invitation to %{workspace}."
+msgstr ""
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex
+#, elixir-autogen, elixir-format
+msgid "Invitation declined"
+msgstr ""
+
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:116
 #, elixir-autogen, elixir-format
 msgid "That invitation is no longer open."
@@ -11482,4 +11558,1358 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgctxt "workspace role"
 msgid "owner"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:566
+#, elixir-autogen, elixir-format
+msgid "Inline"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:567
+#, elixir-autogen, elixir-format
+msgid "inside the paragraph"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:568
+#, elixir-autogen, elixir-format
+msgid "Edit %{name}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:572
+#, elixir-autogen, elixir-format
+msgid "required"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Metadata"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Rights"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Media file ID"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "File info"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "URL"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "MIME type"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Size (bytes)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Blur placeholder (LQIP)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Original filename"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Width"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Height"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Asset kind"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Processing status"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "CDN status"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "External processing"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Job ID"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Last callback"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Delivery visibility"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Checked out by"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Checked out at"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Primary collection"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Role"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Focal point"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "X"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Y"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Related assets"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Relation"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Target asset"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Copyright holder"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "License"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Usage notes"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Watermark profile"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Core"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Sharing"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Collection kind"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Virtual filter"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Tags (comma-separated)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Search text"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "MIME prefix"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Parent collection"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Cover asset"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Sort order"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Token"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Expires at"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "not evaluated: %{name} is not supported"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The formula refers to itself (a circular reference)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The formula refers to a cell that does not exist"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "A value has the wrong type for the formula"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "Division by zero"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "No value is available"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The result is not a valid number"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The result has no room to spill into"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown function or name"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Row / column"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal path graph"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "draft"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "revise"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "publish"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "published"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "correction"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "search"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-request"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-accept"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-reject"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "goal-opened"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "goal-snapshot"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "%{seconds}s left"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answer locked in — tap another to change it."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Answers are closed — look up at the host screen."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Connecting to the room…"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "End game"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Game over"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Host controls"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hyperquiz · Host"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Hyperquiz · Player"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Join at"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lock room"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Lots of players are joining this room right now. Refresh in a few seconds to join."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "No points scored yet."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Nobody is hosting this room right now — check the pin, or refresh once your host is up."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Opening the room…"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Player"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Players (%{count})"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Remove %{name}"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Restart question"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reveal answer"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Room"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scores"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Show scores"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Showing the newest %{count}. Lock the room to stop more joining."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Start question"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The host has locked this room, so nobody new can join. Ask the host to unlock it."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The host removed you from this room."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "The room is locked: players already in can answer, nobody new can join."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This host link has expired. Open Host this quiz in Studio again for a new one."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room could not be opened — the quiz service is at room capacity. Nothing is lost: reopen"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room is running the sample question."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "This room is unavailable right now. Try again shortly."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Unlock room"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "You have opened a lot of quiz rooms in the last hour, so this one is on hold — that limit is what keeps every other host's rooms working. Nothing is lost: your existing rooms are still live, and reopening"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "a little later starts this one."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "answers locked"
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "in a moment and the room starts as soon as one frees up."
+msgstr ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 player"
+msgid_plural "%{count} players"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 answer in"
+msgid_plural "%{count} answers in"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/quiz_host_live.ex
+#, elixir-autogen, elixir-format
+msgid "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Could not create %{what}: %{field} %{message}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "Could not create %{what}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "(+1 more)"
+msgid_plural "(+%{count} more)"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "name"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex
+#, elixir-autogen, elixir-format
+msgid "slug"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is greater than"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is less than"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is equal to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is between"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "contains"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is not empty"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "is empty"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "min"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "max"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Start editing to see preview"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "ONIX 3.0 preview"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "export failed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Start editing to see ONIX"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "updates on publish"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 issue:"
+msgid_plural "%{count} issues:"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 error"
+msgid_plural "%{count} errors"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 warning"
+msgid_plural "%{count} warnings"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex
+#, elixir-autogen, elixir-format
+msgid "1 byte"
+msgid_plural "%{count} bytes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign in"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Back to sign in"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Check your email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "you@example.com"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Show password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Hide password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "to continue to Studio on"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Log in with Barkpark Cloud"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "or sign in with email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Forgot password?"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "or"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "email me a sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "no password needed"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Using enterprise SSO? Open your organization's sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "or ask your admin for it."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Barkpark — the self-hosted content studio"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Set a new password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Choose a new password for your account."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "New password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Set new password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "At least %{count} characters."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email confirmed"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Your account is confirmed — you're all set."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Confirmation link expired"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This confirmation link is invalid, expired, or has already been used."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm your email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Click below to confirm your account."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Confirm email"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "If that address has an account, a sign-in link is on its way. The link is single-use and expires soon — open it promptly, from this device if you can."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "No password needed — enter your account email and we'll send you a link that signs you in."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Rather use your password?"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "If that address has an account, a password-reset link is on its way. The link is single-use and expires soon — open it promptly."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Reset your password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Enter your account email and we'll send you a link to set a new password."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email me a reset link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Remembered it after all?"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Two-step verification"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Enter the six-digit code from your authenticator app."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Authenticator code"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Use a recovery code instead"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Recovery code"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "recovery code"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Verify"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Start over"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Signed in."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Invalid API token."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Token is required."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This sign-in link is invalid or has expired."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email or password is incorrect."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Email and password are required."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "This sign-in link is invalid or has expired — request a fresh one."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Password updated — sign in with your new password."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That reset link is invalid or has expired — request a fresh one."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That code didn't work — try again."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in expired — start again."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "You were already signed out."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Signed out."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "That password can't be used — pick a different one."
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Sign-in link"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Reset password"
+msgstr ""
+
+#: lib/barkpark_web/controllers/session_controller.ex
+#, elixir-autogen, elixir-format
+msgid "Password %{message}."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "OnixEdit Codelist Staleness"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current registry issue:"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Drift is UNMEASURED, not absent."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Scanned %{count} book document(s) and recognized 0 codelist refs across all of them."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "This analyzer only counts a ref when one map carries both"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "and"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "no writer produces that shape, so every row below reports"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "rather than a clean bill of health."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Treat this page as offline until refs are annotated."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "No book documents in the production dataset yet."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book title"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Codelist refs"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Ref issue versions"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Current registry version"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Actions"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "view"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-validate"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Mark accepted as-is"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last re-validate diff —"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "changed: %{count}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "removed: %{count}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "added: %{count}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book %{id} not loaded in this view."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Re-validated %{id}: %{changed} changed, %{removed} removed, %{added} added"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Marked %{id} as accepted as-is."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book %{id} no longer exists."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Book %{id} exists in more than one workspace. Reload the page and try again."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Acknowledge failed: %{reason}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "current"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "unmeasured"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "stale"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "deprecated"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "acknowledged"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Bokbasen Submissions"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Reset"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "From"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "To"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "No Bokbasen submissions yet."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "No submissions match your filters."
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Submission ID"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last action"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Last error"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "View Document"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Submissions pages"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Newer"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Page %{page}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Older"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Document not found in current page"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Retry enqueued for %{id}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Retry failed: %{reason}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "Cannot retry from state %{state}"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "OnixEdit · Plugin Route Highway"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "This page proves Barkpark's"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "macro emitted the route declared by OnixEdit's"
+msgstr ""
+
+#: lib/barkpark/plugins/onixedit/web/staleness_live.ex
+#, elixir-autogen, elixir-format
+msgid "callback."
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search — Barkpark"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search everything."
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search everything…"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "live search served by Phoenix"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "type to search"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "graph truncated (%{reason})"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "showing %{shown} of %{total} hits"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "Search"
+msgstr ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 document"
+msgid_plural "%{count} documents"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/finder_live.ex
+#, elixir-autogen, elixir-format
+msgid "1 hit"
+msgid_plural "%{count} hits"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex
+#, elixir-autogen, elixir-format
+msgid "This action works on book documents only"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex
+#, elixir-autogen, elixir-format
+msgid "Action %{name} belongs to a plugin that is turned off in this workspace"
 msgstr ""

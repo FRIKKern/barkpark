@@ -97,43 +97,70 @@ defmodule Barkpark.Content.Lifecycle do
   # call with no caller context (an internal job) is unchanged.
   defp ensure_may_publish(opts), do: Barkpark.Content.LiveWriteGate.check_seat(opts)
 
+  @doc """
+  Publish a draft that was BUILT, not stored: the unsaved `%Document{}`
+  `Writer.build_document/4` returns. Every publish gate runs exactly as in
+  `publish_document/4`. The published row is written once, with one revision,
+  event and audit row. When `draft.id` names an existing draft row, that row is
+  deleted, as a publish deletes its draft. Called by the mutate door's direct
+  publish (task-6e2552cdeb223fa2).
+  """
+  @spec publish_built_draft(Document.t(), String.t(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def publish_built_draft(%Document{} = draft, type, dataset, opts \\ []) do
+    opts = Keyword.put(opts, :built_draft, true)
+
+    span_write(:publish, opts, fn ->
+      publish_draft(draft, DraftId.published_id(draft.doc_id), type, dataset, opts)
+    end)
+  end
+
   defp do_publish_document(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)
     pid = DraftId.published_id(published_doc_id)
 
     case Content.get_document(did, type, dataset, opts) do
       {:ok, draft} ->
-        # THE INCUMBENT, READ ONCE (task-c1f155da34d3338f). The published row
-        # this publish is about to replace — `nil` when there is none, which is
-        # the definition of a FIRST publish (a birth). It was already being read
-        # here, inside the task publish-door gate (now
-        # `Barkpark.Tasks.PublishGuards.door_gate/4`), purely to decide the same
-        # question ("First publish — a birth" — see its `_ ->` clause);
-        # hoisting the read makes that fact available to the `:before_publish`
-        # payload as well, and costs no extra query.
-        published = read_incumbent(pid, type, dataset, opts)
-
-        # Plugin pre-publish fences (`Barkpark.Plugin.pre_publish_fences/0`,
-        # task-8273f2f1b24a6de1), resolved ONCE here in load order and run at
-        # two positions: `:door` below, `:in_transaction` after the incumbent
-        # is locked inside the publish transaction. `[]` with plugins off, and
-        # then this publish runs no plugin gate at either position.
-        fences = PrePublishFences.list()
-
-        # The publish-door gates — immediately after the draft read, BEFORE the
-        # wall and the :before_publish hook fire, so a refusal is side-effect-free
-        # (the Writer-seam gate-position precedent). The `:door` fences run last,
-        # exactly where the task publish-door lifecycle gate ran when this
-        # module named it directly; each refusal is returned verbatim.
-        with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
-             :ok <- ensure_bound_title_agrees(draft),
-             :ok <- ensure_no_empty_list_members(draft, type, dataset, opts),
-             :ok <- PrePublishFences.run(fences, :door, [type, draft, published, opts]) do
-          publish_after_gate(draft, pid, type, dataset, opts, published, fences)
-        end
+        publish_draft(draft, pid, type, dataset, opts)
 
       {:error, :not_found} ->
         {:error, :not_found}
+    end
+  end
+
+  defp publish_draft(%Document{} = draft, pid, type, dataset, opts) do
+    # THE INCUMBENT, READ ONCE (task-c1f155da34d3338f). The published row
+    # this publish is about to replace — `nil` when there is none, which is
+    # the definition of a FIRST publish (a birth). It was already being read
+    # here, inside the task publish-door gate (now
+    # `Barkpark.Tasks.PublishGuards.door_gate/4`), purely to decide the same
+    # question ("First publish — a birth" — see its `_ ->` clause);
+    # hoisting the read makes that fact available to the `:before_publish`
+    # payload as well, and costs no extra query.
+    # A direct publish read the incumbent already (`:incumbent`).
+    published =
+      case Keyword.fetch(opts, :incumbent) do
+        {:ok, incumbent} -> incumbent
+        :error -> read_incumbent(pid, type, dataset, opts)
+      end
+
+    # Plugin pre-publish fences (`Barkpark.Plugin.pre_publish_fences/0`,
+    # task-8273f2f1b24a6de1), resolved ONCE here in load order and run at
+    # two positions: `:door` below, `:in_transaction` after the incumbent
+    # is locked inside the publish transaction. `[]` with plugins off, and
+    # then this publish runs no plugin gate at either position.
+    fences = PrePublishFences.list()
+
+    # The publish-door gates — immediately after the draft read, BEFORE the
+    # wall and the :before_publish hook fire, so a refusal is side-effect-free
+    # (the Writer-seam gate-position precedent). The `:door` fences run last,
+    # exactly where the task publish-door lifecycle gate ran when this
+    # module named it directly; each refusal is returned verbatim.
+    with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
+         :ok <- ensure_bound_title_agrees(draft),
+         :ok <- ensure_no_empty_list_members(draft, type, dataset, opts),
+         :ok <- PrePublishFences.run(fences, :door, [type, draft, published, opts]) do
+      publish_after_gate(draft, pid, type, dataset, opts, published, fences)
     end
   end
 
@@ -312,6 +339,10 @@ defmodule Barkpark.Content.Lifecycle do
   defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts, published, fences) do
     ctx = WriteScope.build_ctx(opts)
 
+    # A built draft (`publish_built_draft/4`) has no stored row of its own to
+    # discard on a `duplicate_of` refusal; the refusal is returned as is.
+    built_draft = Keyword.get(opts, :built_draft, false)
+
     # `published_doc` (task-c1f155da34d3338f): the row this publish REPLACES, or
     # `nil` on a first publish. `prev_doc` cannot answer that question — it is
     # the draft, the same value as `doc` — so a hook that needs to tell a birth
@@ -465,7 +496,7 @@ defmodule Barkpark.Content.Lifecycle do
                       # the read above, delete nothing and surface a rev_mismatch
                       # (412) instead of destroying the newer edit. A vanished
                       # draft resolves to {:error, :not_found} (prior semantics).
-                      case fenced_delete(draft) do
+                      case remove_draft(draft, opts) do
                         :ok -> {published, prev_pub_rev}
                         {:error, reason} -> Repo.rollback(reason)
                       end
@@ -496,6 +527,9 @@ defmodule Barkpark.Content.Lifecycle do
           # draft in place, so the terminal-refusal draft discard runs here.
           # Nothing else below applies — no row was published.
           case result do
+            {:error, {:duplicate_of, _}} = refused when built_draft ->
+              refused
+
             {:error, {:duplicate_of, dup_payload}} ->
               discard_draft_refused_as_duplicate(draft, dup_payload, type, dataset, opts)
 
@@ -536,6 +570,9 @@ defmodule Barkpark.Content.Lifecycle do
       # (a direct `publish_document/4` and `POST /v1/data/mutate`) end with no
       # draft. A batch that CREATED the draft in the same transaction needs
       # neither: the rollback already removed it.
+      {:error, {:duplicate_of, _}} = refused when built_draft ->
+        refused
+
       {:error, {:duplicate_of, payload}} ->
         discard_draft_refused_as_duplicate(draft, payload, type, dataset, opts)
 
@@ -1291,6 +1328,23 @@ defmodule Barkpark.Content.Lifecycle do
       if Repo.in_transaction?(),
         do: reraise(e, __STACKTRACE__),
         else: {:error, {:raised, Exception.message(e)}}
+  end
+
+  # A stored draft is deleted under its rev fence. A built draft was never
+  # stored: when it stands in for an existing draft row (`id` set), that row is
+  # deleted as the two-step publish would; with no row there is nothing to do.
+  defp remove_draft(%Document{} = draft, opts) do
+    cond do
+      not Keyword.get(opts, :built_draft, false) ->
+        fenced_delete(draft)
+
+      is_nil(draft.id) ->
+        :ok
+
+      true ->
+        _ = Repo.delete_all(from(d in Document, where: d.id == ^draft.id))
+        :ok
+    end
   end
 
   defp fenced_delete(%Document{} = doc) do

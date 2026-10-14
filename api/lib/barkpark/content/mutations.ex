@@ -77,6 +77,7 @@ defmodule Barkpark.Content.Mutations do
     ReadOnlyFields,
     ReferenceIntegrity,
     Warnings,
+    WriteScope,
     Writer
   }
 
@@ -126,7 +127,19 @@ defmodule Barkpark.Content.Mutations do
       [:barkpark, :content, :mutate],
       %{count: length(mutations), dataset: dataset, workspace_id: workspace_id},
       fn ->
-        result = Door.admit(fn -> apply_with_stale_retry(mutations, dataset, opts) end)
+        result =
+          Door.admit(fn ->
+            # One schema read per type for the whole batch (task-6e2552cdeb223fa2).
+            # The validation and publish reads pass bare scope keys, without the
+            # door's `memoize: true`, so each document re-read its schema and
+            # re-expanded its named types. The process memo covers every read
+            # in the batch and is emptied when the batch returns; a schema
+            # write inside the batch resets it.
+            WriteScope.with_process_memo(fn ->
+              apply_with_stale_retry(mutations, dataset, opts)
+            end)
+          end)
+
         {result, %{count: length(mutations), dataset: dataset, workspace_id: workspace_id}}
       end
     )
@@ -144,6 +157,32 @@ defmodule Barkpark.Content.Mutations do
   # so they are not reported twice. A second loss answers a typed
   # `rev_mismatch` (409, "document was modified by another writer"), never
   # `internal_error`.
+  # The caller-facing sentence for a batch-level connection fault. A refused
+  # checkout means the transaction never ran, so nothing was written; a
+  # connection lost at COMMIT is the one case the server cannot know, so the
+  # message says to re-read before resending rather than promising either.
+  defp batch_fault_message(%DBConnection.ConnectionError{} = e) do
+    "the database connection was refused or lost on this batch " <>
+      "(#{Exception.message(e)}). Nothing was refused on its merits — this is " <>
+      "transient. The batch is one transaction: a refused connection applied " <>
+      "nothing, and only a connection lost at commit leaves the outcome unknown. " <>
+      "Re-read the ids you sent before resending the identical batch."
+  end
+
+  # Test-only fault seam, the same `:writer_fault` config `Content.Writer`
+  # reads (site `:batch_transaction`): the SQL sandbox cannot produce a real
+  # pool shed, so the test raises the exception the live run carried, inside
+  # the batch transaction. `nil` outside tests.
+  defp inject_batch_fault! do
+    case Application.get_env(:barkpark, :writer_fault) do
+      {:batch_transaction, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
   defp apply_with_stale_retry(mutations, dataset, opts) do
     warnings = Barkpark.Content.Warnings.snapshot()
 
@@ -181,9 +220,17 @@ defmodule Barkpark.Content.Mutations do
     Broadcast.claim_deferred_queue()
     if dry_run?, do: Process.put(@dry_run_key, true)
 
+    # The batch's audit rows are buffered and appended in ONE insert as the
+    # transaction's last statement, so the workspace's audit-chain lock is held
+    # for that append and the commit, not for the whole batch (see
+    # `Barkpark.Audit.defer_emits/0`). `:nested` when an enclosing batch owns
+    # the buffer; only the owner flushes.
+    audit_owner? = Barkpark.Audit.defer_emits() == :owner
+
     try do
       result =
         Repo.transaction(fn ->
+          inject_batch_fault!()
           :ok = serialize_unscoped_batch(opts)
           tx_id = Writer.generate_rev()
 
@@ -200,6 +247,8 @@ defmodule Barkpark.Content.Mutations do
 
           results = apply_all(mutations, dataset, opts, caller)
 
+          if audit_owner? and not dry_run?, do: Barkpark.Audit.flush_deferred!()
+
           # DRY RUN: every gate, fence and write above ran for real, so the
           # results are exactly what a real batch would answer — then the whole
           # transaction is thrown away.
@@ -208,7 +257,8 @@ defmodule Barkpark.Content.Mutations do
 
       case result do
         {:ok, _} ->
-          Broadcast.flush_deferred_broadcasts()
+          if audit_owner?, do: Barkpark.Audit.finish_deferred(:committed)
+          Broadcast.flush_deferred_broadcasts(visibility: Keyword.get(opts, :visibility, :sync))
           result
 
         {:error, {@dry_run_key, would_be}} ->
@@ -226,6 +276,28 @@ defmodule Barkpark.Content.Mutations do
           compensating_discard(result, mutations, dataset, opts)
       end
     rescue
+      # task-f8233616de3513d4 — a refused or lost DB checkout on the BATCH'S own
+      # transaction (the pool shed it: "request was dropped from queue").
+      # `Content.Writer.create_document/4` already types this fault for its own
+      # Repo calls (#15489), but the batch transaction's checkout is above it,
+      # so under a pool shed 8,011 batches answered 503 `internal_error`
+      # "unknown error (DBConnection.ConnectionError)" (run8-sweep2 probe).
+      # Same typed tuple as the write twin, so the caller gets 503
+      # `storage_unavailable` / reason `connection_unavailable`. Narrow on
+      # purpose: only this struct; every other exception keeps propagating.
+      e in DBConnection.ConnectionError ->
+        Broadcast.clear_deferred_broadcasts()
+        require Logger
+
+        Logger.error(
+          "Barkpark.Content.Mutations.apply_mutations/3: the database connection was " <>
+            "refused or lost on the batch transaction (dataset=#{inspect(dataset)}, " <>
+            "#{length(mutations)} mutation(s)) — answering 503 storage_unavailable/" <>
+            "connection_unavailable. exception=#{Exception.message(e)}"
+        )
+
+        {:error, {:connection_unavailable, batch_fault_message(e)}}
+
       e ->
         Broadcast.clear_deferred_broadcasts()
 
@@ -235,6 +307,7 @@ defmodule Barkpark.Content.Mutations do
         end
     after
       Process.delete(@dry_run_key)
+      if audit_owner?, do: Barkpark.Audit.finish_deferred(:rolled_back)
     end
   end
 
@@ -376,6 +449,11 @@ defmodule Barkpark.Content.Mutations do
   # close a cycle with one either. `lock_chain!/1` is re-entrant, so a nil-
   # workspace document's own emit later in the batch does not wait on itself.
   # Scoped batches are untouched.
+  #
+  # Since the batch buffers its audit rows (`Audit.defer_emits/0`), its emits
+  # take no chain lock mid-batch; the flush takes every chain it needs in sorted
+  # key order. Other locks still take a chain lock mid-batch
+  # (`DedupWall.lock_publish_scope!/3`), so the serializer stays.
   defp serialize_unscoped_batch(opts) do
     if is_nil(Keyword.get(opts, :workspace_id)), do: Barkpark.Audit.lock_chain!(nil), else: :ok
   end
@@ -599,6 +677,60 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # ── Direct publish (task-6e2552cdeb223fa2) ─────────────────────────────────
+  #
+  # `{"createOrReplace": doc, "publish": true}` lands the document on its
+  # PUBLISHED row in one row write, with one revision, event and audit row. The
+  # two-step `createOrReplace` + `publish` costs a draft insert, a published
+  # write and a draft delete, each with its own revision, event and audit row.
+  # Nothing is skipped on the way: `Writer.build_document/4` runs the whole
+  # create pipeline (fences, `:before_save`, schema check, encryption) and
+  # returns the draft unsaved, and `Lifecycle.publish_built_draft/4` runs every
+  # publish gate on it. An existing draft is deleted, as the two-step path
+  # deletes it. `ifRevisionID` is checked against the published row, the row
+  # this replaces. Not offered for system types and papers, whose writes carry
+  # their own fences (`@direct_publish_refused_types`).
+  @direct_publish_refused_types ["paper" | Writer.system_types()]
+
+  defp apply_one(%{"createOrReplace" => attrs, "publish" => true}, dataset, opts)
+       when is_map(attrs) do
+    type = attrs["_type"] || attrs["type"]
+    id = attrs["_id"] || attrs["doc_id"]
+    expected = if_rev(attrs)
+
+    if type in @direct_publish_refused_types do
+      {:error, {:direct_publish_unsupported, type}}
+    else
+      existing =
+        case id && type && Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+          {:ok, doc} -> doc
+          _ -> nil
+        end
+
+      with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
+           :ok <- ensure_rev(existing, expected),
+           :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+           :ok <-
+             ensure_read_only_unchanged(
+               type,
+               existing,
+               incoming_content(attrs),
+               id,
+               dataset,
+               opts
+             ),
+           {:ok, draft} <- Writer.build_document(type, attrs, dataset, opts),
+           {:ok, published} <-
+             Content.publish_built_draft(draft, type, dataset, [incumbent: existing] ++ opts) do
+        {:ok, published, "createOrReplace"}
+      end
+    end
+  end
+
+  defp apply_one(%{"createOrReplace" => _attrs, "publish" => flag}, _dataset, _opts)
+       when flag not in [true, false],
+       do: {:error, {:invalid_publish_flag, flag}}
+
   defp apply_one(%{"createOrReplace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
@@ -700,6 +832,30 @@ defmodule Barkpark.Content.Mutations do
   defp apply_one(%{"deleteExactDraft" => %{"id" => id, "type" => type} = op}, dataset, opts) do
     with {:ok, doc} <- Content.delete_exact_draft(id, type, dataset, if_rev(op), opts),
          do: {:ok, doc, "deleteExactDraft"}
+  end
+
+  # A `delete` naming a `drafts.` id deletes ONLY that draft; the published row
+  # survives (Sanity semantics, task-47f8394f07b97f8b). Before, the id was
+  # widened to the whole pair, so asking to drop a draft deleted the published
+  # document too. It runs through `delete_exact_draft/5`, fenced at the caller's
+  # `ifRevisionID` or else at the draft's rev as read here. References point at
+  # the published id, so they block it only when no published row exists, i.e.
+  # when the draft IS the whole document. A bare id keeps deleting both rows.
+  defp apply_one(
+         %{"delete" => %{"id" => "drafts." <> _ = id, "type" => type} = op},
+         dataset,
+         opts
+       ) do
+    case Content.get_document(id, type, dataset, opts) do
+      {:ok, draft} ->
+        with :ok <- ensure_draft_unreferenced(id, type, op, dataset, opts),
+             {:ok, doc} <-
+               Content.delete_exact_draft(id, type, dataset, if_rev(op) || draft.rev, opts),
+             do: {:ok, doc, "delete"}
+
+      _ ->
+        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+    end
   end
 
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
@@ -1891,6 +2047,15 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp ensure_unreferenced(_id, _type, _op, _dataset, _opts), do: :ok
+
+  # A draft delete leaves the published row, which is what references name, so
+  # only a draft-only document (no published row) is checked.
+  defp ensure_draft_unreferenced(id, type, op, dataset, opts) do
+    case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+      {:ok, _published} -> :ok
+      _ -> ensure_unreferenced(id, type, op, dataset, opts)
+    end
+  end
 
   defp delete_target(id, type, dataset, opts) do
     Enum.find_value([DraftId.published_id(id), DraftId.draft_id(id)], fn v ->

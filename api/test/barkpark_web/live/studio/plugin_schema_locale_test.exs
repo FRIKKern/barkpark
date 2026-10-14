@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Studio.PluginSchemaLocaleTest do
     assert html =~ "Time limit (seconds)"
   end
 
-  test "every Quiz, Forms and paper-form schema string has a translation marker" do
+  test "every Quiz, Forms, paper-form and Media schema string has a translation marker" do
     forms =
       Barkpark.Plugins.Forms.register_schemas(dataset: @dataset)
       |> Enum.filter(&(&1.name in PluginSchemaCopy.schemas()))
@@ -111,15 +111,75 @@ defmodule BarkparkWeb.Studio.PluginSchemaLocaleTest do
       |> Jason.decode!()
       |> then(&%{name: &1["name"], title: &1["title"], fields: &1["fields"]})
 
-    schemas = [Barkpark.Quiz.Content.schema(), form_response | forms]
+    media = Barkpark.Plugins.Media.register_schemas([])
+
+    schemas = [Barkpark.Quiz.Content.schema(), form_response | forms ++ media]
     assert Enum.map(schemas, & &1.name) |> Enum.sort() == Enum.sort(PluginSchemaCopy.schemas())
 
+    # Group tabs and desk filters are chrome too (Media's Metadata/File/Rights
+    # and Images/Video/…).
     strings =
       schemas
-      |> Enum.flat_map(fn s -> [s.title | Enum.flat_map(s.fields, &titles/1)] end)
+      |> Enum.flat_map(fn s ->
+        [s.title | Enum.flat_map(s.fields, &titles/1)] ++
+          group_titles(Map.get(s, :groups)) ++ group_titles(Map.get(s, :desk_groups))
+      end)
       |> Enum.uniq()
 
     assert strings -- PluginSchemaCopy.markers() == []
+  end
+
+  # Ruling on task-0ded99e28e620ba5 ("Media where needed"): the media asset
+  # editor read Alt text, Caption, Role, Focal point and its Metadata / File /
+  # Rights tabs in English in an nb-NO Studio. The stored schema stays English.
+  test "a Norwegian media asset editor reads Norwegian titles and tabs; the stored schema stays English",
+       %{conn: conn, ws: ws, proj: proj} do
+    scope = [workspace_id: ws.id, project_id: proj.id]
+    [asset | _] = Barkpark.Plugins.Media.register_schemas([])
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => asset.name,
+          "title" => asset.title,
+          "visibility" => "public",
+          "fields" => asset.fields,
+          "groups" => asset.groups,
+          "desk_groups" => asset.desk_groups
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "mediaAsset",
+        %{"doc_id" => "asset-loc-1", "title" => "fjord.png"},
+        @dataset,
+        scope
+      )
+
+    path = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/mediaAsset/asset-loc-1"
+    {:ok, view, _} = live(conn, path)
+    html = view |> element(".editor-panel") |> render()
+
+    for word <- ["Alt-tekst", "Bildetekst", "Rolle", "Fokuspunkt", "Sjekket ut av", "Rettigheter"] do
+      assert html =~ word, "expected #{inspect(word)} in the nb-NO media asset editor"
+    end
+
+    for english <- ["Focal point", "Checked out by", ">Rights<", "Related assets"] do
+      refute html =~ english
+    end
+
+    {:ok, stored} = Content.resolve_schema("mediaAsset", @dataset, scope)
+    assert Enum.find(stored.fields, &(&1["name"] == "focalPoint"))["title"] == "Focal point"
+    assert Enum.map(stored.groups, & &1["title"]) == ["Metadata", "File", "Rights"]
+
+    {:ok, _} = Tenancy.set_workspace_locale(ws, "en")
+    {:ok, en_view, _} = live(conn, path)
+    en = en_view |> element(".editor-panel") |> render()
+    assert en =~ "Focal point"
+    assert en =~ "Checked out by"
   end
 
   test "localize/1 leaves a schema that no content plugin owns unchanged" do
@@ -129,6 +189,11 @@ defmodule BarkparkWeb.Studio.PluginSchemaLocaleTest do
              PluginSchemaCopy.localize(schema)
            end) == schema
   end
+
+  defp group_titles(list) when is_list(list),
+    do: for(%{"title" => t} <- list, is_binary(t), do: t)
+
+  defp group_titles(_), do: []
 
   defp titles(%{} = f) do
     own = for k <- ["title", "description"], is_binary(f[k]), do: f[k]

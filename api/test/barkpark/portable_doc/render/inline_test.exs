@@ -193,10 +193,17 @@ defmodule Barkpark.PortableDoc.Render.InlineTest do
     end
 
     test "unknown type DEGRADES, never raises (wire §6, lvw-t1)" do
-      # Childless → the empty string (matches Go pdrender). The historical
-      # `raise ArgumentError` 500ed saves/body_html/deltas/Studio the moment one
-      # forward-compat inline node reached the renderer.
-      assert Inline.compose_inline(%{"type" => "mystery"}, false) == ""
+      # The historical `raise ArgumentError` 500ed saves/body_html/deltas/Studio
+      # the moment one forward-compat inline node reached the renderer.
+      # A childless typed node is an inline object (task-85fee859cf3bfef6): it
+      # composes to a PdInlineObject, and with no text-carrying key the walker
+      # renders it as nothing (inline_object_parity_test.exs).
+      assert Inline.compose_inline(%{"type" => "mystery"}, false) == %{
+               "kind" => "PdInlineObject",
+               "type" => "mystery",
+               "text" => "",
+               "node" => %{"type" => "mystery"}
+             }
 
       # A D6-style node dual-writes its visible fallback as a text child —
       # children still render through a plain PdText wrapper.

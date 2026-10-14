@@ -271,7 +271,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
 
       <section style="margin:1.6rem 0;">
         <h2 style="font-size:0.95rem; letter-spacing:0.03em; text-transform:uppercase; opacity:0.6;">
-          Mirror queue <span style="opacity:0.7; text-transform:none; letter-spacing:0;">(github_mirror)</span>
+          Mirror queue <span style="text-transform:none; letter-spacing:0;">(github_mirror)</span>
         </h2>
         <div data-role="github-queue"
              style="display:flex; flex-wrap:wrap; gap:1.6rem; font-variant-numeric:tabular-nums;">

@@ -15,6 +15,7 @@ defmodule BarkparkWeb.InvitationPageController do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Members
   alias BarkparkWeb.StudioLocale
+  alias BarkparkWeb.StudioRefusalHTML
   alias BarkparkWeb.Studio.ScopeResolver
   alias BarkparkWeb.Studio.StudioLive.Paths
 
@@ -43,9 +44,18 @@ defmodule BarkparkWeb.InvitationPageController do
   def decline(conn, %{"id" => id}) do
     case conn.assigns[:current_user] do
       %{id: user_id} ->
+        invitation = find(user_id, id)
+
         case Members.decline_invitation(user_id, id) do
-          :ok -> redirect(conn, to: "/invitations")
-          {:error, _} -> render_page(put_status(conn, 422), user_id, :not_open)
+          :ok ->
+            # Said on the page it returns to, so a decline is not a row that
+            # silently vanishes (task-a065eac6d95635f4).
+            conn
+            |> put_flash(:declined, invitation && StudioRefusalHTML.invitation_name(invitation))
+            |> redirect(to: "/invitations")
+
+          {:error, _} ->
+            render_page(put_status(conn, 422), user_id, :not_open)
         end
 
       _ ->
@@ -85,7 +95,8 @@ defmodule BarkparkWeb.InvitationPageController do
     |> render("invitations.html",
       invitations: Members.list_invitations_for_user(user_id),
       csrf_token: Plug.CSRFProtection.get_csrf_token(),
-      error: error
+      error: error,
+      declined: Phoenix.Flash.get(conn.assigns[:flash] || %{}, :declined)
     )
   end
 end

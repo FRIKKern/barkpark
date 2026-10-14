@@ -50,7 +50,12 @@ defmodule BarkparkWeb.StudioRefusalHTML do
     assigns =
       Map.merge(assigns, %{
         lang: StudioLocale.html_lang(),
-        title: gettext("Studio · Not a member"),
+        # The tab title is read first; an invited caller's page is an invitation.
+        title:
+          if(invitation,
+            do: gettext("Studio · Invitation"),
+            else: gettext("Studio · Not a member")
+          ),
         heading:
           if(invitation,
             do: gettext("You're invited to %{workspace}", workspace: invitation_name(invitation)),
@@ -110,7 +115,11 @@ defmodule BarkparkWeb.StudioRefusalHTML do
     assigns =
       Map.merge(assigns, %{
         lang: StudioLocale.html_lang(),
-        title: gettext("Studio · Invitations"),
+        declined:
+          assigns[:declined] &&
+            gettext("You declined the invitation to %{workspace}.",
+              workspace: assigns[:declined]
+            ),
         heading: gettext("Your invitations"),
         none: gettext("You have no pending invitations."),
         error: assigns[:error] && gettext("That invitation is no longer open."),
@@ -119,9 +128,22 @@ defmodule BarkparkWeb.StudioRefusalHTML do
         decline: gettext("Decline")
       })
 
+    # A decline's result leads the title too: the title is what a screen
+    # reader reads first when the page comes back.
+    assigns =
+      Map.put(
+        assigns,
+        :title,
+        if(assigns.declined,
+          do: gettext("Invitation declined") <> " · " <> gettext("Studio · Invitations"),
+          else: gettext("Studio · Invitations")
+        )
+      )
+
     ~H"""
     <.page lang={@lang} title={@title}>
       <h1>{@heading}</h1>
+      <p :if={@declined} class="notice">{@declined}</p>
       <p :if={@error} role="alert">{@error}</p>
       <p :if={@invitations == []}>{@none}</p>
       <ul :if={@invitations != []} class="invites">
@@ -166,8 +188,9 @@ defmodule BarkparkWeb.StudioRefusalHTML do
   defp role_word("member"), do: pgettext("workspace role", "member")
   defp role_word(role), do: role
 
-  defp invitation_name(%{workspace_name: name}) when is_binary(name) and name != "", do: name
-  defp invitation_name(%{workspace: slug}), do: slug
+  @doc "The name an invitation's workspace is shown by: its name, else its slug."
+  def invitation_name(%{workspace_name: name}) when is_binary(name) and name != "", do: name
+  def invitation_name(%{workspace: slug}), do: slug
 
   attr(:lang, :string, required: true)
   attr(:title, :string, required: true)

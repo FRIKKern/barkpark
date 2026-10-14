@@ -101,7 +101,12 @@ defmodule Barkpark.Webhooks.Dispatcher do
     # change in workspace B never selects (or delivers to) workspace A's
     # webhooks. `opts` carries `:workspace_id` / `:project_id`; an unscoped
     # caller (no workspace_id) keeps the dataset-only behaviour.
-    webhooks = Webhooks.active_webhooks_for(dataset, event, type, opts)
+    # `:selected_webhooks` is the selection a post-commit flush already ran for
+    # this (dataset, event, type, scope) (`Content.Broadcast.flush_webhooks/1`).
+    webhooks =
+      Keyword.get_lazy(opts, :selected_webhooks, fn ->
+        Webhooks.active_webhooks_for(dataset, event, type, opts)
+      end)
 
     fan_out(webhooks, fn wh -> deliver(wh, body, event_id) end, %{
       source: :content,

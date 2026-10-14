@@ -180,6 +180,11 @@ config :barkpark, :search_analytics_async, false
 # `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
 config :barkpark, :audit_dispatch_async, false
 
+# The content write's post-commit work (webhook selection, async edge upserts)
+# runs inline in the test's process, for the same reason as the line above.
+# Read by `Barkpark.Content.Broadcast.flush_deferred_broadcasts/1`.
+config :barkpark, :post_commit_async, false
+
 # Task transition → paper cache-bust (`Barkpark.Tasks.PaperRefresh`) is OFF by
 # default in tests: its async spawn would leak queries past a test's sandbox
 # owner (the audit-dispatch deadlock above), and inline it would add queries to
@@ -411,3 +416,19 @@ config :barkpark, Barkpark.Quiz.Room, join_burst: 1_000_000, join_rate_per_sec: 
 # suites exercise them; the flag-off behaviour is pinned by synchronous tests
 # that switch it off for their own duration (canonical_shape_writes_flag_test).
 config :barkpark, canonical_shape_writes: true
+
+# The finder's shared graph derivation keeps its result for 0 ms in tests:
+# every test seeds its own corpus in a sandboxed transaction, and a result
+# cached by one test must never be served to the next. Concurrent mounts
+# still share one derivation (Barkpark.SingleFlight); the TTL itself is
+# pinned in finder_graph_single_flight_test.exs.
+config :barkpark, :finder_graph_ttl_ms, 0
+
+# Barkpark's own test runs the publish wall, as every instance we run does
+# (task-8edd8e147c648a36; the library default in config.exs is off).
+config :barkpark, :authoring_wall, true
+
+# Document view counts: no flush timer in tests. A test calls
+# `Barkpark.Search.Views.flush/0` in its own process, which owns the sandbox
+# connection the timer's process would not have.
+config :barkpark, Barkpark.Search.Views, flush_interval_ms: nil

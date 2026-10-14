@@ -209,7 +209,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         project_id: socket.assigns[:current_project] && socket.assigns.current_project.id,
         name: socket.assigns.user_name,
         color: socket.assigns.user_color,
-        joined_at: System.system_time(:second)
+        joined_at: System.system_time(:second),
+        # This socket's own id: two tabs of one browser share a user_id, and a
+        # tab must not draw its own caret (task-c522237b9f37de21).
+        session_id: socket.id
       }
 
       topic = socket.assigns[:presence_topic] || presence_topic(socket)
@@ -219,9 +222,63 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         _ -> Presence.update(self(), topic, socket.assigns.user_id, meta)
       end
 
-      assign(socket, presences: PresenceState.list(topic))
+      socket
+      |> assign(presences: PresenceState.list(topic))
+      |> push_remote_selections()
     else
       socket
+    end
+  end
+
+  @selection_max_bytes 512
+
+  @doc false
+  # The paper canvas's caret (task-c522237b9f37de21): `bp-canvas-selection`
+  # from the canvas, `{anchor, head}` or nil on blur, carried in this socket's
+  # presence meta so the other sessions on the paper draw it. A malformed or
+  # oversized selection is ignored, never stored.
+  def put_paper_selection(socket, selection) do
+    topic = socket.assigns[:presence_topic] || presence_topic(socket)
+
+    valid? =
+      is_nil(selection) or
+        (PresenceState.selection_shape?(selection) and
+           byte_size(Jason.encode!(selection)) <= @selection_max_bytes)
+
+    if connected?(socket) and is_binary(topic) and valid? do
+      Presence.update(self(), topic, socket.assigns.user_id, &Map.put(&1, :selection, selection))
+    end
+
+    socket
+  end
+
+  @doc false
+  # Push the other sessions' carets on the open paper to its canvases
+  # (`bp:remote-selections`, `setRemoteSelections`), only when the list changed.
+  # A departed session drops out of the next presence diff, so its caret clears.
+  def push_remote_selections(socket) do
+    with true <- connected?(socket),
+         "paper" <- socket.assigns[:editor_type],
+         %{doc_id: did} <- socket.assigns[:editor_doc] do
+      doc_id = Content.published_id(did)
+
+      list =
+        PresenceState.remote_selections(
+          socket.assigns[:presences] || [],
+          doc_id,
+          socket.assigns[:dataset],
+          socket.id
+        )
+
+      if socket.assigns[:remote_selections_pushed] == {doc_id, list} do
+        socket
+      else
+        socket
+        |> assign(:remote_selections_pushed, {doc_id, list})
+        |> push_event("bp:remote-selections", %{list: list})
+      end
+    else
+      _ -> socket
     end
   end
 
@@ -972,7 +1029,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     case length(fields) - length(shown) do
       0 -> line
-      n -> line <> " (+#{n} more)"
+      n -> line <> " " <> ngettext("(+1 more)", "(+%{count} more)", n)
     end
   end
 
@@ -980,10 +1037,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # style placeholders still in the message. Interpolating them here keeps the
   # whole render inside this module — no `to_envelope`, and nothing from the
   # changeset's `:data` is ever read.
-  defp changeset_message({message, opts}) do
-    Enum.reduce(opts, message, fn {key, value}, acc ->
-      String.replace(acc, "%{#{key}}", to_string(inspect_scalar(value)))
-    end)
+  defp changeset_message(error), do: translate_changeset_error(error)
+
+  @doc """
+  One changeset error in the Studio language. Ecto's own messages ("can't be
+  blank", "should be at least %{count} character(s)") are msgids of the
+  `errors` domain (`priv/gettext/errors.pot`), plural by `:count`; a message no
+  catalog carries comes back as written. Option values are summarised the way
+  `changeset_message/1` always did, never inspected in full.
+  """
+  def translate_changeset_error({message, opts}) do
+    bindings = Map.new(opts, fn {key, value} -> {key, inspect_scalar(value)} end)
+
+    case Keyword.get(opts, :count) do
+      count when is_integer(count) ->
+        Gettext.dngettext(BarkparkWeb.Gettext, "errors", message, message, count, bindings)
+
+      _ ->
+        Gettext.dgettext(BarkparkWeb.Gettext, "errors", message, bindings)
+    end
   end
 
   defp inspect_scalar(value) when is_binary(value) or is_number(value) or is_atom(value),
@@ -1329,20 +1401,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def create_error(%Ecto.Changeset{} = changeset, what) do
-    errors =
-      Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {key, value}, acc ->
-          String.replace(acc, "%{#{key}}", to_string(value))
-        end)
-      end)
+    errors = Ecto.Changeset.traverse_errors(changeset, &translate_changeset_error/1)
 
     case errors |> Map.to_list() |> List.first() do
-      {field, [msg | _]} -> "Could not create #{what}: #{field} #{msg}"
-      _ -> "Could not create #{what}"
+      {field, [msg | _]} ->
+        gettext("Could not create %{what}: %{field} %{message}",
+          what: created_thing(what),
+          field: created_field(field),
+          message: msg
+        )
+
+      _ ->
+        gettext("Could not create %{what}", what: created_thing(what))
     end
   end
 
-  def create_error(_, what), do: "Could not create #{what}"
+  def create_error(_, what), do: gettext("Could not create %{what}", what: created_thing(what))
+
+  defp created_thing("workspace"), do: gettext("workspace")
+  defp created_thing("project"), do: gettext("project")
+  defp created_thing(what), do: what
+
+  # The fields a workspace or project is created from, as the form calls them.
+  defp created_field(:name), do: gettext("name")
+  defp created_field(:slug), do: gettext("slug")
+  defp created_field(field), do: to_string(field)
 
   @doc false
   def project_has_dataset?(%{} = project, slug) when is_binary(slug) do
