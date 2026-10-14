@@ -88,7 +88,7 @@ defmodule BarkparkWeb.SearchMatchFilterParamsTest do
 
   test "suggest=true answers the same count without facets", %{conn: conn} do
     full = conn |> search(q: "norsk gram") |> json_response(200)
-    fast = build_conn() |> search(q: "norsk gram", suggest: "true") |> json_response(200)
+    fast = scoped_conn() |> search(q: "norsk gram", suggest: "true") |> json_response(200)
     assert fast["count"] == full["count"]
     assert hd(fast["documents"]) == hd(full["documents"])
     assert fast["facets"] == %{}
@@ -99,13 +99,13 @@ defmodule BarkparkWeb.SearchMatchFilterParamsTest do
              conn |> search(q: "norsk", match: "most") |> json_response(400)
 
     assert %{"error" => %{"code" => "malformed"}} =
-             build_conn() |> search(q: "norsk", suggest: "maybe") |> json_response(400)
+             scoped_conn() |> search(q: "norsk", suggest: "maybe") |> json_response(400)
 
     assert %{"error" => %{"code" => "malformed"}} =
-             build_conn() |> search(q: "norsk", facet: "a.b") |> json_response(400)
+             scoped_conn() |> search(q: "norsk", facet: "a.b") |> json_response(400)
 
     assert %{"error" => %{"code" => "malformed"}} =
-             build_conn()
+             scoped_conn()
              |> get("/v1/data/search/#{@ds}", q: "norsk", filter: %{"Format" => "Lydbok"})
              |> json_response(400)
   end

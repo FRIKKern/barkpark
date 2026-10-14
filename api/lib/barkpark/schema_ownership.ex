@@ -108,6 +108,14 @@ defmodule Barkpark.SchemaOwnership do
     "bp_search_item_field(jsonb)",
     "bp_search_redact(jsonb,jsonb,integer)",
     "bp_search_vector_of(text,jsonb)",
+    # Search slots (task-3c6d02392d430c98, migration 20261014150000).
+    "bp_documents_search_slots_trg()",
+    "bp_refresh_search_slots(uuid)",
+    "bp_schema_search_slots_trg()",
+    "bp_search_join(jsonb,text[])",
+    "bp_search_slots(text,text,uuid,uuid,text,jsonb)",
+    "bp_search_text(jsonb)",
+    "bp_search_vector_of(text,text,text,jsonb)",
     "media_object_address_v1(text)",
     "prepare_media_delete_v1(jsonb)",
     "reserve_media_object_v1()"
