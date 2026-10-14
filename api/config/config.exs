@@ -600,7 +600,11 @@ config :barkpark, Barkpark.SelfUpdate.Runner,
   rollback_command: {"bash", ["deploy/instance-deploy.sh", "--rollback"]},
   rollback_preflight_command: {"bash", ["deploy/instance-deploy.sh", "--rollback-preflight"]},
   cd: nil,
-  max_log_lines: 500
+  max_log_lines: 500,
+  # A self-update run cut by a service restart, with no outcome on record, is
+  # started again once on boot; a second cut ends it as "deploy stuck" (-4).
+  # 0 turns resuming off (task-15e2eb3aa36b240b).
+  max_resumes: 1
 
 # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner) — runs deploy/site-deploy.sh
 # for a content-bound STATIC site (site-spawner charter D22/D23/D24). Same

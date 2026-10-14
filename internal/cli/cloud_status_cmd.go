@@ -1852,6 +1852,9 @@ func renderUpdateFailures(out *writer, ranked []rankedBarkpark) {
 	out.outf("LAST FAILED UPDATE (%d)", len(failed))
 	for _, r := range failed {
 		out.outf("%s", updateFailureHeadline(r.BP))
+		if reason := updateFailureReason(r.BP.UpdateLastFailure.Phase); reason != "" {
+			out.outf("    %s", reason)
+		}
 		tail := r.BP.UpdateLastFailure.Tail
 		if len(tail) > updateFailureTailLines {
 			out.outf("    … %d earlier line(s) — full tail: bp cloud status -o json", len(tail)-updateFailureTailLines)
@@ -1861,6 +1864,20 @@ func renderUpdateFailures(out *writer, ranked []rankedBarkpark) {
 			out.outf("    %s", sanitizeCell(line))
 		}
 	}
+}
+
+// updateFailureReason spells out the two phases the box's runner uses when a
+// service restart cut a deploy (task-15e2eb3aa36b240b), so `deploy stuck` reads
+// as a state that needs a person, not as one more failed build. Empty for every
+// other phase.
+func updateFailureReason(phase string) string {
+	switch {
+	case phase == "deploy_stuck":
+		return "deploy stuck: the service restarted during the build and again during its one resume; the box stopped retrying and still serves its old build"
+	case strings.HasSuffix(phase, "_interrupted"):
+		return fmt.Sprintf("build interrupted: the service restarted during the %s step; the box resumes the run once", strings.TrimSuffix(phase, "_interrupted"))
+	}
+	return ""
 }
 
 // updateFailureHeadline is the one-line verdict: which box, which phase, which
