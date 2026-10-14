@@ -25,6 +25,14 @@ defmodule Barkpark.Groq.Pushdown do
       `{:in, path, values}`, and `"x" in a.b` -> `{:member, path, "x"}`. The
       source tests both with one jsonpath that the GIN index on `content`
       serves, and that matches exactly what GROQ matches
+    * `count(a.b[cond]) > 0`, `>= 1`, `length(a.b[cond]) > 0` and
+      `defined(a.b[cond][0])` on a content path, where `cond` is an `&&` of
+      `x.y == v` and `x.y in [...]` on element fields (or `@`) with scalar
+      values -> `checks` as `{:some, path, [{field_path, values}]}`: some
+      element of the array matches every pair. The source tests it with one
+      jsonpath, which is exact. When only some of the conjuncts in `cond`
+      have that shape, `constraints/2` keeps those as a narrowing check and
+      `exact/2` refuses the filter
     * an `||` -> `any` with one probe per disjunct. A disjunct is a single
       condition or an `&&` of conditions; it gives the probe of its most
       selective condition: `_id` (`{:ids, ids}`), then `references()`, then a
@@ -63,6 +71,7 @@ defmodule Barkpark.Groq.Pushdown do
           | {:defined, [String.t()], integer() | nil}
           | {:in, [String.t()], [scalar()]}
           | {:member, [String.t()], scalar()}
+          | {:some, [String.t()], [{[String.t()], [scalar()]}]}
   @type scalar :: String.t() | number() | boolean()
   @type order_key :: {:path, [String.t()]} | :_id | :_createdAt | :_updatedAt
   @type t :: %{
@@ -148,13 +157,14 @@ defmodule Barkpark.Groq.Pushdown do
   # `!=` is left out: `null != 0` is true.
   @length_ops %{"<" => ">", "<=" => ">=", ">" => "<", ">=" => "<=", "==" => "=="}
 
-  defp check({:op, op, l, r}, resolve) when is_map_key(@length_ops, op) do
-    case {count_path(l), count_path(r)} do
-      {{:ok, path}, _} -> length_check(path, op, r, resolve)
-      {_, {:ok, path}} -> length_check(path, Map.fetch!(@length_ops, op), l, resolve)
-      _ -> :error
-    end
+  defp check({:op, op, l, r} = node, resolve) when is_map_key(@length_ops, op) do
+    with :error <- some_check(node, :exact), do: length_check(op, l, r, resolve)
   end
+
+  # `defined(a.b[cond][0])`: the filtered array has a first element. `cond`
+  # never matches a null element, so that is some element matching.
+  defp check({:func, "global", "defined", [{:elem, {:filter, _, _} = filter, 0}]}, _resolve),
+    do: some_filter(filter, :exact)
 
   # `defined(a.b[i])` with a literal index; Postgres `->` counts a negative
   # index from the end, as GROQ does.
@@ -177,6 +187,14 @@ defmodule Barkpark.Groq.Pushdown do
   defp check({:group, inner}, resolve), do: check(inner, resolve)
   defp check(_node, _resolve), do: :error
 
+  defp length_check(op, l, r, resolve) do
+    case {count_path(l), count_path(r)} do
+      {{:ok, path}, _} -> length_n(path, op, r, resolve)
+      {_, {:ok, path}} -> length_n(path, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
   defp in_check(l, r, resolve) do
     with {:ok, path} <- content_path(l),
          {:ok, values} when is_list(values) <- value(r, resolve),
@@ -197,10 +215,98 @@ defmodule Barkpark.Groq.Pushdown do
     end
   end
 
-  defp length_check(path, op, n, resolve) do
+  defp length_n(path, op, n, resolve) do
     case value(n, resolve) do
       {:ok, n} when is_integer(n) -> {:ok, {:length, path, op, n}}
       _ -> :error
+    end
+  end
+
+  # `count(a.b[cond]) > 0` and `>= 1`, either side, and the same with
+  # `length()`. A filter over anything but an array is null in GROQ, and so
+  # are its count and length, so only an array with a matching element
+  # passes. `mode` is `:exact` when every conjunct of `cond` must translate,
+  # `:narrow` when one is enough.
+  defp some_check({:op, op, l, r}, mode) do
+    case {filter_count(l), filter_count(r)} do
+      {{:ok, filter}, _} ->
+        if at_least_one?(op, r), do: some_filter(filter, mode), else: :error
+
+      {_, {:ok, filter}} ->
+        if at_least_one?(Map.fetch!(@length_ops, op), l),
+          do: some_filter(filter, mode),
+          else: :error
+
+      _ ->
+        :error
+    end
+  end
+
+  defp filter_count({:func, "global", name, [{:filter, _, _} = filter]})
+       when name in ["count", "length"],
+       do: {:ok, filter}
+
+  defp filter_count(_node), do: :error
+
+  # The bound is a literal or a parameter equal to 0 for `>` or 1 for `>=`.
+  defp at_least_one?(op, n) do
+    case Parser.const_eval(n) do
+      {:ok, 0} -> op == ">"
+      {:ok, 1} -> op == ">="
+      _ -> false
+    end
+  end
+
+  defp some_filter({:filter, base, element_cond}, mode) do
+    with {:ok, path} <- content_path(base) do
+      pairs = element_cond |> conjuncts() |> Enum.map(&element_pair/1)
+
+      cond do
+        mode == :exact and :error in pairs -> :error
+        Enum.all?(pairs, &(&1 == :error)) -> :error
+        true -> {:ok, {:some, path, for({:ok, pair} <- pairs, do: pair)}}
+      end
+    end
+  end
+
+  # `x.y == v`, `v == x.y` or `x.y in [...]` on an element, where `v` is a
+  # literal or a parameter and every value is a scalar. `@` is the element
+  # itself, with the empty field path. Values are read without the resolver:
+  # inside the element filter `^` is the filtered document, not the scope
+  # the resolver evaluates in.
+  defp element_pair({:op, "==", l, r}) do
+    with :error <- element_pair_eq(l, r), do: element_pair_eq(r, l)
+  end
+
+  defp element_pair({:op, "in", l, r}) do
+    with {:ok, field} <- element_path(l),
+         {:ok, values} when is_list(values) and values != [] <- value(r, nil),
+         true <- Enum.all?(values, &scalar?/1) do
+      {:ok, {field, Enum.uniq(values)}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp element_pair({:group, inner}), do: element_pair(inner)
+  defp element_pair(_node), do: :error
+
+  defp element_pair_eq(field, v) do
+    with {:ok, path} <- element_path(field),
+         {:ok, v} <- value(v, nil),
+         true <- scalar?(v) do
+      {:ok, {path, [v]}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp element_path({:this}), do: {:ok, []}
+
+  defp element_path(expr) do
+    case attr_path(expr) do
+      {:ok, path} -> if Enum.all?(path, &is_binary/1), do: {:ok, path}, else: :error
+      :error -> :error
     end
   end
 
@@ -291,11 +397,25 @@ defmodule Barkpark.Groq.Pushdown do
   defp conjuncts(other), do: [other]
 
   defp apply_conjunct(node, acc, resolve) do
-    case check(node, resolve) do
+    with :error <- check(node, resolve),
+         :error <- narrowing_check(node) do
+      apply_match(node, acc, resolve)
+    else
       {:ok, check} -> %{acc | checks: [check | acc.checks]}
-      :error -> apply_match(node, acc, resolve)
     end
   end
+
+  # An element condition with some conjuncts SQL cannot test: the others
+  # still narrow the read, and the evaluator applies the whole condition.
+  defp narrowing_check({:group, inner}), do: narrowing_check(inner)
+
+  defp narrowing_check({:func, "global", "defined", [{:elem, {:filter, _, _} = filter, 0}]}),
+    do: some_filter(filter, :narrow)
+
+  defp narrowing_check({:op, op, _l, _r} = node) when is_map_key(@length_ops, op),
+    do: some_check(node, :narrow)
+
+  defp narrowing_check(_node), do: :error
 
   defp apply_match({:op, op, _l, _r} = node, acc, resolve) when op in ["==", "in"] do
     case orient(node, resolve) do

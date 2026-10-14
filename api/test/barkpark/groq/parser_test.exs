@@ -252,10 +252,75 @@ defmodule Barkpark.Groq.ParserTest do
             ~s|count(tags) > 0.5|,
             ~s|count(tags) > count(other)|,
             ~s|count(_keys) > 0|,
-            ~s|count(title) > 0|,
-            ~s|count(tags[_type == "x"]) > 0|
+            ~s|count(title) > 0|
           ] do
         {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]")
+        assert Pushdown.constraints(filter_expr(tree)).checks == [], filter
+        assert Pushdown.exact(filter_expr(tree)) == :error, filter
+      end
+    end
+
+    test "a match in an array filter becomes a some check" do
+      q = fn filter, params ->
+        {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]", params)
+        expr = filter_expr(tree)
+        {Pushdown.constraints(expr).checks, Pushdown.exact(expr)}
+      end
+
+      some =
+        {:some, ["onix", "contributors"],
+         [{["role", "_ref"], ["A01"]}, {["contributor", "_ref"], ["c-1", "c-2"]}]}
+
+      params = %{"ids" => ["c-1", "c-2", "c-1"]}
+
+      for filter <- [
+            ~s|count(onix.contributors[role._ref == "A01" && contributor._ref in $ids]) > 0|,
+            ~s|count(onix.contributors[role._ref == "A01" && contributor._ref in $ids]) >= 1|,
+            ~s|0 < count(onix.contributors[("A01" == role._ref) && contributor._ref in $ids])|,
+            ~s|1 <= length(onix.contributors[role._ref == "A01" && contributor._ref in $ids])|,
+            ~s|defined(onix.contributors[role._ref == "A01" && contributor._ref in $ids][0])|
+          ] do
+        assert {[^some], {:ok, %{checks: [^some]}}} = q.(filter, params), filter
+      end
+
+      assert {[{:some, ["tags"], [{[], [1, "x"]}]}], {:ok, _}} =
+               q.(~s|count(tags[@ in [1, "x"]]) > 0|, %{})
+    end
+
+    test "an element condition SQL tests only in part narrows but is not exact" do
+      {:ok, tree} =
+        Parser.parse(
+          ~s|*[_type == "p" && count(slugHistory[match == "url" && lower(value) in $p]) > 0]|,
+          %{"p" => ["/a"]}
+        )
+
+      expr = filter_expr(tree)
+
+      assert Pushdown.constraints(expr).checks == [
+               {:some, ["slugHistory"], [{["match"], ["url"]}]}
+             ]
+
+      assert Pushdown.exact(expr) == :error
+    end
+
+    test "other array filter counts stay in memory" do
+      for {filter, params} <- [
+            {~s|count(tags[_type == "x"]) > 1|, %{}},
+            {~s|count(tags[_type == "x"]) >= 0|, %{}},
+            {~s|count(tags[_type == "x"]) != 0|, %{}},
+            {~s|count(tags[_type == "x"]) == 0|, %{}},
+            {~s|count(tags[x == null]) > 0|, %{}},
+            {~s|count(tags[x in [null]]) > 0|, %{}},
+            {~s|count(tags[x in []]) > 0|, %{}},
+            {~s|count(tags[x == ^._id]) > 0|, %{}},
+            {~s|count(tags[x == y]) > 0|, %{}},
+            {~s'count(tags[x == "a" || y == "b"]) > 0', %{}},
+            {~s|count(_tags[x == "a"]) > 0|, %{}},
+            {~s|count(title[x == "a"]) > 0|, %{}},
+            {~s|defined(tags[x == "a"][1])|, %{}},
+            {~s|defined(tags[x == "a"])|, %{}}
+          ] do
+        {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]", params)
         assert Pushdown.constraints(filter_expr(tree)).checks == [], filter
         assert Pushdown.exact(filter_expr(tree)) == :error, filter
       end

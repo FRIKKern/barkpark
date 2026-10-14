@@ -417,10 +417,10 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
 
       sql =
         sql_reads(fn ->
-          # Even products have role A01.
+          # Even products have role A01. SQL cannot test lower().
           assert result!(
                    token,
-                   ~s'count(*[_type == "product" && count(onix.contributors[role._ref == "A01"]) > 0])',
+                   ~s'count(*[_type == "product" && count(onix.contributors[lower(role._ref) == "a01"]) > 0])',
                    %{}
                  ) == div(@products, 2)
         end)
@@ -551,24 +551,25 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       :ok
     end
 
-    # Every product in `perspective`, read by type alone, then the query
-    # evaluated over them in memory.
-    defp in_memory(token, perspective, query, params) do
-      with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
-      docs = result!(token, ~s'*[_type == "product"]', %{}, %{"perspective" => perspective})
-      with_groq_config([])
-
+    # The query evaluated in memory over `docs`, which `products/2` reads by
+    # type alone, once per perspective.
+    defp in_memory(docs, query, params) do
       {:ok, tree} = Parser.parse(query, params)
       {:ok, value} = Evaluator.evaluate(tree, source: MemorySource.new(docs))
       value
     end
 
+    defp products(token, perspective) do
+      with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+      docs = result!(token, ~s'*[_type == "product"]', %{}, %{"perspective" => perspective})
+      with_groq_config([])
+      docs
+    end
+
     test "each shape equals in-memory evaluation in every perspective", %{token: token} do
       for perspective <- ["published", "drafts", "raw"] do
-        expected =
-          Map.new(@in_shapes, fn {q, params} ->
-            {q, in_memory(token, perspective, q, params)}
-          end)
+        docs = products(token, perspective)
+        expected = Map.new(@in_shapes, fn {q, params} -> {q, in_memory(docs, q, params)} end)
 
         for {q, params} <- @in_shapes do
           extra = %{"perspective" => perspective}
@@ -717,8 +718,10 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     test "each shape answers within the limits and equals in-memory evaluation in every perspective",
          %{token: token} do
       for perspective <- ["published", "drafts", "raw"] do
+        docs = products(token, perspective)
+
         expected =
-          Map.new(@slice_shapes, &{&1, in_memory(token, perspective, &1, %{"s" => "series-3"})})
+          Map.new(@slice_shapes, &{&1, in_memory(docs, &1, %{"s" => "series-3"})})
 
         for q <- @slice_shapes do
           got = result!(token, q, %{"s" => "series-3"}, %{"perspective" => perspective})
@@ -779,6 +782,200 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     end
   end
 
+  describe "a match inside an array filter" do
+    # The twin's "more by this author" query on a product page, over the
+    # fields the synthetic products hold.
+    @author_query """
+    *[_type == "product" && !(_id in path("drafts.**")) && isHidden != true &&
+      isMainProduct == true && defined(title) && defined(onix.isbn) &&
+      count(onix.contributors[role._ref == "A01" && contributor._ref in $authorIds]) > 0 &&
+      !(onix.isbn in $excludeIsbns) && !(title in $excludeTitles) &&
+      onix.publicationStatus.value in $validPublishingStatuses &&
+      onix.availability.value in $validAvailabilityCodes && access.buyStatus != "sold_out"
+    ] | order(onix.publishingDate desc, onix.isbn asc) [0...$limit] {_id, "isbn": onix.isbn}
+    """
+
+    @author_params %{
+      "authorIds" => ["c-8"],
+      "excludeIsbns" => ["9780000708"],
+      "excludeTitles" => ["Product 1408"],
+      "validPublishingStatuses" => ["04"],
+      "validAvailabilityCodes" => ["21"],
+      "limit" => 10
+    }
+
+    @pair ~s'[role._ref == "A01" && contributor._ref in $authorIds]'
+
+    # c-8 sits on 15 products, all of them even and so A01. The y documents
+    # below test the edges SQL could get wrong.
+    @array_shapes [
+      {@author_query, @author_params},
+      {~s'*[_type == "product" && count(onix.contributors#{@pair}) > 0]._id', @author_params},
+      {~s'*[_type == "product" && count(onix.contributors#{@pair}) >= 1]._id', @author_params},
+      {~s'*[_type == "product" && 0 < length(onix.contributors#{@pair})]._id', @author_params},
+      {~s'*[_type == "product" && defined(onix.contributors#{@pair}[0])]._id', @author_params},
+      {~s'*[_type == "product" && count(onix.contributors[contributor._ref == $c && lower(role._ref) == "a01"]) > 0]._id',
+       %{"c" => "c-8"}},
+      {~s'*[_type == "product" && count(tags[@ == "x"]) > 0]._id', %{}},
+      {~s'*[_type == "product" && count(items[n in [7, "y"]]) > 0]._id', %{}},
+      {~s'*[_type == "product" && count(onix.contributors#{@pair}) > 0] | order(isbn desc)[0...4]._id',
+       @author_params}
+    ]
+
+    setup %{scope: scope} do
+      a01 = fn c -> %{"role" => %{"_ref" => "A01"}, "contributor" => %{"_ref" => c}} end
+
+      # y1 holds the role and the author in two elements; y2 holds an object
+      # where the array is; y3 an array where the role's _ref is; y4 a null
+      # and a string before the matching element; y5 an array where the role
+      # is. Only y4 matches. tags and items hold a string where the array
+      # is, a nested array, and 7 written as a float.
+      for {id, doc} <- [
+            {"y1",
+             %{
+               "onix" => %{
+                 "contributors" => [
+                   %{"role" => %{"_ref" => "A01"}, "contributor" => %{"_ref" => "c-9"}},
+                   %{"role" => %{"_ref" => "B06"}, "contributor" => %{"_ref" => "c-8"}}
+                 ]
+               },
+               "tags" => "x"
+             }},
+            {"y2", %{"onix" => %{"contributors" => a01.("c-8")}, "tags" => [["x"]]}},
+            {"y3",
+             %{
+               "onix" => %{
+                 "contributors" => [
+                   %{"role" => %{"_ref" => ["A01"]}, "contributor" => %{"_ref" => "c-8"}}
+                 ]
+               },
+               "tags" => ["y", "x"],
+               "items" => [%{"n" => 7.0}]
+             }},
+            {"y4",
+             %{
+               "onix" => %{"contributors" => [nil, "c-8", a01.("c-8")]},
+               "items" => [%{"n" => "7"}, 7]
+             }},
+            {"y5",
+             %{
+               "onix" => %{
+                 "contributors" => [
+                   %{"role" => [%{"_ref" => "A01"}], "contributor" => %{"_ref" => "c-8"}}
+                 ]
+               },
+               "items" => [%{"n" => [7]}]
+             }}
+          ] do
+        {:ok, _} = Content.create_document("product", Map.put(doc, "_id", id), @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      # Drafts: p708 loses the author, y1 gains it in one element, and y6
+      # exists only as a draft that matches.
+      %{rows: [[content]]} =
+        Repo.query!("SELECT content FROM documents WHERE doc_id = 'p708' AND dataset = $1", [
+          @dataset
+        ])
+
+      for doc <- [
+            put_in(content, ["onix", "contributors"], [a01.("c-9")]) |> Map.put("_id", "p708"),
+            %{"_id" => "y1", "onix" => %{"contributors" => [a01.("c-8")]}, "tags" => ["x"]},
+            %{
+              "_id" => "y6",
+              "onix" => %{"contributors" => [a01.("c-8")]},
+              "items" => [%{"n" => 7}]
+            }
+          ] do
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+      end
+
+      :ok
+    end
+
+    test "each shape equals in-memory evaluation in every perspective", %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        docs = products(token, perspective)
+        expected = Map.new(@array_shapes, fn {q, params} -> {q, in_memory(docs, q, params)} end)
+
+        for {q, params} <- @array_shapes do
+          got = result!(token, q, params, %{"perspective" => perspective})
+          assert got == expected[q], "#{perspective} #{q}"
+        end
+      end
+
+      # Spot checks against the seed, published. Of c-8's 15 products the
+      # excludes drop p708 and p1408, the publication status p9108 and the
+      # buy status p2808; the limit keeps 10 of the other 11.
+      ids = token |> result!(@author_query, @author_params) |> Enum.map(& &1["_id"])
+      assert length(ids) == 10
+
+      assert ids -- ~w(p8 p2108 p3508 p4208 p4908 p5608 p6308 p7008 p7708 p8408 p9808) == []
+
+      assert result!(
+               token,
+               ~s'*[_type == "product" && count(onix.contributors#{@pair}) > 0]._id',
+               @author_params
+             )
+             |> Enum.sort() ==
+               Enum.sort(["y4" | for(g <- 1..@products, rem(g, 700) == 8, do: "p#{g}")])
+
+      assert Enum.sort(
+               result!(token, ~s'*[_type == "product" && count(tags[@ == "x"]) > 0]._id', %{})
+             ) ==
+               ["y3"]
+
+      assert Enum.sort(
+               result!(
+                 token,
+                 ~s'*[_type == "product" && count(items[n in [7, "y"]]) > 0]._id',
+                 %{}
+               )
+             ) == ["y3"]
+    end
+
+    test "SQL reads only the documents whose array holds a match", %{token: token} do
+      for perspective <- ["published", "drafts", "raw"], {q, params} <- @array_shapes do
+        {_result, rows} =
+          rows_read(fn -> result!(token, q, params, %{"perspective" => perspective}) end)
+
+        # 15 products and y1 to y6, with their published twins in drafts.
+        assert rows <= 60, "#{perspective} read #{rows} rows for #{q}"
+      end
+    end
+
+    test "count() over the exact shapes is a SQL count", %{token: token} do
+      shapes = Enum.slice(@array_shapes, 1..4)
+
+      sql =
+        sql_reads(fn ->
+          for {q, params} <- shapes do
+            assert result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), params) == 16
+          end
+        end)
+
+      refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/))
+      assert Enum.count(sql, &(&1 =~ "@?")) == 4
+    end
+
+    test "the element test is one jsonpath that documents_content_path_idx serves",
+         %{token: token} do
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      plans =
+        explain_reads("@?", fn ->
+          result!(
+            token,
+            ~s'*[_type == "product" && count(onix.contributors#{@pair}) > 0]._id',
+            @author_params
+          )
+        end)
+
+      assert [plan] = plans
+      assert plan =~ "documents_content_path_idx", plan
+    end
+  end
+
   # The SQL of every query the function sends.
   defp sql_reads(fun) do
     ref = make_ref()
@@ -829,6 +1026,34 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     |> Enum.map(fn {sql, params} ->
       Repo.query!("EXPLAIN " <> sql, params).rows |> Enum.map_join("\n", &hd/1)
     end)
+  end
+
+  # The function's result and the number of rows its documents reads return.
+  defp rows_read(fun) do
+    ref = make_ref()
+    parent = self()
+    handler = "groq-rows-#{inspect(ref)}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _, _, meta, _ ->
+        with true <- meta.query =~ "FROM \"documents\"",
+             {:ok, %{num_rows: n}} <- meta.result do
+          send(parent, {ref, n, nil})
+        end
+      end,
+      nil
+    )
+
+    result =
+      try do
+        fun.()
+      after
+        :telemetry.detach(handler)
+      end
+
+    {result, ref |> collect([]) |> Enum.map(&elem(&1, 0)) |> Enum.sum()}
   end
 
   defp collect(ref, acc) do

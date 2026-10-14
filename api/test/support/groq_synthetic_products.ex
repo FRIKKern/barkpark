@@ -13,7 +13,11 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
     * `department._ref` is `dept-big` for g <= 10,200 and `dept-small` after
     * `onix.contributors[0]` is `c-<g mod 700>` with role A01 when g is even,
       B06 when odd
-    * `onix.publicationId` is `pub-<g div 4>`
+    * `onix.publicationId` is `pub-<g div 4>`, and `onix.isbn` is `isbn`
+    * `onix.publishingDate` is 2000-01-01 plus `(g * 37) mod 9000` days
+    * `onix.publicationStatus.value` is `07` when g mod 11 is 0, else `04`;
+      `onix.availability.value` is `40` when g mod 7 is 0, else `21`;
+      `access.buyStatus` is `sold_out` when g mod 13 is 0, else `available`
     * `slugHistory[0].value` is `/bok/p<g>`
     * for 4 <= g <= 400 the products form families of four: `p<4k>` is the
       main product, the other three carry `mainProduct._ref == "p<4k>"`, all
@@ -40,8 +44,16 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
                'seriesIds', jsonb_build_array('series-' || (g % 50)),
                'department', jsonb_build_object('_type', 'reference',
                  '_ref', CASE WHEN g <= 10200 THEN 'dept-big' ELSE 'dept-small' END),
+               'access', jsonb_build_object('buyStatus',
+                 CASE WHEN g % 13 = 0 THEN 'sold_out' ELSE 'available' END),
                'onix', jsonb_build_object(
                  'publicationId', 'pub-' || (g / 4),
+                 'isbn', '978' || lpad(g::text, 7, '0'),
+                 'publishingDate', to_char(date '2000-01-01' + (g * 37) % 9000, 'YYYY-MM-DD'),
+                 'publicationStatus', jsonb_build_object('value',
+                   CASE WHEN g % 11 = 0 THEN '07' ELSE '04' END),
+                 'availability', jsonb_build_object('value',
+                   CASE WHEN g % 7 = 0 THEN '40' ELSE '21' END),
                  'contributors', jsonb_build_array(jsonb_build_object(
                    '_key', 'k',
                    'contributor', jsonb_build_object('_type', 'reference', '_ref', 'c-' || (g % 700)),
