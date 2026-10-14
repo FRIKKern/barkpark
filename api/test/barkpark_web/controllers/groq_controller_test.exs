@@ -514,7 +514,7 @@ defmodule BarkparkWeb.GroqControllerTest do
     defp count_query(token, query, sql_count?) do
       {body, sql} =
         sql_statements(fn ->
-          build_conn() |> get_query(token, query) |> json_response(200)
+          scoped_conn() |> get_query(token, query) |> json_response(200)
         end)
 
       counted_in_sql = Enum.any?(sql, &(&1 =~ ~r/SELECT .*count\(d\d\."id"\)/i))
