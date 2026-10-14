@@ -48,7 +48,7 @@ defmodule Barkpark.Tenancy.SeatCapabilitiesTest do
   alias Barkpark.Tenancy.{Membership, Role, RolePermission}
 
   @dataset "production"
-  @none %{read: false, write: false, admin: false}
+  @none %{read: false, write: false, publish: false, admin: false}
 
   # ── fixtures ────────────────────────────────────────────────────────────────
 
@@ -293,6 +293,7 @@ defmodule Barkpark.Tenancy.SeatCapabilitiesTest do
       assert TAuth.seat_capabilities(token, row, ws.id) == %{
                read: true,
                write: true,
+               publish: true,
                admin: false
              }
 
@@ -310,7 +311,12 @@ defmodule Barkpark.Tenancy.SeatCapabilitiesTest do
     user = user!()
     row = seat!(ws, user, "tri")
 
-    assert TAuth.seat_capabilities(user, row, ws.id) == %{read: true, write: true, admin: true}
+    assert TAuth.seat_capabilities(user, row, ws.id) == %{
+             read: true,
+             write: true,
+             publish: true,
+             admin: true
+           }
 
     # THE COST HALF OF THE COLLAPSE. Three `role_permits?/3` calls over the same
     # row cost three `Repo.all`s; this arity costs one. The per-derive figures

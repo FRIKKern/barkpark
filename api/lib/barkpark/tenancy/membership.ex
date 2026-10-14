@@ -13,7 +13,7 @@ defmodule Barkpark.Tenancy.Membership do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @roles ~w(owner admin member)
+  @roles ~w(owner admin member contributor)
   @principal_types ~w(api_token user)
 
   schema "workspace_memberships" do

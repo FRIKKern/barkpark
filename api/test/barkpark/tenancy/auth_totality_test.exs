@@ -82,6 +82,12 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   # together. It is strictly narrower than `workspace_admin?/2` and can only
   # DENY where that admits. It is DRIVEN below — it takes a client-reachable
   # principal and workspace id, so the totality guarantee has to cover it.
+  #
+  # `publish_refused?/2` is the draft-only seat predicate (task-348a4fbe24feede6).
+  # It is NOT driven: its answer is inverted (`true` refuses), and a malformed or
+  # unresolved workspace id already has a ruled answer — "refuse when ANY seat
+  # is draft-only" — pinned in `publish_refused_test.exs`. It casts every id
+  # through `Repo.uuid_or_nil/1` and its catch-all takes any non-context caller.
   @public_surface [
     authorize: 3,
     authorize_with_reason: 3,
@@ -96,6 +102,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
     membership_role: 2,
     membership_role: 3,
     permits?: 2,
+    publish_refused?: 2,
     role_for_permissions: 1,
     role_permits?: 3,
     seat_capabilities: 3,
@@ -182,7 +189,7 @@ defmodule Barkpark.Tenancy.AuthTotalityTest do
   end
 
   describe "public surface pin" do
-    test "Auth exports exactly the 21 pinned {name, arity} tuples" do
+    test "Auth exports exactly the 22 pinned {name, arity} tuples" do
       assert Enum.sort(Auth.__info__(:functions)) == Enum.sort(@public_surface)
     end
   end

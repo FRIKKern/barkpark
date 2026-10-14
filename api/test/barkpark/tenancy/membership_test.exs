@@ -8,8 +8,8 @@ defmodule Barkpark.Tenancy.MembershipTest do
   # ---------------------------------------------------------------------------
 
   describe "roles/0" do
-    test "returns the three expected role strings" do
-      assert Membership.roles() == ~w(owner admin member)
+    test "returns the four built-in role strings" do
+      assert Membership.roles() == ~w(owner admin member contributor)
     end
 
     test "returns a list of strings" do

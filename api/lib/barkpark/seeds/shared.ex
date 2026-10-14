@@ -21,7 +21,8 @@ defmodule Barkpark.Seeds.Shared do
   @builtin_roles %{
     "owner" => ~w(read write admin),
     "admin" => ~w(read write admin),
-    "member" => ~w(read write)
+    "member" => ~w(read write),
+    "contributor" => ~w(read write)
   }
 
   @doc "The dataset every seed profile writes into."
