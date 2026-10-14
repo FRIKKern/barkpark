@@ -391,6 +391,9 @@ when selected, a successful matrix job. Failed, cancelled or unknown dependencie
 fail the gate. An unrelated nonempty diff emits NOT APPLICABLE, explicitly saying
 no row ran. The matrix records both checkout commits and retains its results.
 
+The ledger holds the aggregate under S7 and its dispatcher/matrix under S6.
+The generator preserves that hold; the frozen fixture names are acknowledged.
+
 This name is **not currently required**. The watcher names it
 as PR-scoped: this workflow has no push, schedule or merge-group trigger, so its
 context is not owed on main. Revisit that classification if the triggers change.

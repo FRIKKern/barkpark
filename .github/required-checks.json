@@ -846,7 +846,7 @@
     },
     {
       "context": "Barkdown parity rows",
-      "reason": "S4 PATHS-FILTERED: barkdown-parity.yml runs only for Paper editor/PortableDoc paths or manual dispatch. It drives the real Barkdown Electron parity rows against this Barkpark checkout, using Barkdown main by default. Its private-repository read token is optional and absence is explicitly reported; a skipped run is not parity evidence. Keep the job running and review actual row results for Paper integration; requiring this absent context globally would block unrelated PRs."
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkdown-parity.yml job parity drives the real Barkdown Electron matrix when the unfiltered dispatcher selects editor/PortableDoc or workflow changes. Its needs/result is consumed by Barkdown parity gate, held separately pending owner-approved G2 registration. Skipped rows mean NOT APPLICABLE; failed rows fail the aggregate. Public checkout uses the standard token, with no missing-private-token bypass."
     },
     {
       "context": "Decide (credential + version)",
@@ -915,6 +915,14 @@
     {
       "context": "publish",
       "reason": "S4 PATHS-FILTERED: chronicle-paper.yml job `publish` (bare job id, no name:) runs only on schedule or dispatch and is SKIPPED on every PR where it renders; a required context that never concludes on a PR would block forever. It publishes Chronicle papers and gates nothing (task-26d47d28df1391cd)."
+    },
+    {
+      "context": "Barkdown parity gate",
+      "reason": "S7 EXCLUDED BY DECISION: dated hold 2026-10-14, pending the owner's paired G2 integration/cadence decision. This unfiltered PR-only aggregate fails on failed, cancelled or unknown dispatch/matrix results; it is not one of the four live required contexts. Retire this hold when the paired default-main matrix and distinct PR shapes pass, the four-context floor and fresh deadlock sweep are proven, and the owner authorizes registration. No protection change is made by this classification."
+    },
+    {
+      "context": "Parity dispatch and dependency checks",
+      "reason": "S6 LEAF OF AN EXCLUDED AGGREGATOR: barkdown-parity.yml job changes runs dispatcher regression controls and selects the actual PR base/head diff. Its result is consumed by Barkdown parity gate, held separately pending owner-approved G2 registration. Failure or unknown/cancelled status cannot become a successful aggregate; requiring this leaf would pin the aggregator internals."
     }
   ]
 }
