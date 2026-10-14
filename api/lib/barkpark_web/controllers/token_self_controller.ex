@@ -20,9 +20,10 @@ defmodule BarkparkWeb.TokenSelfController do
   its own answer (capped at `["read"]` by `Auth.max_pat_permissions_for_role/1`,
   a MINTING policy).
 
-  `publish` is the seat's write: no separate publish action exists, and a seat
-  that writes also publishes (in Studio and through mutate). It is spelled out
-  so a client need not know that.
+  `publish` follows the seat's write, except on a draft-only seat: a
+  `contributor` writes drafts but cannot publish, unpublish or delete a
+  published document, and `seat_capabilities/3` reports that as
+  `publish: false`. It is spelled out so a client need not know the rule.
   """
   use BarkparkWeb, :controller
 
@@ -109,7 +110,8 @@ defmodule BarkparkWeb.TokenSelfController do
     end
   end
 
-  # A seat that writes also publishes; see the moduledoc.
-  defp with_publish(%{write: write} = can), do: Map.put(can, :publish, write)
+  # A seat that writes also publishes, unless seat_capabilities/3 already
+  # answered `publish` (a contributor seat writes drafts but never publishes).
+  defp with_publish(%{write: write} = can), do: Map.put_new(can, :publish, write)
   defp with_publish(can), do: can
 end
