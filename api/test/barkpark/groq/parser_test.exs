@@ -444,7 +444,7 @@ defmodule Barkpark.Groq.ParserTest do
         {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]", %{"t" => 5})
         expr = filter_expr(tree)
         assert Pushdown.constraints(expr).checks == [check], filter
-        assert {:ok, %{checks: [^check]}} = Pushdown.exact(expr), filter
+        assert match?({:ok, %{checks: [^check]}}, Pushdown.exact(expr)), filter
       end
     end
 

@@ -49,7 +49,8 @@ defmodule BarkparkWeb.GroqGetLengthTest do
       target = path() <> "?" <> search
       assert byte_size(target) == target_size
 
-      assert {200, _body} = raw_get(port, target, token), "target of #{target_size} bytes"
+      {status, _body} = raw_get(port, target, token)
+      assert status == 200, "target of #{target_size} bytes"
     end
   end
 
