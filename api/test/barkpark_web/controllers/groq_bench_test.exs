@@ -13,7 +13,9 @@ defmodule BarkparkWeb.GroqBenchTest do
   alias Barkpark.Test.GroqSyntheticProducts
 
   @moduletag :groq_bench
-  @moduletag timeout: 600_000
+  # 35 shapes, 10 runs each, twice, and several shapes take seconds on main.
+  @moduletag timeout: 1_800_000
+  @moduletag ownership_timeout: 1_800_000
 
   @dataset "groq_bench"
   @products 20_000
@@ -21,6 +23,30 @@ defmodule BarkparkWeb.GroqBenchTest do
 
   # 31 isbns spread over the products, as a page's list of ids.
   @isbns for(g <- 1..31, do: "978" <> String.pad_leading(Integer.to_string(g * 613), 7, "0"))
+
+  # The visibility filters a Sanity-style product query sends.
+  @visible ~s'_type == "product" && hidden != true && isMainProduct != false && defined(description) && description != ""'
+
+  # A category hub's automatic row: 20 rule groups of thema codes, sized as
+  # the gyldendal.no twin's sakprosa hub, 372 codes in all. A group of one
+  # code is `$c in themaCodes`, as the twin writes it.
+  @hub_sizes [3, 22, 27, 15, 27, 30, 3, 1, 48, 4, 3, 32, 25, 1, 15, 6, 48, 30, 18, 14]
+  @hub_codes @hub_sizes
+             |> Enum.scan({0, 0}, fn n, {_from, to} -> {to, to + n} end)
+             |> Enum.map(fn {from, to} -> Enum.map(from..(to - 1)//1, &"T#{&1}") end)
+  @hub_params @hub_codes
+              |> Enum.with_index()
+              |> Map.new(fn
+                {[code], i} -> {"g#{i}", code}
+                {codes, i} -> {"g#{i}", codes}
+              end)
+              |> Map.put("ex", ["series-7", "series-9"])
+  @hub_groups @hub_codes
+              |> Enum.with_index()
+              |> Enum.map_join(" || ", fn
+                {[_code], i} -> "$g#{i} in themaCodes"
+                {_codes, i} -> "count(themaCodes[@ in $g#{i}]) > 0"
+              end)
 
   @shapes [
     {"1 sibling editions, references(^._id) in ||",
@@ -60,8 +86,8 @@ defmodule BarkparkWeb.GroqBenchTest do
      ~s'count(*[_type == "product" && count(onix.contributors) > 0])', %{}},
     {"8 count(*[... && defined(bokbasen.languageFormatVariants[0])])",
      ~s'count(*[_type == "product" && defined(bokbasen.languageFormatVariants[0])])', %{}},
-    {"9 count(*[...]) scanned in chunks, isbn > \"0\"",
-     ~s'count(*[_type == "product" && isbn > "0"])', %{}},
+    {"9 count(*[...]) scanned in chunks, lower(isbn) > \"0\"",
+     ~s'count(*[_type == "product" && lower(isbn) > "0"])', %{}},
     {"10 isbn in $isbns, 31 values", ~s'*[_type == "product" && isbn in $isbns]._id',
      %{"isbns" => @isbns}},
     {"11 isbn in $isbns && isMainProduct == true",
@@ -80,9 +106,9 @@ defmodule BarkparkWeb.GroqBenchTest do
     {"18 | order(_updatedAt desc)[0...12]",
      ~s'*[_type == "product"] | order(_updatedAt desc)[0...12]._id', %{}},
     {"19 inexact filter [0...12], scanned until full",
-     ~s'*[_type == "product" && isbn > "0"][0...12]._id', %{}},
+     ~s'*[_type == "product" && lower(isbn) > "0"][0...12]._id', %{}},
     {"20 inexact filter | order(isbn desc)[0...12], scanned in full",
-     ~s'*[_type == "product" && isbn > "0"] | order(isbn desc)[0...12]._id', %{}},
+     ~s'*[_type == "product" && lower(isbn) > "0"] | order(isbn desc)[0...12]._id', %{}},
     {"21 more by this author, count(onix.contributors[...]) > 0",
      """
      *[_type == "product" && !(_id in path("drafts.**")) && isHidden != true &&
@@ -113,7 +139,35 @@ defmodule BarkparkWeb.GroqBenchTest do
      """, %{"a" => "series-3", "b" => "series-7"}},
     {"24 count(*[... && ($a in seriesIds || $b in seriesIds)])",
      ~s'count(*[_type == "product" && ($a in seriesIds || $b in seriesIds)])',
-     %{"a" => "series-3", "b" => "series-7"}}
+     %{"a" => "series-3", "b" => "series-7"}},
+    {"25 | order(publishedAt desc)[0...5], no filter",
+     ~s'*[_type == "product"] | order(publishedAt desc)[0...5]._id', %{}},
+    {"26 hidden != true | order(publishedAt desc)[0...5]",
+     ~s'*[_type == "product" && hidden != true] | order(publishedAt desc)[0...5]._id', %{}},
+    {"27 four != filters | order(publishedAt desc)[0...30]",
+     ~s'*[#{@visible} && onix.publicationStatus.value != "02"] | order(publishedAt desc)[0...30]._id',
+     %{}},
+    {"28 count(*[... && hidden != true])", ~s'count(*[_type == "product" && hidden != true])',
+     %{}},
+    {"29 publishedAt > $t | order(publishedAt desc)[0...5]",
+     ~s'*[_type == "product" && publishedAt > $t] | order(publishedAt desc)[0...5]._id',
+     %{"t" => 1_600_000_000_000}},
+    {"30 count(*[... && publishedAt > $t])", ~s'count(*[_type == "product" && publishedAt > $t])',
+     %{"t" => 1_600_000_000_000}},
+    {"31 count(*[... && $t < publishedAt && publishedAt <= $u])",
+     ~s'count(*[_type == "product" && $t < publishedAt && publishedAt <= $u])',
+     %{"t" => 1_600_000_000_000, "u" => 1_700_000_000_000}},
+    {"32 count(*[... && onix.publishingDate >= $d])",
+     ~s'count(*[_type == "product" && onix.publishingDate >= $d])', %{"d" => "2020-01-01"}},
+    {"33 count(themaCodes[@ in $codes]) > 0, 10 codes, | order()[0...30]",
+     ~s'*[_type == "product" && count(themaCodes[@ in $codes]) > 0] | order(publishedAt desc)[0...30]._id',
+     %{"codes" => Enum.map(0..9, &"T#{&1}")}},
+    {"34 count(themaCodes[@ in $codes]) > 0, 372 codes, | order()[0...30]",
+     ~s'*[_type == "product" && count(themaCodes[@ in $codes]) > 0] | order(publishedAt desc)[0...30]._id',
+     %{"codes" => Enum.map(0..371, &"T#{&1}")}},
+    {"35 hub row, 20 groups, 372 codes, != filters and an exclude",
+     ~s'*[#{@visible} && (#{@hub_groups}) && (!defined(seriesIds) || !(count(seriesIds[@ in $ex]) > 0)) && onix.publicationStatus.value != "02"] | order(publishedAt desc)[0...30]._id',
+     @hub_params}
   ]
 
   setup do
@@ -161,7 +215,7 @@ defmodule BarkparkWeb.GroqBenchTest do
       IO.puts("| #{name} | #{status} | #{ms} | #{ms_off} |")
     end
 
-    assert Enum.all?(indexed, fn {_, status, _} -> status == 200 end)
+    assert Enum.all?(indexed ++ unindexed, fn {_, status, _} -> status == 200 end)
   end
 
   # The documents table (heap, TOAST and every index) and the _ref index, as
@@ -186,6 +240,10 @@ defmodule BarkparkWeb.GroqBenchTest do
   end
 
   defp measure(token, {name, query, params}) do
+    # Ten runs of every shape, twice, pass the read rate limit when the shapes
+    # are fast, and a 429 carries no `ms`. Each shape starts with full buckets.
+    Barkpark.RateLimiterSandbox.reset!()
+
     timings =
       for _ <- 0..@runs do
         conn =

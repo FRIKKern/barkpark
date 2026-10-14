@@ -25,6 +25,18 @@ defmodule Barkpark.Groq.Pushdown do
       `{:in, path, values}`, and `"x" in a.b` -> `{:member, path, "x"}`. The
       source tests both with one jsonpath that the GIN index on `content`
       serves, and that matches exactly what GROQ matches
+    * `a.b != v` on a content path, with `v` a string, number or boolean ->
+      `checks` as `{:ne, path, v}`. GROQ's `!=` is true when the field is
+      missing, null or of another type, so the source keeps every row whose
+      value at the path is not `v`. `a.b != null` is `{:defined, path, nil}`
+    * `a.b < v`, `<=`, `>`, `>=` on a content path, either side, with `v` a
+      number, string or boolean -> `checks` as `{:range, path, op, v}`, with
+      `op` read as `path op v`. GROQ compares only two values of one type, so
+      a missing field, null or a value of another type never matches
+    * `!defined(a.b)`, `!(a.b == v)` and `!(a.b in [...])` -> `checks` as
+      `{:not, check}`; `!(count(a.b[cond]) > 0)` and `!("x" in a.b)` ->
+      `{:none, path, pairs}`: `a.b` is an array and no element matches,
+      since the inner test is null, not false, for anything but an array
     * `count(a.b[cond]) > 0`, `>= 1`, `length(a.b[cond]) > 0` and
       `defined(a.b[cond][0])` on a content path, where `cond` is an `&&` of
       `x.y == v` and `x.y in [...]` on element fields (or `@`) with scalar
@@ -82,6 +94,10 @@ defmodule Barkpark.Groq.Pushdown do
           | {:in, [String.t()], [scalar()]}
           | {:member, [String.t()], scalar()}
           | {:some, [String.t()], [{[String.t()], [scalar()]}]}
+          | {:ne, [String.t()], scalar()}
+          | {:not, check()}
+          | {:none, [String.t()], [{[String.t()], [scalar()]}]}
+          | {:range, [String.t()], String.t(), scalar()}
   @type scalar :: String.t() | number() | boolean()
   @type order_key :: {:path, [String.t()]} | :_id | :_createdAt | :_updatedAt
   @type t :: %{
@@ -176,7 +192,24 @@ defmodule Barkpark.Groq.Pushdown do
   @length_ops %{"<" => ">", "<=" => ">=", ">" => "<", ">=" => "<=", "==" => "=="}
 
   defp check({:op, op, l, r} = node, resolve) when is_map_key(@length_ops, op) do
-    with :error <- some_check(node, :exact), do: length_check(op, l, r, resolve)
+    with :error <- some_check(node, :exact),
+         :error <- length_check(op, l, r, resolve) do
+      range_check(op, l, r, resolve)
+    end
+  end
+
+  # `a.b != v` is `not (a.b == v)` with no null in between: GROQ's `==`
+  # always answers true or false, so a missing field, a null and a value of
+  # another type all pass. `a.b != null` is true when the field holds
+  # anything, which is `defined(a.b)`.
+  defp check({:op, "!=", l, r}, resolve) do
+    with {:ok, path, v} <- orient_content(l, r, resolve) do
+      cond do
+        is_nil(v) -> {:ok, {:defined, path, nil}}
+        scalar?(v) -> {:ok, {:ne, path, v}}
+        true -> :error
+      end
+    end
   end
 
   # `defined(a.b[cond][0])`: the filtered array has a first element. `cond`
@@ -203,13 +236,86 @@ defmodule Barkpark.Groq.Pushdown do
   end
 
   defp check({:group, inner}, resolve), do: check(inner, resolve)
+  defp check({:not, inner}, resolve), do: not_check(inner, resolve)
   defp check(_node, _resolve), do: :error
+
+  # `!x` is true only when `x` is false; when `x` is null, so is `!x`, and the
+  # row is dropped. `defined()`, `==` and `in` over a list always answer true
+  # or false, so their negation is SQL's `IS NOT TRUE`. `count(a.b[cond]) > 0`
+  # and `"x" in a.b` are null unless `a.b` is an array, so their negation
+  # needs an array with no matching element: `{:none, path, pairs}`.
+  defp not_check({:group, inner}, resolve), do: not_check(inner, resolve)
+
+  defp not_check({:func, "global", "defined", [arg]}, _resolve) do
+    with {:ok, path} <- content_path(arg), do: {:ok, {:not, {:defined, path, nil}}}
+  end
+
+  defp not_check({:op, "==", l, r}, resolve), do: check({:op, "!=", l, r}, resolve)
+
+  defp not_check({:op, "in", l, r}, resolve) do
+    case in_check(l, r, resolve) do
+      {:ok, check} ->
+        {:ok, {:not, check}}
+
+      :error ->
+        with {:ok, {:member, path, v}} <- member_check(l, r, resolve),
+             do: {:ok, {:none, path, [{[], [v]}]}}
+    end
+  end
+
+  defp not_check({:op, op, _l, _r} = node, _resolve) when is_map_key(@length_ops, op) do
+    with {:ok, {:some, path, pairs}} <- some_check(node, :exact),
+         do: {:ok, {:none, path, pairs}}
+  end
+
+  defp not_check(_node, _resolve), do: :error
 
   defp length_check(op, l, r, resolve) do
     case {count_path(l), count_path(r)} do
       {{:ok, path}, _} -> length_n(path, op, r, resolve)
       {_, {:ok, path}} -> length_n(path, Map.fetch!(@length_ops, op), l, resolve)
       _ -> :error
+    end
+  end
+
+  # `a.b > v` and the like: GROQ orders two numbers, two strings or two
+  # booleans, and anything else is null. `v < a.b` is read as `a.b > v`.
+  defp range_check(op, l, r, resolve) when op in ["<", "<=", ">", ">="] do
+    case orient_side(l, r, resolve) do
+      {:ok, path, v, :left} -> range(path, op, v)
+      {:ok, path, v, :right} -> range(path, Map.fetch!(@length_ops, op), v)
+      :error -> :error
+    end
+  end
+
+  defp range_check(_op, _l, _r, _resolve), do: :error
+
+  defp range(path, op, v) when is_number(v) or is_binary(v) or is_boolean(v),
+    do: {:ok, {:range, path, op, v}}
+
+  defp range(_path, _op, _v), do: :error
+
+  # A content path on one side and a value that does not read the filtered
+  # document on the other. `orient_side/3` also says which side holds the
+  # path.
+  defp orient_content(l, r, resolve) do
+    case orient_side(l, r, resolve) do
+      {:ok, path, v, _side} -> {:ok, path, v}
+      :error -> :error
+    end
+  end
+
+  defp orient_side(l, r, resolve) do
+    with {:l, {:ok, path}} <- {:l, content_path(l)},
+         {:ok, v} <- value(r, resolve) do
+      {:ok, path, v, :left}
+    else
+      _ ->
+        with {:ok, path} <- content_path(r), {:ok, v} <- value(l, resolve) do
+          {:ok, path, v, :right}
+        else
+          _ -> :error
+        end
     end
   end
 

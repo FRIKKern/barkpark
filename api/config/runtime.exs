@@ -254,20 +254,20 @@ case System.get_env("BARKPARK_CLOUD_URL") do
 end
 
 # REQUEST-LINE CEILING (pds-bl-bandit-request-line-ceiling). Bandit caps the
-# HTTP/1 request line at max_request_line_length bytes; 10_000 is Bandit's own
-# default, written out here so the limit is visible instead of implicit. The
-# request line is METHOD + space + TARGET + " HTTP/1.1" + CRLF, so for a POST the
-# request TARGET (path plus query string) may be at most 10_000 - 5 - 9 - 2 =
-# 9_984 bytes. Measured 2026-07-21: total URL 10_016 bytes OK, 10_017 refused,
-# the same byte through Caddy and direct to :4000, so it is this limit and not
-# the proxy. Past it the client gets 414 and the server logs a Bandit.HTTPError
-# "Request URI is too long" (grep journalctl for that, it is not a network blip).
-# Deliberately NOT raised: bp stamp evidence rides the query string, and the fix
-# for oversized evidence is to send it in the request body, not a longer URL.
+# HTTP/1 request line at max_request_line_length bytes. The request line is
+# METHOD + space + TARGET + " HTTP/1.1" + CRLF, so a GET target (path plus query
+# string) may be at most 32_768 - 4 - 9 - 2 = 32_753 bytes and a POST target
+# 32_752. Past it Bandit answers 414 with an empty body before any plug runs and
+# logs a Bandit.HTTPError "Request URI is too long" (grep journalctl for that).
+# Bandit's default is 10_000. It is raised because @sanity/client sends a GROQ
+# query as a GET until its encoded query and params pass 11_264 characters,
+# Sanity's own limit, and only then switches to POST: at 10_000 every query
+# between the two answered 414. 32_768 holds every GET the client sends with
+# room for the path; a longer query goes as POST, in the request body.
 config :barkpark, BarkparkWeb.Endpoint,
   http: [
     port: String.to_integer(System.get_env("PORT", "4000")),
-    http_1_options: [max_request_line_length: 10_000]
+    http_1_options: [max_request_line_length: 32_768]
   ]
 
 cloak_key =

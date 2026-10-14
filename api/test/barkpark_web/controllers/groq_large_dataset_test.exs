@@ -260,7 +260,8 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
 
       # A filter SQL cannot match exactly is scanned in chunks, which keep
       # nothing, so the limits do not refuse it.
-      assert result!(token, ~s'count(*[_type == "product" && isbn > "0"])', %{}) == @products
+      assert result!(token, ~s'count(*[_type == "product" && lower(isbn) > "0"])', %{}) ==
+               @products
     end
 
     test "the SQL count equals the evaluator's count of the loaded documents", %{
@@ -430,7 +431,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       # A chunk does not count toward the documents a query loads.
       assert result!(
                token,
-               ~s'{"n": count(*[_type == "product" && isbn > "0"]), "p": *[_id == "p5"][0]._id}',
+               ~s'{"n": count(*[_type == "product" && lower(isbn) > "0"]), "p": *[_id == "p5"][0]._id}',
                %{}
              ) == %{"n" => @products, "p" => "p5"}
     end
@@ -439,7 +440,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       q = """
       *[_type == "department"] | order(_id asc){
         _id,
-        "n": count(*[_type == "product" && department->_id == ^._id && isbn > "0"])
+        "n": count(*[_type == "product" && department->_id == ^._id && lower(isbn) > "0"])
       }
       """
 
@@ -466,12 +467,19 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
 
       for perspective <- ["published", "drafts", "raw"] do
         extra = %{"perspective" => perspective}
-        counted = result!(token, ~s'count(*[_type == "product" && isbn > "0"])', %{}, extra)
+
+        counted =
+          result!(token, ~s'count(*[_type == "product" && lower(isbn) > "0"])', %{}, extra)
 
         with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
 
         loaded =
-          result!(token, ~s'count(*[_type == "product" && isbn > "0"][0...100000])', %{}, extra)
+          result!(
+            token,
+            ~s'count(*[_type == "product" && lower(isbn) > "0"][0...100000])',
+            %{},
+            extra
+          )
 
         with_groq_config([])
 
@@ -484,7 +492,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
 
       body =
         token
-        |> query(~s'count(*[_type == "product" && isbn > "0"])', %{})
+        |> query(~s'count(*[_type == "product" && lower(isbn) > "0"])', %{})
         |> json_response(422)
 
       assert body["error"]["description"] =~ "ran longer than 50 ms"
@@ -662,9 +670,9 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       ~s'*[_type == "product"] | order(_updatedAt desc)[0...5]._id',
       ~s'*[_type == "product"] | order(_createdAt asc, _id desc)[0..2]._id',
       ~s'*[_type == "product"] | order(_id desc)[0...3]._id',
-      ~s'*[_type == "product" && isbn > "0"][0...12]._id',
-      ~s'*[_type == "product" && isbn > "0"][9000...9010]._id',
-      ~s'*[_type == "product" && isbn > "0"] | order(isbn desc)[0...12]._id',
+      ~s'*[_type == "product" && lower(isbn) > "0"][0...12]._id',
+      ~s'*[_type == "product" && lower(isbn) > "0"][9000...9010]._id',
+      ~s'*[_type == "product" && lower(isbn) > "0"] | order(isbn desc)[0...12]._id',
       ~s'*[_type == "product"] | order(lower(isbn) desc)[1]._id',
       ~s'*[_type == "product" && count(slugHistory[match == "url"]) > 0] | order(rank desc)[0...10]{_id, rank}',
       ~s'{"first": *[_type == "product"][0]._id, "n": count(*[_type == "product"][0...5])}'
@@ -753,7 +761,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
          %{token: token} do
       sql =
         sql_reads(fn ->
-          assert result!(token, ~s'*[_type == "product" && isbn > "0"][0...3]._id', %{}) ==
+          assert result!(token, ~s'*[_type == "product" && lower(isbn) > "0"][0...3]._id', %{}) ==
                    ["p1", "p10", "p100"]
         end)
 
@@ -763,7 +771,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     test "a slice wider than the per-fetch limit is still refused", %{token: token} do
       for q <- [
             ~s'*[_type == "product"][0...10501]',
-            ~s'*[_type == "product" && isbn > "0"][0...10001]'
+            ~s'*[_type == "product" && lower(isbn) > "0"][0...10001]'
           ] do
         body = token |> query(q, %{}) |> json_response(422)
         assert body["error"]["type"] == "queryLimitError", q
@@ -775,7 +783,7 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
 
       body =
         token
-        |> query(~s'*[_type == "product" && isbn > "0"] | order(lower(isbn) desc)[0]', %{})
+        |> query(~s'*[_type == "product" && lower(isbn) > "0"] | order(lower(isbn) desc)[0]', %{})
         |> json_response(422)
 
       assert body["error"]["description"] =~ "ran longer than 50 ms"
@@ -994,7 +1002,8 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       {~s'*[_type == "product" && #{@two}]._id', true},
       {~s'*[_type == "product" && #{@two}] | order(isbn desc)[0...12]._id', true},
       {~s'*[_type == "product" && #{@two}][3...8]._id', true},
-      {~s'*[_type == "product" && #{@two} && isbn > "0"] | order(isbn desc)[0...12]._id', false},
+      {~s'*[_type == "product" && #{@two} && lower(isbn) > "0"] | order(isbn desc)[0...12]._id',
+       false},
       {~s'*[_type == "product" && (isbn in $isbns || _id == "p77" || count(onix.contributors[role._ref == "B06" && contributor._ref == "c-11"]) > 0 || defined(onix.contributors[3]))]._id',
        true},
       {~s'*[_type == "product" && (references("c-9") || $a in seriesIds)]._id', false},
@@ -1118,6 +1127,214 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       assert [plan] = plans
       assert plan =~ "BitmapOr", plan
       assert plan =~ "documents_content_path_idx", plan
+    end
+  end
+
+  describe "!=, ranges, negations and long lists in SQL" do
+    # Products hold `hidden` (true for g mod 17 == 0, false for 1, else
+    # missing), `description` ("" for g mod 19 == 0), `publishedAt` in ms and
+    # `themaCodes` (`T<g mod 2000>`, `T<7g mod 2000>`, `U<g mod 23>`).
+    @codes40 Enum.map(0..39, &"T#{&1}")
+
+    @ne_params %{
+      "s" => "series-3",
+      "t" => 1_600_000_000_000,
+      "u" => 1_700_000_000_000,
+      "astral" => "\u{1F600}",
+      "codes5" => ["T1", "T2", "T3", "T4", "T5"],
+      "codes40" => @codes40,
+      "codes2" => Enum.map(40..99, &"T#{&1}"),
+      "mixed" => [7 | Enum.map(1..8, &"T#{&1}")],
+      "ex" => ["T5", "T6"],
+      "isbns" => ["9780000003", "9780000053"]
+    }
+
+    @s ~s'_type == "product" && $s in seriesIds'
+
+    # Each `._id` shape is also counted.
+    @ne_shapes [
+      ~s'*[#{@s} && hidden != true]._id',
+      ~s'*[#{@s} && true != hidden && hidden != false]._id',
+      ~s'*[#{@s} && hidden != null]._id',
+      ~s'*[#{@s} && !(hidden == true)]._id',
+      ~s'*[#{@s} && defined(description) && description != ""]._id',
+      ~s'*[#{@s} && !defined(description)]._id',
+      ~s'*[#{@s} && code != 7]._id',
+      ~s'*[_type == "product" && hidden != true] | order(publishedAt desc)[0...20]._id',
+      ~s'*[_type == "product" && hidden != true] | order(publishedAt desc)[500...520]._id',
+      ~s'*[_type == "product" && publishedAt > $t]._id',
+      ~s'*[_type == "product" && $t < publishedAt && publishedAt <= $u]._id',
+      ~s'*[_type == "product" && publishedAt >= 1700000000000.0 && publishedAt < 1700100000000]._id',
+      ~s'*[_type == "product" && publishedAt > $t] | order(publishedAt desc)[0...10]._id',
+      ~s'*[_type == "product" && onix.publishingDate < "2000-02-01"]._id',
+      ~s'*[_type == "product" && isbn >= $astral]._id',
+      ~s'*[_type == "product" && isbn > "Y"]._id',
+      ~s'*[_type == "product" && isbn < 13]._id',
+      ~s'*[#{@s} && hidden > false]._id',
+      ~s'*[_type == "product" && count(themaCodes[@ in $codes5]) > 0]._id',
+      ~s'*[_type == "product" && count(themaCodes[@ in $codes40]) > 0]._id',
+      ~s'*[_type == "product" && count(themaCodes[@ in $mixed]) > 0]._id',
+      ~s'*[_type == "product" && (count(themaCodes[@ in $codes40]) > 0 || count(themaCodes[@ in $codes2]) > 0 || "U3" in themaCodes) && hidden != true] | order(publishedAt desc)[0...30]._id',
+      ~s'*[#{@s} && !(count(themaCodes[@ in $codes40]) > 0)]._id',
+      ~s'*[#{@s} && !("T5" in themaCodes)]._id',
+      ~s'*[#{@s} && (!defined(themaCodes) || !(count(themaCodes[@ in $ex]) > 0))]._id',
+      ~s'*[#{@s} && !(isbn in $isbns)]._id'
+    ]
+
+    setup %{scope: scope} do
+      # Each field below holds a value of another type than the products', a
+      # null, an array or an object, so SQL must answer as GROQ does for it.
+      # n6 holds a float equal to a bound; n7 a character above U+FFFF and n8
+      # one in U+E000..U+FFFF, which UTF-16 orders the other way round.
+      edges = [
+        {"n1",
+         %{
+           "hidden" => "true",
+           "publishedAt" => "1650000000000",
+           "themaCodes" => "T5",
+           "description" => nil
+         }},
+        {"n2",
+         %{"hidden" => [true], "publishedAt" => [1_650_000_000_000], "themaCodes" => [["T5"]]}},
+        {"n3",
+         %{"hidden" => nil, "publishedAt" => nil, "themaCodes" => %{"0" => "T5"}, "code" => "7"}},
+        {"n4",
+         %{
+           "hidden" => 1,
+           "publishedAt" => 1_650_000_000_000.5,
+           "themaCodes" => ["T5", nil],
+           "code" => 7.0
+         }},
+        {"n5", %{"hidden" => true, "publishedAt" => true, "themaCodes" => [], "isbn" => 12}},
+        {"n6", %{"hidden" => false, "publishedAt" => 1_700_000_000_000.0, "themaCodes" => [7]}},
+        {"n7", %{"isbn" => "\u{1F600}x", "description" => ""}},
+        {"n8", %{"isbn" => "\u{E000}", "themaCodes" => ["U3"]}},
+        {"n9", %{"isbn" => "Z", "description" => %{"x" => 1}}}
+      ]
+
+      for {id, doc} <- edges do
+        doc = doc |> Map.put("_id", id) |> Map.put_new("seriesIds", ["series-3"])
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      # Drafts: p153 (hidden) shows, p103 (shown) hides, p203 moves past $t
+      # and gains T5, p253 leaves the 40 codes, and n10 exists only as a draft.
+      for {id, change} <- [
+            {"p153", %{"hidden" => false}},
+            {"p103", %{"hidden" => true}},
+            {"p203", %{"publishedAt" => 1_690_000_000_000, "themaCodes" => ["T5"]}},
+            {"p253", %{"themaCodes" => ["U1"]}}
+          ] do
+        %{rows: [[content]]} =
+          Repo.query!("SELECT content FROM documents WHERE doc_id = $1 AND dataset = $2", [
+            id,
+            @dataset
+          ])
+
+        doc = content |> Map.merge(change) |> Map.put("_id", id)
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+      end
+
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          %{
+            "_id" => "n10",
+            "seriesIds" => ["series-3"],
+            "publishedAt" => 1_650_000_000_000,
+            "themaCodes" => ["T1"]
+          },
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    test "each shape and its count equal in-memory evaluation in every perspective",
+         %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        docs = products(token, perspective)
+        extra = %{"perspective" => perspective}
+
+        for q <- @ne_shapes do
+          want = in_memory(docs, q, @ne_params)
+          assert result!(token, q, @ne_params, extra) == want, "#{perspective} #{q}"
+
+          if String.ends_with?(q, "]._id") do
+            counted =
+              result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), @ne_params, extra)
+
+            assert counted == length(want), "#{perspective} count #{q}"
+          end
+        end
+      end
+
+      # Spot checks against the seed and the edge documents, published.
+      ids = result!(token, ~s'*[#{@s} && hidden != true]._id', @ne_params)
+      assert "n1" in ids and "n2" in ids and "n3" in ids and "n4" in ids and "n7" in ids
+      refute "n5" in ids or "p153" in ids
+      assert result!(token, ~s'*[_type == "product" && isbn < 13]._id', @ne_params) == ["n5"]
+
+      assert result!(token, ~s'*[_type == "product" && isbn >= $astral]._id', @ne_params) ==
+               ["n7", "n8"]
+
+      refute "n4" in result!(token, ~s'*[#{@s} && code != 7]._id', @ne_params)
+
+      assert "n6" in result!(
+               token,
+               ~s'*[_type == "product" && count(themaCodes[@ in $mixed]) > 0]._id',
+               @ne_params
+             )
+
+      refute "n2" in result!(
+               token,
+               ~s'*[_type == "product" && count(themaCodes[@ in $codes40]) > 0]._id',
+               @ne_params
+             )
+    end
+
+    test "the shapes are exact: counts are SQL counts and slices one sized read",
+         %{token: token} do
+      for q <- @ne_shapes, String.ends_with?(q, "]._id") do
+        sql =
+          sql_reads(fn ->
+            result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), @ne_params)
+          end)
+
+        refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/)), q
+      end
+
+      {_result, rows} =
+        rows_read(fn ->
+          result!(
+            token,
+            ~s'*[_type == "product" && hidden != true] | order(publishedAt desc)[0...20]._id',
+            @ne_params
+          )
+        end)
+
+      # The sized read returns 20 ids and the load 20 rows.
+      assert rows <= 40
+    end
+
+    test "a long list is one index probe per value", %{token: token} do
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      plans =
+        explain_reads("unnest", fn ->
+          result!(
+            token,
+            ~s'*[_type == "product" && count(themaCodes[@ in $codes40]) > 0]._id',
+            @ne_params
+          )
+        end)
+
+      assert [plan] = plans
+      assert plan =~ "documents_content_path_idx", plan
+      assert plan =~ "Nested Loop", plan
+      assert plan =~ "Function Scan on unnest", plan
     end
   end
 

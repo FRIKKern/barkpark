@@ -24,6 +24,11 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
       four are titled `Book <k>`, and `p<4k+1>` lists `p<4k+401>` as a
       language variant; every other product is titled `Product <g>`
     * `isMainProduct` is true except for the three children in each family
+    * `hidden` is true when g mod 17 is 0, false when g mod 17 is 1, and
+      missing otherwise
+    * `description` is `""` when g mod 19 is 0, else `Book <g>`
+    * `publishedAt` is `onix.publishingDate` as milliseconds since 1970
+    * `themaCodes` is `["T<g mod 2000>", "T<g * 7 mod 2000>", "U<g mod 23>"]`
   """
 
   alias Barkpark.Repo
@@ -59,7 +64,14 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
                    'contributor', jsonb_build_object('_type', 'reference', '_ref', 'c-' || (g % 700)),
                    'role', jsonb_build_object('_ref', CASE WHEN g % 2 = 0 THEN 'A01' ELSE 'B06' END)))),
                'slugHistory', jsonb_build_array(
-                 jsonb_build_object('_key', 's', 'match', 'url', 'value', '/bok/p' || g)))
+                 jsonb_build_object('_key', 's', 'match', 'url', 'value', '/bok/p' || g)),
+               'description', CASE WHEN g % 19 = 0 THEN '' ELSE 'Book ' || g END,
+               'publishedAt', (946684800 + ((g * 37) % 9000) * 86400)::bigint * 1000,
+               'themaCodes', jsonb_build_array('T' || (g % 2000), 'T' || ((g * 7) % 2000),
+                 'U' || (g % 23)))
+             || CASE WHEN g % 17 = 0 THEN '{"hidden": true}'::jsonb
+                     WHEN g % 17 = 1 THEN '{"hidden": false}'::jsonb
+                     ELSE '{}'::jsonb END
              || CASE WHEN g BETWEEN 4 AND 400 AND g % 4 <> 0
                   THEN jsonb_build_object('mainProduct',
                          jsonb_build_object('_type', 'reference', '_ref', 'p' || (g - g % 4)))
