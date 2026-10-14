@@ -68,14 +68,78 @@ func runTaskLint(out *writer, g globals, ctx manifest.Context, tail []string) in
 
 	findings, readyLeaves := areaLintFindings(snap)
 	filesFindings, _ := filesLintFindings(snap) // same ready-leaf pool; denominator matches
+	strayFindings := strayParentLintFindings(snap)
 
 	if out.machineOut() {
-		return emitLintJSON(out, findings, filesFindings, readyLeaves)
+		return emitLintJSON(out, findings, filesFindings, strayFindings, readyLeaves)
 	}
 	if code := renderAreaLintTable(out, findings, readyLeaves); code != exitOK {
 		return code
 	}
-	return renderFilesLintTable(out, filesFindings, readyLeaves)
+	if code := renderFilesLintTable(out, filesFindings, readyLeaves); code != exitOK {
+		return code
+	}
+	return renderStrayParentLintTable(out, strayFindings)
+}
+
+// strayParentLintFinding is one row that carries a near-miss spelling of
+// parent_id (content.parent, parentId, ...) and no parent_id
+// (task-42823fba6f150b97). No reader treats that key as a parent link, so the
+// row is missing from its goal tree and from every parent_id filter.
+type strayParentLintFinding struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Key    string `json:"key"`
+	Parent string `json:"parent"`
+}
+
+// strayParentLintFindings lists every task in the snapshot, whatever its
+// lifecycle, that carries a near-miss parent key and an empty parent_id.
+// Id-sorted.
+func strayParentLintFindings(s taskboard.Snapshot) []strayParentLintFinding {
+	var findings []strayParentLintFinding
+	for _, t := range s.Tasks {
+		if t.StrayParentKey == "" || t.ParentID != "" {
+			continue
+		}
+		findings = append(findings, strayParentLintFinding{
+			ID:     taskboard.BareID(t.DocID),
+			Title:  t.Title,
+			Key:    t.StrayParentKey,
+			Parent: t.StrayParent,
+		})
+	}
+	sort.SliceStable(findings, func(i, j int) bool { return findings[i].ID < findings[j].ID })
+	return findings
+}
+
+// renderStrayParentLintTable prints the rows that carry content.parent (or
+// another near miss) and no parent_id, with the commands that relink one.
+func renderStrayParentLintTable(out *writer, findings []strayParentLintFinding) int {
+	out.outf("LINT · %d tasks carry a parent key that is not parent_id, and no parent_id", len(findings))
+	if len(findings) == 0 {
+		out.outf("(no task is outside its goal tree because of a misspelled parent key)")
+		return exitOK
+	}
+	idW := 0
+	for _, f := range findings {
+		if len(f.ID) > idW {
+			idW = len(f.ID)
+		}
+	}
+	for _, f := range findings {
+		parent := f.Parent
+		if parent == "" {
+			parent = "(not a string)"
+		}
+		out.outf("· %-*s  %s=%s  %s", idW, f.ID, f.Key, parent, f.Title)
+	}
+	out.outf("")
+	out.outf("The goal tree and parent_id filters read only parent_id. To relink a row,")
+	out.outf("adjudicate it if it has no disposition, then set parent_id:")
+	out.outf("  bp task stage <id> open --disposition open --note \"<why>\"")
+	out.outf("  bp doc patch task <id> --set parent_id=<parent>")
+	return exitOK
 }
 
 func renderCompletenessLint(out *writer, snap taskboard.Snapshot, id string) int {
@@ -303,7 +367,7 @@ type filesLintFindingJSON struct {
 // emitLintJSON renders BOTH nudges in one payload: area_less / files_less counts
 // beside their finding rows, so an adoption dashboard can track file-truth
 // coverage (files_less → 0) as it climbs. Always exitOK — advisory.
-func emitLintJSON(out *writer, area []areaLintFinding, files []filesLintFinding, readyLeaves int) int {
+func emitLintJSON(out *writer, area []areaLintFinding, files []filesLintFinding, stray []strayParentLintFinding, readyLeaves int) int {
 	areaRows := make([]areaLintFindingJSON, 0, len(area))
 	for _, f := range area {
 		areaRows = append(areaRows, areaLintFindingJSON{ID: f.ID, Title: f.Title, Suggested: f.Suggested})
@@ -320,6 +384,9 @@ func emitLintJSON(out *writer, area []areaLintFinding, files []filesLintFinding,
 		"files_less":     len(files),
 		"findings":       areaRows,  // area nudge (backward-compatible key)
 		"files_findings": filesRows, // files nudge
+		// rows carrying content.parent (or another near miss) and no parent_id
+		"stray_parent":          len(stray),
+		"stray_parent_findings": nonNilStray(stray),
 	}
 	if out.output == "yaml" {
 		out.renderYAML(payload)
@@ -327,6 +394,13 @@ func emitLintJSON(out *writer, area []areaLintFinding, files []filesLintFinding,
 		out.renderJSON(payload)
 	}
 	return exitOK
+}
+
+func nonNilStray(rows []strayParentLintFinding) []strayParentLintFinding {
+	if rows == nil {
+		return []strayParentLintFinding{}
+	}
+	return rows
 }
 
 func printTaskLintHelp(out *writer) {
@@ -349,8 +423,13 @@ func printTaskLintHelp(out *writer) {
 	out.outf("For files:, add one path per label (files:internal/cli/foo.go), trailing /")
 	out.outf("for a directory.")
 	out.outf("")
+	out.outf("It also lists every task that carries content.parent, parentId or another")
+	out.outf("near miss of parent_id and no parent_id. Those rows are outside their goal")
+	out.outf("tree, because the tree and parent_id filters read only parent_id.")
+	out.outf("")
 	out.outf("flags:")
 	out.outf("  -o json|yaml    machine-readable findings; counts area_less + files_less")
+	out.outf("                  + stray_parent")
 	out.outf("")
 	out.outf("See also: docs/contracts/dispatch-areas.md (the area: vocabulary),")
 	out.outf("`bp task frontier` (the interference model this metadata feeds).")

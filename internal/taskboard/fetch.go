@@ -847,6 +847,7 @@ func (w taskWire) toTask() Task {
 	}
 	t.CriteriaItems = decodeAcceptanceCriteria(w.Content)
 	m := contentMap(w.Content)
+	t.StrayParentKey, t.StrayParent = strayParentOf(m)
 	papers := strList(m["papers"])
 	if len(papers) == 0 {
 		papers = strList(rawList(w.Papers))
@@ -1262,6 +1263,35 @@ func contentMap(raw json.RawMessage) map[string]any {
 		return nil
 	}
 	return m
+}
+
+// strayParentOf returns the first (sorted) content key that is a near-miss
+// spelling of parent_id, and its value when that value is a string. A key is a
+// near miss when it is not "parent_id" and reads "parent" or "parentid" once
+// lowercased with "_" and "-" removed. The api's
+// Barkpark.Tasks.MutateGuards.parent_near_miss_keys/1 applies the same rule.
+func strayParentOf(m map[string]any) (key, value string) {
+	var keys []string
+	for k := range m {
+		if IsParentNearMiss(k) {
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return "", ""
+	}
+	sort.Strings(keys)
+	return keys[0], strField(m, keys[0])
+}
+
+// IsParentNearMiss reports whether a content key is a near-miss spelling of
+// parent_id. See strayParentOf.
+func IsParentNearMiss(key string) bool {
+	if key == "parent_id" {
+		return false
+	}
+	n := strings.NewReplacer("_", "", "-", "").Replace(strings.ToLower(key))
+	return n == "parent" || n == "parentid"
 }
 
 // strField reads a string content field; any other shape (absent, null,
