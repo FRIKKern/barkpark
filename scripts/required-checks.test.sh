@@ -7157,7 +7157,7 @@ fi
 # the wrong reason — each of which still reads as plausible S7 prose, so no
 # per-row text comparison can be trusted until the pairing is.
 RC24_GEN_ARITY="$TMP/rc24-gen-arity.sh"
-RC24_ARITY_BASE="$(s7_report "$GEN" "$SPEC" aritybase | awk -F'\t' '$1 == "CHECKED" { print $2 "\t" $3; exit }')"
+RC24_ARITY_BASE="$(s7_report "$GEN" "$SPEC" aritybase | awk -F'\t' '$1 == "CHECKED" && !found { print $2 "\t" $3; found = 1 }')"
 IFS=$'\t' read -r RC24_NAMES RC24_REASONS <<<"$RC24_ARITY_BASE"
 sed 's/^  "Security gate"$//' "$GEN" > "$RC24_GEN_ARITY"
 if [ "$(grep -c '^  "Security gate"$' "$RC24_GEN_ARITY" || true)" = "0" ]; then
