@@ -400,11 +400,13 @@ extract_for() {
           # file, and the new-file door — the only one that can reach a file that
           # does not exist yet — was silently dead. The harness caught it; nothing
           # in the output looked wrong.
-          dir=""
-          for cand in $(printf '%s\n' "$line" | grep -oE '[A-Za-z_$][A-Za-z0-9_${}/.-]*' | sed -E 's/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\///; s#/+$##'); do
-            case "$cand" in *'$'*|'') continue ;; esac
-            if LC_ALL=C grep -qxF "$cand" "$TMP/dirs"; then dir="$cand"; break; fi
-          done
+          # One grep for all candidates of the line, in line order, instead of
+          # one grep per candidate: the per-candidate form spawned a process per
+          # word of every scan-verb line and pushed this harness past its
+          # 15-minute CI budget on main from 2026-10-10. Same answer: the first
+          # candidate, in order, that is a tracked directory.
+          dir="$(printf '%s\n' "$line" | grep -oE '[A-Za-z_$][A-Za-z0-9_${}/.-]*' | sed -E 's/^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?\///; s#/+$##' \
+            | LC_ALL=C grep -v -e '[$]' -e '^$' | LC_ALL=C grep -m1 -xFf "$TMP/dirs")" || dir=""
           [ -n "$dir" ] || dir="${r%%/*}"
           case "$dir" in ''|*'$'*) continue ;; esac
           printf '%s/%s\n' "$dir" "$norm" ;;
