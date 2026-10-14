@@ -8,6 +8,8 @@ defmodule BarkparkWeb.GroqBenchTest do
       mix test --include groq_bench test/barkpark_web/controllers/groq_bench_test.exs
   """
   use BarkparkWeb.ConnCase, async: false
+  import Barkpark.RateLimiterSandbox
+  setup :reset_rate_limiter!
 
   alias Barkpark.{Auth, Content, Repo, Tenancy}
   alias Barkpark.Test.GroqSyntheticProducts
@@ -242,7 +244,7 @@ defmodule BarkparkWeb.GroqBenchTest do
   defp measure(token, {name, query, params}) do
     # Ten runs of every shape, twice, pass the read rate limit when the shapes
     # are fast, and a 429 carries no `ms`. Each shape starts with full buckets.
-    Barkpark.RateLimiterSandbox.reset!()
+    reset!()
 
     timings =
       for _ <- 0..@runs do
