@@ -38,8 +38,8 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
   and æ/ø/å matching on names). One ALTER adds it with the two folded columns,
   so `documents` is rewritten once, as 20260614220000 did. A schema write recomputes the slots of its type's
   documents (only the rows whose slots change). A bundle import runs with
-  user triggers disabled, so `WorkspaceBundle` refreshes the slots of the
-  imported workspace after it re-enables them.
+  user triggers disabled, so `WorkspaceBundle` calls
+  `bp_refresh_search_slots(workspace_id)` after it commits.
   """
 
   def up do
@@ -300,6 +300,33 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
     $$
     """)
 
+    # Recompute the slots of one workspace's documents (NULL = every
+    # workspace), writing only the rows whose slots differ. A bundle import
+    # calls it after its COPY, which ran with user triggers disabled.
+    execute("""
+    CREATE OR REPLACE FUNCTION bp_refresh_search_slots(p_workspace_id uuid) RETURNS bigint
+    LANGUAGE plpgsql AS $$
+    DECLARE
+      n bigint;
+    BEGIN
+      UPDATE documents d
+      SET search_title = x.slots[1], search_author = x.slots[2]
+      FROM (
+        SELECT d2.id,
+               bp_search_slots(d2.type, d2.dataset, d2.dataset_id, d2.workspace_id,
+                               d2.title, d2.content) AS slots
+        FROM documents d2
+        WHERE p_workspace_id IS NULL OR d2.workspace_id = p_workspace_id
+      ) x
+      WHERE d.id = x.id
+        AND (d.search_title IS DISTINCT FROM x.slots[1]
+             OR d.search_author IS DISTINCT FROM x.slots[2]);
+      GET DIAGNOSTICS n = ROW_COUNT;
+      RETURN n;
+    END
+    $$
+    """)
+
     execute("""
     CREATE TRIGGER schema_definitions_search_slots
     AFTER INSERT OR UPDATE ON schema_definitions
@@ -382,6 +409,7 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
     execute("DROP INDEX IF EXISTS documents_search_label_trgm_idx")
     execute("DROP TRIGGER IF EXISTS schema_definitions_search_slots ON schema_definitions")
     execute("DROP FUNCTION IF EXISTS bp_schema_search_slots_trg()")
+    execute("DROP FUNCTION IF EXISTS bp_refresh_search_slots(uuid)")
     execute("DROP TRIGGER IF EXISTS documents_search_slots ON documents")
     execute("DROP FUNCTION IF EXISTS bp_documents_search_slots_trg()")
 

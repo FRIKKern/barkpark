@@ -15,27 +15,12 @@ defmodule Barkpark.Search.SearchSlots do
 
   `refresh/1` re-applies it to rows written with triggers disabled: a
   workspace bundle import (`Barkpark.Tenancy.WorkspaceBundle`) disables user
-  triggers for its COPY, so it calls this for the imported workspace once the
-  import has committed. Only rows whose slots differ are written.
+  triggers for its COPY, so it calls the same SQL function,
+  `bp_refresh_search_slots/1`, for the imported workspace once the import has
+  committed. Only rows whose slots differ are written.
   """
 
   alias Barkpark.Repo
-
-  # Static SQL only: `$1` is the optional workspace id (NULL = every workspace).
-  @refresh_sql """
-  UPDATE documents d
-  SET search_title = x.slots[1], search_author = x.slots[2]
-  FROM (
-    SELECT d2.id,
-           bp_search_slots(d2.type, d2.dataset, d2.dataset_id, d2.workspace_id,
-                           d2.title, d2.content) AS slots
-    FROM documents d2
-    WHERE ($1::uuid IS NULL OR d2.workspace_id = $1::uuid)
-  ) x
-  WHERE d.id = x.id
-    AND (d.search_title IS DISTINCT FROM x.slots[1]
-         OR d.search_author IS DISTINCT FROM x.slots[2])
-  """
 
   @doc """
   Recompute the search slots of every document of one workspace
@@ -50,7 +35,9 @@ defmodule Barkpark.Search.SearchSlots do
         _ -> nil
       end
 
-    %{num_rows: n} = Repo.query!(@refresh_sql, [workspace_id], timeout: :infinity)
+    %{rows: [[n]]} =
+      Repo.query!("SELECT bp_refresh_search_slots($1::uuid)", [workspace_id], timeout: :infinity)
+
     n
   end
 end

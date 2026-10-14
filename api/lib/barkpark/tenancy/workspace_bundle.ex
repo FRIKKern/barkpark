@@ -632,8 +632,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
           # The import's COPY ran with user triggers disabled, so the search
           # slots of the documents it wrote were never computed against THIS
-          # box's schemas (task-3c6d02392d430c98). Writes only stale rows.
-          Barkpark.Search.SearchSlots.refresh(workspace_id: ws_id)
+          # box's schemas (task-3c6d02392d430c98). The SQL function of
+          # migration 20261014150000 writes only stale rows.
+          Repo.query!("SELECT bp_refresh_search_slots($1::uuid)", [Ecto.UUID.dump!(ws_id)],
+            timeout: :infinity
+          )
         end
 
         result
