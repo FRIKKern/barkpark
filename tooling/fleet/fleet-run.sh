@@ -175,14 +175,29 @@ capacity_json(){
 
 # One beat with measured capacity threaded in. On a corrupt ledger, scream and still beat (presence
 # must survive) but WITHOUT capacity — never emit a coerced budget.
+#
+# --yes: the beat is a write, and bp refuses a write to a prod main from a non-tty caller without
+# it ("prod write ... needs confirmation"). Every other write in this file already passes it; the
+# beat did not, so a systemd listener never registered (fleet-1, 2026-10-14: roster stuck
+# offline while the loop ran). A refused beat is said once per distinct reason, not swallowed.
+FLEET_BEAT_LAST_ERR=""
 fleet_beat(){ # $1 = status (idle|working|blocked)  $2 = slots_free (0|1)
-  local cap
+  local cap out
   if cap=$(capacity_json "$2"); then
-    bp fleet beat "$WORKER" --status "$1" --ttl 30 --agent "$FLEET_AGENT" --capacity "$cap" -o json >/dev/null 2>&1 || true
+    out=$(bp fleet beat "$WORKER" --status "$1" --ttl 30 --agent "$FLEET_AGENT" --capacity "$cap" --yes -o json 2>&1)
   else
     say "⚠ spend-ledger malformed — beating $1 WITHOUT capacity (fix $(ledger_path))"
-    bp fleet beat "$WORKER" --status "$1" --ttl 30 --agent "$FLEET_AGENT" -o json >/dev/null 2>&1 || true
+    out=$(bp fleet beat "$WORKER" --status "$1" --ttl 30 --agent "$FLEET_AGENT" --yes -o json 2>&1)
   fi
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    local why; why=$(printf '%s\n' "$out" | tail -n 1 | cut -c1-200)
+    [ "$why" != "$FLEET_BEAT_LAST_ERR" ] && say "⚠ beat refused (exit $rc): $why"
+    FLEET_BEAT_LAST_ERR="$why"
+  else
+    FLEET_BEAT_LAST_ERR=""
+  fi
+  return 0
 }
 
 # Append one spend row per CLOSED order to the ledger (outside /tmp/fleet-run's per-order rm -rf).

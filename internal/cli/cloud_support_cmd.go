@@ -233,6 +233,11 @@ type supportAddRun struct {
 	resumed  bool
 	progress map[string]bool
 
+	// noDataset skips the scrubbed dataset pull (--no-dataset). The listener
+	// does not need it to come online; it exists for a main whose dataset
+	// the export route cannot resolve (an ambiguous slug).
+	noDataset bool
+
 	ledgerToken string // minted for the box, delivered 0600 — never printed
 	tokenID     string
 	cpRowID     string // the CP support row id the register leg returned
@@ -249,8 +254,8 @@ type supportAddRun struct {
 }
 
 func runCloudSupportAdd(out *writer, g globals, args []string) int {
-	const usage = "bp cloud support add <name> [--agent claude|codex] [--workspace <slug>] [--dataset <slug>] [--parent <cp-row-id>] [--ssh-key <hetzner-key-name>]"
-	a, err := parseHzArgs(args, []string{"agent", "workspace", "dataset", "parent", "ssh-key"}, nil, usage)
+	const usage = "bp cloud support add <name> [--agent claude|codex] [--workspace <slug>] [--dataset <slug>] [--parent <cp-row-id>] [--ssh-key <hetzner-key-name>] [--no-dataset]"
+	a, err := parseHzArgs(args, []string{"agent", "workspace", "dataset", "parent", "ssh-key"}, []string{"no-dataset"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -272,6 +277,7 @@ func runCloudSupportAdd(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("unknown --agent %q (want claude|codex)", r.agent), exitUsage)
 	}
 	r.parent = strings.TrimSpace(a.val("parent"))
+	r.noDataset = a.bools["no-dataset"]
 
 	// --ssh-key names the Hetzner ssh key the new box trusts. Both Hetzner
 	// providers read BARKPARK_SSH_KEY at create time, so the flag sets it for
@@ -446,6 +452,11 @@ func (r *supportAddRun) run() int {
 		{"online", r.stepOnline},
 	}
 	for _, step := range steps {
+		if step.name == "dataset" && r.noDataset {
+			// Not recorded as done: a later run without the flag pulls it.
+			r.done("dataset", "skipped (--no-dataset): the box keeps its own empty workspace; the listener reads the main over its ledger token")
+			continue
+		}
 		if supportResumableSteps[step.name] && r.progress[step.name] {
 			r.done(step.name, "already done on this box (recorded in "+supportProgressFile+"), skipped")
 			continue
@@ -946,9 +957,16 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 	r.state("dataset", fmt.Sprintf("dev-profile (scrubbed) export of %s/%s from the main", r.ws, r.dataset))
 	tar, err := r.exportDatasetTar()
 	if err != nil {
+		next := "check the main's export route (`bp cloud workspace export " + r.ws + " --profile dev`) and re-run `bp cloud support add " + r.name + "`"
+		if strings.Contains(err.Error(), "refusing to guess") {
+			// The export route resolves a dataset by slug within the workspace
+			// and takes no project, so a slug owned by several projects cannot
+			// be pulled at all. Name the two ways forward.
+			next = "the main's export takes no project and cannot pick between them; re-run `bp cloud support add " + r.name + " --no-dataset` to bring the listener up without the pull (the re-run reuses this box)"
+		}
 		return r.fail("dataset", err.Error(),
 			fmt.Sprintf("box %s bound at %s; NO dataset copied yet", r.host.Name, r.host.IP),
-			"check the main's export route (`bp cloud workspace export "+r.ws+" --profile dev`) and re-run `bp cloud support add "+r.name+"`",
+			next,
 			exitGeneric)
 	}
 	defer func() {
@@ -1059,6 +1077,17 @@ func (r *supportAddRun) stepRuntime() (int, bool) {
 	if serr != nil {
 		r.out.errf("⚠ runtime: could not resolve origin/main's sha (%v) — writing the runtime from the box's freshened checkout; its HEAD becomes the reported runner version", serr)
 		sha = ""
+	}
+	// The listener shells out to bp (bp-read.sh). It used to be installed only
+	// inside the dataset step, so --no-dataset left a listener logging "bp is
+	// not on PATH" every beat. Install it here; the step is a no-op when bp is
+	// already present.
+	r.state("runtime", "installing bp on the box (scripts/install-cli.sh; skipped when present)")
+	if err := r.runner.Run(supportCtx(), supportEnsureBpStep()); err != nil {
+		return r.fail("runtime", "bp install on the box failed: "+err.Error(),
+			fmt.Sprintf("box %s bound at %s; the listener needs bp and it is absent", r.host.Name, r.host.IP),
+			fmt.Sprintf("install bp by hand (`ssh root@%s 'sh /opt/barkpark/scripts/install-cli.sh'`), then re-run `bp cloud support add %s`", r.host.IP, r.name),
+			exitGeneric)
 	}
 	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md + bp-read.sh at origin/main "+supportOr(sha, "(checkout fallback)"))
 	if err := r.runner.Run(supportCtx(), supportFleetFilesStep(sha, true)); err != nil {
@@ -2044,10 +2073,22 @@ func supportFleetFilesStep(sha string, checkoutFallback bool) cloud.CaddyStep {
 // supportAgentInstallStep installs node + the agent CLI. The CALLER treats a
 // failure as a WARNING (fail-open): presence never depends on the vendor CLI.
 func supportAgentInstallStep(pkg, bin string) cloud.CaddyStep {
+	// The agent CLIs need Node 18 or newer. Ubuntu 22.04's apt ships Node 12
+	// (the warm image has v12.22.9), and `npm install -g` then failed with its
+	// output thrown away (fleet-1, 2026-10-14). Install Node 20 from NodeSource
+	// when the box's node is older or absent, after removing the distro packages
+	// that conflict with it, and print each installer's tail when it fails.
 	script := `set -e
-command -v node >/dev/null 2>&1 || { apt-get update -y >/dev/null 2>&1 && apt-get install -y nodejs npm >/dev/null 2>&1; }
-npm install -g '` + pkg + `' >/dev/null 2>&1
-command -v '` + bin + `' >/dev/null 2>&1`
+export DEBIAN_FRONTEND=noninteractive
+major=$(node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p')
+if [ -z "$major" ] || [ "$major" -lt 18 ]; then
+  echo "node ${major:-absent} is older than 18; installing Node 20 from NodeSource"
+  apt-get purge -y nodejs npm libnode-dev libnode72 >/dev/null 2>&1 || true
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/tmp/bp-nodesource.log 2>&1 || { tail -n 20 /tmp/bp-nodesource.log; exit 1; }
+  apt-get install -y nodejs >/tmp/bp-node-install.log 2>&1 || { tail -n 20 /tmp/bp-node-install.log; exit 1; }
+fi
+npm install -g '` + pkg + `' >/tmp/bp-agent-install.log 2>&1 || { tail -n 20 /tmp/bp-agent-install.log; exit 1; }
+command -v '` + bin + `'`
 	return cloud.CaddyStep{
 		Title: "install node + the agent CLI (" + pkg + ") — fail-open",
 		Argv:  []string{"bash", "-lc", script},
@@ -2297,7 +2338,7 @@ func printCloudSupportHelp(out *writer) {
 USAGE
   bp cloud support add <name>    [--agent claude|codex] [--workspace <slug>]
                                  [--dataset <slug>] [--parent <cp-row-id>]
-                                 [--ssh-key <hetzner-key-name>]
+                                 [--ssh-key <hetzner-key-name>] [--no-dataset]
                                  [--dry-run] [-o json|yaml]
   bp cloud support remove <name> [--dataset <slug>] [--dry-run] [-o json|yaml]
   bp cloud support refresh <name> [--dataset <slug>] [--force] [--dry-run] [-o json|yaml]
@@ -2359,6 +2400,9 @@ FLAGS
   --ssh-key <name>       the Hetzner ssh key (name or id) the new box trusts;
                          sets BARKPARK_SSH_KEY for this run (default: that
                          env var, else the project's only key)
+  --no-dataset           skip the scrubbed dataset pull; the listener still
+                         comes online (for a main whose export refuses the
+                         dataset, e.g. a slug owned by several projects)
   --dry-run              print the named states and do nothing
   -o json|yaml           one machine-readable receipt on stdout
 

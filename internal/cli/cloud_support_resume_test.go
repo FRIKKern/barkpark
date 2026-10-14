@@ -271,3 +271,67 @@ func TestCloudSupportAddResumeRefusesTwoBoxes(t *testing.T) {
 		t.Fatalf("nothing may be written to the main: %v", main.requests)
 	}
 }
+
+// TestCloudSupportAddNoDatasetSkipsPull: --no-dataset skips the export and the
+// on-box import, does not record dataset as done, and still reaches online.
+func TestCloudSupportAddNoDatasetSkipsPull(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportHappyWiring(t, runner)
+	main, url := supportResumeMain(t)
+
+	stdout, stderr, code := runSupport(t, globals{server: url, token: "op-tok"}, "add", "hex", "--parent", "cp-row-7", "--no-dataset")
+	if code != exitOK {
+		t.Fatalf("want OK, got %d\nstdout:\n%s\nstderr:\n%s", code, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "✓ dataset — skipped (--no-dataset)") {
+		t.Fatalf("the skip should be narrated\n%s", stdout)
+	}
+	if main.count("GET /api/workspaces/") != 0 || len(runner.feeds) != 0 {
+		t.Fatalf("no export and no stream expected: main=%v feeds=%d", main.requests, len(runner.feeds))
+	}
+	for _, s := range runner.steps {
+		if s.Title == "record support-add progress (dataset)" {
+			t.Fatal("a skipped dataset must not be recorded as done")
+		}
+	}
+}
+
+// TestCloudSupportAddRuntimeInstallsBp: the runtime step installs bp before the
+// listener files, so a run without the dataset step still gives the listener bp.
+func TestCloudSupportAddRuntimeInstallsBp(t *testing.T) {
+	supportEnvIsolate(t)
+	runner := newFakeSupportRunner()
+	supportHappyWiring(t, runner)
+	_, url := supportResumeMain(t)
+
+	if _, stderr, code := runSupport(t, globals{server: url, token: "op-tok"}, "add", "hex", "--parent", "cp-row-7", "--no-dataset"); code != exitOK {
+		t.Fatalf("want OK, got %d\n%s", code, stderr)
+	}
+	bp, files := -1, -1
+	for i, s := range runner.steps {
+		if strings.HasPrefix(s.Title, "install the bp CLI") && bp < 0 {
+			bp = i
+		}
+		if strings.Contains(s.Title, "fleet-run.sh") && files < 0 {
+			files = i
+		}
+	}
+	if bp < 0 || files < 0 || bp > files {
+		t.Fatalf("bp must be installed before the runtime files (bp=%d files=%d)\n%s", bp, files, runner.scripts())
+	}
+}
+
+// TestSupportAgentInstallStep_NodeFloor: the agent install brings Node to 20
+// when the box's node is older than 18, and keeps the installer output.
+func TestSupportAgentInstallStep_NodeFloor(t *testing.T) {
+	script := strings.Join(supportAgentInstallStep("@anthropic-ai/claude-code", "claude").Argv, " ")
+	for _, want := range []string{`"$major" -lt 18`, "setup_20.x", "tail -n 20 /tmp/bp-agent-install.log"} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("agent install should carry %q:\n%s", want, script)
+		}
+	}
+	if strings.Contains(script, "npm install -g '@anthropic-ai/claude-code' >/dev/null") {
+		t.Fatalf("npm output must not be discarded:\n%s", script)
+	}
+}
