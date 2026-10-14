@@ -616,6 +616,13 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     end
 
     test "the list is one jsonpath that documents_content_path_idx serves", %{token: token} do
+      # The test asks whether the index CAN serve the predicate, not which plan
+      # the planner prefers. Under a LIMIT the planner may pick a seq scan
+      # depending on the table statistics other tests in the shard left behind,
+      # which made this test fail in CI and pass locally. SET LOCAL lasts until
+      # the sandbox transaction ends, so it touches this test only.
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
       plans =
         explain_reads("@?", fn ->
           result!(token, ~s'*[_type == "product" && isbn in $isbns]._id', %{"isbns" => @isbns})

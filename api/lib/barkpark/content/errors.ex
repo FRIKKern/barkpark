@@ -118,6 +118,9 @@ defmodule Barkpark.Content.Errors do
     # Owner ruling #21 (task-9a7298f03aad0c42) — `Content.BoundFieldGuard`.
     "private_field_bound" =>
       "The body is public, so it may not bind a field the schema keeps private (private, owner_only or readable_by). details.fields names them: remove those bound blocks (or unbind them), or make the field public in the schema.",
+    # A JSON route refused the request's Accept header (task-701191424b8d15e8).
+    "not_acceptable" =>
+      "This route answers JSON. Send Accept: application/json or */*, or leave the Accept header out.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -1475,6 +1478,17 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
+
+  # A JSON route refused the request's Accept header: `plug(:accepts, ["json"])`
+  # raised Phoenix.NotAcceptableError, which BarkparkWeb.ErrorJSON maps here
+  # (task-701191424b8d15e8). It was an `internal_error` 406 with a "Retry
+  # shortly" hint, which sent the caller to resend the same header forever.
+  defp build({:error, :not_acceptable}),
+    do: %{
+      code: "not_acceptable",
+      message: "the Accept header names no format this route can return",
+      status: 406
+    }
 
   # THE DELIBERATE "no fault in scope" SENTINEL, narrowed OUT of the catch-all.
   # `BarkparkWeb.ErrorJSON` renders `{:error, :unknown}` when Phoenix's
