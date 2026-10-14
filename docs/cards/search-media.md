@@ -8,6 +8,8 @@ Shape of the system:
 - `Intelligence.record/6` + `record_interaction/4` capture query/interaction events; the crystallizer batch-distills them.
 - Phase tracker + deliberate-skip table (P9/P10 triggers) → docs/search/ROADMAP.md.
 
+View counts: [VIEWS.md](../search/VIEWS.md).
+
 Media HTTP responses — asset `absoluteUrl` and the `/v1/media/*` list envelope (`total`/`hasMore`/`nextOffset`/`nextCursor`, and the two meanings of `count`): [../contracts/media-http-envelope.md](../contracts/media-http-envelope.md).
 
 Image upload and on-demand transforms (`/media/files/<path>?w=&h=&fit=&crop=&rect=&fp-x=&fp-y=&fm=&auto=&q=`, cached on first request): [../media/IMAGE-TRANSFORMS.md](../media/IMAGE-TRANSFORMS.md).

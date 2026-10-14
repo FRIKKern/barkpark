@@ -149,7 +149,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     docs =
       ranking_input
-      |> order_rank(parsed, config, index)
+      |> order_rank(parsed, config, index, Keyword.get(opts, :boost))
       |> limit(^limit)
       |> offset(^offset)
       |> maybe_light_select(Keyword.get(opts, :fields))
@@ -728,7 +728,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end)
   end
 
-  defp order_rank(queryable, parsed, config, index) do
+  defp order_rank(queryable, parsed, config, index, boost) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token. plainto_tsquery AND-chains the words, so a multi-word query ranks
     # on ALL of them; for a single term this is identical to the old hd(terms).
@@ -766,7 +766,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           {:desc, exact_title_key(positive_query)},
           # 2) Relevance: GREATEST(full-text rank, weighted per-field similarity)
           #    + the weighted-tag boost.
-          {:desc, relevance_key(positive_query, tag_terms, config, index)},
+          {:desc, boosted(relevance_key(positive_query, tag_terms, config, index), boost)},
           # 3) Recency tiebreak.
           {:desc, dynamic([d], d.updated_at)},
           # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
@@ -870,6 +870,30 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     dynamic([_d], fragment("GREATEST(?, ?) + ?", ^ts_rank, ^field_sim, ^boost))
   end
+
+  # `?boost=popularity` (task-5feac4e826cff9a5): adds
+  # `weight * score / (score + 10)` to relevance, where `score` is the
+  # document's decayed view score from `document_popularity`. The term stays
+  # below `weight` (0.1 by default, `config :barkpark, Barkpark.Search.Views,
+  # boost_weight:`), the same scale as the tag boost, so views reorder
+  # documents of similar relevance and cannot lift a weak match over a strong
+  # one. A score of 10 gives half the weight. The ranking pool bounds the
+  # rows this runs on.
+  defp boosted(key, :popularity) do
+    weight =
+      :barkpark
+      |> Application.get_env(Barkpark.Search.Views, [])
+      |> Keyword.get(:boost_weight, 0.1)
+
+    score = Barkpark.Search.Views.sql_value(:score, false)
+
+    dynamic(
+      [_d],
+      fragment("? + ? * (?)::float / ((?)::float + 10.0)", ^key, ^weight, ^score, ^score)
+    )
+  end
+
+  defp boosted(key, _boost), do: key
 
   # Weighted-tag boost subplan. Shape guards make legacy content contribute 0
   # without erroring: non-array `tags` → '[]'::jsonb, flat string elements fail

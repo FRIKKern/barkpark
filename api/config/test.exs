@@ -427,3 +427,8 @@ config :barkpark, :finder_graph_ttl_ms, 0
 # Barkpark's own test runs the publish wall, as every instance we run does
 # (task-8edd8e147c648a36; the library default in config.exs is off).
 config :barkpark, :authoring_wall, true
+
+# Document view counts: no flush timer in tests. A test calls
+# `Barkpark.Search.Views.flush/0` in its own process, which owns the sandbox
+# connection the timer's process would not have.
+config :barkpark, Barkpark.Search.Views, flush_interval_ms: nil

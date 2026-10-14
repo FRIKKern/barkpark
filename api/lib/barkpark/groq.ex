@@ -69,7 +69,12 @@ defmodule Barkpark.Groq do
   defp run(tree, opts) do
     dataset = Keyword.fetch!(opts, :dataset)
     perspective = Keyword.get(opts, :perspective, :published)
-    state = DocumentSource.new(dataset, perspective, Keyword.get(opts, :scope_opts, []))
+
+    state =
+      dataset
+      |> DocumentSource.new(perspective, Keyword.get(opts, :scope_opts, []))
+      |> DocumentSource.with_views(tree)
+
     timeout = limit(:timeout_ms, 10_000)
     max_heap_words = div(limit(:max_heap_bytes, 536_870_912), :erlang.system_info(:wordsize))
 

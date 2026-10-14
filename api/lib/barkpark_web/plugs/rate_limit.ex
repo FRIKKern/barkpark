@@ -113,6 +113,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     case class_opt(opts) do
       :browser -> browser_plan(conn)
       :presence_focus -> presence_focus_plan(conn)
+      :view -> class_plan(conn, :view)
       :read -> class_plan(conn, :read)
       _ -> class_plan(conn, method_class(conn.method))
     end
@@ -343,6 +344,16 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # genuinely runaway client still cannot flood the presence room forever.
   defp default_per_minute(cfg, :presence_focus, _principal_class),
     do: Keyword.get(cfg, :presence_focus_per_minute, 600)
+
+  # task-5feac4e826cff9a5 — `POST .../v1/data/views/:dataset`. An anonymous
+  # caller is one browser, keyed by IP: 60 views a minute is far above a
+  # reader's pace and bounds a script inflating counts. A token caller is a
+  # site's server forwarding every visitor's views, so it gets 6000.
+  defp default_per_minute(cfg, :view, :anonymous),
+    do: Keyword.get(cfg, :view_per_minute, 60)
+
+  defp default_per_minute(cfg, :view, _principal_class),
+    do: Keyword.get(cfg, :view_token_per_minute, 6_000)
 
   defp dataset_override(_cfg, nil, _class), do: nil
 

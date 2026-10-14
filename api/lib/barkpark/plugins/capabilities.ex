@@ -2310,6 +2310,30 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # Document view counts (task-5feac4e826cff9a5, docs/search/VIEWS.md).
+      # Mounted only under the workspace + project prefix, so the path names
+      # it, as the cycle.* commands do. Tier "read": a read token may record,
+      # and an anonymous caller may on a scope with a `:docs` share.
+      core_cmd(
+        "views.record",
+        "views",
+        "record",
+        "Record a view of a document, counted once per visitor per day; GROQ reads " <>
+          "the counts as _views7d, _views30d and _popularity.",
+        "POST",
+        "/w/:workspace_slug/p/:project_slug/v1/data/views/:dataset",
+        "read",
+        args: [arg("id", true, "string", "Id of the document that was viewed.")],
+        flags: [
+          flag(
+            "visitor",
+            "string",
+            "Opaque value naming one visitor for the day; hashed with a daily salt."
+          )
+        ],
+        writes: true,
+        default_output: "minimal"
+      ),
       core_cmd(
         "search.correction",
         "search",

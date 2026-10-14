@@ -86,16 +86,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     # pins the full-schema E2 list, so it needs the plugin/fleet tables present
     # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
     @tag :owned_tables
-    test "E2 = the 17 FK-transitive children without a workspace_id column" do
+    test "E2 = the 19 FK-transitive children without a workspace_id column" do
       # The six 20260715 cycle-fleet children joined the original six; each reaches
       # the tenant grain through a single many-to-one FK to a workspace_id parent.
       # token_sessions joined at task-57f23825b18ab55d (ruling #16 rework half): a
       # revocable browser session row, FK to the E1-pinned api_tokens.
+      # document_popularity and document_view_days joined at
+      # task-5feac4e826cff9a5: view counts keyed by `dataset_id`.
       assert Catalog.live_e2(Repo) ==
                ~w(chat_runtime_usage_receipts content_edges cycle_build_plans
                   cycle_release_gate_captures cycle_release_gate_consumptions
                   cycle_release_paper_candidates cycle_release_public_smokes datasets
-                  epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
+                  document_popularity document_view_days epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
                   epic_benchmark_attempts plugin_doc_state role_permissions task_edges
                   token_sessions webhook_deliveries)
     end
