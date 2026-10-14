@@ -53,6 +53,7 @@ make_fakes() {
 #!/usr/bin/env bash
 serving="$(cat _build/prod/SENTINEL 2>/dev/null || echo none)"
 echo "mix $* root=${MIX_BUILD_ROOT:-unset} serving=$serving" >> "$CALL_LOG"
+[ -n "${ERLFLAGS_FILE:-}" ] && echo "${ERL_FLAGS:-}" >> "$ERLFLAGS_FILE"
 case "${1:-}" in
   compile)
     rc="${FAKE_COMPILE_RC:-0}"
@@ -217,6 +218,85 @@ rc=$?
 check "exit is typed 3" "[ '$rc' = 3 ]"
 check "no command ran" "[ ! -s '$CALL_LOG' ]"
 check "no status record on a refused box" "[ ! -f '$SLOT/.deploy-status.json' ]"
+
+# task-15e2eb3aa36b240b: the engine takes the CI-built artifact for its sha when
+# fetch-prebuilt.sh can place one, and then still migrates on it before the
+# swap. The fake fetch-prebuilt.sh logs its call and either places a build in
+# the requested root (FAKE_PREBUILT=ok) or refuses like a 404 would.
+add_fake_prebuilt() {
+  cat > "$1/scripts/fetch-prebuilt.sh" <<'EOF'
+#!/usr/bin/env bash
+echo "fetch-prebuilt $*" >> "$CALL_LOG"
+[ "${FAKE_PREBUILT:-missing}" = ok ] || { echo "[fetch-prebuilt] fallback to on-box compile: 404"; exit 1; }
+[ "${1:-}" = --into ] || exit 1
+mkdir -p "$(dirname "$0")/../$2/prod"
+printf 'ci-build\n' > "$(dirname "$0")/../$2/prod/SENTINEL"
+exit 0
+EOF
+}
+
+echo "== CI artifact present: no on-box compile, migrate still runs before the swap =="
+PRE="$TMP/prebuilt"
+make_repo "$PRE"
+add_fake_prebuilt "$PRE"
+: > "$CALL_LOG"
+run_engine "$PRE" "$TMP/prebuilt.out" FAKE_PREBUILT=ok
+rc=$?
+check "exit 0" "[ '$rc' = 0 ]"
+check "asked for the artifact of the deployed sha, into the aside root" \
+  "grep -q '^fetch-prebuilt --into api/_build_next deadbeefcafe$' '$CALL_LOG'"
+check "NO mix compile ran" "! grep -q '^mix compile' '$CALL_LOG'"
+check "NO deps.compile ran" "! grep -q '^mix deps.compile' '$CALL_LOG'"
+check "migrate ran on the CI build while the old build served" \
+  "grep -q '^mix ecto.migrate root=_build_next serving=old-build$' '$CALL_LOG'"
+check "the CI build was swapped in" \
+  "[ \"\$(cat '$PRE/api/_build/prod/SENTINEL')\" = ci-build ]"
+check "the output says the CI artifact was used" \
+  "grep -qF 'Using the CI-built artifact' '$TMP/prebuilt.out'"
+
+echo "== CI artifact missing: falls back to the on-box compile =="
+NOPRE="$TMP/noprebuilt"
+make_repo "$NOPRE"
+add_fake_prebuilt "$NOPRE"
+: > "$CALL_LOG"
+run_engine "$NOPRE" "$TMP/noprebuilt.out"
+rc=$?
+check "exit 0" "[ '$rc' = 0 ]"
+check "the artifact was tried" "grep -q '^fetch-prebuilt --into ' '$CALL_LOG'"
+check "then mix compile ran" "grep -q '^mix compile root=_build_next' '$CALL_LOG'"
+check "the on-box build was swapped in" \
+  "[ \"\$(cat '$NOPRE/api/_build/prod/SENTINEL')\" = new-build ]"
+
+echo "== BP_PREBUILT=0 (apply-update already tried): the artifact is not fetched twice =="
+SKIP="$TMP/skipprebuilt"
+make_repo "$SKIP"
+add_fake_prebuilt "$SKIP"
+: > "$CALL_LOG"
+run_engine "$SKIP" "$TMP/skip.out" BP_PREBUILT=0 FAKE_PREBUILT=ok
+check "fetch-prebuilt was not called" "! grep -q '^fetch-prebuilt' '$CALL_LOG'"
+check "mix compile ran" "grep -q '^mix compile' '$CALL_LOG'"
+
+echo "== the flight record carries the runner's pid when the guard hands one down =="
+PID="$TMP/recordpid"
+make_repo "$PID"
+: > "$CALL_LOG"
+run_engine "$PID" "$TMP/recordpid.out" BP_DEPLOY_RECORD_PID=424242
+check "record pid is BP_DEPLOY_RECORD_PID" "grep -q '\"pid\":424242}' '$PID/.deploy-status.json'"
+
+echo "== with scripts/build-guard.sh present, the engine re-execs under it =="
+GUARD="$TMP/guarded"
+make_repo "$GUARD"
+cp -f "$HERE/build-guard.sh" "$GUARD/scripts/"
+: > "$CALL_LOG"
+# No systemd here (BP_BUILD_SYSTEMD_DIR points nowhere), so the guard takes its
+# nice/ionice/log fallback; build-guard.test.sh covers the scope arm.
+run_engine "$GUARD" "$TMP/guarded.out" BP_BUILD_SYSTEMD_DIR="$TMP/no-systemd" BP_BUILD_LOG="$TMP/guarded.log" ERLFLAGS_FILE="$TMP/guarded.erlflags"
+rc=$?
+check "exit 0" "[ '$rc' = 0 ]"
+check "the guard ran" "grep -qF '[build-guard]' '$TMP/guarded.out'"
+check "the engine's output still reached stdout through the guard" \
+  "grep -qF 'Done. Service restarted and answering' '$TMP/guarded.out'"
+check "mix ran with one scheduler" "grep -q '^mix compile .*' '$CALL_LOG' && grep -qF '+S 1:1' '$TMP/guarded.erlflags'"
 
 if [ "$fails" -ne 0 ]; then
   echo "deploy-rebuild tests: $fails failure(s)" >&2

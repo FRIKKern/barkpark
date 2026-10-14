@@ -300,6 +300,8 @@ distribution-harnesses scripts/fetch-prebuilt.sh
 distribution-harnesses scripts/fetch-prebuilt.test.sh
 distribution-harnesses scripts/deploy-rebuild.sh
 distribution-harnesses scripts/deploy-rebuild.test.sh
+distribution-harnesses scripts/build-guard.sh
+distribution-harnesses scripts/build-guard.test.sh
 distribution-harnesses deploy/site-runtime-install.sh
 distribution-harnesses deploy/site-runtime-install_test.sh
 tooling-harnesses tooling/task-obsession/reland_check.py
