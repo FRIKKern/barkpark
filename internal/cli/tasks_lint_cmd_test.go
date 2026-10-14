@@ -138,7 +138,7 @@ func TestAreaLintAdvisoryExit(t *testing.T) {
 	var jo, je bytes.Buffer
 	jw := newWriter(&jo, &je)
 	jw.output = "json"
-	if code := emitLintJSON(jw, findings, filesFindings, readyLeaves); code != exitOK {
+	if code := emitLintJSON(jw, findings, filesFindings, nil, readyLeaves); code != exitOK {
 		t.Errorf("emitLintJSON with findings = %d, want exitOK (%d) — nudge must never error", code, exitOK)
 	}
 
@@ -195,7 +195,7 @@ func TestEmitAreaLintJSON(t *testing.T) {
 	w := newWriter(&so, &se)
 	w.output = "json"
 	filesFindings, _ := filesLintFindings(lintFixture())
-	emitLintJSON(w, findings, filesFindings, readyLeaves)
+	emitLintJSON(w, findings, filesFindings, nil, readyLeaves)
 
 	var payload struct {
 		OK          bool `json:"ok"`
@@ -383,5 +383,85 @@ func TestLintFetchFailureEmitsJSONEnvelope(t *testing.T) {
 	}
 	if env.OK || env.Error.Code == "" || env.Error.Message == "" {
 		t.Errorf("bad fetch-failure envelope:\n%s", so.String())
+	}
+}
+
+// strayParentFixture (task-42823fba6f150b97): rows filed with
+// `--set parent=<goal>` carry content.parent and no parent_id.
+//   - stray-open:    content.parent, no parent_id — FLAGGED
+//   - stray-done:    parentId, no parent_id, done — FLAGGED (any lifecycle)
+//   - relinked:      content.parent AND parent_id — NOT flagged (in the tree)
+//   - plain:         no near-miss key — NOT flagged
+func strayParentFixture() taskboard.Snapshot {
+	return taskboard.Snapshot{Tasks: []taskboard.Task{
+		{DocID: "stray-open", Title: "filed with parent", Lifecycle: "ready", StrayParentKey: "parent", StrayParent: "goal-a"},
+		{DocID: "drafts.stray-done", Title: "camel case", Lifecycle: "done", StrayParentKey: "parentId", StrayParent: "goal-b"},
+		{DocID: "relinked", Title: "relinked later", Lifecycle: "ready", ParentID: "goal-a", StrayParentKey: "parent", StrayParent: "goal-a"},
+		{DocID: "plain", Title: "no parent at all", Lifecycle: "ready"},
+	}}
+}
+
+func TestStrayParentLintFindings(t *testing.T) {
+	findings := strayParentLintFindings(strayParentFixture())
+	if len(findings) != 2 {
+		t.Fatalf("findings = %+v, want 2 (stray-done, stray-open)", findings)
+	}
+	if findings[0].ID != "stray-done" || findings[0].Key != "parentId" || findings[0].Parent != "goal-b" {
+		t.Errorf("findings[0] = %+v", findings[0])
+	}
+	if findings[1].ID != "stray-open" || findings[1].Key != "parent" || findings[1].Parent != "goal-a" {
+		t.Errorf("findings[1] = %+v", findings[1])
+	}
+}
+
+func TestRenderStrayParentLintTable(t *testing.T) {
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.color = false
+	if code := renderStrayParentLintTable(w, strayParentLintFindings(strayParentFixture())); code != exitOK {
+		t.Errorf("exit = %d, want exitOK", code)
+	}
+	got := so.String()
+	for _, want := range []string{
+		"LINT · 2 tasks carry a parent key that is not parent_id, and no parent_id",
+		"stray-open  parent=goal-a",
+		"parentId=goal-b",
+		"bp doc patch task <id> --set parent_id=<parent>",
+		"bp task stage <id> open --disposition open",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("table missing %q\n---\n%s", want, got)
+		}
+	}
+
+	so.Reset()
+	renderStrayParentLintTable(w, nil)
+	if !strings.Contains(so.String(), "LINT · 0 tasks") {
+		t.Errorf("clean table:\n%s", so.String())
+	}
+}
+
+func TestEmitLintJSONCarriesStrayParent(t *testing.T) {
+	var so, se bytes.Buffer
+	w := newWriter(&so, &se)
+	w.output = "json"
+	emitLintJSON(w, nil, nil, strayParentLintFindings(strayParentFixture()), 0)
+
+	var payload struct {
+		StrayParent         int `json:"stray_parent"`
+		StrayParentFindings []struct {
+			ID     string `json:"id"`
+			Key    string `json:"key"`
+			Parent string `json:"parent"`
+		} `json:"stray_parent_findings"`
+	}
+	if err := json.Unmarshal(so.Bytes(), &payload); err != nil {
+		t.Fatalf("json unmarshal: %v\n%s", err, so.String())
+	}
+	if payload.StrayParent != 2 || len(payload.StrayParentFindings) != 2 {
+		t.Fatalf("stray_parent = %d, findings = %d, want 2/2\n%s", payload.StrayParent, len(payload.StrayParentFindings), so.String())
+	}
+	if payload.StrayParentFindings[1].ID != "stray-open" || payload.StrayParentFindings[1].Parent != "goal-a" {
+		t.Errorf("findings[1] = %+v", payload.StrayParentFindings[1])
 	}
 }
