@@ -5019,8 +5019,12 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
   // dr-w15-s5: cannot_deploy sits IMMEDIATELY after degraded, and
   // deploys_failing immediately behind it — the box's own refusal of the NEXT
   // deploy outranks a past-window failure rate.
-  assert.ok(at("degraded") + 1 === at("cannot_deploy"),
-    "dr-w15-s5: cannot_deploy sits IMMEDIATELY after degraded");
+  // task-9d72b5f86487cf9b: restarting sits IMMEDIATELY after degraded, and
+  // cannot_deploy immediately behind it.
+  assert.ok(at("degraded") + 1 === at("restarting"),
+    "task-9d72b5f86487cf9b: restarting sits IMMEDIATELY after degraded");
+  assert.ok(at("restarting") + 1 === at("cannot_deploy"),
+    "dr-w15-s5 + task-9d72b5f86487cf9b: cannot_deploy sits immediately behind restarting");
   assert.ok(at("cannot_deploy") + 1 === at("deploys_failing"),
     "ruling A + dr-w15-s5: deploys_failing sits immediately behind cannot_deploy");
   assert.ok(at("deploys_failing") + 1 === at("diverged"),
@@ -5028,7 +5032,7 @@ test("D32: the SPA ladder is attention_order.json's ORDER, derived on both sides
   assert.ok(at("unreported") < at("deploy_stalled") && at("deploy_stalled") < at("behind"),
     "deploy_stalled must sit after unreported and before behind");
   assert.equal(ladderOrder[ladderOrder.length - 1], "ok", "ok is the last rung");
-  assert.equal(ladderOrder.length, 15, "ruling A's ladder plus dr-w15-s5's cannot_deploy is fifteen rungs");
+  assert.equal(ladderOrder.length, 16, "ruling A's ladder plus cannot_deploy and restarting is sixteen rungs");
 
   // The crossing rungs carry the fixture's own metadata the day it arrives —
   // asserted only WHEN it arrives, so this never claims a fact about a file
@@ -5602,6 +5606,14 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
     // dr-w10-s1: the recorded guerrilla row — 46.28% of 1,290 terminal deploys,
     // which printed `ok` with an empty detail before the arm landed.
     deploys_failing: { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290) },
+    // task-9d72b5f86487cf9b: gyl on 2026-10-13, five automatic restarts in
+    // the hour, the newest an OOM kill. It also carries the cannot_deploy
+    // refusal, so this proves the restart rung wins the evaluation too.
+    restarting: { ...LIVE, deploy_rate: DEPLOY_NODE(46.28, 1290),
+      site_deploy: { configured: false, runner_alive: true, reported_at: SEEN },
+      pressure: { service_restarts_count: 5, service_restarts_window_s: 3600, service_restarts: [
+        { unit: "barkpark-slot@blue.service", restarted_at: "2026-10-13T22:53:12Z", exit_kind: "killed",
+          exit_status: 9, exit_signal: "KILL", result: "oom-kill", oom_killed: true, restart_counter: 5 }] } },
     // dr-w15-s5: the box's OWN refusal on a box with sites. The deploy_rate is
     // the SAME failing node as the deploys_failing witness, so this also
     // proves the refusal wins the evaluation, not only the sort.
@@ -5633,6 +5645,15 @@ test("dr-w25: every fixture state the SPA ranks is REACHABLE, and `behind` is re
     site_deploy: { configured: null, runner_alive: null, reported_at: SEEN } }), "ok");
   assert.equal(hooks.classifyBp({ ...LIVE, deploy_rate: DEPLOY_NODE(0, 0, { sites: 0, sites_deploying: 0 }),
     site_deploy: { configured: false, runner_alive: true, reported_at: SEEN } }), "ok");
+
+  // task-9d72b5f86487cf9b: the restart rung's negative arms. Exactly 3 is the
+  // threshold and stays ok; a null count is UNMEASURED and never fires.
+  assert.equal(hooks.classifyBp({ ...LIVE, pressure: { service_restarts_count: 3, service_restarts_window_s: 3600 } }), "ok");
+  assert.equal(hooks.classifyBp({ ...LIVE, pressure: { service_restarts_count: null, service_restarts: null } }), "ok");
+  const rs = hooks.statusOf(WITNESS.restarting);
+  assert.equal(rs.role, "warn");
+  assert.equal(rs.label, "Restarting");
+  assert.equal(rs.detail, "Restarted 5x in 1h, last 22:53 UTC on blue: killed by SIGKILL, OOM kill");
 
   for (const state of expected) {
     assert.equal(hooks.classifyBp(WITNESS[state]), state, state + " must be reachable from classifyBp");
@@ -5909,7 +5930,7 @@ test("cch-w34-s6: the unknown state names EVIDENCE ONLY — no remediation, no n
 test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls through to a calm label", () => {
   // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
   // most severe state. The enum is pinned, and every member has an explicit arm.
-  const KINDS = ["removal_failed", "failed", "suspended", "degraded",
+  const KINDS = ["removal_failed", "failed", "suspended", "degraded", "restarting",
     "cannot_deploy", "deploys_failing", "diverged", "strained", "filling", "unreported",
     "deploy_stalled", "behind", "removing", "provisioning", "ok"];
   assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
@@ -5919,6 +5940,7 @@ test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls
     failed: { provision_status: "failed" },
     suspended: { host: "h", suspended: true },
     degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    restarting: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", pressure: { service_restarts_count: 4, service_restarts_window_s: 3600, service_restarts: [] } },
     cannot_deploy: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", deploy_rate: DEPLOY_NODE(0, 55), site_deploy: { configured: true, runner_alive: false } },
     deploys_failing: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", deploy_rate: DEPLOY_NODE(46.28, 1290) },
     diverged: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", commit_ancestry: "diverged", commit_distance: 12 },

@@ -491,6 +491,16 @@ type Pressure struct {
 	// is unmeasured, a measured 0 means the list above is complete. The
 	// blue/green pair is never truncated, so this can never hide a slot unit.
 	SlotUnitsTruncated *float64 `json:"slot_units_truncated"`
+	// ServiceRestarts lists the automatic restarts systemd made of the
+	// Barkpark service units in the agent's window, newest first and capped.
+	// A deploy restart is never in it (task-9d72b5f86487cf9b). nil is
+	// UNMEASURED; a non-nil empty slice is measured and quiet.
+	ServiceRestarts []ServiceRestart `json:"service_restarts"`
+	// ServiceRestartsCount is the full number of restarts in the window,
+	// which the capped list cannot say. nil is unmeasured.
+	ServiceRestartsCount *float64 `json:"service_restarts_count"`
+	// ServiceRestartsWindowS is the window the count covers, in seconds.
+	ServiceRestartsWindowS *float64 `json:"service_restarts_window_s"`
 	// ReportedAt is the BEAT's own timestamp (RFC3339), a pointer for the same
 	// reason: null means the box has never phoned home at all, which is not the
 	// same as "beat, but told us nothing readable".
@@ -548,6 +558,22 @@ type SlotUnit struct {
 	// reformatted. nil on a unit systemd has no timestamp for, which is what a
 	// never-started unit reports.
 	StateSince *string `json:"state_since"`
+}
+
+// ServiceRestart is one automatic restart of a Barkpark service unit off a
+// fleet row's pressure block. Unit and RestartedAt (RFC 3339) are always set;
+// the control plane drops a row without them. The exit fields are nil when the
+// agent could not read them. ExitKind is systemd's exited, killed or dumped;
+// ExitStatus is the exit code, or the signal number when killed or dumped.
+type ServiceRestart struct {
+	Unit           string   `json:"unit"`
+	RestartedAt    string   `json:"restarted_at"`
+	ExitKind       *string  `json:"exit_kind"`
+	ExitStatus     *float64 `json:"exit_status"`
+	ExitSignal     *string  `json:"exit_signal"`
+	Result         *string  `json:"result"`
+	OOMKilled      bool     `json:"oom_killed"`
+	RestartCounter *float64 `json:"restart_counter"`
 }
 
 // BoxDeployRate is one barkpark's deploy vital off the fleet row.
