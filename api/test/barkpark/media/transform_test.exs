@@ -191,6 +191,149 @@ defmodule Barkpark.Media.TransformTest do
     end
   end
 
+  # task-a99abd94ae4c2381: auto=format serves WebP when the AVIF encode would
+  # not fit `avif_budget_ms` (default 1500) on this node.
+  describe "resolve/2 AVIF time budget" do
+    @browser "image/avif,image/webp,image/apng,image/*,*/*;q=0.8"
+
+    defp auto(params, opts) do
+      params
+      |> Map.put("auto", "format")
+      |> plan!()
+      |> Transform.resolve([accept: @browser, avif?: true] ++ opts)
+    end
+
+    test "AVIF when the estimated encode fits the budget" do
+      # 1200 x 1235 = 1.48 MP at 1000 ms/MP is 1482 ms.
+      assert auto(%{"w" => "1200"}, source_size: {2151, 2214}, avif_ms_per_megapixel: 1000).fm ==
+               "avif"
+    end
+
+    test "WebP when the estimated encode exceeds the budget" do
+      # 1.48 MP at 1100 ms/MP is 1630 ms.
+      assert auto(%{"w" => "1200"}, source_size: {2151, 2214}, avif_ms_per_megapixel: 1100).fm ==
+               "webp"
+
+      # The same node still answers AVIF for a small width.
+      assert auto(%{"w" => "640"}, source_size: {2151, 2214}, avif_ms_per_megapixel: 1100).fm ==
+               "avif"
+    end
+
+    test "the estimate uses the cropped output size, not the source" do
+      opts = [source_size: {4000, 3000}, avif_ms_per_megapixel: 3000]
+      assert auto(%{"w" => "600", "h" => "600", "fit" => "crop"}, opts).fm == "avif"
+      # 1000 x 750 at 3000 ms/MP is 2250 ms; the 12 MP source would be 36 s.
+      assert auto(%{"w" => "1000"}, opts).fm == "webp"
+    end
+
+    test "without the source size, w x h or the given side squared is the estimate" do
+      opts = [avif_ms_per_megapixel: 1000]
+      assert auto(%{"w" => "1300", "h" => "1300"}, opts).fm == "webp"
+      assert auto(%{"w" => "1000"}, opts).fm == "avif"
+      assert auto(%{"h" => "1300"}, opts).fm == "webp"
+    end
+
+    test "with no size at all, a measured cost picks WebP" do
+      assert auto(%{"q" => "80"}, avif_ms_per_megapixel: 10).fm == "webp"
+    end
+
+    test "no measured cost means no budget" do
+      assert auto(%{"q" => "80"}, []).fm == "avif"
+      assert auto(%{"w" => "4000"}, avif_ms_per_megapixel: nil).fm == "avif"
+    end
+
+    test "the cost function runs only when AVIF is a candidate" do
+      boom = fn -> flunk("cost measured for a request that cannot get AVIF") end
+      plan = plan!(%{"w" => "100", "auto" => "format"})
+
+      assert Transform.resolve(plan,
+               accept: "image/webp,*/*",
+               avif?: true,
+               avif_ms_per_megapixel: boom
+             ).fm ==
+               "webp"
+
+      assert Transform.resolve(plan, accept: @browser, avif?: false, avif_ms_per_megapixel: boom).fm ==
+               "webp"
+
+      assert Transform.resolve(plan,
+               accept: @browser,
+               avif?: true,
+               avif_ms_per_megapixel: fn -> 1 end
+             ).fm ==
+               "avif"
+    end
+
+    test "fm=avif ignores the budget" do
+      plan = plan!(%{"w" => "4000", "fm" => "avif"})
+
+      assert Transform.resolve(plan, accept: @browser, avif?: true, avif_ms_per_megapixel: 1.0e6).fm ==
+               "avif"
+    end
+  end
+
+  describe "AVIF encoder settings" do
+    test "avif_quality/1 maps every q bucket to an AVIF quality at or below it" do
+      # `parse/1` rounds q to a multiple of 5, so these are all the q a plan holds.
+      for q <- 5..100//5 do
+        aq = Transform.avif_quality(q)
+        assert aq in 1..100
+        assert aq <= q
+      end
+
+      assert Transform.avif_quality(75) == 55
+      assert Transform.avif_quality(84) == Transform.avif_quality(85)
+      assert Transform.avif_quality(90) == 79
+    end
+
+    test "avif_quality/1 never decreases as q rises" do
+      qs = Enum.map(1..100, &Transform.avif_quality/1)
+      assert qs == Enum.sort(qs)
+    end
+
+    test "the default effort is 1 and the default budget 1500 ms" do
+      assert Transform.avif_effort() == 1
+      assert Transform.avif_budget_ms() == 1500
+    end
+
+    test "only an AVIF key carries the encoder tag" do
+      assert Transform.canonical(plan!(%{"w" => "100", "fm" => "avif"})) =~
+               ~r/;enc=avif-e1-qm1\z/
+
+      for fm <- ~w(jpg png webp) do
+        assert Transform.encoder_tag(plan!(%{"fm" => fm})) == nil
+      end
+    end
+
+    test "JPEG, PNG and WebP keys are unchanged, so their cached files keep serving" do
+      plan = plan!(%{"w" => "1200", "fm" => "webp", "q" => "85"})
+
+      assert Transform.canonical(plan) ==
+               "v1;w=1200;h=-;fit=clip;crop=;rect=-;fp=-;fm=webp;q=85;wm=none"
+    end
+  end
+
+  describe "output_pixels/2" do
+    test "uses the geometry when the source size is known" do
+      assert Transform.output_pixels(plan!(%{"w" => "300"}), {600, 400}) == 300 * 200
+
+      assert Transform.output_pixels(
+               plan!(%{"w" => "300", "h" => "300", "fit" => "fill"}),
+               {600, 400}
+             ) ==
+               300 * 300
+
+      assert Transform.output_pixels(plan!(%{"rect" => "0,0,50,40"}), {600, 400}) == 50 * 40
+      assert Transform.output_pixels(plan!(%{}), {600, 400}) == 600 * 400
+    end
+
+    test "falls back to the plan's sides without a source size" do
+      assert Transform.output_pixels(plan!(%{"w" => "300", "h" => "200"}), nil) == 60_000
+      assert Transform.output_pixels(plan!(%{"w" => "300"}), nil) == 90_000
+      assert Transform.output_pixels(plan!(%{}), nil) == nil
+    end
+  end
+
   describe "geometry/3" do
     test "width only keeps the aspect" do
       assert %{resize: {300, 200}, crop: nil} =

@@ -58,7 +58,14 @@ defmodule Barkpark.Media.ImageBackend do
   @doc "Whether this backend can encode AVIF. Optional; absent means no."
   @callback avif?() :: boolean()
 
-  @optional_callbacks transform: 4, avif?: 0
+  @doc """
+  Measured AVIF encode time on this node, in milliseconds per megapixel of
+  output, or nil when unknown. Optional. `auto=format` uses it to pick WebP
+  over AVIF when an AVIF encode would exceed the time budget.
+  """
+  @callback avif_ms_per_megapixel() :: number() | nil
+
+  @optional_callbacks transform: 4, avif?: 0, avif_ms_per_megapixel: 0
 
   @doc "Whether the selected backend runs URL-parameter transforms."
   @spec transforms?() :: boolean()
@@ -72,6 +79,16 @@ defmodule Barkpark.Media.ImageBackend do
   def avif? do
     mod = impl()
     Code.ensure_loaded?(mod) and function_exported?(mod, :avif?, 0) and mod.avif?()
+  end
+
+  @doc "The selected backend's measured AVIF cost in ms per megapixel, or nil."
+  @spec avif_ms_per_megapixel() :: number() | nil
+  def avif_ms_per_megapixel do
+    mod = impl()
+
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :avif_ms_per_megapixel, 0),
+      do: mod.avif_ms_per_megapixel(),
+      else: nil
   end
 
   @doc "The selected backend module (config override, else OS default)."
