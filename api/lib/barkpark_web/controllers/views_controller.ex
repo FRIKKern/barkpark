@@ -10,7 +10,7 @@ defmodule BarkparkWeb.ViewsController do
   `visitor` is ignored and the client IP and user agent stand in for it, so a
   browser cannot pick a fresh visitor per request to beat the dedupe.
 
-  The answer is `202` with `{"ok": true, "accepted": n, "duplicates": d}`.
+  The answer is `202` with `{"accepted": n, "duplicates": d}`.
   `accepted` counts the views buffered; a view of an id that is not a
   published document of the dataset is dropped later, at flush, and is not
   reported back.
@@ -34,7 +34,7 @@ defmodule BarkparkWeb.ViewsController do
          {:ok, result} <- Views.record(dataset_id, ids, visitor(conn, params)) do
       conn
       |> put_status(:accepted)
-      |> json(%{ok: true, accepted: result.accepted, duplicates: result.duplicates})
+      |> json(%{accepted: result.accepted, duplicates: result.duplicates})
     else
       {:error, :not_found} -> {:error, :not_found}
       {:error, reason} -> invalid(reason)

@@ -13,7 +13,7 @@ A site records views of its documents. Barkpark counts them per document per day
 | `ids` | Up to 50 ids, as a JSON list or a comma-separated string. |
 | `visitor` | Token callers only. An opaque value naming one visitor for the day, such as a hash of the site's session id. |
 
-The fields may ride the JSON body or the query string, so `navigator.sendBeacon(url + "?id=" + id)` works. The answer is `202 {"ok": true, "accepted": n, "duplicates": d}`. A missing id or more than 50 is `422 validation_failed`; an unknown dataset is `404`.
+The fields may ride the JSON body or the query string, so `navigator.sendBeacon(url + "?id=" + id)` works. The answer is `202 {"accepted": n, "duplicates": d}`. A missing id or more than 50 is `422 validation_failed`; an unknown dataset is `404`.
 
 Access is the same as reading the scope's documents. A token of the workspace (a read token is enough) may record. An anonymous browser may record only when the scope has a `:docs` share because `RequireShareScope` admits POST on this one route. Rate limit: 60 views a minute per anonymous IP (`:rate_limits, view_per_minute`) and 6000 per token (`view_token_per_minute`), per dataset; over that, `429` with `Retry-After`.
 

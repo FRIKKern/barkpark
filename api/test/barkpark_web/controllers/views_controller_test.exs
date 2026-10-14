@@ -78,7 +78,7 @@ defmodule BarkparkWeb.ViewsControllerTest do
         |> post(views_path(ws, project), %{"id" => "b1", "visitor" => "session-1"})
         |> json_response(202)
 
-      assert body == %{"ok" => true, "accepted" => 1, "duplicates" => 0}
+      assert body == %{"accepted" => 1, "duplicates" => 0}
 
       again =
         scoped_conn()
@@ -86,7 +86,7 @@ defmodule BarkparkWeb.ViewsControllerTest do
         |> post(views_path(ws, project), %{"ids" => ["b1", "b2"], "visitor" => "session-1"})
         |> json_response(202)
 
-      assert again == %{"ok" => true, "accepted" => 1, "duplicates" => 1}
+      assert again == %{"accepted" => 1, "duplicates" => 1}
 
       assert Views.flush() == 2
       Views.rollup()

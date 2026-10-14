@@ -218,14 +218,15 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     "datasets" => {"JOIN projects p ON p.id = t.project_id", "p.workspace_id"},
     "role_permissions" => {"JOIN roles r ON r.id = t.role_id", "r.workspace_id"},
     # Document view counts (task-5feac4e826cff9a5): keyed by `dataset_id`,
-    # NOT NULL, so the two many-to-one joins reach the workspace without
-    # fanning out or dropping a row.
+    # NOT NULL. One join, because teardown turns it into `DELETE … USING`;
+    # the dataset's project names the workspace through a scalar subquery
+    # on the projects primary key, so nothing fans out or drops.
     "document_view_days" =>
-      {"JOIN datasets ds ON ds.id = t.dataset_id JOIN projects p ON p.id = ds.project_id",
-       "p.workspace_id"},
+      {"JOIN datasets ds ON ds.id = t.dataset_id",
+       "(SELECT p.workspace_id FROM projects p WHERE p.id = ds.project_id)"},
     "document_popularity" =>
-      {"JOIN datasets ds ON ds.id = t.dataset_id JOIN projects p ON p.id = ds.project_id",
-       "p.workspace_id"},
+      {"JOIN datasets ds ON ds.id = t.dataset_id",
+       "(SELECT p.workspace_id FROM projects p WHERE p.id = ds.project_id)"},
     # SECURITY INVARIANT (pds-bl-pin-webhook-deliveries-inner-join): this INNER
     # JOIN is the ONLY thing keeping media signing secrets out of every bundle.
     # Media deliveries are the one delivery kind whose `payload_snapshot` embeds

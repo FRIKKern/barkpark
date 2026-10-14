@@ -940,6 +940,9 @@ defmodule PDS.Census do
     # nothing: Sanity's client sends a query too long for a URL as POST. It
     # renders the evaluated result, never an `ok: true` literal.
     {:post, "/w/:workspace_slug/p/:project_slug/v:api_version/data/query/:dataset", "BarkparkWeb.GroqController", :read_post, :status_only_receipt},
+    # task-5feac4e826cff9a5: the document view counter answers 202 with the
+    # buffered counts `Views.record/4` returned, and never spells `ok: true`.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/views/:dataset", "BarkparkWeb.ViewsController", :record, :status_only_receipt},
     # Seat consent (owner ruling #7, task-a08da65bc33083d0): three NEW routed
     # writes, rows proposed by `--routed-rows` and pasted verbatim. Each renders
     # the row the context function returned (accept: the created seat; decline:
@@ -1698,13 +1701,13 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
-      basis_spans: [{417, 442}],
+      basis_spans: [{440, 465}],
       basis_token: "no failure reaches this receipt",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis:
-        "the in-code ruling at :417-442, added by #18899 — three stated grounds, of which " <>
-          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :434.",
+        "the in-code ruling at :440-465, added by #18899 — three stated grounds, of which " <>
+          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :457.",
       why:
         "the arm fires and this row withholds the finding. The `_ws_id` head is NOT a " <>
           "failure sink: it is the non-nil half of the two-way split on token_workspace_id/1 " <>
