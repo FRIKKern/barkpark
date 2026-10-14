@@ -7157,13 +7157,17 @@ fi
 # the wrong reason — each of which still reads as plausible S7 prose, so no
 # per-row text comparison can be trusted until the pairing is.
 RC24_GEN_ARITY="$TMP/rc24-gen-arity.sh"
+RC24_ARITY_BASE="$(s7_report "$GEN" "$SPEC" aritybase | awk -F'\t' '$1 == "CHECKED" { print $2 "\t" $3; exit }')"
+IFS=$'\t' read -r RC24_NAMES RC24_REASONS <<<"$RC24_ARITY_BASE"
 sed 's/^  "Security gate"$//' "$GEN" > "$RC24_GEN_ARITY"
 if [ "$(grep -c '^  "Security gate"$' "$RC24_GEN_ARITY" || true)" = "0" ]; then
   ok "the arity mutation applies: a COPY of the generator names one fewer context than it carries reasons"
 else
   bad "the arity mutation did not apply — the entry survived, so the clause below is vacuous"
 fi
-if grep -q '^ARITY	1	2$' <<<"$(s7_report "$RC24_GEN_ARITY" "$SPEC" genarity)"; then
+RC24_ARITY_WANT="$(printf 'ARITY\t%s\t%s' "$((RC24_NAMES - 1))" "$RC24_REASONS")"
+if [ "$RC24_NAMES" -ge 2 ] && [ "$RC24_NAMES" -eq "$RC24_REASONS" ] &&
+   grep -qxF "$RC24_ARITY_WANT" <<<"$(s7_report "$RC24_GEN_ARITY" "$SPEC" genarity)"; then
   ok "…and the check REDS on the unpaired lists before it compares a single reason"
 else
   bad "the S7 name and reason arrays can fall out of step without a red — every pairing below the gap would be silently wrong"
