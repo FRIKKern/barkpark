@@ -6,21 +6,21 @@ defmodule Barkpark.EdgeProjector.Settings do
 
   The one key today:
 
-    * `:incremental_project` — feature flag (default `false`). It gates the
-      per-doc UPSERT path on `:after_save` / `:after_publish` exactly the way
-      Indx's `:incremental_upsert` gates its incremental path:
+    * `:incremental_project` — default `true` (task-6e2552cdeb223fa2; it was
+      `false`). It gates the per-doc UPSERT path on `:after_save`:
 
-        - OFF (the DEFAULT) → save/publish take the SAFE full per-scope
-          REBUILD path (delete the scope's edges, re-extract the published
-          corpus, bulk add). With the flag off the incremental per-doc upsert
-          path is INERT; behaviour is the deterministic full rebuild.
-        - ON → save/publish route to the per-document `upsert_record/2` path,
-          which diffs ONE doc's outbound edges against stored. UNPROVEN — a
-          mis-diff strands stale edges in a durable Postgres table (no
-          blue/green to discard, unlike Indx). Spike-gated.
+        - ON (the DEFAULT) → a save enqueues a per-document `upsert_record/2`
+          job, which diffs ONE doc's outbound edges against stored.
+        - OFF → a save enqueues the full per-scope REBUILD for the doc's type
+          (delete the scope's edges, re-extract the published corpus, bulk
+          add). One rebuild per save made a bulk import cost a type-wide
+          rebuild per document.
 
-      Env override `EDGE_PROJECTOR_INCREMENTAL` (truthy: "1"/"true"/"yes"/"on",
-      case-insensitive).
+      A draft's edges can now reach the table from its draft row; the public
+      graph reads drop draft sources (`Content.Graph` `published_only: true`).
+
+      Turn it off with the env var `EDGE_PROJECTOR_INCREMENTAL=0` (any value
+      outside "1"/"true"/"yes"/"on", case-insensitive, reads as off).
 
   Settings stored under the `"edge_projector"` plugin row. There is no
   network connection to configure (the projector writes the local
@@ -33,7 +33,7 @@ defmodule Barkpark.EdgeProjector.Settings do
   @app :barkpark
   @env_module __MODULE__ |> Module.split() |> Enum.drop(-1) |> Module.concat()
 
-  @default_incremental_project false
+  @default_incremental_project true
 
   @typedoc "Resolved edge-projector settings map."
   @type settings :: %{
@@ -73,7 +73,7 @@ defmodule Barkpark.EdgeProjector.Settings do
 
   # Precedence: OS env EDGE_PROJECTOR_INCREMENTAL > app env
   # (config :barkpark, Barkpark.EdgeProjector, incremental_project:) > DB row >
-  # module default (false). Any source value is coerced to a boolean so a
+  # module default (true). Any source value is coerced to a boolean so a
   # string "true"/"1" reads as true.
   defp resolve_incremental_project(env, db) do
     cond do

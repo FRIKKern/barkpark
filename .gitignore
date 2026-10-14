@@ -53,6 +53,9 @@ api/deps
 # the restart-line cgroup kill so a post-restart death is visible)
 .deploy-status.json
 .deploy-status.json.tmp
+# scripts/build-guard.sh's build log (the guarded build writes here, so a
+# service restart that closes the runner's pipe cannot kill the build)
+.bp-build.log
 
 # JS monorepo
 node_modules/

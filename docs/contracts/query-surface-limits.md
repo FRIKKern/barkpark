@@ -10,7 +10,8 @@ measurements are pinned as tests in
 fails if any statement here stops being true.
 
 Endpoints in scope: `GET /v1/data/query/:dataset/:type` and its
-workspace-scoped twin `GET /w/:ws/p/:proj/v1/data/query/:dataset/:type`.
+workspace-scoped twin `GET /w/:ws/p/:proj/v1/data/query/:dataset/:type`. The
+GROQ read joins through references; its limits: [groq-query.md](groq-query.md).
 
 ## 1. Filters compose with AND
 
@@ -90,8 +91,7 @@ JavaScript, because all of them compare maps/objects structurally.
 It is **not** harmless for a tool that deep-compares **serialised text**. A
 migration checker that does `JSON.stringify(before) !== JSON.stringify(after)`,
 or diffs two `jq`-free dumps line by line, reports field drift on documents
-where no field changed. This cost real debugging time on migrated portable-doc
-fields.
+where no field changed.
 
 Guidance: compare **canonically**, never textually.
 
@@ -137,8 +137,8 @@ Rules that keep this honest:
 - Copy only what a query needs. A catalogue row that mirrors the whole target
   is a second copy of the document, with a second copy's drift.
 
-Today every consumer rediscovers this boundary empirically. This section is the
-answer, so the next one does not have to.
+A read that needs a referenced value without a catalogue row can use GROQ's
+`->` instead.
 
 ## 7. Graph routes are flat-only today
 

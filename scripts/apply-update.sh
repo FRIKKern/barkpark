@@ -92,4 +92,6 @@ if [ -n "$SHA" ] && bash scripts/fetch-prebuilt.sh "$SHA"; then
 fi
 
 echo "[apply-update] no usable precompiled artifact — on-box rebuild"
+# deploy-rebuild.sh would try the same artifact again; it just failed here.
+export BP_PREBUILT=0
 exec bash scripts/deploy-rebuild.sh

@@ -827,6 +827,46 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       paper
     end
 
+    # task-b46266af433288e3: the graph's <pre> scrolls sideways when wide but
+    # could not take focus (axe scrollable-region-focusable).
+    test "the goal-path graph is keyboard-focusable and named", %{conn: conn} do
+      seed_rail_paper()
+      {:ok, _view, html} = live(conn, "/papers/#{@rail_slug}")
+
+      assert html =~
+               ~r/<pre class="mermaid" tabindex="0" role="group" aria-label="Goal path graph">/
+    end
+
+    # Ruling 2026-10-10 (a): the event list names a known event type in the
+    # reader's language; an unknown type ("plan-written") reads raw, the
+    # gitGraph's commit ids stay ASCII, and the stored rows are untouched.
+    test "the event list reads known event types in the reader's language", %{conn: conn} do
+      paper = seed_rail_paper()
+
+      list = fn html ->
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query("#goal-path-events .bp-goal-rail-event-type")
+        |> Enum.map(&LazyHTML.text/1)
+      end
+
+      {:ok, _view, en} = live(conn, "/papers/#{@rail_slug}")
+      assert list.(en) == ["goal-opened", "plan-written", "goal-snapshot"]
+
+      ws = Barkpark.Tenancy.get_workspace_by_id(paper.workspace_id)
+      {:ok, _} = Barkpark.Tenancy.set_workspace_locale(ws, "nb-NO")
+
+      {:ok, _view, nb} = live(build_conn(), "/papers/#{@rail_slug}")
+      assert list.(nb) == ["mål åpnet", "plan-written", "målstatus"]
+
+      for id <- ["goal-opened-1", "plan-written-2", "goal-snapshot-3"], do: assert(nb =~ id)
+
+      assert Barkpark.Repo.all(Barkpark.Plugins.Bulldocs.Event)
+             |> Enum.filter(&(&1.goal_id == @rail_goal))
+             |> Enum.map(& &1.event_type)
+             |> Enum.sort() == Enum.sort(["goal-opened", "plan-written", "goal-snapshot"])
+    end
+
     test "renders the rail with a linear gitGraph commit per event", %{conn: conn} do
       seed_rail_paper()
 

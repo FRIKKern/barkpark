@@ -2397,11 +2397,19 @@ defmodule BarkparkCloud.Sites.Deploy do
   # therefore terminal on the first beat: 207 rows in 24h spent a build on a box
   # that was merely slow. Naming it without grading it here would have kept the
   # loss and only renamed it, so the two land in the SAME change (charter D114).
+  # `storage_unavailable` (task-f8233616de3513d4) is the THIRD. The box used
+  # to answer a refused or lost database connection with the crash path's
+  # `internal_error`; it now types it `storage_unavailable` (reason
+  # `connection_unavailable`), as its controllers already did. Every reason under
+  # that code is transient by its own hint (pool, write admission held for a
+  # switch). Typing it without grading it here would turn the pool blip this
+  # grace exists for into a spent build, so the two land in the SAME change.
   defp transient_refusal?(body) when is_map(body) do
     case refusal_code(body) do
       nil -> true
       "internal_error" -> true
       "deploy_runner_unavailable" -> true
+      "storage_unavailable" -> true
       _ -> false
     end
   end

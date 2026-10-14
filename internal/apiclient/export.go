@@ -75,15 +75,19 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 		return humanAPIError(resp.StatusCode, body)
 	}
 
-	// Classify the framing BEFORE reading a byte. Two of the three shapes carry
-	// an explicit end-of-stream signal the transport itself verifies:
+	// Classify the framing BEFORE reading a byte. These shapes carry an explicit
+	// end-of-stream signal the transport itself verifies:
 	//   chunked          — resp.TransferEncoding names it; a missing terminating
 	//                      chunk surfaces as an unexpected EOF from Read.
 	//   length-delimited — resp.ContentLength >= 0; a short body likewise.
-	// The third — no Content-Length AND no chunked encoding — ends only when the
-	// connection closes, so nothing distinguishes "the server finished" from
-	// "the server died". That one is not attestable.
-	attestable := resp.ContentLength >= 0
+	//   HTTP/2           — a body ends only on an END_STREAM frame; a reset
+	//                      stream or a dropped connection is a Read error, never
+	//                      a clean EOF. Go reports no Transfer-Encoding and a -1
+	//                      ContentLength here, so it must be named on its own.
+	// The last — HTTP/1 with no Content-Length AND no chunked encoding — ends
+	// only when the connection closes, so nothing distinguishes "the server
+	// finished" from "the server died". That one is not attestable.
+	attestable := resp.ContentLength >= 0 || resp.ProtoMajor >= 2
 	for _, te := range resp.TransferEncoding {
 		if strings.EqualFold(te, "chunked") {
 			attestable = true
@@ -121,7 +125,8 @@ func (c *Client) Export(ctx context.Context, opts ExportOpts, onDoc func(line st
 	// operator gets an explicit error naming the framing plus the count that did
 	// arrive, and runExport's `err != nil` arms print PARTIAL and write NO
 	// sidecar. (The real ExportController uses send_chunked — the honest framing
-	// — so this refusal fires only behind a re-framing intermediary.)
+	// over HTTP/1.1, an END_STREAM over HTTP/2 — so this refusal fires only
+	// behind a re-framing intermediary.)
 	//
 	// A real scanner error wins over the framing refusal: it is the more specific
 	// diagnosis of the same incompleteness.

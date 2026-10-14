@@ -17,6 +17,56 @@
 // the patch-block op shape, the slash menu, or the keyboard path.
 
 import { t } from "./i18n.js";
+import { safeUrl } from "./safe-url.js";
+
+// TipTap's toggle command per mark. The bubble's buttons and the canvas's toolbar
+// commands (canvas/host-commands.js) both toggle through applyMark and set links
+// through applyLink, so a press is the same transaction whichever surface made it.
+const TOGGLE = {
+  bold: "toggleBold",
+  italic: "toggleItalic",
+  code: "toggleCode",
+  underline: "toggleUnderline",
+  strike: "toggleStrike",
+  highlight: "toggleHighlight",
+  subscript: "toggleSubscript",
+  superscript: "toggleSuperscript",
+};
+
+export const markToggle = (name) => TOGGLE[name] || null;
+
+// Toggle a mark over the selection; false when this editor has no such mark or it
+// cannot apply here.
+export function applyMark(editor, name) {
+  const cmd = TOGGLE[name];
+  let can = false;
+  try {
+    can = !!cmd && editor.can()[cmd]?.() === true;
+  } catch (_e) {
+    can = false;
+  }
+  return can ? editor.chain().focus()[cmd]().run() : false;
+}
+
+// The href a link may carry, or null: the reader's allowlist (safe-url.js: http, https,
+// mailto, tel, a relative or in-document address, "#"), so a javascript: or data: link
+// never lands, whether the bubble or a host toolbar sets it.
+export function linkHref(rawHref) {
+  if (typeof rawHref !== "string") return null;
+  const href = rawHref.trim();
+  if (href === "") return null;
+  const safe = safeUrl(href);
+  return safe !== "#" || href === "#" ? safe : null;
+}
+
+// Set the link over the selection's whole link range; an empty href clears it, and an
+// href off the allowlist does nothing (false).
+export function applyLink(editor, rawHref) {
+  const chain = editor.chain().focus().extendMarkRange("link");
+  if (typeof rawHref !== "string" || rawHref.trim() === "") return chain.unsetLink().run();
+  const href = linkHref(rawHref);
+  return href ? chain.setLink({ href }).run() : false;
+}
 
 export class FormatBubble {
   constructor({ editor }) {
@@ -238,25 +288,13 @@ export class FormatBubble {
     if (!this._editor) return;
     switch (name) {
       case "bold":
-        this._editor.chain().focus().toggleBold().run();
-        break;
       case "italic":
-        this._editor.chain().focus().toggleItalic().run();
-        break;
       case "strike":
-        this._editor.chain().focus().toggleStrike().run();
-        break;
       case "underline":
-        if (this._editor.can().toggleUnderline?.()) this._editor.chain().focus().toggleUnderline().run();
-        break;
       case "highlight":
-        if (this._editor.can().toggleHighlight?.()) this._editor.chain().focus().toggleHighlight().run();
-        break;
       case "subscript":
-        if (this._editor.can().toggleSubscript?.()) this._editor.chain().focus().toggleSubscript().run();
-        break;
       case "superscript":
-        if (this._editor.can().toggleSuperscript?.()) this._editor.chain().focus().toggleSuperscript().run();
+        applyMark(this._editor, name);
         break;
       case "align-left":
       case "align-center":
@@ -273,7 +311,7 @@ export class FormatBubble {
         break;
       }
       case "code":
-        this._editor.chain().focus().toggleCode().run();
+        applyMark(this._editor, name);
         break;
       case "link":
         this._toggleLinkRow();
@@ -320,13 +358,7 @@ export class FormatBubble {
   // Apply (or, on empty input, clear) the link mark over the selection's full
   // mark range, then refocus the editor.
   _applyLink(rawHref) {
-    const href = (rawHref || "").trim();
-    const chain = this._editor.chain().focus().extendMarkRange("link");
-    if (href.length === 0) {
-      chain.unsetLink().run();
-    } else {
-      chain.setLink({ href }).run();
-    }
+    applyLink(this._editor, rawHref);
     this._closeLinkRow(false);
     this._syncPressed();
   }

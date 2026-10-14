@@ -28,6 +28,9 @@ var cloudTokens = []string{
 	// dr-w15-s5: the box's own measured refusal to deploy, rank 5. Warn, for
 	// the same monotonicity reason.
 	"cannot_deploy",
+	// task-9d72b5f86487cf9b: a service systemd keeps restarting on its own,
+	// rank 5. Warn, for the same monotonicity reason.
+	"restarting",
 	// The usage-meter STATE token for a read that was attempted and FAILED
 	// (dr-w3-s6 followup): before this entry it fell to the neutral default and
 	// painted identically to the deliberate "unmetered".
@@ -61,6 +64,8 @@ func TestForCloudVocabulary(t *testing.T) {
 		"diverged": "warn",
 		// cannot_deploy sits directly under degraded (warn), so it is warn too.
 		"cannot_deploy": "warn", "CANNOT_DEPLOY": "warn",
+		// restarting sits directly under degraded (warn), so it is warn too.
+		"restarting": "warn", "RESTARTING": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Usage-meter quota states: near_limit warns, over_limit is danger.
 		"near_limit": "warn", "NEAR_LIMIT": "warn", " over_limit ": "danger", "over_limit": "danger",

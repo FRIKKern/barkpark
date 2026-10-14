@@ -227,7 +227,7 @@ defmodule BarkparkWeb.FinderUrlStateTest do
       {:ok, view, _html} = live(conn, "/finder")
       html = render_async(view, 5_000)
 
-      [documents] = Regex.run(~r/([0-9]+) documents/, html, capture: :all_but_first)
+      [documents] = Regex.run(~r/([0-9]+) documents?\b/, html, capture: :all_but_first)
       [rev] = Regex.run(~r/data-rev="([0-9]+)"/, html, capture: :all_but_first)
 
       {String.to_integer(documents), String.to_integer(rev)}
@@ -291,7 +291,7 @@ defmodule BarkparkWeb.FinderUrlStateTest do
 
       html = conn |> get("/finder?q=urlstate+sentinel+golf") |> html_response(200)
 
-      assert html =~ "1 hits"
+      assert html =~ ~r/\b1 hit\b/
       # Scoped to the count line: the bare word "showing" appears in the
       # layout's own inline CSS commentary, so a page-wide refute is vacuous.
       refute html =~ "showing 1 of"

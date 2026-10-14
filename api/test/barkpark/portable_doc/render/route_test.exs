@@ -126,11 +126,13 @@ defmodule Barkpark.PortableDoc.Render.RouteTest do
       assert html =~ "Rundt &lt;vannet&gt; &amp; hjem"
     end
 
-    test "article reads the accent token; email carries literal hex" do
+    test "article strokes currentColor (the surface stylesheet paints it); email carries literal hex" do
       article = DataViz.route_html(block(), :article)
       email = DataViz.route_html(block(), :email)
 
-      assert article =~ "var(--paper-accent"
+      # task-ef9f386f8cb5e32a: no theme colour rides the article markup.
+      assert article =~ ~s(stroke="currentColor")
+      refute article =~ "var(--paper-"
       refute email =~ "var("
       assert email =~ ~r/stroke="#[0-9a-fA-F]{6}"/
     end

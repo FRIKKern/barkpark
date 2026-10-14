@@ -129,6 +129,15 @@ defmodule BarkparkWeb.Studio.StudioLive.PathsTest do
         assert URI.decode_query(query) == %{"desk" => desk}
       end
     end
+
+    test "focus: :doc rides alone or after the desk" do
+      assert Paths.append_desk_query("/d/production/studio/post/p1", focus: :doc) ==
+               "/d/production/studio/post/p1?focus=doc"
+
+      built = Paths.append_desk_query("/d/production/studio/post/p1", desk: "a b", focus: :doc)
+      [_base, query] = String.split(built, "?", parts: 2)
+      assert URI.decode_query(query) == %{"desk" => "a b", "focus" => "doc"}
+    end
   end
 
   describe "desk_chip_href/4 — scope-prefixed bookmarkable desk href" do

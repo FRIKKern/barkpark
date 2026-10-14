@@ -3,10 +3,15 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   Recovers `mediaAsset` documents left stranded at `bp_processing_status ==
   "processing"` by a crashed post-upload pipeline.
 
-  `Barkpark.Media.Processing.process/1` runs three NON-transactional
-  `Content.upsert_document` writes around remote-fetch + probe + rendition IO:
-  `set_status(_, "processing")` (write#1) → `maybe_probe_and_patch` →
-  `Renditions.generate_all` → `set_status(_, "ready" | "failed")` (write#3).
+  Since task-50cabce448b02af7 an upload writes its final status in the same
+  create as the asset document, so a new upload is never left at
+  `"processing"`; the rows this sweeper finds are older ones, and assets made
+  by `Assets.ensure_for_upload/1` outside the upload hook. The history below
+  describes the pipeline those rows were born under, which ran three
+  NON-transactional `Content.upsert_document` writes around remote-fetch +
+  probe + rendition IO: `set_status(_, "processing")` (write#1) →
+  `maybe_probe_and_patch` → `Renditions.generate_all` →
+  `set_status(_, "ready" | "failed")` (write#3).
   `set_status/3` swallows an upsert `{:error, _}` (logs, returns the OLD doc),
   and `process/1` itself runs INLINE inside `after_media_upload` under
   `ResolverChain.safe_call`, which swallows a RAISE (a vips/ImageBackend port

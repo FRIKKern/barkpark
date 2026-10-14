@@ -1,25 +1,33 @@
 // task-0ad7fed4370a5978: Studio's role=dialog modals are aria-modal, yet none
-// took focus, so Tab walked the page behind them. Hooks.ModalFocus (inline in
-// root.html.heex) moves focus in, keeps Tab inside, and gives it back on close.
+// took focus, so Tab walked the page behind them. Hooks.ModalFocus moves focus
+// in, keeps Tab inside, and gives it back on close. It lives in
+// /assets/bp-modal-focus.js (run-8 dialog sweep), registered by both the
+// Studio root layout and the paper layout.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { JSDOM } from "jsdom";
 
+const helper = readFileSync(
+  new URL("../../../priv/static/assets/bp-modal-focus.js", import.meta.url),
+  "utf8",
+);
 const root = readFileSync(
   new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url),
   "utf8",
 );
-const start = root.indexOf("Hooks.ModalFocus = {");
-assert.ok(start > 0, "root.html.heex defines Hooks.ModalFocus");
-const end = root.indexOf("\n    };", start);
-const source = root.slice(start + "Hooks.ModalFocus = ".length, end + "\n    }".length);
+assert.ok(
+  root.includes("Hooks.ModalFocus = window.BarkparkModalFocus;"),
+  "root.html.heex registers the shared helper as Hooks.ModalFocus",
+);
 
 const dom = new JSDOM(`<main><button id="trigger">Share</button><button id="behind">Behind</button></main>`, {
   runScripts: "outside-only",
 });
 const { window } = dom;
 const { document } = window;
-const hookDef = window.eval(`(${source})`);
+window.eval(helper);
+const hookDef = window.BarkparkModalFocus;
+assert.ok(hookDef && typeof hookDef.mounted === "function", "bp-modal-focus.js defines window.BarkparkModalFocus");
 const tab = (shiftKey = false) => {
   const e = new window.KeyboardEvent("keydown", { key: "Tab", shiftKey, bubbles: true, cancelable: true });
   document.activeElement.dispatchEvent(e);
@@ -95,6 +103,26 @@ assert.equal(
   document.activeElement,
   rebuilt.querySelector('[aria-label="Historikk"]'),
   "a replaced id-less trigger is found by its phx-click and aria-label",
+);
+
+// Run-8 dialog sweep: the chat palette's own hook (ChatPalette, on the overlay)
+// focuses its input BEFORE ModalFocus mounts on the inner card, so the element
+// focused at mount is inside the dialog. Close still returns to the opener.
+document.getElementById("trigger").focus();
+const overlay = document.createElement("div");
+overlay.setAttribute("role", "dialog");
+overlay.setAttribute("aria-modal", "true");
+overlay.innerHTML = '<div id="card"><input id="palette-input" /></div>';
+document.body.appendChild(overlay);
+document.getElementById("palette-input").focus();
+hook = Object.assign(Object.create(hookDef), { el: overlay.querySelector("#card") });
+hook.mounted();
+overlay.remove();
+hook.destroyed();
+assert.equal(
+  document.activeElement.id,
+  "trigger",
+  "focus returns to the opener even when a parent hook moved focus inside first",
 );
 
 console.log("ok modal focus: focus in, preferred control, Tab wraps, restored on close");

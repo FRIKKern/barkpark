@@ -589,6 +589,16 @@
         "env": {}
       },
       {
+        "name": "build-guard.sh syntax check",
+        "run": "bash -n scripts/build-guard.sh",
+        "env": {}
+      },
+      {
+        "name": "build-guard matrix (fake systemd-run, no service touched)",
+        "run": "bash scripts/build-guard.test.sh",
+        "env": {}
+      },
+      {
         "name": "site-runtime-install.sh syntax check",
         "run": "bash -n deploy/site-runtime-install.sh",
         "env": {}

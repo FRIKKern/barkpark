@@ -12,6 +12,13 @@
 #           than compiling; it only ever makes the happy path fast.
 # Exit 3  — blue/green slot layout detected; the slot deployer owns all writes.
 #
+# fetch-prebuilt.sh --into <build-root> <sha> — the same fetch and gates, but
+# the build lands in <build-root>/prod (api/_build_next for deploy-rebuild.sh)
+# and the deps in api/deps, with NO lock, NO swap of api/_build/prod and NO
+# restart. deploy-rebuild.sh calls it under its own lock and then migrates,
+# swaps and restarts exactly as it does after an on-box compile, so a box that
+# takes the CI build still migrates first (task-15e2eb3aa36b240b).
+#
 # The stamp gate is the safety core: a build compiled on a different Elixir/OTP/
 # erts/arch than this box is REFUSED (bytecode/NIF incompatibility), never
 # swapped in.
@@ -23,6 +30,13 @@ REPO="$PWD"
 if [ -d "$REPO/.slots" ]; then
   echo "[fetch-prebuilt] blue/green slot layout detected — use deploy/instance-deploy.sh" >&2
   exit 3
+fi
+
+INTO=""
+if [ "${1:-}" = "--into" ]; then
+  INTO="${2:-}"
+  shift 2 2>/dev/null || shift $#
+  [ -n "$INTO" ] || { echo "[fetch-prebuilt] usage: fetch-prebuilt.sh --into <build-root> <sha>" >&2; exit 1; }
 fi
 
 SHA="${1:-}"
@@ -73,6 +87,21 @@ have="$(sha256sum "$tmp/api-build.tar.zst" | cut -d' ' -f1)"
 mkdir -p "$tmp/x"
 zstd -dc "$tmp/api-build.tar.zst" 2>/dev/null | tar -C "$tmp/x" -xf - 2>/dev/null || fallback "extract failed"
 [ -d "$tmp/x/_build/prod" ] && [ -d "$tmp/x/deps" ] || fallback "artifact missing _build/prod or deps"
+
+if [ -n "$INTO" ]; then
+  # deploy-rebuild.sh holds the lock and owns the swap, migrate and restart.
+  case "$INTO" in /*) dest="$INTO" ;; *) dest="$REPO/$INTO" ;; esac
+  rm -rf "$dest"
+  mkdir -p "$dest"
+  mv "$tmp/x/_build/prod" "$dest/prod" || fallback "could not place the build in $INTO"
+  rm -rf api/deps.old
+  [ -d api/deps ] && mv api/deps api/deps.old
+  mv "$tmp/x/deps" api/deps || { [ -d api/deps.old ] && mv api/deps.old api/deps; fallback "could not place deps"; }
+  rm -rf api/deps.old
+  find "$dest/prod" api/deps -exec touch {} + 2>/dev/null || true
+  echo "[fetch-prebuilt] placed precompiled build for $SHA in $INTO/prod — no on-box compile"
+  exit 0
+fi
 
 exec 8>"$REPO/.deploy-build.lock"
 flock 8

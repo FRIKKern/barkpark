@@ -40,11 +40,25 @@ package cli
 // command to type. Temporary artifacts are removed ONLY after a fully reconciled
 // success; a failure always keeps them and says where they are.
 //
-// The verb NEVER reports a successful pull with missing members. The import half
-// is not even attempted while a single blob fetch failed, and after the upload
-// the two sidecar counts are RECONCILED — uploaded must equal fetched — so a
-// partially-transferred media set is a non-zero exit with a named shortfall
-// rather than a receipt with a footnote.
+// The verb NEVER reports a successful pull with members it lost on the way. The
+// import half is not attempted while a single blob fetch failed, and after the
+// upload the two sidecar counts are RECONCILED — uploaded must equal fetched —
+// so a partially-transferred media set is a non-zero exit with a named
+// shortfall rather than a receipt with a footnote.
+//
+// Two outcomes are NOT failures, and the receipt names both
+// (task-bf56c5d0302a2d6f):
+//
+//   - a media row whose file the source itself answers 404 for. The bytes do
+//     not exist to move, so the pull lists the file as missing on the source
+//     and carries on; the documents and the media record still land.
+//   - `--no-media`, which moves documents and media records and skips the
+//     files on purpose.
+//
+// A 429 is not a failure either: the media requests are paced and wait out the
+// server's Retry-After (media_transfer.go). After a pull the receipt also names
+// the shares and tokens the dev profile does not carry, with the command that
+// recreates each (dev_pull_not_carried.go).
 
 import (
 	"archive/tar"
@@ -55,11 +69,13 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // devPullUsage is the one usage string every arity/flag error quotes.
-const devPullUsage = "bp dev pull <source-server> <target-server> <workspace>/<dataset> --yes [--bundle <path>] [--keep] [--resume]"
+const devPullUsage = "bp dev pull <source-server> <target-server> <workspace>/<dataset> --yes [--bundle <path>] [--keep] [--resume] [--no-media] [--media-rate <per-minute>]"
 
 // devPullProfile is pinned, not a flag. The verb IS the dev pull: a `full`
 // profile bundle carries unscrubbed content and has no business landing on a
@@ -172,7 +188,7 @@ func (f devPullFailure) render(out *writer) int {
 // @canonical marker: the name self-points, and the doctrine reserves the index
 // for forked or jargon-named capabilities.
 func runDevPull(out *writer, g globals, args []string) int {
-	a, perr := parseHzArgs(args, []string{"bundle"}, []string{"keep", "resume", "yes"}, devPullUsage)
+	a, perr := parseHzArgs(args, []string{"bundle", "media-rate"}, []string{"keep", "resume", "yes", "no-media"}, devPullUsage)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
@@ -190,6 +206,15 @@ func runDevPull(out *writer, g globals, args []string) int {
 	}
 	resume := a.bools["resume"]
 	keep := a.bools["keep"] || resume
+	noMedia := a.bools["no-media"]
+	mediaRate := defaultMediaRatePerMinute
+	if v := strings.TrimSpace(a.val("media-rate")); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil || n < 0 {
+			return useError(out, "usage", fmt.Sprintf("--media-rate wants a whole number of requests a minute (0 = unpaced until a 429), got %q", v), exitUsage)
+		}
+		mediaRate = n
+	}
 
 	// ── phase: resolve ────────────────────────────────────────────────────────
 	//
@@ -231,8 +256,8 @@ func runDevPull(out *writer, g globals, args []string) int {
 	srcLabel, tgtLabel := cfg.DisplayName(srcEntry), cfg.DisplayName(tgtEntry)
 	bundle, ownDir := devPullBundlePath(strings.TrimSpace(a.val("bundle")), srcLabel, ws, ds)
 	blobDir := bundle + ".blobs"
-	rerun := devPullRerunCmd(srcName, tgtName, ws, ds, bundle, false)
-	rerunResume := devPullRerunCmd(srcName, tgtName, ws, ds, bundle, true)
+	rerun := devPullRerunCmd(srcName, tgtName, ws, ds, bundle, false, noMedia)
+	rerunResume := devPullRerunCmd(srcName, tgtName, ws, ds, bundle, true, noMedia)
 
 	gSrc := devPullEndpointGlobals(g, srcBase, srcTok)
 	gTgt := devPullEndpointGlobals(g, tgtBase, tgtTok)
@@ -241,8 +266,16 @@ func runDevPull(out *writer, g globals, args []string) int {
 		out.progressf("DRY RUN — would pull %s/%s (profile %s)", ws, ds, devPullProfile)
 		out.progressf("  export  %s [%s] → %s", srcBase, srcLabel, bundle)
 		out.progressf("  verify  the bundle manifest declares profile=%s dataset=%s", devPullProfile, ds)
-		out.progressf("  blobs   → %s, then PUT each one to %s [%s]", blobDir, tgtBase, tgtLabel)
+		if noMedia {
+			out.progressf("  media   skipped (--no-media): media records travel in the bundle, files do not")
+		} else {
+			out.progressf("  blobs   GET each file from %s/w/%s/p/<project>/media/files/<path> at up to %d a minute → %s", srcBase, ws, mediaRate, blobDir)
+		}
 		out.progressf("  import  %s → workspace %s on %s [%s] (mode: merge)", bundle, ws, tgtBase, tgtLabel)
+		if !noMedia {
+			out.progressf("  blobs   push each fetched file to %s [%s]", tgtBase, tgtLabel)
+		}
+		out.progressf("  report  list the source's shares and tokens for %s/%s, which the dev profile does not carry", ws, ds)
 		return exitOK
 	}
 
@@ -334,9 +367,20 @@ func runDevPull(out *writer, g globals, args []string) int {
 	// The bundle is DB-only. A single failed fetch stops the pull HERE: importing
 	// rows whose media bytes never left the source is precisely the "success with
 	// missing members" this verb must never produce.
+	refs, _, _ := bundleMediaIndex(bundle)
+	project := ""
+	if len(refs) > 0 {
+		project = refs[0].project
+	}
 	fetched, blobBytes := -1, int64(0)
-	if !resume {
-		rep := fetchWorkspaceBlobs(devPullQuietWriter(out), srcBase, srcTok, bundle, blobDir)
+	var missing []string
+	throttled, waited := 0, time.Duration(0)
+	if noMedia {
+		out.progressf("Media files skipped (--no-media): %d media record(s) travel in the bundle without their files", len(refs))
+	} else if !resume {
+		rep := fetchWorkspaceBlobs(devPullQuietWriter(out), srcBase, srcTok, bundle, blobDir,
+			blobFetchOpts{ratePerMinute: mediaRate, listMissing: true})
+		throttled, waited = rep.throttled, rep.waited
 		if rep.failed > 0 {
 			return devPullFailure{
 				phase: "export-blobs", code: "dev_pull_blob_fetch_failed",
@@ -346,7 +390,11 @@ func runDevPull(out *writer, g globals, args []string) int {
 			}.render(out)
 		}
 		fetched, blobBytes = rep.moved, rep.bytes
+		missing = rep.missing
 		out.progressf("Fetched %d blob(s) → %s", fetched, blobDir)
+		if len(missing) > 0 {
+			out.progressf("%d media file(s) are missing on the source (404); their records still travel", len(missing))
+		}
 	}
 
 	// ── phase: import ─────────────────────────────────────────────────────────
@@ -375,8 +423,9 @@ func runDevPull(out *writer, g globals, args []string) int {
 
 	// ── phase: import-blobs ───────────────────────────────────────────────────
 	uploaded, uploadedBytes := 0, int64(0)
-	if devPullHasSidecar(blobDir) {
-		rep := uploadWorkspaceBlobs(devPullQuietWriter(out), tgtBase, tgtTok, ws, blobDir)
+	if !noMedia && devPullHasSidecar(blobDir) {
+		rep := uploadWorkspaceBlobs(devPullQuietWriter(out), tgtBase, tgtTok, ws, blobDir, 0)
+		throttled, waited = throttled+rep.throttled, waited+rep.waited
 		if rep.failed > 0 {
 			return devPullFailure{
 				phase: "import-blobs", code: "dev_pull_blob_upload_failed",
@@ -394,7 +443,7 @@ func runDevPull(out *writer, g globals, args []string) int {
 	// Both sidecar halves reported zero failures; that is not the same claim as
 	// "everything the source served reached the target". Only the two COUNTS
 	// agreeing says that, and on a fresh pull both are known.
-	if !resume && fetched >= 0 && uploaded != fetched {
+	if !noMedia && !resume && fetched >= 0 && uploaded != fetched {
 		return devPullFailure{
 			phase: "reconcile", code: "dev_pull_blob_shortfall",
 			why: fmt.Sprintf("the source served %d blob(s) but only %d reached the target — the media set is short and this is NOT a finished pull",
@@ -404,10 +453,22 @@ func runDevPull(out *writer, g globals, args []string) int {
 		}.render(out)
 	}
 
+	// ── report: what the dev profile does not carry ──────────────────────────
+	notCarried := devPullListNotCarried(srcBase, srcTok, ws, ds, project, tgtName)
+
 	// ── the ONE receipt ───────────────────────────────────────────────────────
 	//
 	// Removal happens only HERE, after reconciliation: every failure above kept
-	// its artifacts and named them.
+	// its artifacts and named them. The missing list is written next to a
+	// bundle that stays, so a long list has a home outside the terminal.
+	missingFile := ""
+	if len(missing) > 0 && (!ownDir || keep) {
+		missingFile = bundle + ".missing.txt"
+		if err := os.WriteFile(missingFile, []byte(strings.Join(missing, "\n")+"\n"), 0o644); err != nil {
+			out.errf("bp: could not write the missing-file list %s: %v", missingFile, err)
+			missingFile = ""
+		}
+	}
 	cleaned := false
 	if ownDir && !keep {
 		if err := os.RemoveAll(filepath.Dir(bundle)); err == nil {
@@ -423,6 +484,10 @@ func runDevPull(out *writer, g globals, args []string) int {
 		tables: tables, rows: rows, receipt: receipt,
 		blobsFetched: fetched, blobsUploaded: uploaded,
 		blobBytes: blobBytes, uploadedBytes: uploadedBytes,
+		noMedia: noMedia, mediaRecords: len(refs),
+		missing: missing, missingFile: missingFile,
+		throttled: throttled, waited: waited,
+		notCarried: notCarried,
 	})
 }
 
@@ -447,7 +512,18 @@ type devPullResult struct {
 	blobsUploaded      int
 	blobBytes          int64
 	uploadedBytes      int64
+	noMedia            bool
+	mediaRecords       int
+	missing            []string
+	missingFile        string
+	throttled          int
+	waited             time.Duration
+	notCarried         devPullNotCarried
 }
+
+// devPullMissingShown caps how many missing paths the human receipt prints;
+// the machine receipt and the .missing.txt file carry all of them.
+const devPullMissingShown = 20
 
 func devPullReceipt(out *writer, r devPullResult) int {
 	if out.machineOut() {
@@ -460,6 +536,17 @@ func devPullReceipt(out *writer, r devPullResult) int {
 			"mode":      "merge",
 			"bundle":    map[string]any{"path": r.bundle, "removed": r.cleaned, "resumed": r.resumed},
 			"blobs":     map[string]any{"fetched": r.blobsFetched, "uploaded": r.blobsUploaded, "bytes_fetched": r.blobBytes, "bytes_received": r.uploadedBytes},
+			"media": map[string]any{
+				"mode":         map[bool]string{true: "skipped", false: "files"}[r.noMedia],
+				"records":      r.mediaRecords,
+				"missing":      missingOrEmpty(r.missing),
+				"rate_limited": r.throttled,
+				"waited_ms":    r.waited.Milliseconds(),
+			},
+			"not_carried": r.notCarried,
+		}
+		if r.missingFile != "" {
+			payload["media"].(map[string]any)["missing_file"] = r.missingFile
 		}
 		if r.bundleBytes >= 0 {
 			payload["bundle"].(map[string]any)["bytes"] = r.bundleBytes
@@ -494,14 +581,67 @@ func devPullReceipt(out *writer, r devPullResult) int {
 		// verification, and saying so is the difference from a vacuous green.
 		out.outf("             the target accepted the bundle but its receipt named no counts — the transfer stands, the verification does not")
 	}
-	if r.resumed {
+	switch {
+	case r.noMedia:
+		out.outf("  media      files skipped (--no-media); %d media record(s) imported without their files", r.mediaRecords)
+	case r.resumed:
 		out.outf("  blobs      %d uploaded from the re-used sidecar (%s received by the target)", r.blobsUploaded, humanBytes(float64(r.uploadedBytes)))
-	} else {
+	default:
 		out.outf("  blobs      %d fetched, %d uploaded — reconciled (%s received by the target)",
 			r.blobsFetched, r.blobsUploaded, humanBytes(float64(r.uploadedBytes)))
 	}
+	if r.throttled > 0 {
+		out.outf("  pacing     %d request(s) answered 429 and were retried after the server's Retry-After (%s waited)",
+			r.throttled, r.waited.Round(time.Second))
+	}
+	if len(r.missing) > 0 {
+		out.outf("  missing    %d media file(s) the source answered 404 for; their records were imported, their files do not exist on the source:", len(r.missing))
+		for i, p := range r.missing {
+			if i == devPullMissingShown {
+				out.outf("             … and %d more", len(r.missing)-devPullMissingShown)
+				break
+			}
+			out.outf("             %s", p)
+		}
+		if r.missingFile != "" {
+			out.outf("             full list: %s", r.missingFile)
+		}
+	}
 	printProvenanceReceipt(out, r.receipt)
+	devPullPrintNotCarried(out, r.notCarried)
 	return exitOK
+}
+
+// devPullPrintNotCarried prints the shares and tokens the dev profile left on
+// the source, and the commands that recreate them on the target.
+func devPullPrintNotCarried(out *writer, nc devPullNotCarried) {
+	if len(nc.Shares) == 0 && len(nc.Tokens) == 0 && len(nc.Unread) == 0 {
+		out.outf("  not carried  no shares or tokens on the source for this dataset")
+		return
+	}
+	out.outf("  not carried  the dev profile does not copy shares or tokens; the source has:")
+	for _, s := range nc.Shares {
+		out.outf("    share  %s  %s (%s)", s.Scope, strings.Join(s.Surfaces, ","), s.Access)
+	}
+	for _, t := range nc.Tokens {
+		line := fmt.Sprintf("    token  %s  %s", t.Label, strings.Join(t.Permissions, ","))
+		if t.Dataset != "" {
+			line += " on " + t.Dataset
+		}
+		if t.Kind != "" && t.Kind != "api" {
+			line += fmt.Sprintf(" (kind %s: recreate it where it was made)", t.Kind)
+		}
+		out.outf("%s", line)
+	}
+	for _, u := range nc.Unread {
+		out.outf("    could not list %s", u)
+	}
+	if len(nc.Commands) > 0 {
+		out.outf("  recreate on the target with:")
+		for _, c := range nc.Commands {
+			out.outf("    %s", c)
+		}
+	}
 }
 
 func devPullCleanedNote(cleaned bool) string {
@@ -687,10 +827,13 @@ func devPullSlug(s string) string {
 // devPullRerunCmd renders the EXACT command that continues from a failure —
 // the whole point of a named state is that the operator does not have to
 // reconstruct it.
-func devPullRerunCmd(src, tgt, ws, ds, bundle string, resume bool) string {
+func devPullRerunCmd(src, tgt, ws, ds, bundle string, resume, noMedia bool) string {
 	cmd := fmt.Sprintf("bp dev pull %s %s %s/%s --yes --bundle %s", src, tgt, ws, ds, bundle)
 	if resume {
 		cmd += " --resume"
+	}
+	if noMedia {
+		cmd += " --no-media"
 	}
 	return cmd
 }
@@ -793,10 +936,18 @@ own entry's token — credentials are never read from the environment.
   1. export   GET the bundle at profile=%s, dataset grain, from the source
   2. verify   the bundle manifest must declare that profile and that dataset;
               a workspace-grain bundle is REFUSED before anything is imported
-  3. blobs    fetch every media file the bundle names into <bundle>.blobs
+  3. blobs    fetch every media file the bundle names into <bundle>.blobs, from
+              the scoped route /w/<workspace>/p/<project>/media/files/<path>,
+              paced under the source's rate limit; a 429 waits out Retry-After
   4. import   POST the bundle to the target with mode=merge (a re-run refreshes)
-  5. blobs    PUT every sidecar file back, path-verbatim
+  5. blobs    push every sidecar file back, path-verbatim, paced the same way
   6. reconcile  the target must receive exactly as many blobs as the source served
+  7. report   list the source's shares and tokens for this dataset, which the
+              dev profile does not copy, and print the commands to recreate them
+
+A media file the source answers 404 for does not exist to move. It is listed in
+the receipt as missing on the source, its record still lands, and the pull does
+not fail on it.
 
 arguments:
   <source-server>   saved server name, display name, or URL to pull FROM
@@ -808,9 +959,12 @@ flags:
   --bundle <path>   keep the bundle here instead of a temp directory (never removed)
   --keep            keep the temporary bundle and sidecar after a successful pull
   --resume          reuse the bundle and sidecar already on disk; skip steps 1-3
-  --dry-run         print the five requests it would make and send nothing
+  --no-media        move documents and media records only; skip steps 3 and 5
+  --media-rate <n>  starting pace for media reads, per minute (default %d;
+                    0 sends unpaced until the first 429)
+  --dry-run         print the requests it would make and send nothing
 
 Every failure names its phase, the artifacts that survive on disk, and the exact
 command that resumes or safely restarts it. A pull whose media set is short is a
-non-zero exit, never a receipt with a footnote.`, devPullUsage, devPullProfile)
+non-zero exit, never a receipt with a footnote.`, devPullUsage, devPullProfile, defaultMediaRatePerMinute)
 }

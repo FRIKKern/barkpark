@@ -55,8 +55,9 @@ func TestDeploysFailingDirectionOne(t *testing.T) {
 	}
 	// 5 -> 6 (dr-w15-s5): `cannot_deploy` now sits between degraded and this
 	// rung — the box's own refusal of the NEXT deploy outranks the past rate.
-	if got := attentionRank("deploys_failing"); got != 6 {
-		t.Fatalf("rank = %d, want 6 (directly under cannot_deploy)", got)
+	// 6 -> 7 (task-9d72b5f86487cf9b): `restarting` sits under degraded.
+	if got := attentionRank("deploys_failing"); got != 7 {
+		t.Fatalf("rank = %d, want 7 (directly under cannot_deploy)", got)
 	}
 	// The sentence never quotes a percentage without its denominator.
 	detail := attentionDetail(b, attentionStatus(b))

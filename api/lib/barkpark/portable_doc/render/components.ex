@@ -1216,13 +1216,15 @@ defmodule Barkpark.PortableDoc.Render.Components do
   tree — the block self-describes its glyphs. Degrades to plain preformatted
   text when no marker matches.
   """
-  def filetree_html(block) when is_map(block) do
+  def filetree_html(block, style \\ :article)
+
+  def filetree_html(block, style) when is_map(block) do
     rows =
       block
       |> Map.get("text", "")
       |> stringish()
       |> split_verbatim_lines()
-      |> Enum.map_join("", &filetree_row_html/1)
+      |> Enum.map_join("", &filetree_row_html(&1, style))
 
     legend = stringish(Map.get(block, "legend", ""))
 
@@ -1236,7 +1238,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
       rows <> legend_html <> ~s|</div>|
   end
 
-  def filetree_html(_), do: ""
+  def filetree_html(_, _style), do: ""
 
   # ── diff/filetree private parse helpers (the verbatim-text front-end, D76) ────
 
@@ -1285,23 +1287,31 @@ defmodule Barkpark.PortableDoc.Render.Components do
     if List.last(lines) == "", do: Enum.drop(lines, -1), else: lines
   end
 
-  # The D78 annotation markers with their evergreen token colors. The glyph is
-  # the semantic carrier; color is never load-bearing (the legend row
-  # disambiguates locally).
+  # The D78 annotation markers with their evergreen token colors and the class
+  # the paper surface paints that colour through. The glyph is the semantic
+  # carrier; color is never load-bearing (the legend row disambiguates locally).
+  # On `:article` the colour rides the class, not the markup
+  # (task-2c5d3da1b7f7db25); `:email` keeps it inline.
   @filetree_markers [
-    {" ● ", "var(--ok)"},
-    {" ○ ", "var(--paper-ink-soft)"},
-    {" ✕ ", "var(--danger)"}
+    {" ● ", "var(--ok)", "ok"},
+    {" ○ ", "var(--paper-ink-soft)", "soft"},
+    {" ✕ ", "var(--danger)", "danger"}
   ]
 
-  defp filetree_row_html(line) do
+  defp filetree_row_html(line, style) do
     case split_filetree_note(line) do
       {path, nil} ->
         ~s|<div style="white-space: pre;">#{escape_html(path)}</div>|
 
-      {path, {glyph, note, color}} ->
+      {path, {glyph, note, {color, tone}}} ->
+        span =
+          case style do
+            :article -> ~s|<span class="bp-filetree-note bp-filetree-note--#{tone}">|
+            _ -> ~s|<span class="bp-filetree-note" style="color: #{color};">|
+          end
+
         ~s|<div style="white-space: pre;">#{escape_html(path)}| <>
-          ~s|<span class="bp-filetree-note" style="color: #{color};">#{escape_html(glyph <> note)}</span></div>|
+          span <> ~s|#{escape_html(glyph <> note)}</span></div>|
     end
   end
 
@@ -1309,10 +1319,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # line into the verbatim path part and the annotation (glyph + trailing text).
   defp split_filetree_note(line) do
     @filetree_markers
-    |> Enum.flat_map(fn {glyph, color} ->
+    |> Enum.flat_map(fn {glyph, color, tone} ->
       case :binary.match(line, glyph) do
         :nomatch -> []
-        {idx, _len} -> [{idx, glyph, color}]
+        {idx, _len} -> [{idx, glyph, {color, tone}}]
       end
     end)
     |> Enum.sort()

@@ -56,6 +56,32 @@ func TestUpdateFailuresRenderPhaseAndTail(t *testing.T) {
 	}
 }
 
+// task-15e2eb3aa36b240b: a deploy cut by service restarts says so in words.
+func TestUpdateFailuresNameStuckAndInterruptedDeploys(t *testing.T) {
+	ranked := rankBarkparks([]cloudclient.Barkpark{
+		failedBox("gyl", "deploy_stuck", -4, []string{"[runner] deploy stuck: the service restarted during this run and during its resume (attempt 2); not retrying."}),
+		failedBox("dnd", "build_interrupted", -3, []string{"Compiling 1095 files (.ex)"}),
+	})
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.color = false
+	renderUpdateFailures(w, ranked)
+	got := sout.String()
+	for _, want := range []string{
+		"gyl: update failed in phase deploy_stuck · exit -4",
+		"    deploy stuck: the service restarted during the build and again during its one resume",
+		"dnd: update failed in phase build_interrupted · exit -3",
+		"    build interrupted: the service restarted during the build step; the box resumes the run once",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in:\n%s", want, got)
+		}
+	}
+	if updateFailureReason("build") != "" || updateFailureReason("migrate") != "" {
+		t.Fatal("an ordinary failed phase needs no extra reason line")
+	}
+}
+
 func TestUpdateFailuresSilentWithNone(t *testing.T) {
 	ranked := rankBarkparks([]cloudclient.Barkpark{{ID: "ok", Name: "fine", Slug: "fine"}})
 	var sout, serr bytes.Buffer

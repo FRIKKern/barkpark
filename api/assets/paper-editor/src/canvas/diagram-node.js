@@ -182,7 +182,9 @@ export const Diagram = Node.create({
   // <pre> parse rule, and two canvas nodes both claiming <pre> would be ambiguous on
   // paste/setContent. The diagram only round-trips its OWN typed wrapper.
   parseHTML() {
-    return [{ tag: "pre[data-bp-type='diagram']", preserveWhitespace: "full" }];
+    // Above the code node's generic `pre` rule, which otherwise claims a pasted
+    // diagram as an EMPTY code block (task-d175b72aba4d5cd6).
+    return [{ tag: "pre[data-bp-type='diagram']", preserveWhitespace: "full", priority: 80 }];
   },
 
   // A schema-level fallback render (used when NO node-view is mounted — e.g. the

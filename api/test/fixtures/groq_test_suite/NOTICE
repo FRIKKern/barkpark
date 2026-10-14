@@ -1,0 +1,13 @@
+suite.ndjson.gz is derived from the GROQ test suite by Sanity.io
+(https://github.com/sanity-io/groq-test-suite), MIT licensed (see LICENSE),
+built from commit f5bfa6686b3182b41239668a0b4675b130af88b8 (2026-08-28) with
+`node src/build.js`.
+
+It keeps the tests groq-js runs for GROQ 1.2.0: features portableText,
+customFunctions, internalDocuments and contentReleases only, no perf files, and
+only datasets embedded in the suite (the external movies dataset is excluded).
+Each line is a dataset ({_type: "dataset", _id, documents}) or a test
+({_type: "test", name, filename, query, result, valid, params, dataset, features}).
+
+Regenerate with tooling/groq/build-conformance-fixture.mjs from the release
+asset suite.ndjson (v1.0.5).

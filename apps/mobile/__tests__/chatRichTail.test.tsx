@@ -1143,6 +1143,10 @@ test('NO client-side markdown parser exists anywhere in the chat screen’s stac
       './wire',
       '../api/chat',
       '../api/instance',
+      // The workspace language (task-5ba3360aecba7a99): one GET of
+      // /v1/workspace/locale so the renderer's own words (Source/Kilde) follow
+      // the workspace. It returns a locale string and parses no markdown.
+      '../api/workspace',
       // The connection identity band (chat-local-cloud-context-w3): the
       // component and the pure resolver behind it. Neither parses anything —
       // `context.ts` reads wire facts and config strings and returns typed

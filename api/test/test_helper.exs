@@ -95,7 +95,13 @@ ExUnit.start(
     #       test/barkpark/tasks/board/claim_forward_live_probe_test.exs
     #
     # Mirrors the TUI half's `-tags liveprobe` build tag.
-    :live_probe
+    :live_probe,
+    # The GROQ benchmark seeds 20,000 documents and times each query shape
+    # many times; it prints numbers for a pull request and checks nothing a
+    # regular test does not. Run it on purpose:
+    #
+    #     mix test --include groq_bench test/barkpark_web/controllers/groq_bench_test.exs
+    :groq_bench
   ]
 )
 

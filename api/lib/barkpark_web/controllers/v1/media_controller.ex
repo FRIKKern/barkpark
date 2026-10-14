@@ -32,8 +32,16 @@ defmodule BarkparkWeb.V1.MediaController do
     t0 = System.monotonic_time(:microsecond)
     opts = MediaSearchParams.parse(params) ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
     {files, total, facets, meta} = Media.search_files(dataset, opts)
-    docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
-    render_opts = render_opts(conn, params)
+    # Batched: one asset-doc pass and one schema per tenant, so the cost of a
+    # page does not grow with its size (task-55a32a11405d5e9b).
+    docs = Media.resolve_asset_docs(files, dataset, scope_opts(conn))
+
+    render_opts =
+      render_opts(conn, params) ++
+        [
+          asset_doc_resolved: true,
+          asset_schemas: AssetResponse.asset_schemas(Map.values(docs), dataset)
+        ]
 
     hits =
       Enum.map(files, fn file ->
@@ -469,11 +477,19 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
-    with :ok <- require_write(conn) do
-      case Media.upload(upload, dataset, [dedupe: true] ++ scope_opts(conn)) do
+    with :ok <- require_write(conn),
+         {:ok, source_id} <- source_id_param(params) do
+      metadata = upload_metadata(params)
+
+      case Media.upload(
+             upload,
+             dataset,
+             [dedupe: true, asset_metadata: metadata, source_id: source_id] ++ scope_opts(conn)
+           ) do
         # task-b6e57c37f6928344 — the same bytes already live in this dataset
-        # and workspace: answer with that asset, 200 not 201, `existing: true`,
-        # and store nothing. The upload's inline metadata is NOT applied: it
+        # and workspace, or (task-0bc9247eca1bd741) a file there already
+        # carries this `sourceId`: answer with that asset, 200 not 201,
+        # `existing: true`, and store nothing. The upload's inline metadata is NOT applied: it
         # would overwrite an asset other documents already show.
         {:existing, file} ->
           conn
@@ -497,7 +513,7 @@ defmodule BarkparkWeb.V1.MediaController do
           # `Media.patch_asset_metadata/3` runs everything through
           # `pick_metadata/1` (@metadata_fields), so a multipart part named
           # `path` or `mimeType` still cannot touch a blob column.
-          doc = apply_upload_metadata(file, params, dataset)
+          doc = apply_upload_metadata(file, metadata, dataset)
 
           conn
           |> put_status(:created)
@@ -523,26 +539,39 @@ defmodule BarkparkWeb.V1.MediaController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
-  # Patch the just-created `mediaAsset` doc with any inline metadata the
-  # multipart carried, and return the document the receipt should render.
+  # Return the document the receipt should render. Upload passes the inline
+  # metadata to `Media.upload/3` as `:asset_metadata`, and the media plugin
+  # writes it in the same create as the asset document. The patch below runs
+  # only when the created document does not hold it (an asset document that
+  # already existed, or a plugin that did not apply it), so the common upload
+  # is one document write instead of two.
   #
   # FAIL-SOFT ON PURPOSE: the BYTES are already persisted and the row is
   # committed, so a metadata patch that fails must not turn a successful upload
   # into an error the client reads as "nothing was stored" — it would retry and
   # duplicate the blob. The receipt then renders the unpatched document, which
   # states plainly that the metadata did not land.
-  defp apply_upload_metadata(file, params, dataset) do
-    case upload_metadata(params) do
-      metadata when map_size(metadata) == 0 ->
-        asset_doc(file, dataset)
+  defp apply_upload_metadata(file, metadata, dataset) do
+    doc = asset_doc(file, dataset)
 
-      metadata ->
-        case Media.patch_asset_metadata(file, metadata, dataset) do
-          {:ok, doc} -> doc
-          _ -> asset_doc(file, dataset)
-        end
+    if map_size(metadata) == 0 or metadata_applied?(doc, metadata) do
+      doc
+    else
+      case Media.patch_asset_metadata(file, metadata, dataset) do
+        {:ok, doc} -> doc
+        _ -> doc
+      end
     end
   end
+
+  defp metadata_applied?(%{content: content, title: title}, metadata) when is_map(content) do
+    Enum.all?(metadata, fn
+      {"title", value} -> title == value
+      {key, value} -> Map.get(content, key) == value
+    end)
+  end
+
+  defp metadata_applied?(_doc, _metadata), do: false
 
   # `metadata` as a nested object (JSON clients) or the flat multipart parts
   # (`altText=…`, `tags=a,b,c`). `tags` arrives as ONE string over multipart —
@@ -567,6 +596,30 @@ defmodule BarkparkWeb.V1.MediaController do
 
   defp normalize_tags(metadata), do: metadata
 
+  # `sourceId` (task-0bc9247eca1bd741): the id the file had in the system it
+  # was imported from, such as a Sanity asset id. Sanity-shaped image and file
+  # URLs resolve by it. Absent or blank is nil; a malformed value is a 422.
+  defp source_id_param(params) do
+    case blank_to_nil(params["sourceId"]) do
+      nil ->
+        {:ok, nil}
+
+      value ->
+        if MediaFile.valid_source_id?(value),
+          do: {:ok, value},
+          else: {:error, invalid_source_id_changeset(value)}
+    end
+  end
+
+  defp invalid_source_id_changeset(value),
+    do: MediaFile.source_id_changeset(%MediaFile{}, value)
+
+  # PATCH sets `sourceId` when the body names it; `null` or "" clears it.
+  defp maybe_set_source_id(file, %{"sourceId" => value}),
+    do: Media.set_source_id(file, blank_to_nil(value))
+
+  defp maybe_set_source_id(file, _params), do: {:ok, file}
+
   def update(conn, %{"dataset" => dataset, "id" => id} = params) do
     metadata = metadata_params(params)
 
@@ -575,6 +628,7 @@ defmodule BarkparkWeb.V1.MediaController do
          :ok <- ensure_dataset(file, dataset),
          doc = asset_doc(file, dataset),
          :ok <- ensure_edit(conn, file, doc),
+         {:ok, file} <- maybe_set_source_id(file, params),
          {:ok, doc} <- Media.patch_asset_metadata(file, metadata, dataset) do
       json(conn, %{
         result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),

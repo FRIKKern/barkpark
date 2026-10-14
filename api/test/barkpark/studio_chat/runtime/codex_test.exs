@@ -7,15 +7,14 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
 
   @fake_app_server Path.expand("../../../fixtures/codex_app_server/fake_app_server.py", __DIR__)
 
-  # A STARTUP BUDGET, not a latency assertion (task-697215d9d7dad3f7). A
-  # success-path call spawns the Python fake app server (twice for readiness:
-  # the version probe, then the session handshake) and must finish inside
-  # `timeout_ms`. At 500 ms a loaded runner's interpreter startup alone could
-  # spend it: main run 36589134658 failed `{:error, :timeout}` on a fixture
-  # that was answering correctly. These tests assert the WIRE, so they get a
-  # budget that only a hang can exhaust; they return as soon as the fake
-  # answers. The fail-closed timeout tests keep their short timeouts on purpose.
-  @startup_budget_ms 10_000
+  # NO CLOCK on the success and process-exit paths (task-2b9df7d705f9ea7a,
+  # superseding task-697215d9d7dad3f7's 10 s startup budget). With
+  # `timeout_ms: :infinity` the Session arms no request timer, so a call
+  # returns when the Python fake ANSWERS or EXITS (`{:exit_status, _}` replies
+  # to every pending request) — never on elapsed time, so a loaded runner's
+  # interpreter startup cannot fail it. ExUnit's per-test timeout is the
+  # backstop for a fake that hangs. The fail-closed timeout test keeps a short
+  # TURN clock on purpose and runs its startup on `startup_timeout_ms: :infinity`.
 
   defp fake_app_server(mode \\ :normal) do
     id = System.unique_integer([:positive])
@@ -36,7 +35,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                sink: self(),
                session_id: "barkpark-session",
                cwd: "/tmp",
-               timeout_ms: @startup_budget_ms
+               timeout_ms: :infinity
              })
 
     assert runtime.provider_session_id == "thread-1"
@@ -97,7 +96,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                sink: self(),
                session_id: "barkpark-session",
                provider_session_id: "native-thread",
-               timeout_ms: @startup_budget_ms
+               timeout_ms: :infinity
              })
 
     assert runtime.provider_session_id == "thread-resumed"
@@ -115,7 +114,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                args: malformed_args,
                sink: self(),
                session_id: "barkpark-session",
-               timeout_ms: 500
+               timeout_ms: :infinity
              })
 
     assert_receive {:studio_chat_runtime_event,
@@ -129,6 +128,9 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                args: stalling_args,
                sink: self(),
                session_id: "barkpark-session",
+               # The TURN clock is this test's subject: the fake stalls the turn,
+               # so 500 ms fires deterministically. Startup is not timed at all.
+               startup_timeout_ms: :infinity,
                timeout_ms: 500
              })
 
@@ -144,7 +146,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                args: dying_args,
                sink: self(),
                session_id: "barkpark-session",
-               timeout_ms: 500
+               timeout_ms: :infinity
              })
 
     assert {:error, {:process_exit, 17}} = Codex.send_turn(runtime, "die")
@@ -161,7 +163,7 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                sink: self(),
                session_id: "barkpark-session",
                provider_session_id: runtime.provider_session_id,
-               timeout_ms: 500
+               timeout_ms: :infinity
              })
 
     assert reconciled.provider_session_id == "thread-resumed"
@@ -257,7 +259,9 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
                binary: binary,
                sink: self(),
                session_id: "barkpark-session",
-               timeout_ms: 5_000
+               # The subject is the overflow refusal, not a clock: no timer, so a
+               # regressed cap hangs to ExUnit's timeout instead of passing.
+               timeout_ms: :infinity
              })
 
     port = :sys.get_state(runtime.runtime).port
@@ -310,6 +314,74 @@ defmodule Barkpark.StudioChat.Runtime.CodexTest do
     end
   rescue
     _ -> false
+  end
+
+  # task-2b9df7d705f9ea7a, made deterministic. On a loaded runner the Python
+  # fake was alive and would have answered, but was not SCHEDULED inside a
+  # 500 ms clock that also timed the handshake. This wrapper holds the fake back
+  # until a `go` file exists, so WHEN it answers is the test's decision, not the
+  # scheduler's. `on_exit` writes `go` so no wrapper loop outlives the test.
+  defp gated(binary) do
+    id = System.unique_integer([:positive])
+    path = TestTmp.path("codex_gated_#{id}.sh")
+    go = TestTmp.path("codex_gated_#{id}.go")
+
+    File.write!(
+      path,
+      # Bounded (~60 s) so a wrapper whose parent never reaps it cannot spin on.
+      "#!/bin/sh\ni=0\nwhile [ ! -f '#{go}' ] && [ \"$i\" -lt 3000 ]; do sleep 0.02; i=$((i + 1)); done\n" <>
+        "[ -f '#{go}' ] || exit 1\nexec '#{binary}' \"$@\"\n"
+    )
+
+    File.chmod!(path, 0o755)
+
+    on_exit(fn ->
+      File.write(go, "")
+      File.rm(path)
+    end)
+
+    {path, go}
+  end
+
+  test "a slow-starting app-server opens: the handshake is not timed by the turn clock" do
+    {binary, args, _log} = fake_app_server()
+    {late, go} = gated(binary)
+
+    # Released well past the 500 ms turn clock. With no startup clock the open
+    # ends only when the fake answers, whenever that is.
+    spawn(fn ->
+      Process.sleep(1_500)
+      File.write!(go, "")
+    end)
+
+    assert {:ok, runtime} =
+             Codex.start(%{
+               binary: late,
+               args: args,
+               sink: self(),
+               session_id: "barkpark-session",
+               startup_timeout_ms: :infinity,
+               timeout_ms: 500
+             })
+
+    assert :ok = Codex.close(runtime)
+  end
+
+  # Session.start/1 directly (no --version shell-out first), so the clock this
+  # pins is the Session's own handshake request timer. The fake is NEVER
+  # released, so only that timer can end the open.
+  test "CONTROL: with no startup clock of its own, the 500 ms clock still times the handshake" do
+    {binary, args, _log} = fake_app_server()
+    {held, _go} = gated(binary)
+
+    assert {:error, :timeout} =
+             Barkpark.StudioChat.Runtime.Codex.Session.start(%{
+               binary: held,
+               args: args,
+               sink: self(),
+               session_id: "barkpark-session",
+               timeout_ms: 500
+             })
   end
 
   defp wait_until(fun, timeout_ms \\ 2_000, waited_ms \\ 0) do

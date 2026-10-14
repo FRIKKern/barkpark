@@ -69,7 +69,6 @@ defmodule BarkparkWeb.LiveAuth do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Auth
-  alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.ReturnTo
   alias BarkparkWeb.StudioLocale
 
@@ -80,8 +79,10 @@ defmodule BarkparkWeb.LiveAuth do
   @chat_deep_link ~r{^/studio/chat/[^/?#]+$}
 
   def on_mount(:admin, params, session, socket) do
-    put_denial_locale(params)
-    authorize(socket, session, ["admin"], gettext("Admin access required"))
+    authorize(socket, session, ["admin"], fn ->
+      put_denial_locale(params, session)
+      gettext("Admin access required")
+    end)
   end
 
   # W26 (charter D219-D222) — authorize against the workspace IN THE URL, not a
@@ -116,8 +117,10 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   def on_mount(:ops, params, session, socket) do
-    put_denial_locale(params)
-    authorize(socket, session, ["ops", "admin"], gettext("Operator access required"))
+    authorize(socket, session, ["ops", "admin"], fn ->
+      put_denial_locale(params, session)
+      gettext("Operator access required")
+    end)
   end
 
   def on_mount(:require_org_mfa, _params, session, socket) do
@@ -268,12 +271,30 @@ defmodule BarkparkWeb.LiveAuth do
   # (`/studio/settings`), so `scoped_target_workspace/1` — the SAME resolver
   # `:scoped_admin` uses — is tried first; a route with no workspace_slug
   # param (and the actual authorization decision in `authorize_user/3`,
-  # unchanged, still checks the DEFAULT workspace, not this one) falls back
-  # to the Default workspace's own locale, which is what the denial is
-  # actually about on those routes.
-  defp put_denial_locale(params) do
-    ws = scoped_target_workspace(params) || Tenancy.get_default_workspace()
+  # unchanged, still checks the DEFAULT workspace, not this one) takes the
+  # locale of the caller's OWN workspace — the one `ScopeResolver` lands them
+  # in, which is where the denial redirect sends them (task-d8e3d76ad251bf73:
+  # an nb member opening /studio/tickets was told "Admin access required" in
+  # Default's English). Default answers only when nothing resolves (anonymous,
+  # or no membership).
+  #
+  # Called from the denial flash builder, so this runs only on a denial: an
+  # admin who passes pays for no extra lookup.
+  defp put_denial_locale(params, session) do
+    ws =
+      scoped_target_workspace(params) ||
+        BarkparkWeb.Studio.ScopeResolver.resolve_workspace(denial_principal(session))
+
     StudioLocale.put(ws)
+  end
+
+  # The same precedence `ScopeResolver.principal/1` uses: a verified session
+  # token wins over the account session.
+  defp denial_principal(session) do
+    case Auth.resolve_session_credential(session["api_token_session"], session["api_token"]) do
+      {:ok, api_token, _raw} -> api_token
+      _ -> user_from_session(session)
+    end
   end
 
   defp authorize(socket, session, allowed_perms, denial_flash) do
@@ -404,7 +425,7 @@ defmodule BarkparkWeb.LiveAuth do
       _ ->
         {:halt,
          socket
-         |> put_flash(:error, denial_flash)
+         |> put_flash(:error, denial_flash.())
          |> redirect(to: denial_target(socket, session))}
     end
   end

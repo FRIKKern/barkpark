@@ -1408,6 +1408,10 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     # sobelow_skip ["Traversal.FileModule"]
     @impl true
     def init(%{sink: sink} = opts) do
+      # The Port is this process's only link. Trapping makes its death a
+      # MESSAGE instead of a kill (task-9656eadf40e489f1, task-77e397fbbc1e503e):
+      # see the `{:EXIT, port, reason}` clause below.
+      Process.flag(:trap_exit, true)
       session_opts = Map.get(opts, :session_opts, %{})
 
       # Give the subprocess its hands BEFORE the argv is assembled (charter
@@ -1756,6 +1760,28 @@ defmodule Barkpark.StudioChat.Provider.Claude do
 
     def handle_info({:DOWN, _ref, :process, sink, _reason}, %{sink: sink} = state) do
       {:stop, :normal, state}
+    end
+
+    # The port died BEFORE it could report an exit status
+    # (task-9656eadf40e489f1, task-77e397fbbc1e503e). A write to the child's
+    # stdin after the child stopped reading it — e.g. the `initialize`
+    # control_request the Recorder casts right after spawn, against a CLI that
+    # already printed its frames and exited — fails with EPIPE, and the port
+    # exits with `:epipe`. Untrapped, that exit signal KILLED this process:
+    # the frames already queued ahead of it (a Cloud `bp_sandbox` binding, the
+    # turn's `result`) were never dispatched, the sink saw only `:DOWN`
+    # (reported `:crashed`), and `terminate/2` never ran, so the stderr file
+    # and the session's MCP token outlived it. Trapped, the queued `{:data, _}`
+    # messages are handled first, then this clause reports the end exactly as
+    # an exit status would, with the port's reason as the status (an atom: the
+    # child's exit code is unknown, so the Recorder keeps a Cloud sandbox
+    # binding, as for any non-integer status), and stops normally so
+    # `terminate/2` cleans up.
+    def handle_info({:EXIT, port, reason}, %{port: port} = state) do
+      release_name(state)
+      status = if is_atom(reason), do: reason, else: :crashed
+      send(state.sink, {:claude_chat_exit, status, read_stderr_tail(state[:stderr_path])})
+      {:stop, :normal, %{state | port: nil}}
     end
 
     # The credential clock (task-cth-bl-token-renewal). Fires on a timer for

@@ -43,7 +43,7 @@ The returned object has `url`, `token`, `port`, `dataDir`, `commit` (the Barkpar
 - **One owner per folder.** `<dataDir>/engine.lock` refuses a second start while its owner's process lives (`EngineBusyError`). A lock left by a process that is gone is moved aside and taken over. A server or database left running by such a process is stopped first, proven by its process id and start time.
 - **Logs** in `<dataDir>/logs`: `server.log` (release output, secrets redacted), `postgres.log` and `engine.log` (failed boots and restarts).
 
-The engine sets `BARKPARK_SHAPE=app` and turns off the Studio terminal console and Claude chat.
+The engine sets `BARKPARK_SHAPE=app` and turns off the Studio terminal console and Claude chat. It also sets `BARKPARK_AUTHORING_WALL=off`: Barkpark's publish wall (a description and registered, weighted tags on every paper; near-duplicate titles refused) is off, so an app publishes a paper with only a slug, a title and blocks, and registers no tag first. `/status.json` reports `authoring_wall: false`.
 
 ## Building an engine folder
 

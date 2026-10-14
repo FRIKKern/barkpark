@@ -17,15 +17,33 @@ defmodule Barkpark.Plugins.Media.Assets do
 
   @doc """
   Ensures a `mediaAsset` draft exists for `media_file`. Idempotent.
+
+  `fields` is merged into the content of a NEWLY created draft only, so upload
+  writes its metadata in the same write that creates the document: `fileInfo`
+  keys merge over the blob-derived `fileInfo`, `"title"` becomes the document
+  title, and every other key lands in `content`. An existing document is
+  returned unchanged; the second element says which case happened.
   """
   @spec ensure_for_upload(%MediaFile{}) :: {:ok, Document.t()} | {:error, term()}
   def ensure_for_upload(%MediaFile{} = file) do
+    case ensure_for_upload(file, %{}) do
+      {:ok, doc, _created_or_existing} -> {:ok, doc}
+      error -> error
+    end
+  end
+
+  @spec ensure_for_upload(%MediaFile{}, map()) ::
+          {:ok, Document.t(), :created | :existing} | {:error, term()}
+  def ensure_for_upload(%MediaFile{} = file, fields) when is_map(fields) do
     case find_by_media_file_id(file.id, file.dataset, MediaFile.scope_opts(file)) do
       %Document{} = doc ->
-        {:ok, doc}
+        {:ok, doc, :existing}
 
       nil ->
-        create_draft(file)
+        case create_draft(file, fields) do
+          {:ok, doc} -> {:ok, doc, :created}
+          error -> error
+        end
     end
   end
 
@@ -72,6 +90,16 @@ defmodule Barkpark.Plugins.Media.Assets do
           {:halt, {:error, reason}}
       end
     end)
+  end
+
+  @doc false
+  def pending_delete_snapshot(%MediaFile{} = file) do
+    Document
+    |> asset_doc_scope(file.id, file.dataset, MediaFile.scope_opts(file))
+    |> order_by([d], asc: d.id)
+    |> lock("FOR UPDATE")
+    |> select([d], fragment("to_jsonb(?)", d))
+    |> Repo.all()
   end
 
   @doc """
@@ -270,28 +298,22 @@ defmodule Barkpark.Plugins.Media.Assets do
     {:ok, %{created: created, skipped: skipped, errors: Enum.reverse(errors)}}
   end
 
-  defp create_draft(%MediaFile{} = file) do
+  defp create_draft(%MediaFile{} = file, fields) do
     doc_id = "asset-#{file.id}"
+    base = base_content(file)
+    {title, fields} = Map.pop(fields, "title")
+    {file_info, fields} = Map.pop(fields, "fileInfo", %{})
+
+    content =
+      base
+      |> Map.merge(fields)
+      |> Map.put("fileInfo", Map.merge(base["fileInfo"], file_info))
 
     attrs = %{
       "doc_id" => doc_id,
-      "title" => file.original_name || file.filename,
+      "title" => title || file.original_name || file.filename,
       "status" => "draft",
-      "content" => %{
-        "mediaFileId" => file.id,
-        "bp_asset_kind" => asset_kind(file.mime_type),
-        "bp_processing_status" => initial_processing_status(file),
-        "fileInfo" => %{
-          "url" => public_url(file),
-          "path" => file.path,
-          "mimeType" => file.mime_type,
-          "size" => Integer.to_string(file.size),
-          "originalName" => file.original_name,
-          "width" => "",
-          "height" => ""
-        },
-        "tags" => []
-      }
+      "content" => content
     }
 
     Content.create_document(
@@ -300,6 +322,24 @@ defmodule Barkpark.Plugins.Media.Assets do
       file.dataset,
       [source: :worker] ++ MediaFile.scope_opts(file)
     )
+  end
+
+  defp base_content(%MediaFile{} = file) do
+    %{
+      "mediaFileId" => file.id,
+      "bp_asset_kind" => asset_kind(file.mime_type),
+      "bp_processing_status" => initial_processing_status(file),
+      "fileInfo" => %{
+        "url" => public_url(file),
+        "path" => file.path,
+        "mimeType" => file.mime_type,
+        "size" => Integer.to_string(file.size),
+        "originalName" => file.original_name,
+        "width" => "",
+        "height" => ""
+      },
+      "tags" => []
+    }
   end
 
   defp asset_kind(nil), do: "other"

@@ -76,6 +76,23 @@ defmodule BarkparkWeb.Studio.ApiTesterLiveAuthzTest do
     end
   end
 
+  # task-4f7d1e36ff1dc721: the page's h1 sat before the pane layout, in no
+  # landmark (axe region). It belongs to the first column's region.
+  test "the page heading sits inside the first column's region, and the docs column is the main landmark",
+       %{
+         conn: conn,
+         member_raw: raw
+       } do
+    {:ok, view, _html} = mount_as(conn, raw)
+
+    assert has_element?(view, ~s(#api-tester-panes [role="region"] h1), "API")
+    refute has_element?(view, ~s(#api-tester-panes ~ h1, h1 + #api-tester-panes))
+
+    # The page's main content is the docs column; the page had no main
+    # landmark at all (axe landmark-one-main).
+    assert has_element?(view, ~s(#api-tester-panes .api-col-docs[role="main"]))
+  end
+
   describe "run/run-all admin gate" do
     test "a non-admin MEMBER's run is DENIED — nothing dispatches", %{
       conn: conn,

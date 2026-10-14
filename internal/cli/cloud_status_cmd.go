@@ -60,9 +60,10 @@ const (
 const fillingDiskPercent = 90.0
 
 // attentionStatus classifies one Barkpark into its charter-decision-15 status
-// label. The FIFTEEN labels (charter D69 + jpf-w1 D7 + dr-w10-s1 +
-// dr-w24-followup + dr-w15-s5), MOST URGENT FIRST — attentionRankOrder is the
-// authority and TestAttentionLadderIsFifteenRungs pins it; this list is its
+// label. The SIXTEEN labels (charter D69 + jpf-w1 D7 + dr-w10-s1 +
+// dr-w24-followup + dr-w15-s5 + task-9d72b5f86487cf9b), MOST URGENT FIRST —
+// attentionRankOrder is the authority and TestAttentionLadderIsSixteenRungs
+// pins it; this list is its
 // prose (it read TWELVE, with no deploys_failing or diverged, for as long as
 // those two rungs were on main):
 //
@@ -70,18 +71,20 @@ const fillingDiskPercent = 90.0
 //  2. failed          — no host && provision_status = "failed"
 //  3. suspended       — suspended = true (and not removing)
 //  4. degraded        — live && (health_status != "up" || agent_status != "online")
-//  5. cannot_deploy   — live && the box has sites && it MEASURED a refusal
+//  5. restarting     — live && more than 3 automatic service restarts in the
+//     agent's one-hour window (deploy restarts never count)
+//  6. cannot_deploy   — live && the box has sites && it MEASURED a refusal
 //     (site_deploy.configured = false, or runner_alive = false)
-//  6. deploys_failing — live && measured deploy failure rate >= 20%
-//  7. diverged        — live && commit_ancestry = "diverged"
-//  8. strained        — live && sustained load per core over the D67 fence
-//  9. filling         — live && disk_used_percent >= 90
-//  10. unreported     — live && the CP has never heard a byte from the box
-//  11. deploy_stalled — live && a queued deployment no builder has claimed for 5m
-//  12. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
-//  13. removing       — deprovision_status ∈ {pending, claimed}
-//  14. provisioning   — no host, nothing failed
-//  15. ok             — live, healthy, current
+//  7. deploys_failing — live && measured deploy failure rate >= 20%
+//  8. diverged        — live && commit_ancestry = "diverged"
+//  9. strained        — live && sustained load per core over the D67 fence
+//  10. filling        — live && disk_used_percent >= 90
+//  11. unreported     — live && the CP has never heard a byte from the box
+//  12. deploy_stalled — live && a queued deployment no builder has claimed for 5m
+//  13. behind         — live && (update_state = "behind" || commit_ancestry = "behind")
+//  14. removing       — deprovision_status ∈ {pending, claimed}
+//  15. provisioning   — no host, nothing failed
+//  16. ok             — live, healthy, current
 //
 // where "live" = a host is set with nothing in-flight/failed/suspended.
 //
@@ -152,6 +155,13 @@ func attentionStatus(b cloudclient.Barkpark) string {
 	// pre-contract producer, not evidence that the deploy queue is healthy.
 	case live && b.QueuedDeployAgeSecondsMissing:
 		return "degraded"
+	// task-9d72b5f86487cf9b: THE RESTART RUNG, directly under degraded. A box
+	// whose service systemd restarted more than restartingThreshold times in
+	// the last hour drops its traffic for the length of every boot. Between
+	// beats it reads up and online, so degraded cannot see it. Deploy restarts
+	// are never counted. An unmeasured box never fires it.
+	case live && restarting(b):
+		return "restarting"
 	// dr-w15-s5: THE CAPABILITY RUNG, evaluated (and ranked) directly above
 	// deploys_failing. deploys_failing says >= 20% of PAST attempts failed; this
 	// says the NEXT attempt will be refused, by the very expression the box's
@@ -925,26 +935,34 @@ func round1(n float64) float64 { return math.Round(n*10) / 10 }
 // sits BELOW degraded because a box that is down or offline cannot be trusted
 // to have reported its capability freshly; the older, broader signal explains
 // more.
+//
+// task-9d72b5f86487cf9b INSERTS `restarting` AT 5, directly under degraded. It
+// is a measured, customer-visible outage: every automatic restart drops the
+// box's traffic while the new BEAM boots (about 30 s of 503 on gyl). It sits
+// below degraded because a box that is down right now explains more than one
+// that keeps coming back, and above cannot_deploy because a box that cannot
+// stay up is the cause of most other symptoms on its row.
 var attentionRankOrder = []string{
 	"removal_failed",  // 1
 	"failed",          // 2
 	"suspended",       // 3
 	"degraded",        // 4
-	"cannot_deploy",   // 5 (dr-w15-s5 — the box itself refuses the next deploy)
-	"deploys_failing", // 6 (dr-w10-s1 / D202 — a measured, customer-visible outcome)
-	"diverged",        // 7 (dr-w24-followup — off the release train, behind deploys_failing)
-	"strained",        // 8
-	"filling",         // 9
-	"unreported",      // 10
-	"deploy_stalled",  // 11 (jpf-w1 D7 — after the box-condition rungs, before behind)
-	"behind",          // 12
-	"removing",        // 13
-	"provisioning",    // 14
-	"ok",              // 15
+	"restarting",      // 5 (task-9d72b5f86487cf9b — the service keeps restarting on its own)
+	"cannot_deploy",   // 6 (dr-w15-s5 — the box itself refuses the next deploy)
+	"deploys_failing", // 7 (dr-w10-s1 / D202 — a measured, customer-visible outcome)
+	"diverged",        // 8 (dr-w24-followup — off the release train, behind deploys_failing)
+	"strained",        // 9
+	"filling",         // 10
+	"unreported",      // 11
+	"deploy_stalled",  // 12 (jpf-w1 D7 — after the box-condition rungs, before behind)
+	"behind",          // 13
+	"removing",        // 14
+	"provisioning",    // 15
+	"ok",              // 16
 }
 
 // attentionRank is the sort key for a status label — its charter rank, 1 (most
-// urgent) through 15 (ok), matching the decision-32 fixture byte-for-byte. An
+// urgent) through 16 (ok), matching the decision-32 fixture byte-for-byte. An
 // unknown label ranks past the end (never panics) and so sorts last.
 func attentionRank(status string) int {
 	for i, s := range attentionRankOrder {
@@ -956,8 +974,8 @@ func attentionRank(status string) int {
 }
 
 // attentionBucket groups a status into the three charter buckets: attention
-// (ranks 1–12: removal_failed…behind), in-flight (13–14: removing/provisioning),
-// healthy (15: ok). The bucket strings are the decision-32 fixture's, verbatim —
+// (ranks 1–13: removal_failed…behind), in-flight (14–15: removing/provisioning),
+// healthy (16: ok). The bucket strings are the decision-32 fixture's, verbatim —
 // note "in-flight" is hyphenated there, so it is hyphenated here and in -o json.
 //
 // The boundary is stated as a MEMBERSHIP switch, not as a rank comparison, so a
@@ -971,7 +989,7 @@ func attentionBucket(status string) string {
 	case "ok":
 		return "healthy"
 	default:
-		// removal_failed, failed, suspended, degraded, cannot_deploy, deploys_failing,
+		// removal_failed, failed, suspended, degraded, restarting, cannot_deploy, deploys_failing,
 		// diverged, strained, filling, unreported, deploy_stalled, behind — and
 		// any unknown label defensively surfaces in the attention bucket rather
 		// than hiding.
@@ -1035,7 +1053,9 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// say — muscle-1's rung is removal_failed and its reason is a 200-character
 	// deprovision error, behind which a trailing "dark 50d" would be cut off.
 	parts := make([]string, 0, 8)
-	for _, s := range []string{darkMarker(b, status), reason, pausedMarker(b), queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	// restartMarker rides on any row with a restart in the window, so a box
+	// under the restarting threshold still says it restarted, and why.
+	for _, s := range []string{darkMarker(b, status), reason, pausedMarker(b), queuedDeployAgeMarker(b), restartMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
@@ -1644,6 +1664,10 @@ func rankedBarkparkRow(r rankedBarkpark) map[string]any {
 	if units := slotUnitsRow(r.BP); units != nil {
 		row["slot_units"] = units
 	}
+	// Automatic service restarts, emitted only when the box measured them.
+	if restarts := serviceRestartsRow(r.BP); restarts != nil {
+		row["service_restarts"] = restarts
+	}
 	return row
 }
 
@@ -1828,6 +1852,9 @@ func renderUpdateFailures(out *writer, ranked []rankedBarkpark) {
 	out.outf("LAST FAILED UPDATE (%d)", len(failed))
 	for _, r := range failed {
 		out.outf("%s", updateFailureHeadline(r.BP))
+		if reason := updateFailureReason(r.BP.UpdateLastFailure.Phase); reason != "" {
+			out.outf("    %s", reason)
+		}
 		tail := r.BP.UpdateLastFailure.Tail
 		if len(tail) > updateFailureTailLines {
 			out.outf("    … %d earlier line(s) — full tail: bp cloud status -o json", len(tail)-updateFailureTailLines)
@@ -1837,6 +1864,20 @@ func renderUpdateFailures(out *writer, ranked []rankedBarkpark) {
 			out.outf("    %s", sanitizeCell(line))
 		}
 	}
+}
+
+// updateFailureReason spells out the two phases the box's runner uses when a
+// service restart cut a deploy (task-15e2eb3aa36b240b), so `deploy stuck` reads
+// as a state that needs a person, not as one more failed build. Empty for every
+// other phase.
+func updateFailureReason(phase string) string {
+	switch {
+	case phase == "deploy_stuck":
+		return "deploy stuck: the service restarted during the build and again during its one resume; the box stopped retrying and still serves its old build"
+	case strings.HasSuffix(phase, "_interrupted"):
+		return fmt.Sprintf("build interrupted: the service restarted during the %s step; the box resumes the run once", strings.TrimSuffix(phase, "_interrupted"))
+	}
+	return ""
 }
 
 // updateFailureHeadline is the one-line verdict: which box, which phase, which

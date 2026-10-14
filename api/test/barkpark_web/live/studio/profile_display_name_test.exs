@@ -149,5 +149,46 @@ defmodule BarkparkWeb.Studio.ProfileDisplayNameTest do
     refute render(view) =~ "profile-modal-dialog"
   end
 
+  # task-5bf6b5e5074396db: the colour radios were display:none, so Tab skipped
+  # them and a screen reader found no choices under "Color". They are a
+  # fieldset of focusable radios, each named by a colour word.
+  test "the colour choices are a named group of focusable, named radios, in the Studio language",
+       %{conn: conn} do
+    user = register!()
+    {:ok, view, _} = open_studio(session_conn(conn, user))
+    html = render_click(view, "show-profile", %{})
+    doc = LazyHTML.from_fragment(html)
+
+    assert doc |> LazyHTML.query("fieldset.profile-color-fieldset > legend") |> LazyHTML.text() =~
+             "Color"
+
+    radios =
+      LazyHTML.query(doc, ~s(fieldset.profile-color-fieldset input[type="radio"][name="color"]))
+
+    assert Enum.count(radios) == 8
+
+    for radio <- radios do
+      refute LazyHTML.attribute(radio, "style") |> List.first() |> to_string() =~ "display:none",
+             "a display:none radio is out of the tab order and the accessibility tree"
+    end
+
+    assert LazyHTML.attribute(radios, "aria-label") ==
+             ~w(Blue Red Green Amber Violet Pink Cyan Orange)
+
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(
+        Barkpark.Tenancy.get_workspace_by_id(Barkpark.TenancyFixtures.default_workspace_id!()),
+        "nb-NO"
+      )
+
+    {:ok, nb_view, _} = open_studio(session_conn(build_conn_scoped(), user))
+    nb = nb_view |> render_click("show-profile", %{}) |> LazyHTML.from_fragment()
+
+    assert nb
+           |> LazyHTML.query(~s(input.profile-color-input))
+           |> LazyHTML.attribute("aria-label") ==
+             ~w(Blå Rød Grønn Gul Lilla Rosa Turkis Oransje)
+  end
+
   defp build_conn_scoped, do: scoped_conn()
 end

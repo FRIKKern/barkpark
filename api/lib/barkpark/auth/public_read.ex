@@ -14,7 +14,12 @@ defmodule Barkpark.Auth.PublicRead do
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 
+  require Logger
+
   @label_prefix "public-read-"
+  @token_file_default "/opt/barkpark/.env.public_token"
+  # 8 days: the weekly cadence plus a 24 h grace for the previous deploy.
+  @grace_seconds 8 * 24 * 60 * 60
 
   @doc """
   Create a new public-read token row.
@@ -48,6 +53,100 @@ defmodule Barkpark.Auth.PublicRead do
   end
 
   @doc """
+  Is the weekly rotation switched on? Ships OFF: `config :barkpark,
+  :public_read_rotation, enabled: false` (runtime switch
+  `BARKPARK_PUBLIC_READ_ROTATION=on`). Turning it on mints a new token every
+  week and purges the previous one after 8 days, so every consumer of the
+  old value must be reached by the token file or the deploy hook first.
+  """
+  @spec rotation_enabled?() :: boolean()
+  def rotation_enabled? do
+    Application.get_env(:barkpark, :public_read_rotation, []) |> Keyword.get(:enabled, false) ==
+      true
+  end
+
+  @doc """
+  One weekly rotation: mint `public-read-<ISO date>`, write the plaintext to
+  the token file (0600) the deploy reads, POST it to `VERCEL_DEPLOY_HOOK` when
+  set, and purge `public-read` rows older than 8 days.
+
+  The core job `Barkpark.Auth.PublicReadRotationWorker` and the manual
+  `mix barkpark.rotate_public_read` both call this. Options (tests):
+  `:today`, `:now`, `:token_file`, `:deploy_hook` (`false` skips it).
+
+  Returns `{:ok, %{label: label, purged: n}}` — never the plaintext, so a job
+  result or a log line cannot carry it — or `{:error, reason}`.
+  """
+  @spec rotate(keyword()) ::
+          {:ok, %{label: String.t(), purged: non_neg_integer()}} | {:error, term()}
+  def rotate(opts \\ []) do
+    today = Keyword.get(opts, :today, Date.utc_today())
+    now = Keyword.get(opts, :now, DateTime.utc_now())
+    label = @label_prefix <> Date.to_iso8601(today)
+    cutoff = DateTime.add(now, -@grace_seconds, :second)
+
+    with {:ok, raw, _row} <- create_public_read_token(label),
+         :ok <- write_token_file(Keyword.get(opts, :token_file, token_file_path()), raw),
+         :ok <-
+           notify_deploy_hook(
+             Keyword.get(opts, :deploy_hook, System.get_env("VERCEL_DEPLOY_HOOK")),
+             raw
+           ),
+         {:ok, purged} <- purge_public_read_older_than(cutoff) do
+      {:ok, %{label: label, purged: purged}}
+    end
+  end
+
+  defp token_file_path, do: System.get_env("PUBLIC_READ_TOKEN_FILE") || @token_file_default
+
+  # The path is OPERATOR configuration, never request data: the
+  # PUBLIC_READ_TOKEN_FILE env var or the fixed /opt/barkpark default, and in
+  # tests a `:token_file` opt. No request path reaches `rotate/1` (its callers
+  # are the cron worker and a mix task), so there is no traversal to steer.
+  # The same file writes ran unflagged in the mix task this was lifted from.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp write_token_file(path, raw) do
+    # ATOMIC: a reader (the deploy) sees the old file or the new one, never a
+    # half-written token. The temp sits beside the target (same filesystem, so
+    # the rename is atomic) and is narrowed to 0600 BEFORE the secret goes in,
+    # so the plaintext is never on disk under a wider mode.
+    tmp = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    with :ok <- File.write(tmp, ""),
+         :ok <- File.chmod(tmp, 0o600),
+         :ok <- File.write(tmp, raw <> "\n"),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
+      {:error, reason} ->
+        _ = File.rm(tmp)
+        {:error, {:token_file, path, reason}}
+    end
+  end
+
+  # A deploy hook failure is logged, never fatal: the token file already holds
+  # the new value, and the old token stays valid for the 8-day grace.
+  defp notify_deploy_hook(hook, raw) when is_binary(hook) and hook != "" do
+    case Req.post(hook, json: %{"public_read_token" => raw}, retry: false) do
+      {:ok, %Req.Response{status: status}} when status in 200..299 ->
+        :ok
+
+      {:ok, %Req.Response{status: status}} ->
+        Logger.warning("public-read rotation: deploy hook answered #{status}")
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("public-read rotation: deploy hook failed: #{inspect(reason)}")
+        :ok
+    end
+  end
+
+  defp notify_deploy_hook(_hook, _raw) do
+    Logger.info("public-read rotation: VERCEL_DEPLOY_HOOK not set; skipping deploy notify")
+    :ok
+  end
+
+  @doc """
   Delete public-read token rows older than `cutoff` (a `DateTime`).
   Returns `{:ok, count_deleted}`.
 
@@ -56,10 +155,11 @@ defmodule Barkpark.Auth.PublicRead do
   credential, not a per-tenant one, and `create_public_read_token/2` binds its
   row to the seeded Default workspace it resolves and names EXPLICITLY (there
   is no longer any fallback inside `Auth.create_token/5` to lean on), so
-  scoping the sweep to a tenant would simply break it. The only
-  caller is `mix barkpark.rotate_public_read`, driven by the
-  `barkpark-rotate-public-token.timer` systemd unit; nothing on the request path
-  reaches this function, so it is not an HTTP-reachable mass-delete.
+  scoping the sweep to a tenant would simply break it. The only caller is
+  `rotate/1` — run weekly by the core job `Barkpark.Auth.PublicReadRotationWorker`
+  (when switched on) or by hand via `mix barkpark.rotate_public_read`; nothing
+  on the request path reaches this function, so it is not an HTTP-reachable
+  mass-delete.
 
   What it IS reachable for is COLLATERAL: the row filter is a caller-chosen
   `label`, and callers choose labels through request paths. Two fences narrow

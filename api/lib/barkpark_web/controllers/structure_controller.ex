@@ -54,6 +54,9 @@ defmodule BarkparkWeb.StructureController do
     |> put_present(:docId, node.doc_id)
     |> put_present(:orderings, node.orderings)
     |> put_present(:tree, node.tree)
+    # task-d99d878b061b435a — a declared desk item that could not be built
+    # carries the reason; the rest of the desk is unaffected.
+    |> put_present(:error, Map.get(node, :error))
     |> put_items(node.items)
     |> put_child(node.child)
   end

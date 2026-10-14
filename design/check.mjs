@@ -2046,10 +2046,11 @@ console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
   // The four article <figure> emitters carry the same pair inline. Counted, not
   // just found: three of the four live in figures.ex and one in compose.ex, and a
   // figure family that silently loses the breakout is exactly the regression the
-  // count catches.
+  // count catches. Any attribute may precede `style` (the diagram figure carries
+  // `class="bp-diagram"` first), so the match is on the tag, not its first byte.
   const figureBreakouts = consumerSources
     .filter(({ path }) => path.endsWith(".ex"))
-    .flatMap(({ text }) => text.split("\n").filter((l) => l.includes("<figure style=") && l.includes("--bp-evidence-width")));
+    .flatMap(({ text }) => text.split("\n").filter((l) => /<figure\b[^>]*\sstyle=/.test(l) && l.includes("--bp-evidence-width")));
   if (figureBreakouts.length !== 4)
     kFail(
       `  Part K FAIL: ${figureBreakouts.length} article <figure> emitter(s) carry the evidence breakout, expected 4\n` +

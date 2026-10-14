@@ -1611,8 +1611,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # choice on, so picking "Go" once switches every code-tabs block sharing
   # the key (the "choose npm once" pitch) — inert here, read only client-side.
   # Article: tab strip (role=tablist) + every panel via the SAME
-  # Figures.code_block_html/1 the standalone `code` block uses (inline-styled,
-  # so it needs no stylesheet — reused verbatim for the email leg too).
+  # Figures.code_block_html/1 the standalone `code` block uses (its colours ride
+  # the `bp-codeblock` class there). The email leg passes `:email` and keeps the
+  # inline colours, since a mail client has no stylesheet.
   # Email/default: no dead tab strip (nothing would ever switch it) — stacked
   # panels under a plain label heading, matching the `tabs` block's degrade.
   # Empty `tabs` composes to "" (the `video` src-less precedent).
@@ -1665,7 +1666,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         Enum.map_join(tabs, fn t ->
           ~s(<div class="bp-code-tabs__panel">) <>
             ~s(<p class="bp-code-tabs__label">#{Util.escape_html(t.label)}</p>) <>
-            Figures.code_block_html(t.value) <> ~s(</div>)
+            Figures.code_block_html(t.value, [], nil, :email) <> ~s(</div>)
         end)
 
       %{"kind" => "_raw", "html" => ~s(<div class="bp-code-tabs">#{panels}</div>)}
@@ -1929,9 +1930,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   # scaffy:add-block-type Filetree MARK:ex-compose-filetree
   # `filetree` (W7 grow, charter D78): verbatim tree lines with annotation
-  # spans + the optional legend row — Components.filetree_html/1 through the
-  # `_raw` pre-rendered-HTML hatch. Style-invariant single clause like
-  # chat-tool-diff (inline-token mono rendering reads identically in email).
+  # spans + the optional legend row — Components.filetree_html/2 through the
+  # `_raw` pre-rendered-HTML hatch. One clause for both styles; the only style
+  # difference is the note colour, inline on `:email` and a paper-surface class on
+  # `:article` (task-2c5d3da1b7f7db25).
   #
   # CONTENTLESS FILETREE (the empty-chrome invariant — see `blank_field?/2`): of
   # the framed arms surveyed alongside the four media blocks, this is the one that
@@ -1944,11 +1946,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # "Allow tool? pending", …), so an empty one still SAYS something. Blank now
   # composes to the empty `_raw` node; a tree with EITHER lines or a legend is
   # byte-UNCHANGED.
-  def compose_block(%{"type" => "filetree"} = b, _style) do
+  def compose_block(%{"type" => "filetree"} = b, style) do
     if blank_filetree?(b) do
       %{"kind" => "_raw", "html" => ""}
     else
-      %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b)}
+      %{
+        "kind" => "_raw",
+        "html" => Barkpark.PortableDoc.Render.Components.filetree_html(b, style)
+      }
     end
   end
 
@@ -3182,14 +3187,97 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       title_default?: is_nil(title),
       description: description,
       description_source: description_source || "",
-      section_style: paper_links_section_style(layout),
+      section_style: layout |> paper_links_section_style() |> theme_free(style),
       header_style: "margin:0 0 #{if layout == "chapters", do: "2.15rem", else: "1.15rem"}",
-      title_style: paper_links_title_style(layout),
+      title_style: layout |> paper_links_title_style() |> theme_free(style),
       description_style:
-        "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6",
-      grid_style: paper_links_grid_style(layout)
+        theme_free(
+          "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6",
+          style
+        ),
+      grid_style: layout |> paper_links_grid_style() |> theme_free(style)
+    }
+    |> Map.merge(paper_links_classes(layout, style))
+  end
+
+  # On `:article` a `var(--paper-*)` colour is THEME paint: it leaves the inline
+  # style, and the paper-surface stylesheet paints it through the element's class
+  # (task-ef9f386f8cb5e32a). Geometry and type stay inline: a border keeps its
+  # width and style here (`border-top:3px double`) and only its colour moves to a
+  # `border-*-color` rule; a `color` or `background` leaves whole. `:email` keeps
+  # every declaration — a mail client strips `<style>`.
+  defp theme_free(css, :article) do
+    css
+    |> String.split(";")
+    |> Enum.flat_map(&unpaint/1)
+    |> Enum.join(";")
+  end
+
+  defp theme_free(css, _style), do: css
+
+  # A paper colour token: every `--paper-*` but the `--paper-font-*` faces.
+  defp unpaint(decl) do
+    cond do
+      not (decl =~ ~r/var\(--paper-(?!font-)/) ->
+        [decl]
+
+      decl =~ ~r/^\s*border(-(top|right|bottom|left))?\s*:/ ->
+        [String.replace(decl, ~r/\s*var\(--paper-(?!font-)[^)]*\)/, "")]
+
+      true ->
+        []
+    end
+  end
+
+  defp paper_links_layout_key(layout) when layout in ["chapters", "timeline"], do: layout
+  defp paper_links_layout_key(_layout), do: "list"
+
+  # The classes that carry the theme paint on `:article` (nil on `:email`). The
+  # Studio editor applies the same keys, so View and Edit paint through the same
+  # rules.
+  defp paper_links_classes(layout, :article) do
+    l = paper_links_layout_key(layout)
+
+    %{
+      section_class: "bp-plinks bp-plinks--#{l}",
+      title_class: "bp-plinks__title",
+      description_class: "bp-plinks__desc",
+      grid_class: "bp-plinks__grid bp-plinks__grid--#{l}"
     }
   end
+
+  defp paper_links_classes(_layout, _style),
+    do: %{section_class: nil, title_class: nil, description_class: nil, grid_class: nil}
+
+  defp paper_link_classes(kind, :article) do
+    l = if kind == :default, do: "list", else: Atom.to_string(kind)
+
+    %{
+      card_class: "bp-plink bp-plink--#{l}",
+      eyebrow_class: "bp-plink__eyebrow bp-plink__eyebrow--#{l}",
+      title_class: "bp-plink__title bp-plink__title--#{l}",
+      description_class: "bp-plink__desc",
+      footer_class: "bp-plink__foot bp-plink__foot--#{l}",
+      reason_class: "bp-plink__reason",
+      metadata_class: "bp-plink__meta"
+    }
+  end
+
+  defp paper_link_classes(_kind, _style) do
+    %{
+      card_class: nil,
+      eyebrow_class: nil,
+      title_class: nil,
+      description_class: nil,
+      footer_class: nil,
+      reason_class: nil,
+      metadata_class: nil
+    }
+  end
+
+  # ` class="…"` for an element, or nothing when the style carries no class.
+  defp class_attr(nil), do: ""
+  defp class_attr(class), do: ~s| class="#{class}"|
 
   defp paper_links_html(block, style) do
     presentation = paper_links_presentation(block, style)
@@ -3200,7 +3288,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       intro =
         if presentation.description,
           do:
-            ~s|<p style="#{presentation.description_style}">#{Util.escape_html(presentation.description)}</p>|,
+            ~s|<p#{class_attr(presentation.description_class)} style="#{presentation.description_style}">#{Util.escape_html(presentation.description)}</p>|,
           else: ""
 
       layout_attr =
@@ -3208,9 +3296,9 @@ defmodule Barkpark.PortableDoc.Render.Compose do
           do: ~s| data-layout="#{Util.escape_attr(presentation.layout)}"|,
           else: ""
 
-      ~s|<section data-paper-links#{layout_attr} aria-label="#{Util.escape_attr(presentation.title)}" style="#{presentation.section_style}">| <>
-        ~s|<header style="#{presentation.header_style}"><h2 style="#{presentation.title_style}">#{Util.escape_html(presentation.title)}</h2>#{intro}</header>| <>
-        ~s(<div style="#{presentation.grid_style}">#{presentation.cards_html}</div></section>)
+      ~s|<section data-paper-links#{layout_attr}#{class_attr(presentation.section_class)} aria-label="#{Util.escape_attr(presentation.title)}" style="#{presentation.section_style}">| <>
+        ~s|<header style="#{presentation.header_style}"><h2#{class_attr(presentation.title_class)} style="#{presentation.title_style}">#{Util.escape_html(presentation.title)}</h2>#{intro}</header>| <>
+        ~s(<div#{class_attr(presentation.grid_class)} style="#{presentation.grid_style}">#{presentation.cards_html}</div></section>)
     end
   end
 
@@ -3312,89 +3400,115 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     do:
       "display:block;margin-bottom:0.9rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.11em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
 
-  defp paper_link_card_presentation(ref, _style, "chapters") do
+  defp paper_link_card_presentation(ref, style, "chapters") do
     href = "/papers/" <> ref.slug
     featured = if ref.featured, do: "grid-column:1/-1;", else: ""
+    classes = paper_link_classes(:chapters, style)
 
-    eyebrow_style = paper_link_eyebrow_style("chapters")
+    eyebrow_style = "chapters" |> paper_link_eyebrow_style() |> theme_free(style)
 
     eyebrow =
       if ref.eyebrow,
-        do: ~s|<span style="#{eyebrow_style}">#{Util.escape_html(ref.eyebrow)}</span>|,
+        do:
+          ~s|<span#{class_attr(classes.eyebrow_class)} style="#{eyebrow_style}">#{Util.escape_html(ref.eyebrow)}</span>|,
         else: ""
 
-    description = paper_link_description(ref.description)
+    description = paper_link_description(ref.description, style, classes)
     live_label = if ref.live, do: Chrome.t("Live edition"), else: Chrome.t("Edition")
     meta = [live_label, ref.meta] |> Enum.reject(&is_nil/1) |> Enum.join(" · ")
 
     card =
-      Map.merge(ref, %{
+      ref
+      |> Map.merge(classes)
+      |> Map.merge(%{
         kind: :chapters,
         href: href,
         card_style:
-          "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #e2e6e5);color:inherit;text-decoration:none",
+          theme_free(
+            "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #e2e6e5);color:inherit;text-decoration:none",
+            style
+          ),
         before_title_html: eyebrow,
         eyebrow_text: ref.eyebrow,
         eyebrow_style: eyebrow_style,
         title_style:
-          "display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)",
-        description_style:
-          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+          theme_free(
+            "display:block;max-width:22ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:clamp(1.3rem,2.2vw,1.7rem);font-weight:650;line-height:1.18;letter-spacing:-0.018em;color:var(--paper-ink, #17332d)",
+            style
+          ),
+        description_style: paper_link_description_style(style),
         after_copy_html: "",
         footer_text: meta,
         footer_label: live_label,
         meta_text: ref.meta,
         footer_style:
-          "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)"
+          theme_free(
+            "display:block;margin-top:auto;padding-top:1.35rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.055em;text-transform:uppercase;color:var(--paper-accent, #1e5347)",
+            style
+          )
       })
 
     html =
-      ~s|<a data-paper-link-card data-chapter href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
+      ~s|<a data-paper-link-card data-chapter#{class_attr(card.card_class)} href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
         eyebrow <>
-        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+        ~s|<strong#{class_attr(card.title_class)} style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
         description <>
-        ~s|<span style="#{card.footer_style}">#{Util.escape_html(meta)} &nbsp;→</span>| <>
+        ~s|<span#{class_attr(card.footer_class)} style="#{card.footer_style}">#{Util.escape_html(meta)} &nbsp;→</span>| <>
         ~s(</a>)
 
     Map.put(card, :html, html)
   end
 
-  defp paper_link_card_presentation(ref, _style, "timeline") do
+  defp paper_link_card_presentation(ref, style, "timeline") do
     href = "/papers/" <> ref.slug
+    classes = paper_link_classes(:timeline, style)
     eyebrow = ref.eyebrow || Chrome.t("Edition")
-    eyebrow_style = paper_link_eyebrow_style("timeline")
-    description = paper_link_description(ref.description)
+    eyebrow_style = "timeline" |> paper_link_eyebrow_style() |> theme_free(style)
+    description = paper_link_description(ref.description, style, classes)
 
     status =
       [if(ref.live, do: Chrome.t("Live edition"), else: Chrome.t("Edition")), ref.updated_at]
       |> Enum.reject(&is_nil/1)
       |> Enum.join(" · ")
 
+    eyebrow_html =
+      ~s|<span#{class_attr(classes.eyebrow_class)} style="#{eyebrow_style}">#{Util.escape_html(eyebrow)}</span>|
+
     card =
-      Map.merge(ref, %{
+      ref
+      |> Map.merge(classes)
+      |> Map.merge(%{
         kind: :timeline,
         href: href,
         card_style:
-          "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #e2e6e5);color:inherit;text-decoration:none",
-        before_title_html: ~s|<span style="#{eyebrow_style}">#{Util.escape_html(eyebrow)}</span>|,
+          theme_free(
+            "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #e2e6e5);color:inherit;text-decoration:none",
+            style
+          ),
+        before_title_html: eyebrow_html,
         eyebrow_text: eyebrow,
         eyebrow_style: eyebrow_style,
         title_style:
-          "display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)",
-        description_style:
-          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+          theme_free(
+            "display:block;max-width:18ch;font-family:var(--bp-font-serif, Georgia, serif);font-size:1.14rem;font-weight:650;line-height:1.2;color:var(--paper-ink, #17332d)",
+            style
+          ),
+        description_style: paper_link_description_style(style),
         after_copy_html: "",
         footer_text: status,
         footer_style:
-          "display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)"
+          theme_free(
+            "display:block;margin-top:auto;padding-top:1rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;color:var(--paper-ink-soft, #55635e)",
+            style
+          )
       })
 
     html =
-      ~s|<a data-paper-link-card data-timeline-stop href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
-        ~s|<span style="#{eyebrow_style}">#{Util.escape_html(eyebrow)}</span>| <>
-        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+      ~s|<a data-paper-link-card data-timeline-stop#{class_attr(card.card_class)} href="#{Util.escape_attr(href)}" style="#{card.card_style}">| <>
+        eyebrow_html <>
+        ~s|<strong#{class_attr(card.title_class)} style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
         description <>
-        ~s|<span style="#{card.footer_style}">#{Util.escape_html(status)} &nbsp;→</span>| <>
+        ~s|<span#{class_attr(card.footer_class)} style="#{card.footer_style}">#{Util.escape_html(status)} &nbsp;→</span>| <>
         ~s(</a>)
 
     Map.put(card, :html, html)
@@ -3402,22 +3516,28 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_link_card_presentation(ref, style, _layout) do
     href = "/papers/" <> ref.slug
-    description = paper_link_description(ref.description)
+    classes = paper_link_classes(:default, style)
+    description = paper_link_description(ref.description, style, classes)
     reason_text = paper_link_reason_text(ref.reason, ref.description)
-    reason = paper_link_reason(reason_text)
-    metadata = paper_link_metadata(ref)
+    reason = paper_link_reason(reason_text, style, classes)
+    metadata = paper_link_metadata(ref, style, classes)
 
     card_style =
       case style do
         :article ->
-          "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none"
+          theme_free(
+            "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none",
+            style
+          )
 
         _ ->
           "display:block;padding:14px 16px;border:1px solid #e2e6e5;border-radius:8px;color:#17332d;text-decoration:none"
       end
 
     card =
-      Map.merge(ref, %{
+      ref
+      |> Map.merge(classes)
+      |> Map.merge(%{
         kind: :default,
         href: href,
         card_style: card_style,
@@ -3425,20 +3545,22 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         eyebrow_text: nil,
         eyebrow_style: nil,
         title_style:
-          "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)",
-        description_style:
-          "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+          theme_free(
+            "display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)",
+            style
+          ),
+        description_style: paper_link_description_style(style),
         after_copy_html: reason <> metadata,
         reason_text: reason_text,
-        reason_style: paper_link_reason_style(),
+        reason_style: paper_link_reason_style(style),
         metadata_html: metadata,
         footer_text: nil,
         footer_style: nil
       })
 
     html =
-      ~s(<a data-paper-link-card href="#{Util.escape_attr(href)}" style="#{card_style}">) <>
-        ~s|<strong style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
+      ~s(<a data-paper-link-card#{class_attr(card.card_class)} href="#{Util.escape_attr(href)}" style="#{card_style}">) <>
+        ~s|<strong#{class_attr(card.title_class)} style="#{card.title_style}">#{Util.escape_html(ref.title)}</strong>| <>
         description <>
         reason <>
         metadata <>
@@ -3447,10 +3569,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     Map.put(card, :html, html)
   end
 
-  defp paper_link_description(copy) do
+  defp paper_link_description_style(style),
+    do:
+      theme_free(
+        "display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55",
+        style
+      )
+
+  defp paper_link_description(copy, style, classes) do
     if copy,
       do:
-        ~s|<span style="display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55">#{Util.escape_html(copy)}</span>|,
+        ~s|<span#{class_attr(classes.description_class)} style="#{paper_link_description_style(style)}">#{Util.escape_html(copy)}</span>|,
       else: ""
   end
 
@@ -3460,14 +3589,17 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     if reason && normalized_copy(reason) != normalized_copy(description), do: reason
   end
 
-  defp paper_link_reason_style,
+  defp paper_link_reason_style(style),
     do:
-      "display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"
+      theme_free(
+        "display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45",
+        style
+      )
 
-  defp paper_link_reason(nil), do: ""
+  defp paper_link_reason(nil, _style, _classes), do: ""
 
-  defp paper_link_reason(reason) do
-    ~s|<span style="#{paper_link_reason_style()}"><strong>#{Chrome.t("Why it matters:")}</strong> #{Util.escape_html(reason)}</span>|
+  defp paper_link_reason(reason, style, classes) do
+    ~s|<span#{class_attr(classes.reason_class)} style="#{paper_link_reason_style(style)}"><strong>#{Chrome.t("Why it matters:")}</strong> #{Util.escape_html(reason)}</span>|
   end
 
   defp normalized_copy(nil), do: nil
@@ -3479,7 +3611,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     |> String.downcase()
   end
 
-  defp paper_link_metadata(ref) do
+  defp paper_link_metadata(ref, style, classes) do
     [ref.event_type, ref.rev && Chrome.t("rev %{n}", n: ref.rev), ref.updated_at]
     |> Enum.reject(&is_nil/1)
     |> Enum.map(&to_string/1)
@@ -3489,7 +3621,13 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         ""
 
       parts ->
-        ~s|<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">#{Util.escape_html(Enum.join(parts, " · "))}</span>|
+        metadata_style =
+          theme_free(
+            "display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)",
+            style
+          )
+
+        ~s|<span#{class_attr(classes.metadata_class)} style="#{metadata_style}">#{Util.escape_html(Enum.join(parts, " · "))}</span>|
     end
   end
 

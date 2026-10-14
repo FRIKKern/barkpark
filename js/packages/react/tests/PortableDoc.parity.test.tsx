@@ -46,6 +46,11 @@ import {
   type GoldenShapeNode,
 } from './support/dom-shape'
 import { ELIXIR_MIRROR, goldenNames } from './support/pd-golden-mirrors'
+import { fieldBlocks } from '../src/field-blocks'
+import { embedBlocks } from '../src/embed'
+
+// Every opt-in emitter, registered for every golden so opt-in types count like core ones.
+const OPT_IN = { ...fieldBlocks, ...embedBlocks() }
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SURFACE = 'bp-paper-surface' // wrapper both sides may (or may not) carry — unwrapped for per-block compare
@@ -79,7 +84,10 @@ describe('dom-shape comparator', () => {
   })
 
   it('compares data-* attributes as a map', () => {
-    assertShapeEqual('<div data-role="ok" data-n="3">x</div>', '<div data-n="3" data-role="ok">x</div>')
+    assertShapeEqual(
+      '<div data-role="ok" data-n="3">x</div>',
+      '<div data-n="3" data-role="ok">x</div>',
+    )
   })
 
   it('compares the style attribute order-insensitively (D4 inline marks / D6 chat)', () => {
@@ -99,7 +107,8 @@ describe('dom-shape comparator', () => {
   // NOTE: cells are always wrapped in a real <table> — `body.innerHTML` DROPS a
   // bare <th>/<td>, so an unwrapped cell fixture compares two EMPTY trees and
   // passes vacuously (this bit once, hence the wrapper and this note).
-  const cell = (attrs: string): string => `<table><tbody><tr><th ${attrs}>x</th></tr></tbody></table>`
+  const cell = (attrs: string): string =>
+    `<table><tbody><tr><th ${attrs}>x</th></tr></tbody></table>`
 
   it('compares non-data-* attributes as a map (order-insensitively)', () => {
     assertShapeEqual(cell('scope="row" abbr="Q"'), cell('abbr="Q" scope="row"'))
@@ -107,10 +116,7 @@ describe('dom-shape comparator', () => {
 
   it('does NOT compare the VARIABLE_ATTRS denylist (href/src/srcset/poster/id)', () => {
     // The original, legitimate exemption: a CDN URL's query order is not shape.
-    assertShapeEqual(
-      '<a href="/a?x=1&y=2" id="r1">go</a>',
-      '<a href="/a?y=2&x=1" id="r9">go</a>',
-    )
+    assertShapeEqual('<a href="/a?x=1&y=2" id="r1">go</a>', '<a href="/a?y=2&x=1" id="r9">go</a>')
   })
 
   it('does NOT compare width/height on media tags, but DOES on svg geometry', () => {
@@ -127,13 +133,18 @@ describe('dom-shape comparator', () => {
     const golden = '<div class="bp-callout bp-callout--info"><p>note</p></div>'
 
     it('catches a wrong TAG', () => {
-      expect(() => assertShapeEqual('<section class="bp-callout bp-callout--info"><p>note</p></section>', golden)).toThrow(
-        /tag <section> != <div>/,
-      )
+      expect(() =>
+        assertShapeEqual(
+          '<section class="bp-callout bp-callout--info"><p>note</p></section>',
+          golden,
+        ),
+      ).toThrow(/tag <section> != <div>/)
     })
 
     it('catches a MISSING class', () => {
-      expect(() => assertShapeEqual('<div class="bp-callout"><p>note</p></div>', golden)).toThrow(/class set/)
+      expect(() => assertShapeEqual('<div class="bp-callout"><p>note</p></div>', golden)).toThrow(
+        /class set/,
+      )
     })
 
     it('catches an EXTRA / wrong class', () => {
@@ -143,21 +154,21 @@ describe('dom-shape comparator', () => {
     })
 
     it('catches divergent TEXT', () => {
-      expect(() => assertShapeEqual('<div class="bp-callout bp-callout--info"><p>WRONG</p></div>', golden)).toThrow(
-        /text "WRONG" != "note"/,
-      )
+      expect(() =>
+        assertShapeEqual('<div class="bp-callout bp-callout--info"><p>WRONG</p></div>', golden),
+      ).toThrow(/text "WRONG" != "note"/)
     })
 
     it('catches a divergent data-* value', () => {
-      expect(() => assertShapeEqual('<div data-tone="danger">x</div>', '<div data-tone="info">x</div>')).toThrow(
-        /data-tone "danger" != "info"/,
-      )
+      expect(() =>
+        assertShapeEqual('<div data-tone="danger">x</div>', '<div data-tone="info">x</div>'),
+      ).toThrow(/data-tone "danger" != "info"/)
     })
 
     it('catches a divergent ACCESSIBILITY attribute (role / aria-*)', () => {
-      expect(() => assertShapeEqual('<div role="list">x</div>', '<div role="grid">x</div>')).toThrow(
-        /attr: role "list" != "grid"/,
-      )
+      expect(() =>
+        assertShapeEqual('<div role="list">x</div>', '<div role="grid">x</div>'),
+      ).toThrow(/attr: role "list" != "grid"/)
       expect(() =>
         assertShapeEqual('<i aria-hidden="false">x</i>', '<i aria-hidden="true">x</i>'),
       ).toThrow(/attr: aria-hidden "false" != "true"/)
@@ -182,7 +193,10 @@ describe('dom-shape comparator', () => {
 
     it('catches a divergent style property', () => {
       expect(() =>
-        assertShapeEqual('<span style="color: var(--ok)">x</span>', '<span style="color: var(--danger)">x</span>'),
+        assertShapeEqual(
+          '<span style="color: var(--ok)">x</span>',
+          '<span style="color: var(--danger)">x</span>',
+        ),
       ).toThrow(/style: color/)
     })
 
@@ -200,7 +214,10 @@ describe('dom-shape comparator', () => {
   })
 
   it('diffShape reports EVERY divergence, not just the first', () => {
-    const { equal, diffs } = diffShape('<div class="x" data-a="1">no</div>', '<div class="y" data-a="2">yes</div>')
+    const { equal, diffs } = diffShape(
+      '<div class="x" data-a="1">no</div>',
+      '<div class="y" data-a="2">yes</div>',
+    )
     expect(equal).toBe(false)
     // class set + data-* + text all diverge → at least three findings.
     expect(diffs.length).toBeGreaterThanOrEqual(3)
@@ -224,7 +241,11 @@ describe('dom-shape comparator', () => {
         tag: 'p',
         classes: ['a', 'b'], // sorted set, same normalization project() uses
         data: {},
-        children: [{ text: 'x ' }, { tag: 'em', classes: [], data: {}, children: [{ text: 'y' }] }, { text: ' z' }],
+        children: [
+          { text: 'x ' },
+          { tag: 'em', classes: [], data: {}, children: [{ text: 'y' }] },
+          { text: ' z' },
+        ],
       },
     ])
   })
@@ -306,7 +327,7 @@ describe(`PortableDoc × Elixir golden parity (${fixtureFiles.length} non-plugin
     return
   }
 
-  const Renderer = PortableDoc as (props: { value: unknown }) => ReactNode
+  const Renderer = PortableDoc as (props: { value: unknown; blocks?: unknown }) => ReactNode
 
   for (const file of fixtureFiles) {
     const golden = JSON.parse(readFileSync(join(FIXTURE_DIR, file), 'utf8')) as GoldenFixture
@@ -318,7 +339,11 @@ describe(`PortableDoc × Elixir golden parity (${fixtureFiles.length} non-plugin
       // ARRAY (`value: Block[]`), so wrap it. It renders the single block inside
       // the `.bp-paper-surface` wrapper, which unwrapClass then descends past to
       // compare against the per-block Elixir golden.
-      const actualHtml = renderToStaticMarkup(createElement(Renderer, { value: [golden.input] }))
+      // The opt-in field blocks and embed are registered for every fixture, so
+      // their goldens count here like any core type.
+      const actualHtml = renderToStaticMarkup(
+        createElement(Renderer, { value: [golden.input], blocks: OPT_IN }),
+      )
       assertShapeEqual(actualHtml, golden.expectedHtml, { unwrapClass: SURFACE })
     })
 
@@ -344,7 +369,9 @@ describe(`PortableDoc × Elixir golden parity (${fixtureFiles.length} non-plugin
   // reporting parity over a corpus smaller than the one that exists.)
   it('covers every frozen golden fixture (no silent gaps)', () => {
     const minted = goldenNames(ELIXIR_MIRROR)
-    expect(minted.length, `the canonical mint at ${ELIXIR_MIRROR} read as empty`).toBeGreaterThan(30)
+    expect(minted.length, `the canonical mint at ${ELIXIR_MIRROR} read as empty`).toBeGreaterThan(
+      30,
+    )
     expect(fixtureFiles.length).toBe(minted.length)
   })
 })
@@ -376,7 +403,10 @@ describe('PortableDoc × Elixir locale golden', () => {
 
   for (const file of localeFiles) {
     const golden = JSON.parse(readFileSync(join(FIXTURE_DIR, file), 'utf8')) as LocaleGolden
-    const Renderer = PortableDoc as (props: { value: unknown; strings?: Record<string, string> }) => ReactNode
+    const Renderer = PortableDoc as (props: {
+      value: unknown
+      strings?: Record<string, string>
+    }) => ReactNode
 
     it(`${golden.locale} — DOM shape equals the Elixir golden when handed its strings`, () => {
       const actualHtml = renderToStaticMarkup(
@@ -389,16 +419,22 @@ describe('PortableDoc × Elixir locale golden', () => {
       const { renderPortableDocument } = (await import('../src/index')) as unknown as {
         renderPortableDocument: (v: unknown, o?: { strings?: Record<string, string> }) => string
       }
-      assertShapeEqual(renderPortableDocument(golden.inputs, { strings: golden.strings }), golden.expectedHtml, {
-        unwrapClass: SURFACE,
-      })
+      assertShapeEqual(
+        renderPortableDocument(golden.inputs, { strings: golden.strings }),
+        golden.expectedHtml,
+        {
+          unwrapClass: SURFACE,
+        },
+      )
     })
 
     // Control: without the map the JS renderer answers English, so the match
     // above is the strings doing the work, not a golden that happens to be English.
     it(`${golden.locale} — without strings the shape does NOT match (the words are the difference)`, () => {
       const englishHtml = renderToStaticMarkup(createElement(Renderer, { value: golden.inputs }))
-      expect(() => assertShapeEqual(englishHtml, golden.expectedHtml, { unwrapClass: SURFACE })).toThrow()
+      expect(() =>
+        assertShapeEqual(englishHtml, golden.expectedHtml, { unwrapClass: SURFACE }),
+      ).toThrow()
     })
 
     it(`${golden.locale} — JS parser reproduces the Elixir-computed golden shape`, () => {

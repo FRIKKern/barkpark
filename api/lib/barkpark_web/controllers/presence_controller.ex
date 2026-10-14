@@ -90,7 +90,10 @@ defmodule BarkparkWeb.PresenceController do
 
   Identity is the client's to state: the Studio parity app proxies every
   browser user through one server token, so `?name=` carries the person and
-  defaults to the token's label. Only workspace members may join; a caller
+  defaults to the token's label. A signed-in editor may also come with their
+  own login session as the bearer (task-cc6ad07a8aa36338): then the session's
+  user is the principal, owning its sessions and naming it by default. Only
+  workspace members may join; a caller
   admitted by a narrow grant is refused, because the room shows which
   documents everyone in the project is editing.
   """
@@ -393,8 +396,7 @@ defmodule BarkparkWeb.PresenceController do
         {:error, 403, "forbidden", "presence is for workspace members; a grant does not admit it"}
 
       true ->
-        {:ok, PresenceState.topic(ws, Keyword.get(scope, :project_id), dataset),
-         conn.assigns[:api_token]}
+        {:ok, PresenceState.topic(ws, Keyword.get(scope, :project_id), dataset), principal(conn)}
     end
   end
 
@@ -426,7 +428,7 @@ defmodule BarkparkWeb.PresenceController do
         {:error, 413, "payload_too_large",
          "selection must be at most #{@selection_max_bytes} bytes of JSON"}
 
-      selection_shape?(sel) ->
+      BarkparkWeb.Studio.PresenceState.selection_shape?(sel) ->
         {:ok, sel}
 
       true ->
@@ -434,22 +436,6 @@ defmodule BarkparkWeb.PresenceController do
          "selection must be null or {anchor, head}, each {blockId, path?, offset}"}
     end
   end
-
-  defp selection_shape?(%{"anchor" => a, "head" => h} = sel) when map_size(sel) == 2,
-    do: point?(a) and point?(h)
-
-  defp selection_shape?(_), do: false
-
-  defp point?(%{"blockId" => id, "offset" => off} = p)
-       when is_binary(id) and id != "" and is_integer(off) and off >= 0 do
-    case Map.drop(p, ["blockId", "offset"]) do
-      empty when empty == %{} -> true
-      %{"path" => path} when is_binary(path) and path != "" -> true
-      _ -> false
-    end
-  end
-
-  defp point?(_), do: false
 
   defp owns_live_session(topic, sid, token) do
     case Presence.get_by_key(topic, presence_key(sid)) do
@@ -469,12 +455,23 @@ defmodule BarkparkWeb.PresenceController do
   defp presence_key(sid), do: "api:" <> sid
   defp session_topic(topic, sid), do: topic <> ":session:" <> sid
 
-  # Compared, never shown: entries/2 does not copy it into a frame.
+  # The API token, else the member's login-session user that
+  # `RequireTokenOrMemberSession` admitted (it lets no other user through).
+  defp principal(conn), do: conn.assigns[:api_token] || conn.assigns[:current_user]
+
+  # Compared, never shown: entries/2 does not copy it into a frame. A user is
+  # tagged so its id can never stand for a token's.
+  defp owner_ref(%Barkpark.Accounts.User{id: id}) when is_binary(id),
+    do: :erlang.phash2({:user, id})
+
   defp owner_ref(%{id: id}) when is_binary(id), do: :erlang.phash2(id)
   defp owner_ref(_), do: nil
 
   defp display_name(name, _token) when is_binary(name) and name != "",
     do: String.slice(String.trim(name), 0, 80)
+
+  defp display_name(_name, %Barkpark.Accounts.User{email: email}) when is_binary(email),
+    do: email
 
   defp display_name(_name, %{label: label}) when is_binary(label) and label != "", do: label
   defp display_name(_name, %{name: name}) when is_binary(name) and name != "", do: name

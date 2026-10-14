@@ -68,5 +68,13 @@ check("the names follow the Studio language and fall back to English", () => {
   assert.deepEqual(landmarks(en).map((m) => m.name), ["Library", "Library", "Refine", "Collections", "Asset details"]);
 });
 
+// The inspector's title (an asset's, a collection's) sat at h3 under the page's
+// h1 with nothing between (axe heading-order on the media library).
+check("the inspector titles are h2 under the library's h1", () => {
+  const src = readFileSync(new URL("../../../priv/static/assets/bp-asset-explorer.js", import.meta.url), "utf8");
+  assert.equal((src.match(/<h2 class="bp-ae-inspector-title">/g) || []).length, 2);
+  assert.equal((src.match(/<h3 class="bp-ae-inspector-title">/g) || []).length, 0);
+});
+
 console.log(failures ? `\n${failures} failed` : "\nall passed");
 process.exit(failures ? 1 : 0);

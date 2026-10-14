@@ -80,9 +80,10 @@ defmodule Barkpark.Plugins.OnixEdit.ResolveDocActionsTest do
   end
 
   describe "resolve_doc_actions/2 — non-book docs" do
-    test "never filters publish_to_bokbasen for post documents (even with in-flight state)" do
-      result = OnixEdit.resolve_doc_actions(@prev, non_book_ctx("polling"))
-      assert result == @prev
+    test "drops OnixEdit's book-only actions on a non-book document, keeps the rest" do
+      export = %{@publish_action | "name" => "export_onix", "kind" => "link"}
+      result = OnixEdit.resolve_doc_actions([export | @prev], non_book_ctx("accepted"))
+      assert result == [@other_action]
     end
   end
 
@@ -138,6 +139,16 @@ defmodule Barkpark.Plugins.OnixEdit.ResolveDocActionsTest do
 
       result = OnixEdit.resolve_doc_actions(@prev, ctx)
       assert "publish_to_bokbasen" in Enum.map(result, & &1["name"])
+    end
+  end
+
+  describe "resolve_action_handlers/2 — non-book document" do
+    test "publish_to_bokbasen answers :not_a_book instead of loading a book" do
+      handler =
+        OnixEdit.resolve_action_handlers(%{}, non_book_ctx("accepted"))["publish_to_bokbasen"]
+
+      assert handler.("post-1", "production", :dryrun) == {:error, :not_a_book}
+      assert handler.("post-1", "production", :real) == {:error, :not_a_book}
     end
   end
 end

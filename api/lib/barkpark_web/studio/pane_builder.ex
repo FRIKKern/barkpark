@@ -434,6 +434,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           role: :list,
           priority: if(rest == [], do: :active, else: depth + 1),
           items: list_items(node, scope_prefix(opts)),
+          # A declared desk item that could not be built opens as an empty
+          # list stating why (task-d99d878b061b435a).
+          filter_error: Map.get(node, :error),
           selected: Enum.at(rest, 0)
         }
 
@@ -502,7 +505,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             _ -> nil
           end
 
-        desk_groups = schema_desk_groups(schema)
+        # A content plugin's desk filters read in the Studio language
+        # (PluginSchemaCopy); names and filters are data and stay.
+        desk_groups =
+          schema_desk_groups(schema && BarkparkWeb.Studio.PluginSchemaCopy.localize(schema))
+
         active_desk = Keyword.get(opts, :desk)
         active_group = find_desk_group(desk_groups, active_desk)
 
@@ -1319,6 +1326,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       refusal ->
         {[], false, refusal}
     end
+  rescue
+    # A refusal only the schemas can give (a `referencedBy` naming no type or
+    # field) is raised while the query is built: the pane states it.
+    e in Barkpark.Content.InvalidFilterError -> {[], false, resolved_refusal(e)}
   end
 
   defp list_documents_preflighted(type_name, dataset, list_opts) do
@@ -1326,7 +1337,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       nil -> {Content.list_documents(type_name, dataset, list_opts), nil}
       refusal -> {[], refusal}
     end
+  rescue
+    e in Barkpark.Content.InvalidFilterError -> {[], resolved_refusal(e)}
   end
+
+  defp resolved_refusal(e),
+    do:
+      "This list's saved filter could not be applied (#{Exception.message(e)}). " <>
+        "No documents are shown."
 
   # nil when the list's filter is one the builder accepts, else the sentence the
   # pane shows in place of its documents.
@@ -1684,6 +1702,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   def list_items(node, scope_prefix) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
+        # A desk.hidden type rides the resolution tree so its URL opens; a
+        # rendered list never names it (task-9df0043eb4ecf3cc follow-up).
+        _ when is_map_key(child, :desk_hidden) and child.desk_hidden == true ->
+          []
+
         :divider ->
           # Carry the optional label through so the renderer can show it as a
           # section break. Legacy host-side dividers omit it (label nil).

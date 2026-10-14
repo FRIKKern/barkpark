@@ -590,9 +590,12 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         .bp-tk-keyactions { display:flex; gap:6px; justify-content:flex-end; }
       </style>
 
-      <header class="bp-tk-topbar">
+      <%!-- A labelled region, not a <header>: outside <main> a header is a
+            banner, and Studio's own bar already is one (axe
+            landmark-no-duplicate-banner). --%>
+      <div class="bp-tk-topbar" role="region" aria-labelledby="bp-tk-title">
         <div class="bp-tk-topbar-left">
-          <h1 class="h1">Tickets</h1>
+          <h1 class="h1" id="bp-tk-title">Tickets</h1>
           <span :if={@view == :inbox and @presenter.badge_count > 0} class="bp-tk-badge" data-test-id="inbox-badge">
             {@presenter.badge_count} waiting
           </span>
@@ -616,7 +619,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
             Keys
           </button>
         </nav>
-      </header>
+      </div>
 
       <%!-- Flash is rendered by the :app layout's studio_flash — never here
             (a second copy would double every banner). The persistent

@@ -109,7 +109,8 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
       <%= for lang <- @languages do %>
         <div class="bp-localized-row" data-lang={lang}>
           <label class="bp-field-label" for={"#{@base_id}-#{lang}"}>
-            <%= lang %><%= if @warning && @warning.primary == lang, do: " (primary, missing)" %>
+            <%= lang %><%= if @warning && @warning.primary == lang,
+              do: " " <> gettext("(primary, missing)") %>
           </label>
           <%= if @format == :rich do %>
             <div id={"bp-rt-wrap-#{@field.name}-#{lang}" <> if(@wrap_key == "", do: "", else: "-" <> @wrap_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
@@ -121,11 +122,14 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
                 phx-debounce="500"
                 data-lang={lang}
               />
+              <%!-- The row's label names the hidden input, so the editor body
+                    is named here: "<field> (<lang>)" (task-05710d91d03d7fc9). --%>
               <bp-rich-text-editor
                 value={Map.get(@value_map, lang, "")}
                 data-bridge-target={"#{@base_id}-#{lang}"}
                 data-lang={lang}
                 data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}
+                data-label={"#{@title} (#{lang})"}
                 class="bp-localized-rich"
               ></bp-rich-text-editor>
             </div>

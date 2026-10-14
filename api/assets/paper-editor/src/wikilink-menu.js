@@ -190,7 +190,9 @@ export class WikilinkMenu {
         // Muted right-aligned type badge, mirroring `.bp-slash-desc`.
         const badge = document.createElement("span");
         badge.className = "bp-wikilink-type-badge";
-        badge.textContent = candidate.type || "";
+        // The host's word for the type when it sends one (Studio: "artikkel"),
+        // else the type id.
+        badge.textContent = candidate.type_label || candidate.type || "";
 
         row.appendChild(title);
         row.appendChild(badge);

@@ -128,8 +128,10 @@ func For(status string) string {
 	// "cannot_deploy" (dr-w15-s5) enters at rank 5, between "degraded" (4,
 	// warn) and "deploys_failing" (6, warn): warn for the same monotonicity
 	// reason — it may not shout louder than the rung above it.
+	// "restarting" (task-9d72b5f86487cf9b) enters at rank 5, directly under
+	// "degraded" (4, warn): warn for the same monotonicity reason.
 	case "degraded", "unknown", "suspended", "inactive", "near_limit",
-		"cannot_deploy", "deploys_failing", "diverged",
+		"restarting", "cannot_deploy", "deploys_failing", "diverged",
 		"strained", "filling", "unreported", "deploy_stalled", "unavailable":
 		return "warn"
 	// "over_limit" is a usage meter at or past its plan quota — a hard ceiling

@@ -51,6 +51,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -81,6 +82,10 @@ var supportProviderFor = func() (cloud.CloudProvider, error) {
 
 // supportCreateServer creates + identity-labels the box (cloud.CreateSupportServer).
 var supportCreateServer = cloud.CreateSupportServer
+
+// supportSSHKeyName names the Hetzner ssh key a new box will trust
+// (cloud.SupportSSHKeyName). A seam so tests never list real hcloud keys.
+var supportSSHKeyName = cloud.SupportSSHKeyName
 
 // supportRunnerFor builds the per-host SSH runner once the box IP is known.
 var supportRunnerFor = func(host string) cloud.SupportRunner {
@@ -217,6 +222,22 @@ type supportAddRun struct {
 	runner  cloud.SupportRunner
 	secrets cloud.Secrets
 
+	// sshKey is the Hetzner ssh key the box was created with ("" when unknown,
+	// e.g. a reused box or a key listing that failed). wait-ready names it when
+	// sshd refuses this machine.
+	sshKey string
+
+	// resumed is true when create found an existing box labeled with this name
+	// and reused it. progress is what that box's state file says is already
+	// done (supportProgressFile); a fresh box starts with none.
+	resumed  bool
+	progress map[string]bool
+
+	// noDataset skips the scrubbed dataset pull (--no-dataset). The listener
+	// does not need it to come online; it exists for a main whose dataset
+	// the export route cannot resolve (an ambiguous slug).
+	noDataset bool
+
 	ledgerToken string // minted for the box, delivered 0600 — never printed
 	tokenID     string
 	cpRowID     string // the CP support row id the register leg returned
@@ -233,8 +254,8 @@ type supportAddRun struct {
 }
 
 func runCloudSupportAdd(out *writer, g globals, args []string) int {
-	const usage = "bp cloud support add <name> [--agent claude|codex] [--workspace <slug>] [--dataset <slug>] [--parent <cp-row-id>]"
-	a, err := parseHzArgs(args, []string{"agent", "workspace", "dataset", "parent"}, nil, usage)
+	const usage = "bp cloud support add <name> [--agent claude|codex] [--workspace <slug>] [--dataset <slug>] [--parent <cp-row-id>] [--ssh-key <hetzner-key-name>] [--no-dataset]"
+	a, err := parseHzArgs(args, []string{"agent", "workspace", "dataset", "parent", "ssh-key"}, []string{"no-dataset"}, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -256,6 +277,17 @@ func runCloudSupportAdd(out *writer, g globals, args []string) int {
 		return useError(out, "usage", fmt.Sprintf("unknown --agent %q (want claude|codex)", r.agent), exitUsage)
 	}
 	r.parent = strings.TrimSpace(a.val("parent"))
+	r.noDataset = a.bools["no-dataset"]
+
+	// --ssh-key names the Hetzner ssh key the new box trusts. Both Hetzner
+	// providers read BARKPARK_SSH_KEY at create time, so the flag sets it for
+	// this process: one rule, and the env var keeps working on its own.
+	if k := strings.TrimSpace(a.val("ssh-key")); k != "" {
+		if !supportSlugRe.MatchString(k) {
+			return useError(out, "usage", fmt.Sprintf("invalid --ssh-key %q (want a Hetzner ssh key name or id: letters, digits, '-' and '_')", k), exitUsage)
+		}
+		os.Setenv("BARKPARK_SSH_KEY", k)
+	}
 
 	// The MAIN is the active content context — the same precedence every bp
 	// command resolves (env > saved server > baked localhost floor).
@@ -304,8 +336,8 @@ func runCloudSupportAdd(out *writer, g globals, args []string) int {
 
 	if g.dryRun {
 		out.progressf("DRY RUN — bp cloud support add %s would run, in order:", r.name)
-		out.progressf("  1. create        x86 warm-image box on hetzner (label %s=%s); a placement failure writes NOTHING", cloud.FleetSupportLabelKey, r.name)
-		out.progressf("  2. wait-ready    poll sshd on the new box (budget %s)", supportReadyTimeout)
+		out.progressf("  1. create        reuse the box labeled %s=%s if one exists, else create an x86 warm-image box on hetzner trusting ssh key %s; a placement failure writes NOTHING", cloud.FleetSupportLabelKey, r.name, supportOr(os.Getenv("BARKPARK_SSH_KEY"), "(the project's only key; set --ssh-key or BARKPARK_SSH_KEY)"))
+		out.progressf("  2. wait-ready    poll sshd on the box (budget %s); a reused box then skips the steps its %s records as done", supportReadyTimeout, supportProgressFile)
 		out.progressf("  3. roster-row    publish listener-%s {status:provisioning, ttl_s:%d} on %s (dataset %s)", r.name, supportProvisioningTTL, r.base, r.dataset)
 		out.progressf("  4. configure     freshen → secrets → migrate → admin-token → LOCAL health probe")
 		out.progressf("  5. bind          mint POST /v1/fleet/support-tokens on the MAIN + register POST /v1/fleet/supports on the CONTROL PLANE (PDF-D69)")
@@ -400,20 +432,40 @@ func (r *supportAddRun) resolveParent() (int, bool) {
 
 // run executes the eight named states in order. Each step returns (exitCode,
 // stop); the first stop wins.
+//
+// A step named in supportResumableSteps records itself in the box's progress
+// file when it finishes. A re-run that reuses the box skips each recorded step
+// and continues from the first unfinished one. create, wait-ready and online
+// always run: create is where the box is found, and the other two only read.
 func (r *supportAddRun) run() int {
-	steps := []func() (int, bool){
-		r.stepCreate,
-		r.stepWaitReady,
-		r.stepRosterRow,
-		r.stepConfigure,
-		r.stepBind,
-		r.stepDataset,
-		r.stepRuntime,
-		r.stepOnline,
+	steps := []struct {
+		name string
+		fn   func() (int, bool)
+	}{
+		{"create", r.stepCreate},
+		{"wait-ready", r.stepWaitReady},
+		{"roster-row", r.stepRosterRow},
+		{"configure", r.stepConfigure},
+		{"bind", r.stepBind},
+		{"dataset", r.stepDataset},
+		{"runtime", r.stepRuntime},
+		{"online", r.stepOnline},
 	}
 	for _, step := range steps {
-		if code, stop := step(); stop {
+		if step.name == "dataset" && r.noDataset {
+			// Not recorded as done: a later run without the flag pulls it.
+			r.done("dataset", "skipped (--no-dataset): the box keeps its own empty workspace; the listener reads the main over its ledger token")
+			continue
+		}
+		if supportResumableSteps[step.name] && r.progress[step.name] {
+			r.done(step.name, "already done on this box (recorded in "+supportProgressFile+"), skipped")
+			continue
+		}
+		if code, stop := step.fn(); stop {
 			return code
+		}
+		if supportResumableSteps[step.name] {
+			r.recordProgress(step.name)
 		}
 	}
 	return r.success()
@@ -533,12 +585,52 @@ func (r *supportAddRun) stepCreate() (int, bool) {
 			"fix the provider credential (hetzner: set HCLOUD_TOKEN or an `hcloud context`) and re-run `bp cloud support add "+r.name+"`",
 			exitAuth)
 	}
+	// A box already labeled with this name is the one an earlier run created:
+	// reuse it and continue, rather than billing a second box (fleet-1,
+	// 2026-10-14: the failure's own "re-run" hint created a new box).
+	if lister, ok := provider.(cloud.LabelLister); ok {
+		boxes, lerr := lister.ListByLabel(supportCtx(), cloud.FleetSupportLabelKey, r.name)
+		if lerr != nil {
+			return r.fail("create", "list boxes labeled "+cloud.FleetSupportLabelKey+"="+r.name+": "+lerr.Error(),
+				"nothing was created and nothing was written",
+				"fix the provider credential or connectivity and re-run `bp cloud support add "+r.name+"`",
+				exitGeneric)
+		}
+		if refusal := supportIdentityFence(boxes, r.name); refusal != "" {
+			return r.fail("create", refusal, "nothing was created and nothing was written",
+				"remove the extra box with `bp cloud instance delete <name> --provider hetzner --yes`, then re-run `bp cloud support add "+r.name+"`",
+				exitGeneric)
+		}
+		if len(boxes) == 1 {
+			if strings.TrimSpace(boxes[0].IP) == "" {
+				return r.fail("create", fmt.Sprintf("box %s carries %s=%s but has no public IPv4", boxes[0].Name, cloud.FleetSupportLabelKey, r.name),
+					"nothing was created and nothing was written",
+					"inspect it with `hcloud server describe "+boxes[0].Name+"`",
+					exitGeneric)
+			}
+			r.host, r.resumed = boxes[0], true
+			r.done("create", fmt.Sprintf("reusing %s at %s (already labeled %s=%s); continuing from the first unfinished step", r.host.Name, r.host.IP, cloud.FleetSupportLabelKey, r.name))
+			return exitOK, false
+		}
+	}
+
+	// Name the key the box will trust BEFORE it bills. When it was picked only
+	// because it is the project's single key, say so: that key is often the
+	// control plane's, which this machine does not hold.
+	if k, auto, kerr := supportSSHKeyName(supportCtx()); kerr == nil {
+		r.sshKey = k
+		if auto {
+			r.out.errf("⚠ create: the box will trust Hetzner ssh key %q, the only key in the project. If this machine cannot ssh with it, stop and re-run with --ssh-key <your Hetzner key name> (or BARKPARK_SSH_KEY).", k)
+		} else {
+			r.state("create", fmt.Sprintf("the box will trust Hetzner ssh key %q", k))
+		}
+	}
 	r.state("create", fmt.Sprintf("provisioning an x86 warm-image box for support %q on hetzner…", r.name))
 	host, err := supportCreateServer(supportCtx(), provider, cloud.ProviderHetzner, r.name)
 	if err != nil {
 		return r.fail("create", err.Error(),
 			"nothing was created and nothing was written (no box, no roster row, no token)",
-			"re-run `bp cloud support add "+r.name+"` — placement failures are transient; BARKPARK_SERVER_TYPE / BARKPARK_SERVER_LOCATION move the type/region",
+			"re-run `bp cloud support add "+r.name+"` — placement failures are transient; BARKPARK_SERVER_TYPE / BARKPARK_SERVER_LOCATION move the type/region; --ssh-key (or BARKPARK_SSH_KEY) picks the Hetzner ssh key",
 			exitGeneric)
 	}
 	r.host = host
@@ -551,13 +643,144 @@ func (r *supportAddRun) stepWaitReady() (int, bool) {
 	r.runner = supportRunnerFor(r.host.IP)
 	r.state("wait-ready", fmt.Sprintf("waiting for sshd on %s (budget %s)", r.host.IP, supportReadyTimeout))
 	if err := r.runner.WaitReady(supportCtx(), supportReadyTimeout); err != nil {
-		return r.fail("wait-ready", err.Error(),
-			fmt.Sprintf("box %s EXISTS at %s (it is billing); nothing was written to the main", r.host.Name, r.host.IP),
-			fmt.Sprintf("reclaim it with `bp cloud instance delete %s --provider hetzner --yes`, or re-run `bp cloud support add %s` once the box answers SSH", r.host.Name, r.name),
+		written := fmt.Sprintf("box %s EXISTS at %s (it is billing); nothing was written to the main", r.host.Name, r.host.IP)
+		var denied *cloud.SSHPermissionDeniedError
+		if errors.As(err, &denied) {
+			trusts := "the Hetzner ssh key it was created with"
+			if r.sshKey != "" {
+				trusts = fmt.Sprintf("Hetzner ssh key %q", r.sshKey)
+			}
+			return r.fail("wait-ready",
+				fmt.Sprintf("permission denied: the box is up, but it trusts %s and this machine offered no matching key (%s)", trusts, err.Error()),
+				written,
+				fmt.Sprintf("load that key into your ssh agent (or point BARKPARK_SSH_KEY_FILE at its private key) and re-run `bp cloud support add %s`, which reuses this box; or delete it with `bp cloud instance delete %s --provider hetzner --yes` and re-run with --ssh-key <your Hetzner key name> (or BARKPARK_SSH_KEY)", r.name, r.host.Name),
+				exitGeneric)
+		}
+		return r.fail("wait-ready", "the box is not up yet: "+err.Error(),
+			written,
+			fmt.Sprintf("re-run `bp cloud support add %s` once the box answers SSH (the re-run reuses this box), or reclaim it with `bp cloud instance delete %s --provider hetzner --yes`", r.name, r.host.Name),
 			exitGeneric)
 	}
 	r.done("wait-ready", "sshd answering")
+	if r.resumed {
+		r.loadProgress()
+	}
 	return exitOK, false
+}
+
+// ── resume: the box's own progress file ─────────────────────────────────────
+
+// supportProgressFile is where `support add` records, on the box itself, each
+// step it finished plus the credentials a later step needs (the box admin
+// token, the minted ledger token). It is root-only 0600: the ledger token lands
+// in the 0600 listener env anyway, and the admin token governs only this box,
+// whose root can already read its database. Keeping it on the box ties the
+// record to the box: a deleted box takes its progress with it.
+const supportProgressFile = "/opt/barkpark-fleet/support-add.state"
+
+// supportResumableSteps are the steps a re-run may skip once recorded.
+var supportResumableSteps = map[string]bool{
+	"roster-row": true, "configure": true, "bind": true, "dataset": true, "runtime": true,
+}
+
+// supportProgressValueRe fences every value written into the progress file:
+// each one is single-quoted into a shell printf, and read back by key.
+var supportProgressValueRe = regexp.MustCompile(`^[A-Za-z0-9._~+/=:-]+$`)
+
+// recordProgress appends "done=<step>" and the step's carried values to the
+// progress file. A failed write is loud but not fatal: the step itself is done,
+// and the only cost is that a later re-run repeats it.
+func (r *supportAddRun) recordProgress(step string) {
+	lines := []string{"done=" + step}
+	var redact []string
+	add := func(key, val string, secret bool) {
+		if val == "" || !supportProgressValueRe.MatchString(val) {
+			return
+		}
+		lines = append(lines, key+"="+val)
+		if secret {
+			redact = append(redact, val)
+		}
+	}
+	switch step {
+	case "configure":
+		add("admin_token", r.secrets.AdminToken, true)
+	case "bind":
+		add("ledger_token", r.ledgerToken, true)
+		add("token_id", r.tokenID, false)
+		add("cp_row_id", r.cpRowID, false)
+	case "runtime":
+		add("max_class", r.maxClass, false)
+	}
+	quoted := make([]string, len(lines))
+	for i, l := range lines {
+		quoted[i] = "'" + l + "'"
+	}
+	script := "set -e; umask 077; mkdir -p /opt/barkpark-fleet; printf '%s\\n' " + strings.Join(quoted, " ") + " >> " + supportProgressFile + "; chmod 600 " + supportProgressFile
+	if err := r.runner.Run(supportCtx(), cloud.CaddyStep{
+		Title:  "record support-add progress (" + step + ")",
+		Cmd:    "append done=" + step + " to " + supportProgressFile + " (values redacted)",
+		Argv:   []string{"bash", "-lc", script},
+		Redact: redact,
+	}); err != nil {
+		r.out.errf("⚠ %s: could not record progress on the box (%v); a re-run will repeat this step", step, err)
+	}
+}
+
+// supportProgressReadScript prints the progress file, or nothing when absent.
+const supportProgressReadScript = `cat ` + supportProgressFile + ` 2>/dev/null || true`
+
+// loadProgress reads a reused box's progress file and restores what the
+// skipped steps would have produced. A step whose carried credential is missing
+// or malformed is NOT treated as done, so it runs again rather than leaving a
+// later step without its token. Unreadable progress means every step runs.
+func (r *supportAddRun) loadProgress() {
+	r.progress = map[string]bool{}
+	out, err := r.runner.RunOutput(supportCtx(), supportProgressReadScript)
+	if err != nil {
+		r.out.errf("⚠ wait-ready: could not read %s on the box (%v); every step runs again", supportProgressFile, err)
+		return
+	}
+	vals := map[string]string{}
+	for _, line := range strings.Split(out, "\n") {
+		k, v, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok || !supportProgressValueRe.MatchString(v) {
+			continue
+		}
+		if k == "done" {
+			if supportResumableSteps[v] {
+				r.progress[v] = true
+			}
+			continue
+		}
+		vals[k] = v
+	}
+	if r.progress["configure"] {
+		if tok := vals["admin_token"]; cloud.ValidSupportAdminToken(tok) {
+			r.secrets.AdminToken = tok
+		} else {
+			delete(r.progress, "configure")
+		}
+	}
+	if r.progress["bind"] {
+		if tok := vals["ledger_token"]; tok != "" && supportTokenSafeRe.MatchString(tok) {
+			r.ledgerToken, r.tokenID, r.cpRowID = tok, vals["token_id"], vals["cp_row_id"]
+		} else {
+			delete(r.progress, "bind")
+		}
+	}
+	r.maxClass = vals["max_class"]
+	var done []string
+	for _, s := range []string{"roster-row", "configure", "bind", "dataset", "runtime"} {
+		if r.progress[s] {
+			done = append(done, s)
+		}
+	}
+	if len(done) == 0 {
+		r.state("wait-ready", "no recorded progress on this box; running every step")
+		return
+	}
+	r.state("wait-ready", "this box already finished: "+strings.Join(done, ", "))
 }
 
 // stepRosterRow — ONLY now that a box exists (PDF-D56): publish the
@@ -601,7 +824,7 @@ func (r *supportAddRun) stepRosterRow() (int, bool) {
 
 // stepConfigure — the REDUCED go-live subset (PDF-D59) + LOCAL health probe.
 func (r *supportAddRun) stepConfigure() (int, bool) {
-	r.state("configure", "freshen → secrets-mint → secrets-install → migrate → admin-token → local health")
+	r.state("configure", "freshen → secrets-mint → secrets-install → migrate → serving → admin-token → local health")
 	secrets, err := supportConfigureHost(supportCtx(), r.runner, cloud.SupportConfigureOpts{
 		SecretsGen: supportSecretsGen,
 		Narrate:    func(state, detail string) { r.out.progressf("  · %s: %s", state, detail) },
@@ -734,9 +957,16 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 	r.state("dataset", fmt.Sprintf("dev-profile (scrubbed) export of %s/%s from the main", r.ws, r.dataset))
 	tar, err := r.exportDatasetTar()
 	if err != nil {
+		next := "check the main's export route (`bp cloud workspace export " + r.ws + " --profile dev`) and re-run `bp cloud support add " + r.name + "`"
+		if strings.Contains(err.Error(), "refusing to guess") {
+			// The export route resolves a dataset by slug within the workspace
+			// and takes no project, so a slug owned by several projects cannot
+			// be pulled at all. Name the two ways forward.
+			next = "the main's export takes no project and cannot pick between them; re-run `bp cloud support add " + r.name + " --no-dataset` to bring the listener up without the pull (the re-run reuses this box)"
+		}
 		return r.fail("dataset", err.Error(),
 			fmt.Sprintf("box %s bound at %s; NO dataset copied yet", r.host.Name, r.host.IP),
-			"check the main's export route (`bp cloud workspace export "+r.ws+" --profile dev`) and re-run `bp cloud support add "+r.name+"`",
+			next,
 			exitGeneric)
 	}
 	defer func() {
@@ -847,6 +1077,17 @@ func (r *supportAddRun) stepRuntime() (int, bool) {
 	if serr != nil {
 		r.out.errf("⚠ runtime: could not resolve origin/main's sha (%v) — writing the runtime from the box's freshened checkout; its HEAD becomes the reported runner version", serr)
 		sha = ""
+	}
+	// The listener shells out to bp (bp-read.sh). It used to be installed only
+	// inside the dataset step, so --no-dataset left a listener logging "bp is
+	// not on PATH" every beat. Install it here; the step is a no-op when bp is
+	// already present.
+	r.state("runtime", "installing bp on the box (scripts/install-cli.sh; skipped when present)")
+	if err := r.runner.Run(supportCtx(), supportEnsureBpStep()); err != nil {
+		return r.fail("runtime", "bp install on the box failed: "+err.Error(),
+			fmt.Sprintf("box %s bound at %s; the listener needs bp and it is absent", r.host.Name, r.host.IP),
+			fmt.Sprintf("install bp by hand (`ssh root@%s 'sh /opt/barkpark/scripts/install-cli.sh'`), then re-run `bp cloud support add %s`", r.host.IP, r.name),
+			exitGeneric)
 	}
 	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md + bp-read.sh at origin/main "+supportOr(sha, "(checkout fallback)"))
 	if err := r.runner.Run(supportCtx(), supportFleetFilesStep(sha, true)); err != nil {
@@ -1832,10 +2073,22 @@ func supportFleetFilesStep(sha string, checkoutFallback bool) cloud.CaddyStep {
 // supportAgentInstallStep installs node + the agent CLI. The CALLER treats a
 // failure as a WARNING (fail-open): presence never depends on the vendor CLI.
 func supportAgentInstallStep(pkg, bin string) cloud.CaddyStep {
+	// The agent CLIs need Node 18 or newer. Ubuntu 22.04's apt ships Node 12
+	// (the warm image has v12.22.9), and `npm install -g` then failed with its
+	// output thrown away (fleet-1, 2026-10-14). Install Node 20 from NodeSource
+	// when the box's node is older or absent, after removing the distro packages
+	// that conflict with it, and print each installer's tail when it fails.
 	script := `set -e
-command -v node >/dev/null 2>&1 || { apt-get update -y >/dev/null 2>&1 && apt-get install -y nodejs npm >/dev/null 2>&1; }
-npm install -g '` + pkg + `' >/dev/null 2>&1
-command -v '` + bin + `' >/dev/null 2>&1`
+export DEBIAN_FRONTEND=noninteractive
+major=$(node -v 2>/dev/null | sed -n 's/^v\([0-9]*\).*/\1/p')
+if [ -z "$major" ] || [ "$major" -lt 18 ]; then
+  echo "node ${major:-absent} is older than 18; installing Node 20 from NodeSource"
+  apt-get purge -y nodejs npm libnode-dev libnode72 >/dev/null 2>&1 || true
+  curl -fsSL https://deb.nodesource.com/setup_20.x | bash - >/tmp/bp-nodesource.log 2>&1 || { tail -n 20 /tmp/bp-nodesource.log; exit 1; }
+  apt-get install -y nodejs >/tmp/bp-node-install.log 2>&1 || { tail -n 20 /tmp/bp-node-install.log; exit 1; }
+fi
+npm install -g '` + pkg + `' >/tmp/bp-agent-install.log 2>&1 || { tail -n 20 /tmp/bp-agent-install.log; exit 1; }
+command -v '` + bin + `'`
 	return cloud.CaddyStep{
 		Title: "install node + the agent CLI (" + pkg + ") — fail-open",
 		Argv:  []string{"bash", "-lc", script},
@@ -2085,19 +2338,25 @@ func printCloudSupportHelp(out *writer) {
 USAGE
   bp cloud support add <name>    [--agent claude|codex] [--workspace <slug>]
                                  [--dataset <slug>] [--parent <cp-row-id>]
+                                 [--ssh-key <hetzner-key-name>] [--no-dataset]
                                  [--dry-run] [-o json|yaml]
   bp cloud support remove <name> [--dataset <slug>] [--dry-run] [-o json|yaml]
   bp cloud support refresh <name> [--dataset <slug>] [--force] [--dry-run] [-o json|yaml]
 
 WHAT IT DOES (eight named states, in order)
   create      provision an x86 warm-image box on hetzner, labeled
-              barkpark-fleet-support=<name>. A placement failure writes NOTHING.
-  wait-ready  poll sshd on the new box.
+              barkpark-fleet-support=<name>, trusting the Hetzner ssh key
+              from --ssh-key or BARKPARK_SSH_KEY. A placement failure writes
+              NOTHING. When a box with that label already exists, it is reused.
+  wait-ready  poll sshd on the box. "permission denied" (the box is up but
+              refuses this machine's keys) is reported apart from "not up".
   roster-row  publish listener-<name> {status:provisioning, ttl_s:1800} on the
               MAIN's ledger (only now that a box exists — the row never lies).
   configure   the reduced go-live chain on the box: freshen → per-instance
-              secrets → migrate → admin token → LOCAL health probe. No DNS, no
-              TLS, no public identity — a support serves the main, not the web.
+              secrets → migrate → box serves HEAD → admin token → LOCAL health
+              probe. No DNS, no TLS, no public identity — a support serves
+              the main, not the web.
+              A failed freshen stops here: the later steps need current code.
   bind        mint a support token on the MAIN (/v1/fleet/support-tokens) and
               register the fleet group record on the CONTROL PLANE
               (/v1/fleet/supports, via your bp-login Cloud session — PDF-D69).
@@ -2116,6 +2375,20 @@ WHAT IT DOES (eight named states, in order)
   Agent provider keys are NEVER copied to the box: the command finishes by
   printing the exact ssh one-liner you run to hand them over yourself.
 
+RE-RUN AFTER A FAILURE
+  Run the same command again. It finds the box labeled
+  barkpark-fleet-support=<name>, reads the steps it already finished from
+  /opt/barkpark-fleet/support-add.state on the box, skips them and continues
+  from the first unfinished one. No second box is created. Two boxes with the
+  same label are refused.
+
+SSH KEYS
+  The box trusts ONE Hetzner ssh key, chosen at create: --ssh-key, else
+  BARKPARK_SSH_KEY, else the project's only key (often the control plane's,
+  which your machine may not hold). bp then connects with your ssh agent, or
+  with the private key file in BARKPARK_SSH_KEY_FILE (default
+  ~/.ssh/barkpark_indx, used only when that file exists).
+
 FLAGS
   --agent claude|codex   which agent CLI the listener runs orders with (default claude)
   --workspace <slug>     the main workspace to pull from (default: the active context)
@@ -2124,6 +2397,12 @@ FLAGS
   --parent <cp-row-id>   the main's control-plane row id for the fleet group
                          record (default: auto-resolved by url-host match;
                          zero or many matches refuse with candidates)
+  --ssh-key <name>       the Hetzner ssh key (name or id) the new box trusts;
+                         sets BARKPARK_SSH_KEY for this run (default: that
+                         env var, else the project's only key)
+  --no-dataset           skip the scrubbed dataset pull; the listener still
+                         comes online (for a main whose export refuses the
+                         dataset, e.g. a slug owned by several projects)
   --dry-run              print the named states and do nothing
   -o json|yaml           one machine-readable receipt on stdout
 

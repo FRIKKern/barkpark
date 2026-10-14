@@ -118,6 +118,9 @@ defmodule Barkpark.Content.Errors do
     # Owner ruling #21 (task-9a7298f03aad0c42) — `Content.BoundFieldGuard`.
     "private_field_bound" =>
       "The body is public, so it may not bind a field the schema keeps private (private, owner_only or readable_by). details.fields names them: remove those bound blocks (or unbind them), or make the field public in the schema.",
+    # A JSON route refused the request's Accept header (task-701191424b8d15e8).
+    "not_acceptable" =>
+      "This route answers JSON. Send Accept: application/json or */*, or leave the Accept header out.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -765,6 +768,36 @@ defmodule Barkpark.Content.Errors do
          details: %{mutation: verb, missing: missing}
        }
 
+  # Direct publish (`{"createOrReplace": doc, "publish": true}`,
+  # task-6e2552cdeb223fa2) is for content types. A task, a paper and the other
+  # system types are written through their own doors and fences, so the option
+  # is refused for them under the registered `validation_failed` code.
+  defp build({:error, {:direct_publish_unsupported, type}}) when is_binary(type),
+    do: %{
+      code: "validation_failed",
+      message:
+        "createOrReplace with publish: true is not supported for type #{inspect(type)}; " <>
+          "send createOrReplace and then publish",
+      status: 422,
+      details: %{mutation: "createOrReplace", publish: true, type: type}
+    }
+
+  defp build({:error, {:invalid_visibility, value}}),
+    do: %{
+      code: "malformed",
+      message: "visibility must be sync, async or deferred, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "visibility"}
+    }
+
+  defp build({:error, {:invalid_publish_flag, value}}),
+    do: %{
+      code: "malformed",
+      message: "createOrReplace publish must be true or false, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "publish"}
+    }
+
   # A block list carrying an element that is not an object. `render_blocks/2`
   # guards the LIST (`is_list`) but `render_block/2` guards the ELEMENT
   # (`is_map`), so `{"body":{"blocks":["notamap"]}}` used to clear the outer
@@ -898,6 +931,21 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:invalid_filter_clause, message, details}})
        when is_binary(message) and is_map(details),
        do: %{code: "invalid_filter", message: message, status: 400, details: details}
+
+  # A filter param the data query API cannot read at all (task-341a5d9e63ffdcc3):
+  # a broken bracket spelling (`?filter[[=x` decodes to a top-level "filter[["
+  # key nothing reads) or a blank/bracketed field. It used to run unfiltered and
+  # answer every document. Same registered "invalid_filter" code; `param` is the
+  # caller's own spelling, so echoing it reveals nothing they did not send.
+  defp build({:error, {:malformed_filter_param, param}}) when is_binary(param),
+    do: %{
+      code: "invalid_filter",
+      message:
+        "malformed filter parameter #{inspect(param)}; use filter[field][op]=value, " <>
+          "filter=field<op>value, or a repeated filter[]=field<op>value",
+      status: 400,
+      details: %{param: param}
+    }
 
   # The legacy `/api/documents/:type?filter=...` surface's flat "field=value"
   # string parser (LegacyController.parse_legacy_filter/1). A non-empty string
@@ -1443,6 +1491,17 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
+
+  # A JSON route refused the request's Accept header: `plug(:accepts, ["json"])`
+  # raised Phoenix.NotAcceptableError, which BarkparkWeb.ErrorJSON maps here
+  # (task-701191424b8d15e8). It was an `internal_error` 406 with a "Retry
+  # shortly" hint, which sent the caller to resend the same header forever.
+  defp build({:error, :not_acceptable}),
+    do: %{
+      code: "not_acceptable",
+      message: "the Accept header names no format this route can return",
+      status: 406
+    }
 
   # THE DELIBERATE "no fault in scope" SENTINEL, narrowed OUT of the catch-all.
   # `BarkparkWeb.ErrorJSON` renders `{:error, :unknown}` when Phoenix's

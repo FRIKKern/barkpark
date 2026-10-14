@@ -22,7 +22,15 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
 
     File.mkdir_p!(dir)
     status_file = Path.join(dir, "deploy-status.json")
-    put_cfg(run_state_dir: dir, deploy_status_file: status_file, orphan_poll_ms: 50)
+    # max_resumes: 0 keeps the older recovery tests about recovery alone; the
+    # resume rule has its own describe block below and turns it back on.
+    put_cfg(
+      run_state_dir: dir,
+      deploy_status_file: status_file,
+      orphan_poll_ms: 50,
+      max_resumes: 0
+    )
+
     on_exit(fn -> File.rm_rf(dir) end)
     # Registered LAST so it runs FIRST (on_exit is LIFO): a run still in flight
     # finishes while this test's dir + config are still in place.
@@ -347,6 +355,201 @@ defmodule Barkpark.SelfUpdate.RunnerTest do
       end
 
       refute Enum.any?(Runner.status().log, &(&1 =~ pat))
+    end
+  end
+
+  describe "an interrupted run is resumed at most once (task-15e2eb3aa36b240b)" do
+    # gyl: every on-box build was cut by a service restart, the run was recorded
+    # interrupted (-3) with deploy-rebuild's record at phase=build
+    # outcome=running, and nothing on the box ever finished a deploy. The rule:
+    # resume once, then stop with a typed "deploy stuck" (-4).
+
+    # A build that records phase=build outcome=running under its own pid, as
+    # deploy-rebuild.sh does, counts its starts, and then waits to be killed.
+    defp build_script(status_file, count_file) do
+      """
+      echo start >> #{count_file}
+      printf '{"engine":"deploy-rebuild","phase":"build","outcome":"running","sha":"201598b14","ts":"%s","pid":%d}\\n' \\
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" > #{status_file}
+      echo "Compiling 1095 files (.ex)"
+      exec sleep 30
+      """
+    end
+
+    defp starts(count_file) do
+      case File.read(count_file) do
+        {:ok, body} -> body |> String.split("\n", trim: true) |> length()
+        _ -> 0
+      end
+    end
+
+    defp await_starts(count_file, n, attempts \\ 80) do
+      cond do
+        starts(count_file) >= n -> :ok
+        attempts > 0 -> Process.sleep(50) && await_starts(count_file, n, attempts - 1)
+        true -> flunk("expected #{n} start(s), saw #{starts(count_file)}")
+      end
+    end
+
+    # The service restart: the Runner AND the build die together.
+    defp service_restart do
+      pid = manifest_os_pid()
+      stop_runner()
+      kill_child(pid)
+      start_runner()
+    end
+
+    test "the first interruption resumes the run once, with the same env",
+         %{dir: dir, status_file: status_file} do
+      count_file = Path.join(dir, "starts")
+      env_file = Path.join(dir, "env")
+
+      script =
+        "echo \"$CLOUD_EGRESS\" > #{env_file}\n" <> build_script(status_file, count_file)
+
+      put_cfg(enabled: true, max_resumes: 1, command: {"bash", ["-c", script]})
+
+      assert Runner.trigger(env: [{"CLOUD_EGRESS", "203.0.113.7"}]) == {:ok, :started}
+      await_log_line("Compiling 1095 files")
+      service_restart()
+
+      # Recovered as interrupted, then started again as attempt 2.
+      await_starts(count_file, 2)
+      status = await_log_line("resuming run")
+      assert status.state == :running
+      assert File.read!(env_file) == "203.0.113.7\n"
+
+      manifest = dir |> Path.join("run.manifest.json") |> File.read!() |> Jason.decode!()
+      assert manifest["attempt"] == 2
+      assert manifest["env"] == %{"CLOUD_EGRESS" => "203.0.113.7"}
+
+      kill_child(manifest_os_pid())
+      await_not_running()
+    end
+
+    test "a resumed run interrupted again is deploy stuck (-4) and is not started a third time",
+         %{dir: dir, status_file: status_file} do
+      count_file = Path.join(dir, "starts")
+
+      put_cfg(
+        enabled: true,
+        max_resumes: 1,
+        command: {"bash", ["-c", build_script(status_file, count_file)]}
+      )
+
+      assert Runner.trigger() == {:ok, :started}
+      await_log_line("Compiling 1095 files")
+      service_restart()
+
+      await_starts(count_file, 2)
+      await_log_line("Compiling 1095 files")
+      service_restart()
+
+      status = await_done()
+      assert status.state == :done
+      assert status.exit_code == -4
+      assert Enum.any?(status.log, &(&1 =~ "deploy stuck"))
+      assert Enum.any?(status.log, &(&1 =~ "phase=build outcome=running sha=201598b14"))
+      assert %{phase: "deploy_stuck", exit_code: -4} = status.failure
+
+      # Give a third start every chance to happen; it must not.
+      Process.sleep(300)
+      assert starts(count_file) == 2
+      refute Runner.running?()
+
+      # And the verdict is stable across another boot.
+      restart_runner()
+      assert %{state: :done, exit_code: -4} = Runner.status()
+      Process.sleep(200)
+      assert starts(count_file) == 2
+    end
+
+    test "with resuming off, an interrupted build is build_interrupted and stays stopped",
+         %{dir: dir, status_file: status_file} do
+      count_file = Path.join(dir, "starts")
+
+      put_cfg(
+        enabled: true,
+        max_resumes: 0,
+        command: {"bash", ["-c", build_script(status_file, count_file)]}
+      )
+
+      assert Runner.trigger() == {:ok, :started}
+      await_log_line("Compiling 1095 files")
+      service_restart()
+
+      status = await_done()
+      assert status.exit_code == -3
+      assert %{phase: "build_interrupted", source: "deploy_status"} = status.failure
+      Process.sleep(200)
+      assert starts(count_file) == 1
+    end
+
+    test "a run older than the resume window is not resumed",
+         %{dir: dir, status_file: status_file} do
+      count_file = Path.join(dir, "starts")
+
+      put_cfg(
+        enabled: true,
+        max_resumes: 1,
+        resume_window_ms: 0,
+        command: {"bash", ["-c", build_script(status_file, count_file)]}
+      )
+
+      assert Runner.trigger() == {:ok, :started}
+      await_log_line("Compiling 1095 files")
+      Process.sleep(20)
+      service_restart()
+
+      assert %{exit_code: -3} = await_done()
+      Process.sleep(200)
+      assert starts(count_file) == 1
+    end
+
+    test "a rollback is never resumed", %{dir: dir, status_file: status_file} do
+      count_file = Path.join(dir, "starts")
+
+      put_cfg(
+        enabled: true,
+        max_resumes: 1,
+        rollback_command: {"bash", ["-c", build_script(status_file, count_file)]}
+      )
+
+      assert Runner.trigger_rollback() == {:ok, :started}
+      await_log_line("Compiling 1095 files")
+      service_restart()
+
+      assert %{exit_code: -3, mode: :rollback} = await_done()
+      Process.sleep(200)
+      assert starts(count_file) == 1
+    end
+  end
+
+  describe "a signal exit after the restart was queued is not a failure" do
+    test "exit 143 with a matching restart-applied record reads as exit 0",
+         %{status_file: status_file} do
+      # The 21:53 deploy to gyl: the script reached `systemctl restart`, the
+      # cgroup stop SIGTERMed it, and the port reported 143 before the BEAM
+      # went down. The flight record said the restart was applied.
+      script = """
+      printf '{"engine":"deploy-rebuild","phase":"restart","outcome":"applied","sha":"0c9898cab","ts":"%s","pid":%d}\\n' \\
+        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" > #{status_file}
+      echo "[deploy-rebuild] Restarting service..."
+      kill -TERM $$
+      """
+
+      put_cfg(enabled: true, command: {"bash", ["-c", script]})
+      assert Runner.trigger() == {:ok, :started}
+      status = await_done()
+      assert status.exit_code == 0
+      assert status.failure == nil
+      assert Enum.any?(status.log, &(&1 =~ "exit 143 was the restart this run queued"))
+    end
+
+    test "exit 143 with no restart record stays a failure" do
+      put_cfg(enabled: true, command: {"bash", ["-c", "echo building; kill -TERM $$"]})
+      assert Runner.trigger() == {:ok, :started}
+      assert %{exit_code: 143} = await_done()
     end
   end
 

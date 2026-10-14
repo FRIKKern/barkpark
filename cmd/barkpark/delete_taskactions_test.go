@@ -15,7 +15,7 @@ import (
 
 // TUI parity pins for gaps 3+4:
 //   - D delete (two-press confirm): first D arms a status-bar prompt, second D
-//     sends {"delete":{"id":<as listed>,"type":…}}; esc disarms (swallowed),
+//     sends {"delete":{"id":<bare id>,"type":…}}; esc disarms (swallowed),
 //     any other key disarms and handles normally. Deleting the open editor doc
 //     pops out of the editor.
 //   - task quick actions: `c` claims via the FLAT POST /v1/tasks/:doc_id/claim
@@ -136,15 +136,15 @@ func TestDeleteTwoPressSendsDeleteMutation(t *testing.T) {
 		t.Fatalf("arming must not hit the API, got %d mutate(s)", len(mutates))
 	}
 
-	// Second D deletes — the id goes over the wire EXACTLY as listed
-	// (drafts. prefix included, per the drafts-vs-published API contract).
+	// Second D deletes the DOCUMENT — the id goes over the wire bare: since
+	// #23059 a drafts.<id> delete would remove only the draft.
 	m = press(t, m, "D")
 	if len(mutates) != 1 {
 		t.Fatalf("confirm must send exactly one mutate, got %d", len(mutates))
 	}
 	id, typeName := parseDeleteBody(t, mutates[0])
-	if id != "drafts.post-1" || typeName != "post" {
-		t.Errorf("delete body = {id:%q type:%q}, want the listed drafts.post-1/post", id, typeName)
+	if id != "post-1" || typeName != "post" {
+		t.Errorf("delete body = {id:%q type:%q}, want the bare post-1/post for listed drafts.post-1", id, typeName)
 	}
 	if m.deleteArmed {
 		t.Error("confirm must disarm")
@@ -215,8 +215,8 @@ func TestDeleteFromEditorPopsOut(t *testing.T) {
 		t.Fatalf("want 1 delete mutate, got %d", len(mutates))
 	}
 	id, _ := parseDeleteBody(t, mutates[0])
-	if id != "drafts.post-1" {
-		t.Errorf("delete id = %q, want drafts.post-1", id)
+	if id != "post-1" {
+		t.Errorf("delete id = %q, want the bare post-1 (the open doc is drafts.post-1)", id)
 	}
 	if m.showEditor || m.focus.Target != FocusPane {
 		t.Errorf("delete must pop out of the editor: showEditor=%v focus=%v", m.showEditor, m.focus.Target)

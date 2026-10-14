@@ -127,6 +127,21 @@ defmodule BarkparkCloud.SitesDeployTest do
      }}
   end
 
+  # THE THIRD AUTHORLESS SHAPE (task-f8233616de3513d4). A box whose database
+  # pool sheds answers a refused connection with the typed 503 its controllers
+  # use; before that change the same fault arrived as `internal_error`.
+  defp storage_unavailable_503(request_id \\ "F9-pool-shed") do
+    {:ok, 503,
+     %{
+       "error" => %{
+         "code" => "storage_unavailable",
+         "reason" => "connection_unavailable",
+         "message" => "the database connection was refused or lost while serving this request",
+         "request_id" => request_id
+       }
+     }}
+  end
+
   # Move a row out of the ACTIVE set. deploy-truth W1 re-keyed the active-
   # deployment index onto (site_id, environment), so at most ONE queued/building/
   # pushing production build per site can exist — a test that wants a second one
@@ -2129,6 +2144,46 @@ defmodule BarkparkCloud.SitesDeployTest do
       final = Repo.get(Deployment, d.id)
       assert final.status == "live"
       assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    # task-f8233616de3513d4, THE CO-MERGE. The box now types a pool-refused
+    # connection `storage_unavailable` instead of `internal_error`. Delete
+    # `"storage_unavailable" -> true` from `transient_refusal?/1` and these two
+    # go red: the pool blip the grace exists for would spend the build.
+    test "a pool-shed start refusal (storage_unavailable) buys the start retry" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start: [
+          storage_unavailable_503(),
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+        ]
+      )
+
+      assert {:ok, :deferred} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "deferred"
+      assert row.failure_reason =~ "already_running"
+      assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    test "a pool-shed poll beat (storage_unavailable) is graced, and the build goes live" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          storage_unavailable_503(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
     end
 
     # Grace still has to be able to LOSE: a Runner that never answers is a real

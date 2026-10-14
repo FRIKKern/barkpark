@@ -110,9 +110,62 @@ if skipped; then pass "BAKE_MAX_AGE_DAYS=30 keeps a 10-day-old current bake"; el
 run_case "unreadable age" "$(images_json "not-a-date" abc)" abc "$INERT_COMPARE"
 if baked; then pass "an unreadable snapshot age rebakes"; else fail "an unreadable snapshot age rebakes — $OUT"; fi
 
+# ── The on-box checkout: restore go.mod/go.sum churn, snapshot only clean ────
+# The two marked blocks run on the bake box inside the BAKE heredoc. They are cut
+# out of the script by their markers and run here against a real git checkout
+# that reproduces the 2026-10-14 state: origin moved go.mod forward while the
+# baked tree carries an old `go mod tidy` rewrite of go.mod/go.sum.
+block() { # $1 = marker name
+  sed -n "/^# >>> $1\$/,/^# <<< $1\$/p" "$SCRIPT"
+}
+RESTORE="$(block restore-go-mod-churn)"
+ASSERT="$(block assert-clean-checkout)"
+GIT_ENV=(env GIT_CONFIG_GLOBAL=/dev/null GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t)
+G="$TMP/git"
+mkdir -p "$G"
+(
+  cd "$G" && "${GIT_ENV[@]}" bash -c '
+    set -e
+    git init -q -b main origin
+    cd origin && printf "module x\n" > go.mod && printf "a\n" > go.sum && printf "r\n" > README && git add . && git commit -qm one && cd ..
+    git clone -q origin box
+    cd origin && printf "module x\n\ngo 1.22\n" > go.mod && git commit -qam two && cd ..
+    cd box && printf "module x\n// tidy\n" > go.mod && printf "tidy\n" > go.sum && git fetch -q origin'
+) >/dev/null 2>&1
+
+# 8. The restore block lets the merge fast-forward over go.mod/go.sum churn.
+if [ -n "$RESTORE" ] && (cd "$G/box" && "${GIT_ENV[@]}" bash -c "set -euo pipefail; $RESTORE
+git -c core.hooksPath=/dev/null merge --ff-only origin/main") >/dev/null 2>&1; then
+  pass "the bake restores go.mod/go.sum churn so its merge fast-forwards"
+else
+  fail "the bake restores go.mod/go.sum churn so its merge fast-forwards"
+fi
+
+# 9. The clean-checkout gate passes a clean tree and fails a dirty one.
+if [ -n "$ASSERT" ] && (cd "$G/box" && bash -c "set -euo pipefail; $ASSERT") >/dev/null 2>&1; then
+  pass "the clean-checkout gate passes a clean tree"
+else
+  fail "the clean-checkout gate passes a clean tree"
+fi
+printf 'local\n' >"$G/box/README"
+GATE_OUT="$(cd "$G/box" && bash -c "set -euo pipefail; $ASSERT" 2>&1)"
+GATE_RC=$?
+if [ "$GATE_RC" = 12 ] && grep -q 'refusing to snapshot' <<<"$GATE_OUT" && grep -q 'README' <<<"$GATE_OUT"; then
+  pass "the clean-checkout gate refuses a dirty tree (exit 12, names the file)"
+else
+  fail "the clean-checkout gate refuses a dirty tree (rc=$GATE_RC) — $GATE_OUT"
+fi
+
+# 10. The gate sits after the rebuild and before the BAKE heredoc ends.
+if awk '/timeout 2400 bash scripts\/deploy-rebuild.sh/{r=NR} /^# >>> assert-clean-checkout$/{a=NR} /^BAKE$/{e=NR} END{exit !(r && a && e && r<a && a<e)}' "$SCRIPT"; then
+  pass "the clean-checkout gate runs after the rebuild, inside the bake heredoc"
+else
+  fail "the clean-checkout gate runs after the rebuild, inside the bake heredoc"
+fi
+
 echo
-if [ "$ran" -lt 7 ]; then
-  echo "  FAIL: harness non-vacuity — only $ran checks ran (expected 7)"
+if [ "$ran" -lt 11 ]; then
+  echo "  FAIL: harness non-vacuity — only $ran checks ran (expected 11)"
   fails=$((fails + 1))
 fi
 echo "checks run: $ran"

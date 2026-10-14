@@ -70,6 +70,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // runCloudWorkspace routes `bp cloud workspace <verb> …` to export/import. It is
@@ -292,7 +293,7 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 	// document describing the whole pull.
 	code := exitOK
 	if withBlobs {
-		rep := fetchWorkspaceBlobs(out, base, token, outPath, blobDir)
+		rep := fetchWorkspaceBlobs(out, base, token, outPath, blobDir, defaultBlobFetchOpts())
 		payload["blobs"] = rep.payload()
 		code = rep.exit
 	}
@@ -497,7 +498,7 @@ func runCloudWorkspaceImport(out *writer, g globals, args []string) int {
 	if !withBlobs {
 		return exitOK
 	}
-	rep := uploadWorkspaceBlobs(out, base, token, slug, blobDir)
+	rep := uploadWorkspaceBlobs(out, base, token, slug, blobDir, 0)
 	return rep.exit
 }
 
@@ -626,7 +627,14 @@ type blobReport struct {
 	unknown  int // blobs that moved with NOTHING to check the byte count against
 	dir      string
 	failures []string
-	exit     int
+	// missing names files the source answered 404 for, when the caller asked
+	// for a missing file to be listed rather than failed (blobFetchOpts).
+	missing []string
+	// throttled counts 429 answers that were waited out and retried; waited
+	// is the total time spent waiting on them.
+	throttled int
+	waited    time.Duration
+	exit      int
 }
 
 // payload renders the report for -o json/-o yaml.
@@ -639,7 +647,18 @@ func (r blobReport) payload() map[string]any {
 		"size_unchecked": r.unknown,
 		"dir":            r.dir,
 		"failures":       r.failures,
+		"missing":        missingOrEmpty(r.missing),
+		"rate_limited":   r.throttled,
 	}
+}
+
+// missingOrEmpty keeps the JSON key an array: `[]` and `null` read differently
+// to a script that counts entries.
+func missingOrEmpty(m []string) []string {
+	if m == nil {
+		return []string{}
+	}
+	return m
 }
 
 // bytesPhrase names the byte total with the EXACT strength of the claim behind
@@ -677,17 +696,44 @@ func (r *blobReport) fail(out *writer, blobPath, why string, exit int) {
 // render writes the per-run summary line. It is a progress line (stderr under
 // -o json/yaml) so machine stdout stays one parseable document.
 func (r blobReport) render(out *writer) {
-	out.progressf("Blobs: %d %s, %d failed, %s → %s", r.moved, r.verb, r.failed, r.bytesPhrase(), r.dir)
+	extra := ""
+	if len(r.missing) > 0 {
+		extra += fmt.Sprintf(", %d missing on the source", len(r.missing))
+	}
+	if r.throttled > 0 {
+		extra += fmt.Sprintf(", %d rate-limited and retried (%s waited)", r.throttled, r.waited.Round(time.Second))
+	}
+	out.progressf("Blobs: %d %s, %d failed%s, %s → %s", r.moved, r.verb, r.failed, extra, r.bytesPhrase(), r.dir)
+}
+
+// blobFetchOpts tunes one fetch run.
+//
+//   - ratePerMinute is the starting pace (mediaPacer); 0 sends unpaced and only
+//     slows down after a 429.
+//   - listMissing turns a 404 into a listed missing file instead of a failure.
+//     `bp dev pull` sets it: a media row whose bytes the source no longer holds
+//     must not stop the documents from landing. The export verb leaves it off,
+//     so `--with-blobs` still fails on a short set.
+type blobFetchOpts struct {
+	ratePerMinute int
+	listMissing   bool
+}
+
+// defaultBlobFetchOpts is what the export verb's --with-blobs runs with.
+func defaultBlobFetchOpts() blobFetchOpts {
+	return blobFetchOpts{ratePerMinute: defaultMediaRatePerMinute}
 }
 
 // fetchWorkspaceBlobs is the EXPORT half of the sidecar: read the bundle's
 // `tables/media_files.copy` member for the server-generated relative paths, then
-// GET each one from <source>/media/files/<path> into <dir>/<path>, streaming one
-// file at a time. A bundle with no media_files member (or no rows) is not an
-// error — it reports 0 and exits clean.
-func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobReport {
+// GET each one from the scoped delivery route
+// <source>/w/<ws>/p/<project>/media/files/<path> (blobFetchURL) into
+// <dir>/<path>, streaming one file at a time through a mediaPacer. A bundle with
+// no media_files member (or no rows) is not an error — it reports 0 and exits
+// clean.
+func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string, opts blobFetchOpts) blobReport {
 	rep := blobReport{verb: "fetched", dir: dir, exit: exitOK}
-	refs, err := bundleMediaRefs(bundlePath)
+	refs, workspace, err := bundleMediaIndex(bundlePath)
 	if err != nil {
 		out.userErr("read media paths from %s: %v", bundlePath, err)
 		rep.exit = exitGeneric
@@ -708,6 +754,7 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 	}
 
 	client := newTransferClient()
+	pacer := newMediaPacer(opts.ratePerMinute)
 	for _, ref := range refs {
 		p := ref.path
 		if !safeBlobPath(p) {
@@ -719,8 +766,12 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 			rep.fail(out, p, "create directory: "+err.Error(), exitGeneric)
 			continue
 		}
-		n, verified, ferr, exit := fetchOneBlob(client, base, token, ref, dest)
+		n, verified, ferr, exit := fetchOneBlob(client, pacer, base, token, workspace, ref, dest)
 		if ferr != nil {
+			if opts.listMissing && exit == exitNotFound {
+				rep.missing = append(rep.missing, p)
+				continue
+			}
 			rep.fail(out, p, ferr.Error(), exit)
 			continue
 		}
@@ -736,6 +787,7 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 			out.progressf("  %s — declared size absent; %d bytes fetched, unverified", p, n)
 		}
 	}
+	rep.throttled, rep.waited = pacer.throttled, pacer.waited
 	rep.render(out)
 	return rep
 }
@@ -753,23 +805,33 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 // Any failure after the destination is opened REMOVES it: the sidecar directory
 // is the import half's input, so short bytes left under the final name come
 // back as an upload (PDS-D394).
-func fetchOneBlob(client *http.Client, base, token string, ref mediaBlobRef, dest string) (int64, bool, error, int) {
-	req, rerr := http.NewRequest(http.MethodGet, base+"/media/files/"+escapeBlobPath(ref.path), nil)
-	if rerr != nil {
-		return 0, false, rerr, exitGeneric
-	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, derr := client.Do(req)
+func fetchOneBlob(client *http.Client, pacer *mediaPacer, base, token, workspace string, ref mediaBlobRef, dest string) (int64, bool, error, int) {
+	target := blobFetchURL(base, workspace, ref)
+	resp, derr := pacer.do(client, func() (*http.Request, error) {
+		req, rerr := http.NewRequest(http.MethodGet, target, nil)
+		if rerr != nil {
+			return nil, rerr
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		return req, nil
+	})
 	if derr != nil {
 		return 0, false, derr, exitGeneric
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := readCapped(resp.Body, maxResponseBytes)
-		ae := classifyError(resp.StatusCode, body)
-		return 0, false, fmt.Errorf("%s", ae.errorMessage()), ae.exit
+		ae := classifyErrorWithHeader(resp.StatusCode, body, resp.Header)
+		exit := ae.exit
+		// A 404 is the one answer a caller may choose to list instead of fail
+		// (blobFetchOpts.listMissing), so it carries exitNotFound whatever the
+		// envelope's code mapped to.
+		if resp.StatusCode == http.StatusNotFound {
+			exit = exitNotFound
+		}
+		return 0, false, fmt.Errorf("%s", ae.errorMessage()), exit
 	}
 	f, cerr := os.Create(dest)
 	if cerr != nil {
@@ -800,10 +862,13 @@ func fetchOneBlob(client *http.Client, base, token string, ref mediaBlobRef, des
 // uploadWorkspaceBlobs is the IMPORT half: walk the sidecar dir and PUT every
 // file back path-verbatim (its path RELATIVE to the sidecar dir is exactly the
 // media_files.path the source served it under) to
-// <target>/api/workspaces/<slug>/media/blob/<path>, one at a time. A missing
-// sidecar dir is a NAMED failure, not a silent success — --with-blobs was asked
-// for, so an absent media set is a lie the operator must see.
-func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport {
+// <target>/api/workspaces/<slug>/media/blob/<path>, one at a time, through a
+// mediaPacer: the route is a write on the target's rate limiter, so a large set
+// meets 429 and must wait it out rather than fail. ratePerMinute is the starting
+// pace; 0 sends unpaced until the first 429. A missing sidecar dir is a NAMED
+// failure, not a silent success — --with-blobs was asked for, so an absent
+// media set is a lie the operator must see.
+func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string, ratePerMinute int) blobReport {
 	rep := blobReport{verb: "uploaded", dir: dir, exit: exitOK}
 	paths, err := sidecarBlobPaths(dir)
 	if err != nil {
@@ -819,12 +884,13 @@ func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport
 	}
 
 	client := newTransferClient()
+	pacer := newMediaPacer(ratePerMinute)
 	for _, p := range paths {
 		if !safeBlobPath(p) {
 			rep.fail(out, p, "refusing an unsafe media path (traversal/absolute/empty)", exitValidation)
 			continue
 		}
-		n, uerr, exit := putOneBlob(client, base, token, slug, filepath.Join(dir, filepath.FromSlash(p)), p)
+		n, uerr, exit := putOneBlob(client, pacer, base, token, slug, filepath.Join(dir, filepath.FromSlash(p)), p)
 		if uerr != nil {
 			rep.fail(out, p, uerr.Error(), exit)
 			continue
@@ -833,6 +899,7 @@ func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport
 		rep.bytes += n
 		rep.verified++
 	}
+	rep.throttled, rep.waited = pacer.throttled, pacer.waited
 	rep.render(out)
 	return rep
 }
@@ -850,28 +917,37 @@ func uploadWorkspaceBlobs(out *writer, base, token, slug, dir string) blobReport
 // a NAMED failure. The echo is measured before the write hits the blobstore
 // (Blobstore.put_bytes/3 returns a bare `:ok`), so it proves bytes RECEIVED —
 // the caller's wording must not upgrade that to "stored".
-func putOneBlob(client *http.Client, base, token, slug, localPath, blobPath string) (int64, error, int) {
-	f, oerr := os.Open(localPath)
-	if oerr != nil {
-		return 0, oerr, exitGeneric
-	}
-	defer f.Close()
-	fi, serr := f.Stat()
+func putOneBlob(client *http.Client, pacer *mediaPacer, base, token, slug, localPath, blobPath string) (int64, error, int) {
+	fi, serr := os.Stat(localPath)
 	if serr != nil {
 		return 0, serr, exitGeneric
 	}
 	target := base + "/api/workspaces/" + slug + "/media/blob/" + escapeBlobPath(blobPath)
-	req, rerr := http.NewRequest(http.MethodPut, target, f)
-	if rerr != nil {
-		return 0, rerr, exitGeneric
-	}
-	req.ContentLength = fi.Size()
-	req.Header.Set("Authorization", "Bearer "+token)
-	// octet-stream is load-bearing: a JSON content-type lets Plug.Parsers eat the
-	// body and the route answers 422 empty_body.
-	req.Header.Set("Content-Type", "application/octet-stream")
-
-	resp, derr := client.Do(req)
+	// Each attempt opens its own reader: a 429 retry must send the whole file
+	// again, and a reader the first attempt consumed would send nothing.
+	var opened []*os.File
+	defer func() {
+		for _, f := range opened {
+			f.Close()
+		}
+	}()
+	resp, derr := pacer.do(client, func() (*http.Request, error) {
+		f, oerr := os.Open(localPath)
+		if oerr != nil {
+			return nil, oerr
+		}
+		opened = append(opened, f)
+		req, rerr := http.NewRequest(http.MethodPut, target, f)
+		if rerr != nil {
+			return nil, rerr
+		}
+		req.ContentLength = fi.Size()
+		req.Header.Set("Authorization", "Bearer "+token)
+		// octet-stream is load-bearing: a JSON content-type lets Plug.Parsers
+		// eat the body and the route answers 422 empty_body.
+		req.Header.Set("Content-Type", "application/octet-stream")
+		return req, nil
+	})
 	if derr != nil {
 		return 0, derr, exitGeneric
 	}
@@ -928,10 +1004,15 @@ func sidecarBlobPaths(dir string) ([]string, error) {
 // creates no row at all) or when the bundle predates the size column; in that
 // case there is nothing to verify a fetch against, and the CLI says so instead
 // of pretending.
+//
+// project is the slug of the row's project, resolved from its project_id
+// through the bundle's own `projects` member. It names the scoped route the
+// file is read from (blobFetchURL); "" when the bundle cannot say.
 type mediaBlobRef struct {
 	path      string
 	size      int64
 	sizeKnown bool
+	project   string
 }
 
 // bundleMediaRefs reads a bp-export-v1 tar and returns the media_files rows'
@@ -944,13 +1025,22 @@ type mediaBlobRef struct {
 // whose member declares no `size` column yields refs with sizeKnown=false rather
 // than an error, since the paths are still transferable.
 func bundleMediaRefs(bundlePath string) ([]mediaBlobRef, error) {
+	refs, _, err := bundleMediaIndex(bundlePath)
+	return refs, err
+}
+
+// bundleMediaIndex is bundleMediaRefs plus what the fetch route needs: the
+// manifest's workspace_slug, and each ref's project slug from its project_id
+// joined against the bundle's `projects` member. Either may be absent in an
+// older or hand-built bundle; the fetch then falls back as blobFetchURL says.
+func bundleMediaIndex(bundlePath string) ([]mediaBlobRef, string, error) {
 	f, err := os.Open(bundlePath)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer f.Close()
 
-	var manifestBytes, dumpBytes []byte
+	var manifestBytes, dumpBytes, projectsBytes []byte
 	tr := tar.NewReader(f)
 	for {
 		h, nerr := tr.Next()
@@ -958,34 +1048,45 @@ func bundleMediaRefs(bundlePath string) ([]mediaBlobRef, error) {
 			break
 		}
 		if nerr != nil {
-			return nil, fmt.Errorf("read bundle tar: %w", nerr)
+			return nil, "", fmt.Errorf("read bundle tar: %w", nerr)
 		}
 		name := path.Clean(h.Name)
 		switch name {
 		case "manifest.json":
 			b, rerr := readCapped(tr, maxResponseBytes)
 			if rerr != nil {
-				return nil, fmt.Errorf("read manifest.json: %w", rerr)
+				return nil, "", fmt.Errorf("read manifest.json: %w", rerr)
 			}
 			manifestBytes = b
 		case "tables/media_files.copy":
 			b, rerr := readCapped(tr, maxResponseBytes)
 			if rerr != nil {
-				return nil, fmt.Errorf("read tables/media_files.copy: %w", rerr)
+				return nil, "", fmt.Errorf("read tables/media_files.copy: %w", rerr)
 			}
 			dumpBytes = b
+		case "tables/projects.copy":
+			b, rerr := readCapped(tr, maxResponseBytes)
+			if rerr != nil {
+				return nil, "", fmt.Errorf("read tables/projects.copy: %w", rerr)
+			}
+			projectsBytes = b
 		}
 	}
 	if len(manifestBytes) == 0 {
-		return nil, fmt.Errorf("bundle has no manifest.json — not a bp-export-v1 tar")
+		return nil, "", fmt.Errorf("bundle has no manifest.json — not a bp-export-v1 tar")
 	}
+	var head struct {
+		WorkspaceSlug string `json:"workspace_slug"`
+	}
+	_ = json.Unmarshal(manifestBytes, &head)
+	workspace := strings.TrimSpace(head.WorkspaceSlug)
 	if len(dumpBytes) == 0 {
 		// No media member (or an empty one): honestly zero blobs.
-		return nil, nil
+		return nil, workspace, nil
 	}
 	idx, err := manifestColumnIndex(manifestBytes, "media_files", "path")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	// A missing size column is a bundle shape, not an error: -1 means "nothing
 	// declared", and every ref comes back sizeKnown=false.
@@ -993,7 +1094,61 @@ func bundleMediaRefs(bundlePath string) ([]mediaBlobRef, error) {
 	if serr != nil {
 		sizeIdx = -1
 	}
-	return copyMediaRefs(dumpBytes, idx, sizeIdx), nil
+	refs := copyMediaRefs(dumpBytes, idx, sizeIdx)
+
+	// project_id → slug. Optional at every step: a bundle without the column or
+	// the member keeps project "" and the fetch uses the default project.
+	projIdx, perr := manifestColumnIndex(manifestBytes, "media_files", "project_id")
+	if perr == nil && len(projectsBytes) > 0 {
+		slugs := projectSlugsByID(manifestBytes, projectsBytes)
+		byPath := copyColumnByPath(dumpBytes, idx, projIdx)
+		for i := range refs {
+			refs[i].project = slugs[byPath[refs[i].path]]
+		}
+	}
+	return refs, workspace, nil
+}
+
+// projectSlugsByID reads the bundle's projects member into id → slug.
+func projectSlugsByID(manifestBytes, projectsBytes []byte) map[string]string {
+	out := map[string]string{}
+	idIdx, err := manifestColumnIndex(manifestBytes, "projects", "id")
+	if err != nil {
+		return out
+	}
+	slugIdx, err := manifestColumnIndex(manifestBytes, "projects", "slug")
+	if err != nil {
+		return out
+	}
+	for _, line := range strings.Split(string(projectsBytes), "\n") {
+		fields := strings.Split(line, "\t")
+		if idIdx >= len(fields) || slugIdx >= len(fields) {
+			continue
+		}
+		if fields[idIdx] == "\\N" || fields[slugIdx] == "\\N" {
+			continue
+		}
+		out[unescapeCopyField(fields[idIdx])] = unescapeCopyField(fields[slugIdx])
+	}
+	return out
+}
+
+// copyColumnByPath maps each media row's path to one other column's value. The
+// first row for a path wins, matching copyMediaRefs' de-duplication.
+func copyColumnByPath(dump []byte, pathIdx, colIdx int) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(string(dump), "\n") {
+		fields := strings.Split(line, "\t")
+		if pathIdx >= len(fields) || colIdx >= len(fields) || fields[pathIdx] == "\\N" {
+			continue
+		}
+		p := unescapeCopyField(fields[pathIdx])
+		if _, seen := out[p]; seen || fields[colIdx] == "\\N" {
+			continue
+		}
+		out[p] = unescapeCopyField(fields[colIdx])
+	}
+	return out
 }
 
 // manifestColumnIndex finds a column's position in a manifest table member's

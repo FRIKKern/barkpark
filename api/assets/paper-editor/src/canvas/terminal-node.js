@@ -115,7 +115,9 @@ export const Terminal = Node.create({
 
   // Specific parse rule (data-bp-type='terminal') so a bare <div> stays unclaimed.
   parseHTML() {
-    return [{ tag: "div[data-bp-type='terminal']" }];
+    // The children live in `.bp-term__body`; the title bar and footer are attrs
+    // (pasted, they used to come back as paragraphs — task-d175b72aba4d5cd6).
+    return [{ tag: "div[data-bp-type='terminal']", contentElement: (dom) => dom.querySelector(":scope > .bp-term__body") || dom }];
   },
 
   // Schema-level fallback render (the pure-Node / non-node-view path — keeps the

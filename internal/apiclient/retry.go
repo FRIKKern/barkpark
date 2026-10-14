@@ -183,6 +183,13 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// repeat on a 500 (isRetryableServerFault's arm below checks the method),
 	// and it is granted one on a 429 only when the envelope and a rewindable
 	// body both say it is safe (mayReplayUnderBackpressure).
+	// --no-retry / BARKPARK_NO_RETRY (retry_optout.go): the caller paces
+	// itself, so every request goes out once and every answer comes back as
+	// the server sent it.
+	if RetryDisabled() {
+		return t.roundTripper().RoundTrip(req)
+	}
+
 	attempts := t.attempts
 	if attempts <= 0 {
 		attempts = retryAttempts

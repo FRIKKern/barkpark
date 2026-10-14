@@ -16,8 +16,15 @@ defmodule Barkpark.SelfUpdate.FailureReport do
   (`source: "deploy_status"`), else from the exit code the scripts document
   (`source: "exit_code"`): 1 build, 13 migrate, 15 restart (unverified),
   2 merge (fast-forward refused), 3 slot (deploy-rebuild refused a slot box),
-  -1 runner (port closed), -2 deadline, -3 interrupted. Any other code is
-  `fetch` when the log never reached the rebuild, else `unknown`.
+  -1 runner (port closed), -2 deadline, -3 interrupted, -4 `deploy_stuck`.
+  Any other code is `fetch` when the log never reached the rebuild, else
+  `unknown`.
+
+  An interrupted run (-3) whose flight record says a phase was still
+  `running` is `<phase>_interrupted` (`build_interrupted` on gyl,
+  task-15e2eb3aa36b240b), so the control plane shows which step the service
+  restart cut. A resumed run that was interrupted again is `deploy_stuck`
+  (-4): the Runner stopped retrying and a human has to look.
 
   ## Tail
 
@@ -41,8 +48,11 @@ defmodule Barkpark.SelfUpdate.FailureReport do
     3 => "slot",
     -1 => "runner",
     -2 => "deadline",
-    -3 => "interrupted"
+    -3 => "interrupted",
+    -4 => "deploy_stuck"
   }
+
+  @running_phases ~w(build migrate restart)
 
   @failed_outcomes ["failed", "unverified"]
 
@@ -74,6 +84,13 @@ defmodule Barkpark.SelfUpdate.FailureReport do
   def build(_code, _log, _deploy_status), do: nil
 
   @doc false
+  def phase(-4, _log, deploy_status),
+    do: {"deploy_stuck", if(is_map(deploy_status), do: "deploy_status", else: "exit_code")}
+
+  def phase(-3, _log, %{"phase" => phase, "outcome" => "running"})
+      when phase in @running_phases,
+      do: {phase <> "_interrupted", "deploy_status"}
+
   def phase(_code, _log, %{"phase" => phase, "outcome" => outcome})
       when is_binary(phase) and outcome in @failed_outcomes,
       do: {phase, "deploy_status"}

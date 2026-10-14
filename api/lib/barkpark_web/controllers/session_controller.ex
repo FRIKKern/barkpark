@@ -20,33 +20,41 @@ defmodule BarkparkWeb.SessionController do
 
   @default_return_to "/studio"
 
+  plug(:put_signin_locale)
+
   def new(conn, params) do
     return_to = sanitize_return_to(params["return_to"])
-    put_locale_for(return_to)
     render(conn, :new, new_assigns(return_to))
   end
 
-  # Gyldendal parity E7: the login page has no workspace of its own, but a
-  # `return_to` that points into `/w/<slug>/…` names one — so the page speaks
-  # that workspace's locale (nb-NO for the twin). Anything else stays English.
-  defp put_locale_for(return_to) when is_binary(return_to) do
-    locale =
-      case Regex.run(~r{^/w/([^/]+)/}, return_to) do
-        [_, slug] ->
-          Barkpark.Tenancy.workspace_locale(Barkpark.Tenancy.get_workspace_by_slug(slug))
+  # The sign-in pages have no workspace of their own. Their language, in order
+  # (lead ruling, run 8):
+  #   1. a `return_to` into `/w/<slug>/…` names a workspace: its locale
+  #      (Gyldendal parity E7, nb-NO for the twin);
+  #   2. otherwise the browser's Accept-Language (nb, no, nn → nb-NO);
+  #   3. otherwise English. Never the Default workspace's locale.
+  # Every action here renders or flashes, so the plug runs for all of them.
+  defp put_signin_locale(conn, _opts) do
+    return_to = sanitize_return_to(conn.params["return_to"])
 
-        _ ->
-          Barkpark.Tenancy.default_locale()
-      end
+    (return_to_locale(return_to) || BarkparkWeb.AcceptLanguage.locale(conn) ||
+       Barkpark.Tenancy.default_locale())
+    |> BarkparkWeb.StudioLocale.put_named()
 
-    BarkparkWeb.StudioLocale.put_named(locale)
+    conn
   end
 
-  defp put_locale_for(_), do: BarkparkWeb.StudioLocale.put_named(nil)
+  defp return_to_locale(return_to) do
+    with [_, slug] <- Regex.run(~r{^/w/([^/]+)/}, return_to),
+         %Barkpark.Tenancy.Workspace{} = ws <- Barkpark.Tenancy.get_workspace_by_slug(slug) do
+      Barkpark.Tenancy.workspace_locale(ws)
+    else
+      _ -> nil
+    end
+  end
 
   def create(conn, %{"token" => raw_token} = params) when is_binary(raw_token) do
     return_to = sanitize_return_to(params["return_to"])
-    put_locale_for(return_to)
     trimmed = String.trim(raw_token)
 
     with {:ok, api_token} <- Barkpark.Auth.verify_token(trimmed),
@@ -54,19 +62,19 @@ defmodule BarkparkWeb.SessionController do
       conn
       |> configure_session(renew: true)
       |> put_session("api_token_session", session_id)
-      |> put_flash(:info, "Signed in.")
+      |> put_flash(:info, gettext("Signed in."))
       |> redirect(to: return_to)
     else
       _ ->
         conn
-        |> put_flash(:error, "Invalid API token.")
+        |> put_flash(:error, gettext("Invalid API token."))
         |> render(:new, new_assigns(return_to))
     end
   end
 
   def create(conn, _params) do
     conn
-    |> put_flash(:error, "Token is required.")
+    |> put_flash(:error, gettext("Token is required."))
     |> render(:new, new_assigns(@default_return_to))
   end
 
@@ -75,7 +83,7 @@ defmodule BarkparkWeb.SessionController do
   defp new_assigns(return_to) do
     [
       return_to: return_to,
-      page_title: "Sign in",
+      page_title: gettext("Sign in"),
       instance_host: instance_host(),
       cloud_login_href: cloud_login_href()
     ]
@@ -137,7 +145,7 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> configure_session(renew: true)
         |> put_session("user_session", token)
-        |> put_flash(:info, "Signed in.")
+        |> put_flash(:info, gettext("Signed in."))
         |> redirect(to: @default_return_to)
 
       {:ok, raw_api_token} when is_binary(raw_api_token) ->
@@ -148,18 +156,18 @@ defmodule BarkparkWeb.SessionController do
             conn
             |> configure_session(renew: true)
             |> put_session("api_token_session", session_id)
-            |> put_flash(:info, "Signed in.")
+            |> put_flash(:info, gettext("Signed in."))
             |> redirect(to: @default_return_to)
 
           {:error, :unauthorized} ->
             conn
-            |> put_flash(:error, "This sign-in link is invalid or has expired.")
+            |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
             |> redirect(to: "/login")
         end
 
       {:error, :invalid} ->
         conn
-        |> put_flash(:error, "This sign-in link is invalid or has expired.")
+        |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
         |> redirect(to: "/login")
     end
   end
@@ -167,7 +175,7 @@ defmodule BarkparkWeb.SessionController do
   def ticket(conn, _params) do
     conn
     |> no_store()
-    |> put_flash(:error, "This sign-in link is invalid or has expired.")
+    |> put_flash(:error, gettext("This sign-in link is invalid or has expired."))
     |> redirect(to: "/login")
   end
 
@@ -232,7 +240,7 @@ defmodule BarkparkWeb.SessionController do
     case Barkpark.Accounts.get_user_by_email_and_password(email, password) do
       nil ->
         conn
-        |> put_flash(:error, "Email or password is incorrect.")
+        |> put_flash(:error, gettext("Email or password is incorrect."))
         |> render(:new, new_assigns(return_to))
 
       user ->
@@ -242,7 +250,7 @@ defmodule BarkparkWeb.SessionController do
 
   def account(conn, params) do
     conn
-    |> put_flash(:error, "Email and password are required.")
+    |> put_flash(:error, gettext("Email and password are required."))
     |> render(:new, new_assigns(sanitize_return_to(params["return_to"])))
   end
 
@@ -269,7 +277,7 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> put_session("studio_mfa_user", user.id)
         |> put_session("studio_mfa_at", System.system_time(:second))
-        |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
+        |> render(:mfa, return_to: return_to, page_title: gettext("Two-step verification"))
 
       # A passkey-only member presents the passkey at its own door (owner
       # ruling #14); a member with no factor enrols first.
@@ -304,7 +312,7 @@ defmodule BarkparkWeb.SessionController do
   flow already sends (which `magic/2` below makes land in a browser).
   """
   def magic_request_form(conn, _params) do
-    render(conn, :magic_request, page_title: "Sign-in link", sent: false)
+    render(conn, :magic_request, page_title: gettext("Sign-in link"), sent: false)
   end
 
   def magic_request(conn, %{"email" => email}) when is_binary(email) do
@@ -329,7 +337,7 @@ defmodule BarkparkWeb.SessionController do
         )
     end
 
-    render(conn, :magic_request, page_title: "Sign-in link", sent: true)
+    render(conn, :magic_request, page_title: gettext("Sign-in link"), sent: true)
   end
 
   def magic_request(conn, _params), do: redirect(conn, to: "/login/magic")
@@ -352,7 +360,10 @@ defmodule BarkparkWeb.SessionController do
 
       :error ->
         conn
-        |> put_flash(:error, "This sign-in link is invalid or has expired — request a fresh one.")
+        |> put_flash(
+          :error,
+          gettext("This sign-in link is invalid or has expired — request a fresh one.")
+        )
         |> redirect(to: "/login/magic")
     end
   end
@@ -367,7 +378,7 @@ defmodule BarkparkWeb.SessionController do
   what makes that link actually land somewhere in a browser.
   """
   def reset_request_form(conn, _params) do
-    render(conn, :reset_request, page_title: "Reset password", sent: false)
+    render(conn, :reset_request, page_title: gettext("Reset password"), sent: false)
   end
 
   def reset_request(conn, %{"email" => email}) when is_binary(email) do
@@ -382,7 +393,7 @@ defmodule BarkparkWeb.SessionController do
       NotificationWithhold.record("reset", :no_recipient_by_construction)
     end
 
-    render(conn, :reset_request, page_title: "Reset password", sent: true)
+    render(conn, :reset_request, page_title: gettext("Reset password"), sent: true)
   end
 
   def reset_request(conn, _params), do: redirect(conn, to: "/login/reset")
@@ -395,7 +406,7 @@ defmodule BarkparkWeb.SessionController do
   def reset_form(conn, %{"token" => token}) when is_binary(token) do
     conn
     |> no_store()
-    |> render(:reset, page_title: "Set a new password", token: token)
+    |> render(:reset, page_title: gettext("Set a new password"), token: token)
   end
 
   def reset_submit(conn, %{"token" => token, "password" => password})
@@ -404,7 +415,7 @@ defmodule BarkparkWeb.SessionController do
       {:ok, _user} ->
         conn
         |> configure_session(renew: true)
-        |> put_flash(:info, "Password updated — sign in with your new password.")
+        |> put_flash(:info, gettext("Password updated — sign in with your new password."))
         |> redirect(to: "/login")
 
       {:error, %Ecto.Changeset{} = changeset} ->
@@ -413,11 +424,14 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> put_flash(:error, password_error(changeset))
         |> no_store()
-        |> render(:reset, page_title: "Set a new password", token: token)
+        |> render(:reset, page_title: gettext("Set a new password"), token: token)
 
       :error ->
         conn
-        |> put_flash(:error, "That reset link is invalid or has expired — request a fresh one.")
+        |> put_flash(
+          :error,
+          gettext("That reset link is invalid or has expired — request a fresh one.")
+        )
         |> redirect(to: "/login/reset")
     end
   end
@@ -441,7 +455,7 @@ defmodule BarkparkWeb.SessionController do
   def confirm_form(conn, %{"token" => token}) when is_binary(token) do
     conn
     |> no_store()
-    |> render(:confirm, page_title: "Confirm your email", token: token, result: nil)
+    |> render(:confirm, page_title: gettext("Confirm your email"), token: token, result: nil)
   end
 
   @doc """
@@ -458,11 +472,11 @@ defmodule BarkparkWeb.SessionController do
 
     case Barkpark.Accounts.confirm_user(token) do
       {:ok, _user} ->
-        render(conn, :confirm, page_title: "Email confirmed", token: token, result: :ok)
+        render(conn, :confirm, page_title: gettext("Email confirmed"), token: token, result: :ok)
 
       :error ->
         render(conn, :confirm,
-          page_title: "Confirmation link expired",
+          page_title: gettext("Confirmation link expired"),
           token: token,
           result: :error
         )
@@ -473,14 +487,12 @@ defmodule BarkparkWeb.SessionController do
 
   defp password_error(changeset) do
     changeset
-    |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
-      Enum.reduce(opts, msg, fn {k, v}, acc ->
-        String.replace(acc, "%{#{k}}", to_string(v))
-      end)
-    end)
+    |> Ecto.Changeset.traverse_errors(
+      &BarkparkWeb.Studio.StudioLive.Shared.translate_changeset_error/1
+    )
     |> case do
-      %{password: [msg | _]} -> "Password " <> msg <> "."
-      _ -> "That password can't be used — pick a different one."
+      %{password: [msg | _]} -> gettext("Password %{message}.", message: msg)
+      _ -> gettext("That password can't be used — pick a different one.")
     end
   end
 
@@ -520,12 +532,12 @@ defmodule BarkparkWeb.SessionController do
       _ ->
         if is_binary(user_id) and fresh? do
           conn
-          |> put_flash(:error, "That code didn't work — try again.")
-          |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
+          |> put_flash(:error, gettext("That code didn't work — try again."))
+          |> render(:mfa, return_to: return_to, page_title: gettext("Two-step verification"))
         else
           conn
           |> configure_session(renew: true)
-          |> put_flash(:error, "Sign-in expired — start again.")
+          |> put_flash(:error, gettext("Sign-in expired — start again."))
           |> redirect(to: "/login")
         end
     end
@@ -551,7 +563,7 @@ defmodule BarkparkWeb.SessionController do
     conn
     |> configure_session(renew: true)
     |> put_session("user_session", token)
-    |> put_flash(:info, "Signed in.")
+    |> put_flash(:info, gettext("Signed in."))
     |> redirect(to: return_to)
   end
 
@@ -614,8 +626,8 @@ defmodule BarkparkWeb.SessionController do
   # never an error — but "a live session was revoked" and "there was nothing
   # left to revoke" no longer arrive at the user as the same sentence over a
   # count nobody read (PDS-D523).
-  defp sign_out_flash(0), do: "You were already signed out."
-  defp sign_out_flash(_revoked), do: "Signed out."
+  defp sign_out_flash(0), do: gettext("You were already signed out.")
+  defp sign_out_flash(_revoked), do: gettext("Signed out.")
 
   # Harden the one-time-link response: never cached/stored, and the ticket URL
   # is never leaked onward as a Referer.

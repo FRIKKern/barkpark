@@ -155,6 +155,42 @@ defmodule BarkparkWeb.UserPrefControllerTest do
       resp_a = bearer(raw_a) |> get(prefs_path(ws, project, "k")) |> json_response(200)
       assert resp_a["value"] == %{"owner" => "a"}
     end
+
+    # task-9ef21c251c14488e: DELETE removes only the caller's own key.
+    test "one user's DELETE leaves another user's same-named key intact", %{
+      ws: ws,
+      project: project
+    } do
+      {raw_a, _} = personal_token!(ws)
+      {raw_b, _} = personal_token!(ws)
+
+      for {raw, owner} <- [{raw_a, "a"}, {raw_b, "b"}] do
+        bearer(raw)
+        |> put(prefs_path(ws, project, "k"), Jason.encode!(%{value: %{"owner" => owner}}))
+        |> json_response(200)
+      end
+
+      bearer(raw_a) |> delete(prefs_path(ws, project, "k")) |> json_response(200)
+
+      assert (bearer(raw_a) |> get(prefs_path(ws, project, "k")) |> json_response(200))["value"] ==
+               nil
+
+      assert (bearer(raw_b) |> get(prefs_path(ws, project, "k")) |> json_response(200))["value"] ==
+               %{"owner" => "b"},
+             "user A's DELETE removed user B's pref"
+    end
+
+    test "DELETE of a key that was never set still succeeds (idempotent)", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _user} = personal_token!(ws)
+
+      for _ <- 1..2 do
+        assert bearer(raw) |> delete(prefs_path(ws, project, "never-set")) |> json_response(200) ==
+                 %{"ok" => true}
+      end
+    end
   end
 
   describe "an account session (no bearer)" do

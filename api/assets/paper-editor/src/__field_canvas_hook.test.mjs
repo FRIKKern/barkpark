@@ -22,7 +22,7 @@ function mount() {
   const wc = wrap.querySelector("bp-paper-canvas");
   const settled = [];
   wc.acknowledgeOps = (seq, saved) => settled.push(["ack", seq, saved]);
-  wc.discardInflightOps = (seq) => settled.push(["discard", seq]);
+  wc.discardInflightOps = (seq, refusal) => settled.push(refusal === undefined ? ["discard", seq] : ["discard", seq, refusal]);
   wc.applyServerBlocks = () => {};
   const pushes = [];
   const handlers = {};
@@ -102,6 +102,16 @@ test("a refusal is shown as not saved, and the batch is dropped so later edits s
   emit(OPS, 2);
   pushes[1].reply({ saved: true, request_id: pushes[1].payload.request_id, rev: "rev-1" });
   assert.equal(banner(), null, "the next save that lands clears it");
+});
+
+test("a refused reply's validation reason reaches discardInflightOps", () => {
+  const { pushes, settled, emit, banner } = mount();
+  emit(OPS, 1);
+  const reason = "paragraph/content/1/tone: must be one of positive, caution";
+  pushes[0].reply({ saved: false, request_id: pushes[0].payload.request_id, reason });
+  // The refusal object is built in the hook's realm (jsdom), so compare its JSON.
+  assert.equal(JSON.stringify(settled), JSON.stringify([["discard", 1, { reason }]]));
+  assert.equal(banner().dataset.fieldSaveState, "refused", "the generic notice still shows");
 });
 
 test("an answer to another request settles nothing", () => {

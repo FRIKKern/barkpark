@@ -13,6 +13,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   alias Barkpark.Content
   alias Barkpark.Content.Papers.ValueWriteback
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{Blocks, PaperCanvas, Shared}
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper, as: SharedPaper
 
@@ -993,7 +994,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   replaces scope keys the socket cannot supply — the flat paper reader has no
   `:current_workspace`, so it passes the paper's own workspace and project.
 
-  Returns `{:reply, %{results: [%{title, id, type}]}, socket}` — LiveView
+  Returns `{:reply, %{results: [%{title, id, type, type_label}]}, socket}` — LiveView
   forwards the map to the client's pushEvent callback, which resolves the
   Promise exposed on `el.wikilinkSource`.
   """
@@ -1008,10 +1009,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     dataset = socket.assigns.dataset
     opts = Keyword.merge(ScopeHelpers.scope_opts(socket), scope_overrides)
 
+    # The badge's word, in the viewer's language; `type` stays the id.
+    type_label = PaneBuilder.type_word("paper")
+
     results =
       Content.search_papers(q, dataset, opts)
       |> Enum.map(fn %{id: id, title: title} ->
-        %{title: title, id: to_string(id), type: "paper"}
+        %{title: title, id: to_string(id), type: "paper", type_label: type_label}
       end)
 
     {:reply, %{results: results}, socket}

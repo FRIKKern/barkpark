@@ -631,6 +631,24 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_scope_opts(_), do: []
 
+  # The rail's event list names a known event type in the reader's language
+  # (ruling 2026-10-10, option (a)): the stored `event_type` and the gitGraph's
+  # ASCII commit ids stay as written, and an unknown type reads raw. English
+  # reads the ids exactly as before (each id is its own msgid).
+  @doc false
+  def event_label("draft"), do: pgettext("paper event", "draft")
+  def event_label("revise"), do: pgettext("paper event", "revise")
+  def event_label("publish"), do: pgettext("paper event", "publish")
+  def event_label("published"), do: pgettext("paper event", "published")
+  def event_label("correction"), do: pgettext("paper event", "correction")
+  def event_label("search"), do: pgettext("paper event", "search")
+  def event_label("simplify-request"), do: pgettext("paper event", "simplify-request")
+  def event_label("simplify-accept"), do: pgettext("paper event", "simplify-accept")
+  def event_label("simplify-reject"), do: pgettext("paper event", "simplify-reject")
+  def event_label("goal-opened"), do: pgettext("paper event", "goal-opened")
+  def event_label("goal-snapshot"), do: pgettext("paper event", "goal-snapshot")
+  def event_label(type), do: type
+
   @doc false
   # Build a VALID linear Mermaid gitGraph from the rail's events. One `commit`
   # per event in inserted_at order (the context already sorts asc). Each commit
@@ -1925,7 +1943,9 @@ defmodule BarkparkWeb.BulldocsLive do
       <aside :if={@rail_events != []} id="goal-path-rail" class="bp-goal-rail">
         <h2 class="bp-goal-rail-title">{gettext("Goal path")}</h2>
         <div id="goal-path-graph" phx-hook="PaperMermaid">
-          <pre class="mermaid">{@rail_gitgraph}</pre>
+          <%!-- The graph scrolls sideways when wide; a keyboard user scrolls
+                it once it can take focus (axe scrollable-region-focusable). --%>
+          <pre class="mermaid" tabindex="0" role="group" aria-label={gettext("Goal path graph")}>{@rail_gitgraph}</pre>
         </div>
         <%!-- Clickable event list — doubles as the no-Mermaid fallback. A
               PLAIN click selects (highlight only, via "rail-select"). A
@@ -1944,7 +1964,7 @@ defmodule BarkparkWeb.BulldocsLive do
               phx-value-event-id={event.id}
             >
               <span class="bp-goal-rail-event-idx">{idx}</span>
-              <span class="bp-goal-rail-event-type">{event.event_type}</span>
+              <span class="bp-goal-rail-event-type">{event_label(event.event_type)}</span>
             </button>
           </li>
         </ol>
@@ -1970,7 +1990,9 @@ defmodule BarkparkWeb.BulldocsLive do
               click, so clicks inside the panel never bubble to a close. --%>
         <div class="bp-diff-backdrop" phx-click={close_diff()} aria-hidden="true"></div>
         <div
+          id="bp-diff-panel"
           class="bp-diff-panel"
+          phx-hook="ModalFocus"
           role="dialog"
           aria-modal="true"
           aria-labelledby="bp-diff-title"

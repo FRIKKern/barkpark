@@ -1558,7 +1558,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 the one pane every desk has and the only one whose contents are
                 not already a single type. Typing swaps THIS pane's body for the
                 hits and leaves every other pane untouched, so a drilled path
-                stays on screen behind the results. A hit is an ordinary link to
+                stays on screen behind the results. A hit is a real link to
                 `/…/studio/<type>/<id>`, so it is deep-linkable, middle-clickable,
                 and opens a type the desk does not list at its root through the
                 E3.5 dead-head alias. --%>
@@ -1592,34 +1592,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             class="pane-body"
             data-test-id="desk-search-results"
           >
-            <%!-- The two notices below announce themselves; a list of hits did
-                  not, so a screen reader heard nothing after typing. One region,
-                  present for the whole search, so its text change is announced
-                  (task-0ad7fed4370a5978). --%>
-            <div class="sr-only" role="status" data-test-id="desk-search-count"><%=
-              if String.length(String.trim(@desk_search)) >= 2 and @desk_search_hits != [],
-                do: ngettext("1 result", "%{count} results", length(@desk_search_hits))
-            %></div>
+            <%!-- The search's one live region (task-0ad7fed4370a5978,
+                  task-b78dddf5135d8bbf). Every state's message lands here, so
+                  "no match" after hits is a text change in place, which is read;
+                  it used to be a new role=status node arriving already filled,
+                  which often is not. The visible notices below are not live
+                  regions. It lives in the results block, not the search box,
+                  so a settled desk ships no second empty announcer beside
+                  #bp-press-answer (press_answer_region_guard_test). The id keeps
+                  the DOM patch updating this node in place. --%>
+            <div
+              id="desk-search-status"
+              class="sr-only"
+              role="status"
+              data-test-id="desk-search-count"
+            ><%= desk_search_status(@desk_search, @desk_search_hits) %></div>
             <%= if String.length(String.trim(@desk_search)) < 2 do %>
-              <div class="bp-pane-notice" role="status" data-test-id="desk-search-too-short">
+              <div class="bp-pane-notice" data-test-id="desk-search-too-short">
                 <%= gettext("Type at least 2 characters") %>
               </div>
             <% else %>
               <%= if @desk_search_hits == [] do %>
-                <div class="bp-pane-notice" role="status" data-test-id="desk-search-empty">
+                <div class="bp-pane-notice" data-test-id="desk-search-empty">
                   <%= gettext("No documents match “%{query}”", query: String.trim(@desk_search)) %>
                 </div>
               <% else %>
-                <a
+                <%!-- A live navigation, not a page load: `navigate` keeps the
+                      real href (middle-click, new tab), and `focus: :doc`
+                      lands focus on the opened document's header, where a
+                      desk row open puts it (task-4e10550394f87112). --%>
+                <.link
                   :for={hit <- @desk_search_hits}
                   class="pane-doc-item bp-desk-search-hit"
                   data-test-id="desk-search-hit"
                   data-hit-type={hit.type}
-                  href={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset)}
+                  navigate={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset, focus: :doc)}
                 >
                   <span class="pane-doc-title"><%= hit.title %></span>
                   <span class="pane-doc-sub"><%= hit.type_title %></span>
-                </a>
+                </.link>
               <% end %>
             <% end %>
           </div>
@@ -2566,4 +2577,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   end
 
   defp blank_body?(_not_a_string), do: true
+
+  # What the desk search's status region says for the current query: nothing
+  # before a search, then the same message the pane shows (task-b78dddf5135d8bbf).
+  defp desk_search_status(query, hits) do
+    query = String.trim(query || "")
+
+    cond do
+      query == "" -> ""
+      String.length(query) < 2 -> gettext("Type at least 2 characters")
+      hits == [] -> gettext("No documents match “%{query}”", query: query)
+      true -> ngettext("1 result", "%{count} results", length(hits))
+    end
+  end
 end

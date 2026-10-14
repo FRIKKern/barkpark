@@ -84,4 +84,39 @@ defmodule BarkparkWeb.LiveAuthLocaleTest do
       assert flash["error"] == "Admin access required"
     end
   end
+
+  # task-d8e3d76ad251bf73: a FLAT admin route has no workspace in the URL. The
+  # flash used to take Default's locale (English); it now takes the caller's
+  # own workspace — the one `ScopeResolver` lands them in, which is where the
+  # denial redirect sends them.
+  describe ":admin denial on a flat route (/studio/styleguide)" do
+    test "a plain member of an nb-NO workspace sees the denial flash in Norwegian", %{
+      conn: conn,
+      ws_nb: ws
+    } do
+      conn = member_conn!(conn, ws)
+
+      assert {:error, {:redirect, %{flash: flash}}} = live(conn, "/studio/styleguide")
+      assert flash["error"] == "Administratortilgang kreves"
+    end
+
+    test "a plain member of an en workspace keeps the English flash", %{conn: conn, ws_en: ws} do
+      conn = member_conn!(conn, ws)
+
+      assert {:error, {:redirect, %{flash: flash}}} = live(conn, "/studio/styleguide")
+      assert flash["error"] == "Admin access required"
+    end
+
+    test "a member of nb-NO AND of Default is still answered in Norwegian (Default is demoted)",
+         %{conn: conn, ws_nb: ws} do
+      {default_ws, _} = ensure_default_scope!()
+      conn = member_conn!(conn, ws)
+      %{"user_session" => raw} = Plug.Conn.get_session(conn)
+      {user, _} = Accounts.verify_user_session(raw)
+      {:ok, _} = TenancyAuth.create_membership(default_ws.id, user.id, "member", "user")
+
+      assert {:error, {:redirect, %{flash: flash}}} = live(conn, "/studio/styleguide")
+      assert flash["error"] == "Administratortilgang kreves"
+    end
+  end
 end

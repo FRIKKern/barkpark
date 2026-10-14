@@ -155,4 +155,32 @@ defmodule BarkparkWeb.Studio.StructurePaneLocaleTest do
     assert labels["forfatter"] == "Forfatter"
     assert labels["paper"] == "artikkel"
   end
+
+  # task-f1b5f9e279951791: the map was built from the listed catalog only, which
+  # leaves out a plugin's SHARED schema row outside the Default workspace, so
+  # its pickers read the raw id ("paper", "sheet"). This workspace registers no
+  # sheet or task schema of its own; their words are on the shell anyway.
+  test "the shell's type words include every plugin type, registered here or not", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
+
+    [json] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("[data-type-labels]")
+      |> LazyHTML.attribute("data-type-labels")
+
+    labels = Jason.decode!(json)
+
+    for type <- BarkparkWeb.Studio.PaneBuilder.plugin_type_word_types() do
+      assert Map.has_key?(labels, type), "no word for plugin type #{type}: #{inspect(labels)}"
+    end
+
+    assert labels["sheet"] == "regneark"
+    assert labels["task"] == "oppgave"
+    assert labels["forfatter"] == "Forfatter", "an authored title still wins"
+  end
 end

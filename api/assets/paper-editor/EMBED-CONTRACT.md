@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.1.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.7.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,10 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.1.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.7.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
-unchanged from 1.0.0.
+unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
+`bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`.
 
 ## The element
 
@@ -83,10 +85,11 @@ instance. Barkdown and Studio mount it.
 | Channel | Shape |
 |---|---|
 | `editable` attribute | default editable; only the literal string `"false"` mounts read-only. Observed: a later change calls `setEditable`. A run that failed to mount stays read-only whatever it says |
+| `format-bubble` attribute | `"off"` hides the floating format bubble, for a host that draws its own toolbar (Toolbar commands). Observed: setting or clearing it after mount drops or brings back the bubble. With it off, Mod+K and the link card's Edit fire `bp-canvas-link-request` instead |
 | `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
 
-All six properties (`blocks`, `acknowledgedSaves` and the four callbacks) may be
+All eight properties (`blocks`, `acknowledgedSaves` and the six callbacks) may be
 set before the element upgrades; `connectedCallback` reclaims them through the setters.
 
 ### Host callbacks
@@ -100,13 +103,35 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 | `tagSource` | `(query) => [name, ...]` (strings) | the `#` menu never opens |
 | `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href? } \| null` | the hover card shows the address only |
 | `mediaUploader` | `(file) => url \| { src?, url?, alt? }` | a pasted or dropped image shows `no media uploader is connected` |
+| `mediaPicker` | `({ kind: "insert" \| "replace", current: { src, alt } \| null }) => { src, alt?, width? } \| null` | an Image insert is the empty image block, and images offer no Select |
+| `editBlockObject` | `({ type, title, inline, fields, value, error }) => value \| null` | declared objects are edited in the canvas's own popover |
 
 The menus drop a result that arrives after a newer query or after close. A
 `linkPreviewSource` that throws or rejects is ignored. For a `link`, `kind`/`href`
 are set; for a `wikilink`, `kind`/`target`/`docId`/`alias` are. A returned `href`
 becomes the address `bp-canvas-open-link` reports. `mediaUploader` gets one
 `File` per image (`image/*` only); a result with no `src`/`url` (or a throw) marks
-the image with the error message instead.
+the image with the error message instead. `mediaPicker` is the host's own image
+dialog (upload or library): an Image insert (slash menu, palette, `insertBlock`)
+opens it for the new block, and each image's Select opens it for that image
+(the canvas carries `data-media-picker` while one is set, which shows Select). Its
+answer becomes the image's `src`, and `alt` / `width` when given; an insert and its
+pick are one undo step. The `src` goes through the reader's URL allowlist (`safeUrl`:
+http(s), mailto, tel, relative, `#`); one it refuses (`javascript:`, `data:`,
+protocol-relative), a blank `src`, `null` or a throw leaves the image as it was.
+
+`editBlockObject` is the host's own editor for an object the field declares (a
+block under `blocks.of`, an inline object under `blocks.inline`): set, every insert
+and edit of one asks it instead of opening the popover — the slash and palette
+pick, Enter or a double-click on a block or chip, and a server refusal of a save.
+It gets the kind (`type`, `title`, `inline`, its declared `fields` as declared) and
+the current `value` (`{ type }` for a new one; a block's `id` and undeclared keys
+included), plus `error` (`{ field, message }`, or `null`) when asked again. Only the
+declared fields are taken from the answer (`null`, `undefined` or `""` removes
+one); `type`, `id` and undeclared keys stay as stored. A required field left
+empty asks again with `{ field, message: "Required" }`, its `value` what the host
+answered. `null` or a throw inserts
+or changes nothing. The canvas still owns where the object lands and the undo step.
 
 ### Outbound (canvas → host)
 
@@ -124,6 +149,8 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-master-insert` | a Masters pick from the slash menu | `{ master_id, after_id, mode?: "linked" }` |
 | `bp-server-insert` | a `terminal`, `stage`, `image` or `equation` pick, only when the editor or an ancestor carries `data-server-insert` (the host inserts it); without it they insert in the canvas | `{ type, after_id }` |
 | `bp-canvas-selection` | the local selection changed, at most once per animation frame | `{ anchor: Point, head: Point }`, or `null` when blurred or none (see Shared carets) |
+| `bp-selection-change` | the toolbar state changed, at most once per animation frame | `state()` (see Toolbar commands) |
+| `bp-canvas-link-request` | with `format-bubble="off"`: Mod+K on a selection, or Edit on the link card. Cancelable; the host opens its own link input and sets the link with `toggleMark("link", { href })` | `{ href }`, the selection's current link or `null` |
 
 `ops` is a non-empty array of: `patch-block { id, patch }`, `replace-block { id,
 block }`, `insert-after { afterId, block }`, `append-block { block }`,
@@ -191,6 +218,45 @@ mount `findSet`/`findState` return `{ query: "", count: 0, index: -1 }` and
 | `findClear()` | nothing |
 | `replaceCurrent(text)` | `state` after replacing the active match (read-only: unchanged `state`) |
 | `replaceAll(text)` | `{ replaced, ...state }`, one transaction (read-only: `replaced: 0`) |
+
+### Toolbar commands
+
+For a host that draws its own toolbar (a field's chrome). Each command acts on
+the current selection (the one on screen: `run`, `can` and `state` first read a DOM
+selection change the browser has not yet reported, so a press right after
+Shift+Arrow covers the whole selection) and returns `true` when it applied; unmounted or read-only
+it returns `false` and does nothing. Each runs the transaction the canvas's own
+surfaces run (the format bubble, the block menu's Turn into, the palette's
+Insert), so a press is one undo step and the same ops on the wire. Commands
+less than 500 ms apart group into one undo step, as typing does. Such a host usually sets
+`format-bubble="off"` (Inbound) and answers `bp-canvas-link-request` with its own link input.
+
+| Method | Effect |
+|---|---|
+| `toggleMark(mark, { href }?)` | `mark`: `strong`, `em`, `code`, `underline`, `strike`, `highlight`, `link`, `wikilink`. `wikilink` takes `{ docId, target? }`: a link to that document over the selection (`docId` must be a document id — letters, digits, `.`, `_`, `-`, `:` — or the command is `false`; the server refuses anything else in a field's write path) (`target` defaults to the id; the canvas's own picks put the document's title there), and without a `docId` it clears the document link in place. A field admits it when it declares `link`'s sibling `internalLink` (Sanity's link to a document), which portable-doc stores as this `wikilink`. Resolution reads only the rendering document's dataset and workspace, so a `docId` from elsewhere renders as an unresolved link. `link` with an `href` sets the link over the selection's link range; without one it clears the link there. Only the reader's allowlist links (`http`, `https`, `mailto`, `tel`, a relative or in-document address, `#`): anything else (`javascript:`, `data:`, a protocol-relative `//`) returns `false`, `can()` is `false`, and the format bubble's link row refuses it the same way |
+| `setBlockStyle(style)` | `normal`, `h1`–`h6`, `blockquote`. A quote keeps the block's id and text; in a field canvas it is the quote kind the field admits (its pullquote when `blockquote` maps there), as `> ` makes |
+| `toggleList(kind)` | `bullet` or `number`. Off a list: makes one. In a list of the other kind: converts it, keeping the list's id. In a list of that kind: lifts the item out |
+| `insertBlock(type, { level }?)` | any type the canvas's slash menu offers here (narrowed to the field's vocabulary). Inserts after the caret's block, an empty paragraph is replaced; a declared object block opens its fields first, a type the host builds on the server emits `bp-server-insert` |
+| `insertInline(type)` | a declared inline object (the field's `blocks.inline`), at the caret, as the slash pick does: its field editor opens first (the popover, or the host's `editBlockObject`) and its answer puts the object in; a cancel inserts nothing. `true` when the editor opened. Only inside text the field writes in (not a code block) |
+| `run(command, args?)` | the same, by name: `toggleMark` `{ mark, href? }`, `setBlockStyle` `{ style }`, `toggleList` `{ kind }`, `insertBlock` `{ type, attrs? }`, `insertInline` `{ type }`. An unknown command is `false` |
+| `can(command, args?)` | whether `run(command, args)` would apply now, without applying it. `false` for what the field's vocabulary forbids (its veto would drop the edit) |
+| `state()` | the active state, below |
+
+`state()` is `{ marks, blockStyle, list, link, wikilink, selection }`:
+
+- `marks`: the active marks, by the names above.
+- `blockStyle`: the caret's textblock (`normal`, `h1`–`h6`, `blockquote`), or `null` in another block.
+- `list`: `bullet` or `number` when the caret is in such a list, else `null`.
+- `link`: `{ href }` when the selection is in a link, else `null`.
+- `wikilink`: `{ target, docId }` when the selection is in a document link, else `null`.
+- `selection`: `{ empty, inBlockType }`; `inBlockType` is the portable-doc type of the top-level block, or `null`.
+
+Before mount it is `{ marks: [], blockStyle: null, list: null, link: null,
+wikilink: null, selection: { empty: true, inBlockType: null } }`.
+
+`bp-selection-change` (bubbles, composed) fires when that state changes (a
+selection move, a stored mark, a block turned into a heading), at most once per
+animation frame. Its `detail` equals `state()`.
 
 ### Shared carets
 

@@ -447,11 +447,35 @@ export function buildCommandRegistry(editor, opts) {
       // level-prose guard (degrades safely inside a callout body / list item).
       // Terminal and Stage are built by the SERVER (CANVAS_SERVER_INSERT_TYPES): the
       // canvas passes `opts.onServerInsert`, which hands the pick to the host.
-      run: opts && typeof opts.onServerInsert === "function" &&
-        (typeof opts.serverBuilds === "function" ? opts.serverBuilds(type) : CANVAS_SERVER_INSERT_TYPES.has(type))
-        ? () => opts.onServerInsert(type)
-        : (ed) => insertSlashTypeAtSelection(ed, type),
+      // A type the field DECLARES as its own object block (a declared `callout`)
+      // inserts the declared block through `opts.onObjectInsert`, never the
+      // built-in node of that name (task-441e0c1cc08acc5e).
+      run: opts && opts.declaredObjects && opts.declaredObjects.has(type) && typeof opts.onObjectInsert === "function"
+        ? () => opts.onObjectInsert(type)
+        : opts && typeof opts.onServerInsert === "function" &&
+          (typeof opts.serverBuilds === "function" ? opts.serverBuilds(type) : CANVAS_SERVER_INSERT_TYPES.has(type))
+          ? () => opts.onServerInsert(type)
+          : (ed) => {
+              const done = insertSlashTypeAtSelection(ed, type);
+              if (done && type === "image" && opts && typeof opts.onImageInserted === "function") opts.onImageInserted();
+              return done;
+            },
     });
+  }
+
+  // INLINE — one per declared inline object kind (a field's blocks.inline,
+  // task-85fee859cf3bfef6), inserted at the caret anywhere in prose, so a kind
+  // is keyboard-insertable mid-sentence (the slash menu opens at a line start).
+  if (opts && typeof opts.onInlineInsert === "function" && Array.isArray(opts.inlineObjects)) {
+    for (const o of opts.inlineObjects) {
+      cmds.push({
+        id: `inline-${o.name}`,
+        label: tr("Insert %{block}", { block: o.title }),
+        group: "Inline",
+        hint: "◦",
+        run: () => opts.onInlineInsert(o.name),
+      });
+    }
   }
 
   // STARTERS — compound inserts: ONE pre-composed subtree per CANVAS_COMPOUND_INSERTS

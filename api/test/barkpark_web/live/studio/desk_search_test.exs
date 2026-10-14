@@ -108,8 +108,44 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     refute html =~ "Songs from the South"
 
     prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
-    assert html =~ ~s(href="#{prefix}/publication/pub-nord")
-    assert html =~ ~s(href="#{prefix}/author/aut-nord")
+    assert html =~ ~s(href="#{prefix}/publication/pub-nord?focus=doc")
+    assert html =~ ~s(href="#{prefix}/author/aut-nord?focus=doc")
+  end
+
+  # task-4e10550394f87112: a hit was a plain href, so opening it reloaded the
+  # page and keyboard focus started at the top. It is now a live navigation
+  # that asks for the opened document's header, the target a row open uses.
+  test "a hit opens its document by live navigation with the header focused", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {view, _} = desk(conn, ws, proj)
+    type_in(view, "crime")
+    prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
+
+    assert {:error, {:live_redirect, %{to: to}}} =
+             view |> element(~s([data-test-id="desk-search-hit"])) |> render_click()
+
+    assert to == prefix <> "/publication/pub-nord?focus=doc"
+
+    {:ok, doc, _html} = live(conn, to)
+    assert_push_event(doc, "bp:focus-doc-header", %{})
+    assert_patch(doc, prefix <> "/publication/pub-nord")
+    assert has_element?(doc, ~s(.editor-header[tabindex="-1"]))
+  end
+
+  test "a document opened without the hit's request does not take focus", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, doc, _html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/publication/pub-nord")
+
+    assert has_element?(doc, ".editor-header")
+    refute_push_event(doc, "bp:focus-doc-header", %{})
+    refute has_element?(doc, ".editor-header[phx-mounted]")
   end
 
   # task-6f820118621e0f9d: the hit's type label is the schema TITLE the desk
@@ -186,7 +222,7 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
 
     assert html =~ "Zulukladd draft only"
     prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
-    assert html =~ ~s(href="#{prefix}/publication/pub-fresh")
+    assert html =~ ~s(href="#{prefix}/publication/pub-fresh?focus=doc")
     refute html =~ "drafts.pub-fresh"
   end
 
@@ -211,25 +247,42 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     refute html =~ ~s(data-test-id="desk-search-hit")
   end
 
-  # task-0ad7fed4370a5978: the hits were silent to a screen reader. One status
-  # region stays in place for the whole search, so its text change is read.
-  test "the hit count is announced in a status region that lasts the whole search", %{
+  # task-0ad7fed4370a5978: the hits were silent to a screen reader.
+  # task-b78dddf5135d8bbf: so was "no match" — after hits, it arrived as a NEW
+  # status element already holding its text, which a screen reader often skips.
+  # The one region now carries every state's message, so each change is a text
+  # change in place; the visible notices are not live regions, so nothing is
+  # read twice. A settled desk ships no search region at all: the page's one
+  # load-armed announcer is #bp-press-answer (press_answer_region_guard_test).
+  test "one status region carries every search state, and the settled desk has none", %{
     conn: conn,
     ws: ws,
     proj: proj
   } do
-    {view, _} = desk(conn, ws, proj)
-    count = ~s([data-test-id="desk-search-count"][role="status"])
+    {view, html} = desk(conn, ws, proj)
+    count = ~s(#desk-search-status[data-test-id="desk-search-count"][role="status"])
 
-    type_in(view, "N")
-    assert has_element?(view, count), "the region must exist before hits arrive"
-    assert render(view |> element(count)) =~ ~r/>\s*<\/div>/
+    assert status_regions(html) == []
+
+    html = type_in(view, "N")
+    assert view |> element(count) |> render() =~ "Type at least 2 characters"
+    assert status_regions(html) == ["desk-search-count"]
 
     type_in(view, "nor")
     assert view |> element(count) |> render() =~ "2 results"
 
-    type_in(view, "zzzzz")
-    refute view |> element(count) |> render() =~ "result"
+    html = type_in(view, "zzzzz")
+    assert view |> element(count) |> render() =~ "No documents match “zzzzz”"
+    assert status_regions(html) == ["desk-search-count"]
+  end
+
+  defp status_regions(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query(
+      ~s([data-test-id="desk-search"] [role="status"], [data-test-id="desk-search-results"] [role="status"])
+    )
+    |> LazyHTML.attribute("data-test-id")
   end
 
   test "clearing the box brings the desk's own items back", %{conn: conn, ws: ws, proj: proj} do

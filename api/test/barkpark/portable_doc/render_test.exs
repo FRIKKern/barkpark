@@ -953,9 +953,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Bold "Figure N." run-in, remainder plain.
       assert html =~ "<b>Figure 1.</b>"
       assert html =~ "The control flow."
-      # Article figure chrome: parchment card.
-      assert html =~ "<figure"
-      assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
+      # Article figure chrome: the parchment card's ground and rule colour are
+      # the `bp-diagram` paper-surface rule's (task-2c5d3da1b7f7db25).
+      assert html =~ ~s(<figure class="bp-diagram")
+      refute html =~ "var(--paper-bg-deep"
     end
 
     test "email/default mode degrades — no pre.mermaid, source as a code block" do
@@ -1189,9 +1190,10 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@code, %{style: :article})
 
       assert html =~ "<pre"
-      # A --paper-bg-deep slab, horizontal scroll — emitted through
-      # `var(--paper-*, hex)` for dark-mode theming.
-      assert html =~ "background:var(--paper-bg-deep, #eaf1ee)"
+      # A --paper-bg-deep slab, horizontal scroll. The slab's colours are the
+      # `bp-codeblock` paper-surface rule's (task-2c5d3da1b7f7db25), not inline.
+      assert html =~ ~s(<pre class="bp-codeblock")
+      refute html =~ "var(--paper-bg-deep"
       # task-ddb1e0ab09a62466: NO left bar. The 3px terracotta reading-accent bar
       # (S8) marked a code block while the reader body was painted --paper-bg-deep
       # and the slab was invisible; the body now stands on --paper-bg, the slab is
@@ -1262,9 +1264,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
     # future "simplification" of the blank check cannot quietly move a byte.
     test "article: a nonempty code block is byte-identical to the pre-guard emitter" do
       assert Render.render_block(@code, %{style: :article}) ==
-               ~s|<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;| <>
+               ~s|<pre class="bp-codeblock" style="border:0;| <>
                  ~s|border-radius:var(--bp-codeblock-radius, 0);| <>
-                 ~s|color:var(--paper-ink, #15211d);| <>
                  ~s|padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
                  ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);| <>
                  ~s|font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);| <>
@@ -1648,7 +1649,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_diagram
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto"><pre class="mermaid">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption class="bp-figcaption">The three-stage pipeline</figcaption></figure>|
+               ~s|<figure class="bp-diagram" style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;border:1px solid;border-radius:4px;overflow-x:auto"><pre class="mermaid">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption class="bp-figcaption">The three-stage pipeline</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><pre style="background:#f3f4f6;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:0.9em;overflow:auto;white-space:pre-wrap">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">The three-stage pipeline</div></figure>|
@@ -1658,7 +1659,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_asciicast
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid;border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><a href="https://example.com/casts/demo.cast">Terminal recording</a><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">A terminal walkthrough</div></figure>|
@@ -1690,7 +1691,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_filetree
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note" style="color: var(--ok);"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note" style="color: var(--paper-ink-soft);"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note" style="color: var(--danger);"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
+               ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note bp-filetree-note--ok"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note bp-filetree-note--soft"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note bp-filetree-note--danger"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<div class="bp-filetree text-xs" style="font-family: var(--font-mono); margin: 4px var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); box-sizing: border-box; background: var(--muted-surface); border-radius: 6px; padding: 6px 8px; overflow-x: auto; line-height: 1.5;"><div style="white-space: pre;">api/lib/barkpark/portable_doc/render/</div><div style="white-space: pre;">├── components.ex<span class="bp-filetree-note" style="color: var(--ok);"> ● diff_html/1 + filetree_html/1</span></div><div style="white-space: pre;">├── compose.ex<span class="bp-filetree-note" style="color: var(--paper-ink-soft);"> ○ grew the diff + filetree clauses</span></div><div style="white-space: pre;">└── starter_stub.ex<span class="bp-filetree-note" style="color: var(--danger);"> ✕ removed</span></div><div class="bp-filetree-legend text-dim" style="font-size: 12px; margin-top: 4px;">● created · ○ injected · ✕ removed</div></div>|
@@ -1854,7 +1855,9 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "article mode renders the § glyph straddling a hairline rule" do
       html = Render.render_block(@divider, %{style: :article})
       assert html =~ "§"
-      assert html =~ "border-top:1px solid var(--paper-rule, #e2e6e5)"
+      # The rule's colour is the paper-surface rule's (task-2c5d3da1b7f7db25).
+      assert html =~ ~s(border-top:1px solid")
+      refute html =~ "var(--paper-"
       refute html =~ "<hr"
     end
 

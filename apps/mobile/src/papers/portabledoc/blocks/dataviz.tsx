@@ -39,6 +39,7 @@ import { ScrollView, Text, View } from 'react-native'
 
 import type { Theme } from '../../../ui/theme'
 import { roles, scale } from '../../../ui/typography'
+import { chromeWord } from '../chrome'
 import { asList, isMap, num, str } from '../model'
 import { MONO, bodyText, type BlockCtx, type Render } from '../register'
 
@@ -345,10 +346,11 @@ function figureRefs(
   return out
 }
 
-/** The «kilde» stamp: a dim mono "Kilde: …" / "Kilder: a · b" line. */
+/** The «kilde» stamp: a dim mono "Source: …" / "Sources: a · b" line, in the
+ * workspace's language (nb: Kilde / Kilder — task-5ba3360aecba7a99). */
 function kildeLine(refs: SourceRef[], ctx: BlockCtx): ReactNode {
   if (refs.length === 0) return null
-  const word = refs.length > 1 ? 'Kilder' : 'Kilde'
+  const word = chromeWord(ctx.locale, refs.length > 1 ? 'Sources' : 'Source')
   return (
     <Text style={{ ...scale.micro, fontFamily: MONO, color: ctx.theme.textMuted, marginTop: 8 }}>
       {word}: {refs.map((r) => r.label).join(' · ')}

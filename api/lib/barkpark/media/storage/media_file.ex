@@ -23,6 +23,11 @@ defmodule Barkpark.Media.Storage.MediaFile do
     # Hex SHA-1 of the stored bytes (task-b6e57c37f6928344). NULL on rows born
     # before the column until `mix barkpark.media.backfill_sha1` hashes them.
     field :sha1, :string
+    # The id this asset had in the system it was imported from, such as a
+    # Sanity asset id (`image-<sha1>-<w>x<h>-<ext>`). Unique per dataset.
+    # Sanity-shaped image and file URLs resolve by it first
+    # (`Barkpark.Media.SanityAsset`, task-0bc9247eca1bd741).
+    field :source_id, :string
     field :dataset, :string, default: "production"
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
@@ -93,9 +98,11 @@ defmodule Barkpark.Media.Storage.MediaFile do
       :workspace_id,
       :project_id,
       :dataset_id,
-      :sha1
+      :sha1,
+      :source_id
     ])
     |> validate_required([:filename, :original_name, :path])
+    |> validate_source_id()
     |> neutralize_dangerous_mime()
     |> put_object_key()
     # W2 uniqueness flip: blob identity is now (path, dataset_id). The `dataset`
@@ -117,6 +124,35 @@ defmodule Barkpark.Media.Storage.MediaFile do
     |> foreign_key_constraint(:workspace_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:dataset_id)
+  end
+
+  @source_id_format ~r/\A[A-Za-z0-9][A-Za-z0-9._:-]{0,199}\z/
+
+  @doc "True when `value` is a well-formed `source_id`: 1 to 200 of `[A-Za-z0-9._:-]`."
+  @spec valid_source_id?(term()) :: boolean()
+  def valid_source_id?(value) when is_binary(value), do: Regex.match?(@source_id_format, value)
+  def valid_source_id?(_value), do: false
+
+  @doc """
+  Set or clear `source_id` on an existing row. A taken id fails with a
+  changeset error on `:source_id` (the unique index on
+  `(dataset_id, source_id)`).
+  """
+  def source_id_changeset(media_file, source_id) do
+    media_file
+    |> cast(%{source_id: source_id}, [:source_id])
+    |> validate_source_id()
+  end
+
+  defp validate_source_id(changeset) do
+    changeset
+    |> validate_format(:source_id, @source_id_format,
+      message: "must be 1 to 200 characters of letters, digits, '.', '_', ':' or '-'"
+    )
+    |> unique_constraint(:source_id,
+      name: :media_files_dataset_id_source_id_index,
+      message: "is already set on another file in this dataset"
+    )
   end
 
   # THE OBJECT ADDRESS IS DECIDED ONCE, AT INSERT (task-8eb6542ece62aff1).
