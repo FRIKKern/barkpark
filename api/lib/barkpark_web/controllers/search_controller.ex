@@ -44,60 +44,68 @@ defmodule BarkparkWeb.SearchController do
         invalid_body_chars(conn, params["bodyChars"])
 
       {query, {:ok, body_chars}} ->
-        t0 = System.monotonic_time(:microsecond)
-
-        opts =
-          [
-            type: bin(params["type"]),
-            types: parse_types(params["types"]),
-            # The loopback fast-path takes the param at face value (no token to
-            # clamp against) but through the SAME lenient parser every other
-            # non-declared reader uses — this used to be a byte-identical
-            # private copy of it. Not validated: `search_local/2` is the
-            # on-box route, absent from the manifest, so it has no declared
-            # enum to hold a caller to.
-            perspective: AnonPerspective.parse(params["perspective"]),
-            limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
-            # ONE offset parse, shared with the analytics recorder so the
-            # recorded offset is by construction the offset SERVED.
-            offset: SearchIntelligence.parse_offset(params),
-            engine: params["engine"] || "postgres",
-            # Retrieval column projection (search-latency slice a). The SAME
-            # `fields=` allowlist the response is projected to below — threaded
-            # to the retriever so heavy content blobs are dropped at the DB, not
-            # shipped-then-discarded. Envelope.project stays the authoritative
-            # response filter; this only spares the wire+decode.
-            fields: bin(params["fields"])
-          ]
-          |> maybe_put_opt(:workspace_id, params["workspace_id"])
-          |> maybe_put_opt(:project_id, params["project_id"])
-
-        caller_context = CallerContext.from_conn(conn)
-
-        # Row/ownership ACL (Phase 4, core-auth): the retriever drops another
-        # user's owner_scoped rows. Loopback callers are trusted for tenancy
-        # scope but still carry their principal here, so an owner_scoped read
-        # stays isolated. nil/anonymous → only unowned rows, never an owned one.
-        opts = Keyword.put(opts, :caller_context, caller_context)
-
-        {docs, count, meta} = Content.search_documents(query, dataset, opts)
-        ms = div(System.monotonic_time(:microsecond) - t0, 1000)
-
-        # ONE shared envelope builder (AXI R3) — same function REST/loopback/WS
-        # all consume. `?view=brief` returns brief hit cards; default stays full.
-        # `:offset` echoes the page start so the envelope's `hasMore` is honest.
-        envelope =
-          HitEnvelope.build(docs, count, query, meta,
-            caller_context: caller_context,
-            schema_resolver: schema_resolver(conn, dataset),
-            fields: params["fields"],
-            view: params["view"],
-            body_chars: body_chars,
-            offset: opts[:offset]
-          )
-
-        json(conn, Map.put(envelope, :ms, ms))
+        case search_terms_opts(conn, dataset, params) do
+          {:ok, extra} -> do_search_local(conn, dataset, params, query, body_chars, extra)
+          {:error, conn} -> conn
+        end
     end
+  end
+
+  defp do_search_local(conn, dataset, params, query, body_chars, extra) do
+    t0 = System.monotonic_time(:microsecond)
+
+    opts =
+      [
+        type: bin(params["type"]),
+        types: parse_types(params["types"]),
+        # The loopback fast-path takes the param at face value (no token to
+        # clamp against) but through the SAME lenient parser every other
+        # non-declared reader uses — this used to be a byte-identical
+        # private copy of it. Not validated: `search_local/2` is the
+        # on-box route, absent from the manifest, so it has no declared
+        # enum to hold a caller to.
+        perspective: AnonPerspective.parse(params["perspective"]),
+        limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
+        # ONE offset parse, shared with the analytics recorder so the
+        # recorded offset is by construction the offset SERVED.
+        offset: SearchIntelligence.parse_offset(params),
+        engine: params["engine"] || "postgres",
+        # Retrieval column projection (search-latency slice a). The SAME
+        # `fields=` allowlist the response is projected to below — threaded
+        # to the retriever so heavy content blobs are dropped at the DB, not
+        # shipped-then-discarded. Envelope.project stays the authoritative
+        # response filter; this only spares the wire+decode.
+        fields: bin(params["fields"])
+      ]
+      |> maybe_put_opt(:workspace_id, params["workspace_id"])
+      |> maybe_put_opt(:project_id, params["project_id"])
+      |> Keyword.merge(extra)
+
+    caller_context = CallerContext.from_conn(conn)
+
+    # Row/ownership ACL (Phase 4, core-auth): the retriever drops another
+    # user's owner_scoped rows. Loopback callers are trusted for tenancy
+    # scope but still carry their principal here, so an owner_scoped read
+    # stays isolated. nil/anonymous → only unowned rows, never an owned one.
+    opts = Keyword.put(opts, :caller_context, caller_context)
+
+    {docs, count, meta} = Content.search_documents(query, dataset, opts)
+    ms = div(System.monotonic_time(:microsecond) - t0, 1000)
+
+    # ONE shared envelope builder (AXI R3) — same function REST/loopback/WS
+    # all consume. `?view=brief` returns brief hit cards; default stays full.
+    # `:offset` echoes the page start so the envelope's `hasMore` is honest.
+    envelope =
+      HitEnvelope.build(docs, count, query, meta,
+        caller_context: caller_context,
+        schema_resolver: schema_resolver(conn, dataset),
+        fields: params["fields"],
+        view: params["view"],
+        body_chars: body_chars,
+        offset: opts[:offset]
+      )
+
+    json(conn, Map.put(envelope, :ms, ms))
   end
 
   defp maybe_put_opt(opts, _, nil), do: opts
@@ -178,90 +186,242 @@ defmodule BarkparkWeb.SearchController do
         missing_q(conn)
 
       query ->
-        t0 = System.monotonic_time(:microsecond)
+        case search_terms_opts(conn, dataset, params) do
+          {:ok, extra} -> run_search(conn, dataset, params, body_chars, query, extra)
+          {:error, conn} -> conn
+        end
+    end
+  end
 
-        opts =
-          [
-            type: bin(params["type"]),
-            types: parse_types(params["types"]),
-            # Anonymous callers are pinned to :published — a tokenless reader
-            # passing ?perspective=drafts must NOT get drafts (same invariant
-            # QueryController enforces; this public path previously trusted the
-            # raw param and leaked unpublished content).
-            perspective: AnonPerspective.resolve(conn, params),
-            limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
-            # ONE offset parse, shared with the analytics recorder so the
-            # recorded offset is by construction the offset SERVED.
-            offset: SearchIntelligence.parse_offset(params),
-            engine: params["engine"] || "postgres",
-            # Retrieval column projection (search-latency slice a) — see
-            # search_local/2. Threads the response's `fields=` allowlist to the
-            # retriever so heavy content is dropped at the DB.
-            fields: bin(params["fields"]),
-            boost: elem(parse_boost(params["boost"]), 1)
-          ] ++ scope_opts(conn)
+  defp run_search(conn, dataset, params, body_chars, query, extra) do
+    t0 = System.monotonic_time(:microsecond)
 
-        {docs, count, meta} = Content.search_documents(query, dataset, opts)
-        ms = div(System.monotonic_time(:microsecond) - t0, 1000)
+    opts =
+      [
+        type: bin(params["type"]),
+        types: parse_types(params["types"]),
+        # Anonymous callers are pinned to :published — a tokenless reader
+        # passing ?perspective=drafts must NOT get drafts (same invariant
+        # QueryController enforces; this public path previously trusted the
+        # raw param and leaked unpublished content).
+        perspective: AnonPerspective.resolve(conn, params),
+        limit: parse_int(params["limit"], 50) |> min(200) |> max(1),
+        # ONE offset parse, shared with the analytics recorder so the
+        # recorded offset is by construction the offset SERVED.
+        offset: SearchIntelligence.parse_offset(params),
+        engine: params["engine"] || "postgres",
+        # Retrieval column projection (search-latency slice a) — see
+        # search_local/2. Threads the response's `fields=` allowlist to the
+        # retriever so heavy content is dropped at the DB.
+        fields: bin(params["fields"]),
+        boost: elem(parse_boost(params["boost"]), 1)
+      ] ++ extra ++ scope_opts(conn)
 
-        record_opts = [
-          actor_key: SearchIntel.actor_key(conn),
-          audience: SearchIntel.audience(conn),
-          parent_event_id: SearchIntel.parent_event_id(conn),
-          session_key: SearchIntel.session_key(conn),
-          source: SearchIntel.source(conn, "documents-api"),
-          record: SearchIntel.should_record?(conn),
-          tags: SearchIntel.tags(conn),
-          metadata: search_metadata(meta),
-          # Stamp the resolved tenant at ingest so the crystallizer can roll this
-          # event up on its OWN row instead of merging tenants that share a scope.
-          workspace_id: workspace_id(conn)
-        ]
+    {docs, count, meta} = Content.search_documents(query, dataset, opts)
+    ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
-        record_result =
-          SearchIntelligence.record(dataset, params, count, ms, record_opts)
+    record_opts = [
+      actor_key: SearchIntel.actor_key(conn),
+      audience: SearchIntel.audience(conn),
+      parent_event_id: SearchIntel.parent_event_id(conn),
+      session_key: SearchIntel.session_key(conn),
+      source: SearchIntel.source(conn, "documents-api"),
+      record: SearchIntel.should_record?(conn),
+      tags: SearchIntel.tags(conn),
+      metadata: search_metadata(meta),
+      # Stamp the resolved tenant at ingest so the crystallizer can roll this
+      # event up on its OWN row instead of merging tenants that share a scope.
+      workspace_id: workspace_id(conn)
+    ]
 
-        # `searchEventId: null` IS the honest wire answer for every no-write
-        # outcome here (pds-bl-w36-record6-conflation): the id's only use is
-        # interaction linking, and "nothing was recorded" needs no companion
-        # field — unlike the interaction receipt, no success claim is made. The
-        # CAUSE is no longer destroyed: `record/6` names it ({:skipped, reason})
-        # and telemetry carries it; a reader who wants it on the wire changes
-        # this case, not the recorder.
-        search_event_id =
-          case record_result do
-            {:ok, id} -> id
-            {:skipped, _reason} -> nil
-            {:rejected, _reason} -> nil
-          end
+    record_result =
+      SearchIntelligence.record(dataset, params, count, ms, record_opts)
 
+    # `searchEventId: null` IS the honest wire answer for every no-write
+    # outcome here (pds-bl-w36-record6-conflation): the id's only use is
+    # interaction linking, and "nothing was recorded" needs no companion
+    # field — unlike the interaction receipt, no success claim is made. The
+    # CAUSE is no longer destroyed: `record/6` names it ({:skipped, reason})
+    # and telemetry carries it; a reader who wants it on the wire changes
+    # this case, not the recorder.
+    search_event_id =
+      case record_result do
+        {:ok, id} -> id
+        {:skipped, _reason} -> nil
+        {:rejected, _reason} -> nil
+      end
+
+    caller_context = CallerContext.from_conn(conn)
+
+    # ONE shared envelope builder (AXI R3): documents/count/query/
+    # parsedQuery/highlights/recovery/correctedTo/facets/truncation/hasMore
+    # come from `HitEnvelope.build/5` — the same function the loopback route
+    # and the WS channel consume — with this route's extras (searchEventId,
+    # ms) put on top. `?view=brief` returns brief hit cards; default stays
+    # full. `:offset` echoes the page start so `hasMore` is honest.
+    envelope =
+      HitEnvelope.build(docs, count, query, meta,
+        caller_context: caller_context,
+        schema_resolver: schema_resolver(conn, dataset),
+        fields: params["fields"],
+        view: params["view"],
+        # Server-side bound on each hit's projected prose (search-blocks-
+        # bound). nil = unbounded, so every caller that never passes
+        # `?bodyChars=` is byte-identical to before.
+        body_chars: body_chars,
+        offset: opts[:offset]
+      )
+
+    json(
+      conn,
+      envelope
+      |> Map.put(:searchEventId, search_event_id)
+      |> Map.put(:ms, ms)
+    )
+  end
+
+  # ── Term rule, field filters and named facets ─────────────────────────────
+  #
+  #   * `match=all` (default) | `any` — must a document hold every word of the
+  #     query, or one (task-3623955d22974d71). Anything else is a 400.
+  #   * `suggest=true` — the type-ahead fast path (task-7e7891dbf1f488ee).
+  #   * `filter[...]` — the query API's field filters, read and refused by
+  #     `QueryController.search_filter_map/3`, applied inside the search so
+  #     they run before the limit, the count and the facets
+  #     (task-c7395e0d27e1121b).
+  #   * `facet=a,b` (or repeated `facet[]=`) — value counts of up to
+  #     #{@max_facet_fields} top-level content fields over the filtered match,
+  #     in `facets.fields`. A field this caller may not read is a 403
+  #     `forbidden_field`, as it is for a filter.
+  #
+  # `filter` and `facet` need `type`: a field name means something on one type.
+  @max_facet_fields 10
+
+  defp search_terms_opts(conn, dataset, params) do
+    with {:ok, match} <- parse_match(conn, params["match"]),
+         {:ok, suggest} <- parse_suggest(conn, params["suggest"]),
+         {:ok, facet_fields} <- parse_facets(conn, params["facet"]),
+         {:ok, filter_map, facet_fields} <-
+           search_filters(conn, dataset, params, facet_fields) do
+      {:ok, [match: match, suggest: suggest, filter_map: filter_map, facet_fields: facet_fields]}
+    end
+  end
+
+  # `suggest=true` — the type-ahead fast path (task-7e7891dbf1f488ee): the
+  # same match and order of the best hits, without facets, recovery passes or
+  # a read of the stored text vector. `count` stays exact.
+  defp parse_suggest(_conn, nil), do: {:ok, false}
+  defp parse_suggest(_conn, v) when v in ["true", "1"], do: {:ok, true}
+  defp parse_suggest(_conn, v) when v in ["false", "0"], do: {:ok, false}
+
+  defp parse_suggest(conn, value) do
+    {:error,
+     ErrorResponse.emit_custom(
+       conn,
+       400,
+       "malformed",
+       "suggest must be true or false; got " <> inspect(value),
+       %{parameter: "suggest", received: value}
+     )}
+  end
+
+  defp parse_match(_conn, nil), do: {:ok, :all}
+  defp parse_match(_conn, "all"), do: {:ok, :all}
+  defp parse_match(_conn, "any"), do: {:ok, :any}
+
+  defp parse_match(conn, value) do
+    {:error,
+     ErrorResponse.emit_custom(
+       conn,
+       400,
+       "malformed",
+       "match must be \"all\" (every word, the default) or \"any\" (one word); got " <>
+         inspect(value),
+       %{parameter: "match", received: value}
+     )}
+  end
+
+  defp parse_facets(_conn, nil), do: {:ok, []}
+
+  defp parse_facets(conn, value) do
+    fields =
+      value
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        v when is_binary(v) -> String.split(v, ",")
+        _ -> [:invalid]
+      end)
+      |> Enum.map(fn
+        v when is_binary(v) -> String.trim(v)
+        v -> v
+      end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    if Enum.all?(fields, &(is_binary(&1) and Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, &1))) and
+         length(fields) <= @max_facet_fields do
+      {:ok, fields}
+    else
+      {:error,
+       ErrorResponse.emit_custom(
+         conn,
+         400,
+         "malformed",
+         "facet takes up to #{@max_facet_fields} top-level field names, comma separated " <>
+           "(facet=Format,Language); got " <> inspect(value),
+         %{parameter: "facet", received: inspect(value)}
+       )}
+    end
+  end
+
+  defp search_filters(conn, dataset, params, facet_fields) do
+    filter? = Map.has_key?(params, "filter") or malformed_filter_key?(params)
+    type = bin(params["type"])
+
+    cond do
+      not filter? and facet_fields == [] ->
+        {:ok, %{}, []}
+
+      is_nil(type) ->
+        {:error,
+         ErrorResponse.emit_custom(
+           conn,
+           400,
+           "malformed",
+           "filter and facet need type: a field name means something on one type",
+           %{parameter: "type", received: nil}
+         )}
+
+      true ->
+        schema = schema_resolver(conn, dataset).(type)
         caller_context = CallerContext.from_conn(conn)
 
-        # ONE shared envelope builder (AXI R3): documents/count/query/
-        # parsedQuery/highlights/recovery/correctedTo/facets/truncation/hasMore
-        # come from `HitEnvelope.build/5` — the same function the loopback route
-        # and the WS channel consume — with this route's extras (searchEventId,
-        # ms) put on top. `?view=brief` returns brief hit cards; default stays
-        # full. `:offset` echoes the page start so `hasMore` is honest.
-        envelope =
-          HitEnvelope.build(docs, count, query, meta,
-            caller_context: caller_context,
-            schema_resolver: schema_resolver(conn, dataset),
-            fields: params["fields"],
-            view: params["view"],
-            # Server-side bound on each hit's projected prose (search-blocks-
-            # bound). nil = unbounded, so every caller that never passes
-            # `?bodyChars=` is byte-identical to before.
-            body_chars: body_chars,
-            offset: opts[:offset]
-          )
+        with {:ok, filter_map} <- filter_map(conn, params, schema, filter?),
+             :ok <- readable_facets(conn, facet_fields, schema, caller_context) do
+          {:ok, filter_map, facet_fields}
+        end
+    end
+  end
 
-        json(
-          conn,
-          envelope
-          |> Map.put(:searchEventId, search_event_id)
-          |> Map.put(:ms, ms)
-        )
+  defp malformed_filter_key?(params),
+    do: Enum.any?(Map.keys(params), &(is_binary(&1) and String.match?(&1, ~r/^filter[\[\]]/)))
+
+  defp filter_map(_conn, _params, _schema, false), do: {:ok, %{}}
+
+  defp filter_map(conn, params, schema, true) do
+    case BarkparkWeb.QueryController.search_filter_map(conn, params, schema) do
+      {:ok, map} -> {:ok, map}
+      {:error, reason} -> {:error, error_json(conn, {:error, reason})}
+    end
+  end
+
+  defp readable_facets(conn, fields, schema, caller_context) do
+    case Enum.find(
+           fields,
+           &(not Barkpark.Content.Envelope.field_readable?(schema, &1, caller_context))
+         ) do
+      nil -> :ok
+      field -> {:error, error_json(conn, {:error, {:forbidden_field, field}})}
     end
   end
 

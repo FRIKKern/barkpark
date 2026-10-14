@@ -25,7 +25,7 @@ defmodule Barkpark.Search.HitEnvelope do
 
   The envelope's key set is identical in both views (`documents`, `count`,
   `query`, `parsedQuery`, `highlights`, `recovery`, `correctedTo`, `facets`,
-  `truncation`, `engineUsed`, `hasMore`, `offset`, `nextOffset`) so
+  `truncation`, `engineUsed`, `match`, `hasMore`, `offset`, `nextOffset`) so
   shape-destructuring clients (`find-shape.ts`) never branch.
   Surface-specific extras (`ms`, `seq`, `searchEventId`) are `Map.put` by the
   call sites.
@@ -147,6 +147,9 @@ defmodule Barkpark.Search.HitEnvelope do
       # recovery, tenant gate, unregistered engine). Additive: clients that
       # don't read it are unchanged; clients that do stop guessing.
       engineUsed: meta[:engine_used],
+      # Which term rule served the hits: "all" (every word matched) or "any"
+      # (one word was enough). nil for a browse.
+      match: meta[:match],
       # Additive pagination echo: `count` here is already the corpus total
       # (see moduledoc), so whether another page exists is derivable in-hand
       # — the server had the fact and simply wasn't saying it. A paging

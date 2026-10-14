@@ -17965,6 +17965,42 @@
             "schema": {
               "type": "integer"
             }
+          },
+          {
+            "description": "all (default): a hit holds every word of the query; any: one word is enough. When all finds nothing the search widens to any and says so (recovery: match_any). The response's match field names the rule that served the hits.",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Type-ahead fast path: the same match and best hits and an exact count, without facets or recovery passes.",
+            "in": "query",
+            "name": "suggest",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Comma-separated top-level content fields (needs --type): value counts over the filtered match in facets.fields.",
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A query API field filter applied inside the search, before the limit, count and facets (needs --type), e.g. Format=Lydbok. The bracketed filter[field][op]= forms work too.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -19126,6 +19162,42 @@
             "required": false,
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "description": "all (default): a hit holds every word of the query; any: one word is enough. When all finds nothing the search widens to any and says so (recovery: match_any). The response's match field names the rule that served the hits.",
+            "in": "query",
+            "name": "match",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Type-ahead fast path: the same match and best hits and an exact count, without facets or recovery passes.",
+            "in": "query",
+            "name": "suggest",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Comma-separated top-level content fields (needs --type): value counts over the filtered match in facets.fields.",
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "A query API field filter applied inside the search, before the limit, count and facets (needs --type), e.g. Format=Lydbok. The bracketed filter[field][op]= forms work too.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],

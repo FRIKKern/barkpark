@@ -629,6 +629,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           # workspace never shows a schedule that will not fire, and never
           # publishes late without a human (task-8e88b5539acafdae).
           Barkpark.Content.ScheduledPublishes.rearm(ws_id)
+
+          # The import's COPY ran with user triggers disabled, so the search
+          # slots of the documents it wrote were never computed against THIS
+          # box's schemas (task-3c6d02392d430c98). Writes only stale rows.
+          Barkpark.Search.SearchSlots.refresh(workspace_id: ws_id)
         end
 
         result

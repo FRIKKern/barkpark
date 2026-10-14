@@ -2308,6 +2308,33 @@ defmodule Barkpark.Plugins.Capabilities do
               "carries _bodyTruncated: true. Absent means unbounded (a limit=100 browse " <>
               "projecting blocks answers ~14 MB). A malformed value is a 400, never an " <>
               "unbounded 200."
+          ),
+          flag(
+            "match",
+            "string",
+            "all (default): a hit holds every word of the query; any: one word is enough. " <>
+              "When all finds nothing the search widens to any and says so (recovery: " <>
+              "match_any). The response's match field names the rule that served the hits."
+          ),
+          flag(
+            "suggest",
+            "bool",
+            "Type-ahead fast path: the same match and best hits and an exact count, without " <>
+              "facets or recovery passes.",
+            default: false
+          ),
+          flag(
+            "facet",
+            "string",
+            "Comma-separated top-level content fields (needs --type): value counts over the " <>
+              "filtered match in facets.fields."
+          ),
+          flag(
+            "filter",
+            "string",
+            "A query API field filter applied inside the search, before the limit, count and " <>
+              "facets (needs --type), e.g. Format=Lydbok. The bracketed filter[field][op]= " <>
+              "forms work too."
           )
         ],
         paginated: true,

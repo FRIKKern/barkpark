@@ -36,6 +36,8 @@ defmodule Barkpark.Search.TypoPolicy do
   @default_min_len 4
   @default_threshold 0.25
   @default_threshold_relaxed 0.15
+  @word_threshold 0.6
+  @word_threshold_relaxed 0.5
 
   @doc """
   Whether typo tolerance is on for this surface config.
@@ -84,6 +86,23 @@ defmodule Barkpark.Search.TypoPolicy do
     do: get_threshold(config, "similarity_threshold_relaxed", @default_threshold_relaxed)
 
   def threshold(config, _), do: get_threshold(config, "similarity_threshold", @default_threshold)
+
+  @doc """
+  The pg_trgm word-similarity floor of the documents retriever's word-level typo
+  arm (`term <% title`): how close the query word must be to some word of the
+  search title. 0.6 on the strict pass (pg_trgm's own default) and 0.5 on the
+  widened recovery pass, or the surface's `similarity_threshold` when an admin
+  set it higher, so raising the knob narrows both typo arms. "poter" finds
+  "Harry Potter"; the `enabled` and `min_len_1typo` knobs gate this arm like
+  the other.
+  """
+  @spec word_threshold(map(), boolean()) :: float()
+  def word_threshold(config, relaxed),
+    do:
+      max(
+        threshold(config, relaxed) * 1.0,
+        if(relaxed, do: @word_threshold_relaxed, else: @word_threshold)
+      )
 
   defp get_threshold(config, key, default) do
     case config |> policy() |> Map.get(key, default) do
