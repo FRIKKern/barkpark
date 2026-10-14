@@ -40,7 +40,8 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     "RequireToken" => {:resolved, "api_token via Auth.verify_token_id/1"},
     "OptionalSessionToken" =>
       {:resolved,
-       "bearer branch is Auth.verify_token/1; the cookie branch (task-2c31de0cf6597d32) now " <>
+       "bearer branch is Auth.verify_token/1, else a login-session bearer via RateLimit's " <>
+         "\"user\" resolver (login_session_principal/1); the cookie branch (task-2c31de0cf6597d32) now " <>
          "resolves too, via RateLimit's own session_principal_id/1 (session[\"api_token\"] -> " <>
          "Auth.verify_token_id/1, else session[\"user_session\"] -> Accounts.verify_user_session/1) " <>
          "-- only a conn with NO session at all (or no :fetch_session upstream) keys on IP"},
@@ -145,6 +146,7 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     # pairing, not a replaced function.
     assert src =~ "{\"api\", {Barkpark.Auth, :verify_token_principal}}"
     assert src =~ "{\"scim\", {Barkpark.Scim, :resolve_token_id}}"
+    assert src =~ "{\"user\", {__MODULE__, :login_session_principal}}"
 
     # And all three of those functions exist with the arity the registry (or
     # the session branch below) applies. `ensure_loaded?` first: in :test the
@@ -163,8 +165,10 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     # reflecting on the module, same idiom this test already uses for the
     # Bearer registry two lines up.
     assert src =~ "Barkpark.Auth.verify_token_id(raw)"
-    assert src =~ "Barkpark.Accounts.verify_user_session(raw)"
+    assert src =~ "Barkpark.Accounts.verify_user_session(String.trim(raw))"
     assert Code.ensure_loaded?(Barkpark.Accounts)
     assert function_exported?(Barkpark.Accounts, :verify_user_session, 1)
+    assert Code.ensure_loaded?(BarkparkWeb.Plugs.RateLimit)
+    assert function_exported?(BarkparkWeb.Plugs.RateLimit, :login_session_principal, 1)
   end
 end

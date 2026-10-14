@@ -538,6 +538,64 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       assert RateLimit.call(bearer_write, RateLimit.init([])).halted
     end
 
+    # Studio's account sign-in (J67) sends the LOGIN token as a Bearer, not a
+    # cookie, from one egress address for every editor.
+    defp mutate_with_login_bearer(raw) do
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    defp login_token(email) do
+      user = Barkpark.AccountsFixtures.register_user(email)
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      raw
+    end
+
+    test "two editors writing with a login-session BEARER get their own session buckets, " <>
+           "not the egress address's 60/min one" do
+      with_limits([])
+
+      a = login_token("bearer-editor-a@example.com")
+      b = login_token("bearer-editor-b@example.com")
+
+      results_a =
+        for _ <- 1..65, do: RateLimit.call(mutate_with_login_bearer(a), RateLimit.init([]))
+
+      refute Enum.any?(results_a, & &1.halted),
+             "editor A hit a write 429 before 65 writes — a login bearer is metered as anonymous"
+
+      results_b =
+        for _ <- 1..65, do: RateLimit.call(mutate_with_login_bearer(b), RateLimit.init([]))
+
+      refute Enum.any?(results_b, & &1.halted),
+             "editor B hit a write 429 before 65 writes — editors are sharing ONE bucket again"
+    end
+
+    test "a login session is ONE bucket whether it rides as a bearer or as the cookie" do
+      with_limits(session_write_per_minute: 2)
+
+      email = "bearer-and-cookie@example.com"
+      user = Barkpark.AccountsFixtures.register_user(email)
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+
+      assert not RateLimit.call(mutate_with_login_bearer(raw), RateLimit.init([])).halted
+
+      assert not RateLimit.call(mutate_with_session(%{"user_session" => raw}), RateLimit.init([])).halted
+
+      assert RateLimit.call(mutate_with_login_bearer(raw), RateLimit.init([])).halted
+    end
+
+    test "a bearer that is no live login session still falls to the IP bucket" do
+      with_limits(write_per_minute: 1, session_write_per_minute: 180)
+
+      junk =
+        mutate_with_login_bearer("not-a-session-" <> Base.encode16(:crypto.strong_rand_bytes(8)))
+
+      assert not RateLimit.call(junk, RateLimit.init([])).halted
+      assert RateLimit.call(junk, RateLimit.init([])).halted
+    end
+
     test "a Bearer still wins over a session cookie on the SAME request" do
       with_limits(write_per_minute: 1, session_write_per_minute: 180)
 
