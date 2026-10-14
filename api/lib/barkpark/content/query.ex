@@ -793,9 +793,10 @@ defmodule Barkpark.Content.Query do
   # vocabulary for it. The desk structure is the caller.
   @doc_id_only_ops ~w(starts_with not_starts_with referencedBy notReferencedBy)
 
-  # The two ops above bind a TYPE NAME, not a value of the id column. A blank or
-  # non-binary value has no clause and would otherwise fall to the catch-all and
-  # return every row — the same silent-unfiltered-set shape `hasStrong` refuses.
+  # The two ops above bind the REFERENCING side (a type, a comma list of types,
+  # `*`, or `type.field`), not a value of the id column. A blank or non-binary
+  # value has no clause and would otherwise fall to the catch-all and return
+  # every row, the same silent-unfiltered-set shape `hasStrong` refuses.
   @reference_count_ops ~w(referencedBy notReferencedBy)
 
   # `in`/`nin` are the ONLY ops with an `is_list` clause in `apply_field_op/4`;
@@ -1017,6 +1018,35 @@ defmodule Barkpark.Content.Query do
 
   def validate_filter_map(_other), do: {:error, {nil, :not_a_map}}
 
+  @doc """
+  Check a filter map for a list of `type` without reading any documents:
+  every op has an SQL arm (`validate_filter_map/1`) and every `referencedBy` /
+  `notReferencedBy` term names a document type, or a field of one, that the
+  dataset's schemas declare. Returns `:ok` or `{:error, reason}`, the reason
+  naming the field, the op and what is wrong.
+
+  The declared desk (`Barkpark.Structure`) runs this per item, so an item whose
+  filter cannot run is reported on that item instead of failing at render.
+  """
+  @spec check_filter(String.t(), String.t(), term(), keyword()) :: :ok | {:error, String.t()}
+  def check_filter(type, dataset, filter_map, opts \\ []) do
+    case validate_filter_map(filter_map) do
+      :ok ->
+        _ = resolve_reference_count_ops(filter_map, type, dataset, opts)
+        :ok
+
+      {:error, {nil, :not_a_map}} ->
+        {:error, "the filter is not a map of field => operators"}
+
+      {:error, {field, op}} ->
+        {:error,
+         "filter on #{inspect(to_string(field))}: operator #{inspect(op)} is not supported there"}
+    end
+  rescue
+    e in Barkpark.Content.InvalidFilterError ->
+      {:error, "filter on #{inspect(to_string(e.field))}: #{Exception.message(e)}"}
+  end
+
   # THE CHOKEPOINT. Every read reaches this through `base_query/4`, so validating
   # here — before a single clause is applied — is what makes the refusal total:
   # a door added later inherits it by construction rather than having to remember
@@ -1033,7 +1063,7 @@ defmodule Barkpark.Content.Query do
 
     map =
       map
-      |> resolve_reference_count_ops(dataset, opts)
+      |> resolve_reference_count_ops(type, dataset, opts)
       |> resolve_references_eq(type, dataset, opts)
 
     Enum.reduce(map, query, fn
@@ -1083,130 +1113,304 @@ defmodule Barkpark.Content.Query do
     end
   end
 
-  # `referencedBy: "publication"` names a TYPE; the clause needs that type's
-  # REFERENCE FIELD NAMES, which live in the schema. Resolved once here, at the
+  # The placeholder the SQL swaps for the candidate's published id, JSON-quoted.
+  # A field with this name is never probed, so the swap cannot hit a key.
+  @pid_slot_name "#pid#"
+  @pid_slot "\"#pid#\""
+
+  # `referencedBy` / `notReferencedBy` name the REFERENCING side. The value is a
+  # comma list of terms, resolved once here against the schemas, at the
   # chokepoint that already has `dataset` and `opts`, so `apply_field_op/4`
-  # stays a pure query builder.
+  # stays a pure query builder:
+  #
+  #   * `product`          a document of that type references this one
+  #   * `article,event`    a document of any of those types does
+  #   * `*`                a document of any type does
+  #   * `tag.parentTags`   a document of that type does, through that one field
+  #
+  # Sanity writes these as `count(*[_type == "product" && references(^._id)]) > 0`,
+  # `_type in [...]`, `*[references(^._id)]` and `^._id in parentTags[]._ref`.
+  # A list value (`["article", "event"]`) is the same as the comma form.
   #
   # READ THE DOCUMENTS, NOT `content_edges`. The edge table is a MATERIALISED
-  # projection refreshed by `Barkpark.EdgeProjector` — correct for the graph
-  # view, wrong for a desk list, because an editor who has just linked a
-  # category would keep seeing it under «Kategorier uten utgivelser» until the
-  # projector next ran. This clause reads the referencing documents' own
-  # `content`, the same live predicate `Edges.find_referencing_docs/3` uses.
+  # projection refreshed by `Barkpark.EdgeProjector`, correct for the graph
+  # view and wrong for a desk list: an editor who has just linked a category
+  # would keep seeing it under «Kategorier uten utgivelser» until the projector
+  # next ran. The clause reads the referencing documents' own `content`.
   #
-  # AN UNKNOWN TYPE IS A REFUSAL, not an empty list. A desk node with a typo'd
-  # type would otherwise render an empty «med utgivelser» and a complete
-  # «uten utgivelser» — two plausible-looking lists, both lies.
-  defp resolve_reference_count_ops(map, dataset, opts) do
+  # AN UNKNOWN TYPE OR FIELD IS A REFUSAL, not an empty list. A desk node with a
+  # typo'd type would otherwise render an empty «med utgivelser» and a complete
+  # «uten utgivelser»: two plausible-looking lists, both lies.
+  defp resolve_reference_count_ops(map, type, dataset, opts) do
     Map.new(map, fn
-      {field, %{} = ops} -> {field, Map.new(ops, &resolve_one_op(&1, field, dataset, opts))}
-      other -> other
+      {field, %{} = ops} ->
+        {field, Map.new(ops, &resolve_one_op(&1, field, type, dataset, opts))}
+
+      other ->
+        other
     end)
   end
 
-  defp resolve_one_op({op, type}, field, dataset, opts)
-       when op in @reference_count_ops and is_binary(type) do
-    schemas = Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts))
+  defp resolve_one_op({op, value}, field, type, dataset, opts)
+       when op in @reference_count_ops do
+    case reference_terms(value) do
+      {:ok, terms} ->
+        schemas = Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts))
+        {op, {:referencing, reference_spec(terms, schemas, type, field, op)}}
 
-    case Enum.find(schemas, &(&1.name == type)) do
-      nil ->
-        # The op is fine; the TYPE is unknown. Say that, not "unsupported operator".
-        raise %{
-          Barkpark.Content.InvalidFilterError.new(field, op)
-          | message: "filter #{op} names no document type in this dataset: #{inspect(type)}"
-        }
-
-      schema ->
-        {op, {type, reference_field_names(schema)}}
+      :error ->
+        raise Barkpark.Content.InvalidFilterError.new(field, op)
     end
   end
 
-  defp resolve_one_op(pair, _field, _dataset, _opts), do: pair
+  defp resolve_one_op(pair, _field, _type, _dataset, _opts), do: pair
 
-  # BOTH stored reference shapes count (task-da600cdc8482d1ca): a bare id
-  # (`content->>k`, or an array holding the id) and a `{"_ref": id}` object
-  # (`content->k->>'_ref'`, or an array holding such an object). Which shape is
-  # canonical is the owner ruling on task-fcb752b43e11df9b; readers accept both,
-  # like `Edges.reference_target/1`. Nothing about storage changes here.
-  #
-  # Scalar `reference` fields and `arrayOf` fields whose element is a reference.
-  # Sanity's `references(^._id)` does not care which field carried the link, so
-  # neither does this: every reference-shaped field on the type is a candidate.
-  # No reference-shaped field on the referencing type means nothing there CAN
-  # point here, so the existence question answers false — the same verdict
-  # Sanity's `references()` gives, and the complement still partitions the set.
-  defp reference_exists(query, _type, [], negate?) do
-    if negate?, do: query, else: where(query, [d], false)
-  end
+  # The value as a list of trimmed, non-blank terms, or :error.
+  defp reference_terms(value) when is_binary(value),
+    do: value |> String.split(",") |> reference_terms()
 
-  defp reference_exists(query, type, ref_fields, negate?) do
-    scalars = for {name, "reference"} <- ref_fields, do: name
-    arrays = for {name, "arrayOf"} <- ref_fields, do: name
-
-    if negate? do
-      where(
-        query,
-        [d],
-        not fragment(
-          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END) OR f.content -> k ->> '_ref' = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND (f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR f.content -> k @> jsonb_build_array(jsonb_build_object('_ref', (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))))",
-          ^type,
-          d.dataset,
-          d.dataset_id,
-          d.workspace_id,
-          d.project_id,
-          ^scalars,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          ^arrays,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id
-        )
-      )
+  defp reference_terms([_ | _] = values) do
+    if Enum.all?(values, &is_binary/1) do
+      terms = Enum.map(values, &String.trim/1)
+      if Enum.any?(terms, &(&1 == "")), do: :error, else: {:ok, Enum.uniq(terms)}
     else
-      where(
-        query,
-        [d],
-        fragment(
-          "EXISTS (SELECT 1 FROM documents f WHERE f.type = ? AND f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND (EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE f.content ->> k = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END) OR f.content -> k ->> '_ref' = (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(f.content -> k) = 'array' AND (f.content -> k @> to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)) OR f.content -> k @> jsonb_build_array(jsonb_build_object('_ref', (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)))))))",
-          ^type,
-          d.dataset,
-          d.dataset_id,
-          d.workspace_id,
-          d.project_id,
-          ^scalars,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          ^arrays,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id,
-          d.doc_id
-        )
-      )
+      :error
     end
   end
 
-  defp reference_field_names(schema) do
+  defp reference_terms(_), do: :error
+
+  # The resolved clause, as two arms the SQL ORs:
+  #
+  #   * The `_ref` arm: a `{"_ref": id}` at ANY depth of a referencing document
+  #     whose type is in `ref_types` (or any type, `any: true`), or at any depth
+  #     under one named field (`ref_fields`, `{type, field}` pairs). This is
+  #     Sanity's `references()`, and the GIN index `documents_content_refs_idx`
+  #     answers it: one index probe per candidate row instead of a scan of the
+  #     whole referencing type.
+  #   * The probe arm: `{referencing type, JSON containment template}` pairs for
+  #     the shape the `_ref` index cannot see. Studio stores a reference as a
+  #     BARE id string (task-fcb752b43e11df9b), so for each reference field that
+  #     can point at the candidate type the arm asks `content @> {"field": id}`
+  #     (or `[id]` for an array field). The GIN index
+  #     `documents_content_path_idx` answers these.
+  defp reference_spec(terms, schemas, candidate_type, field, op) do
+    by_name = Map.new(schemas, &{&1.name, &1})
+    empty = %{any: false, ref_types: [], ref_fields: [], probes: []}
+
+    Enum.reduce(terms, empty, fn term, acc ->
+      case String.split(term, ".", parts: 2) do
+        ["*"] ->
+          probes =
+            for s <- schemas, probe <- bare_probes(s, candidate_type), do: {s.name, probe}
+
+          %{acc | any: true, probes: acc.probes ++ probes}
+
+        [ref_type] ->
+          schema = Map.get(by_name, ref_type) || refuse_reference(field, op, ref_type)
+          probes = for probe <- bare_probes(schema, candidate_type), do: {ref_type, probe}
+          %{acc | ref_types: acc.ref_types ++ [ref_type], probes: acc.probes ++ probes}
+
+        [ref_type, ref_field] ->
+          schema = Map.get(by_name, ref_type) || refuse_reference(field, op, ref_type)
+
+          unless Enum.any?(schema.fields || [], &(&1["name"] == ref_field)) and
+                   ref_field != @pid_slot_name do
+            raise %{
+              Barkpark.Content.InvalidFilterError.new(field, op)
+              | message:
+                  "filter #{op} names no field #{inspect(ref_field)} on document type " <>
+                    "#{inspect(ref_type)}"
+            }
+          end
+
+          probes = for probe <- field_probes(ref_field), do: {ref_type, probe}
+
+          %{
+            acc
+            | ref_fields: acc.ref_fields ++ [{ref_type, ref_field}],
+              probes: acc.probes ++ probes
+          }
+      end
+    end)
+    |> Map.update!(:ref_types, &Enum.uniq/1)
+    |> Map.update!(:ref_fields, &Enum.uniq/1)
+    |> Map.update!(:probes, &Enum.uniq/1)
+  end
+
+  defp refuse_reference(field, op, ref_type) do
+    # The op is fine; the TYPE is unknown. Say that, not "unsupported operator".
+    raise %{
+      Barkpark.Content.InvalidFilterError.new(field, op)
+      | message: "filter #{op} names no document type in this dataset: #{inspect(ref_type)}"
+    }
+  end
+
+  # Bare-id templates for the schema's reference fields that can point at the
+  # candidate type. A field whose targets are not declared can point anywhere.
+  defp bare_probes(schema, candidate_type) do
+    for {name, shape, targets} <- reference_fields(schema),
+        name != @pid_slot_name,
+        targets == :any or candidate_type == nil or candidate_type in targets do
+      case shape do
+        :scalar -> Jason.encode!(%{name => @pid_slot_name})
+        :array -> Jason.encode!(%{name => [@pid_slot_name]})
+      end
+    end
+  end
+
+  # One named field, bare-id shapes. The `{"_ref": id}` shapes, at any depth
+  # under the field, are the `_ref` arm's.
+  defp field_probes(name),
+    do: [Jason.encode!(%{name => @pid_slot_name}), Jason.encode!(%{name => [@pid_slot_name]})]
+
+  # `{name, :scalar | :array, targets}` for every reference-shaped field:
+  # a `reference`, or an `arrayOf` whose `of` is a reference or a LIST of
+  # member types one of which is a reference (product.tilleggsressurser,
+  # page.landingPageSections). `targets` is the list of type names the field
+  # may point at, or `:any` when the schema does not say.
+  defp reference_fields(schema) do
     for f <- schema.fields || [],
-        f["type"] == "reference" or
-          (f["type"] == "arrayOf" and get_in(f, ["of", "type"]) == "reference"),
         is_binary(f["name"]),
-        do: {f["name"], f["type"]}
+        shape = reference_shape(f),
+        shape != nil,
+        do: {f["name"], elem(shape, 0), elem(shape, 1)}
+  end
+
+  defp reference_shape(%{"type" => "reference"} = f), do: {:scalar, ref_targets([f])}
+
+  defp reference_shape(%{"type" => "arrayOf", "of" => %{} = of}) do
+    if of["type"] == "reference", do: {:array, ref_targets([of])}
+  end
+
+  defp reference_shape(%{"type" => "arrayOf", "of" => members}) when is_list(members) do
+    case Enum.filter(members, &(is_map(&1) and &1["type"] == "reference")) do
+      [] -> nil
+      refs -> {:array, ref_targets(refs)}
+    end
+  end
+
+  defp reference_shape(_field), do: nil
+
+  # A field's `to` (type names or `%{"type" => name}` maps) and `refType`.
+  # Empty means undeclared, which is `:any`.
+  defp ref_targets(specs) do
+    targets =
+      Enum.flat_map(specs, fn spec ->
+        to =
+          spec
+          |> Map.get("to")
+          |> List.wrap()
+          |> Enum.map(fn
+            %{"type" => t} -> t
+            t -> t
+          end)
+
+        to ++ List.wrap(spec["refType"])
+      end)
+      |> Enum.filter(&is_binary/1)
+
+    cond do
+      targets == [] -> :any
+      Enum.any?(specs, &(target_count(&1) == 0)) -> :any
+      true -> Enum.uniq(targets)
+    end
+  end
+
+  defp target_count(spec), do: length(List.wrap(spec["to"])) + length(List.wrap(spec["refType"]))
+
+  # The `{name, type}` pairs `filter[_references]` reads (scalar fields stored
+  # as a bare id). Same field walk as `referencedBy`, so a multi-type `arrayOf`
+  # never crashes it either.
+  defp reference_field_names(schema) do
+    for {name, shape, _targets} <- reference_fields(schema),
+        do: {name, if(shape == :scalar, do: "reference", else: "arrayOf")}
+  end
+
+  # The SQL. `d` is the candidate row; its PUBLISHED id (the `drafts.` prefix
+  # dropped) is what every reference holds. `f` is a referencing document in
+  # the same dataset, workspace and project. DRAFTS COUNT, like Sanity's desk:
+  # a referencing draft twin is its own row.
+  #
+  # The `_ref` arm repeats `documents_content_refs_idx`'s expression word for
+  # word (see `Barkpark.Groq.DocumentSource.references_any/1`), because
+  # Postgres uses an expression index only for the same expression. The probe
+  # arm builds its containment probes from text templates with `replace` and
+  # `string_to_array` (no subquery), so the array is an index key and
+  # `documents_content_path_idx` serves `@> ANY(...)`. The inner `unnest`
+  # pairs each probe with its own type, so a probe from one type's schema
+  # never matches a row of another type.
+  defp reference_exists(query, spec, negate?) do
+    # Every term adds to the `_ref` arm, so it is never empty; the probe arm is
+    # empty when no reference field can hold a bare id of the candidate.
+    %{any: any?, ref_types: types, ref_fields: ref_fields, probes: probes} = spec
+    field_types = Enum.map(ref_fields, &elem(&1, 0))
+    field_keys = Enum.map(ref_fields, &elem(&1, 1))
+    templates = probes |> Enum.map(&elem(&1, 1)) |> Enum.join(<<30>>)
+    probe_types = Enum.map(probes, &elem(&1, 0))
+
+    cond =
+      cond do
+        probes == [] ->
+          dynamic(
+            [d],
+            fragment(
+              "EXISTS (SELECT 1 FROM documents f WHERE f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND jsonb_path_query_array(f.content, 'strict $.** \\? (exists(@._ref))._ref') \\? (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)::text AND (?::boolean OR f.type = ANY(?::text[]) OR EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) u(t, k) WHERE u.t = f.type AND jsonb_path_exists(f.content -> u.k, '$.** \\? (@._ref == $id)', jsonb_build_object('id', (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)::text)))))",
+              d.dataset,
+              d.dataset_id,
+              d.workspace_id,
+              d.project_id,
+              d.doc_id,
+              d.doc_id,
+              d.doc_id,
+              ^any?,
+              type(^types, {:array, :string}),
+              type(^field_types, {:array, :string}),
+              type(^field_keys, {:array, :string}),
+              d.doc_id,
+              d.doc_id,
+              d.doc_id
+            )
+          )
+
+        true ->
+          dynamic(
+            [d],
+            fragment(
+              "EXISTS (SELECT 1 FROM documents f WHERE f.dataset IS NOT DISTINCT FROM ? AND f.dataset_id IS NOT DISTINCT FROM ? AND f.workspace_id IS NOT DISTINCT FROM ? AND f.project_id IS NOT DISTINCT FROM ? AND ((jsonb_path_query_array(f.content, 'strict $.** \\? (exists(@._ref))._ref') \\? (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)::text AND (?::boolean OR f.type = ANY(?::text[]) OR EXISTS (SELECT 1 FROM unnest(?::text[], ?::text[]) u(t, k) WHERE u.t = f.type AND jsonb_path_exists(f.content -> u.k, '$.** \\? (@._ref == $id)', jsonb_build_object('id', (CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)::text))))) OR (f.content @> ANY(string_to_array(replace(?::text, ?::text, to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)::text)::text), chr(30))::jsonb[]) AND f.type = ANY(?::text[]) AND EXISTS (SELECT 1 FROM unnest(string_to_array(replace(?::text, ?::text, to_jsonb((CASE WHEN ? LIKE 'drafts.%' THEN substring(? from 8) ELSE ? END)::text)::text), chr(30))::jsonb[], ?::text[]) u(p, t) WHERE u.t = f.type AND f.content @> u.p))))",
+              d.dataset,
+              d.dataset_id,
+              d.workspace_id,
+              d.project_id,
+              d.doc_id,
+              d.doc_id,
+              d.doc_id,
+              ^any?,
+              type(^types, {:array, :string}),
+              type(^field_types, {:array, :string}),
+              type(^field_keys, {:array, :string}),
+              d.doc_id,
+              d.doc_id,
+              d.doc_id,
+              ^templates,
+              ^@pid_slot,
+              d.doc_id,
+              d.doc_id,
+              d.doc_id,
+              type(^probe_types, {:array, :string}),
+              ^templates,
+              ^@pid_slot,
+              d.doc_id,
+              d.doc_id,
+              d.doc_id,
+              type(^probe_types, {:array, :string})
+            )
+          )
+      end
+
+    if negate?,
+      do: where(query, ^dynamic([d], not (^cond))),
+      else: where(query, ^cond)
   end
 
   # `{field, ops}` -> the first {field, op} with no SQL arm, or nil.
@@ -1241,7 +1445,8 @@ defmodule Barkpark.Content.Query do
 
       op =
           Enum.find(Map.keys(ops), fn op ->
-            op not in @list_value_ops and non_scalar_op_value?(ops, op)
+            op not in @list_value_ops and op not in @reference_count_ops and
+                non_scalar_op_value?(ops, op)
           end) ->
         {field, op}
 
@@ -1282,9 +1487,11 @@ defmodule Barkpark.Content.Query do
 
   defp unsupported_op?(_field, _op), do: true
 
+  # `referencedBy` takes a comma list of terms, or a list of them; a blank term
+  # anywhere is a refusal (`reference_terms/1` is the one parser).
   defp blank_type_value?(ops, op) do
     case Map.fetch(ops, op) do
-      {:ok, v} -> not (is_binary(v) and String.trim(v) != "")
+      {:ok, v} -> reference_terms(v) == :error
       :error -> false
     end
   end
@@ -1891,14 +2098,14 @@ defmodule Barkpark.Content.Query do
   # DRAFTS COUNT, like Sanity's desk. A referencing draft twin is its own row,
   # and an editor who has linked a category from an unsaved publication expects
   # that category to leave the «uten utgivelser» list at once.
-  defp apply_field_op(query, field, "referencedBy", {type, ref_fields})
+  defp apply_field_op(query, field, "referencedBy", {:referencing, spec})
        when field in @id_fields do
-    reference_exists(query, type, ref_fields, false)
+    reference_exists(query, spec, false)
   end
 
-  defp apply_field_op(query, field, "notReferencedBy", {type, ref_fields})
+  defp apply_field_op(query, field, "notReferencedBy", {:referencing, spec})
        when field in @id_fields do
-    reference_exists(query, type, ref_fields, true)
+    reference_exists(query, spec, true)
   end
 
   defp apply_field_op(query, field, "hasStrong", v) do
@@ -2140,6 +2347,15 @@ defmodule Barkpark.Content.Query do
   defp apply_order(q, :updated_at_asc), do: order_by(q, [d], asc: d.updated_at)
   defp apply_order(q, :created_at_desc), do: order_by(q, [d], desc: d.inserted_at)
   defp apply_order(q, :created_at_asc), do: order_by(q, [d], asc: d.inserted_at)
+
+  # View counts (task-5feac4e826cff9a5): `_views7d`, `_views30d` and
+  # `_popularity` (alias `popularity`) sort by the document's row in
+  # `document_popularity`, 0 without one. A draft sorts by its published id.
+  defp apply_order(q, {:views, column, dir}) do
+    q
+    |> Barkpark.Search.Views.join_popularity(false)
+    |> order_by(^[{dir, Barkpark.Search.Views.joined_value(column)}])
+  end
 
   # Content-field ordering: `title`/`status` are promoted columns (mirroring the
   # filter ops above); every other field sorts by its JSONB value. `field` rides

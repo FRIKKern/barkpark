@@ -105,6 +105,7 @@ defmodule BarkparkWeb.MemberController do
          role <- Map.get(params, "role", @default_role) do
       case Members.add_user_member(ws_id, email, to_string(role), actor: caller(conn)) do
         {:ok, {:invited, invitation}} ->
+          notify_invitee(conn, invitation)
           conn |> put_status(:accepted) |> json(%{invitation: invitation})
 
         {:ok, {:reclaimed, member}} ->
@@ -614,4 +615,33 @@ defmodule BarkparkWeb.MemberController do
 
   defp unresolved_workspace(conn),
     do: unprocessable(conn, "workspace could not be resolved")
+
+  # The invitee learns of the invitation by mail (task-a3c4164ea2f56ccd): the
+  # workspace's name, who invited them, and a link to /invitations, in the
+  # workspace's language. Sent only when an invitation was CREATED, so a
+  # repeat invite of a pending invitee (409 already_invited) sends nothing.
+  # Fire-and-forget like every UserNotifier mail: the 202 never waits on SMTP.
+  defp notify_invitee(conn, %{email: email}) when is_binary(email) do
+    ws = conn.assigns[:current_workspace]
+
+    Barkpark.Accounts.UserNotifier.deliver_invitation(email, %{
+      workspace: Map.get(ws, :name) || Map.get(ws, :slug),
+      inviter: inviter_name(conn),
+      url: BarkparkWeb.Endpoint.url() <> "/invitations",
+      locale: Barkpark.Tenancy.workspace_locale(ws)
+    })
+  end
+
+  defp notify_invitee(_conn, _invitation), do: :ok
+
+  # A person is named by their email: the owner of a personal token (PAT). A
+  # service token is not named (its label can carry someone else's address).
+  defp inviter_name(conn) do
+    with %{owner_user_id: uid} when is_binary(uid) <- caller(conn),
+         %{email: email} when is_binary(email) <- Barkpark.Accounts.get_user(uid) do
+      email
+    else
+      _ -> nil
+    end
+  end
 end

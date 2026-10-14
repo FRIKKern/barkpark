@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       # resolved by LiveScope + StudioChrome (nil on an unseeded tenancy).
       known_themes: Tenancy.known_themes(),
       # Workspace Studio locale (Gyldendal parity E7) — same bag, same guards.
-      known_locales: Tenancy.known_locales(),
+      known_locales: locale_options(Tenancy.known_locales()),
       # A scope switch fired from Settings re-opens Settings under the NEW
       # scope, not the desk (chrome D16 seam) — StudioChrome appends this to
       # the target's studio_root.
@@ -1673,4 +1673,12 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     |> Enum.map(fn {field, {msg, _}} -> "#{field}: #{msg}" end)
     |> Enum.join("; ")
   end
+
+  # The Studio language picker names each language in itself, the same in
+  # every UI language, so a reader finds their own (task-a1b3ef2e5475f9c5).
+  # The value stays the locale code; a code with no name here reads as the code.
+  @locale_names %{"en" => "English", "nb-NO" => "Norsk bokmål"}
+
+  defp locale_options(codes),
+    do: Enum.map(codes, &{&1, Map.get(@locale_names, &1, &1)})
 end

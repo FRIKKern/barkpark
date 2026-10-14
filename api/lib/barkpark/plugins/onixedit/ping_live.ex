@@ -23,12 +23,11 @@ defmodule Barkpark.Plugins.OnixEdit.PingLive do
   def render(assigns) do
     ~H"""
     <main class="container">
-      <h1>OnixEdit · Plugin Route Highway</h1>
+      <h1>{gettext("OnixEdit · Plugin Route Highway")}</h1>
       <p data-role="ping-payload"><%= @body %></p>
       <p>
         <small>
-          This page proves Barkpark's <code>plugin_routes/1</code> macro emitted
-          the route declared by OnixEdit's <code>register_routes/1</code> callback.
+          {gettext("This page proves Barkpark's")} <code>plugin_routes/1</code> {gettext("macro emitted the route declared by OnixEdit's")} <code>register_routes/1</code> {gettext("callback.")}
         </small>
       </p>
     </main>

@@ -238,7 +238,7 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
   describe "the existing pipeline mounts are untouched (criterion 3)" do
     @router Path.expand("../../../lib/barkpark_web/router.ex", __DIR__)
 
-    test "every RateLimit mount in the router passes NO options, so none of them can reach the browser class" do
+    test "the only RateLimit mounts with options are :presence_focus, :view, the GROQ POST read and the five browser pipelines" do
       src = File.read!(@router)
 
       mounts =
@@ -262,12 +262,34 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
       # (RateLimit.limited/4's non-:browser catch-all refuses it exactly like
       # :read/:write), never shadow-only. Any OTHER new option string still
       # fails this assertion and must be reasoned about the same way.
+      #
+      # THE BROWSER MOUNTS (am-w2-s8, charter D7): exactly FIVE `class:
+      # :browser` lines, one per HTML browser pipeline, each pinned to a real
+      # route in `rate_limit_browser_mounts_test.exs`. Shadow-only by the law
+      # above, so they refuse nobody. A sixth is a new decision, not drift.
       non_empty = Enum.reject(mounts, &(&1 == ""))
+      {browser, others} = Enum.split_with(non_empty, &(&1 == ", class: :browser"))
 
-      assert Enum.all?(non_empty, &(&1 == ", class: :presence_focus")),
-             "a RateLimit mount now passes options: #{inspect(non_empty)} — " <>
-               "if that is `class: :browser`, the shadow law applies to it and this test should " <>
-               "be updated deliberately, not silently"
+      assert length(browser) == 5,
+             "expected exactly 5 `class: :browser` mounts (the HTML browser pipelines), " <>
+               "found #{length(browser)}"
+
+      # SECOND DELIBERATE EXCEPTION: `class: :read` on `:shared_docs_query_post`,
+      # the POST form of the GROQ query read. It meters a read as a read
+      # (one of the two existing method classes), so it adds no class.
+      #
+      # THIRD DELIBERATE EXCEPTION (task-5feac4e826cff9a5): `class: :view` on
+      # `:scoped_views_ingest`, the document view counter. A REAL enforced
+      # class like :presence_focus: its own bucket key and budget (60 a minute
+      # per anonymous IP, 6000 per token, rate_limit.ex), refused with the
+      # standard JSON 429 by `limited/4`'s catch-all, so a burst of views never
+      # debits the caller's write budget.
+      assert Enum.all?(
+               others,
+               &(&1 in [", class: :presence_focus", ", class: :read", ", class: :view"])
+             ),
+             "a RateLimit mount now passes options: #{inspect(others)} — a new class must be " <>
+               "reasoned about here deliberately, not silently"
     end
 
     test "a default-init call is byte-identical to the pre-browser behaviour: read/write classes, no :browser in the key" do

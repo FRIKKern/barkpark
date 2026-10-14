@@ -1720,7 +1720,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 180 -> 181 (task-92b443a2c78a914f, a failed self-update's phase + tail): `barkpark_json/6` emits ONE new
   # top-level key, `update_last_failure` (the mirrored failed run). MEASURED by
   # the PIN CO-EDIT arm on this branch off origin/main ("180 -> 181").
-  @emitted_pinned 181
+  # 181 -> 184 (task-9d72b5f86487cf9b, automatic service restarts):
+  # `merge_pressure/2` gains `service_restarts`, `service_restarts_count` and
+  # `service_restarts_window_s`. MEASURED by the PIN CO-EDIT arm on this branch
+  # off origin/main ("181 -> 184").
+  @emitted_pinned 184
   # dr-w24-bl-truncated-census-flag-has-no-reader (2026-08-23): the four census/3
   # keys that were KNOWN OPEN :unread rows — `total_sites`, `truncated`,
   # `completeness` and `boundaries` — finally have Go readers, so their four
@@ -2111,7 +2115,15 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # (`update_last_failure`, and one of the struct's six tags not declared
   # anywhere before); its other tags ride existing names and move the SITE
   # register instead. MEASURED by the PIN CO-EDIT arm ("405 -> 407").
-  @go_tag_pinned 407
+  # 407 -> 416 (task-9d72b5f86487cf9b, automatic service restarts):
+  # internal/cloudclient/client.go gains `Pressure.ServiceRestarts`,
+  # `ServiceRestartsCount`, `ServiceRestartsWindowS` and the `ServiceRestart`
+  # row: NINE new NAMES (`service_restarts`, `service_restarts_count`,
+  # `service_restarts_window_s`, `restarted_at`, `exit_kind`, `exit_status`,
+  # `exit_signal`, `oom_killed`, `restart_counter`). `unit` and `result` ride
+  # existing names and move the SITE register instead. MEASURED by the PIN
+  # CO-EDIT arm ("407 -> 416").
+  @go_tag_pinned 416
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2472,6 +2484,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # read off — 2 -> 3, riding free on the NAME union.
     "reported_at" => 3,
     "required" => 2,
+    # task-9d72b5f86487cf9b: NEWLY DUPLICATED, 1 -> 2. `ServiceRestart.Result`
+    # joins `SlotUnit.Result`, both systemd's own result word.
+    "result" => 2,
     # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED and the only
     # NEW NAME on this branch (the sole reason `@go_tag_pinned` moved at all):
     # `retry_after` is declared at BOTH levels of the throttle envelope — top and
@@ -2575,7 +2590,9 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "trigger" => 3,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.Truncated` joins the single existing declaration — whether the tail is a prefix of the log.
     "truncated" => 2,
-    "unit" => 2,
+    # task-9d72b5f86487cf9b: 2 -> 3. `ServiceRestart.Unit`, the systemd unit
+    # the restart happened to.
+    "unit" => 3,
     "unmetered" => 2,
     "unreadable" => 3,
     "unresolved" => 2,
@@ -2678,7 +2695,10 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # key in the base literal, so BOTH walkers see it and the pair moves
   # together; `seeing - blind == 14` is unmoved. MEASURED by the PIN CO-EDIT
   # arm ("70 -> 71", "51 -> 52").
-  @barkpark_family_keys 71
+  # 71 -> 74 (task-9d72b5f86487cf9b): the three service_restarts keys land in
+  # `merge_pressure/2`'s guarded clause, which only the :when-unwrapping
+  # walker sees, so `blind` stays put. MEASURED by the PIN CO-EDIT arm.
+  @barkpark_family_keys 74
   @barkpark_family_keys_blind 52
 
   # ---------------------------------------------------------------------------

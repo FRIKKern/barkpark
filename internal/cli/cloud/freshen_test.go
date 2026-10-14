@@ -3,6 +3,9 @@ package cloud
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -399,5 +402,77 @@ func TestProvision_FreshenCheckFailureStillRegisters(t *testing.T) {
 	}
 	if !reg.Has("acme.barkpark.cloud") {
 		t.Error("box was not registered after a degraded (unreachable-fetch) freshen")
+	}
+}
+
+// TestFreshenScripts_RestoreGoModChurnBeforeMerge proves both merge scripts put
+// go.mod/go.sum back to HEAD BEFORE `merge --ff-only`. A warm image baked before
+// #21539 carries `go mod tidy` churn in those two files, and the merge aborted on
+// it (fleet-1, 2026-10-14). The restore names only those two files, so any other
+// local edit still blocks the merge.
+func TestFreshenScripts_RestoreGoModChurnBeforeMerge(t *testing.T) {
+	for name, script := range map[string]string{
+		"rebuild": freshenRebuildScript(freshenRebuildBudget),
+		"ff":      freshenFFScript,
+	} {
+		restore := strings.Index(script, `git checkout -- "$f"`)
+		merge := strings.Index(script, "merge --ff-only origin/main")
+		if restore < 0 || merge < 0 || restore > merge {
+			t.Fatalf("%s: want the go.mod/go.sum restore before the merge (restore=%d merge=%d):\n%s", name, restore, merge, script)
+		}
+		if !strings.Contains(script, "for f in go.mod go.sum; do") {
+			t.Fatalf("%s: the restore must name only go.mod and go.sum:\n%s", name, script)
+		}
+		if strings.Contains(script, "git checkout -- .") || strings.Contains(script, "reset --hard") {
+			t.Fatalf("%s: the restore must not discard other local edits:\n%s", name, script)
+		}
+	}
+}
+
+// TestFreshenDiscardChurn_RealGit runs the restore snippet plus the merge against
+// a real git checkout that reproduces the fleet-1 state: origin moved go.mod
+// forward while the box's working tree carries its own go.mod/go.sum rewrite.
+// Without the snippet the merge aborts; with it the fast-forward lands.
+func TestFreshenDiscardChurn_RealGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	dir := t.TempDir()
+	run := func(cwd, script string) (string, error) {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Dir = cwd
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	must := func(cwd, script string) {
+		t.Helper()
+		if out, err := run(cwd, script); err != nil {
+			t.Fatalf("%s: %v\n%s", script, err, out)
+		}
+	}
+	must(dir, `git init -q -b main origin && cd origin && printf 'module x\n' > go.mod && printf 'a\n' > go.sum && printf 'r\n' > README && git add . && git commit -qm one`)
+	must(dir, `git clone -q origin box`)
+	must(filepath.Join(dir, "origin"), `printf 'module x\n\ngo 1.22\n' > go.mod && printf 'b\n' > go.sum && git commit -qam two`)
+	box := filepath.Join(dir, "box")
+	must(box, `printf 'module x\n// tidy\n' > go.mod && printf 'tidy\n' > go.sum && git fetch -q origin`)
+
+	if out, err := run(box, `git -c core.hooksPath=/dev/null merge --ff-only origin/main`); err == nil {
+		t.Fatalf("precondition: the dirty merge should abort, got success:\n%s", out)
+	}
+	if out, err := run(box, "set -e\n"+freshenDiscardChurn+`git -c core.hooksPath=/dev/null merge --ff-only origin/main`); err != nil {
+		t.Fatalf("restore + merge should fast-forward: %v\n%s", err, out)
+	}
+	if out, _ := run(box, `git status --porcelain --untracked-files=no`); strings.TrimSpace(out) != "" {
+		t.Fatalf("checkout should be clean after the restore + merge, got:\n%s", out)
+	}
+
+	// Any other local edit is left alone.
+	must(box, `printf 'local\n' > README`)
+	if out, _ := run(box, "set -e\n"+freshenDiscardChurn); strings.Contains(out, "README") {
+		t.Fatalf("the restore must not touch README:\n%s", out)
+	}
+	if out, _ := run(box, `git status --porcelain --untracked-files=no`); !strings.Contains(out, "README") {
+		t.Fatalf("README edit should survive the restore, status:\n%s", out)
 	}
 }

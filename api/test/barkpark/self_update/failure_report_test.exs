@@ -35,6 +35,25 @@ defmodule Barkpark.SelfUpdate.FailureReportTest do
                FailureReport.build(9, ["[self-update] merge done — rebuilding..."])
     end
 
+    test "an interrupted run names the phase the restart cut, a stuck run says so" do
+      # task-15e2eb3aa36b240b: gyl's record read phase=build outcome=running.
+      assert %{phase: "build_interrupted", source: "deploy_status", exit_code: -3} =
+               FailureReport.build(-3, [], %{"phase" => "build", "outcome" => "running"})
+
+      assert %{phase: "migrate_interrupted"} =
+               FailureReport.build(-3, [], %{"phase" => "migrate", "outcome" => "running"})
+
+      assert %{phase: "deploy_stuck", source: "exit_code", exit_code: -4} =
+               FailureReport.build(-4, [])
+
+      assert %{phase: "deploy_stuck", source: "deploy_status"} =
+               FailureReport.build(-4, [], %{"phase" => "build", "outcome" => "running"})
+
+      # An unknown phase word in the record is not echoed into the phase.
+      assert %{phase: "interrupted"} =
+               FailureReport.build(-3, [], %{"phase" => "Weird", "outcome" => "running"})
+    end
+
     test "an applied or running flight record does not name the failing phase" do
       assert %{phase: "build", source: "exit_code"} =
                FailureReport.build(1, [], %{"phase" => "restart", "outcome" => "applied"})

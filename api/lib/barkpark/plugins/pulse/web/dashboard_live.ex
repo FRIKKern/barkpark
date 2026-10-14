@@ -203,7 +203,7 @@ defmodule Barkpark.Plugins.Pulse.Web.DashboardLive do
           <span>storage <strong data-role="cost-storage"><%= mb(@storage.events_bytes + @storage.counters_bytes) %> MB</strong>
             (<%= @storage.event_rows %> rows)</span>
         </div>
-        <p style="margin:0.6rem 0 0; opacity:0.55;">
+        <p style="margin:0.6rem 0 0; opacity:0.65;">
           <small>
             The euro figure is this node's live BEAM CPU share of a fixed
             €<%= f1(host_eur_month()) %>/mo server — it rises when people join and

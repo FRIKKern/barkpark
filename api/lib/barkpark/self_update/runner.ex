@@ -67,6 +67,25 @@ defmodule Barkpark.SelfUpdate.Runner do
       us — is exit 0. With no matching record the run is `:done` with exit
       `-3` (interrupted, outcome unknown) — never `:idle`. The recovered
       outcome is then written as the terminal record, so it is stable.
+
+  ## Resume once, then stop (task-15e2eb3aa36b240b)
+
+  A self-update run the service restarted under, with no outcome on record
+  (deploy-rebuild last said `outcome=running`, or said nothing), is RESUMED
+  once: the Runner starts the same command again as attempt 2, with the same
+  env, as soon as it boots. If attempt 2 is interrupted too, the run ends as
+  exit `-4` with a "deploy stuck" line, and nothing re-runs it: a restart that
+  keeps landing mid-build would otherwise rebuild forever, and every rebuild on
+  a small box makes the next restart more likely. `FailureReport` names these
+  `build_interrupted` and `deploy_stuck`, and `bp cloud status` prints them.
+  Rollbacks are never resumed. A run older than the resume window (default:
+  the run deadline) is not resumed either: a box that was down for a day should
+  not start a day-old deploy on boot. `max_resumes: 0` turns resuming off.
+
+  `deploy-rebuild.sh` now runs under `scripts/build-guard.sh` in its own systemd
+  scope, so on a box with systemd a service restart no longer kills the build
+  at all: the run is re-attached (its pid is alive) and finishes on its own.
+  The resume rule covers what is left: a reboot, or a box without the scope.
   """
 
   use GenServer
@@ -94,8 +113,10 @@ defmodule Barkpark.SelfUpdate.Runner do
   # Both are config-overridable per env for tests via
   # `config :barkpark, __MODULE__, preflight_timeout_ms: N, run_deadline_ms: N`.
   @default_preflight_timeout_ms 60_000
-  # 30 min — comfortably covers a real self-update/rollback + clean rebuild.
-  @default_run_deadline_ms 1_800_000
+  # 60 min. The on-box build now runs at low priority with one BEAM scheduler
+  # (scripts/build-guard.sh), so a clean compile on a 2-core box takes longer
+  # than it used to; the CI artifact path takes minutes.
+  @default_run_deadline_ms 3_600_000
 
   # exit 0 prints `TARGET_SHA=<40-hex>` (charter W6 contract); tolerate a short
   # sha for stub-command tests, but require hex so a garbage line can't pass.
@@ -105,6 +126,13 @@ defmodule Barkpark.SelfUpdate.Runner do
   # matching deploy-rebuild flight record: interrupted, outcome unknown. Beside
   # -1 (port closed abnormally) and -2 (deadline force-close).
   @interrupted_exit -3
+
+  # Exit code for a RESUMED run that was interrupted again: the deploy is stuck
+  # and the Runner stops (task-15e2eb3aa36b240b).
+  @stuck_exit -4
+
+  # How many times an interrupted self-update run is started again on boot.
+  @default_max_resumes 1
 
   # How often a re-attached run's child pid is probed for liveness.
   @default_orphan_poll_ms 5_000
@@ -327,45 +355,9 @@ defmodule Barkpark.SelfUpdate.Runner do
         {:reply, {:error, :already_running}, state}
 
       true ->
-        # Captured BEFORE open_port spawns the child: deploy-rebuild's own
-        # flight record carries a `ts` stamped the instant it reaches a
-        # phase, which can be microseconds after exec, and
-        # `matching_deploy_status/1` requires `ts >= started_at`. A
-        # `started_at` taken after the spawn can land later than that `ts`
-        # even though the child started after it.
-        started_at = DateTime.utc_now()
-
-        case open_port(mode, env) do
-          # `os_pid` rides the spawn itself: `Port.info(port, :os_pid)`
-          # returns `nil` once the child has already exited (confirmed: a
-          # trivial/fast child can die before this process is scheduled
-          # again), so it must be read here, not later (task-5ce2d1ba1fc78838).
-          # Even here a child can beat us on a loaded box; a `nil` os_pid then
-          # matches on `ts` alone (`matching_deploy_status/1`,
-          # task-fe3e406164766598) instead of falling back to "exit_code".
-          {:ok, port, os_pid} ->
-            # Watchdog: force-close a run that outlives the deadline so `running?`
-            # can't wedge true (and block every future trigger) until a BEAM restart.
-            schedule_run_deadline(port)
-
-            state = %{
-              state
-              | run: :running,
-                port: port,
-                mode: mode,
-                log: [],
-                started_at: started_at,
-                finished_at: nil,
-                run_id: new_run_id(),
-                os_pid: os_pid,
-                orphan?: false
-            }
-
-            _ = persist_start(state)
-            {:reply, {:ok, :started}, state}
-
-          {:error, _reason} ->
-            {:reply, {:error, :start_failed}, state}
+        case start_run(state, mode, env, 1) do
+          {:ok, state} -> {:reply, {:ok, :started}, state}
+          {:error, _reason} -> {:reply, {:error, :start_failed}, state}
         end
     end
   end
@@ -380,7 +372,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    {:noreply, finish(state, code)}
+    {:noreply, finish(state, code) |> after_finish()}
   end
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) when state.run == :running do
@@ -412,7 +404,7 @@ defmodule Barkpark.SelfUpdate.Runner do
       schedule_orphan_check(run_id)
       {:noreply, state}
     else
-      {:noreply, finish_interrupted(%{state | log: read_log_tail()})}
+      {:noreply, finish_interrupted(%{state | log: read_log_tail()}) |> after_finish()}
     end
   end
 
@@ -432,9 +424,91 @@ defmodule Barkpark.SelfUpdate.Runner do
     {:noreply, finish(state, -2)}
   end
 
+  # Resume an interrupted self-update run once (see the moduledoc). Sent by
+  # `recover/0` and by the orphan poll after the interrupted outcome is on disk.
+  def handle_info({:resume, run_id}, %{run: {:done, @interrupted_exit}, run_id: run_id} = state) do
+    attempt = state.attempt + 1
+
+    with true <- enabled?(),
+         {:ok, new_state} <- start_run(state, state.mode, state.env, attempt) do
+      Logger.warning(
+        "[self-update] resumed run #{run_id} as attempt #{attempt} after a service restart"
+      )
+
+      {:noreply,
+       push_log(
+         new_state,
+         "[runner] resuming run #{run_id} after a service restart (attempt #{attempt} of #{max_resumes() + 1})"
+       )}
+    else
+      false ->
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.warning("[self-update] resume of #{run_id} failed to start: #{inspect(reason)}")
+        {:noreply, state}
+    end
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ── internals ───────────────────────────────────────────────────────────
+
+  # Spawn the command for `mode` and record the run. `attempt` is 1 for a fresh
+  # trigger and counts up on a resume.
+  defp start_run(state, mode, env, attempt) do
+    # Captured BEFORE open_port spawns the child: deploy-rebuild's own
+    # flight record carries a `ts` stamped the instant it reaches a
+    # phase, which can be microseconds after exec, and
+    # `matching_deploy_status/1` requires `ts >= started_at`. A
+    # `started_at` taken after the spawn can land later than that `ts`
+    # even though the child started after it.
+    started_at = DateTime.utc_now()
+
+    case open_port(mode, env) do
+      # `os_pid` rides the spawn itself: `Port.info(port, :os_pid)`
+      # returns `nil` once the child has already exited (confirmed: a
+      # trivial/fast child can die before this process is scheduled
+      # again), so it must be read here, not later (task-5ce2d1ba1fc78838).
+      # Even here a child can beat us on a loaded box; a `nil` os_pid then
+      # matches on `ts` alone (`matching_deploy_status/1`,
+      # task-fe3e406164766598) instead of falling back to "exit_code".
+      {:ok, port, os_pid} ->
+        # Watchdog: force-close a run that outlives the deadline so `running?`
+        # can't wedge true (and block every future trigger) until a BEAM restart.
+        schedule_run_deadline(port)
+
+        state = %{
+          state
+          | run: :running,
+            port: port,
+            mode: mode,
+            log: [],
+            started_at: started_at,
+            finished_at: nil,
+            run_id: new_run_id(),
+            os_pid: os_pid,
+            orphan?: false,
+            attempt: attempt,
+            env: env
+        }
+
+        _ = persist_start(state)
+        {:ok, state}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp max_resumes do
+    case Keyword.get(config(), :max_resumes, @default_max_resumes) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> @default_max_resumes
+    end
+  end
+
+  defp resume_window_ms, do: Keyword.get(config(), :resume_window_ms, run_deadline_ms())
 
   defp schedule_run_deadline(port) do
     Process.send_after(self(), {:run_deadline, port}, run_deadline_ms())
@@ -461,7 +535,9 @@ defmodule Barkpark.SelfUpdate.Runner do
       finished_at: nil,
       run_id: nil,
       os_pid: nil,
-      orphan?: false
+      orphan?: false,
+      attempt: 1,
+      env: []
     }
   end
 
@@ -531,10 +607,41 @@ defmodule Barkpark.SelfUpdate.Runner do
   # name; nothing request-derived reaches a path.
 
   defp finish(state, code) do
+    {state, code} = reconcile_signal_exit(state, code)
     state = %{state | run: {:done, code}, port: nil, finished_at: DateTime.utc_now()}
     _ = write_terminal(state)
     state
   end
+
+  # 143 (SIGTERM) or 137 (SIGKILL) from a script whose own flight record says
+  # `restart applied` is the restart the script queued, not a failure: systemd
+  # stopped the cgroup the script ran in. The 21:53 deploy to gyl on
+  # 2026-10-13 was reported as exit 143 this way although it had swapped and
+  # restarted. Any other flight record leaves the code as it is.
+  defp reconcile_signal_exit(state, code) when code in [137, 143] do
+    case safe_deploy_status(state) do
+      %{"phase" => "restart", "outcome" => "applied"} = record ->
+        line =
+          "[runner] exit #{code} was the restart this run queued; deploy-rebuild " <>
+            "recorded phase=restart outcome=applied sha=#{record["sha"]}"
+
+        {push_log_memory(state, line), 0}
+
+      _ ->
+        {state, code}
+    end
+  end
+
+  defp reconcile_signal_exit(state, code), do: {state, code}
+
+  # After an orphaned or recovered run lands as interrupted, ask for the one
+  # resume it is owed. `finish/2` never produces -3, so a natural exit passes.
+  defp after_finish(%{resume?: true, run_id: run_id} = state) do
+    send(self(), {:resume, run_id})
+    Map.delete(state, :resume?)
+  end
+
+  defp after_finish(state), do: Map.delete(state, :resume?)
 
   defp new_run_id, do: Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 
@@ -561,7 +668,9 @@ defmodule Barkpark.SelfUpdate.Runner do
       "run_id" => state.run_id,
       "mode" => Atom.to_string(state.mode),
       "started_at" => DateTime.to_iso8601(state.started_at),
-      "os_pid" => state.os_pid
+      "os_pid" => state.os_pid,
+      "attempt" => state.attempt,
+      "env" => Map.new(state.env)
     })
   rescue
     error -> record_failed(:manifest, error)
@@ -583,6 +692,7 @@ defmodule Barkpark.SelfUpdate.Runner do
       "run_id" => state.run_id,
       "mode" => Atom.to_string(state.mode),
       "exit_code" => run_exit_code(state.run),
+      "attempt" => state.attempt,
       "started_at" => iso(state.started_at),
       "finished_at" => iso(state.finished_at),
       "log" => Enum.reverse(state.log),
@@ -649,7 +759,7 @@ defmodule Barkpark.SelfUpdate.Runner do
         state
 
       {:gone, state} ->
-        finish_interrupted(state)
+        state |> finish_interrupted() |> after_finish()
     end
   rescue
     # A malformed record must never take the boot down — degrade to idle.
@@ -662,7 +772,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   # writes and no timers (this runs in the CALLER's process).
   defp disk_state do
     case read_disk() do
-      {:gone, state} -> interrupted_outcome(state)
+      {:gone, state} -> state |> interrupted_outcome(false) |> Map.delete(:resume?)
       {_kind, state} -> state
     end
   rescue
@@ -677,7 +787,9 @@ defmodule Barkpark.SelfUpdate.Runner do
         | mode: decode_mode(manifest["mode"]),
           started_at: started_at,
           run_id: run_id,
-          os_pid: pid_or_nil(manifest["os_pid"])
+          os_pid: pid_or_nil(manifest["os_pid"]),
+          attempt: attempt_of(manifest["attempt"]),
+          env: env_of(manifest["env"])
       }
 
       case read_json(@terminal_file) do
@@ -710,7 +822,7 @@ defmodule Barkpark.SelfUpdate.Runner do
   end
 
   defp finish_interrupted(state) do
-    state = interrupted_outcome(state)
+    state = interrupted_outcome(state, true)
     _ = write_terminal(state)
     state
   end
@@ -718,17 +830,19 @@ defmodule Barkpark.SelfUpdate.Runner do
   # The run's child is gone and left no terminal record: the BEAM (and with it
   # this process) died mid-run — on the happy path, by the restart the run
   # itself queued. Recover the outcome from deploy-rebuild.sh's own flight
-  # recorder when it names THIS run; otherwise say interrupted, never idle.
-  defp interrupted_outcome(state) do
+  # recorder when it names THIS run; otherwise the run was interrupted, never
+  # idle. An interrupted self-update run is resumed once (`resume?` set when
+  # `may_resume?` is true, acted on by `after_finish/1`); a resumed run that is
+  # interrupted again is stuck (-4) and stays stopped.
+  defp interrupted_outcome(state, may_resume?) do
     now = DateTime.utc_now()
+    record = matching_deploy_status(state)
 
-    case matching_deploy_status(state) do
-      %{"phase" => phase, "outcome" => outcome} = record ->
-        code = Map.get(@deploy_status_exits, {phase, outcome}, @interrupted_exit)
-
+    case record && Map.fetch(@deploy_status_exits, {record["phase"], record["outcome"]}) do
+      {:ok, code} ->
         line =
           "[runner] service restarted during this run; deploy-rebuild recorded " <>
-            "phase=#{phase} outcome=#{outcome} sha=#{record["sha"]} at #{record["ts"]}"
+            "phase=#{record["phase"]} outcome=#{record["outcome"]} sha=#{record["sha"]} at #{record["ts"]}"
 
         # The flight record's `ts` is when the script reached that phase — for
         # `restart applied`, the moment the restart was queued.
@@ -739,19 +853,71 @@ defmodule Barkpark.SelfUpdate.Runner do
             finished_at: parse_dt(record["ts"]) || now
         }
 
-      nil ->
-        line =
-          "[runner] interrupted: the service restarted while this run was in flight " <>
-            "and no terminal record exists — outcome unknown"
-
-        %{
-          push_log_memory(state, line)
-          | run: {:done, @interrupted_exit},
-            port: nil,
-            finished_at: now
-        }
+      _no_outcome ->
+        interrupted_without_outcome(state, record, may_resume?, now)
     end
   end
+
+  defp interrupted_without_outcome(state, record, may_resume?, now) do
+    where =
+      case record do
+        %{"phase" => phase, "outcome" => outcome} ->
+          "deploy-rebuild recorded phase=#{phase} outcome=#{outcome} sha=#{record["sha"]} at #{record["ts"]}"
+
+        _ ->
+          "no terminal record exists — outcome unknown"
+      end
+
+    {code, lines, resume?} =
+      cond do
+        state.mode == :self_update and state.attempt > 1 ->
+          {@stuck_exit,
+           [
+             "[runner] service restarted during this run; #{where}",
+             "[runner] deploy stuck: the service restarted during this run and during its " <>
+               "resume (attempt #{state.attempt}); not retrying. The box keeps serving its old " <>
+               "build. Deploy again once the restarts are explained."
+           ], false}
+
+        may_resume? and resumable?(state) ->
+          {@interrupted_exit,
+           [
+             "[runner] service restarted during this run; #{where}",
+             "[runner] build interrupted: resuming once (attempt #{state.attempt + 1} of #{max_resumes() + 1})"
+           ], true}
+
+        record != nil ->
+          {@interrupted_exit, ["[runner] service restarted during this run; #{where}"], false}
+
+        true ->
+          {@interrupted_exit,
+           [
+             "[runner] interrupted: the service restarted while this run was in flight " <>
+               "and no terminal record exists — outcome unknown"
+           ], false}
+      end
+
+    state = Enum.reduce(lines, state, &push_log_memory(&2, &1))
+
+    state = %{
+      state
+      | run: {:done, code},
+        port: nil,
+        finished_at: (record && parse_dt(record["ts"])) || now
+    }
+
+    if resume?, do: Map.put(state, :resume?, true), else: state
+  end
+
+  defp resumable?(state) do
+    state.mode == :self_update and state.attempt <= max_resumes() and recent?(state)
+  end
+
+  defp recent?(%{started_at: %DateTime{} = started_at}) do
+    DateTime.diff(DateTime.utc_now(), started_at, :millisecond) <= resume_window_ms()
+  end
+
+  defp recent?(_state), do: false
 
   # Recovery lines are appended to memory + the terminal record, not run.log:
   # the log file is the child's captured output.
@@ -832,6 +998,17 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   defp pid_or_nil(pid) when is_integer(pid), do: pid
   defp pid_or_nil(_other), do: nil
+
+  defp attempt_of(n) when is_integer(n) and n >= 1, do: n
+  defp attempt_of(_other), do: 1
+
+  # The trigger env rides the manifest so a resume runs with the same env.
+  # Only string pairs are trusted back.
+  defp env_of(%{} = env) do
+    for {k, v} <- env, is_binary(k) and is_binary(v), do: {k, v}
+  end
+
+  defp env_of(_other), do: []
 
   defp parse_dt(value) when is_binary(value) do
     case DateTime.from_iso8601(value) do

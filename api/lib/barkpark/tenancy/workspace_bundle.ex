@@ -1197,6 +1197,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp do_export(%Workspace{} = ws, opts) do
     profile = normalize_profile!(Keyword.get(opts, :profile))
     target = resolve_dataset!(ws, Keyword.get(opts, :dataset))
+    Catalog.assert_no_pending_media_cleanup!(Repo)
 
     slug_partition = partition_dataset_slugs_for(ws.id)
     dataset_slugs = narrow_slugs(slug_partition.exclusive, target)

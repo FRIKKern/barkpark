@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.1.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.7.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -133,6 +133,36 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-server-insert": CustomEvent<BpServerInsertDetail>;
   /** The local selection, one per animation frame when it changes; null when blurred or none. */
   "bp-canvas-selection": CustomEvent<CanvasSelection | null>;
+  /** The toolbar state, one per animation frame when it changes; detail equals state(). */
+  "bp-selection-change": CustomEvent<ToolbarState>;
+  /** With format-bubble="off": Mod+K or the link card's Edit. Cancelable; detail.href is the current link or null. */
+  "bp-canvas-link-request": CustomEvent<{ href: string | null }>;
+}
+
+/** A mark a toolbar toggles (portable-doc names). */
+export type ToolbarMark = "strong" | "em" | "code" | "underline" | "strike" | "highlight" | "link" | "wikilink";
+export type ToolbarBlockStyle = "normal" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote";
+export type ToolbarList = "bullet" | "number";
+export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock" | "insertInline";
+export interface ToolbarCommandArgs {
+  mark?: ToolbarMark;
+  href?: string;
+  /** `wikilink`: the document to link to (its published id), and the label kept as `target`. */
+  docId?: string;
+  target?: string;
+  style?: ToolbarBlockStyle;
+  kind?: ToolbarList;
+  type?: string;
+  attrs?: { level?: number };
+}
+/** What a toolbar shows as pressed. */
+export interface ToolbarState {
+  marks: ToolbarMark[];
+  blockStyle: ToolbarBlockStyle | null;
+  list: ToolbarList | null;
+  link: { href: string } | null;
+  wikilink: { target: string; docId: string | null } | null;
+  selection: { empty: boolean; inBlockType: string | null };
 }
 
 /** A caret address. path only below the id-bearing block ("items[2]", "rows[1].cells[0]"); offset in UTF-16 units. */
@@ -205,6 +235,23 @@ export interface BpPaperCanvasElement extends HTMLElement {
     | null
     | undefined;
   mediaUploader: ((file: File) => MaybePromise<MediaUploadResult>) | null | undefined;
+  /** The host's image dialog: an Image insert and an image's Select open it. */
+  mediaPicker:
+    | ((request: { kind: "insert" | "replace"; current: { src: string; alt: string | null } | null }) => MaybePromise<{ src: string; alt?: string; width?: number } | null>)
+    | null
+    | undefined;
+  /** The host's editor for a declared block or inline object, instead of the popover. */
+  editBlockObject:
+    | ((request: {
+        type: string;
+        title: string;
+        inline: boolean;
+        fields: Array<{ name: string; title?: string; type?: string; [key: string]: unknown }>;
+        value: { type: string; [key: string]: unknown };
+        error: { field: string | null; message: string } | null;
+      }) => MaybePromise<Record<string, unknown> | null>)
+    | null
+    | undefined;
 
   acknowledgeOps(seq: number, saved: boolean): boolean;
   discardInflightOps(seq: number): boolean;
@@ -229,6 +276,17 @@ export interface BpPaperCanvasElement extends HTMLElement {
   replaceAll(text: string): FindState & { replaced: number };
   /** Replace the remote carets (decorations only; [] clears). */
   setRemoteSelections(list: RemoteSelection[]): void;
+  /** Toolbar commands on the current selection: true when applied. */
+  run(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
+  toggleMark(mark: ToolbarMark, attrs?: { href?: string; docId?: string; target?: string }): boolean;
+  setBlockStyle(style: ToolbarBlockStyle): boolean;
+  toggleList(kind: ToolbarList): boolean;
+  insertBlock(type: string, attrs?: { level?: number }): boolean;
+  /** A declared inline object at the caret; its field editor opens first. */
+  insertInline(type: string): boolean;
+  /** Whether the command would apply here, without applying it. */
+  can(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
+  state(): ToolbarState;
 
   addEventListener<K extends keyof BpPaperCanvasEventMap>(
     type: K,

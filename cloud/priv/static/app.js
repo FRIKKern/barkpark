@@ -7842,6 +7842,12 @@
     // not a lesser one; the ladder below is where its urgency is expressed.
     if (live && bp.last_seen_at == null) return "unreported";      // 9
     if (live && !healthy) return "degraded";                       // 4
+    // task-9d72b5f86487cf9b: THE RESTART RUNG, the Go twin's arm verbatim
+    // (cloud_status_cmd.go attentionStatus `case live && restarting(b)`).
+    // More than RESTARTING_THRESHOLD automatic service restarts in the agent's
+    // one-hour window. Deploy restarts never count, and an unmeasured box
+    // (null count) never fires.
+    if (live && restarting(bp)) return "restarting";               // 5
     // dr-w10-s1: THE DEPLOY VERDICT, the Go twin's arm verbatim
     // (cloud_status_cmd.go attentionStatus `case live && deploysFailing(b)`).
     // ABOVE every capacity rung below it — a CONFIRMED failure outranks a "may
@@ -7856,8 +7862,8 @@
     // both hold it names the cause. Fires only on a REAL false from a box that
     // owns sites — a null (unmeasured) never fires, and a box with no deploy
     // surface (the feature is off by default) has been refused nothing.
-    if (live && cannotDeploy(bp)) return "cannot_deploy";          // 5
-    if (live && deploysFailing(bp)) return "deploys_failing";      // 6
+    if (live && cannotDeploy(bp)) return "cannot_deploy";          // 6
+    if (live && deploysFailing(bp)) return "deploys_failing";      // 7
     // dr-w24-followup: the box serves a sha on neither side of main's history.
     // Immediately behind deploys_failing by the same ruling — a fact about the
     // box's CODE, not its capacity, and not itself a failed deploy. Until this
@@ -7933,6 +7939,7 @@
     { state: "failed",          bucket: "attention" },
     { state: "suspended",       bucket: "attention" },
     { state: "degraded",        bucket: "attention" },
+    { state: "restarting",      bucket: "attention" },
     { state: "cannot_deploy",   bucket: "attention" },
     { state: "deploys_failing", bucket: "attention" },
     { state: "diverged",        bucket: "attention" },
@@ -8122,6 +8129,10 @@
     // dr-w15-s5: warn (directly under degraded), and the detail names WHICH
     // refusal the box gave and how many sites wait on it — the Go twin's
     // cannotDeployReason.
+    // task-9d72b5f86487cf9b: warn (directly under degraded), and the detail
+    // is the Go twin's restartMarker: the count, the window and the last
+    // restart's time, unit and reason.
+    if (kind === "restarting") return { role: "warn", label: "Restarting", detail: restartDetail(bp) };
     if (kind === "cannot_deploy") {
       var sd = bp.site_deploy, refusals = [];
       if (sd.configured === false) refusals.push("Site deploys not configured on the box");
@@ -8502,6 +8513,42 @@
   }
   function deployPct1(n) {
     return String(Math.round(n * 10) / 10);
+  }
+  // task-9d72b5f86487cf9b: the restart rung's predicate, the Go twin's
+  // restarting(). The agent counts automatic restarts of the service units
+  // over its window (one hour); a deploy restart is a manual job and never
+  // counts. A null count is UNMEASURED and never fires.
+  var RESTARTING_THRESHOLD = 3;
+  function restarting(bp) {
+    var p = bp && bp.pressure;
+    var n = p && p.service_restarts_count;
+    return typeof n === "number" && n > RESTARTING_THRESHOLD;
+  }
+  // "Restarted 5x in 1h, last 22:53 UTC on blue: killed by SIGKILL, OOM kill",
+  // the Go twin's restartMarker.
+  function restartDetail(bp) {
+    var p = (bp && bp.pressure) || {};
+    var n = p.service_restarts_count;
+    if (typeof n !== "number" || n <= 0) return "";
+    var s = "Restarted " + n + "x";
+    var w = p.service_restarts_window_s;
+    if (typeof w === "number" && w > 0) s += " in " + (w % 3600 === 0 ? (w / 3600) + "h" : Math.round(w / 60) + "m");
+    var last = (p.service_restarts || [])[0];
+    if (last) {
+      var t = new Date(last.restarted_at);
+      if (!isNaN(t.getTime())) {
+        s += ", last " + String(t.getUTCHours()).padStart(2, "0") + ":" + String(t.getUTCMinutes()).padStart(2, "0") + " UTC";
+      }
+      var unit = String(last.unit || "").replace(/\.service$/, "");
+      if (unit.indexOf("@") >= 0) unit = unit.slice(unit.indexOf("@") + 1);
+      if (unit) s += " on " + unit;
+      var why = [];
+      if ((last.exit_kind === "killed" || last.exit_kind === "dumped") && last.exit_signal) why.push("killed by SIG" + last.exit_signal);
+      else if (last.exit_kind === "exited" && typeof last.exit_status === "number") why.push("exit code " + last.exit_status);
+      if (last.oom_killed === true) why.push("OOM kill");
+      if (why.length) s += ": " + why.join(", ");
+    }
+    return s;
   }
   // The WHY, and it never prints a percentage without the denominator that
   // produced it: a rate with no sample is a number with no population.

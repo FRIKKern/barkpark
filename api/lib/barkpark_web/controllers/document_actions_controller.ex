@@ -100,6 +100,28 @@ defmodule BarkparkWeb.DocumentActionsController do
     )
   end
 
+  # The action's plugin is turned off in this workspace: refused in either mode,
+  # the same way it is left out of `index/2`'s list.
+  defp respond_dispatch({:error, {:plugin_disabled, _} = reason}, conn, _mode) do
+    ErrorResponse.emit_custom(
+      conn,
+      :unprocessable_entity,
+      "plugin_disabled",
+      DocActions.format_action_error(reason)
+    )
+  end
+
+  # An action that can't act on this document's type (OnixEdit's on a non-book)
+  # is a refused request in either mode: 422, never a 200 with an error preview.
+  defp respond_dispatch({:error, :not_a_book}, conn, _mode) do
+    ErrorResponse.emit_custom(
+      conn,
+      :unprocessable_entity,
+      "action_not_applicable",
+      DocActions.format_action_error(:not_a_book)
+    )
+  end
+
   # A dry-run failure (e.g. ONIX failing XSD validation) is the PREVIEW's own
   # answer, not a malformed request — 200, same as `preview_from_result/1`
   # shapes a LiveView flash from the identical error tuple instead of a crash.

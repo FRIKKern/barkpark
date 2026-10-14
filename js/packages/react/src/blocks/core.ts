@@ -433,26 +433,27 @@ const diff: Emit = (b) => {
   )
 }
 
-// The D78 annotation markers with their evergreen token colors (glyph is the
-// semantic carrier; the legend row disambiguates locally).
+// The D78 annotation markers and the modifier class paper-surface.css paints
+// each one's colour through (glyph is the semantic carrier; the legend row
+// disambiguates locally). No colour rides the markup (task-2c5d3da1b7f7db25).
 const FILETREE_MARKERS: Array<[string, string]> = [
-  [' ● ', 'var(--ok)'],
-  [' ○ ', 'var(--paper-ink-soft)'],
-  [' ✕ ', 'var(--danger)'],
+  [' ● ', 'ok'],
+  [' ○ ', 'soft'],
+  [' ✕ ', 'danger'],
 ]
 
 function filetreeRowHtml(line: string): string {
-  let hit: { idx: number; glyph: string; color: string } | null = null
-  for (const [glyph, color] of FILETREE_MARKERS) {
+  let hit: { idx: number; glyph: string; tone: string } | null = null
+  for (const [glyph, tone] of FILETREE_MARKERS) {
     const idx = line.indexOf(glyph)
-    if (idx !== -1 && (hit === null || idx < hit.idx)) hit = { idx, glyph, color }
+    if (idx !== -1 && (hit === null || idx < hit.idx)) hit = { idx, glyph, tone }
   }
   if (hit === null) return `<div style="white-space: pre;">${escapeHtml(line)}</div>`
   const path = line.slice(0, hit.idx)
   const note = hit.glyph + line.slice(hit.idx + hit.glyph.length)
   return (
     `<div style="white-space: pre;">${escapeHtml(path)}` +
-    `<span class="bp-filetree-note" style="color: ${hit.color};">${escapeHtml(note)}</span></div>`
+    `<span class="bp-filetree-note bp-filetree-note--${hit.tone}">${escapeHtml(note)}</span></div>`
   )
 }
 
@@ -654,11 +655,13 @@ const MONO = 'ui-monospace,Menlo,monospace'
 // code-tabs panel and a standalone `code` block render the same chrome. A bare
 // --paper-bg-deep slab on the --paper-bg page — no left bar: the 3px
 // reading-accent bar was retired with task-ddb1e0ab09a62466 once the reader
-// body stopped painting the fill token as the page.
+// body stopped painting the fill token as the page. The slab's ground and ink
+// ride the `bp-codeblock` class paper-surface.css paints; layout and type stay
+// inline (task-2c5d3da1b7f7db25).
 function codeBlockHtml(value: string, emphasis: EmphasisRange[] = []): string {
   const escaped = codeBodyHtml(value, emphasis)
   return (
-    `<pre style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
+    `<pre class="bp-codeblock" style="border:0;border-radius:var(--bp-codeblock-radius, 0);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);` +
     `margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ${MONO});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);` +
     `overflow-x:auto;white-space:pre">${escaped}</pre>`
   )
@@ -727,16 +730,16 @@ const code: Emit = (b) => {
   return source.trim() === '' ? '' : codeBlockHtml(source, codeEmphasis(b))
 }
 
-// The `bp-section-divider` classes carry no styling (every value is inline, the
-// same bytes figures.ex emits) — they are the handle the reader shell needs to
-// say something about a divider's POSITION, e.g. that one sitting directly in
-// front of a section head draws a boundary the head already draws. Kept here so
-// an SDK-rendered document is the same document the reader renders. The § mark
-// paints the PAGE token (--paper-bg): it masks the hairline, it is not a fill.
+// The `bp-section-divider` classes are the handle the reader shell needs to say
+// something about a divider's POSITION (one directly in front of a section head
+// draws a boundary the head already draws), and they carry its COLOURS: the
+// rule keeps its width and style inline, and paper-surface.css paints its
+// colour, the § mark's ground (the PAGE token, --paper-bg: it masks the
+// hairline) and its ink (task-2c5d3da1b7f7db25). The same bytes figures.ex emits.
 const divider: Emit = () =>
-  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e2e6e5)">` +
+  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid">` +
   `<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
-  `background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
+  `font-size:1.1rem">§</span></div>`
 
 const image: Emit = (b) => {
   const rawSrc = str(b.src).trim()
@@ -795,7 +798,7 @@ const diagram: Emit = (b) => {
   const source = str(b.source)
   const caption = str(b.caption)
   return (
-    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto">` +
+    `<figure class="bp-diagram" style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;border:1px solid;border-radius:4px;overflow-x:auto">` +
     `<pre class="mermaid">${encodeMermaid(source)}</pre>` +
     articleFigcaption(caption) +
     `</figure>`
@@ -819,7 +822,7 @@ const asciicast: Emit = (b) => {
   const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid;border-radius:6px;overflow:hidden"></div>` +
     articleFigcaption(caption) +
     `</figure>`
   )
@@ -866,7 +869,10 @@ const action: Emit = (b) => {
 }
 
 /* paper-links (compose.ex paper_links_html) — authored refs render everywhere;
- * `_paper_links` may carry transient live metadata injected by a reader. */
+ * `_paper_links` may carry transient live metadata injected by a reader. Theme
+ * colours ride classes (`bp-plinks*`, `bp-plink*`) the paper-surface stylesheet
+ * paints; geometry and type stay inline, a border keeping its width and style
+ * with only its colour moved (task-ef9f386f8cb5e32a). */
 
 interface PaperLinkRef {
   slug: string
@@ -912,20 +918,20 @@ function paperLinkCard(ref: PaperLinkRef, ctx: RenderCtx): string {
   const description =
     ref.description === ''
       ? ''
-      : `<span style="display:block;margin-top:0.42rem;color:var(--paper-ink-soft, #55635e);line-height:1.55">${escapeHtml(ref.description)}</span>`
+      : `<span class="bp-plink__desc" style="display:block;margin-top:0.42rem;line-height:1.55">${escapeHtml(ref.description)}</span>`
   const reason =
     ref.reason !== '' && normalizedCopy(ref.reason) !== normalizedCopy(ref.description)
-      ? `<span style="display:block;margin-top:0.65rem;color:var(--paper-ink, #17332d);font-size:0.88rem;line-height:1.45"><strong>${ctx.t('Why it matters:')}</strong> ${escapeHtml(ref.reason)}</span>`
+      ? `<span class="bp-plink__reason" style="display:block;margin-top:0.65rem;font-size:0.88rem;line-height:1.45"><strong>${ctx.t('Why it matters:')}</strong> ${escapeHtml(ref.reason)}</span>`
       : ''
   const metadataParts = [ref.eventType, ref.rev === '' ? '' : ctx.t('rev %{n}', { n: ref.rev }), ref.updatedAt].filter(Boolean)
   const metadata =
     metadataParts.length === 0
       ? ''
-      : `<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">${escapeHtml(metadataParts.join(' · '))}</span>`
+      : `<span class="bp-plink__meta" style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em">${escapeHtml(metadataParts.join(' · '))}</span>`
 
   return (
-    `<a data-paper-link-card href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none">` +
-    `<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">${escapeHtml(ref.title)}</strong>` +
+    `<a data-paper-link-card class="bp-plink bp-plink--list" href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid;border-left:3px solid;border-radius:0.65rem;color:inherit;text-decoration:none">` +
+    `<strong class="bp-plink__title bp-plink__title--list" style="display:block;font-size:1.02rem;line-height:1.35">${escapeHtml(ref.title)}</strong>` +
     description +
     reason +
     metadata +
@@ -948,12 +954,12 @@ const paperLinks: Emit = (b, ctx) => {
   const intro =
     description === ''
       ? ''
-      : `<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">${escapeHtml(description)}</p>`
+      : `<p class="bp-plinks__desc" style="margin:0.45rem 0 0;line-height:1.6">${escapeHtml(description)}</p>`
 
   return (
-    `<section data-paper-links aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #e2e6e5)">` +
-    `<header style="margin:0 0 1.15rem"><h2 style="margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)">${escapeHtml(title)}</h2>${intro}</header>` +
-    `<div style="display:grid;gap:0.85rem">${cards}</div></section>`
+    `<section data-paper-links class="bp-plinks bp-plinks--list" aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid">` +
+    `<header style="margin:0 0 1.15rem"><h2 class="bp-plinks__title" style="margin:0;font-size:1.15rem;line-height:1.25">${escapeHtml(title)}</h2>${intro}</header>` +
+    `<div class="bp-plinks__grid bp-plinks__grid--list" style="display:grid;gap:0.85rem">${cards}</div></section>`
   )
 }
 

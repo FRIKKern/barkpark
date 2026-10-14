@@ -60,7 +60,7 @@ func supportEnvIsolate(t *testing.T) {
 	withTempConfigHome(t)
 	// axi-b4: the server/token names come from the shared dialect lists; the
 	// DNS token is this suite's own and stays literal.
-	for _, k := range append(append(append([]string{}, ServerEnvNames...), TokenEnvNames...), "BARKPARK_DNS_HCLOUD_TOKEN") {
+	for _, k := range append(append(append([]string{}, ServerEnvNames...), TokenEnvNames...), "BARKPARK_DNS_HCLOUD_TOKEN", "BARKPARK_SSH_KEY") {
 		t.Setenv(k, "")
 	}
 }
@@ -78,11 +78,15 @@ func supportSaveSeams(t *testing.T) {
 	origClock := supportClock
 	origDNS := supportDNSFor
 	origSHA := supportResolveMainSHA
+	origKey := supportSSHKeyName
 	// Never reach GitHub from a test: every run resolves a fixed fake sha
 	// unless the test overrides it.
 	supportResolveMainSHA = func() (string, error) { return supportTestSHA, nil }
+	// Never list real Hetzner keys from a test.
+	supportSSHKeyName = func(context.Context) (string, bool, error) { return "test-key", true, nil }
 	t.Cleanup(func() {
 		supportResolveMainSHA = origSHA
+		supportSSHKeyName = origKey
 		supportCreateServer = origCreate
 		supportProviderFor = origProvider
 		supportRunnerFor = origRunner

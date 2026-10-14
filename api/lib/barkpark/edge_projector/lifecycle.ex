@@ -34,16 +34,14 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
       mirroring Indx.
     * `:after_delete`    — a doc was removed          → DELETE op (always)
 
-  ## The feature flag (default OFF)
+  ## The feature flag (default ON since task-6e2552cdeb223fa2)
 
   `Settings.get().incremental_project` gates the `:after_save` add/update path
   ONLY:
 
-    * OFF (the DEFAULT) → save takes the deterministic full per-scope REBUILD
-      path. Inert incremental path.
-    * ON  → save routes to the per-document incremental UPSERT op. A mis-diff
-      strands stale edges in the durable table (no blue/green to discard,
-      unlike Indx) — UNPROVEN, spike-gated.
+    * ON (the DEFAULT) → save routes to the per-document incremental UPSERT op.
+    * OFF (`EDGE_PROJECTOR_INCREMENTAL=0`) → save takes the full per-scope
+      REBUILD path, one type-wide rebuild per save.
 
   `:after_publish` no longer reads this flag (see below) — it always runs the
   bounded per-doc upsert, synchronously. delete/unpublish are ALWAYS
@@ -217,15 +215,29 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
 
   def enqueue_rebuild(_other), do: :ok
 
-  # add/update routing gated by the incremental_project flag. OFF (default) →
-  # the full per-scope REBUILD op. ON → the per-document UPSERT op carrying the
-  # doc _id; with no resolvable _id we cannot target a doc, so fall back to a
-  # rebuild (never leave the graph stale).
+  # add/update routing gated by the incremental_project flag. ON (default) →
+  # the per-document UPSERT op carrying the doc _id. OFF → the full per-scope
+  # REBUILD op. With no resolvable _id we cannot target a doc, so fall back to
+  # a rebuild (never leave the graph stale).
+  #
+  # A DRAFT save under the incremental path enqueues nothing. The table is the
+  # PUBLISHED graph: the rebuild path re-extracts the published corpus, so a
+  # draft save never changed what it wrote, and an upsert of a draft would
+  # project the draft's references onto the published row's PK
+  # (`Projector.doc_pk/2` prefers the published row). The publish that lands
+  # the draft upserts it.
   defp route_save(doc, dataset) do
-    if incremental_project?() do
-      do_enqueue_upsert(doc, dataset)
-    else
-      do_enqueue_rebuild(doc, dataset)
+    cond do
+      not incremental_project?() -> do_enqueue_rebuild(doc, dataset)
+      draft_doc?(doc) -> :ok
+      true -> do_enqueue_upsert(doc, dataset)
+    end
+  end
+
+  defp draft_doc?(doc) do
+    case doc_id(doc) do
+      "drafts." <> _ -> true
+      _ -> false
     end
   end
 
@@ -314,6 +326,65 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
     :ok
   end
 
+  @doc """
+  Take the deferred edge-upsert queue out of this process, in queue order, for
+  `run_upserts/1` to run elsewhere (a `visibility: :async` mutate batch hands
+  it to a post-commit task, task-6e2552cdeb223fa2).
+  """
+  @spec take_deferred_upserts() :: [{map(), String.t(), String.t()}]
+  def take_deferred_upserts do
+    (Process.delete(@deferred_edge_upserts_key) || []) |> Enum.reverse()
+  end
+
+  @doc """
+  Run upserts taken by `take_deferred_upserts/0`, off the request.
+
+  The queued document is the row as it was at ITS commit. A later write of the
+  same document can commit, and its own task can run, before this one does, so
+  each upsert takes a per-document advisory lock and re-reads the row inside
+  it: whichever task runs last projects the newest committed row, in either
+  order. A row that is gone by then (unpublished, deleted) is skipped; its own
+  delete op removes its edges.
+  """
+  @spec run_upserts([{map(), String.t(), String.t()}]) :: :ok
+  def run_upserts(queue) when is_list(queue) do
+    Enum.each(queue, &run_one_upsert/1)
+  end
+
+  # A SESSION lock on one checked-out connection, not a transaction: the
+  # upsert opens its own transaction, and a raise inside a nested one would
+  # poison an outer one (see "Why a batch publish is DEFERRED" above).
+  defp run_one_upsert({%{id: pk} = doc, id, dataset}) when not is_nil(pk) do
+    key = "edge-upsert:#{pk}"
+
+    Repo.checkout(fn ->
+      _ = Repo.query!("SELECT pg_advisory_lock(hashtext($1))", [key])
+
+      try do
+        # The row this write itself committed; the upsert scopes its edges.
+        # global-read: by-PK re-read of the queued row, tenancy is its own
+        case Repo.get(Barkpark.Content.Document, pk) do
+          nil -> :ok
+          current -> flush_one_deferred_upsert({current, id, dataset})
+        end
+      after
+        Repo.query!("SELECT pg_advisory_unlock(hashtext($1))", [key])
+      end
+    end)
+
+    :ok
+  rescue
+    e ->
+      Logger.error(
+        "EdgeProjector.Lifecycle: post-commit upsert RAISED for _id=#{id} " <>
+          "dataset=#{dataset}, falling back to the debounced path: " <> Exception.message(e)
+      )
+
+      do_enqueue_upsert(doc, dataset)
+  end
+
+  defp run_one_upsert(item), do: flush_one_deferred_upsert(item)
+
   # ONE queued upsert, isolated — mirrors `Broadcast.flush_one_webhook/1`
   # exactly in intent: a raise here must not abort the `Enum.each` and drop
   # every LATER queued upsert of the same committed batch. `upsert_now/3`
@@ -398,8 +469,12 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   defp require_workspace?(nil), do: Tenancy.multi_tenant?()
   defp require_workspace?(ws) when is_binary(ws), do: false
 
+  # Read once per request or batch: `Settings.get/0` reads the
+  # `plugin_settings` row, and a batch asked once per saved document.
   defp incremental_project? do
-    Settings.get().incremental_project == true
+    Barkpark.Content.WriteScope.request_memo([], :edge_projector_incremental, fn ->
+      Settings.get().incremental_project == true
+    end)
   rescue
     # Settings.get/0 never raises by contract, but a misconfigured DB read must
     # never crash a lifecycle hook — degrade to the safe rebuild path.

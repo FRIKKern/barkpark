@@ -23,6 +23,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { readerPaintClass } from "./embed-node.js";
+import { objectBlockFor, objectBlockValue } from "./inline-object.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -82,7 +83,10 @@ export const Opaque = Node.create({
   // Match ONLY our own generic opaque wrapper; no bare-tag claim, so we never contend
   // with sheet/embed/section/field parse rules (all of which key on data-bp-type).
   parseHTML() {
-    return [{ tag: "div[data-bp-opaque]" }];
+    // Above every built-in block's `div[data-bp-type=…]` rule: a carried block
+    // that shares a built-in's name (a declared `callout`) must come back as the
+    // carry, bpBlock and all (task-d175b72aba4d5cd6).
+    return [{ tag: "div[data-bp-opaque]", priority: 80 }];
   },
 
   renderHTML({ HTMLAttributes }) {
@@ -92,7 +96,7 @@ export const Opaque = Node.create({
   // A read-only chip node-view (NO edit surface). The whole block rides on bpBlock;
   // PM never reads/writes inside this view.
   addNodeView() {
-    return ({ node, editor }) => {
+    return ({ node, editor, view }) => {
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || block.type || "block";
       if (bpType === "note") return readonlyNoteView(node, editor);
@@ -105,7 +109,7 @@ export const Opaque = Node.create({
 
       const chip = document.createElement("span");
       chip.className = "bp-canvas-readonly-chip";
-      chip.textContent = opaqueChipLabel(bpType);
+      paintChip(dom, chip, bpType, block, view && view.dom);
       dom.appendChild(chip);
 
       return {
@@ -115,7 +119,7 @@ export const Opaque = Node.create({
           const b = (updated.attrs && updated.attrs.bpBlock) || {};
           const t = (updated.attrs && updated.attrs.bpType) || b.type || "block";
           if (t === "note") return false;
-          chip.textContent = opaqueChipLabel(t);
+          paintChip(dom, chip, t, b, dom);
           return true;
         },
         stopEvent: () => true,
@@ -126,8 +130,39 @@ export const Opaque = Node.create({
 });
 
 // A calm read-only label for a carried block (e.g. "section", "composite", "codelist").
-function opaqueChipLabel(bpType) {
-  return bpType ? `↪ ${bpType}` : "↪ block";
+// A custom object block the field DECLARES is a row instead, as Sanity draws one: an
+// icon, the kind title and a preview line (a field value, task-65fb83593b2d1c29),
+// each its own element a host can style (.bp-canvas-object-row, [data-object-type]).
+// The chip's text stays "Callout · warning" (the separator is in the text, not
+// shown), so its name and text read the same.
+function paintChip(dom, chip, bpType, block, el) {
+  const host = el && typeof el.closest === "function" ? el.closest("bp-paper-canvas") : null;
+  const vocab = host && typeof host.inlineObjectVocabulary === "function" ? host.inlineObjectVocabulary() : null;
+  const kind = objectBlockFor(vocab, bpType);
+  const row = !!(kind && Array.isArray(kind.fields) && kind.fields.length);
+  dom.classList.toggle("bp-canvas-object-row", row);
+  if (!row) {
+    dom.removeAttribute("data-object-type");
+    chip.textContent = bpType ? `↪ ${bpType}` : "↪ block";
+    return;
+  }
+  dom.setAttribute("data-object-type", bpType);
+  const value = objectBlockValue(kind, block || {});
+  const span = (cls, text) => {
+    const s = document.createElement("span");
+    s.className = cls;
+    if (text != null) s.textContent = text;
+    return s;
+  };
+  const icon = span("bp-canvas-object-icon");
+  icon.setAttribute("aria-hidden", "true");
+  const text = span("bp-canvas-object-text");
+  text.appendChild(span("bp-canvas-object-title", kind.title));
+  if (value !== "") {
+    text.appendChild(span("bp-canvas-object-sep", " · "));
+    text.appendChild(span("bp-canvas-object-preview", value));
+  }
+  chip.replaceChildren(icon, text);
 }
 
 // Unsafe note carriers stay opaque. Only the canonical server producer supplies

@@ -148,6 +148,8 @@ never pays for the other:
 ```ts
 import { PortableText } from '@barkpark/react/portable-text' // legacy Sanity-shaped shim (~1.3 KB gz)
 import { PortableDoc, renderPortableDocument } from '@barkpark/react/portable-doc' // canonical renderer, shim-free
+import { fieldBlocks } from '@barkpark/react/field-blocks' // opt-in schema field rows: <PortableDoc blocks={fieldBlocks} />
+import { embedBlocks } from '@barkpark/react/embed' // opt-in note transclusion: blocks={embedBlocks({ [target]: html })}
 ```
 
 **Compatibility policy:** the root barrel (`@barkpark/react`) keeps exporting

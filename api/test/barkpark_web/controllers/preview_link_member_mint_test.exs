@@ -1,9 +1,9 @@
 defmodule BarkparkWeb.PreviewLinkMemberMintTest do
   @moduledoc """
   task-9cfe08fe1e91b6c9 — `POST /v1/shares/preview-links` widened from
-  admin-only to any write-capable workspace MEMBER, the third and final
-  sibling of this widening series (after task-ea6c9abb868593f8's preview
-  tokens and task-d50757dc446514e7's share links). `GET`/`DELETE` stay
+  admin-only to any write-capable workspace MEMBER, after
+  task-ea6c9abb868593f8's preview tokens. (The share-link mint was not
+  widened: #22484 closed unmerged; owner decision 2026-10-10.) `GET`/`DELETE` stay
   admin-only, untouched — covered by the existing `preview_link_test.exs`.
 
   Covers the two things this widening had to get right:
@@ -19,7 +19,7 @@ defmodule BarkparkWeb.PreviewLinkMemberMintTest do
   there is nothing separate to keep admin-gated once `mint` itself widens.
 
   Also pins the `dataset_bound` (#22393) fix, applied here PRE-EMPTIVELY
-  (task-d50757dc446514e7 found this exact gap live on the sibling
+  (the same gap #22546 closed on the sibling, admin-only
   `ShareLinkController.mint/2`): the dataset rides inside the composite
   `scope` string, which neither `RequireToken` nor `OptionalToken`'s
   `dataset_off_binding?/2` parses.

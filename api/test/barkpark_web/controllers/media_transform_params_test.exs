@@ -21,6 +21,9 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
   `serve_rendition/2` back to a bare call reds the two "...refused with 400"
   tests below (they observe 200 with the original bytes instead); restoring
   the guard goes green again.
+
+  task-50cabce448b02af7 changed `serve/2`: it now applies the supported
+  transform vocabulary to raster images and still refuses the rest.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -71,23 +74,27 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
   end
 
   describe "GET .../media/files/* — transform params" do
-    test "a transform param is refused with 400, never silently served", ctx do
+    # task-50cabce448b02af7: `/media/files/*` now APPLIES w/h/fit/crop/rect/
+    # fp-x/fp-y/fm/auto/q (MediaOnDemandTransformTest pins the image arm). The
+    # property this file guards still holds: a transform request is never
+    # answered with the original bytes. This blob is not an image, so it 400s.
+    test "a transform param on a non-image is refused with 400, never silently served", ctx do
       conn = get_scoped(ctx, "/media/files/#{@path}?w=200")
 
       assert conn.status == 400
       body = json_response(conn, 400)
-      assert body["error"]["code"] == "unsupported_transform_param"
-      assert body["error"]["details"]["ignored"] == ["w"]
-      assert body["error"]["message"] =~ "w"
-      assert body["error"]["message"] =~ "/media/renditions/<id>/<preset>"
+      assert body["error"]["code"] == "not_transformable"
+      refute response(conn, 400) =~ @bytes
     end
 
-    test "every ignored transform param is named, not just the first", ctx do
-      conn = get_scoped(ctx, "/media/files/#{@path}?w=200&h=100&fm=webp")
+    test "unapplied transform vocabulary is refused, every name listed", ctx do
+      conn = get_scoped(ctx, "/media/files/#{@path}?dpr=2&w=200&blur=10")
 
       assert conn.status == 400
       body = json_response(conn, 400)
-      assert body["error"]["details"]["ignored"] == ["w", "h", "fm"]
+      assert body["error"]["code"] == "unsupported_transform_param"
+      assert body["error"]["details"]["ignored"] == ["dpr", "blur"]
+      assert body["error"]["message"] =~ "docs/media/IMAGE-TRANSFORMS.md"
     end
 
     test "a signed-url param set is NOT denylisted — original bytes still serve", ctx do
@@ -120,7 +127,7 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
       body = json_response(conn, 400)
       assert body["error"]["code"] == "unsupported_transform_param"
       assert body["error"]["details"]["ignored"] == ["quality"]
-      assert body["error"]["message"] =~ "/media/renditions/<id>/<preset>"
+      assert body["error"]["message"] =~ "/media/files/<path>"
     end
 
     test "a signed-url param set is NOT denylisted on renditions either", ctx do

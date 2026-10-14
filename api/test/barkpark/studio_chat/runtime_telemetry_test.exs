@@ -111,7 +111,8 @@ defmodule Barkpark.StudioChat.RuntimeTelemetryTest do
                args: [],
                sink: self(),
                session_id: session_id,
-               timeout_ms: 500
+               # Answer-or-exit, not a 500 ms wall clock (task-2b9df7d705f9ea7a).
+               timeout_ms: :infinity
              })
 
     assert_receive {:studio_chat_runtime_event,

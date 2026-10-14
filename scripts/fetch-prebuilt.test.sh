@@ -160,6 +160,28 @@ check "non-slot path reached only the fake curl" \
 # past all four comparisons (it dies at the tarball download instead). The
 # MISMATCH arm is mutation-proved — delete the `otp` line from fetch-prebuilt.sh
 # and it fails, because the run then reaches "artifact download failed".
+# task-15e2eb3aa36b240b: deploy-rebuild.sh calls `--into <root> <sha>` under
+# its own lock. That mode must fall back exactly like the plain one and never
+# touch the lock, the live build or the service.
+echo "== --into mode: same fallback, no lock, no swap, no restart =="
+INTO="$TMP/into"
+make_repo "$INTO"
+before="$(snapshot "$INTO")" || die_digest "into sentinels before the arm"
+: > "$DANGER_LOG"
+run_script "$INTO" fetch-prebuilt.sh "$TMP/into-usage.out" --into
+rc=$?
+check "--into without a root is a usage error (exit 1)" "[ '$rc' = 1 ]"
+check "--into usage text" "grep -qF 'usage: fetch-prebuilt.sh --into <build-root> <sha>' '$TMP/into-usage.out'"
+: > "$DANGER_LOG"
+run_script "$INTO" fetch-prebuilt.sh "$TMP/into.out" --into api/_build_next deadbeef
+rc=$?
+check "--into with no artifact is exit 1 (caller compiles)" "[ '$rc' = 1 ]"
+check "--into with no artifact says fallback" "grep -qF '[fetch-prebuilt] fallback to on-box compile:' '$TMP/into.out'"
+check "--into reached only the fake curl (no flock, no systemctl)" \
+  "[ \"\$(wc -l < '$DANGER_LOG' | tr -d ' ')\" = 1 ] && grep -q '^curl ' '$DANGER_LOG'"
+after="$(snapshot "$INTO")" || die_digest "into sentinels after the arm"
+check_eq "--into left the live build and deps untouched" "$before" "$after"
+
 echo "== stamp gate: every published stamp field is gated =="
 
 STAMP_FAKE="$TMP/stampbin"

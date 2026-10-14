@@ -273,13 +273,37 @@ defmodule BarkparkCloud.DeviceAuth do
   end
 
   @doc """
-  Deny a request: delete the row by `user_code`. Idempotent — always `:ok` (a
-  no-op when the code is unknown or already gone). A subsequent poll on the
-  matching device code then finds nothing → `{:error, :expired_or_invalid}`.
+  May `user_id` see who is asking (the requester's IP and user agent) on this
+  request's confirm screen? Yes for an unbound request — any signed-in user may
+  approve it — and, for a TEAM-BOUND one, only for a member of that team: the
+  people who could approve it (task-c9560d84f704705d).
+  """
+  @spec may_see_requester?(Request.t(), binary()) :: boolean()
+  def may_see_requester?(%Request{requested_team_id: nil}, _user_id), do: true
+
+  def may_see_requester?(%Request{requested_team_id: team_id}, user_id) do
+    Repo.exists?(
+      from(m in TeamMembership, where: m.team_id == ^team_id and m.user_id == ^user_id)
+    )
+  end
+
+  @doc """
+  Deny a PENDING request: delete the row by `user_code`. Idempotent — always
+  `:ok` (a no-op when the code is unknown, already gone, or no longer pending).
+  A subsequent poll on the matching device code then finds nothing →
+  `{:error, :expired_or_invalid}`.
+
+  Only `pending` rows: an APPROVED row is a login a rightful approver already
+  granted and the CLI is about to collect, and a code holder must not be able to
+  take it back (task-c9560d84f704705d). Any signed-in code holder may deny a
+  pending request, team member or not — the console's "Didn't start this?
+  Deny" safety valve.
   """
   @spec deny(binary()) :: :ok
   def deny(user_code) when is_binary(user_code) do
-    from(r in Request, where: r.user_code_hash == ^user_code_hash(user_code))
+    from(r in Request,
+      where: r.user_code_hash == ^user_code_hash(user_code) and r.status == "pending"
+    )
     |> Repo.delete_all()
 
     :ok

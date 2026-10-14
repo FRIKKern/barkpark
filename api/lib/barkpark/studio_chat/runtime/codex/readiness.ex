@@ -36,31 +36,65 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Readiness do
     end
   end
 
-  # Bounded shell-out under the standard async_nolink + Task.yield ||
-  # Task.shutdown(:brutal_kill) deadline. Sobelow CI.System is a
-  # false-positive here: `path` comes from resolve_binary/1 — a
-  # System.find_executable/1 lookup (or absolute-path stat) of the
-  # server-configured codex binary name, never request data — and the argv is
-  # the fixed ["--version"]; no shell string, no client input. This durable
-  # inline skip replaces the line-anchored `.sobelow-skips` fingerprint
-  # (readiness.ex:42), which any edit shifting this file would silently
-  # re-red on main — the exact fingerprint-drift the #2641 pattern cures.
-  # sobelow_skip ["CI.System"]
+  # Bounded `--version` shell-out. The task owns a PORT (not `System.cmd`) so
+  # that on its own deadline it can REAP the child: `PortReaper.reap/1` closes
+  # the port and SIGKILLs the OS pid (task-3d3f89e2966ea9d7). The old shape ran
+  # `System.cmd` in the task and `Task.shutdown(:brutal_kill)`ed it on timeout;
+  # that closes the port, and a port close sends the child NO signal, so a
+  # hung `--version` that does not read stdin was orphaned to init.
+  #
+  # The task's own deadline fires first; the caller's `Task.yield` outlives it
+  # by a second only as a backstop. `path` comes from resolve_binary/1 (a
+  # server-configured binary, never request data) and the argv is the fixed
+  # ["--version"].
   defp version(path, timeout) do
     task =
       Task.Supervisor.async_nolink(Barkpark.TaskSupervisor, fn ->
-        System.cmd(path, ["--version"], stderr_to_stdout: false)
+        run_version(path, timeout)
       end)
 
-    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {output, 0}} -> parse_version(output)
-      {:ok, {_output, _status}} -> {:error, :version_failed}
+    case Task.yield(task, yield_timeout(timeout)) || Task.shutdown(task, :brutal_kill) do
+      {:ok, result} -> result
       {:exit, _reason} -> {:error, :version_failed}
       nil -> {:error, :timeout}
     end
+  end
+
+  defp yield_timeout(:infinity), do: :infinity
+  defp yield_timeout(ms) when is_integer(ms), do: ms + 1_000
+
+  defp run_version(path, timeout) do
+    port = Port.open({:spawn_executable, path}, [:binary, :exit_status, args: ["--version"]])
+
+    deadline =
+      if is_integer(timeout), do: Process.send_after(self(), {:version_deadline, port}, timeout)
+
+    collect_version(port, "", deadline)
   rescue
     _ -> {:error, :version_failed}
   end
+
+  defp collect_version(port, acc, deadline) do
+    receive do
+      {^port, {:data, data}} ->
+        collect_version(port, acc <> data, deadline)
+
+      {^port, {:exit_status, 0}} ->
+        cancel_deadline(deadline)
+        parse_version(acc)
+
+      {^port, {:exit_status, _status}} ->
+        cancel_deadline(deadline)
+        {:error, :version_failed}
+
+      {:version_deadline, ^port} ->
+        Barkpark.PortReaper.reap(port)
+        {:error, :timeout}
+    end
+  end
+
+  defp cancel_deadline(nil), do: :ok
+  defp cancel_deadline(ref), do: Process.cancel_timer(ref)
 
   defp parse_version(output) do
     case Regex.run(~r/\d+(?:\.\d+)+/, output) do

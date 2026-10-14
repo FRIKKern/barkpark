@@ -60,6 +60,25 @@ defmodule BarkparkWeb.Studio.SettingsLocaleTest do
     refute html =~ "Theme, plugins and credentials for"
   end
 
+  # task-a1b3ef2e5475f9c5: the language picker offered "en" and "nb-NO". Each
+  # language is named in itself, in every UI language; the values stay codes.
+  test "the Studio language picker names each language in itself", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    html = render_live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/settings")
+
+    options =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("#workspace-locale option")
+
+    pairs = Enum.zip(LazyHTML.attribute(options, "value"), Enum.map(options, &LazyHTML.text/1))
+    assert {"en", "English"} in pairs
+    assert {"nb-NO", "Norsk bokmål"} in pairs
+  end
+
   test "the default workspace's Settings page stays English", %{conn: conn} do
     {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
     html = render_live(conn, "/w/#{default_ws.slug}/p/#{default_proj.slug}/studio/settings")

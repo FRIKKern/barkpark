@@ -140,7 +140,35 @@ function statHtml(block: unknown, ctx: RenderCtx): string {
   const verdictMod = VERDICTS.includes(displayString(get(block, 'verdict')))
     ? ` bp-stat__v--${displayString(get(block, 'verdict'))}`
     : ''
-  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${dotsHtml(block, ctx)}${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+}
+
+/* ── trial dots (pe-bl-stat-tile-dots) ─────────────────────────────────────── */
+//
+// `dots: {on, of}` — "2 of 10 trials": `of` dots, the first `on` filled. `of`
+// must be a whole number 1..MAX_DOTS and `on` is clamped into 0..of; anything
+// else renders nothing. The array is ONE image to assistive tech. MIRROR of
+// data_viz.ex dots/1 + dots_html/1.
+const MAX_DOTS = 50
+
+function whole(v: unknown): number | null {
+  const t = typeof v === 'string' ? v.trim() : v
+  return Number.isInteger(t)
+    ? (t as number)
+    : typeof t === 'string' && /^[+-]?\d+$/.test(t)
+      ? +t
+      : null
+}
+
+function dotsHtml(block: unknown, ctx: RenderCtx): string {
+  const d = get(block, 'dots')
+  const of = whole(get(d, 'of'))
+  let on = whole(get(d, 'on'))
+  if (of === null || of < 1 || of > MAX_DOTS || on === null) return ''
+  on = Math.min(Math.max(on, 0), of)
+  const dot = (cls: string, n: number) =>
+    `<i class="bp-stat__dot${cls}" aria-hidden="true"></i>`.repeat(n)
+  return `<div class="bp-stat__dots" role="img" aria-label="${escapeAttr(ctx.t('%{on} of %{total}', { on, total: of }))}">${dot(' bp-stat__dot--on', on)}${dot('', of - on)}</div>`
 }
 
 const stats: Emit = (block, ctx) => {
@@ -292,7 +320,9 @@ const duel: Emit = (block, ctx) => {
 // base class, so every lineage authored before the clock strip is unchanged.
 function toneClass(base: string, tone: unknown): string {
   const t = displayString(tone)
-  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger' ? `${base} ${base}--${t}` : base
+  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger'
+    ? `${base} ${base}--${t}`
+    : base
 }
 
 function lineageNodeHtml(n: unknown): string {
@@ -717,7 +747,12 @@ function countGauges(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {
   const entries = [...counts.entries()].sort((a, b) =>
     a[1] !== b[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0,
   )
-  return entries.map(([label, count]) => ({ label, prop: count / maxCount, digit: String(count), note: '' }))
+  return entries.map(([label, count]) => ({
+    label,
+    prop: count / maxCount,
+    digit: String(count),
+    note: '',
+  }))
 }
 
 function gaugeRows(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {
@@ -850,9 +885,10 @@ const ROUTE_MAX_H = 400
 const ROUTE_PAD = 16
 const ROUTE_START = '#2f9e63'
 const ROUTE_FINISH = '#c65a3f'
-const ROUTE_TRACK = 'var(--paper-accent, #1e5347)'
-const ROUTE_MUTED = '#55635e'
-const ROUTE_BORDER = '#e2e6e5'
+// The track strokes currentColor; the paper-surface stylesheet paints it and the
+// meta/caption/separator inks (task-ef9f386f8cb5e32a), so no theme colour rides
+// the markup.
+const ROUTE_TRACK = 'currentColor'
 
 /** Google encoded-polyline decoder — the same drop-at-last-whole-pair contract
  * as the Elixir/Go twins: a malformed tail never invents a point. */
@@ -933,15 +969,15 @@ const route: Emit = (block, ctx) => {
   const metaHtml =
     meta.length === 0
       ? ''
-      : `<div class="bp-route__meta" style="font-size:13px;color:${ROUTE_MUTED};margin-top:6px;">` +
-        meta.map(escapeHtml).join(` <span style="color:${ROUTE_BORDER};">·</span> `) +
+      : `<div class="bp-route__meta" style="font-size:13px;margin-top:6px;">` +
+        meta.map(escapeHtml).join(` <span class="bp-route__sep">·</span> `) +
         '</div>'
 
   const caption = displayString(get(block, 'caption'))
   const captionHtml =
     caption === ''
       ? ''
-      : `<div class="bp-route__caption" style="font-size:13px;color:${ROUTE_MUTED};font-style:italic;margin-top:2px;">${escapeHtml(caption)}</div>`
+      : `<div class="bp-route__caption" style="font-size:13px;font-style:italic;margin-top:2px;">${escapeHtml(caption)}</div>`
 
   return `<div class="bp-route">${svg}${metaHtml}${captionHtml}</div>`
 }

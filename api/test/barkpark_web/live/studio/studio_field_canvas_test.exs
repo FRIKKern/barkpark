@@ -189,6 +189,15 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
 
     assert html =~ "Not allowed in this field"
     assert html =~ "block type code"
+
+    # The reply carries the vocabulary check's reason (path + message) so the
+    # canvas can show it on the field it names (task-85fee859cf3bfef6).
+    assert_reply(view, %{
+      saved: false,
+      request_id: "field-canvas-refused",
+      reason: "block type code is not in this field's vocabulary"
+    })
+
     refute_push_event(view, "bp:field-canvas-update", %{field: "description"})
 
     {:ok, saved} = Content.get_document(DraftId.draft_id(id), "publication", @dataset, scope)

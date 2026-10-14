@@ -3012,6 +3012,99 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert green["main_pid"] == 1_604_014
     end
 
+    # task-9d72b5f86487cf9b. gyl restarted about every 12 minutes after a deploy
+    # and this row read `ok` with no restart count, exit reason or OOM mark.
+    test "automatic service restarts ride the row with their exit and OOM mark" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          pre_vitals_report()
+          |> Map.put("service_restarts", [
+            %{
+              "restarted_at" => "2026-10-13T22:53:12Z",
+              "unit" => "barkpark-slot@blue.service",
+              "exit_kind" => "killed",
+              "exit_status" => 9,
+              "exit_signal" => "KILL",
+              "result" => "oom-kill",
+              "oom_killed" => true,
+              "restart_counter" => 5
+            },
+            # Unreadable exit fields: still a restart, the optionals render nil.
+            %{
+              "restarted_at" => "2026-10-13T22:41:00Z",
+              "unit" => "barkpark-slot@blue.service",
+              "exit_kind" => "",
+              "exit_status" => -1,
+              "exit_signal" => "",
+              "result" => "",
+              "oom_killed" => false,
+              "restart_counter" => -1
+            },
+            # No time: a restart nobody can place is dropped.
+            %{"unit" => "barkpark-slot@blue.service"},
+            "garbage"
+          ])
+          |> Map.put("service_restarts_count", 5)
+          |> Map.put("service_restarts_window_s", 3600)
+        )
+
+      pressure = pressure_for(user, bp)
+      assert pressure["service_restarts_count"] == 5
+      assert pressure["service_restarts_window_s"] == 3600
+      assert [last, older] = pressure["service_restarts"]
+      assert last["unit"] == "barkpark-slot@blue.service"
+      assert last["restarted_at"] == "2026-10-13T22:53:12Z"
+      assert last["exit_kind"] == "killed"
+      assert last["exit_status"] == 9
+      assert last["exit_signal"] == "KILL"
+      assert last["result"] == "oom-kill"
+      assert last["oom_killed"] == true
+      assert last["restart_counter"] == 5
+      assert older["exit_kind"] == nil
+      assert older["exit_status"] == nil
+      assert older["result"] == nil
+      assert older["oom_killed"] == false
+      assert older["restart_counter"] == nil
+    end
+
+    test "no restarts reports [] and 0; an UNMEASURED box reports nil" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          pre_vitals_report()
+          |> Map.put("service_restarts", [])
+          |> Map.put("service_restarts_count", 0)
+          |> Map.put("service_restarts_window_s", 3600)
+        )
+
+      pressure = pressure_for(user, bp)
+      assert pressure["service_restarts"] == []
+      assert pressure["service_restarts_count"] == 0
+
+      # An agent that predates the probe, or a journalctl that failed.
+      :ok =
+        beat(
+          bp,
+          pre_vitals_report()
+          |> Map.put("service_restarts", nil)
+          |> Map.put("service_restarts_count", -1)
+          |> Map.put("service_restarts_window_s", -1)
+        )
+
+      pressure = pressure_for(user, bp)
+      assert Map.has_key?(pressure, "service_restarts")
+      assert pressure["service_restarts"] == nil
+      assert pressure["service_restarts_count"] == nil
+      assert pressure["service_restarts_window_s"] == nil
+    end
+
     test "an INTACT pair reports [] and an UNMEASURED box reports nil — never the same" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)

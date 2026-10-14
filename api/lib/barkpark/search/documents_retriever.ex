@@ -149,7 +149,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     docs =
       ranking_input
-      |> order_rank(parsed, config, index)
+      |> order_rank(parsed, config, index, Keyword.get(opts, :boost))
       |> limit(^limit)
       |> offset(^offset)
       |> maybe_light_select(Keyword.get(opts, :fields))
@@ -628,7 +628,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
             ^ts_match(index, term) or
               ilike(d.title, ^pattern) or
               ^folded_title_match(term) or
-              ^slug_match(index, pattern)
+              ^slug_match(index, pattern) or
+              ^id_match(term)
           )
 
         # Fuzzy title arm only for tokens long enough to be meaningful.
@@ -727,7 +728,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end)
   end
 
-  defp order_rank(queryable, parsed, config, index) do
+  defp order_rank(queryable, parsed, config, index, boost) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token. plainto_tsquery AND-chains the words, so a multi-word query ranks
     # on ALL of them; for a single term this is identical to the old hd(terms).
@@ -758,12 +759,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
       order_by(
         queryable,
         ^[
+          # 0) The document whose id IS the query.
+          {:desc, exact_id_key(positive_query)},
           # 1) Exact title match wins outright — typing a doc's exact title
           #    guarantees it ranks #1, ahead of any relevance score.
           {:desc, exact_title_key(positive_query)},
           # 2) Relevance: GREATEST(full-text rank, weighted per-field similarity)
           #    + the weighted-tag boost.
-          {:desc, relevance_key(positive_query, tag_terms, config, index)},
+          {:desc, boosted(relevance_key(positive_query, tag_terms, config, index), boost)},
           # 3) Recency tiebreak.
           {:desc, dynamic([d], d.updated_at)},
           # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
@@ -772,6 +775,41 @@ defmodule Barkpark.Search.DocumentsRetriever do
         ]
       )
     end
+  end
+
+  # ── Document ids are searchable (task-aa52fb0ec971417e) ───────────────────
+  #
+  # A query equal to a document id must find that document. The id is not in
+  # the text index, so `drafts.sq-fox` used to find only a sibling whose CONTENT
+  # mentioned it. A term matches a row whose `doc_id` is the term in either
+  # spelling (published or `drafts.`); a term with a `.` (a namespaced id such
+  # as `drafts.x`) also matches ids it prefixes, so `drafts.sq-fox` finds
+  # `drafts.sq-fox-rev` too. Every scope, perspective and visibility clause on
+  # the query still applies: this only adds a match arm.
+  defp id_match(term) do
+    exact = dynamic([d], d.doc_id in ^id_forms(term))
+
+    if String.contains?(term, "."),
+      do: dynamic([d], ^exact or like(d.doc_id, ^id_prefix_pattern(term))),
+      else: exact
+  end
+
+  defp id_forms(term) do
+    published = String.replace_prefix(term, "drafts.", "")
+    Enum.uniq([term, published, "drafts." <> published])
+  end
+
+  defp id_prefix_pattern(term) do
+    String.replace(term, ~r/([\\%_])/, "\\\\\\1") <> "%"
+  end
+
+  # ORDER BY key #0: the document whose id IS the query ranks first, so an
+  # exact id is never pushed off the page by text matches.
+  defp exact_id_key(positive_query) do
+    dynamic(
+      [d],
+      fragment("CASE WHEN ? = ANY(?) THEN 1 ELSE 0 END", d.doc_id, ^id_forms(positive_query))
+    )
   end
 
   # ORDER BY key #1: exact (case-insensitive) title match → 1, else 0.
@@ -832,6 +870,30 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     dynamic([_d], fragment("GREATEST(?, ?) + ?", ^ts_rank, ^field_sim, ^boost))
   end
+
+  # `?boost=popularity` (task-5feac4e826cff9a5): adds
+  # `weight * score / (score + 10)` to relevance, where `score` is the
+  # document's decayed view score from `document_popularity`. The term stays
+  # below `weight` (0.1 by default, `config :barkpark, Barkpark.Search.Views,
+  # boost_weight:`), the same scale as the tag boost, so views reorder
+  # documents of similar relevance and cannot lift a weak match over a strong
+  # one. A score of 10 gives half the weight. The ranking pool bounds the
+  # rows this runs on.
+  defp boosted(key, :popularity) do
+    weight =
+      :barkpark
+      |> Application.get_env(Barkpark.Search.Views, [])
+      |> Keyword.get(:boost_weight, 0.1)
+
+    score = Barkpark.Search.Views.sql_value(:score, false)
+
+    dynamic(
+      [_d],
+      fragment("? + ? * (?)::float / ((?)::float + 10.0)", ^key, ^weight, ^score, ^score)
+    )
+  end
+
+  defp boosted(key, _boost), do: key
 
   # Weighted-tag boost subplan. Shape guards make legacy content contribute 0
   # without erroring: non-array `tags` → '[]'::jsonb, flat string elements fail

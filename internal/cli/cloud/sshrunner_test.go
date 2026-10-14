@@ -3,8 +3,11 @@ package cloud
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -432,5 +435,119 @@ func TestProvision_LegacyRunnerBackCompat(t *testing.T) {
 	}
 	if got := wp.RunnerFor("any-host"); got != StepRunner(runner) {
 		t.Errorf("legacy Runner not honored: factory returned %v, want the injected runner", got)
+	}
+}
+
+// TestSSHStepRunner_WaitReady_PermissionDeniedFailsEarly proves a box whose sshd
+// keeps refusing the offered keys fails with *SSHPermissionDeniedError once the
+// refusal outlasts sshDeniedGrace, long before the timeout. Measured 2026-10-14:
+// fleet-1 trusted only the control plane's key and the old probe burned the full
+// 3 minutes before printing a bare "exit status 255".
+func TestSSHStepRunner_WaitReady_PermissionDeniedFailsEarly(t *testing.T) {
+	oldI, oldG := sshReadyProbeInterval, sshDeniedGrace
+	sshReadyProbeInterval, sshDeniedGrace = time.Millisecond, 5*time.Millisecond
+	defer func() { sshReadyProbeInterval, sshDeniedGrace = oldI, oldG }()
+
+	r := &SSHStepRunner{Host: "10.0.0.9", Key: "",
+		Exec: func(_ context.Context, _ string, _ ...string) (string, error) {
+			return "Warning: Permanently added '10.0.0.9' (ED25519) to the list of known hosts.\r\nroot@10.0.0.9: Permission denied (publickey,password).", fmt.Errorf("exit status 255")
+		}}
+	start := time.Now()
+	err := r.WaitReady(context.Background(), time.Hour)
+	var denied *SSHPermissionDeniedError
+	if !errors.As(err, &denied) {
+		t.Fatalf("want *SSHPermissionDeniedError, got %T: %v", err, err)
+	}
+	if time.Since(start) > 10*time.Second {
+		t.Fatalf("permission denied should fail early, took %s", time.Since(start))
+	}
+	if !strings.Contains(err.Error(), "permission denied") || !strings.Contains(err.Error(), "ssh agent") {
+		t.Errorf("error should say permission denied and name the agent: %v", err)
+	}
+}
+
+// TestSSHStepRunner_WaitReady_DeniedThenAccepted proves a short refusal while
+// cloud-init writes authorized_keys is tolerated: the wait keeps polling and
+// succeeds once the key is accepted.
+func TestSSHStepRunner_WaitReady_DeniedThenAccepted(t *testing.T) {
+	oldI, oldG := sshReadyProbeInterval, sshDeniedGrace
+	sshReadyProbeInterval, sshDeniedGrace = time.Millisecond, time.Hour
+	defer func() { sshReadyProbeInterval, sshDeniedGrace = oldI, oldG }()
+
+	calls := 0
+	r := &SSHStepRunner{Host: "10.0.0.9", Key: "/k",
+		Exec: func(_ context.Context, _ string, _ ...string) (string, error) {
+			calls++
+			if calls < 3 {
+				return "root@10.0.0.9: Permission denied (publickey).", fmt.Errorf("exit status 255")
+			}
+			return "", nil
+		}}
+	if err := r.WaitReady(context.Background(), 5*time.Second); err != nil {
+		t.Fatalf("a brief refusal should be retried, got: %v", err)
+	}
+}
+
+// TestSSHStepRunner_WaitReady_NotUpSaysSo proves a box that never opens port 22
+// times out as "not up" with ssh's own line, never as permission denied.
+func TestSSHStepRunner_WaitReady_NotUpSaysSo(t *testing.T) {
+	old := sshReadyProbeInterval
+	sshReadyProbeInterval = time.Millisecond
+	defer func() { sshReadyProbeInterval = old }()
+
+	r := &SSHStepRunner{Host: "10.0.0.9", Key: "/k",
+		Exec: func(_ context.Context, _ string, _ ...string) (string, error) {
+			return "ssh: connect to host 10.0.0.9 port 22: Connection refused", fmt.Errorf("exit status 255")
+		}}
+	err := r.WaitReady(context.Background(), 5*time.Millisecond)
+	var denied *SSHPermissionDeniedError
+	if err == nil || errors.As(err, &denied) {
+		t.Fatalf("want a not-up timeout, got %T: %v", err, err)
+	}
+	if !strings.Contains(err.Error(), "not up: ssh: connect to host 10.0.0.9 port 22: Connection refused") {
+		t.Errorf("timeout should carry ssh's own line, got: %v", err)
+	}
+}
+
+// TestSSHStepArgv_NoKeyOmitsIdentity proves an empty key yields no -i, so ssh
+// offers the agent's keys instead of warning about a missing file.
+func TestSSHStepArgv_NoKeyOmitsIdentity(t *testing.T) {
+	for _, argv := range [][]string{
+		sshStepArgv("root", "203.0.113.7", "", "true", false),
+		sshFeedArgv("root", "203.0.113.7", "", "true", false),
+	} {
+		for _, a := range argv {
+			if a == "-i" {
+				t.Fatalf("empty key must not pass -i: %v", argv)
+			}
+		}
+		if argv[0] != "ssh" || argv[1] != "-o" {
+			t.Fatalf("argv shape changed: %v", argv)
+		}
+	}
+}
+
+// TestSSHKeyPath_MissingDefaultIsEmpty proves the default ~/.ssh/barkpark_indx
+// is offered only when the file exists, and BARKPARK_SSH_KEY_FILE always wins.
+func TestSSHKeyPath_MissingDefaultIsEmpty(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("BARKPARK_SSH_KEY_FILE", "")
+	if got := sshKeyPath(); got != "" {
+		t.Fatalf("missing default key should resolve empty, got %q", got)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(home, ".ssh", "barkpark_indx")
+	if err := os.WriteFile(want, []byte("k"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := sshKeyPath(); got != want {
+		t.Fatalf("present default key: want %q, got %q", want, got)
+	}
+	t.Setenv("BARKPARK_SSH_KEY_FILE", "/explicit/key")
+	if got := sshKeyPath(); got != "/explicit/key" {
+		t.Fatalf("explicit key file should win, got %q", got)
 	}
 }

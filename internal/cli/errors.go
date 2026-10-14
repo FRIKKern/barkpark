@@ -350,6 +350,9 @@ var codeExit = map[string]int{
 	"unsupported_if_match_for_batch": exitUsage, // 400, errors.ex:402
 	"import_body_read_failed":        exitUsage, // 400, workspace_controller.ex:1011
 	"unknown_format":                 exitUsage, // 400, bulldocs_source_controller.ex:28
+	// 406: the Accept header named no format the route returns. The request
+	// as framed is wrong; resending the same header can never succeed.
+	"not_acceptable": exitUsage, // 406, errors.ex build({:error, :not_acceptable})
 
 	// 422/413/402 → validation. Never retryable AS SENT — the distinction that
 	// matters to a wrapper, and the one exit 1 destroyed by folding these in

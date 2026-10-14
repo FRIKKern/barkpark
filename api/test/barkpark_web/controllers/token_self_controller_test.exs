@@ -30,7 +30,14 @@ defmodule BarkparkWeb.TokenSelfControllerTest do
     assert body["tier"] == "write"
     assert body["workspace"]["id"] == ws_id
     assert body["seat"]["role"] == TenancyAuth.membership_role(token, ws_id)
-    assert body["seat"]["can"] == %{"read" => true, "write" => true, "admin" => false}
+
+    assert body["seat"]["can"] == %{
+             "read" => true,
+             "write" => true,
+             "publish" => true,
+             "admin" => false
+           }
+
     refute Map.has_key?(body, "token_hash")
   end
 

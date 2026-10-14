@@ -936,6 +936,13 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # The POST form of the GROQ query read (task-cf961ac7f324b6cc). It writes
+    # nothing: Sanity's client sends a query too long for a URL as POST. It
+    # renders the evaluated result, never an `ok: true` literal.
+    {:post, "/w/:workspace_slug/p/:project_slug/v:api_version/data/query/:dataset", "BarkparkWeb.GroqController", :read_post, :status_only_receipt},
+    # task-5feac4e826cff9a5: the document view counter answers 202 with the
+    # buffered counts `Views.record/4` returned, and never spells `ok: true`.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/views/:dataset", "BarkparkWeb.ViewsController", :record, :status_only_receipt},
     # Seat consent (owner ruling #7, task-a08da65bc33083d0): three NEW routed
     # writes, rows proposed by `--routed-rows` and pasted verbatim. Each renders
     # the row the context function returned (accept: the created seat; decline:
@@ -1702,13 +1709,13 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/search_controller.ex",
             "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
-      basis_spans: [{417, 442}],
+      basis_spans: [{440, 465}],
       basis_token: "no failure reaches this receipt",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis:
-        "the in-code ruling at :417-442, added by #18899 — three stated grounds, of which " <>
-          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :434.",
+        "the in-code ruling at :440-465, added by #18899 — three stated grounds, of which " <>
+          "the token anchors the third: `NO FAILURE REACHES THIS RECEIPT` on :457.",
       why:
         "the arm fires and this row withholds the finding. The `_ws_id` head is NOT a " <>
           "failure sink: it is the non-nil half of the two-way split on token_workspace_id/1 " <>
@@ -1721,13 +1728,13 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
             "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
-      basis_spans: [{219, 244}],
+      basis_spans: [{227, 252}],
       basis_token: "no failure reaches this receipt",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis:
-        "the in-code ruling at :219-244, added by #18899 — the `media` surface twin of the " <>
-          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :236.",
+        "the in-code ruling at :227-252, added by #18899 — the `media` surface twin of the " <>
+          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :245.",
       why:
         "the arm fires and this row withholds the finding, for the reason its twin states: " <>
           "same split, same @spec'd delete, same 404 beside the receipt. TWO ROWS, NOT ONE " <>
@@ -2115,9 +2122,9 @@ defmodule PDS.Census do
       note: "RE-DERIVED at 2b824bf75 (#18300, the SCIM request-body member bound). The verdict is UNCHANGED and the citation is unchanged: that commit adds a REFUSAL in front of this receipt and moves no byte of the rendering the row judges. THE ANCHOR MOVED ONTO `do_replace/4` FOR THE SAME REASON `create` MOVED ONTO `do_create/3`: `replace/2` is now the bound check and every call this note describes lives in `do_replace/4`, so the wrapper's def_fp would detect nothing. `put /scim/v2/Groups/:id -> replace` stays disposed by reachability. PUT is a REAL def here, not a delegate: it reads the group, guards the precondition, calls `Scim.update_group/3` then `Scim.replace_group_members/3`, and renders `updated` — the struct update_group RETURNED — beside `Scim.group_member_ids(org, updated)`, a stored read, and the `unmatched` set the reconciliation refused. The `{:error, :invalid_role}` arm cannot reach a 2xx. CITATION NOTE, SAID PLAINLY: the sharpest PUT witness is `PUT: full-replace answers over the reconciliation it actually performed`, which asserts the receipt AND `stored_roles/1` on both the granted and the reverted user; it reads the store through a same-file helper rather than a `Repo.` token in its own block, so this row cites the case whose read-back token is IN the block and the sharper case is named here instead of being claimed by a citation the falsifier could not open."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
-      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "92011717", callee_fp: "27216941",
+      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "92011717", callee_fp: "119154111",
       verdict: "PROVEN", basis: :end_to_end,
-      note: "RE-DERIVED on fix/session-token-not-raw-key (task-57f23825b18ab55d, ruling #16 rework half), on top of task-429d3c7559ea8a3c and task-807307d827255d7e (both folded in by this rebase). delete/2 grew a SECOND revoke arm alongside the unchanged user_session one: `Barkpark.Auth.revoke_token_session/1` on `session[\"api_token_session\"]`, which also carries @spec :: {:ok, non_neg_integer()} (a DELETE count, not an update_all — see TokenSession's moduledoc for why: the row holds an encrypted-at-rest raw bearer, so a live row is a live credential regardless of a revoked_at flag). THE VERDICT IS UNCHANGED AND STRICTLY STRONGER: the flash now forks on `sign_out_flash(user_revoked + token_session_revoked)`, 0 only when BOTH counts are 0 — a token-session-only logout (no user_session cookie) now also reports \"Signed out.\" rather than the user_session arm silently absorbing it, and the redirect target is still the unrelated after_sign_out_path/0 (/studio on a public-demo host, else /login) task-429d3c7559ea8a3c added. Driven and read back: session_controller_test.exs `clears the session and redirects to /studio` is unchanged (still certifies the user_session row's revoked_at across a double logout) and a new case, `after sign-in and logout, replaying a COPIED cookie no longer authenticates`, certifies the NEW arm — it resolves a token-session id copied from the pre-logout cookie through `Auth.resolve_session_credential/2` BEFORE logout (proving the copy was live) and again AFTER (proving the real logout deleted the row the copy names, so the copy's own resolve dies even though it was never itself posted to /logout). PRIOR HISTORY (task-429d3c7559ea8a3c, task-807307d827255d7e, 974d412ca, was REFUTED at 501fb9670): revoke_user_session_token/1 (accounts.ex) carries @spec :: {:ok, non_neg_integer()}, returns the Repo.update_all count (now also select: t.id, broadcasting a best-effort session teardown of those ids after the write), the caller binds `{:ok, n} =` and the flash forks on it."},
+      note: "RE-DERIVED on studio/signin-nb (task-e807e0e5d7cf57c7, the sign-in pages speak the browser's language): the one-hop callee `sign_out_flash/1` now returns gettext(\"You were already signed out.\") / gettext(\"Signed out.\") instead of the bare strings, which moved callee_fp 27216941 -> 119154111; def_fp is unchanged. THE VERDICT IS UNCHANGED: the flash still forks on the same `user_revoked + token_session_revoked` count, 0 only when both revokes found nothing; only the words are now in the request's language. RE-DERIVED on fix/session-token-not-raw-key (task-57f23825b18ab55d, ruling #16 rework half), on top of task-429d3c7559ea8a3c and task-807307d827255d7e (both folded in by this rebase). delete/2 grew a SECOND revoke arm alongside the unchanged user_session one: `Barkpark.Auth.revoke_token_session/1` on `session[\"api_token_session\"]`, which also carries @spec :: {:ok, non_neg_integer()} (a DELETE count, not an update_all — see TokenSession's moduledoc for why: the row holds an encrypted-at-rest raw bearer, so a live row is a live credential regardless of a revoked_at flag). THE VERDICT IS UNCHANGED AND STRICTLY STRONGER: the flash now forks on `sign_out_flash(user_revoked + token_session_revoked)`, 0 only when BOTH counts are 0 — a token-session-only logout (no user_session cookie) now also reports \"Signed out.\" rather than the user_session arm silently absorbing it, and the redirect target is still the unrelated after_sign_out_path/0 (/studio on a public-demo host, else /login) task-429d3c7559ea8a3c added. Driven and read back: session_controller_test.exs `clears the session and redirects to /studio` is unchanged (still certifies the user_session row's revoked_at across a double logout) and a new case, `after sign-in and logout, replaying a COPIED cookie no longer authenticates`, certifies the NEW arm — it resolves a token-session id copied from the pre-logout cookie through `Auth.resolve_session_credential/2` BEFORE logout (proving the copy was live) and again AFTER (proving the real logout deleted the row the copy names, so the copy's own resolve dies even though it was never itself posted to /logout). PRIOR HISTORY (task-429d3c7559ea8a3c, task-807307d827255d7e, 974d412ca, was REFUTED at 501fb9670): revoke_user_session_token/1 (accounts.ex) carries @spec :: {:ok, non_neg_integer()}, returns the Repo.update_all count (now also select: t.id, broadcasting a best-effort session teardown of those ids after the write), the caller binds `{:ok, n} =` and the flash forks on it."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
       anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "11050786", callee_fp: "62964120",

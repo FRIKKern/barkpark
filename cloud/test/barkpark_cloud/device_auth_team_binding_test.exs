@@ -195,6 +195,79 @@ defmodule BarkparkCloud.DeviceAuthTeamBindingTest do
       assert Accounts.verify_user_session_token(body["token"]).id == member.id
     end
 
+    # task-c9560d84f704705d: who is asking goes only to someone who could approve.
+    test "inspect hides the requester's ip and user agent from a non-member of the bound team" do
+      team_a = team_fixture()
+      {:ok, outsider_session} = Accounts.create_user_session_token(member_of(team_fixture()))
+      {:ok, member_session} = Accounts.create_user_session_token(member_of(team_a))
+
+      s =
+        jbody(
+          call(:post, "/v1/auth/device/start", %{client_name: "bp on laptop", team_id: team_a.id})
+        )
+
+      outsider =
+        call(:post, "/v1/auth/device/inspect", %{user_code: s["user_code"]}, outsider_session)
+
+      assert outsider.status == 200
+      seen = jbody(outsider)
+
+      refute Map.has_key?(seen, "ip_address"),
+             "a non-member saw the requester's ip: #{inspect(seen)}"
+
+      refute Map.has_key?(seen, "user_agent"),
+             "a non-member saw the requester's ua: #{inspect(seen)}"
+
+      # The confirm screen still renders, so the Deny valve keeps working.
+      assert seen["client_name"] == "bp on laptop" and seen["team_id"] == team_a.id
+
+      member =
+        jbody(
+          call(:post, "/v1/auth/device/inspect", %{user_code: s["user_code"]}, member_session)
+        )
+
+      assert Map.has_key?(member, "ip_address") and Map.has_key?(member, "user_agent")
+    end
+
+    test "inspect of an unbound login shows who is asking to any signed-in user (control)" do
+      {:ok, session} = Accounts.create_user_session_token(member_of(team_fixture()))
+      s = jbody(call(:post, "/v1/auth/device/start", %{client_name: "bp"}))
+      body = jbody(call(:post, "/v1/auth/device/inspect", %{user_code: s["user_code"]}, session))
+      assert Map.has_key?(body, "ip_address") and Map.has_key?(body, "user_agent")
+    end
+
+    test "deny cannot take back an approved login before the CLI collects it" do
+      team_a = team_fixture()
+      {:ok, outsider_session} = Accounts.create_user_session_token(member_of(team_fixture()))
+      member = member_of(team_a)
+      {:ok, member_session} = Accounts.create_user_session_token(member)
+
+      s = jbody(call(:post, "/v1/auth/device/start", %{client_name: "bp", team_id: team_a.id}))
+
+      assert call(:post, "/v1/auth/device/approve", %{user_code: s["user_code"]}, member_session).status ==
+               200
+
+      # The code holder's deny answers the idempotent 200 and changes nothing.
+      assert call(:post, "/v1/auth/device/deny", %{user_code: s["user_code"]}, outsider_session).status ==
+               200
+
+      poll = call(:post, "/v1/auth/device/poll", %{device_code: s["device_code"]})
+      assert poll.status == 200
+      assert Accounts.verify_user_session_token(jbody(poll)["token"]).id == member.id
+    end
+
+    test "any signed-in code holder may still deny a PENDING login, member or not (the safety valve)" do
+      team_a = team_fixture()
+      {:ok, outsider_session} = Accounts.create_user_session_token(member_of(team_fixture()))
+      s = jbody(call(:post, "/v1/auth/device/start", %{client_name: "bp", team_id: team_a.id}))
+
+      assert call(:post, "/v1/auth/device/deny", %{user_code: s["user_code"]}, outsider_session).status ==
+               200
+
+      poll = call(:post, "/v1/auth/device/poll", %{device_code: s["device_code"]})
+      assert poll.status == 404
+    end
+
     test "start with a bad team_id is 422 invalid_team" do
       conn = call(:post, "/v1/auth/device/start", %{team_id: "not-a-uuid"})
       assert conn.status == 422

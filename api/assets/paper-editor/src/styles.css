@@ -935,6 +935,15 @@ article code[style*="background:#f3f4f6"] {
  * even though it lives outside any .bp-paper-surface ancestor. */
 
 /* Pre-paint / no-theme fallback — warm light defaults. */
+/* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
+   (task-387501f9ce96c335): the accent colour, underlined so it is not told
+   apart by colour alone. Its hover card's Open goes to the linked paper. */
+.bp-paper-editor span[data-wikilink] {
+  color: var(--paper-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .bp-wikilink-menu {
   --paper-bg:           #fbfaf6;
   --paper-ink:          #1f1a14;
@@ -1233,6 +1242,16 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
   font-weight: 500;
   line-height: 1.2;
 }
+/* A declared object block (Sanity's block object row): full width, an icon, the kind
+ * title and a preview line, each its own element for a host to style. The chip's
+ * text keeps "Title · value" for its name; the separator is not shown. */
+.bp-canvas-object-row .bp-canvas-readonly-chip { display: flex; width: 100%; box-sizing: border-box; gap: 10px; padding: 8px 12px; font-weight: 400; }
+.bp-canvas-object-icon { flex: none; position: relative; width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; }
+.bp-canvas-object-icon::after { content: ""; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 1.5px solid currentColor; }
+.bp-canvas-object-text { display: flex; flex-direction: column; min-width: 0; gap: 2px; }
+.bp-canvas-object-title { color: var(--paper-ink); font-weight: 600; }
+.bp-canvas-object-sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.bp-canvas-object-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper-ink-soft); }
 
 /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
  * <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
@@ -1327,6 +1346,8 @@ textarea.bp-canvas-island__input { resize: vertical; }
 .bp-canvas-image-chrome { display: flex; gap: 8px; margin: 0.5rem 0 0; }
 .bp-canvas-image-chrome input { flex: 1 1 0; min-width: 0; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 8px; }
 .bp-canvas-image-chrome input:focus { outline: none; border-color: var(--paper-accent); color: var(--paper-ink); }
+.bp-canvas-image-pick { display: none; flex: none; border: 1px solid var(--paper-chrome-border); border-radius: 4px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.85rem/1.4 var(--paper-font-sans, system-ui, sans-serif); padding: 3px 10px; cursor: pointer; }
+bp-paper-canvas[data-media-picker] .bp-canvas-image-pick { display: inline-block; }
 .bp-canvas-image-chrome .bp-canvas-image-src { flex: 2 1 0; }
 .bp-canvas-image-chrome .bp-canvas-image-width { flex: 0 0 90px; }
 .bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
@@ -1775,3 +1796,27 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
   outline: 2px solid var(--paper-accent);
   outline-offset: 1px;
 }
+
+/* ── Inline object field dialog (canvas/inline-object.js). ───────────────────
+ * Portaled to <body> like the menus above; it reads the host's --paper-*
+ * tokens when they reach it and otherwise the CSS system colours, so it stays
+ * legible in both themes without a literal of its own. */
+.bp-inline-object-dialog {
+  position: fixed; z-index: 210;
+  width: min(300px, calc(100vw - 16px));
+  padding: 12px;
+  background: var(--paper-chrome-bg, Canvas);
+  color: var(--paper-ink, CanvasText);
+  border: 1px solid var(--paper-chrome-border, ButtonBorder);
+  border-radius: 6px;
+  font-family: var(--paper-font-sans, system-ui, sans-serif);
+}
+.bp-inline-object-dialog__title { margin: 0 0 8px; font-size: inherit; font-weight: 600; }
+.bp-inline-object-dialog__row { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
+.bp-inline-object-dialog__row input:not([type="checkbox"]),
+.bp-inline-object-dialog__row select,
+.bp-inline-object-dialog__row textarea { font: inherit; padding: 4px 6px; }
+.bp-inline-object-dialog [aria-invalid="true"] { outline: 2px solid var(--paper-accent, Highlight); }
+.bp-inline-object-dialog__msg,
+.bp-inline-object-dialog__error { color: var(--paper-accent, LinkText); margin: 0; }
+.bp-inline-object-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }

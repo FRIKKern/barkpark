@@ -108,6 +108,23 @@ defmodule BarkparkWeb.Studio.PaneBuilderReferenceCountTest do
         "type" => "category",
         "title" => "Kategorier uten utgivelser",
         "filter" => %{"_id" => %{"notReferencedBy" => "publication"}}
+      },
+      # task-d99d878b061b435a: items whose filter names no type or field.
+      %{
+        "kind" => "documentTypeList",
+        "id" => "skrivefeil",
+        "type" => "category",
+        "title" => "Skrivefeil",
+        "filter" => %{"_id" => %{"referencedBy" => "publikasjon"}}
+      },
+      %{
+        "kind" => "groupBy",
+        "id" => "feil-gruppe",
+        "type" => "publication",
+        "by" => "content.category",
+        "over" => "category",
+        "title" => "Feil gruppe",
+        "overFilter" => %{"_id" => %{"referencedBy" => "publication.nope"}}
       }
     ]
 
@@ -148,5 +165,24 @@ defmodule BarkparkWeb.Studio.PaneBuilderReferenceCountTest do
     # One child list per category a publication points at — and none for the
     # unused one, which would otherwise be an empty group in the desk.
     assert Enum.map(pane.items, & &1.title) == ["Krim"]
+  end
+
+  test "an item whose filter names no type opens as an empty list stating why" do
+    {panes, _editor} = PaneBuilder.build(@dataset, ["skrivefeil"])
+    pane = List.last(panes)
+
+    assert pane.items == []
+    assert pane.filter_error =~ "names no document type in this dataset: \"publikasjon\""
+  end
+
+  test "a groupBy that cannot be built opens as an empty list stating why, the rest stays" do
+    {panes, _editor} = PaneBuilder.build(@dataset, ["feil-gruppe"])
+    pane = List.last(panes)
+
+    assert pane.title == "Feil gruppe"
+    assert pane.items == []
+    assert pane.filter_error =~ "names no field \"nope\""
+
+    assert titles("kategorier-med-utgivelser") == ["Krim"]
   end
 end

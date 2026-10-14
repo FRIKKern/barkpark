@@ -17,6 +17,8 @@ defmodule Barkpark.Tasks.MutateGuards do
     * `:after_claim`, in this order — `disposition_via_verb/6` (term, rerun,
       operating instruction, reopen trigger), `adoption_adjudicated/6`,
       `disposition_owner_registered/6`.
+    * both phases — `parent_key_spelled/6`, last in each: a near-miss
+      spelling of `parent_id` is refused (task-42823fba6f150b97).
 
   Every fence takes `(type, existing, merged, op, dataset, opts)` — the row
   the mutate door resolved, the content the write will carry, the raw
@@ -50,6 +52,15 @@ defmodule Barkpark.Tasks.MutateGuards do
   @doc "`:after_claim` — a written `disposition_owner` must be a registered role."
   def disposition_owner_registered(type, existing, merged, _op, _dataset, opts),
     do: ensure_disposition_owner_registered(type, existing, merged, opts)
+
+  @doc """
+  `:before_rev` and `:after_claim` — a near-miss spelling of `parent_id`
+  (`parent`, `parentId`, `parent-id`, …) is refused, naming `parent_id`.
+  Registered in both phases: `:before_rev` is the only phase a plain `create`
+  runs, and `:after_claim` is the only phase a `patch` runs.
+  """
+  def parent_key_spelled(type, existing, merged, _op, _dataset, opts),
+    do: ensure_parent_key_spelled(type, existing, merged, opts)
 
   # The id the create family addresses — the same `_id || doc_id` read
   # `apply_one/3` makes.
@@ -328,6 +339,81 @@ defmodule Barkpark.Tasks.MutateGuards do
   end
 
   defp ensure_disposition_owner_registered(_type, _existing, _merged, _opts), do: :ok
+
+  # ── THE PARENT KEY'S SPELLING (task-42823fba6f150b97) ──────────────────────
+  #
+  # The parent link of a task is `content.parent_id`, and nothing else reads a
+  # parent. `bp task create --set parent=<goal>` stored `content.parent` and
+  # left `parent_id` empty, so the goal tree and every `parent_id` filter missed
+  # the row. Measured on the guerrilla ledger (2026-10-14): seven tasks filed
+  # that way, 46 children of the goal before relinking and 53 after. The task
+  # schema accepts unknown keys, so nothing refused the write.
+  #
+  # REFUSE, DO NOT MAP. The tags check refuses a malformed spine with the fix
+  # in the message, and every sibling guard here refuses and names the right
+  # door. Mapping `parent` to `parent_id` would also have to pick a winner when
+  # a write carries both, and it would reparent a row through the side, past
+  # `ensure_adoption_adjudicated/4`.
+  #
+  # IT FENCES THE WRITE, NOT THE ROW, like the owner guard above. A key whose
+  # value is unchanged from the existing row passes, so rows already carrying
+  # `content.parent` keep accepting claims, stamps and patches. Unsetting the
+  # key is always allowed. `bp task lint` lists those rows.
+  #
+  # Replication is exempt first, for the same reason as every sibling.
+  @parent_near_misses ~w(parent parentid)
+
+  @doc """
+  The content keys that are near-miss spellings of `parent_id`: any key other
+  than `parent_id` that reads `parent` or `parentid` once lowercased with `_`
+  and `-` removed. Sorted.
+  """
+  @spec parent_near_miss_keys(map()) :: [String.t()]
+  def parent_near_miss_keys(content) when is_map(content) do
+    content
+    |> Map.keys()
+    |> Enum.filter(&parent_near_miss?/1)
+    |> Enum.sort()
+  end
+
+  def parent_near_miss_keys(_content), do: []
+
+  defp parent_near_miss?(key) when is_binary(key) and key != @parent_key do
+    (key |> String.downcase() |> String.replace(["_", "-"], "")) in @parent_near_misses
+  end
+
+  defp parent_near_miss?(_key), do: false
+
+  defp ensure_parent_key_spelled("task", existing, merged, opts) when is_map(merged) do
+    was = (existing && existing.content) || %{}
+
+    changed =
+      for key <- parent_near_miss_keys(merged), Map.get(merged, key) != Map.get(was, key), do: key
+
+    cond do
+      Keyword.get(opts, :source, :api) != :api -> :ok
+      changed == [] -> :ok
+      true -> {:error, {:invalid_task_content, parent_spelling_error(changed, merged)}}
+    end
+  end
+
+  defp ensure_parent_key_spelled(_type, _existing, _merged, _opts), do: :ok
+
+  defp parent_spelling_error(keys, merged) do
+    Map.new(keys, fn key ->
+      value = Map.get(merged, key)
+      shown = if is_binary(value), do: value, else: "<parent task id>"
+
+      {key,
+       [
+         "is not a task field. The parent link is `#{@parent_key}`: the goal tree and " <>
+           "`#{@parent_key}` filters read only that key, so a task carrying `#{key}` is " <>
+           "outside its parent's tree. Write `#{@parent_key}` instead, for example " <>
+           "`bp task create --set #{@parent_key}=#{shown}` or " <>
+           "`bp doc patch task <id> --set #{@parent_key}=#{shown}`, and leave `#{key}` out."
+       ]}
+    end)
+  end
 
   defp owner_registry_error(code, owner) do
     %{

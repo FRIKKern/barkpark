@@ -3,8 +3,8 @@
   <div class="bp-auth-card">
     <.auth_brand />
 
-    <h1 class="bp-auth-title">Sign in</h1>
-    <p class="bp-auth-sub">to continue to Studio on <b>{@instance_host}</b></p>
+    <h1 class="bp-auth-title"><%= gettext("Sign in") %></h1>
+    <p class="bp-auth-sub"><%= gettext("to continue to Studio on") %> <b>{@instance_host}</b></p>
 
     <.auth_flash flash={@flash} />
 
@@ -13,16 +13,16 @@
         <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
           <path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z" />
         </svg>
-        Log in with Barkpark Cloud
+        <%= gettext("Log in with Barkpark Cloud") %>
       </a>
-      <div class="bp-auth-divider"><span>or sign in with email</span></div>
+      <div class="bp-auth-divider"><span><%= gettext("or sign in with email") %></span></div>
     <% end %>
 
     <.form :let={_f} for={%{}} as={:account} action={~p"/login/account"} method="post">
       <input type="hidden" name="return_to" value={@return_to} />
 
       <div class="form-group">
-        <label class="form-label" for="account_email">Email</label>
+        <label class="form-label" for="account_email"><%= gettext("Email") %></label>
         <input
           type="email"
           name="email"
@@ -31,14 +31,14 @@
           autocomplete="username"
           autofocus
           required
-          placeholder="you@example.com"
+          placeholder={gettext("you@example.com")}
         />
       </div>
 
       <div class="form-group">
         <div class="bp-auth-label-row">
-          <label class="form-label" for="account_password">Password</label>
-          <a href={~p"/login/reset"}>Forgot password?</a>
+          <label class="form-label" for="account_password"><%= gettext("Password") %></label>
+          <a href={~p"/login/reset"}><%= gettext("Forgot password?") %></a>
         </div>
         <div class="bp-auth-input-affix">
           <input
@@ -55,7 +55,9 @@
             class="bp-auth-eye"
             data-eye-for="account_password"
             tabindex="-1"
-            aria-label="Show password"
+            aria-label={gettext("Show password")}
+            data-show-label={gettext("Show password")}
+            data-hide-label={gettext("Hide password")}
           >
             <svg
               width="16"
@@ -74,12 +76,12 @@
       </div>
 
       <button type="submit" class={["bp-auth-btn", @cloud_login_href && "bp-auth-btn-quiet"]}>
-        Sign in
+        <%= gettext("Sign in") %>
       </button>
     </.form>
 
     <p class="bp-auth-alt">
-      or <a href={~p"/login/magic"}>email me a sign-in link</a> — no password needed
+      <%= gettext("or") %> <a href={~p"/login/magic"}><%= gettext("email me a sign-in link") %></a> — <%= gettext("no password needed") %>
     </p>
 
     <details data-token-signin>
@@ -106,12 +108,12 @@
     </details>
 
     <p class="bp-auth-foot">
-      Using enterprise SSO? Open your organization's sign-in link —
-      <code>/v1/auth/oidc/&lt;org&gt;/start</code> — or ask your admin for it.
+      <%= gettext("Using enterprise SSO? Open your organization's sign-in link") %> —
+      <code>/v1/auth/oidc/&lt;org&gt;/start</code> — <%= gettext("or ask your admin for it.") %>
     </p>
   </div>
 
-  <p class="bp-auth-pagefoot">Barkpark — the self-hosted content studio</p>
+  <p class="bp-auth-pagefoot"><%= gettext("Barkpark — the self-hosted content studio") %></p>
 
   <script nonce={assigns[:csp_nonce]}>
     // Password show/hide — same affordance as the Cloud dashboard login.
@@ -121,7 +123,7 @@
         if (!input) return;
         var show = input.type === "password";
         input.type = show ? "text" : "password";
-        btn.setAttribute("aria-label", show ? "Hide password" : "Show password");
+        btn.setAttribute("aria-label", show ? btn.dataset.hideLabel : btn.dataset.showLabel);
       });
     });
   </script>

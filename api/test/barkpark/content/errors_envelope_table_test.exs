@@ -155,6 +155,15 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # The mutate door's `dryRun` was neither true nor false
       # (task-ca600d55736bc9ca): refused, never read as a real write.
       {"invalid_dry_run", {:error, {:invalid_dry_run, "yes"}}, "malformed", 400, [:details]},
+      # Direct publish (task-6e2552cdeb223fa2): a type that keeps its own door,
+      # and a `publish` flag that is not a boolean.
+      {"direct_publish_unsupported", {:error, {:direct_publish_unsupported, "task"}},
+       "validation_failed", 422, [:details]},
+      {"invalid_publish_flag", {:error, {:invalid_publish_flag, "yes"}}, "malformed", 400,
+       [:details]},
+      # The mutate door's `visibility` was not sync, async or deferred.
+      {"invalid_visibility", {:error, {:invalid_visibility, "later"}}, "malformed", 400,
+       [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
@@ -167,6 +176,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "invalid_filter", 400, [:details]},
       {"invalid_filter/legacy", {:error, {:invalid_filter, "price>10"}}, "invalid_filter", 400,
        [:details]},
+      {"malformed_filter_param", {:error, {:malformed_filter_param, "filter[["}},
+       "invalid_filter", 400, [:details]},
       {"forbidden_field", {:error, {:forbidden_field, "secret"}}, "forbidden_field", 422,
        [:details]},
       {"conflict", {:error, :conflict}, "conflict", 409, []},
@@ -261,6 +272,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"unsupported_media_type", {:error, :unsupported_media_type}, "unsupported_media_type", 422,
        []},
       {"payload_too_large", {:error, :payload_too_large}, "payload_too_large", 413, []},
+      {"not_acceptable", {:error, :not_acceptable}, "not_acceptable", 406, []},
       {"rate_limited/retry_after", {:error, :rate_limited, %{retry_after: 30}}, "rate_limited",
        429, [:details]},
       {"binary reason", {:error, "boom"}, "internal_error", 500, []},

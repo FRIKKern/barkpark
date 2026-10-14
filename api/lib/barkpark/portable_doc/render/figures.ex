@@ -47,7 +47,20 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # `lang` rides as `data-lang` (only when present, so a lang-less block is byte-identical to before):
   # the reader's /assets/bp-paper-code.js paints hljs-* tokens from THE tokenizer the canvas uses
   # (paper-editor/src/code-highlight.js) — view and edit are one producer (Barkdown plan #27).
-  def code_block_html(value, emphasis, lang) do
+  #
+  # On `:article` the slab's COLOURS ride the `bp-codeblock` class, not the markup
+  # (task-2c5d3da1b7f7db25): paper-surface.css paints its ground and ink. Layout
+  # and type stay inline. `:email` keeps the inline colours — a mail client has no
+  # stylesheet (the code-tabs email leg reuses this emitter).
+  def code_block_html(value, emphasis, lang), do: code_block_html(value, emphasis, lang, :article)
+
+  def code_block_html(value, emphasis, lang, :article) do
+    ~s|<pre class="bp-codeblock"#{code_lang_attr(lang)} style="border:0;border-radius:var(--bp-codeblock-radius, 0);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
+      ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
+      ~s|overflow-x:auto;white-space:pre">#{code_body_html(value, emphasis)}</pre>|
+  end
+
+  def code_block_html(value, emphasis, lang, _style) do
     ~s|<pre#{code_lang_attr(lang)} style="background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);| <>
       ~s|margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, #{@font_mono});font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);| <>
       ~s|overflow-x:auto;white-space:pre">#{code_body_html(value, emphasis)}</pre>|
@@ -111,10 +124,14 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # the edit surface has bound its mirror to since the divider-lockstep slice
   # (`.bp-section-divider` / `.bp-section-divider__mark`), so this closes an
   # asymmetry rather than inventing a second vocabulary for one block.
+  #
+  # Its COLOURS are not inline (task-2c5d3da1b7f7db25): the rule keeps its width
+  # and style here and paper-surface.css paints its colour, the § mark's ground
+  # and its ink through these same two classes.
   def section_divider_html do
-    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e2e6e5)">| <>
+    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid">| <>
       ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
-      ~s|background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
+      ~s|font-size:1.1rem">§</span></div>|
   end
 
   # ── diagram / figure HTML emission ─────────────────────────────────────────
@@ -182,7 +199,9 @@ defmodule Barkpark.PortableDoc.Render.Figures do
         ~s|<figcaption class="bp-figcaption">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto">| <>
+    # The frame's ground and rule colour ride `bp-diagram` (task-2c5d3da1b7f7db25);
+    # the border keeps its width and style inline.
+    ~s|<figure class="bp-diagram" style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;border:1px solid;border-radius:4px;overflow-x:auto">| <>
       ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
       cap <>
       "</figure>"
@@ -246,7 +265,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
     # radius:") and the file will not compile. The pipe delimiter has no such
     # ambiguity, and the sibling figure/divider strings above already use it.
     ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
-      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div>| <>
+      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid;border-radius:6px;overflow:hidden"></div>| <>
       cap <>
       "</figure>"
   end

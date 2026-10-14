@@ -74,8 +74,13 @@ defmodule BarkparkWeb.WorkspaceController do
 
   action_fallback BarkparkWeb.FallbackController
 
+  # The three LISTs (index, projects, datasets) also answer a login-session
+  # bearer (task-6224d34a5a8a6017): its user is the principal, and
+  # `Tenancy.Auth` decides membership for a `%User{}` as for a token.
+  defp list_principal(conn), do: conn.assigns[:api_token] || conn.assigns[:current_user]
+
   def index(conn, _params) do
-    token = conn.assigns[:api_token]
+    token = list_principal(conn)
     workspaces = Tenancy.list_workspaces_for(token)
     json(conn, %{workspaces: Enum.map(workspaces, &render_workspace/1)})
   end
@@ -1619,7 +1624,7 @@ defmodule BarkparkWeb.WorkspaceController do
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   def projects(conn, %{"workspace_slug" => slug}) do
-    token = conn.assigns[:api_token]
+    token = list_principal(conn)
 
     # Denial shape (charter D13 Tier A): an UNKNOWN slug is 404, a KNOWN
     # workspace the caller is refused is 403 — the same answer
@@ -1657,7 +1662,7 @@ defmodule BarkparkWeb.WorkspaceController do
   end
 
   def datasets(conn, %{"workspace_slug" => ws_slug, "project_slug" => proj_slug}) do
-    token = conn.assigns[:api_token]
+    token = list_principal(conn)
 
     # D13 Tier A on the WORKSPACE only. An unknown PROJECT inside a workspace
     # the caller was admitted to stays 404 (Tier B): project-slug existence is

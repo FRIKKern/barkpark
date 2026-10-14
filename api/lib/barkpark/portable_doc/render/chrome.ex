@@ -96,6 +96,8 @@ defmodule Barkpark.PortableDoc.Render.Chrome do
       # the data-viz source stamp (task-c5c0f4fa42848256)
       "Source" => pgettext("data source", "Source"),
       "Sources" => pgettext("data source", "Sources"),
+      # stat trial dots: "2 of 10" (pe-bl-stat-tile-dots)
+      "%{on} of %{total}" => gettext("%{on} of %{total}", on: "%{on}", total: "%{total}"),
       "Sheet truncated — showing the first %{n} rows" =>
         gettext("Sheet truncated — showing the first %{n} rows", n: "%{n}"),
       # task status vocabulary (design/status-manifest.json labels)

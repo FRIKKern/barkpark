@@ -236,6 +236,13 @@ config :barkpark, :media_webhooks, endpoints: []
 # `Barkpark.Webhooks.Dispatcher.dispatch_audit_async/1`.
 config :barkpark, :audit_dispatch_async, true
 
+# Post-commit work of a content write (task-6e2552cdeb223fa2): the webhook
+# selection query, and the graph-edge upserts of a `visibility: async` mutate
+# batch. TRUE = it runs on a supervised task after commit, outside the request.
+# config/test.exs flips it FALSE for the same reason as the line above. Read by
+# `Barkpark.Content.Broadcast.flush_deferred_broadcasts/1`.
+config :barkpark, :post_commit_async, true
+
 # Auto-disable a webhook endpoint after this many CONSECUTIVE terminal delivery
 # give-ups (permanent 4xx / SSRF block / retry exhaustion). The counter resets to
 # 0 on any successful delivery, so only a persistently-dead endpoint trips it.
@@ -388,6 +395,11 @@ config :barkpark, Oban,
        # nightly reads never kick off in the same tick.
        {"31 3 * * *", Barkpark.Workers.TagDistribution},
        {"0 4 * * *", Barkpark.Search.Workers.Prune},
+       # Document view counts (task-5feac4e826cff9a5) — rewrites
+       # `document_popularity` from the last 30 days of `document_view_days`
+       # and prunes day rows past 90 days. Every 10 minutes, so a sort by
+       # views is at most about 10 minutes behind the views it counts.
+       {"*/10 * * * *", Barkpark.Search.Workers.ViewsRollup},
        # edit-on-the-link slice 4 — retention sweep for the paper view/edit
        # trail (`paper_access_log`). Daily, fifteen minutes after the search
        # prune so the two range deletes never open their scans in one tick.
@@ -398,6 +410,10 @@ config :barkpark, Oban,
        # window in mutation_events.document / webhook_deliveries.payload_snapshot.
        # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
        {"30 4 * * *", Barkpark.Content.Workers.DeletedPayloadSweeper},
+       # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation, Mondays
+       # 03:00 UTC (the slot of the never-installed systemd timer it replaces).
+       # A no-op tick unless `:public_read_rotation, enabled:` (below) is on.
+       {"0 3 * * 1", Barkpark.Auth.PublicReadRotationWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -527,6 +543,13 @@ config :barkpark, :paper_access_log_ttl_days, 90
 # Barkpark.Content.DeletedPayloadRetention.
 config :barkpark, :deleted_payload_retention, enabled: false, days: 90
 
+# task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation
+# (Barkpark.Auth.PublicReadRotationWorker). SHIPS DISABLED: switched on it mints
+# a new token every Monday and purges the previous one after 8 days, so every
+# consumer must be reached by the token file or VERCEL_DEPLOY_HOOK first. An
+# operator turns it on with BARKPARK_PUBLIC_READ_ROTATION=on (runtime.exs).
+config :barkpark, :public_read_rotation, enabled: false
+
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`
 # the holder refreshes; the TtlSweeper's second sweep lapses rows whose ts
@@ -582,7 +605,11 @@ config :barkpark, Barkpark.SelfUpdate.Runner,
   rollback_command: {"bash", ["deploy/instance-deploy.sh", "--rollback"]},
   rollback_preflight_command: {"bash", ["deploy/instance-deploy.sh", "--rollback-preflight"]},
   cd: nil,
-  max_log_lines: 500
+  max_log_lines: 500,
+  # A self-update run cut by a service restart, with no outcome on record, is
+  # started again once on boot; a second cut ends it as "deploy stuck" (-4).
+  # 0 turns resuming off (task-15e2eb3aa36b240b).
+  max_resumes: 1
 
 # Site-deploy EXECUTOR (Barkpark.Sites.DeployRunner) — runs deploy/site-deploy.sh
 # for a content-bound STATIC site (site-spawner charter D22/D23/D24). Same
@@ -666,5 +693,13 @@ config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
 # consumers read both shapes. Readers accept both shapes either way.
 # `Barkpark.Content.CanonicalShapes`.
 config :barkpark, canonical_shape_writes: false
+
+# The publish wall (`Barkpark.Content.AuthoringWall`: label spine, tag
+# registry, dedup) is an INSTALL setting, declared by the installing door
+# (task-8edd8e147c648a36). The library default is OFF, so a fresh install and
+# @barkpark/engine publish a paper with only a slug, a title and blocks.
+# Barkpark's own instances turn it on: dev.exs, test.exs, and prod runtime.exs
+# (unless BARKPARK_AUTHORING_WALL is falsy).
+config :barkpark, :authoring_wall, false
 
 import_config "#{config_env()}.exs"

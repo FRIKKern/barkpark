@@ -175,7 +175,10 @@ defmodule Barkpark.Search.QueryPipeline do
         # measures). The DB-level twin of `Content.Envelope.project/2`: it only
         # ever DROPS content keys the caller did not ask for, so the rendered
         # envelope is byte-identical. nil/absent → the full struct (unchanged).
-        fields: Keyword.get(opts, :fields)
+        fields: Keyword.get(opts, :fields),
+        # `?boost=popularity` (task-5feac4e826cff9a5): the Postgres retriever
+        # adds the document's view score to relevance. Other engines ignore it.
+        boost: Keyword.get(opts, :boost)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery

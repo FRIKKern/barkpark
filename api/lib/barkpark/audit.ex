@@ -16,6 +16,10 @@ defmodule Barkpark.Audit do
   row must not be lost on a crash between request-return and a background
   write. The cost is one indexed insert under a per-workspace advisory lock —
   negligible latency, and it can never drift from the change it records.
+
+  A mutate batch buffers its rows and appends them in one insert at commit
+  (`defer_emits/0`, `flush_deferred!/0`), so it holds the lock only for that
+  final append. The rows are still written inside the batch's transaction.
   """
   import Ecto.Query, warn: false
 
@@ -80,6 +84,12 @@ defmodule Barkpark.Audit do
   def emit(attrs) when is_map(attrs) do
     fields = normalize(attrs)
 
+    if deferring?() and Repo.in_transaction?(),
+      do: buffer(fields),
+      else: emit_now(fields)
+  end
+
+  defp emit_now(fields) do
     result =
       Repo.transaction(fn ->
         lock_chain(fields.workspace_id)
@@ -106,6 +116,147 @@ defmodule Barkpark.Audit do
     end
 
     result
+  end
+
+  # ── Deferred emits: one append per batch ───────────────────────────────
+  #
+  # A mutate batch used to append each row the moment it was written, which
+  # took the workspace's chain lock at the batch's FIRST write and held it to
+  # commit. Every batch into one workspace therefore ran one at a time, however
+  # many writers there were (measured on guerrilla: about 3.5 documents a
+  # second for a createOrReplace plus publish batch, flat under concurrency).
+  #
+  # Inside `defer_emits/0` … `flush_deferred!/0` an emit only VALIDATES its row
+  # and buffers it in the process dictionary. `flush_deferred!/0`, the batch's
+  # last statement before commit, takes the chain locks, reads each chain's
+  # tail, hashes the buffered rows onto it in buffer order and writes them in
+  # ONE insert. The lock is held from that insert to commit, not for the whole
+  # batch. The chain is the same chain: each row's `prev_hash` is the row before
+  # it, so `verify_chain/1` checks it exactly as before.
+  #
+  # Two things change, both deliberately. A buffered row's `id` and `hash` are
+  # unknown until the flush, so `emit/1` answers `{:ok, %Event{id: nil,
+  # hash: nil}}` for it. And two batches into one workspace now append in COMMIT
+  # order, so a row's `occurred_at` can be earlier than the row before it in the
+  # chain. The chain orders by `id`; nothing reads `occurred_at` as an order.
+  @deferred_key :barkpark_audit_deferred
+  @flushed_key :barkpark_audit_flushed
+
+  @doc """
+  Start buffering this process's `emit/1` calls made inside a transaction.
+
+  Returns `:owner` when this call started the buffer, and `:nested` when an
+  enclosing caller already owns it. Only the owner calls `flush_deferred!/0`
+  and `finish_deferred/1`; a nested caller leaves the buffer alone, so an inner
+  batch can never flush or drop rows an outer batch has buffered.
+  """
+  @spec defer_emits() :: :owner | :nested
+  def defer_emits do
+    if deferring?() do
+      :nested
+    else
+      Process.put(@deferred_key, [])
+      Process.delete(@flushed_key)
+      :owner
+    end
+  end
+
+  @doc "True while this process buffers its emits (see `defer_emits/0`)."
+  @spec deferring?() :: boolean()
+  def deferring?, do: is_list(Process.get(@deferred_key))
+
+  @doc """
+  Append every buffered row to its chain in one insert. MUST be called inside
+  the transaction the rows belong to, as its last statement: the chain locks
+  it takes are held to commit. Stops buffering, so an emit after the flush
+  appends directly. Raises when the insert fails, which rolls the transaction
+  back with it, the same outcome a failed `emit/1` has always had.
+  """
+  @spec flush_deferred!() :: [Event.t()]
+  def flush_deferred! do
+    buffered = Process.delete(@deferred_key) || []
+
+    events =
+      case Enum.reverse(buffered) do
+        [] -> []
+        rows -> append_batch!(rows)
+      end
+
+    Process.put(@flushed_key, events)
+    events
+  end
+
+  @doc """
+  End a deferred scope. `:committed` hands the flushed rows to the audit
+  webhook bridge (post-commit, like `emit/1`); `:rolled_back` drops them. Both
+  clear the buffer.
+  """
+  @spec finish_deferred(:committed | :rolled_back) :: :ok
+  def finish_deferred(outcome) do
+    Process.delete(@deferred_key)
+    events = Process.delete(@flushed_key) || []
+
+    if outcome == :committed and events != [] do
+      # The bridge's subscription lookup is a query per row; a batch's rows
+      # take it on a supervised task, off the request, as `emit/1`'s single
+      # row takes its delivery. Inline where the bridge itself runs inline
+      # (`:audit_dispatch_async` false, config/test.exs).
+      if Application.get_env(:barkpark, :audit_dispatch_async, true) do
+        {:ok, _} =
+          Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
+            Enum.each(events, &safe_bridge/1)
+          end)
+      else
+        Enum.each(events, &safe_bridge/1)
+      end
+    end
+
+    :ok
+  end
+
+  defp buffer(fields) do
+    changeset = Event.insert_changeset(Map.put(fields, :hash, "deferred"))
+
+    if changeset.valid? do
+      Process.put(@deferred_key, [fields | Process.get(@deferred_key)])
+
+      {:ok, %{Ecto.Changeset.apply_changes(changeset) | hash: nil}}
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp append_batch!(rows) do
+    rows
+    |> Enum.map(& &1.workspace_id)
+    |> Enum.uniq()
+    |> Enum.map(&lock_key/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.each(&advisory_lock/1)
+
+    {entries, _tails} =
+      Enum.map_reduce(rows, %{}, fn fields, tails ->
+        ws = fields.workspace_id
+        prev = Map.get_lazy(tails, ws, fn -> last_hash(ws) end)
+        hash = Chain.hash(fields, prev)
+
+        entry =
+          fields
+          |> Map.merge(%{prev_hash: prev, hash: hash})
+          |> Event.insert_changeset()
+          |> Ecto.Changeset.apply_action!(:insert)
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id])
+
+        {entry, Map.put(tails, ws, hash)}
+      end)
+
+    # One multi-row INSERT: Postgres takes `nextval` for each VALUES row in
+    # order, so ids ascend in buffer order and the chain reads back in the
+    # order it was hashed.
+    {_n, events} = Repo.insert_all(Event, entries, returning: true)
+    Enum.sort_by(events, & &1.id)
   end
 
   @doc """
@@ -217,12 +368,13 @@ defmodule Barkpark.Audit do
   # Transaction-scoped advisory lock keyed on the workspace, so concurrent
   # emits for the SAME workspace serialize on the chain tail (and the empty
   # first-row case is safe) while different workspaces never contend.
-  defp lock_chain(workspace_id) do
-    # crc32 → 0..2^32-1, which fits a bigint (the single-arg lock form); the
-    # two-int4 form would overflow for keys above 2^31.
-    key = :erlang.crc32(@lock_prefix <> lock_scope(workspace_id))
-    Repo.query!("SELECT pg_advisory_xact_lock($1::bigint)", [key])
-  end
+  defp lock_chain(workspace_id), do: workspace_id |> lock_key() |> advisory_lock()
+
+  # crc32 → 0..2^32-1, which fits a bigint (the single-arg lock form); the
+  # two-int4 form would overflow for keys above 2^31.
+  defp lock_key(workspace_id), do: :erlang.crc32(@lock_prefix <> lock_scope(workspace_id))
+
+  defp advisory_lock(key), do: Repo.query!("SELECT pg_advisory_xact_lock($1::bigint)", [key])
 
   # The global (nil-workspace) chain and the seeded Default's chain share ONE
   # lock (task-962637a90e406961). They are separate hash chains — `last_hash/1`

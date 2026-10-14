@@ -71,6 +71,18 @@ const docListingRowIDKey = "doc_id"
 // one page or from a stitched `--all` walk.
 const docListingRowCountKey = "count"
 
+// docListingRowReturnedKey names the number of rows in THIS output, and
+// nothing else. The server's `count` already means that (docs/api-v1.md §4:
+// "`count` = page rows"), but `--count` adds `total` beside it, and a reader
+// who sees `{"count":100,"total":5000}` reads `count` as the total. That is the
+// misreading the twin import made (task-33e5b203e987650c).
+//
+// `count` keeps its meaning and its value, because it is the HTTP contract and
+// scripts already read it. `returned` is added beside it with an unambiguous
+// name, so a caller can read `returned` for the rows it holds and `total` for
+// every match. On a stitched `--all` walk the two are the same number.
+const docListingRowReturnedKey = "returned"
+
 // docListingMirrorsID reports whether cmd's rows are stored documents keyed
 // `_id` — the only rows for which mirroring is a statement of fact rather than
 // a guess. Driven off commandListEnvelopes so this cannot drift away from what
@@ -81,8 +93,9 @@ func docListingMirrorsID(cmd manifest.Command) bool {
 }
 
 // enrichDocListingRows returns payload with `doc_id` mirrored onto every row
-// that carries a non-empty string `_id`, and with a top-level `count` when the
-// envelope carries none.
+// that carries a non-empty string `_id`, with a top-level `count` when the
+// envelope carries none, and with a top-level `returned` (the number of rows in
+// this output) when the envelope carries none.
 //
 // It is TOTAL and CONSERVATIVE: any payload it cannot read as a
 // `{"documents":[ {…}, … ]}` envelope comes back byte-identical, and a row that
@@ -117,15 +130,19 @@ func enrichDocListingRows(cmd manifest.Command, payload []byte) []byte {
 		}
 	}
 	_, hasCount := env[docListingRowCountKey]
-	if !mirrored && hasCount {
+	_, hasReturned := env[docListingRowReturnedKey]
+	if !mirrored && hasCount && hasReturned {
+		return payload
+	}
+	rowCount, err := json.Marshal(len(rows))
+	if err != nil {
 		return payload
 	}
 	if !hasCount {
-		count, err := json.Marshal(len(rows))
-		if err != nil {
-			return payload
-		}
-		env[docListingRowCountKey] = json.RawMessage(count)
+		env[docListingRowCountKey] = json.RawMessage(rowCount)
+	}
+	if !hasReturned {
+		env[docListingRowReturnedKey] = json.RawMessage(rowCount)
 	}
 	if mirrored {
 		stitched, err := json.Marshal(rows)

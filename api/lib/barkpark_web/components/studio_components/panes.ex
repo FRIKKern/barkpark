@@ -177,6 +177,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # Set by the caller for the pane a just-handled `expand-pane` named, so the
   # initial page load (where every pane mounts) never steals focus.
   attr :focus_on_mount, :boolean, default: false
+  # The expanded column's landmark role. "region" everywhere except a page whose
+  # main content IS a column and has no <main> of its own (the API tester's docs
+  # column), which passes "main" (axe landmark-one-main).
+  attr :landmark, :string, default: "region", values: ~w(region main)
 
   slot :header_actions
   slot :inner_block, required: true
@@ -243,7 +247,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <div
         class={@col_class}
         id={@id}
-        role="region"
+        role={@landmark}
         aria-label={@title}
         data-role={@role_attr}
         data-priority={@priority_attr}

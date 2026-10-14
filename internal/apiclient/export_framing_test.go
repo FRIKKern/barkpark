@@ -3,7 +3,10 @@ package apiclient
 import (
 	"bufio"
 	"context"
+	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"testing"
@@ -136,5 +139,61 @@ func TestExportCompleteChunkedSucceeds(t *testing.T) {
 	}
 	if len(lines) != 3 {
 		t.Fatalf("delivered %d documents, want 3", len(lines))
+	}
+}
+
+// exportOverHTTP2 runs Export against an HTTP/2 (TLS) httptest server. Go's
+// client reports no Transfer-Encoding and ContentLength -1 for an HTTP/2 body,
+// the shape a close-delimited HTTP/1 body also has.
+func exportOverHTTP2(t *testing.T, handler http.HandlerFunc) (error, []string) {
+	t.Helper()
+	ts := httptest.NewUnstartedServer(handler)
+	ts.EnableHTTP2 = true
+	ts.StartTLS()
+	t.Cleanup(ts.Close)
+	prev := streamBase
+	streamBase = ts.Client().Transport
+	t.Cleanup(func() { streamBase = prev })
+
+	c := New(Config{BaseURL: ts.URL, Workspace: "ws", Project: "proj", Dataset: "production"})
+	var lines []string
+	err := c.Export(context.Background(), ExportOpts{}, func(line string) error {
+		lines = append(lines, line)
+		return nil
+	})
+	return err, lines
+}
+
+// CASE 5 — HTTP/2, COMPLETE. The stream ends on END_STREAM: attestable, nil.
+func TestExportCompleteHTTP2Succeeds(t *testing.T) {
+	err, lines := exportOverHTTP2(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor != 2 {
+			t.Errorf("request arrived over %s, want HTTP/2", r.Proto)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = io.WriteString(w, threeDocs)
+		w.(http.Flusher).Flush()
+	})
+
+	if err != nil {
+		t.Fatalf("Export returned %v on a complete HTTP/2 body, want nil", err)
+	}
+	if len(lines) != 3 {
+		t.Fatalf("delivered %d documents, want 3", len(lines))
+	}
+}
+
+// CASE 6 — HTTP/2, CUT SHORT. The server resets the stream after sending what
+// it had: a Read error, so a truncated HTTP/2 export is still refused.
+func TestExportResetHTTP2StillErrors(t *testing.T) {
+	err, lines := exportOverHTTP2(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = io.WriteString(w, threeDocs)
+		w.(http.Flusher).Flush()
+		panic(http.ErrAbortHandler)
+	})
+
+	if err == nil {
+		t.Fatalf("Export returned nil on a RESET HTTP/2 stream (%d documents); want an error", len(lines))
 	}
 }

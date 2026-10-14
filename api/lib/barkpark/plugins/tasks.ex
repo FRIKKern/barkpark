@@ -222,11 +222,11 @@ defmodule Barkpark.Plugins.Tasks do
   position it held there — see `Barkpark.Tasks.MutateGuards`:
 
     * `:before_rev` — the create family's published-fork fence, before the
-      revision precondition.
+      revision precondition, then the parent key's spelling.
     * `:after_claim` — after the door's close-CAS and claim fences, before the
       writer: disposition by verb (term, rerun, operating instruction, reopen
       trigger), adoption adjudicated, disposition owner registered — the order
-      the door's `with` chain named them in.
+      the door's `with` chain named them in — then the parent key's spelling.
 
   `mutate_door_fences_test.exs` pins the order.
   """
@@ -234,9 +234,11 @@ defmodule Barkpark.Plugins.Tasks do
   def mutate_door_fences do
     [
       {:before_rev, Barkpark.Tasks.MutateGuards, :create_not_forking_published},
+      {:before_rev, Barkpark.Tasks.MutateGuards, :parent_key_spelled},
       {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_via_verb},
       {:after_claim, Barkpark.Tasks.MutateGuards, :adoption_adjudicated},
-      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered}
+      {:after_claim, Barkpark.Tasks.MutateGuards, :disposition_owner_registered},
+      {:after_claim, Barkpark.Tasks.MutateGuards, :parent_key_spelled}
     ]
   end
 

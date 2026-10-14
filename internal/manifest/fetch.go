@@ -90,7 +90,9 @@ func Fetch(client *apiclient.Client, cache *Cache) (*Manifest, error) {
 	// re-ask after the interval the refusal itself named is the difference. It
 	// is deliberately ONE retry — this is a rate limiter, and the correct
 	// response to "too many requests" is emphatically not more of them.
-	if err == nil && res.StatusCode == http.StatusTooManyRequests {
+	// --no-retry / BARKPARK_NO_RETRY (apiclient.RetryDisabled) skips the re-ask
+	// and goes straight to the cache fallback below.
+	if err == nil && res.StatusCode == http.StatusTooManyRequests && !apiclient.RetryDisabled() {
 		if delay, ok := retryAfterDelay(res); ok {
 			time.Sleep(delay)
 			// A transport failure on the retry keeps the ORIGINAL 429: the

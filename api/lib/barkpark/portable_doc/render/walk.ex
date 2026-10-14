@@ -737,19 +737,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       end)
       |> Enum.join("")
 
-    # Article links drop their inline at-rest treatment — the `.bp-paper-surface
-    # a` element rule (`text-decoration:none; border-bottom:1px solid
-    # var(--paper-accent-soft)`) owns it in both View and Edit by construction
-    # (moduledoc theme-vs-data contract). The accent link colour stays inline
-    # (the same `--paper-accent` token the CSS rule resolves, so no drift).
-    # Email/default keeps the real underline — the correct convention off-surface.
-    deco =
-      case pal do
-        %{style: :article} -> ""
-        _ -> ";text-decoration:underline"
-      end
+    # Article links carry NO inline style: the `.bp-paper-surface a` element rule
+    # owns the colour and the underline in both View and Edit by construction
+    # (moduledoc theme-vs-data contract), and the standalone export embeds that
+    # stylesheet. The link colour is a THEME value, so it never rides inline here
+    # (task-10ca9c3597695db7). Email/default keeps the inline colour and the real
+    # underline — a mail client strips `<style>`.
+    href = safe_url(Map.get(n, "href", ""))
 
-    ~s(<a href="#{safe_url(Map.get(n, "href", ""))}" style="color:#{pal.link_color}#{deco}">#{inner}</a>)
+    case pal do
+      %{style: :article} ->
+        ~s(<a href="#{href}">#{inner}</a>)
+
+      _ ->
+        ~s(<a href="#{href}" style="color:#{pal.link_color};text-decoration:underline">#{inner}</a>)
+    end
   end
 
   # Internal-link kinds. A RESOLVED target (present in the palette's `:wikilinks`

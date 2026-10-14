@@ -10,6 +10,7 @@ import { dirname, resolve, join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { generateTypes, schemaEnvelopeSchema } from '../src/index'
 import type { BarkparkSchemaJson } from '../src/index'
+import { SUBPROCESS_TIMEOUT_MS } from './subprocess-timeout'
 
 const exec = promisify(execFile)
 const here = dirname(fileURLToPath(import.meta.url))
@@ -31,7 +32,7 @@ beforeAll(async () => {
  * so the test exercises the built binary the gate invokes (`barkpark generate
  * --from <fixture> --output <tmp>`) — never the live API.
  */
-describe('generate --from <file> (network-free)', () => {
+describe('generate --from <file> (network-free)', { timeout: SUBPROCESS_TIMEOUT_MS }, () => {
   it('reads a local schema file and writes byte-identical output to generateTypes', async () => {
     const out = join(mkdtempSync(join(tmpdir(), 'bp-codegen-')), 'barkpark.types.ts')
     await exec('node', [

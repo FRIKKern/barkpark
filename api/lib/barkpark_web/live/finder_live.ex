@@ -49,7 +49,11 @@ defmodule BarkparkWeb.FinderLive do
   @graph_node_per_type_limit 1000
 
   @impl true
-  def mount(params, _session, socket) do
+  def mount(params, session, socket) do
+    # The browser's language (lead ruling, run 8), stored by the
+    # BarkparkWeb.AcceptLanguage plug on the static request: the connected
+    # mount cannot read Accept-Language itself.
+    session |> BarkparkWeb.AcceptLanguage.from_session() |> BarkparkWeb.StudioLocale.put_named()
     dataset = sanitize_dataset(params["dataset"])
 
     # THE PUBLIC TENANT, resolved ONCE (task-f9c30aa28c64f24a). This LiveView is
@@ -91,7 +95,7 @@ defmodule BarkparkWeb.FinderLive do
     socket =
       socket
       |> assign(
-        page_title: "Search — Barkpark",
+        page_title: gettext("Search — Barkpark"),
         dataset: dataset,
         # The pinned public tenant every read below threads (or `nil` → empty
         # page). Assigned, not re-resolved per event: it cannot change within a
@@ -131,7 +135,7 @@ defmodule BarkparkWeb.FinderLive do
     socket =
       if connected?(socket) do
         start_async(socket, :graph_corpus, fn ->
-          graph_payload(dataset, caller_context, workspace_id)
+          shared_graph_payload(dataset, caller_context, workspace_id)
         end)
       else
         socket
@@ -333,17 +337,17 @@ defmodule BarkparkWeb.FinderLive do
       >
       </div>
       <section class="bp-finder-panel">
-        <p class="bp-finder-eyebrow">Search</p>
-        <h1>Search everything.</h1>
+        <p class="bp-finder-eyebrow">{gettext("Search")}</p>
+        <h1>{gettext("Search everything.")}</h1>
         <form phx-change="search" phx-submit="search" autocomplete="off">
           <input
             type="search"
             name="q"
             value={@q}
-            placeholder="Search everything…"
+            placeholder={gettext("Search everything…")}
             phx-debounce="150"
             autofocus
-            aria-label="Search"
+            aria-label={gettext("Search")}
             class="bp-finder-input"
           />
         </form>
@@ -360,9 +364,11 @@ defmodule BarkparkWeb.FinderLive do
           </li>
         </ol>
         <p class="bp-finder-count">
-          {@document_count} documents · live search served by Phoenix · {if @q != "",
+          {ngettext("1 document", "%{count} documents", @document_count)} · {gettext(
+            "live search served by Phoenix"
+          )} · {if @q != "",
             do: hit_summary(@hit_count, length(@hits)),
-            else: "type to search"}<span :if={@graph_truncated}> · graph truncated ({@graph_truncation_reason})</span>
+            else: gettext("type to search")}<span :if={@graph_truncated}> · {gettext("graph truncated (%{reason})", reason: @graph_truncation_reason)}</span>
         </p>
       </section>
     </main>
@@ -391,8 +397,10 @@ defmodule BarkparkWeb.FinderLive do
   # rows and offers no pagination — so "437 hits" beside 12 rows read as a
   # rendering bug. Say which is which. Under the limit the wording is unchanged,
   # which is what the existing spec pins.
-  defp hit_summary(total, shown) when total > shown, do: "showing #{shown} of #{total} hits"
-  defp hit_summary(total, _shown), do: "#{total} hits"
+  defp hit_summary(total, shown) when total > shown,
+    do: gettext("showing %{shown} of %{total} hits", shown: shown, total: total)
+
+  defp hit_summary(total, _shown), do: ngettext("1 hit", "%{count} hits", total)
 
   defp sanitize_dataset(raw) do
     case to_string(raw || "") do
@@ -441,6 +449,33 @@ defmodule BarkparkWeb.FinderLive do
   # renders, so the page degrades to "no corpus" rather than to an unscoped
   # walk of every workspace on the box. Same posture as `run_search/2` above and
   # as `Content.get_public_document/3`.
+  # SINGLE-FLIGHT (am-w2-s4). The corpus walk costs seconds, and every finder
+  # visitor used to pay it: N concurrent mounts ran N derivations of the same
+  # graph (the flat twin's pile-up was prod incident #10016). Now concurrent
+  # mounts of the same graph share ONE derivation, and its result serves later
+  # mounts for `@graph_ttl_ms`. The key names everything the payload depends
+  # on: the dataset, the tenant, and WHO asks — the visibility clamp keys on
+  # the caller, so an anonymous visitor shares with anonymous visitors only.
+  @graph_ttl_ms 30_000
+
+  defp shared_graph_payload(dataset, caller_context, workspace_id) do
+    Barkpark.SingleFlight.run(
+      {:finder_graph, dataset, workspace_id, viewer_key(caller_context)},
+      Application.get_env(:barkpark, :finder_graph_ttl_ms, @graph_ttl_ms),
+      fn ->
+        :telemetry.execute([:barkpark, :finder, :graph_derived], %{count: 1}, %{dataset: dataset})
+        graph_payload(dataset, caller_context, workspace_id)
+      end
+    )
+  end
+
+  defp viewer_key(%CallerContext{principal_type: :anonymous, grants: []}), do: :anonymous
+
+  defp viewer_key(%CallerContext{} = ctx),
+    do: {ctx.principal_type, ctx.token_id, ctx.user_id, ctx.is_admin, ctx.roles, ctx.grants}
+
+  defp viewer_key(other), do: {:other, other}
+
   defp graph_payload(_dataset, _caller_context, nil), do: {"[]", "[]", "", 0, 0, false, nil}
 
   defp graph_payload(dataset, caller_context, workspace_id) do

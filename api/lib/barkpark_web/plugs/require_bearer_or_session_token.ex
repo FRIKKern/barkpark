@@ -52,7 +52,7 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
 
           {:error, conn} ->
             case account_session?(conn) do
-              true -> require_csrf_header(conn)
+              true -> require_account_csrf(conn)
               false -> unauthorized(conn)
             end
         end
@@ -109,6 +109,19 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
   defp account_session?(conn) do
     match?(%Barkpark.Accounts.User{}, conn.assigns[:current_user]) and
       match?(%{id: id} when is_binary(id), conn.assigns[:current_workspace])
+  end
+
+  # The account arm's CSRF guard applies to the COOKIE door only
+  # (task-a89ef18ee88ba6a0). A login session presented as `Authorization:
+  # Bearer` (`OptionalSessionToken` records `:current_user_via, :bearer`) is
+  # not an ambient credential — a cross-site form or image cannot attach that
+  # header — so it is exempt exactly like the API-token bearer above. Anything
+  # else, including a missing marker, is treated as the cookie: fail closed.
+  defp require_account_csrf(conn) do
+    case conn.assigns[:current_user_via] do
+      :bearer -> conn
+      _ -> require_csrf_header(conn)
+    end
   end
 
   # CSRF guard for the cookie branch only. Bearer callers return above and

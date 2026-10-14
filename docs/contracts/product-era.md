@@ -41,6 +41,8 @@ Core has two doors. The HTTP API serves everything outside the process. The plug
 
 The installing door declares the shape in `BARKPARK_SHAPE` (`cloud`, `solo` or `app`; an unknown value refuses the boot). The Cloud provisioner writes `cloud`; `deploy.sh`, compose and `bin/barkpark` write `solo`. `/status.json` reports it as `shape`, or `null` when no door declared one. It is inventory: core code does not branch on it (`Barkpark.Shape`).
 
+The publish wall (`Barkpark.Content.AuthoringWall`: description, registered weighted tags, dedup) is an install setting, not a shape: `config :barkpark, :authoring_wall`, read by `AuthoringWall.enabled?/0` (ruling "8edd A", task-8edd8e147c648a36). The library default is off. Dev, test and prod `runtime.exs` turn it on; in prod a falsy `BARKPARK_AUTHORING_WALL` turns it off, and `@barkpark/engine` sets `off`. So guerrilla and every Cloud and compose box keep the wall, and an app publishes a paper with only a slug, a title and blocks. `/status.json` reports `authoring_wall`.
+
 Core never assumes a shape: no hard-coded dataset, no self-update when the host owns updates, no login when local. Shape-specific code lives at the edges. A change is proven in every shape it touches.
 
 "Barkspark" is only the codename for the App work. What ships is compiled Barkpark: `@barkpark/engine`, `startBarkpark({ dataDir, plugins })` and `bp build`.
