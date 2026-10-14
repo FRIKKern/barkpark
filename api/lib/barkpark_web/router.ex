@@ -3362,6 +3362,15 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.PublicCors, methods: "GET, HEAD")
   end
 
+  # Media delivery GETs only (task-701191424b8d15e8). Listed BEFORE the
+  # pipeline that runs `plug(:accepts, ["json"])`, so a strict image or file
+  # `Accept` header (image/webp, image/*, application/pdf) negotiates the json
+  # error format instead of raising Phoenix.NotAcceptableError. See the plug's
+  # @moduledoc. Never mount it on a JSON route.
+  pipeline :delivery_accept do
+    plug(BarkparkWeb.Plugs.DeliveryAccept)
+  end
+
   # ── Media — upload requires token, serving is public ────────────────────
   # Presented-but-UNVERIFIABLE bearer → 401, on the two FLAT media READ blocks:
   # `/media` just below (task-6716af864218081b) and `/v1/media` further down
@@ -3399,12 +3408,27 @@ defmodule BarkparkWeb.Router do
   #
   # NOT a liveness surface: `deploy.sh`, the docker-compose healthcheck and
   # `cloud/` all probe `/api/schemas`, never a media path.
+  #
+  # The two delivery GETs (renditions, files) also take `:delivery_accept`, so
+  # any `Accept` header reaches them (task-701191424b8d15e8). The JSON reads in
+  # between keep refusing a header that cannot take JSON. The three scopes keep
+  # the original match order, so `/media/files/meta` still reaches `:show`.
+  scope "/media", BarkparkWeb do
+    pipe_through([:media_public_cors, :delivery_accept, :api, :api_strict_bearer])
+
+    get("/renditions/:id/:preset", MediaController, :serve_rendition)
+  end
+
   scope "/media", BarkparkWeb do
     pipe_through([:media_public_cors, :api, :api_strict_bearer])
 
-    get("/renditions/:id/:preset", MediaController, :serve_rendition)
     get("/", MediaController, :index)
     get("/:id/meta", MediaController, :show)
+  end
+
+  scope "/media", BarkparkWeb do
+    pipe_through([:media_public_cors, :delivery_accept, :api, :api_strict_bearer])
+
     get("/files/*path", MediaController, :serve)
   end
 
@@ -3713,11 +3737,20 @@ defmodule BarkparkWeb.Router do
   # reflects any allowlisted `Origin` on the dataset, with `Vary: Origin`: a
   # per-tenant opt-in. Pinned (absence AND the reflector) by
   # `test/barkpark_web/controllers/scoped_media_cors_test.exs`.
+  #
+  # The delivery GETs (files, renditions) also take `:delivery_accept`, so any
+  # `Accept` header reaches them (task-701191424b8d15e8). Index and meta are
+  # JSON reads and keep refusing a header that cannot take JSON.
   scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
     pipe_through(:shared_media_api)
 
     get("/", MediaController, :index)
     get("/:id/meta", MediaController, :show)
+  end
+
+  scope "/w/:workspace_slug/p/:project_slug/media", BarkparkWeb do
+    pipe_through([:delivery_accept, :shared_media_api])
+
     get("/files/*path", MediaController, :serve)
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
   end
@@ -3727,9 +3760,10 @@ defmodule BarkparkWeb.Router do
   # Same pipeline as the scoped media reads above, so access, share and CORS
   # behave as for `/media/files/*path`. The first segment after `images` or
   # `files` is Sanity's projectId and is ignored; `:dataset` is the Barkpark
-  # dataset, which `RequireShareScope` checks against a share.
+  # dataset, which `RequireShareScope` checks against a share. Both routes
+  # return bytes, so they take `:delivery_accept` like the scoped serve GETs.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through(:shared_media_api)
+    pipe_through([:delivery_accept, :shared_media_api])
 
     get("/images/:sanity_project/:dataset/*rest", MediaController, :serve_sanity_image)
     get("/files/:sanity_project/:dataset/*rest", MediaController, :serve_sanity_file)

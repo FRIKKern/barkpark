@@ -292,4 +292,17 @@ defmodule Barkpark.Content.ErrorsTest do
   test "label_spine is a registered code (OpenAPI enum + hint table truthful)" do
     assert MapSet.member?(Errors.known_codes(), "label_spine")
   end
+
+  # scaffy:add-error-shape not_acceptable MARK:error-test-not_acceptable
+  test "maps :not_acceptable to its envelope and registers not_acceptable in known_codes" do
+    Logger.metadata(request_id: nil)
+
+    env = Errors.to_envelope({:error, :not_acceptable})
+    assert env.code == "not_acceptable"
+    assert env.status == 406
+    assert env.message == "the Accept header names no format this route can return"
+    assert is_binary(env.hint) and env.hint != ""
+    refute env.hint =~ ~r/retry/i
+    assert MapSet.member?(Errors.known_codes(), "not_acceptable")
+  end
 end

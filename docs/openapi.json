@@ -171,6 +171,7 @@
                   "missing_slug",
                   "missing_source",
                   "no_user_identity",
+                  "not_acceptable",
                   "not_found",
                   "owner_only",
                   "paper_exists",

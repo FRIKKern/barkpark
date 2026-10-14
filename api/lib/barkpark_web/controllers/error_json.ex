@@ -93,6 +93,15 @@ defmodule BarkparkWeb.ErrorJSON do
        }),
        do: {:error, e}
 
+  # A strict `Accept` header on a JSON route (task-701191424b8d15e8).
+  # `plug(:accepts, ["json"])` raises Phoenix.NotAcceptableError, whose status
+  # is already 406. Without this clause the body read `internal_error`, with
+  # the message "unknown error (Phoenix.NotAcceptableError)" and a "Retry
+  # shortly" hint, so a client resent the same header and got the same 406.
+  # The code is `not_acceptable`, and its hint names the header to send.
+  defp reason_for_template(_template, %{kind: :error, reason: %Phoenix.NotAcceptableError{}}),
+    do: {:error, :not_acceptable}
+
   # A refused or lost DATABASE CONNECTION is a transient refusal, not a server
   # fault (task-f8233616de3513d4). Under pool shedding it raises from the plugs
   # before any controller runs (`Auth.verify_token/1`, `AssignDefaultScope`,

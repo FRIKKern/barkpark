@@ -121,7 +121,10 @@ defmodule Barkpark.Content.Errors do
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
-      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota."
+      "This workspace has reached its write quota (details.quota). Remove documents to free capacity, or raise the workspace's quota.",
+    # scaffy:add-error-shape not_acceptable MARK:error-hint-not_acceptable
+    "not_acceptable" =>
+      "This route answers JSON. Send Accept: application/json or */*, or leave the Accept header out."
   }
 
   # ── Public codes emitted INLINE by other v1 controllers / plugs ──────────────
@@ -1475,6 +1478,18 @@ defmodule Barkpark.Content.Errors do
 
   defp build({:error, reason}) when is_binary(reason),
     do: %{code: "internal_error", message: reason, status: 500}
+
+  # scaffy:add-error-shape not_acceptable MARK:error-shape-not_acceptable
+  # A JSON route refused the request's Accept header: `plug(:accepts, ["json"])`
+  # raised Phoenix.NotAcceptableError, which BarkparkWeb.ErrorJSON maps here
+  # (task-701191424b8d15e8). It was an `internal_error` 406 with a "Retry
+  # shortly" hint, which sent the caller to resend the same header forever.
+  defp build({:error, :not_acceptable}),
+    do: %{
+      code: "not_acceptable",
+      message: "the Accept header names no format this route can return",
+      status: 406
+    }
 
   # THE DELIBERATE "no fault in scope" SENTINEL, narrowed OUT of the catch-all.
   # `BarkparkWeb.ErrorJSON` renders `{:error, :unknown}` when Phoenix's

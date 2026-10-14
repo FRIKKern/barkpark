@@ -272,6 +272,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"unsupported_media_type", {:error, :unsupported_media_type}, "unsupported_media_type", 422,
        []},
       {"payload_too_large", {:error, :payload_too_large}, "payload_too_large", 413, []},
+      {"not_acceptable", {:error, :not_acceptable}, "not_acceptable", 406, []},
       {"rate_limited/retry_after", {:error, :rate_limited, %{retry_after: 30}}, "rate_limited",
        429, [:details]},
       {"binary reason", {:error, "boom"}, "internal_error", 500, []},

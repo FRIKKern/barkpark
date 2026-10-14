@@ -173,7 +173,7 @@ Two rules keep it closed:
    close/stamp refusal family (`tasks/{close,stamp}.ex` → `conflict/3`), whose
    gate is `TestCodeExitCoversCloseRefusalVocabulary`; its fallback is `2`.
 2. **Bucket by the status the emitter actually returns**, never the code's name:
-   `400`→`2`, `401`/`403`→`3`, `404`→`4`, `409`/`412`→`6`, `402`/`413`/`422`→`5`,
+   `400`/`406`→`2`, `401`/`403`→`3`, `404`→`4`, `409`/`412`→`6`, `402`/`413`/`422`→`5`,
    `429`→`7`, `5xx`→`8`. Two live codes read against this rule —
    `source_not_found` answers **422** (not 404), `payload_too_large` **413** —
    and both follow the status; bucketing on the name is the guesswork this table
