@@ -193,7 +193,7 @@ defmodule Barkpark.Groq.ParserTest do
             ~s'*[_type == "p" && ("x" in codes || (a == 1 && lower(b) == "x"))]',
             ~s'*[_type == "p" && ("x" in codes || "y" in tags[].v)]'
           ] do
-        assert [{:or, [_, _]}] = constraints(q).checks, q
+        assert match?([{:or, [_, _]}], constraints(q).checks), q
         assert exact(q) == :error, q
       end
 
