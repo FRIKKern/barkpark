@@ -39,6 +39,15 @@ defmodule Barkpark.Groq.Pushdown do
       content equality. A disjunct with a condition that reads only `^` and
       is not true for this parent can never match, so it adds no probe; an
       `||` whose disjuncts all drop matches nothing.
+    * an `||` whose every disjunct narrows -> `checks` as `{:or, branches}`,
+      unless each branch is one probe list, which stays the `any` above.
+      Each branch is the constraint set of one disjunct, read as
+      `constraints/2` reads a filter, so every shape above counts, a nested
+      `||` included. A disjunct narrows when one of its conjuncts does. SQL
+      tests the branches as one OR, which Postgres can plan as a BitmapOr
+      over the indexes each branch uses. A branch is exact when each of its
+      conjuncts is one `exact/2` takes; the check is exact when every branch
+      is
 
   A probe in `any` is a JSON containment map, `{:refs, ids}` or `{:ids, ids}`.
 
@@ -67,7 +76,8 @@ defmodule Barkpark.Groq.Pushdown do
 
   @type probe :: map() | {:refs, [String.t()]} | {:ids, [String.t()]}
   @type check ::
-          {:length, [String.t()], String.t(), integer()}
+          {:or, [t()]}
+          | {:length, [String.t()], String.t(), integer()}
           | {:defined, [String.t()], integer() | nil}
           | {:in, [String.t()], [scalar()]}
           | {:member, [String.t()], scalar()}
@@ -103,8 +113,9 @@ defmodule Barkpark.Groq.Pushdown do
   conjuncts qualify: `_type ==` and `in` with strings, `_id ==` and `in`, a
   content path `==` a string, number or boolean, and the `checks` above. A
   content path's first segment does not start with `_` and its segments are
-  not array indexes. `title`, `null`, `||`, other functions and everything
-  else make the filter inexact. The source still checks that
+  not array indexes. An `||` qualifies when each of its branches holds only
+  these. `title`, `null`, other functions and everything else make the filter
+  inexact. The source still checks that
   rendering hides no field before it trusts the count.
   """
   @spec exact(tuple(), (tuple() -> term()) | nil) :: {:ok, t()} | :error
@@ -147,6 +158,13 @@ defmodule Barkpark.Groq.Pushdown do
 
       _ ->
         :error
+    end
+  end
+
+  defp exact_match({:or, _l, _r} = node, acc, resolve) do
+    case or_check(node, resolve) do
+      {:ok, check, true} -> {:ok, add_or(acc, check)}
+      _ -> :error
     end
   end
 
@@ -424,7 +442,94 @@ defmodule Barkpark.Groq.Pushdown do
     end
   end
 
+  # An `||` whose branches each hold one probe list and nothing else is one
+  # probe list, as before: one `@> ANY(...)` the GIN index serves.
+  defp apply_match({:or, _l, _r} = node, acc, resolve) do
+    case or_check(node, resolve) do
+      {:ok, {:or, [_ | _] = branches} = check, _exact?} ->
+        if Enum.all?(branches, &probes_only?/1),
+          do: %{acc | any: [Enum.flat_map(branches, &hd(&1.any)) | acc.any]},
+          else: add_or(acc, check)
+
+      {:ok, check, _exact?} ->
+        add_or(acc, check)
+
+      :error ->
+        add_probes(acc, node, resolve)
+    end
+  end
+
   defp apply_match(node, acc, resolve), do: add_probes(acc, node, resolve)
+
+  defp probes_only?(%{types: nil, ids: nil, eq: [], checks: [], any: [_]}), do: true
+  defp probes_only?(_branch), do: false
+
+  # `{:ok, {:or, branches}, exact?}` for an `||` whose every disjunct narrows,
+  # else `:error`. A disjunct that cannot be true for this parent adds no
+  # branch, so an `||` whose disjuncts all drop is `{:or, []}`, which matches
+  # nothing.
+  defp or_check(node, resolve) do
+    node
+    |> disjuncts()
+    |> Enum.reduce_while({[], true}, fn disjunct, {branches, exact?} ->
+      case branch(disjunct, resolve) do
+        {:ok, branch, branch_exact?} -> {:cont, {[branch | branches], exact? and branch_exact?}}
+        :never -> {:cont, {branches, exact?}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      :error -> :error
+      {branches, exact?} -> {:ok, {:or, Enum.reverse(branches)}, exact?}
+    end
+  end
+
+  # When every branch names its types, the filter's types are among them,
+  # so a count can still judge each type's fields.
+  defp add_or(acc, {:or, branches} = check) do
+    acc = %{acc | checks: [check | acc.checks]}
+
+    if Enum.all?(branches, &(&1.types != nil)),
+      do: narrow(acc, :types, Enum.flat_map(branches, & &1.types)),
+      else: acc
+  end
+
+  defp disjuncts({:or, l, r}), do: disjuncts(l) ++ disjuncts(r)
+  defp disjuncts({:group, inner}), do: disjuncts(inner)
+  defp disjuncts(other), do: [other]
+
+  # The constraint set of one disjunct, whether it is exact, or `:never`. A
+  # conjunct that reads only `^` and literals is true or not for this parent:
+  # true adds nothing, anything else drops the branch. A conjunct SQL cannot
+  # test leaves the branch inexact; a branch where no conjunct narrows makes
+  # the whole `||` unnarrowable.
+  defp branch(node, resolve) do
+    node
+    |> conjuncts()
+    |> Enum.reduce_while({empty(), true}, fn conjunct, {acc, exact?} ->
+      case value(conjunct, resolve) do
+        {:ok, true} ->
+          {:cont, {acc, exact?}}
+
+        {:ok, _not_true} ->
+          {:halt, :never}
+
+        :error ->
+          case exact_conjunct(conjunct, acc, resolve) do
+            {:ok, acc} -> {:cont, {acc, exact?}}
+            :error -> {:cont, {apply_conjunct(conjunct, acc, resolve), false}}
+          end
+      end
+    end)
+    |> case do
+      :never -> :never
+      {acc, _exact?} when acc == %{types: nil, ids: nil, eq: [], any: [], checks: []} -> :error
+      {acc, exact?} -> if matches_nothing?(acc), do: :never, else: {:ok, acc, exact?}
+    end
+  end
+
+  defp matches_nothing?(acc),
+    do: acc.types == [] or acc.ids == [] or [] in acc.any or {:or, []} in acc.checks
 
   defp add_probes(acc, node, resolve) do
     case probes(node, resolve) do

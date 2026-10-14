@@ -18,8 +18,9 @@ defmodule Barkpark.Groq.DocumentSource do
   The constraints `Barkpark.Groq.Pushdown` reads off each `*[...]` filter
   become SQL: `_type`, `_id`, field equalities and array membership as JSON
   containment on `content`, `in` over a list of values as a jsonpath on
-  `content`, and `references()` against an expression index
-  over the `_ref` values in `content`. Everything else runs in memory over the
+  `content`, `references()` against an expression index
+  over the `_ref` values in `content`, and an `||` whose every branch narrows
+  as one SQL OR of the branches' conditions. Everything else runs in memory over the
   loaded documents. An equality on `title` reads the `documents.title`
   column, where the writer keeps it. Containment and jsonpath use `documents_content_path_idx`
   (`20260702130000_add_documents_content_gin_index.exs`); the `_ref` index is
@@ -312,8 +313,10 @@ defmodule Barkpark.Groq.DocumentSource do
   defp filter_paths(constraints) do
     eq = Enum.map(constraints.eq, fn {path, _value} -> path end)
 
+    {ors, plain} = Enum.split_with(constraints.checks, &match?({:or, _}, &1))
+
     checks =
-      Enum.map(constraints.checks, fn
+      Enum.map(plain, fn
         {:length, path, _op, _n} -> path
         {:defined, path, _index} -> path
         {:in, path, _values} -> path
@@ -321,7 +324,9 @@ defmodule Barkpark.Groq.DocumentSource do
         {:some, path, _pairs} -> path
       end)
 
-    Enum.uniq(eq ++ checks)
+    branches = for {:or, branches} <- ors, branch <- branches, do: filter_paths(branch)
+
+    Enum.uniq(eq ++ checks ++ List.flatten(branches))
   end
 
   # `field_readable?/3` takes a dotted name, so a segment holding a dot
@@ -454,20 +459,26 @@ defmodule Barkpark.Groq.DocumentSource do
     condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
 
     condition =
-      Enum.reduce(checks, condition, fn c, acc -> dynamic(^acc and ^check_condition(c)) end)
+      Enum.reduce(checks, condition, fn c, acc ->
+        dynamic(^acc and ^check_condition(c, perspective))
+      end)
 
     Enum.reduce(eq, condition, fn {path, value}, acc ->
-      dynamic(
-        [d],
-        ^acc and ^eq_condition(path, value) and
-          fragment(
-            "? #> ? = CAST(? AS jsonb)",
-            d.content,
-            type(^path, {:array, :string}),
-            type(^Jason.encode!(value), :string)
-          )
-      )
+      dynamic(^acc and ^strict_eq_condition(path, value))
     end)
+  end
+
+  defp strict_eq_condition(path, value) do
+    dynamic(
+      [d],
+      ^eq_condition(path, value) and
+        fragment(
+          "? #> ? = CAST(? AS jsonb)",
+          d.content,
+          type(^path, {:array, :string}),
+          type(^Jason.encode!(value), :string)
+        )
+    )
   end
 
   # `counted_rows/1` leaves out a published row whose draft replaces it, so
@@ -814,7 +825,9 @@ defmodule Barkpark.Groq.DocumentSource do
     condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
 
     condition =
-      Enum.reduce(checks, condition, fn c, acc -> dynamic(^acc and ^check_condition(c)) end)
+      Enum.reduce(checks, condition, fn c, acc ->
+        dynamic(^acc and ^check_condition(c, perspective))
+      end)
 
     condition =
       Enum.reduce(eq, condition, fn {path, value}, acc ->
@@ -873,6 +886,36 @@ defmodule Barkpark.Groq.DocumentSource do
         type(^ids, {:array, :string})
       )
     )
+  end
+
+  # `{:or, branches}`: a row matches every condition of one branch. Each
+  # branch is a constraint set, so a branch tests what a whole filter would,
+  # and Postgres can plan the OR as a BitmapOr over the indexes the branches
+  # use. An equality tests the value at the path as `exact_condition/4` does,
+  # which matches what GROQ matches, so an exact branch stays exact; `title`
+  # keeps its column test.
+  defp check_condition({:or, []}, _perspective), do: dynamic(false)
+
+  defp check_condition({:or, branches}, perspective) do
+    branches
+    |> Enum.map(&branch_condition(&1, perspective))
+    |> Enum.reduce(fn c, acc -> dynamic(^acc or ^c) end)
+  end
+
+  defp check_condition(check, _perspective), do: check_condition(check)
+
+  defp branch_condition(branch, perspective) do
+    conditions =
+      Enum.reject([branch.types && dynamic([d], d.type in ^branch.types)], &is_nil/1) ++
+        Enum.reject([branch.ids && ids_condition(branch.ids, perspective)], &is_nil/1) ++
+        Enum.map(branch.checks, &check_condition(&1, perspective)) ++
+        Enum.map(branch.eq, fn
+          {["title"], value} -> eq_condition(["title"], value)
+          {path, value} -> strict_eq_condition(path, value)
+        end) ++
+        Enum.map(branch.any, &probes_condition(&1, perspective))
+
+    Enum.reduce(conditions, fn c, acc -> dynamic(^acc and ^c) end)
   end
 
   # `count(path) op n`. The CASE yields null for anything but an array, as

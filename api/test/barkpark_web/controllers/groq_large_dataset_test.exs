@@ -976,6 +976,151 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     end
   end
 
+  describe "an || whose every branch narrows in SQL" do
+    # The twin's recommendation rail: books that share any of several codes.
+    # `seriesIds` is `["series-<g mod 50>"]`, so each value holds 210 products.
+    @rail_query """
+    *[_type == "product" && ($a in seriesIds || $b in seriesIds) && isMainProduct == true &&
+      access.buyStatus != "sold_out"] | order(onix.publishingDate desc)[0...5]{_id}
+    """
+
+    @or_params %{"a" => "series-3", "b" => "series-7", "isbns" => ["9780000101", "9780000202"]}
+
+    @two ~s'($a in seriesIds || $b in seriesIds)'
+
+    # `exact?` says whether SQL counts the shape.
+    @or_shapes [
+      {@rail_query, false},
+      {~s'*[_type == "product" && #{@two}]._id', true},
+      {~s'*[_type == "product" && #{@two}] | order(isbn desc)[0...12]._id', true},
+      {~s'*[_type == "product" && #{@two}][3...8]._id', true},
+      {~s'*[_type == "product" && #{@two} && isbn > "0"] | order(isbn desc)[0...12]._id', false},
+      {~s'*[_type == "product" && (isbn in $isbns || _id == "p77" || count(onix.contributors[role._ref == "B06" && contributor._ref == "c-11"]) > 0 || defined(onix.contributors[3]))]._id',
+       true},
+      {~s'*[_type == "product" && (references("c-9") || $a in seriesIds)]._id', false},
+      {~s'*[_type == "product" && ($a in seriesIds || title == "Book 3")]._id', false},
+      {~s'*[_type == "product" && (($a in seriesIds && isMainProduct == false) || (onix.publicationStatus.value == "07" && $b in seriesIds) || (lower(isbn) == "x" && code == 7))]._id',
+       false},
+      {~s'*[_type == "product" && (code == 7 || "x" in tags)]._id', true},
+      {~s'*[(_type == "product" && code == 7) || (_type == "product" && $b in seriesIds)]._id',
+       true}
+    ]
+
+    setup %{scope: scope} do
+      # z1 holds a string where the array is, z2 an array nested in the
+      # array, z3 the value next to another and a float 7, z4 the string "7".
+      for {id, doc} <- [
+            {"z1", %{"seriesIds" => "series-3", "tags" => "x"}},
+            {"z2", %{"seriesIds" => [["series-7"]], "tags" => [["x"]]}},
+            {"z3", %{"seriesIds" => ["other", "series-7"], "code" => 7.0}},
+            {"z4", %{"code" => "7", "tags" => ["y", "x"]}}
+          ] do
+        {:ok, _} = Content.create_document("product", Map.put(doc, "_id", id), @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      # Drafts: p3 leaves series-3, p8 joins series-7, and z5 exists only as
+      # a draft that matches.
+      for {id, series} <- [{"p3", ["other"]}, {"p8", ["series-7"]}] do
+        %{rows: [[content]]} =
+          Repo.query!("SELECT content FROM documents WHERE doc_id = $1 AND dataset = $2", [
+            id,
+            @dataset
+          ])
+
+        doc = content |> Map.put("seriesIds", series) |> Map.put("_id", id)
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+      end
+
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          %{"_id" => "z5", "seriesIds" => ["series-3"], "isMainProduct" => true},
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    test "each shape and its count equal in-memory evaluation in every perspective",
+         %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        docs = products(token, perspective)
+        extra = %{"perspective" => perspective}
+
+        for {q, _exact?} <- @or_shapes do
+          want = in_memory(docs, q, @or_params)
+          assert result!(token, q, @or_params, extra) == want, "#{perspective} #{q}"
+
+          if String.ends_with?(q, "]._id") do
+            counted =
+              result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), @or_params, extra)
+
+            assert counted == length(want), "#{perspective} count #{q}"
+          end
+        end
+      end
+
+      # Spot checks against the seed, published.
+      ids = result!(token, ~s'*[_type == "product" && #{@two}]._id', @or_params)
+      assert length(ids) == 420 + 1
+      assert "z3" in ids and "p3" in ids and "p7" in ids
+      refute "z1" in ids or "z2" in ids
+
+      assert Enum.sort(
+               result!(token, ~s'*[_type == "product" && (code == 7 || "x" in tags)]._id', %{})
+             ) == ["z3", "z4"]
+    end
+
+    test "SQL narrows each shape before the per-fetch limit", %{token: token} do
+      with_groq_config(max_documents_per_fetch: 1_000)
+
+      for {q, _exact?} <- @or_shapes do
+        assert is_list(result!(token, q, @or_params)), q
+      end
+    end
+
+    test "an exact or is a SQL count, not a chunked scan", %{token: token} do
+      for {q, true} <- @or_shapes, String.ends_with?(q, "]._id") do
+        sql =
+          sql_reads(fn ->
+            result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), @or_params)
+          end)
+
+        refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/)), q
+        assert Enum.any?(sql, &(&1 =~ " OR ")), q
+      end
+    end
+
+    test "an exact slice reads only the rows it returns", %{token: token} do
+      {_result, rows} =
+        rows_read(fn ->
+          result!(
+            token,
+            ~s'*[_type == "product" && #{@two}] | order(isbn desc)[0...12]._id',
+            @or_params
+          )
+        end)
+
+      # The sized read returns 12 ids and the load 12 rows.
+      assert rows <= 24
+    end
+
+    test "the or is a BitmapOr over documents_content_path_idx", %{token: token} do
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      plans =
+        explain_reads("@?", fn ->
+          result!(token, ~s'*[_type == "product" && #{@two}]._id', @or_params)
+        end)
+
+      assert [plan] = plans
+      assert plan =~ "BitmapOr", plan
+      assert plan =~ "documents_content_path_idx", plan
+    end
+  end
+
   # The SQL of every query the function sends.
   defp sql_reads(fun) do
     ref = make_ref()
