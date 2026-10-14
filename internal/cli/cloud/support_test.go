@@ -173,6 +173,9 @@ func (r *sunsetRunner) Run(_ context.Context, _ CaddyStep) error { return nil }
 func (r *sunsetRunner) RunOutput(_ context.Context, script string) (string, error) {
 	r.outScripts = append(r.outScripts, script)
 	switch {
+	case strings.Contains(script, "SERVING_OK="):
+		// The served-commit gate: the box serves its checkout's HEAD.
+		return "SERVING_OK=abc123", nil
 	case strings.Contains(script, "/api/schemas"):
 		// The route is RETIRED. curl -fsS on a 404 exits 22 and prints the
 		// reason on stderr; the caller sees a non-nil error.
@@ -235,5 +238,130 @@ func TestConfigureSupportHost_SurvivesTheSunsetOfApiSchemas(t *testing.T) {
 	}
 	if !probed {
 		t.Fatalf("no script probed /status.json — the health gate never ran, so this green measured nothing: %v", r.outScripts)
+	}
+}
+
+// staleBoxRunner is a SupportRunner whose box is BEHIND origin/main and whose
+// rebuild fails: the fleet-1 state of 2026-10-14 (baked bd27dba66, go.mod churn
+// aborting the merge). It records every Run step title.
+type staleBoxRunner struct {
+	titles []string
+}
+
+func (r *staleBoxRunner) Run(_ context.Context, s CaddyStep) error {
+	r.titles = append(r.titles, s.Title)
+	return nil
+}
+
+func (r *staleBoxRunner) RunOutput(_ context.Context, script string) (string, error) {
+	switch {
+	case strings.Contains(script, "apply-update.sh"):
+		return "error: Your local changes to the following files would be overwritten by merge:\n\tgo.mod\n\tgo.sum\nAborting", fmt.Errorf("exit status 1")
+	case strings.Contains(script, "diff --name-only"):
+		return "api/lib/barkpark/auth.ex\n", nil
+	case strings.Contains(script, "/status.json"):
+		return `{"status":"operational"}`, nil
+	}
+	return "FRESHEN_HEAD=bd27dba66\nFRESHEN_REMOTE=db8655f11\nFRESHEN_FROM=a\nFRESHEN_TO=b\n", nil
+}
+
+func (r *staleBoxRunner) RunFeed(_ context.Context, _, _ string, _ io.Reader) (string, error) {
+	return "", nil
+}
+
+func (r *staleBoxRunner) WaitReady(_ context.Context, _ time.Duration) error { return nil }
+
+// TestConfigureSupportHost_FreshenFailureStops proves a failed freshen ends the
+// configure chain BEFORE secrets-mint: no secrets install, no migrate, and above
+// all no admin-token step, which crashed on the baked release with
+// "Barkpark.Auth.list_tokens/2 is undefined" when freshen was fail-open.
+func TestConfigureSupportHost_FreshenFailureStops(t *testing.T) {
+	r := &staleBoxRunner{}
+	minted := false
+	_, err := ConfigureSupportHost(context.Background(), r, SupportConfigureOpts{
+		SecretsGen: func() (Secrets, error) { minted = true; return Secrets{}, nil },
+	})
+	if err == nil {
+		t.Fatal("a failed freshen must stop the support configure chain")
+	}
+	if !strings.HasPrefix(err.Error(), "freshen:") || !strings.Contains(err.Error(), "go.mod") {
+		t.Fatalf("the error should name freshen and carry the box's reason, got: %v", err)
+	}
+	if minted {
+		t.Fatal("secrets were minted after a failed freshen")
+	}
+	if len(r.titles) != 0 {
+		t.Fatalf("no step may run after a failed freshen, ran: %v", r.titles)
+	}
+}
+
+// servingLagRunner is a box whose checkout is current (freshen sees nothing to
+// do) but whose running build lags: the state a re-run meets after a rebuild
+// timed out past its merge. servingOK flips once the rebuild has run.
+type servingLagRunner struct {
+	rebuilt    bool
+	rebuildErr error
+	titles     []string
+}
+
+func (r *servingLagRunner) Run(_ context.Context, s CaddyStep) error {
+	r.titles = append(r.titles, s.Title)
+	return nil
+}
+
+func (r *servingLagRunner) RunOutput(_ context.Context, script string) (string, error) {
+	switch {
+	case strings.Contains(script, "SERVING_OK="):
+		if r.rebuilt {
+			return "SERVING_OK=db8655f11", nil
+		}
+		return "SERVING_HEAD=db8655f11be3\nSERVING_COMMIT=bd27dba66", fmt.Errorf("exit status 3")
+	case strings.Contains(script, "apply-update.sh"):
+		if r.rebuildErr != nil {
+			return "timeout", r.rebuildErr
+		}
+		r.rebuilt = true
+		return "rebuilt", nil
+	case strings.Contains(script, "/status.json"):
+		return `{"status":"operational"}`, nil
+	}
+	return "FRESHEN_HEAD=db8655f11\nFRESHEN_REMOTE=db8655f11\n", nil
+}
+
+func (r *servingLagRunner) RunFeed(_ context.Context, _, _ string, _ io.Reader) (string, error) {
+	return "", nil
+}
+
+func (r *servingLagRunner) WaitReady(_ context.Context, _ time.Duration) error { return nil }
+
+// TestConfigureSupportHost_ServingLagRebuilds proves a box whose checkout is at
+// origin/main but whose running build is older is rebuilt before any later step.
+func TestConfigureSupportHost_ServingLagRebuilds(t *testing.T) {
+	r := &servingLagRunner{}
+	var narr []string
+	_, err := ConfigureSupportHost(context.Background(), r, SupportConfigureOpts{
+		Narrate: func(state, detail string) { narr = append(narr, state+": "+detail) },
+	})
+	if err != nil {
+		t.Fatalf("a lagging build should be rebuilt and the chain continue, got: %v", err)
+	}
+	if !r.rebuilt {
+		t.Fatal("the rebuild never ran")
+	}
+	if !strings.Contains(strings.Join(narr, "\n"), "serves bd27dba66, checkout db8655f11be3") {
+		t.Fatalf("the lag should be narrated with both commits: %v", narr)
+	}
+}
+
+// TestConfigureSupportHost_ServingLagRebuildFailureStops proves a failed rebuild
+// of a lagging build stops the chain before any step runs.
+func TestConfigureSupportHost_ServingLagRebuildFailureStops(t *testing.T) {
+	r := &servingLagRunner{rebuildErr: fmt.Errorf("exit status 124")}
+	_, err := ConfigureSupportHost(context.Background(), r, SupportConfigureOpts{})
+	if err == nil || !strings.Contains(err.Error(), "rebuild to the checkout's HEAD failed") {
+		t.Fatalf("want the rebuild failure, got: %v", err)
+	}
+	if len(r.titles) != 0 {
+		t.Fatalf("no step may run after the failed rebuild, ran: %v", r.titles)
 	}
 }

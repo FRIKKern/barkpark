@@ -79,6 +79,23 @@ printf 'FRESHEN_REMOTE=%s\n' "$(git rev-parse origin/main)"
 printf 'FRESHEN_FROM=%s\n' "$(git describe --tags --always 2>/dev/null || echo unknown)"
 printf 'FRESHEN_TO=%s\n' "$(git describe --tags --always origin/main 2>/dev/null || echo unknown)"`
 
+// freshenDiscardChurn restores go.mod and go.sum to HEAD before a merge when the
+// box has rewritten them. Until #21539 (2026-10-03) deploy-rebuild.sh ran `go mod
+// tidy`, and every warm image baked before that carries the rewrite in its
+// checkout. The --ff-only merge then aborts with "Your local changes to the
+// following files would be overwritten by merge: go.mod go.sum" (measured
+// 2026-10-14 on fleet-1, image baked at bd27dba66). These two files are generated
+// on a box, never authored there, so restoring them loses nothing. Any OTHER
+// local edit still makes the merge refuse. scripts/self-update.sh carries the
+// same loop for the dashboard's update path.
+const freshenDiscardChurn = `for f in go.mod go.sum; do
+  if ! git diff --quiet -- "$f" 2>/dev/null; then
+    echo "freshen: discarding box-side churn in $f (written by an older rebuild's go mod tidy)" >&2
+    git checkout -- "$f"
+  fi
+done
+`
+
 // freshenRebuildScript renders the REBUILD (phase 2), run ONLY when the check
 // found the box behind: fast-forward to origin/main with the post-merge hook
 // SUPPRESSED (the hook path wedges after a failed build — self-update.sh's header
@@ -111,7 +128,7 @@ func freshenRebuildScript(budget time.Duration) string {
 	}
 	return `set -e
 cd ` + freshenRepoDir + `
-git -c core.hooksPath=/dev/null merge --ff-only origin/main
+` + freshenDiscardChurn + `git -c core.hooksPath=/dev/null merge --ff-only origin/main
 ` + rebuild
 }
 
@@ -300,10 +317,11 @@ git diff --name-only HEAD origin/main`
 
 // freshenFFScript fast-forwards the checkout WITHOUT rebuilding — the catch-up
 // for a box-irrelevant drift. Hooks suppressed for the same reason as
-// freshenRebuildScript; --ff-only refuses a diverged snapshot.
+// freshenRebuildScript; --ff-only refuses a diverged snapshot. It restores the
+// go.mod/go.sum churn first, like the rebuild script.
 const freshenFFScript = `set -e
 cd ` + freshenRepoDir + `
-git -c core.hooksPath=/dev/null merge --ff-only origin/main`
+` + freshenDiscardChurn + `git -c core.hooksPath=/dev/null merge --ff-only origin/main`
 
 // boxIrrelevantPrefixes lists the repo areas a provisioned box never serves or
 // executes: the control plane (cloud/), the web demo, the JS SDK, docs, CI

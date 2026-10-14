@@ -132,7 +132,7 @@ type SupportConfigureOpts struct {
 // ConfigureSupportHost runs the REDUCED go-live subset (PDF-D59) on an
 // already-created, SSH-ready support box:
 //
-//	freshen (fail-open) → secrets-mint → secrets-install → migrate →
+//	freshen (fail-closed) → secrets-mint → secrets-install → migrate →
 //	admin-token → LOCAL health probe (curl localhost:4000/status.json)
 //
 // DROPPED vs configureHost: dns, caddy/TLS, the public health poll, and the
@@ -141,9 +141,9 @@ type SupportConfigureOpts struct {
 // identity now); the CLI chain runs it bare. NEVER
 // authored here: barkpark.service (baked into the warm image). The minted
 // Secrets are returned so the caller can drive the on-box admin API (dataset
-// import) with the box's own admin token. Every failure is fail-closed except
-// freshen, which degrades loudly onto the baked release (a working-but-behind
-// support beats a dead bring-up — the same policy as the go-live chain).
+// import) with the box's own admin token. Every failure is fail-closed,
+// freshen included: the later steps run code that only the current release
+// has, so a box left on its baked release cannot finish the chain.
 func ConfigureSupportHost(ctx context.Context, runner SupportRunner, opts SupportConfigureOpts) (Secrets, error) {
 	narrate := opts.Narrate
 	if narrate == nil {
@@ -151,13 +151,28 @@ func ConfigureSupportHost(ctx context.Context, runner SupportRunner, opts Suppor
 	}
 
 	// freshen — bring the baked checkout to origin/main BEFORE migrate (the
-	// migrations must match the code that will serve). FAIL-OPEN, like the
-	// go-live chain: a freshen failure degrades to the baked release, loudly.
+	// migrations must match the code that will serve). FAIL-CLOSED, unlike the
+	// go-live chain: every later step here (admin-token, the default-workspace
+	// reset, the merge-import) runs `mix run` code written against the CURRENT
+	// Barkpark API. On a baked release that code does not exist. Measured
+	// 2026-10-14 on fleet-1: freshen degraded onto bd27dba66, then admin-token
+	// crashed with "function Barkpark.Auth.list_tokens/2 is undefined or
+	// private". Stopping here leaves the box as it was baked (deploy-rebuild.sh
+	// builds aside), so a re-run of the caller resumes cleanly.
 	if _, ferr := EnsureFresh(ctx, runner, FreshenOpts{
 		RebuildTimeout: freshenRebuildBudget,
 		Narrate:        func(status, detail string) { narrate("freshen", strings.TrimSpace(status+" "+detail)) },
 	}); ferr != nil {
-		narrate("freshen", "degraded — continuing on the baked release: "+ferr.Error())
+		return Secrets{}, fmt.Errorf("freshen: the box could not be brought to origin/main, and the later steps need current code: %w", ferr)
+	}
+
+	// serving — freshen compares the CHECKOUT with origin/main, not the running
+	// build. A rebuild that timed out after its merge leaves HEAD current while
+	// the old build still serves, and a re-run's freshen then sees nothing to
+	// do. Gate on the commit the box actually serves (/status.json "commit");
+	// when it lags HEAD, rebuild once more and check again.
+	if err := supportEnsureServingHead(ctx, runner, narrate); err != nil {
+		return Secrets{}, err
 	}
 
 	// secrets-mint — per-instance credentials, validated BEFORE any of them is
@@ -335,4 +350,86 @@ exit $rc`
 		Argv:   []string{"bash", "-lc", script},
 		Redact: []string{boxAdminToken},
 	}
+}
+
+// SupportSSHKeyName reports the Hetzner ssh key a new support box will be
+// created with, by the same rule the create uses (resolveSSHKey):
+// BARKPARK_SSH_KEY when set, else the project's only key. auto is true when the
+// key was picked because it is the only one in the project. That case needs
+// saying out loud: on a project shared with the control plane the only key is
+// the control plane's (barkpark-indx), and an operator who does not hold it gets
+// a billing box that refuses their ssh (fleet-1, 2026-10-14).
+func SupportSSHKeyName(ctx context.Context) (name string, auto bool, err error) {
+	if k := strings.TrimSpace(os.Getenv("BARKPARK_SSH_KEY")); k != "" {
+		return k, false, nil
+	}
+	k, err := resolveSSHKey(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	return k, true, nil
+}
+
+// ValidSupportAdminToken reports whether tok has the minted admin-token shape
+// (bp_admin_<base64url>), the guard every step that single-quotes it into a
+// shell script relies on. The CLI uses it before trusting a token it reads back
+// from a box's progress file.
+func ValidSupportAdminToken(tok string) bool { return validateAdminToken(tok) == nil }
+
+// SupportServingCheckScript waits up to ~60s for the box's own Barkpark to serve
+// the checkout's HEAD. It prints SERVING_OK=<commit> when the commit in
+// /status.json is a prefix of `git rev-parse HEAD`, else SERVING_HEAD and
+// SERVING_COMMIT lines and exits 3. The poll covers the restart at the end of a
+// rebuild, when the endpoint is briefly down.
+const SupportServingCheckScript = `cd ` + freshenRepoDir + `
+head=$(git rev-parse HEAD)
+c=""
+for i in $(seq 1 30); do
+  c=$(curl -fsS http://localhost:4000/status.json 2>/dev/null | sed -n 's/.*"commit":"\([0-9a-f]*\)".*/\1/p')
+  if [ -n "$c" ] && [ "${head#"$c"}" != "$head" ]; then echo "SERVING_OK=$c"; exit 0; fi
+  sleep 2
+done
+echo "SERVING_HEAD=$head"
+echo "SERVING_COMMIT=${c:-none}"
+exit 3`
+
+// supportEnsureServingHead runs SupportServingCheckScript and, when the box
+// serves an older build than its checkout, reruns the freshen rebuild once and
+// checks again. Any remaining lag is an error: the later steps would run
+// current-API code against the old build.
+func supportEnsureServingHead(ctx context.Context, runner SupportRunner, narrate func(string, string)) error {
+	out, err := runner.RunOutput(ctx, SupportServingCheckScript)
+	if err == nil && strings.Contains(out, "SERVING_OK=") {
+		return nil
+	}
+	narrate("freshen", "the box serves an older build than its checkout ("+servingSummary(out)+"); rebuilding")
+	rctx, cancel := context.WithTimeout(ctx, freshenRebuildBudget+freshenLocalGrace)
+	defer cancel()
+	if rout, rerr := runner.RunOutput(rctx, freshenRebuildScript(freshenRebuildBudget)); rerr != nil {
+		return fmt.Errorf("freshen: rebuild to the checkout's HEAD failed: %w: %s", rerr, tailOf(rout, freshenErrOutputMax))
+	}
+	out, err = runner.RunOutput(ctx, SupportServingCheckScript)
+	if err == nil && strings.Contains(out, "SERVING_OK=") {
+		narrate("freshen", "rebuilt; the box serves its checkout's HEAD")
+		return nil
+	}
+	return fmt.Errorf("freshen: after a rebuild the box still does not serve its checkout's HEAD (%s)", servingSummary(out))
+}
+
+// servingSummary renders the check's HEAD/COMMIT lines as "serves X, checkout Y".
+func servingSummary(out string) string {
+	var head, commit string
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if v, ok := strings.CutPrefix(l, "SERVING_HEAD="); ok {
+			head = v
+		}
+		if v, ok := strings.CutPrefix(l, "SERVING_COMMIT="); ok {
+			commit = v
+		}
+	}
+	if head == "" {
+		return "no reading: " + tailOf(out, 200)
+	}
+	return "serves " + commit + ", checkout " + head
 }
