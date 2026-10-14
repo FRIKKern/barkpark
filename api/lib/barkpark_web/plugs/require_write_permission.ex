@@ -196,7 +196,45 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
          :ok <- TenancyAuth.authorize(user, ws_id, :write) do
       grant(conn)
     else
+      _ -> reader_or_forbidden(conn)
+    end
+  end
+
+  @doc """
+  The assign the READER arm sets: the caller may read this workspace but not
+  write it, and the route is the mutate batch. `MutateController` then holds
+  every mutation to `Barkpark.Content.ReaderWrites` (task-97702b326b8bfd6d).
+  It is NOT `granted?/1`: nothing else treats this caller as a writer.
+  """
+  def reader_assign, do: :reader_writes
+
+  # THE READER ARM (task-97702b326b8bfd6d). A read seat may write the few
+  # documents a schema opens to readers (Studio comments). Only the mutate
+  # batch can carry such a write, so every other write route keeps its 403,
+  # and the batch itself is checked op by op in MutateController before
+  # anything is written. Fail-closed: no workspace, no read seat, or another
+  # route all land on `forbidden/1`.
+  defp reader_or_forbidden(conn) do
+    with true <- mutate_route?(conn.path_info),
+         %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace],
+         true <- reader_seat?(conn, ws_id) do
+      assign(conn, reader_assign(), true)
+    else
       _ -> forbidden(conn)
     end
+  end
+
+  defp mutate_route?(path_info) do
+    case Enum.reverse(path_info) do
+      [_dataset, "mutate", "data", "v1" | _] -> true
+      _ -> false
+    end
+  end
+
+  defp reader_seat?(conn, ws_id) do
+    Enum.any?([conn.assigns[:api_token], conn.assigns[:current_user]], fn
+      nil -> false
+      principal -> TenancyAuth.authorize(principal, ws_id, :read) == :ok
+    end)
   end
 end

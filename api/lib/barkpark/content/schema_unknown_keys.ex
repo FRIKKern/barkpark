@@ -22,7 +22,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
   # back (`id`, `schemaHash`), so a pull → apply round trip stays quiet.
   @schema_keys ~w(name title icon visibility owner_scoped singleton kind fields dataset
                   cors_origins actions groups desk_groups desk list_preview initial_values
-                  cross_validations layout prefill workspace_id project_id dataset_id
+                  cross_validations layout prefill reader_writes readerWrites workspace_id project_id dataset_id
                   id schemaHash)
 
   # The SDK echo spells these camelCase; the changeset casts snake_case only.
