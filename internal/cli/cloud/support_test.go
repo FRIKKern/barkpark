@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -299,6 +302,7 @@ func TestConfigureSupportHost_FreshenFailureStops(t *testing.T) {
 // do) but whose running build lags: the state a re-run meets after a rebuild
 // timed out past its merge. servingOK flips once the rebuild has run.
 type servingLagRunner struct {
+	silent     bool // Barkpark never answers /status.json
 	rebuilt    bool
 	rebuildErr error
 	titles     []string
@@ -311,6 +315,8 @@ func (r *servingLagRunner) Run(_ context.Context, s CaddyStep) error {
 
 func (r *servingLagRunner) RunOutput(_ context.Context, script string) (string, error) {
 	switch {
+	case strings.Contains(script, "SERVING_OK=") && r.silent:
+		return "SERVING_HEAD=db8655f11be3\nSERVING_COMMIT=none", fmt.Errorf("exit status 4")
 	case strings.Contains(script, "SERVING_OK="):
 		if r.rebuilt {
 			return "SERVING_OK=db8655f11", nil
@@ -348,6 +354,19 @@ func TestConfigureSupportHost_ServingLagRebuilds(t *testing.T) {
 	if !r.rebuilt {
 		t.Fatal("the rebuild never ran")
 	}
+	// migrate runs before the gate and again after its rebuild, then admin-token.
+	var order []string
+	for _, title := range r.titles {
+		switch {
+		case strings.Contains(title, "migrations"):
+			order = append(order, "migrate")
+		case strings.Contains(title, "admin token"):
+			order = append(order, "admin-token")
+		}
+	}
+	if strings.Join(order, ",") != "migrate,migrate,admin-token" {
+		t.Fatalf("want migrate, migrate (after the rebuild), admin-token; got %v", order)
+	}
 	if !strings.Contains(strings.Join(narr, "\n"), "serves bd27dba66, checkout db8655f11be3") {
 		t.Fatalf("the lag should be narrated with both commits: %v", narr)
 	}
@@ -361,7 +380,60 @@ func TestConfigureSupportHost_ServingLagRebuildFailureStops(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "rebuild to the checkout's HEAD failed") {
 		t.Fatalf("want the rebuild failure, got: %v", err)
 	}
-	if len(r.titles) != 0 {
-		t.Fatalf("no step may run after the failed rebuild, ran: %v", r.titles)
+	for _, title := range r.titles {
+		if strings.Contains(title, "admin token") {
+			t.Fatalf("admin-token must not run after the failed rebuild, ran: %v", r.titles)
+		}
+	}
+}
+
+// TestConfigureSupportHost_ServingSilentDoesNotRebuild proves a Barkpark that is
+// still starting (or down) is reported as not answering, never rebuilt
+// underneath: a second rebuild restarts the service and kills its first start.
+func TestConfigureSupportHost_ServingSilentDoesNotRebuild(t *testing.T) {
+	r := &servingLagRunner{silent: true}
+	_, err := ConfigureSupportHost(context.Background(), r, SupportConfigureOpts{})
+	if err == nil || !strings.Contains(err.Error(), "did not answer") {
+		t.Fatalf("want a not-answering error, got: %v", err)
+	}
+	if r.rebuilt {
+		t.Fatal("a silent box must not be rebuilt underneath its start")
+	}
+	for _, title := range r.titles {
+		if strings.Contains(title, "admin token") {
+			t.Fatalf("admin-token must not run on a silent box, ran: %v", r.titles)
+		}
+	}
+}
+
+// TestSupportServingCheckScript_RealShell runs the check under bash with curl,
+// git and sleep stubbed: a matching commit passes, another commit returns at
+// once with exit 3, and silence exits 4 after the wait.
+func TestSupportServingCheckScript_RealShell(t *testing.T) {
+	bin := t.TempDir()
+	write := func(name, body string) {
+		if err := os.WriteFile(filepath.Join(bin, name), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("git", "echo db8655f11be3ff9fc09fb5705dd9df1c816447a0")
+	write("sleep", "exit 0")
+	write("curl", `[ -n "$FAKE_COMMIT" ] || exit 7; echo '{"status":"degraded","commit":"'"$FAKE_COMMIT"'","sla":{}}'`)
+	script := supportServingCheckScript(10 * time.Second)
+	for _, c := range []struct {
+		commit string
+		rc     int
+		want   string
+	}{
+		{"db8655f11", 0, "SERVING_OK=db8655f11"},
+		{"bd27dba66", 3, "SERVING_COMMIT=bd27dba66"},
+		{"", 4, "SERVING_COMMIT=none"},
+	} {
+		cmd := exec.Command("bash", "-c", script)
+		cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "FAKE_COMMIT="+c.commit)
+		out, _ := cmd.CombinedOutput()
+		if cmd.ProcessState.ExitCode() != c.rc || !strings.Contains(string(out), c.want) {
+			t.Fatalf("commit %q: want rc %d and %q, got rc %d:\n%s", c.commit, c.rc, c.want, cmd.ProcessState.ExitCode(), out)
+		}
 	}
 }

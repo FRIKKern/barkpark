@@ -813,7 +813,7 @@ func (r *supportAddRun) stepRosterRow() (int, bool) {
 
 // stepConfigure — the REDUCED go-live subset (PDF-D59) + LOCAL health probe.
 func (r *supportAddRun) stepConfigure() (int, bool) {
-	r.state("configure", "freshen → secrets-mint → secrets-install → migrate → admin-token → local health")
+	r.state("configure", "freshen → secrets-mint → secrets-install → migrate → serving → admin-token → local health")
 	secrets, err := supportConfigureHost(supportCtx(), r.runner, cloud.SupportConfigureOpts{
 		SecretsGen: supportSecretsGen,
 		Narrate:    func(state, detail string) { r.out.progressf("  · %s: %s", state, detail) },
@@ -2312,8 +2312,9 @@ WHAT IT DOES (eight named states, in order)
   roster-row  publish listener-<name> {status:provisioning, ttl_s:1800} on the
               MAIN's ledger (only now that a box exists — the row never lies).
   configure   the reduced go-live chain on the box: freshen → per-instance
-              secrets → migrate → admin token → LOCAL health probe. No DNS, no
-              TLS, no public identity — a support serves the main, not the web.
+              secrets → migrate → box serves HEAD → admin token → LOCAL health
+              probe. No DNS, no TLS, no public identity — a support serves
+              the main, not the web.
               A failed freshen stops here: the later steps need current code.
   bind        mint a support token on the MAIN (/v1/fleet/support-tokens) and
               register the fleet group record on the CONTROL PLANE
