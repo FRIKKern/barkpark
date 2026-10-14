@@ -142,8 +142,8 @@ defmodule Barkpark.Search.Views do
         %{dataset_id: Ecto.UUID.dump!(dataset_id), doc_id: id, day: day, type: type, views: n}
       end
 
-    upsert_days(rows)
-    Enum.reduce(rows, 0, &(&1.views + &2))
+    {written, _} = upsert_days(rows)
+    if written == length(rows), do: Enum.reduce(rows, 0, &(&1.views + &2)), else: 0
   rescue
     e ->
       Logger.warning("views flush failed for dataset #{dataset_id}: #{Exception.message(e)}")
@@ -151,7 +151,9 @@ defmodule Barkpark.Search.Views do
       0
   end
 
-  defp upsert_days([]), do: :ok
+  # Returns insert_all's `{count, nil}`, so a failed write raises to the
+  # rescue in `flush_dataset/2` and nothing reports success it did not have.
+  defp upsert_days([]), do: {0, nil}
 
   defp upsert_days(rows) do
     query =
@@ -163,8 +165,6 @@ defmodule Barkpark.Search.Views do
       on_conflict: query,
       conflict_target: [:dataset_id, :doc_id, :day]
     )
-
-    :ok
   end
 
   @doc """

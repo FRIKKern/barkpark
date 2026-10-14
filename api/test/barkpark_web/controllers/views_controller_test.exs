@@ -8,6 +8,9 @@ defmodule BarkparkWeb.ViewsControllerTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  import Barkpark.RateLimiterSandbox
+  setup :reset_rate_limiter!
+
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Content}
@@ -21,9 +24,6 @@ defmodule BarkparkWeb.ViewsControllerTest do
   setup do
     Buffer.reset()
     on_exit(&Buffer.reset/0)
-    # The rate-limit test below empties an anonymous bucket; start each test
-    # with none.
-    :ets.delete_all_objects(:barkpark_rate_limiter)
 
     ws = create_workspace!()
     project = create_project!(ws)
