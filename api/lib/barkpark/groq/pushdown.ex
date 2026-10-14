@@ -21,6 +21,10 @@ defmodule Barkpark.Groq.Pushdown do
       source tests with `jsonb_array_length`
     * `defined(a.b)` and `defined(a.b[0])` on a content path -> `checks` as
       `{:defined, path, index}`, with `index` nil for no index
+    * `a.b in [...]` with scalar members on a content path -> `checks` as
+      `{:in, path, values}`, and `"x" in a.b` -> `{:member, path, "x"}`. The
+      source tests both with one jsonpath that the GIN index on `content`
+      serves, and that matches exactly what GROQ matches
     * an `||` -> `any` with one probe per disjunct. A disjunct is a single
       condition or an `&&` of conditions; it gives the probe of its most
       selective condition: `_id` (`{:ids, ids}`), then `references()`, then a
@@ -30,11 +34,13 @@ defmodule Barkpark.Groq.Pushdown do
 
   A probe in `any` is a JSON containment map, `{:refs, ids}` or `{:ids, ids}`.
 
-  The value side is a literal, a parameter, arithmetic over them, or an
+  The value side is a literal, a parameter, arithmetic over them, an
   expression over `^` (such as `^._id`, `^.author._ref` or
-  `^.variants[]._ref`). The caller passes a resolver that evaluates the `^`
-  forms in the scope the filter runs in, so a subquery inside a projection
-  gets its own constraints per parent document.
+  `^.variants[]._ref`), or a closed subquery (`*[...].isbn`, which reads no
+  `^`). The caller passes a resolver that evaluates the `^` forms in the scope
+  the filter runs in, so a subquery inside a projection gets its own
+  constraints per parent document. A closed subquery is evaluated once per
+  query (`{:memo, _}`), so its list narrows every read that uses it.
 
   A conjunct that reads the filtered document on both sides, dereferences, or
   calls another function stays in memory. The source may return more
@@ -55,6 +61,9 @@ defmodule Barkpark.Groq.Pushdown do
   @type check ::
           {:length, [String.t()], String.t(), integer()}
           | {:defined, [String.t()], integer() | nil}
+          | {:in, [String.t()], [scalar()]}
+          | {:member, [String.t()], scalar()}
+  @type scalar :: String.t() | number() | boolean()
   @type t :: %{
           types: [String.t()] | nil,
           ids: [String.t()] | nil,
@@ -156,8 +165,36 @@ defmodule Barkpark.Groq.Pushdown do
     with {:ok, path} <- content_path(arg), do: {:ok, {:defined, path, nil}}
   end
 
+  # `a.b in [...]` is true when the value at the path equals a member, so an
+  # array or a missing field never matches. A member that is null or not a
+  # scalar leaves the conjunct to the other shapes. `"x" in a.b` is true when
+  # `a.b` is an array holding `"x"`; a string there is not searched.
+  defp check({:op, "in", l, r}, resolve) do
+    with :error <- in_check(l, r, resolve), do: member_check(l, r, resolve)
+  end
+
   defp check({:group, inner}, resolve), do: check(inner, resolve)
   defp check(_node, _resolve), do: :error
+
+  defp in_check(l, r, resolve) do
+    with {:ok, path} <- content_path(l),
+         {:ok, values} when is_list(values) <- value(r, resolve),
+         true <- Enum.all?(values, &scalar?/1) do
+      {:ok, {:in, path, Enum.uniq(values)}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp member_check(l, r, resolve) do
+    with {:ok, path} <- content_path(r),
+         {:ok, v} <- value(l, resolve),
+         true <- scalar?(v) do
+      {:ok, {:member, path, v}}
+    else
+      _ -> :error
+    end
+  end
 
   defp length_check(path, op, n, resolve) do
     case value(n, resolve) do
@@ -188,6 +225,8 @@ defmodule Barkpark.Groq.Pushdown do
   @doc "True when `expr` reads nothing but literals and `^` scopes."
   @spec outer_only?(tuple()) :: boolean()
   def outer_only?({:value, _}), do: true
+  # A closed subquery reads no `^` and no filtered document.
+  def outer_only?({:memo, _}), do: true
   def outer_only?({:parent, n}) when n >= 1, do: true
   def outer_only?({:attr, base, _}) when is_tuple(base), do: outer_only?(base)
   def outer_only?({:elem, base, _}), do: outer_only?(base)

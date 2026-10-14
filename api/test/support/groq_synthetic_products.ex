@@ -8,7 +8,8 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
   Product `p<g>` for g in 1..n:
 
     * `isbn` is `978` followed by g padded to seven digits
-    * `series._ref` is `series-<g mod 50>`
+    * `series._ref` is `series-<g mod 50>`, and `seriesIds` is the array
+      `["series-<g mod 50>"]`
     * `department._ref` is `dept-big` for g <= 10,200 and `dept-small` after
     * `onix.contributors[0]` is `c-<g mod 700>` with role A01 when g is even,
       B06 when odd
@@ -36,6 +37,7 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
                'isbn', '978' || lpad(g::text, 7, '0'),
                'isMainProduct', NOT (g BETWEEN 4 AND 400 AND g % 4 <> 0),
                'series', jsonb_build_object('_type', 'reference', '_ref', 'series-' || (g % 50)),
+               'seriesIds', jsonb_build_array('series-' || (g % 50)),
                'department', jsonb_build_object('_type', 'reference',
                  '_ref', CASE WHEN g <= 10200 THEN 'dept-big' ELSE 'dept-small' END),
                'onix', jsonb_build_object(

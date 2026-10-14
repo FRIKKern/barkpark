@@ -19,6 +19,9 @@ defmodule BarkparkWeb.GroqBenchTest do
   @products 20_000
   @runs 9
 
+  # 31 isbns spread over the products, as a page's list of ids.
+  @isbns for(g <- 1..31, do: "978" <> String.pad_leading(Integer.to_string(g * 613), 7, "0"))
+
   @shapes [
     {"1 sibling editions, references(^._id) in ||",
      """
@@ -58,7 +61,16 @@ defmodule BarkparkWeb.GroqBenchTest do
     {"8 count(*[... && defined(bokbasen.languageFormatVariants[0])])",
      ~s'count(*[_type == "product" && defined(bokbasen.languageFormatVariants[0])])', %{}},
     {"9 count(*[...]) scanned in chunks, isbn > \"0\"",
-     ~s'count(*[_type == "product" && isbn > "0"])', %{}}
+     ~s'count(*[_type == "product" && isbn > "0"])', %{}},
+    {"10 isbn in $isbns, 31 values", ~s'*[_type == "product" && isbn in $isbns]._id',
+     %{"isbns" => @isbns}},
+    {"11 isbn in $isbns && isMainProduct == true",
+     ~s'*[_type == "product" && isbn in $isbns && isMainProduct == true]._id',
+     %{"isbns" => @isbns}},
+    {"12 isbn in *[... && references($c)].isbn",
+     ~s'*[_type == "product" && isbn in *[_type == "product" && references($c)].isbn]._id',
+     %{"c" => "c-8"}},
+    {"13 $s in seriesIds", ~s'*[_type == "product" && $s in seriesIds]._id', %{"s" => "series-3"}}
   ]
 
   setup do
