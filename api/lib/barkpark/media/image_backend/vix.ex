@@ -36,6 +36,8 @@ defmodule Barkpark.Media.ImageBackend.Vix do
 
   alias Barkpark.Media.Transform
 
+  require Logger
+
   # The `:image` dep is OPTIONAL by construction (api/mix.exs image_dep/0):
   # absent on native Windows by default and under BARKPARK_SKIP_IMAGE=1 (the
   # mix-test CI lane, which never executes a vips-reaching test — they are
@@ -244,10 +246,98 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     end
   end
 
-  defp write_options("png", _q), do: [suffix: ".png", strip_metadata: true]
-  defp write_options("webp", q), do: [suffix: ".webp", quality: q, strip_metadata: true]
-  defp write_options("avif", q), do: [suffix: ".avif", quality: q, strip_metadata: true]
-  defp write_options(_jpg, q), do: [suffix: ".jpg", quality: q, strip_metadata: true]
+  @doc """
+  The `Image.write/3` options for a format and URL `q`.
+
+  AVIF sets its effort and quality explicitly. Left to libvips, heifsave runs
+  at effort 4 with `q` passed 1:1 to the AV1 quantizer: on a 2-core ARM box
+  that took 15 to 43 s per 1200 px image, and the files came out larger than
+  WebP at the same `q`. `Transform.avif_effort/0` (default 1) and
+  `Transform.avif_quality/1` set both. `Image` takes effort as 1 to 10 and
+  passes `effort - 1` to libvips, hence the `+ 1`.
+  """
+  @spec write_options(String.t(), pos_integer()) :: keyword()
+  def write_options("png", _q), do: [suffix: ".png", strip_metadata: true]
+  def write_options("webp", q), do: [suffix: ".webp", quality: q, strip_metadata: true]
+
+  def write_options("avif", q) do
+    [
+      suffix: ".avif",
+      quality: Transform.avif_quality(q),
+      effort: Transform.avif_effort() + 1,
+      strip_metadata: true
+    ]
+  end
+
+  def write_options(_jpg, q), do: [suffix: ".jpg", quality: q, strip_metadata: true]
+
+  @doc """
+  AVIF encode time on this node in milliseconds per output megapixel, or nil
+  when this node cannot encode AVIF.
+
+  `config :barkpark, #{inspect(__MODULE__)}, avif_ms_per_megapixel: N` sets it.
+  Otherwise the first call encodes a 512 x 512 test image of blurred noise
+  over gradients twice with the AVIF write options, keeps the faster run and
+  caches the result for the life of the node. Noise is slower to encode than
+  most photos, so the estimate leans towards WebP.
+  """
+  @impl true
+  @spec avif_ms_per_megapixel() :: number() | nil
+  def avif_ms_per_megapixel do
+    case Keyword.get(config(), :avif_ms_per_megapixel) do
+      n when is_number(n) and n > 0 -> n
+      _ -> measured_avif_cost()
+    end
+  end
+
+  defp measured_avif_cost do
+    case :persistent_term.get({__MODULE__, :avif_ms_per_mp}, :unknown) do
+      :unknown ->
+        cost = if avif_supported?(), do: probe_avif_cost(), else: nil
+        :persistent_term.put({__MODULE__, :avif_ms_per_mp}, cost)
+        cost
+
+      cached ->
+        cached
+    end
+  end
+
+  @probe_side 512
+
+  defp probe_avif_cost do
+    alias Vix.Vips.Operation, as: Op
+    n = @probe_side
+
+    with {:ok, noise} <- Op.gaussnoise(n, n, sigma: 48.0, mean: 128.0),
+         {:ok, noise} <- Op.gaussblur(noise, 1.2),
+         {:ok, xyz} <- Op.xyz(n, n),
+         {:ok, x} <- Op.extract_band(xyz, 0),
+         {:ok, y} <- Op.extract_band(xyz, 1),
+         {:ok, r} <- Op.linear(x, [255.0 / n], [0.0]),
+         {:ok, b} <- Op.linear(y, [255.0 / n], [0.0]),
+         {:ok, r} <- Op.add(r, noise),
+         {:ok, b} <- Op.add(b, noise),
+         {:ok, rgb} <- Op.bandjoin([r, noise, b]),
+         {:ok, rgb} <- Op.cast(rgb, :VIPS_FORMAT_UCHAR),
+         {:ok, rgb} <- Vix.Vips.Image.copy_memory(rgb) do
+      opts = write_options("avif", 75)
+
+      ms =
+        for _ <- 1..2 do
+          {us, {:ok, _}} = :timer.tc(fn -> Image.write(rgb, :memory, opts) end)
+          us / 1000
+        end
+        |> Enum.min()
+
+      cost = Float.round(ms / (n * n / 1_000_000), 1)
+      Logger.info("Barkpark.Media.ImageBackend.Vix: AVIF encode cost #{cost} ms per megapixel")
+      cost
+    else
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
 
   # AVIF needs libvips built with libheif and an AV1 encoder. The precompiled
   # libvips that ships with vix may lack one; probe once per node and cache.

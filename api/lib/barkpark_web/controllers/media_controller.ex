@@ -464,14 +464,16 @@ defmodule BarkparkWeb.MediaController do
 
   # The stored focal point (`mediaAsset.focalPoint`, fractions of the
   # original) applies when the URL crops without naming a crop mode or a focal
-  # point. `Accept` picks AVIF or WebP for `auto=format`.
+  # point. `Accept` picks AVIF or WebP for `auto=format`, and AVIF only when
+  # this node can encode it within the time budget (`Transform.avif_budget_ms/0`).
   defp resolve_plan(conn, plan, file, doc) do
     Transform.resolve(plan,
       focal_point: stored_focal_point(doc),
       source_size: stored_size(doc),
       accept: conn |> get_req_header("accept") |> Enum.join(","),
       source_mime: file.mime_type,
-      avif?: ImageBackend.avif?()
+      avif?: ImageBackend.avif?(),
+      avif_ms_per_megapixel: &ImageBackend.avif_ms_per_megapixel/0
     )
   end
 

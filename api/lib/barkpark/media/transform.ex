@@ -25,12 +25,58 @@ defmodule Barkpark.Media.Transform do
       past that.
 
   All three are read from `config :barkpark, Barkpark.Media.Transform`.
+
+  ## AVIF
+
+  AVIF is encoded at libvips effort `avif_effort` (default 1 of 0 to 9; AV1
+  speed 8, imgproxy's default). The URL's `q` goes through `avif_quality/1`,
+  so an AVIF at a given `q` is no larger than a WebP at the same `q`.
+
+  `auto=format` picks AVIF only when the estimated encode time fits
+  `avif_budget_ms` (default 1500): output megapixels times the backend's
+  measured AVIF cost on this node (`ImageBackend.avif_ms_per_megapixel/0`).
+  Past the budget it picks WebP. `fm=avif` always encodes AVIF.
+
+  The cache key of an AVIF carries the encoder settings (`encoder_tag/1`), so a
+  change to them renders new files instead of serving old bytes. JPEG, PNG and
+  WebP keys do not change.
   """
 
   @fits ~w(clip crop fill max min)
   @crop_modes ~w(center focalpoint entropy attention top bottom left right)
   @formats ~w(jpg png webp avif)
   @default_quality 75
+
+  # AVIF quality for each URL `q` bucket. Measured on photos, a book cover, a
+  # screenshot and a flat graphic at 256 to 1200 px with libvips 8.17 at effort
+  # 1: each value is the highest AVIF quality whose file was no larger than the
+  # WebP at that `q` for every sample, minus 2, then made non-decreasing. A
+  # change here must bump `@avif_qmap_version` so cached AVIFs are re-rendered.
+  @avif_qmap %{
+    5 => 4,
+    10 => 9,
+    15 => 14,
+    20 => 17,
+    25 => 22,
+    30 => 25,
+    35 => 28,
+    40 => 33,
+    45 => 38,
+    50 => 41,
+    55 => 41,
+    60 => 44,
+    65 => 48,
+    70 => 54,
+    75 => 55,
+    80 => 62,
+    85 => 71,
+    90 => 79,
+    95 => 87,
+    100 => 87
+  }
+  @avif_qmap_version 1
+  @default_avif_effort 1
+  @default_avif_budget_ms 1500
 
   # Parameters this module owns. Anything else on the URL (signed-URL `_`/`exp`,
   # CDN cache-busters) passes through untouched.
@@ -114,16 +160,21 @@ defmodule Barkpark.Media.Transform do
     * `:accept` — the request's `Accept` header, read only for `auto=format`.
     * `:source_mime` — the original's mime type, used for the default format.
     * `:avif?` — whether the backend can encode AVIF.
+    * `:avif_ms_per_megapixel` — the backend's AVIF encode cost, a number or a
+      zero-arity function that returns one (called only when `auto=format`
+      could pick AVIF). With a cost, `auto=format` picks AVIF only when the
+      estimated encode time fits `avif_budget_ms/0`. Without one, no budget
+      applies.
   """
   @spec resolve(plan(), keyword()) :: plan()
   def resolve(plan, opts \\ []) do
     plan
     |> resolve_focal(Keyword.get(opts, :focal_point), Keyword.get(opts, :source_size))
-    |> resolve_format(
-      Keyword.get(opts, :accept),
-      Keyword.get(opts, :source_mime),
-      Keyword.get(opts, :avif?, false)
-    )
+    |> resolve_format(Keyword.get(opts, :accept), Keyword.get(opts, :source_mime), %{
+      avif?: Keyword.get(opts, :avif?, false),
+      cost: Keyword.get(opts, :avif_ms_per_megapixel),
+      source_size: Keyword.get(opts, :source_size)
+    })
   end
 
   @doc """
@@ -144,8 +195,64 @@ defmodule Barkpark.Media.Transform do
       "q=#{plan.q}",
       "wm=#{watermark || "none"}"
     ]
+    |> then(fn parts ->
+      case encoder_tag(plan) do
+        nil -> parts
+        tag -> parts ++ ["enc=#{tag}"]
+      end
+    end)
     |> Enum.join(";")
   end
+
+  @doc """
+  The encoder settings that change an output's bytes beyond the plan, for the
+  cache key. Only AVIF has one today; nil keeps the other formats' keys as
+  they were, so their cached files keep serving.
+  """
+  @spec encoder_tag(plan()) :: String.t() | nil
+  def encoder_tag(%{fm: "avif"}), do: "avif-e#{avif_effort()}-qm#{@avif_qmap_version}"
+  def encoder_tag(_plan), do: nil
+
+  @doc "AVIF encoder quality for a URL `q` (1 to 100)."
+  @spec avif_quality(pos_integer()) :: pos_integer()
+  def avif_quality(q) when is_integer(q) do
+    bucket = (round(q / 5) * 5) |> max(5) |> min(100)
+    Map.fetch!(@avif_qmap, bucket)
+  end
+
+  @doc "libvips AVIF effort, 0 (fastest) to 9 (slowest)."
+  @spec avif_effort() :: 0..9
+  def avif_effort, do: Keyword.get(config(), :avif_effort, @default_avif_effort)
+
+  @doc "Most milliseconds `auto=format` lets an AVIF encode take before it picks WebP."
+  @spec avif_budget_ms() :: pos_integer()
+  def avif_budget_ms, do: Keyword.get(config(), :avif_budget_ms, @default_avif_budget_ms)
+
+  @doc """
+  Output pixel count for a plan. With the source size this is exact. Without
+  it, `w` x `h`, or the one given side squared; nil when the plan names
+  neither.
+  """
+  @spec output_pixels(plan(), {pos_integer(), pos_integer()} | nil) :: pos_integer() | nil
+  def output_pixels(plan, {sw, sh}) when sw > 0 and sh > 0 do
+    g = geometry(plan, sw, sh)
+
+    {w, h} =
+      cond do
+        g.pad -> g.pad
+        g.crop -> {elem(g.crop, 2), elem(g.crop, 3)}
+        g.resize -> g.resize
+        g.rect -> {elem(g.rect, 2), elem(g.rect, 3)}
+        true -> {sw, sh}
+      end
+
+    w * h
+  end
+
+  def output_pixels(%{w: w, h: h}, _size) when is_integer(w) and is_integer(h), do: w * h
+  def output_pixels(%{w: w}, _size) when is_integer(w), do: w * w
+  def output_pixels(%{h: h}, _size) when is_integer(h), do: h * h
+  def output_pixels(_plan, _size), do: nil
 
   @doc "Cache file name (hash + extension) for a resolved plan."
   @spec cache_name(plan(), String.t() | nil) :: String.t()
@@ -305,17 +412,44 @@ defmodule Barkpark.Media.Transform do
 
   defp move_into_rect(_fp, _rect, _size), do: nil
 
-  defp resolve_format(%{auto_format: true} = plan, accept, mime, avif?) when is_binary(accept) do
+  # `auto=format`: AVIF when the client takes it, the backend encodes it and
+  # the encode fits the time budget; else WebP when the client takes it; else
+  # the plan's `fm` or the source format.
+  defp resolve_format(%{auto_format: true} = plan, accept, mime, ctx) when is_binary(accept) do
     cond do
-      avif? and String.contains?(accept, "image/avif") -> %{plan | fm: "avif"}
-      String.contains?(accept, "image/webp") -> %{plan | fm: "webp"}
-      true -> resolve_format(%{plan | auto_format: false}, nil, mime, avif?)
+      ctx.avif? and String.contains?(accept, "image/avif") and avif_in_budget?(plan, ctx) ->
+        %{plan | fm: "avif"}
+
+      String.contains?(accept, "image/webp") ->
+        %{plan | fm: "webp"}
+
+      true ->
+        resolve_format(%{plan | auto_format: false}, nil, mime, ctx)
     end
   end
 
-  defp resolve_format(%{fm: "avif"} = plan, _accept, _mime, false), do: %{plan | fm: "webp"}
-  defp resolve_format(%{fm: fm} = plan, _accept, _mime, _avif?) when is_binary(fm), do: plan
-  defp resolve_format(plan, _accept, mime, _avif?), do: %{plan | fm: default_format(mime)}
+  defp resolve_format(%{fm: "avif"} = plan, _accept, _mime, %{avif?: false}),
+    do: %{plan | fm: "webp"}
+
+  defp resolve_format(%{fm: fm} = plan, _accept, _mime, _ctx) when is_binary(fm), do: plan
+  defp resolve_format(plan, _accept, mime, _ctx), do: %{plan | fm: default_format(mime)}
+
+  defp avif_in_budget?(plan, %{cost: cost, source_size: size}) do
+    case avif_cost(cost) do
+      nil ->
+        true
+
+      ms_per_mp ->
+        case output_pixels(plan, size) do
+          nil -> false
+          pixels -> pixels / 1_000_000 * ms_per_mp <= avif_budget_ms()
+        end
+    end
+  end
+
+  defp avif_cost(fun) when is_function(fun, 0), do: avif_cost(fun.())
+  defp avif_cost(n) when is_number(n) and n > 0, do: n
+  defp avif_cost(_), do: nil
 
   defp default_format("image/png"), do: "png"
   defp default_format("image/gif"), do: "png"
