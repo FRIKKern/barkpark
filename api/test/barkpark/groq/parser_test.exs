@@ -280,7 +280,9 @@ defmodule Barkpark.Groq.ParserTest do
             ~s|1 <= length(onix.contributors[role._ref == "A01" && contributor._ref in $ids])|,
             ~s|defined(onix.contributors[role._ref == "A01" && contributor._ref in $ids][0])|
           ] do
-        assert {[^some], {:ok, %{checks: [^some]}}} = q.(filter, params), filter
+        {checks, exact} = q.(filter, params)
+        assert checks == [some], filter
+        assert match?({:ok, %{checks: [^some]}}, exact), filter
       end
 
       assert {[{:some, ["tags"], [{[], [1, "x"]}]}], {:ok, _}} =
