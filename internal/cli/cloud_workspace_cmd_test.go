@@ -419,8 +419,8 @@ func TestCloudWorkspaceExportWithBlobsStreamsSidecar(t *testing.T) {
 
 	var served []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/media/files/") {
-			p := strings.TrimPrefix(r.URL.Path, "/media/files/")
+		if strings.HasPrefix(r.URL.Path, "/w/acme/p/default/media/files/") {
+			p := strings.TrimPrefix(r.URL.Path, "/w/acme/p/default/media/files/")
 			served = append(served, p)
 			body, ok := blobs[p]
 			if !ok {
@@ -476,7 +476,7 @@ func TestCloudWorkspaceExportBlobFailureExitsNonZero(t *testing.T) {
 		[]string{"id", "path"},
 		[][]string{{"id-1", "2026/07/gone-deadbeef.png"}})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/media/files/") {
+		if strings.HasPrefix(r.URL.Path, "/w/acme/p/default/media/files/") {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"no such blob"}}`))
@@ -1129,7 +1129,7 @@ func TestBlobFetchSizeMismatchIsANamedFailure(t *testing.T) {
 		[]string{"id", "path", "size"},
 		[][]string{{"id-1", "2026/07/short-11112222.png", "9999"}})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/media/files/") {
+		if strings.HasPrefix(r.URL.Path, "/w/acme/p/default/media/files/") {
 			_, _ = w.Write([]byte("TRUNCATED"))
 			return
 		}
@@ -1185,7 +1185,7 @@ func TestBlobFetchAbsentDeclaredSizeIsNotAPass(t *testing.T) {
 			{"id-2", "2026/07/unknown-33334444.png", "\\N"},
 		})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.URL.Path, "/media/files/") {
+		if strings.HasPrefix(r.URL.Path, "/w/acme/p/default/media/files/") {
 			_, _ = w.Write([]byte("BYTES"))
 			return
 		}

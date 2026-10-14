@@ -111,17 +111,28 @@ type devPullSourceOpts struct {
 	exportStatus     int    // non-zero → the export route answers this instead of a tar
 	failBlob         string // this blob path answers 500
 	truncateBlob     string // this blob answers FEWER bytes than the manifest declares
+	missingBlob      string // this blob path answers 404 "media blob missing"
+	// rateLimited answers 429 this many times per blob path before serving it,
+	// with retryAfter as the Retry-After header ("" sends none).
+	rateLimited int
+	retryAfter  string
+	// sharesJSON / tokensJSON are the bodies of GET /v1/shares and the scoped
+	// token inventory. "" answers an empty list.
+	sharesJSON, tokensJSON string
 }
 
 type devPullSourceProbe struct {
 	exportQuery string
 	exportAuth  string
 	blobAuths   []string
+	blobPaths   []string // the URL path of every media GET, in order
+	hits429     int
 }
 
 func devPullSourceServer(t *testing.T, o devPullSourceOpts) (*httptest.Server, *devPullSourceProbe) {
 	t.Helper()
 	probe := &devPullSourceProbe{}
+	limited := map[string]int{}
 	bundle := devPullTar(t, o.profile, o.dataset, o.blobs)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -136,9 +147,30 @@ func devPullSourceServer(t *testing.T, o devPullSourceOpts) (*httptest.Server, *
 			}
 			w.Header().Set("Content-Type", "application/x-tar")
 			_, _ = w.Write(bundle)
-		case strings.HasPrefix(r.URL.Path, "/media/files/"):
-			p := strings.TrimPrefix(r.URL.Path, "/media/files/")
+		case strings.HasPrefix(r.URL.Path, "/w/acme/p/default/media/files/"):
+			// The scoped delivery route. The flat /media/files/ route is NOT
+			// served here: it resolves the Default workspace, and a pull that
+			// reads from it is the 404 bug task-bf56c5d0302a2d6f fixed.
+			p := strings.TrimPrefix(r.URL.Path, "/w/acme/p/default/media/files/")
 			probe.blobAuths = append(probe.blobAuths, r.Header.Get("Authorization"))
+			probe.blobPaths = append(probe.blobPaths, r.URL.Path)
+			if o.rateLimited > 0 && limited[p] < o.rateLimited {
+				limited[p]++
+				probe.hits429++
+				if o.retryAfter != "" {
+					w.Header().Set("Retry-After", o.retryAfter)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"rate limited"}}`))
+				return
+			}
+			if p == o.missingBlob {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"error":{"code":"not_found","message":"media blob missing"}}`))
+				return
+			}
 			if p == o.failBlob {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
@@ -154,6 +186,12 @@ func devPullSourceServer(t *testing.T, o devPullSourceOpts) (*httptest.Server, *
 				body = body[:len(body)/2]
 			}
 			_, _ = w.Write(body)
+		case r.URL.Path == "/v1/shares":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(firstNonEmptyStr(o.sharesJSON, `{"shares":[],"active":true}`)))
+		case r.URL.Path == "/w/acme/p/default/v1/tokens":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(firstNonEmptyStr(o.tokensJSON, `{"tokens":[]}`)))
 		default:
 			t.Errorf("source got an unexpected request: %s %s", r.Method, r.URL.Path)
 			w.WriteHeader(http.StatusNotFound)
@@ -167,6 +205,7 @@ type devPullTargetOpts struct {
 	importStatus  int    // non-zero → the import route answers this instead of a receipt
 	importReceipt string // defaults to realImportReceipt
 	failBlob      string // this blob path answers 500 on PUT
+	rateLimited   int    // each blob push answers 429 this many times first
 }
 
 type devPullTargetProbe struct {
@@ -179,6 +218,7 @@ type devPullTargetProbe struct {
 func devPullTargetServer(t *testing.T, o devPullTargetOpts) (*httptest.Server, *devPullTargetProbe) {
 	t.Helper()
 	probe := &devPullTargetProbe{}
+	limited := map[string]int{}
 	receipt := o.importReceipt
 	if receipt == "" {
 		receipt = realImportReceipt
@@ -199,9 +239,16 @@ func devPullTargetServer(t *testing.T, o devPullTargetOpts) (*httptest.Server, *
 			_, _ = w.Write([]byte(receipt))
 		case strings.Contains(r.URL.Path, "/media/blob/"):
 			p := r.URL.Path[strings.Index(r.URL.Path, "/media/blob/")+len("/media/blob/"):]
-			probe.blobPUTs = append(probe.blobPUTs, p)
 			body, _ := readCapped(r.Body, maxResponseBytes)
 			w.Header().Set("Content-Type", "application/json")
+			if limited[p] < o.rateLimited {
+				limited[p]++
+				w.Header().Set("Retry-After", "1")
+				w.WriteHeader(http.StatusTooManyRequests)
+				_, _ = w.Write([]byte(`{"error":{"code":"rate_limited","message":"rate limited"}}`))
+				return
+			}
+			probe.blobPUTs = append(probe.blobPUTs, p)
 			if p == o.failBlob {
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"error":{"code":"blob_write_failed","message":"the target refused the bytes"}}`))
