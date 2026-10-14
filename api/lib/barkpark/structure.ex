@@ -91,7 +91,11 @@ defmodule Barkpark.Structure do
       # true on a `desk.hidden` type's node in the RESOLUTION tree only: it is
       # there so a direct URL resolves, and a rendered list pane leaves it out
       # (task-9df0043eb4ecf3cc follow-up).
-      desk_hidden: false
+      desk_hidden: false,
+      # A declared desk item that could not be built (task-d99d878b061b435a):
+      # the reason, naming what is wrong. The node keeps its place and title;
+      # the rest of the declared desk renders around it.
+      error: nil
     ]
   end
 
@@ -1172,7 +1176,7 @@ defmodule Barkpark.Structure do
         nodes =
           items
           |> Enum.with_index()
-          |> Enum.map(fn {item, i} -> declared_item_to_node(item, "desk-#{i}", ctx) end)
+          |> Enum.map(fn {item, i} -> safe_item_to_node(item, "desk-#{i}", ctx) end)
           |> Enum.reject(&is_nil/1)
 
         if nodes == [] do
@@ -1201,6 +1205,58 @@ defmodule Barkpark.Structure do
       :none
   end
 
+  # ONE item failing never drops the declared desk (task-d99d878b061b435a).
+  # Before this, a raise anywhere in the walk reached `declared_desk/3`'s
+  # rescue and the WHOLE declaration fell back to the default desk, with only a
+  # log line to say why. Now the failing item becomes an error node in its own
+  # place: same id and title, no children, and `error` naming the reason, which
+  # `GET /v1/structure/:dataset` returns and Studio shows when the item opens.
+  defp safe_item_to_node(item, idx, ctx) do
+    declared_item_to_node(item, idx, ctx)
+  rescue
+    e ->
+      error_node(item, idx, Exception.message(e))
+  end
+
+  defp error_node(item, idx, reason) do
+    title = if is_map(item), do: item["title"] || item["type"] || item["kind"], else: nil
+    id = if is_map(item), do: item["id"] || idx, else: idx
+
+    Logger.warning(
+      "deskStructure item #{inspect(title || id)} (#{id}) could not be built: #{reason}"
+    )
+
+    %Node{
+      id: id,
+      title: title || "Desk item",
+      icon: if(is_map(item), do: item["icon"]),
+      type: :list,
+      items: [],
+      error: reason
+    }
+  end
+
+  # A declared list's children go through the same per-item guard.
+  defp declared_children(item, idx, ctx) do
+    (item["items"] || [])
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.map(fn {child, j} -> safe_item_to_node(child, "#{idx}-#{j}", ctx) end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  # A typed list's filter is checked when the desk is built, without reading
+  # documents, so an author sees the reason on the item in the structure
+  # response and not only as an empty pane.
+  defp filter_error(type, filter, ctx) when is_map(filter) and filter != %{} do
+    case Content.Query.check_filter(type, ctx.dataset, filter, ctx.scope) do
+      :ok -> nil
+      {:error, reason} -> reason
+    end
+  end
+
+  defp filter_error(_type, _filter, _ctx), do: nil
+
   defp declared_item_to_node(%{"kind" => "singleton"} = item, idx, _ctx) do
     type = item["type"]
 
@@ -1221,12 +1277,7 @@ defmodule Barkpark.Structure do
     do: %Node{type: :divider, id: item["id"] || idx, title: item["title"]}
 
   defp declared_item_to_node(%{"kind" => "list"} = item, idx, ctx) do
-    children =
-      (item["items"] || [])
-      |> List.wrap()
-      |> Enum.with_index()
-      |> Enum.map(fn {child, j} -> declared_item_to_node(child, "#{idx}-#{j}", ctx) end)
-      |> Enum.reject(&is_nil/1)
+    children = declared_children(item, idx, ctx)
 
     %Node{
       id: item["id"] || idx,
@@ -1237,10 +1288,12 @@ defmodule Barkpark.Structure do
     }
   end
 
-  defp declared_item_to_node(%{"kind" => "documentTypeList"} = item, idx, _ctx) do
+  defp declared_item_to_node(%{"kind" => "documentTypeList"} = item, idx, ctx) do
     type = item["type"]
 
     if is_binary(type) and type != "" do
+      filter = if(is_map(item["filter"]), do: item["filter"], else: nil)
+
       %Node{
         id: item["id"] || "#{idx}-#{type}",
         title: item["title"] || type,
@@ -1248,8 +1301,9 @@ defmodule Barkpark.Structure do
         type: :document_type_list,
         type_name: type,
         visibility: :public,
-        filter: if(is_map(item["filter"]), do: item["filter"], else: nil),
-        orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
+        filter: filter,
+        orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
+        error: filter_error(type, filter, ctx)
       }
     end
   end
@@ -1276,35 +1330,10 @@ defmodule Barkpark.Structure do
       # Without this the desk grows an empty child list per unused category.
       over_filter = parse_filter(item["overFilter"])
 
-      children =
-        over
-        |> Content.list_documents(
-          ctx.dataset,
-          [perspective: :published, limit: @group_by_fanout, filter_map: over_filter] ++
-            ctx.scope
-        )
-        |> Enum.map(fn doc ->
-          key = Barkpark.Content.DraftId.published_id(doc.doc_id)
-
-          %Node{
-            id: "#{idx}-#{key}",
-            title: doc.title || key,
-            icon: item["icon"],
-            type: :document_type_list,
-            type_name: type,
-            visibility: :public,
-            filter: %{by => %{"eq" => key}},
-            orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
-          }
-        end)
-
-      %Node{
-        id: item["id"] || idx,
-        title: item["title"] || "By #{over}",
-        icon: item["icon"],
-        type: :list,
-        items: children
-      }
+      case filter_error(over, over_filter, ctx) do
+        nil -> group_by_node(item, idx, ctx, type, over, by, over_filter)
+        reason -> error_node(item, idx, "overFilter: " <> reason)
+      end
     end
   end
 
@@ -1337,6 +1366,38 @@ defmodule Barkpark.Structure do
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  defp group_by_node(item, idx, ctx, type, over, by, over_filter) do
+    children =
+      over
+      |> Content.list_documents(
+        ctx.dataset,
+        [perspective: :published, limit: @group_by_fanout, filter_map: over_filter] ++
+          ctx.scope
+      )
+      |> Enum.map(fn doc ->
+        key = Barkpark.Content.DraftId.published_id(doc.doc_id)
+
+        %Node{
+          id: "#{idx}-#{key}",
+          title: doc.title || key,
+          icon: item["icon"],
+          type: :document_type_list,
+          type_name: type,
+          visibility: :public,
+          filter: %{by => %{"eq" => key}},
+          orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
+        }
+      end)
+
+    %Node{
+      id: item["id"] || idx,
+      title: item["title"] || "By #{over}",
+      icon: item["icon"],
+      type: :list,
+      items: children
+    }
+  end
 
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)

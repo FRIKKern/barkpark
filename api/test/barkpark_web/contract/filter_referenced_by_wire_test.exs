@@ -75,6 +75,72 @@ defmodule BarkparkWeb.Contract.FilterReferencedByWireTest do
     assert body =~ "names no document type"
   end
 
+  # task-d99d878b061b435a: a referencing type with a multi-type arrayOf field
+  # answered a 500 HTML page. task-948233bb3443c675: several types, any type,
+  # one field.
+  test "a multi-type arrayOf on the referencing type, and the list, * and field forms",
+       %{conn: conn} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "page",
+          "title" => "page",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{
+              "name" => "sections",
+              "type" => "arrayOf",
+              "of" => [
+                %{
+                  "name" => "hero",
+                  "type" => "composite",
+                  "fields" => [
+                    %{"name" => "category", "type" => "reference", "to" => ["category"]}
+                  ]
+                },
+                %{
+                  "name" => "text",
+                  "type" => "composite",
+                  "fields" => [%{"name" => "body", "type" => "string"}]
+                }
+              ]
+            }
+          ]
+        },
+        @ds
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "page",
+        %{
+          "_id" => "page-1",
+          "title" => "page-1",
+          "content" => %{
+            "sections" => [%{"_type" => "hero", "category" => %{"_ref" => "cat-empty"}}]
+          }
+        },
+        @ds
+      )
+
+    {:ok, _} = Content.publish_document("page-1", "page", @ds)
+
+    assert ids(query(conn, "filter[_id][referencedBy]=page", @token)) == ["cat-empty"]
+
+    assert ids(query(scoped_conn(), "filter[_id][referencedBy]=publication,page", @token)) ==
+             ["cat-empty", "cat-used"]
+
+    assert ids(query(scoped_conn(), "filter[_id][referencedBy]=*", @token)) ==
+             ["cat-empty", "cat-used"]
+
+    assert ids(query(scoped_conn(), "filter[_id][referencedBy]=publication.category", @token)) ==
+             ["cat-used"]
+
+    assert ids(query(scoped_conn(), "filter[_id][notReferencedBy]=page.sections", @token)) ==
+             ["cat-used"]
+  end
+
   test "an anonymous caller is still refused", %{conn: conn} do
     assert query(conn, "filter[_id][referencedBy]=publication", nil).status == 400
   end
