@@ -459,10 +459,10 @@ defmodule Barkpark.Groq.Pushdown do
     end
   end
 
+  defp apply_match(node, acc, resolve), do: add_probes(acc, node, resolve)
+
   defp probes_only?(%{types: nil, ids: nil, eq: [], checks: [], any: [_]}), do: true
   defp probes_only?(_branch), do: false
-
-  defp apply_match(node, acc, resolve), do: add_probes(acc, node, resolve)
 
   # `{:ok, {:or, branches}, exact?}` for an `||` whose every disjunct narrows,
   # else `:error`. A disjunct that cannot be true for this parent adds no
