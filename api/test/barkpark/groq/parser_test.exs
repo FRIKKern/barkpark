@@ -123,9 +123,90 @@ defmodule Barkpark.Groq.ParserTest do
       assert Pushdown.constraints(expr).checks == []
     end
 
-    test "an || of field equalities becomes one any-of constraint" do
+    test "an || of field equalities is an exact or check" do
       c = constraints(~s'*[_type == "p" && (isbn == $i || onix.isbn == $i)]', %{"i" => "9"})
-      assert c.any == [[%{"isbn" => "9"}, %{"onix" => %{"isbn" => "9"}}]]
+
+      want = {:or, [branch(eq: [{["isbn"], "9"}]), branch(eq: [{["onix", "isbn"], "9"}])]}
+      assert c.checks == [want] and c.any == []
+
+      assert {:ok, %{checks: [^want]}} =
+               exact(~s'*[_type == "p" && (isbn == $i || onix.isbn == $i)]', %{"i" => "9"})
+    end
+
+    # One branch of an `{:or, branches}` check.
+    defp branch(fields), do: Map.merge(Pushdown.empty(), Map.new(fields))
+
+    defp exact(query, params \\ %{}) do
+      {:ok, tree} = Parser.parse(query, params)
+      Pushdown.exact(filter_expr(tree))
+    end
+
+    test "an || of value in array clauses is one exact or of member checks" do
+      q = ~s'*[_type == "p" && ("218" in codes || $c in codes) && isMain == true]'
+      c = constraints(q, %{"c" => "212"})
+
+      want =
+        {:or,
+         [
+           branch(checks: [{:member, ["codes"], "218"}]),
+           branch(checks: [{:member, ["codes"], "212"}])
+         ]}
+
+      assert c.checks == [want]
+      assert c.types == ["p"] and c.eq == [{["isMain"], true}]
+      assert {:ok, %{checks: [^want], types: ["p"]}} = exact(q, %{"c" => "212"})
+    end
+
+    test "every exact shape may be a branch, and the or is exact" do
+      q = """
+      *[_type == "p" && (
+        _type == "q" || _id == "x" || isbn in ["1", "2"] || count(tags) > 2 ||
+        defined(onix.isbn) || count(cs[role._ref == "A01"]) > 0 ||
+        (a == 1 && (b == 2 || "y" in tags))
+      )]
+      """
+
+      assert [{:or, branches}] = constraints(q).checks
+
+      assert branches == [
+               branch(types: ["q"]),
+               branch(ids: ["x"]),
+               branch(checks: [{:in, ["isbn"], ["1", "2"]}]),
+               branch(checks: [{:length, ["tags"], ">", 2}]),
+               branch(checks: [{:defined, ["onix", "isbn"], nil}]),
+               branch(checks: [{:some, ["cs"], [{["role", "_ref"], ["A01"]}]}]),
+               branch(
+                 eq: [{["a"], 1}],
+                 checks: [
+                   {:or, [branch(eq: [{["b"], 2}]), branch(checks: [{:member, ["tags"], "y"}])]}
+                 ]
+               )
+             ]
+
+      assert {:ok, %{checks: [{:or, ^branches}]}} = exact(q)
+    end
+
+    test "an or with a branch SQL only narrows is not exact" do
+      for q <- [
+            ~s'*[_type == "p" && ("x" in codes || references("r"))]',
+            ~s'*[_type == "p" && ("x" in codes || title == "t")]',
+            ~s'*[_type == "p" && ("x" in codes || (a == 1 && lower(b) == "x"))]',
+            ~s'*[_type == "p" && ("x" in codes || "y" in tags[].v)]'
+          ] do
+        assert [{:or, [_, _]}] = constraints(q).checks, q
+        assert exact(q) == :error, q
+      end
+
+      assert [{:or, [_, branch]}] =
+               constraints(~s'*[("x" in codes || (a == 1 && lower(b) == "x"))]').checks
+
+      assert branch == branch(eq: [{["a"], 1}])
+    end
+
+    test "an or with a branch SQL cannot narrow stays in memory" do
+      c = constraints(~s'*[_type == "p" && ("x" in codes || lower(b) == "x")]')
+      assert c.checks == [] and c.any == []
+      assert exact(~s'*[_type == "p" && ("x" in codes || lower(b) == "x")]') == :error
     end
 
     # Constraints for the first `*[...]` filter, with `^` bound to `parent`.
@@ -184,7 +265,7 @@ defmodule Barkpark.Groq.ParserTest do
       assert c.any == []
     end
 
-    test "each disjunct gives its most selective condition and a false one drops" do
+    test "each disjunct gives a branch and a false one drops" do
       filter = """
       *[_type == "product" && _id != ^._id && (defined(isbn) || defined(onix.isbn)) && (
         (references(^._id) && (mainProduct._ref == ^._id || ^._id in variants[]._ref)) ||
@@ -198,9 +279,25 @@ defmodule Barkpark.Groq.ParserTest do
       root = %{"_id" => "p4", "onix" => %{"publicationId" => "pub-1"}}
       assert constraints_under(filter, root).types == ["product"]
 
-      assert constraints_under(filter, root).any == [
-               [{:refs, ["p4"]}, %{"onix" => %{"publicationId" => "pub-1"}}]
+      # Checks come last conjunct first: the big || and then the defined() one.
+      assert [{:or, [first, last]}, {:or, defined}] = constraints_under(filter, root).checks
+
+      assert defined == [
+               branch(checks: [{:defined, ["isbn"], nil}]),
+               branch(checks: [{:defined, ["onix", "isbn"], nil}])
              ]
+
+      assert first.any == [[{:refs, ["p4"]}]]
+
+      assert first.checks == [
+               {:or,
+                [
+                  branch(eq: [{["mainProduct", "_ref"], "p4"}]),
+                  branch(any: [[%{"variants" => [%{"_ref" => "p4"}]}]])
+                ]}
+             ]
+
+      assert last == branch(eq: [{["onix", "publicationId"], "pub-1"}])
 
       child = %{
         "_id" => "p5",
@@ -208,9 +305,9 @@ defmodule Barkpark.Groq.ParserTest do
         "variants" => [%{"_ref" => "p9"}]
       }
 
-      assert constraints_under(filter, child).any == [
-               [{:refs, ["p5"]}, {:ids, ["p4"]}, {:refs, ["p4"]}, {:ids, ["p9"]}]
-             ]
+      assert [{:or, branches}, _defined] = constraints_under(filter, child).checks
+      assert [[[{:refs, ["p5"]}]], [], [[{:refs, ["p4"]}]], []] == Enum.map(branches, & &1.any)
+      assert [nil, ["p4"], nil, ["p9"]] == Enum.map(branches, & &1.ids)
     end
 
     test "an || with a disjunct SQL cannot narrow stays in memory" do
@@ -349,9 +446,10 @@ defmodule Barkpark.Groq.ParserTest do
       end
     end
 
-    test "or, functions and ^ stay in memory" do
+    test "an or of types narrows the types, and ^ stays in memory" do
       c = constraints(~s'*[_type == "a" || _type == "b"]')
-      assert c.types == nil
+      assert c.types == ["a", "b"]
+      assert c.checks == [{:or, [branch(types: ["a"]), branch(types: ["b"])]}]
       c = constraints(~s|*[_type == "a"]{"x": *[_type == "b" && ref == ^._id]}|)
       assert c.types == ["a"]
     end

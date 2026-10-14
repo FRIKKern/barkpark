@@ -100,7 +100,20 @@ defmodule BarkparkWeb.GroqBenchTest do
        "validPublishingStatuses" => ["04"],
        "validAvailabilityCodes" => ["21"],
        "limit" => 10
-     }}
+     }},
+    {"22 rail, $a in seriesIds && filters | order()[0...5]",
+     """
+     *[_type == "product" && $a in seriesIds && isMainProduct == true &&
+       access.buyStatus != "sold_out"] | order(onix.publishingDate desc)[0...5]{_id}
+     """, %{"a" => "series-3"}},
+    {"23 rail, ($a in seriesIds || $b in seriesIds) && filters | order()[0...5]",
+     """
+     *[_type == "product" && ($a in seriesIds || $b in seriesIds) && isMainProduct == true &&
+       access.buyStatus != "sold_out"] | order(onix.publishingDate desc)[0...5]{_id}
+     """, %{"a" => "series-3", "b" => "series-7"}},
+    {"24 count(*[... && ($a in seriesIds || $b in seriesIds)])",
+     ~s'count(*[_type == "product" && ($a in seriesIds || $b in seriesIds)])',
+     %{"a" => "series-3", "b" => "series-7"}}
   ]
 
   setup do
