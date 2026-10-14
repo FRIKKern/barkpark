@@ -425,6 +425,53 @@ defmodule Barkpark.Groq.ParserTest do
       end
     end
 
+    test "!=, ranges and negations on a content path become exact checks" do
+      for {filter, check} <- [
+            {~s|hidden != true|, {:ne, ["hidden"], true}},
+            {~s|"x" != a.b|, {:ne, ["a", "b"], "x"}},
+            {~s|a != null|, {:defined, ["a"], nil}},
+            {~s|n > $t|, {:range, ["n"], ">", 5}},
+            {~s|$t >= n|, {:range, ["n"], "<=", 5}},
+            {~s|2.5 < n|, {:range, ["n"], ">", 2.5}},
+            {~s|d <= "2026-01-01"|, {:range, ["d"], "<=", "2026-01-01"}},
+            {~s|b > false|, {:range, ["b"], ">", false}},
+            {~s|!defined(a)|, {:not, {:defined, ["a"], nil}}},
+            {~s|!(a == 1)|, {:ne, ["a"], 1}},
+            {~s|!(a in [1, "x"])|, {:not, {:in, ["a"], [1, "x"]}}},
+            {~s|!("x" in tags)|, {:none, ["tags"], [{[], ["x"]}]}},
+            {~s|!(count(tags[@ in ["x", "y"]]) > 0)|, {:none, ["tags"], [{[], ["x", "y"]}]}}
+          ] do
+        {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]", %{"t" => 5})
+        expr = filter_expr(tree)
+        assert Pushdown.constraints(expr).checks == [check], filter
+        assert match?({:ok, %{checks: [^check]}}, Pushdown.exact(expr)), filter
+      end
+    end
+
+    test "!=, ranges and negations SQL cannot test exactly stay in memory" do
+      for filter <- [
+            ~s|a != [1]|,
+            ~s|a != b|,
+            ~s|title != "x"|,
+            ~s|_id != "x"|,
+            ~s|a > null|,
+            ~s|a > [1]|,
+            ~s|a > b|,
+            ~s|lower(a) > "x"|,
+            ~s|a[0] > 1|,
+            ~s|_updatedAt > "2026"|,
+            ~s|!(a > 1)|,
+            ~s|!defined(a[0])|,
+            ~s|!(lower(a) == "x")|,
+            ~s|!(count(tags[_type == "x"]) == 0)|,
+            ~s|!(count(tags[lower(x) == "a"]) > 0)|
+          ] do
+        {:ok, tree} = Parser.parse("*[_type == \"p\" && #{filter}]")
+        assert Pushdown.constraints(filter_expr(tree)).checks == [], filter
+        assert Pushdown.exact(filter_expr(tree)) == :error, filter
+      end
+    end
+
     test "order() over content paths and _id, _createdAt, _updatedAt gives SQL sort keys" do
       {:ok, {:slice, {:memo, {:pipe, _base, "order", args}}, 0, 12, false}} =
         Parser.parse(

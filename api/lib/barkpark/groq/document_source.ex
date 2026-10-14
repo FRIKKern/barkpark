@@ -18,7 +18,9 @@ defmodule Barkpark.Groq.DocumentSource do
   The constraints `Barkpark.Groq.Pushdown` reads off each `*[...]` filter
   become SQL: `_type`, `_id`, field equalities and array membership as JSON
   containment on `content`, `in` over a list of values as a jsonpath on
-  `content`, `references()` against an expression index
+  `content`, `!=`, `<`, `<=`, `>`, `>=` and `!` as typed tests of the value at
+  the path, a long `count(a.b[@ in [...]]) > 0` as one index probe per value,
+  `references()` against an expression index
   over the `_ref` values in `content`, and an `||` whose every branch narrows
   as one SQL OR of the branches' conditions. Everything else runs in memory over the
   loaded documents. An equality on `title` reads the `documents.title`
@@ -78,6 +80,11 @@ defmodule Barkpark.Groq.DocumentSource do
   # entries a jsonpath or containment value selects: over 20,000 products
   # `isbn in $isbns` went from 8 ms to 200 ms on the sixth run.
   @planned_per_call [prepare: :unnamed]
+
+  # From this many values on, `count(a.b[@ in [...]]) > 0` is tested with one
+  # index probe per value instead of one jsonpath (`check_condition/1`). Below
+  # it the jsonpath's re-test is cheap and one lookup is faster.
+  @probe_join_min_values 8
 
   @type perspective :: :published | :drafts | :raw
 
@@ -315,19 +322,17 @@ defmodule Barkpark.Groq.DocumentSource do
 
     {ors, plain} = Enum.split_with(constraints.checks, &match?({:or, _}, &1))
 
-    checks =
-      Enum.map(plain, fn
-        {:length, path, _op, _n} -> path
-        {:defined, path, _index} -> path
-        {:in, path, _values} -> path
-        {:member, path, _value} -> path
-        {:some, path, _pairs} -> path
-      end)
+    checks = Enum.map(plain, &check_path/1)
 
     branches = for {:or, branches} <- ors, branch <- branches, do: filter_paths(branch)
 
     Enum.uniq(eq ++ checks ++ List.flatten(branches))
   end
+
+  defp check_path({:not, check}), do: check_path(check)
+  defp check_path({:length, path, _op, _n}), do: path
+  defp check_path({:range, path, _op, _value}), do: path
+  defp check_path({_kind, path, _arg}), do: path
 
   # `field_readable?/3` takes a dotted name, so a segment holding a dot
   # cannot be judged and is treated as unreadable.
@@ -918,6 +923,21 @@ defmodule Barkpark.Groq.DocumentSource do
     Enum.reduce(conditions, fn c, acc -> dynamic(^acc and ^c) end)
   end
 
+  # `!x` for a test that is always true or false in GROQ: SQL's NULL for a
+  # missing field counts as false, as GROQ's answer would be.
+  defp check_condition({:not, check}),
+    do: dynamic(fragment("(?) IS NOT TRUE", ^check_condition(check)))
+
+  # An array with no element that matches. Anything but an array leaves the
+  # GROQ test null, so the row is dropped.
+  defp check_condition({:none, path, pairs}) do
+    dynamic(
+      [d],
+      fragment("jsonb_typeof(? #> ?) = 'array'", d.content, type(^path, {:array, :string})) and
+        fragment("(?) IS NOT TRUE", ^check_condition({:some, path, pairs}))
+    )
+  end
+
   # `count(path) op n`. The CASE yields null for anything but an array, as
   # GROQ's count() does, and keeps `jsonb_array_length` from raising on one.
   defp check_condition({:length, path, "<", n}) do
@@ -1032,6 +1052,33 @@ defmodule Barkpark.Groq.DocumentSource do
         "strict " <> jsonpath(path) <> "[*] ? (" <> any_equal("@", [value]) <> ")"
       )
 
+  # `count(a.b[@ in [...]]) > 0` with a long list: one containment probe
+  # `{"a": {"b": [v]}}` per value, each looked up on its own in
+  # `documents_content_path_idx`, and the row ids they find. The jsonpath
+  # below is one index lookup too, but Postgres then re-tests it on every row
+  # the index returns, and that re-test compares each array element with every
+  # value: over 10,592 products, 372 codes in 20 groups took 820 ms against
+  # 9 ms for the index lookups. Here each probe re-tests only its own rows,
+  # with one containment. `OFFSET 0` keeps the lookup per probe; without it
+  # Postgres may join the probes against a full scan of `documents`. The
+  # probe is exact: containment of `[v]` needs an array holding a scalar equal
+  # to `v`, so a string, an object or a nested array at the path does not
+  # match, and `7` matches `7.0` as GROQ's `==` does. The ids are a superset
+  # across every dataset; the outer query applies scope and visibility.
+  defp check_condition({:some, path, [{[], values}]})
+       when length(values) >= @probe_join_min_values do
+    probes = Enum.map(values, &Jason.encode!(Pushdown.nest(path ++ [:each], &1)))
+
+    dynamic(
+      [d],
+      fragment(
+        "? = ANY(ARRAY(SELECT x.id FROM unnest(CAST(? AS jsonb[])) AS p(probe) CROSS JOIN LATERAL (SELECT s.id FROM documents AS s WHERE s.content @> p.probe OFFSET 0) AS x))",
+        d.id,
+        type(^probes, {:array, :string})
+      )
+    )
+  end
+
   # Some element of the array at `path` matches every `{field, values}` pair:
   # `strict $."a"."b"[*] ? (@."x"."_ref" == "v" && (@."y" == 1 || @."y" == 2))`.
   # Strict mode does not unwrap an array at a field or step into a non-array
@@ -1046,8 +1093,83 @@ defmodule Barkpark.Groq.DocumentSource do
     jsonpath_condition("strict " <> jsonpath(path) <> "[*] ? (" <> test <> ")")
   end
 
+  # `a.b != v`: true unless the value at the path equals `v`. A missing
+  # field makes the comparison null, which `IS NOT TRUE` keeps, as GROQ keeps
+  # it. jsonb `=` compares numbers as numbers and strings byte for byte, and
+  # never matches two values of different types, as GROQ's `==` does.
+  defp check_condition({:ne, path, value}) do
+    dynamic(
+      [d],
+      fragment(
+        "(? #> ? = CAST(? AS jsonb)) IS NOT TRUE",
+        d.content,
+        type(^path, {:array, :string}),
+        type(^Jason.encode!(value), :string)
+      )
+    )
+  end
+
+  # `a.b op v`: GROQ orders two numbers, two strings or two booleans and
+  # answers null for any other pair, so the value at the path must have the
+  # type of `v`. Numbers and booleans compare as jsonb, which orders numbers
+  # as `numeric` and false before true. Strings compare by UTF-16 code unit,
+  # with the same sort key as `sort_exprs/2`.
+  defp check_condition({:range, path, op, value}) when is_binary(value) do
+    dynamic(
+      [d],
+      fragment("jsonb_typeof(? #> ?) = 'string'", d.content, type(^path, {:array, :string})) and
+        ^string_compare(op, path, value)
+    )
+  end
+
+  defp check_condition({:range, path, op, value}) do
+    json_type = if is_boolean(value), do: "boolean", else: "number"
+
+    dynamic(
+      [d],
+      fragment(
+        "jsonb_typeof(? #> ?) = ?",
+        d.content,
+        type(^path, {:array, :string}),
+        type(^json_type, :string)
+      ) and ^json_compare(op, path, Jason.encode!(value))
+    )
+  end
+
   defp jsonpath_condition(path) do
     dynamic([d], fragment("? @\\? CAST(? AS jsonpath)", d.content, type(^path, :string)))
+  end
+
+  for op <- ["<", "<=", ">", ">="] do
+    defp string_compare(unquote(op), path, value) do
+      dynamic(
+        [d],
+        fragment(
+          unquote(
+            "regexp_replace(? #>> ?, ?, ?, 'g') COLLATE \"C\" #{op} regexp_replace(?, ?, ?, 'g') COLLATE \"C\""
+          ),
+          d.content,
+          type(^path, {:array, :string}),
+          ^@utf16_pattern,
+          ^@utf16_replacement,
+          type(^value, :string),
+          ^@utf16_pattern,
+          ^@utf16_replacement
+        )
+      )
+    end
+
+    defp json_compare(unquote(op), path, json) do
+      dynamic(
+        [d],
+        fragment(
+          unquote("? #> ? #{op} CAST(? AS jsonb)"),
+          d.content,
+          type(^path, {:array, :string}),
+          type(^json, :string)
+        )
+      )
+    end
   end
 
   defp jsonpath(path), do: "$" <> jsonpath_fields(path)
