@@ -8,7 +8,8 @@ defmodule Barkpark.Webhooks.Dispatcher do
     X-Barkpark-Signature: v1=<hex HMAC-SHA256(secret, "timestamp.body")>
     X-Barkpark-Event-ID:  <mutation_events.id>
 
-  Retries follow a JITTERED backoff (base `[1s, 5s, 30s]`, equal-jitter around
+  Retries follow a JITTERED backoff (base `[1s, 5s, 30s, 60s, 120s, 120s, 120s,
+  120s]`, equal-jitter around
   each tier, ceiling-bounded so a spike of queued deliveries doesn't re-align on
   the same wall-clock offsets and stampede a recovering endpoint) with
   `@max_attempts` attempts total on 5xx, transport error, or a RETRYABLE 4xx
@@ -59,8 +60,16 @@ defmodule Barkpark.Webhooks.Dispatcher do
   alias Barkpark.Webhooks
   alias Barkpark.Tenancy
 
-  @default_retry_delays_ms [1_000, 5_000, 30_000]
-  @default_max_attempts 3
+  # A delivery keeps retrying for at least ~4.8 minutes (each tier jitters to
+  # half its base at the least) and ~9.6 minutes on average. With the old
+  # `[1s, 5s, 30s]` table a delivery gave up after about 6 seconds, so a
+  # 2-minute receiver restart turned every event in that window into a terminal
+  # give-up. 52 of them in a row tripped the auto-disable latch and the
+  # endpoint went dark until a person re-enabled it (task-ebb207785fcb75ec).
+  # Every tier stays under the stuck-delivery sweeper's 300 s threshold; see
+  # `@jitter_ceiling_ms` below.
+  @default_retry_delays_ms [1_000, 5_000, 30_000, 60_000, 120_000, 120_000, 120_000, 120_000]
+  @default_max_attempts 9
 
   # 4xx statuses that are TRANSIENT and should be retried rather than dropped:
   # 429 Too Many Requests, 408 Request Timeout, 425 Too Early. Dropping these
@@ -77,7 +86,7 @@ defmodule Barkpark.Webhooks.Dispatcher do
   # old enough to be swept, and the sweep and the scheduled job then race for
   # the same row. Pinned by stuck_delivery_attempt_resume_test.exs.
   @retry_after_max_ms 240_000
-  @jitter_ceiling_ms 60_000
+  @jitter_ceiling_ms 180_000
 
   # Replay-defense window for `verify_signature/5`: an inbound signature whose
   # signed timestamp is more than this many seconds from local "now" (either
@@ -1050,7 +1059,8 @@ defmodule Barkpark.Webhooks.Dispatcher do
     min(half + spread, ceiling_ms)
   end
 
-  defp retry_delays do
+  @doc false
+  def retry_delays do
     Application.get_env(:barkpark, :webhook_retry_delays_ms, @default_retry_delays_ms)
   end
 

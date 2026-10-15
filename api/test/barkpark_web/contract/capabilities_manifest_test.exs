@@ -491,6 +491,23 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "webhook workspace scope" do
+    # task-ebb207785fcb75ec: the server has scoped webhook routes, but without a
+    # scoped_prefix bp refused `bp webhook ls -w <workspace>`.
+    test "every webhook command carries the workspace scoped prefix", %{conn: conn} do
+      cmds =
+        capabilities(conn)["commands"]
+        |> Enum.filter(&String.starts_with?(&1["id"], "webhook."))
+
+      assert length(cmds) >= 10
+
+      for cmd <- cmds do
+        assert cmd["scoped_prefix"] == "/w/:workspace_slug/p/:project_slug",
+               "#{cmd["id"]} has no scoped_prefix"
+      end
+    end
+  end
+
   describe "webhook get/delete commands" do
     test "webhook.get is GET /v1/webhooks/:dataset/:id with an id arg", %{conn: conn} do
       manifest = capabilities(conn)
