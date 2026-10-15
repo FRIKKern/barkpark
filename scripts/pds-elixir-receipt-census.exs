@@ -1222,6 +1222,8 @@ defmodule PDS.Census do
     # (`%{schedule: …}`), never an `ok: true` literal.
     {:post, "/v1/data/schedules/:dataset", "BarkparkWeb.ScheduleController", :create, :status_only_receipt},
     {:delete, "/v1/data/schedules/:dataset/:schedule_id", "BarkparkWeb.ScheduleController", :delete, :status_only_receipt},
+    {:post, "/v1/data/schedules/:dataset/:schedule_id/pause", "BarkparkWeb.ScheduleController", :pause, :status_only_receipt},
+    {:post, "/v1/data/schedules/:dataset/:schedule_id/resume", "BarkparkWeb.ScheduleController", :resume, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
@@ -1301,6 +1303,8 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset", "BarkparkWeb.ScheduleController", :create, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset/:schedule_id", "BarkparkWeb.ScheduleController", :delete, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset/:schedule_id/pause", "BarkparkWeb.ScheduleController", :pause, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/schedules/:dataset/:schedule_id/resume", "BarkparkWeb.ScheduleController", :resume, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},

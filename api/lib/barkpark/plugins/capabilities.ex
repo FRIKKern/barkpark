@@ -1182,7 +1182,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "status",
             "string",
-            "scheduled | published | cancelled | refused | failed | missed | all.",
+            "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             default: "scheduled"
           )
         ],
@@ -1194,11 +1194,47 @@ defmodule Barkpark.Plugins.Capabilities do
         "doc.unschedule",
         "doc",
         "unschedule",
-        "Cancel a pending scheduled publish.",
+        "Cancel a pending or paused scheduled publish.",
         "DELETE",
         "/v1/data/schedules/:dataset/:schedule_id",
         "write",
         args: [arg("schedule_id", true, "string", "Schedule id (from doc schedules).")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # Sanity's "Pause to edit": a paused schedule keeps its time and runs nothing
+      # until it is resumed, at that time or a new one.
+      core_cmd(
+        "doc.schedule-pause",
+        "doc",
+        "schedule-pause",
+        "Pause a pending scheduled publish: it keeps its time and runs nothing until resumed.",
+        "POST",
+        "/v1/data/schedules/:dataset/:schedule_id/pause",
+        "write",
+        args: [arg("schedule_id", true, "string", "Schedule id (from doc schedules).")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.schedule-resume",
+        "doc",
+        "schedule-resume",
+        "Resume a paused scheduled publish, at its own time or a new one.",
+        "POST",
+        "/v1/data/schedules/:dataset/:schedule_id/resume",
+        "write",
+        args: [
+          arg("schedule_id", true, "string", "Schedule id (from doc schedules)."),
+          arg(
+            "publishAt",
+            false,
+            "string",
+            "A new time: ISO 8601 date-time with a zone, in the future. Omitted: the paused time."
+          )
+        ],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

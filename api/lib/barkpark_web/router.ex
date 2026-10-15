@@ -2921,6 +2921,8 @@ defmodule BarkparkWeb.Router do
     # cancelling are writes; the publish itself runs later AS the scheduler.
     post("/schedules/:dataset", ScheduleController, :create)
     delete("/schedules/:dataset/:schedule_id", ScheduleController, :delete)
+    post("/schedules/:dataset/:schedule_id/pause", ScheduleController, :pause)
+    post("/schedules/:dataset/:schedule_id/resume", ScheduleController, :resume)
   end
 
   # ── Mutations — token + idempotency dedup ──────────────────────────────
@@ -3869,6 +3871,8 @@ defmodule BarkparkWeb.Router do
     post("/v1/data/revision/:dataset/:id/restore", HistoryController, :restore)
     post("/v1/data/schedules/:dataset", ScheduleController, :create)
     delete("/v1/data/schedules/:dataset/:schedule_id", ScheduleController, :delete)
+    post("/v1/data/schedules/:dataset/:schedule_id/pause", ScheduleController, :pause)
+    post("/v1/data/schedules/:dataset/:schedule_id/resume", ScheduleController, :resume)
   end
 
   # Scoped mutations — the :scoped_mutate pipeline carries the member write-gate

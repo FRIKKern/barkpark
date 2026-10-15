@@ -21,7 +21,9 @@ defmodule Barkpark.Content.ScheduledPublishes do
   ## Lifecycle
 
   `scheduled` -> `published` | `cancelled` | `refused` | `failed` | `missed`. At most one
-  `scheduled` row per document. Each change is announced on the document's
+  `scheduled` row per document. `scheduled` <-> `paused` (Sanity's "Pause to edit"): a
+  paused schedule keeps its time and runs nothing until it is resumed, at that time
+  or a new one; it can still be cancelled. Each change is announced on the document's
   listen stream as a `schedule` or `unschedule` event on the draft; the publish
   itself is the ordinary `publish` event.
 
@@ -104,16 +106,79 @@ defmodule Barkpark.Content.ScheduledPublishes do
   end
 
   @doc """
-  Cancel a pending schedule. Only a `scheduled` row can be cancelled; any
-  other status answers `{:error, {:schedule_not_pending, status}}`.
+  Cancel a pending or paused schedule. Any other status answers
+  `{:error, {:schedule_not_pending, status}}`.
   """
   def cancel(id, dataset, opts) when is_binary(id) and is_binary(dataset) do
     with {:ok, row} <- fetch(id, dataset, opts),
-         :ok <- pending(row),
+         :ok <- pending_or_paused(row),
          {:ok, row} <- Repo.update(ScheduledPublish.finish_changeset(row, "cancelled", nil)) do
       announce_for(row, "unschedule")
       {:ok, row}
     end
+  end
+
+  @doc """
+  Pause a pending schedule (Sanity's "Pause to edit"): its job is cancelled and the
+  row keeps its time until `resume/4`. Only a `scheduled` row can be paused.
+  """
+  def pause(id, dataset, opts) when is_binary(id) and is_binary(dataset) do
+    with {:ok, row} <- fetch(id, dataset, opts),
+         :ok <- pending(row),
+         {:ok, row} <- Repo.update(ScheduledPublish.pause_changeset(row)) do
+      cancel_job(row.id)
+      announce_for(row, "unschedule")
+      {:ok, row}
+    end
+  end
+
+  @doc """
+  Resume a paused schedule at `publish_at` (an ISO 8601 string or `DateTime`, in
+  the future), or at its own time when `publish_at` is nil. Only a `paused` row
+  can be resumed; another pending schedule for the document answers
+  `{:error, :schedule_exists}`.
+  """
+  def resume(id, dataset, publish_at, opts) when is_binary(id) and is_binary(dataset) do
+    with {:ok, row} <- fetch(id, dataset, opts),
+         :ok <- paused(row),
+         {:ok, at} <- future_time(publish_at || row.publish_at) do
+      Repo.transaction(fn ->
+        with {:ok, row} <- Repo.update(ScheduledPublish.resume_changeset(row, at)),
+             {:ok, _job} <-
+               Oban.insert(ScheduledPublishWorker.new(%{id: row.id}, scheduled_at: at)) do
+          row
+        else
+          {:error, %Ecto.Changeset{} = cs} ->
+            if Keyword.has_key?(cs.errors, :workspace_id),
+              do: Repo.rollback(:schedule_exists),
+              else: Repo.rollback(cs)
+
+          {:error, reason} ->
+            Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, row} ->
+          announce_for(row, "schedule")
+          {:ok, row}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  # A paused schedule's job must not fire at the old time, and a resumed one gets
+  # a new job (the worker is unique per schedule id among live jobs).
+  defp cancel_job(schedule_id) do
+    Oban.cancel_all_jobs(
+      from(j in Oban.Job,
+        where:
+          j.worker == ^inspect(ScheduledPublishWorker) and
+            fragment("?->>'id' = ?", j.args, ^schedule_id) and
+            j.state in ["available", "scheduled", "retryable"]
+      )
+    )
   end
 
   @doc """
@@ -328,6 +393,12 @@ defmodule Barkpark.Content.ScheduledPublishes do
 
   defp pending(%ScheduledPublish{status: "scheduled"}), do: :ok
   defp pending(%ScheduledPublish{status: status}), do: {:error, {:schedule_not_pending, status}}
+
+  defp paused(%ScheduledPublish{status: "paused"}), do: :ok
+  defp paused(%ScheduledPublish{status: status}), do: {:error, {:schedule_not_paused, status}}
+
+  defp pending_or_paused(%ScheduledPublish{status: "paused"}), do: :ok
+  defp pending_or_paused(row), do: pending(row)
 
   defp workspace_id(opts) do
     case Keyword.get(opts, :workspace_id) do

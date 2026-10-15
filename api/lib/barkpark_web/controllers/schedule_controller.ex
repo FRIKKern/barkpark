@@ -7,7 +7,12 @@ defmodule BarkparkWeb.ScheduleController do
     * `GET    /v1/data/schedules/:dataset` — `?id=&type=&status=` lists them
       (default: pending only; `status=all` for every status) as
       `{"result": {"schedules": [...]}}`.
-    * `DELETE /v1/data/schedules/:dataset/:schedule_id` — cancels a pending one.
+    * `DELETE /v1/data/schedules/:dataset/:schedule_id` — cancels a pending or
+      paused one.
+    * `POST   /v1/data/schedules/:dataset/:schedule_id/pause` — pauses a pending
+      one (Sanity's "Pause to edit"); it keeps its time and runs nothing.
+    * `POST   /v1/data/schedules/:dataset/:schedule_id/resume` — `{"publishAt"?}`
+      puts a paused one back, at its own time or a new future one.
 
   Writes ride the same `:require_write` gate as mutate; the publish itself
   runs later AS the scheduler (see `Barkpark.Content.ScheduledPublishes`).
@@ -54,6 +59,20 @@ defmodule BarkparkWeb.ScheduleController do
     end
   end
 
+  def pause(conn, %{"dataset" => dataset, "schedule_id" => id}) do
+    case ScheduledPublishes.pause(id, dataset, scope_opts(conn)) do
+      {:ok, row} -> json(conn, %{schedule: schedule_json(row)})
+      error -> respond_with_error(conn, error)
+    end
+  end
+
+  def resume(conn, %{"dataset" => dataset, "schedule_id" => id} = params) do
+    case ScheduledPublishes.resume(id, dataset, params["publishAt"], scope_opts(conn)) do
+      {:ok, row} -> json(conn, %{schedule: schedule_json(row)})
+      error -> respond_with_error(conn, error)
+    end
+  end
+
   defp put_pin(opts, rev) when is_binary(rev) and rev != "",
     do: Keyword.put(opts, :draft_rev, rev)
 
@@ -87,6 +106,16 @@ defmodule BarkparkWeb.ScheduleController do
         "this document already has a pending scheduled publish",
         %{},
         "List it with GET /v1/data/schedules/:dataset?id=<id>, cancel it, then schedule again."
+      )
+
+  defp respond_with_error(conn, {:error, {:schedule_not_paused, status}}),
+    do:
+      ErrorResponse.emit_custom(
+        conn,
+        409,
+        "conflict",
+        "this schedule is #{status}, not paused",
+        %{status: status}
       )
 
   defp respond_with_error(conn, {:error, {:schedule_not_pending, status}}),
