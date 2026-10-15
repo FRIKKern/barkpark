@@ -23,6 +23,7 @@ defmodule Barkpark.Search.QueryPipeline do
           recovery: String.t() | nil,
           corrected_to: String.t() | nil,
           engine_used: String.t() | nil,
+          match: String.t() | nil,
           ms: non_neg_integer()
         }
 
@@ -103,6 +104,10 @@ defmodule Barkpark.Search.QueryPipeline do
        # that path no longer emits it.
        facets: Map.get(engine_meta, :facets),
        truncation: Map.get(engine_meta, :truncation),
+       # "all" when every word had to match, "any" when one word was enough
+       # (the caller asked, or `match_any` recovery ran). nil for a browse and
+       # for an engine that does not report it.
+       match: Map.get(engine_meta, :match),
        # Which retriever ACTUALLY served the returned hits — "postgres" whenever
        # the served result came from the Postgres retriever, even when the
        # caller asked for another engine (zero-hit recovery, the D3-b tenant
@@ -119,11 +124,19 @@ defmodule Barkpark.Search.QueryPipeline do
     if positive == [] do
       {parsed, nil}
     else
-      extra =
-        positive
-        |> Enum.flat_map(fn term -> Synonyms.search_terms(surface, scope, term, workspace_id) end)
-        |> Enum.reject(&(&1 in positive or &1 == ""))
-        |> Enum.uniq()
+      # Each term's synonyms are its alternatives: the retriever matches a term
+      # OR any of its synonyms, never a synonym as one more word every document
+      # must hold. `terms` still lists them, as `parsedQuery` always has.
+      alternatives =
+        Map.new(positive, fn term ->
+          {term,
+           surface
+           |> Synonyms.search_terms(scope, term, workspace_id)
+           |> Enum.reject(&(&1 in positive or &1 == ""))
+           |> Enum.uniq()}
+        end)
+
+      extra = alternatives |> Map.values() |> List.flatten() |> Enum.uniq()
 
       # The corrected term is the canonical to_query of the FIRST positive term
       # for which an enabled synonym fired — null when nothing matched.
@@ -132,7 +145,8 @@ defmodule Barkpark.Search.QueryPipeline do
           Synonyms.correction_for(surface, scope, term, workspace_id)
         end)
 
-      {%{parsed | terms: parsed.terms ++ extra}, corrected_to}
+      {Map.put(%{parsed | terms: parsed.terms ++ extra}, :alternatives, alternatives),
+       corrected_to}
     end
   end
 
@@ -176,6 +190,16 @@ defmodule Barkpark.Search.QueryPipeline do
         # ever DROPS content keys the caller did not ask for, so the rendered
         # envelope is byte-identical. nil/absent → the full struct (unchanged).
         fields: Keyword.get(opts, :fields),
+        # task-3623955d22974d71: every word must match (`:all`) unless the
+        # caller asked for `:any`. Field filters and named facets
+        # (task-c7395e0d27e1121b) ride to the retriever with the same opts, so
+        # every recovery pass keeps them.
+        match: Keyword.get(opts, :match, :all),
+        filter_map: Keyword.get(opts, :filter_map),
+        facet_fields: Keyword.get(opts, :facet_fields),
+        # The type-ahead fast path (task-7e7891dbf1f488ee): no facets, a small
+        # ranking pool, no stored vector read, and no recovery pass below.
+        suggest: Keyword.get(opts, :suggest, false),
         # `?boost=popularity` (task-5feac4e826cff9a5): the Postgres retriever
         # adds the document's view score to relevance. Other engines ignore it.
         boost: Keyword.get(opts, :boost)
@@ -214,17 +238,23 @@ defmodule Barkpark.Search.QueryPipeline do
     # recovery is a served-by-postgres answer — the exact silent substitution
     # (indx request → empty → postgres re-run → happy 200 wearing indx's name)
     # this field exists to make visible.
-    {final_hits, final_total, recovery, engine_used} =
+    {final_hits, final_total, recovery, engine_used, final_meta} =
       cond do
-        # No recovery configured.
-        total == 0 and strategy == "none" ->
-          {hits, total, nil, primary_engine}
+        # No recovery configured, or a suggestion: the type-ahead answers from
+        # one pass, so a keystroke never pays for a recovery chain.
+        total == 0 and (strategy == "none" or retriever_opts[:suggest] == true) ->
+          {hits, total, nil, primary_engine, %{}}
 
-        # Zero-hit path — unchanged: drop_tokens then typo_widen.
+        retriever_opts[:suggest] == true ->
+          {hits, total, nil, primary_engine, %{}}
+
+        # Zero-hit path. When every word had to match: the typo-widened pass
+        # under the same rule, then any word (`match_any`, ranked by how many
+        # words a document holds), then the drop_tokens / typo_widen chain.
         total == 0 ->
           case recover_documents(scope, parsed, config, retriever_opts, strategy) do
-            {rh, rt, recovery} -> {rh, rt, recovery, "postgres"}
-            nil -> {hits, total, nil, primary_engine}
+            {rh, rt, recovery, meta} -> {rh, rt, recovery, "postgres", meta}
+            nil -> {hits, total, nil, primary_engine, %{}}
           end
 
         # Thin-results path — widen fuzzy on a positive-but-small result set and
@@ -235,26 +265,68 @@ defmodule Barkpark.Search.QueryPipeline do
         # zero-hit path above still falls back to Postgres for any engine.
         engine == "postgres" and total < low_hit_threshold and strategy != "none" ->
           case try_typo_widen(scope, parsed, config, retriever_opts, strategy) do
-            {rh, rt, _r} when rt > total -> {rh, rt, "typo_widen", "postgres"}
-            _ -> {hits, total, nil, primary_engine}
+            {rh, rt, _r, meta} when rt > total -> {rh, rt, "typo_widen", "postgres", meta}
+            _ -> {hits, total, nil, primary_engine, %{}}
           end
 
         true ->
-          {hits, total, nil, primary_engine}
+          {hits, total, nil, primary_engine, %{}}
       end
 
     # Carry the PRIMARY retriever's engine meta (Indx facets + truncation)
     # regardless of zero-hit recovery — facets describe the whole dataset, so
-    # they stay meaningful even when the text matched nothing.
+    # they stay meaningful even when the text matched nothing. `match` names
+    # the rule of the pass that SERVED the hits.
+    engine_meta =
+      case Map.fetch(final_meta, :match) do
+        {:ok, m} -> Map.put(engine_meta, :match, m)
+        :error -> engine_meta
+      end
+
     {final_hits, final_total, recovery, engine_meta, engine_used}
   end
 
   defp recover_documents(scope, parsed, config, opts, strategy) do
-    with nil <- try_drop_tokens(scope, parsed, config, opts, strategy),
-         nil <- try_typo_widen(scope, parsed, config, opts, strategy) do
+    with nil <- try_typo_widen_all(scope, parsed, config, opts, strategy),
+         nil <- try_match_any(scope, parsed, config, opts, strategy),
+         nil <- try_drop_tokens(scope, parsed, config, opts, strategy),
+         nil <- try_typo_widen(scope, parsed, config, Keyword.put(opts, :match, :any), strategy) do
       nil
     end
   end
+
+  # Under `:all`, the widened typo pass keeps the rule: every word must still
+  # match, each one now a little more loosely.
+  defp try_typo_widen_all(scope, parsed, config, opts, strategy) do
+    if all_words?(opts) and positive_count(parsed) > 1,
+      do: try_typo_widen(scope, parsed, config, opts, strategy),
+      else: nil
+  end
+
+  # task-3623955d22974d71: when no document holds every word, any word will
+  # do. The ranking puts the documents that hold most of the words first.
+  defp try_match_any(scope, parsed, config, opts, strategy)
+       when strategy in ["drop_tokens", "typo_widen"] do
+    if all_words?(opts) and positive_count(parsed) > 1 do
+      {hits, total, meta} =
+        DocumentsRetriever.search(scope, parsed, config, Keyword.put(opts, :match, :any))
+
+      if total > 0, do: {hits, total, "match_any", meta}
+    end
+  end
+
+  defp try_match_any(_scope, _parsed, _config, _opts, _strategy), do: nil
+
+  defp all_words?(opts), do: Keyword.get(opts, :match, :all) not in [:any, "any"]
+
+  defp positive_count(parsed),
+    do:
+      length(
+        Enum.uniq(
+          Map.get(parsed, :terms, []) --
+            List.flatten(Map.values(Map.get(parsed, :alternatives, %{})))
+        )
+      ) + length(Map.get(parsed, :phrases, [])) + length(Map.get(parsed, :prefixes, []))
 
   defp try_drop_tokens(scope, parsed, config, opts, "drop_tokens") do
     terms = parsed.terms ++ parsed.phrases
@@ -268,10 +340,10 @@ defmodule Barkpark.Search.QueryPipeline do
           phrases: Enum.drop(parsed.phrases, -1)
       }
 
-      {hits, total, _meta} = DocumentsRetriever.search(scope, dropped, config, opts)
+      {hits, total, meta} = DocumentsRetriever.search(scope, dropped, config, opts)
 
       if total > 0 do
-        {hits, total, "drop_tokens"}
+        {hits, total, "drop_tokens", meta}
       else
         try_drop_tokens(scope, dropped, config, opts, "drop_tokens")
       end
@@ -289,10 +361,10 @@ defmodule Barkpark.Search.QueryPipeline do
        when strategy in ["drop_tokens", "typo_widen"] do
     if TypoPolicy.enabled?(config) do
       relaxed_opts = Keyword.put(opts, :relaxed, true)
-      {hits, total, _meta} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
+      {hits, total, meta} = DocumentsRetriever.search(scope, parsed, config, relaxed_opts)
 
       if total > 0 do
-        {hits, total, "typo_widen"}
+        {hits, total, "typo_widen", meta}
       end
     end
   end

@@ -24,6 +24,7 @@ A top-level `validations` list is read by `parse/2` but not cast, so it is not s
 | `encrypted`, `private`, `visibility`, `readable_by` | Encryption at rest and per-field read visibility. |
 | `options` | Type-specific, below. |
 | `onix` | Passed through for ONIX export. |
+| `search` | `title` or `author`: [search slots](search-query.md). |
 
 ## Field types
 
@@ -75,7 +76,7 @@ The `builtin_field_types/0` list in `Barkpark.Content.Schema`. "No value check" 
 | `message` | Replaces the wording of every finding the map produces with one finding, code `custom`. |
 | `level` | `error` (default), `warning` or `info`. `warning` and `info` never block. Any other value counts as `error`. |
 
-`pattern` with `message` is enforced on top-level fields and nested ones (`validation_nested_tree_test` pins a composite subfield). In a list, the maps at one level are merged and a later key wins, so a `message` in one error-level map rewords every error-level finding on that field.
+`pattern` with `message` is enforced on top-level fields and nested ones. In a list, the maps at one level are merged and a later key wins, so a `message` in one error-level map rewords every error-level finding on that field.
 
 Where findings go: Studio blocks publish on errors and shows warnings. API writes return them as `warnings` (code `schema_validation`) unless the dataset is listed in `BARKPARK_SCHEMA_ENFORCE_DATASETS`, where errors refuse the write with 422 `validation_failed`.
 
@@ -87,7 +88,7 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Unknown keys
 
-Measured against `POST /v1/schemas/:dataset` on 2026-10-10. Only the field `type` is refused when unknown. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
+On `POST /v1/schemas/:dataset`, only the field `type` is refused when unknown. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
 
 | You send | Result |
 |---|---|

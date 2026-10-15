@@ -1053,6 +1053,17 @@ defmodule Barkpark.Content.Query do
   # its own guard. `QueryController` still pre-guards so the HTTP surface keeps
   # its field-naming envelope (and its ordering behind `forbidden_query_field/4`);
   # this is the floor under every OTHER door.
+  @doc """
+  Apply a query-API filter map (the `?filter[...]` grammar of
+  `/v1/data/query`) to a document search query, so the search endpoint's
+  filters run before its limit, count and facets (task-c7395e0d27e1121b). Same
+  chokepoint, same refusal, same operators as a query read.
+  """
+  @spec apply_search_filters(Ecto.Queryable.t(), map(), String.t() | nil, String.t(), keyword()) ::
+          Ecto.Query.t()
+  def apply_search_filters(query, filter_map, type, dataset, opts) when is_map(filter_map),
+    do: apply_filter_map(query, filter_map, type, dataset, opts)
+
   defp apply_filter_map(query, map, _type, _dataset, _opts) when map_size(map) == 0, do: query
 
   defp apply_filter_map(query, map, type, dataset, opts) do

@@ -3,10 +3,11 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
   Covers the bounded-ranking-pool refactor (Barkpark Cloud P4 / Move B).
 
   The contract: for a real query (anything that isn't browse), the expensive
-  per-row ranking (`ts_rank` + `similarity`) runs on at MOST `ranking_pool_size`
-  rows, picked cheaply by `updated_at DESC`. The pool defaults to 500; tests
-  pass an explicit `ranking_pool_size: 2` so the bound is observable with a
-  tiny corpus.
+  per-row ranking (`ts_rank` + `similarity`) runs on at MOST
+  `max(ranking_pool_size, offset + limit)` rows, picked cheaply by how many
+  query words start a word of the title or author, then `updated_at DESC`.
+  The pool defaults to 500; tests pass a small `ranking_pool_size` and `limit`
+  so the bound is observable with a tiny corpus.
 
   Also confirms:
     * `count` reflects the full match set, NOT the pool — the user-visible
@@ -75,7 +76,10 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
     newest_id = seed!(scope, "Alphagrid Newest", updated_at: now)
 
     parsed = %{terms: ["alphagrid"], phrases: [], prefixes: [], excludes: []}
-    opts = [ranking_pool_size: 2] ++ scope
+
+    # The pool always holds the requested page (task-c7395e0d27e1121b), so a
+    # pool of 2 binds only when the page fits inside it: limit 2, offset 0.
+    opts = [ranking_pool_size: 2, limit: 2] ++ scope
 
     {hits, total, _meta} = DocumentsRetriever.search(@ds, parsed, %{}, opts)
     ids = Enum.map(hits, & &1.doc_id)
@@ -83,10 +87,64 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
     # The full count reflects all 3 matches.
     assert total == 3, "count should reflect full match set, got #{total}"
 
-    # Only the 2 newest (middle + newest) survive the pool — oldest doesn't.
+    # Every title holds the word equally, so the 2 newest (middle + newest)
+    # survive the pool and the oldest does not.
     assert newest_id in ids
     assert middle_id in ids
     refute oldest_id in ids, "oldest should have been excluded by the pool bound"
+  end
+
+  test "the pool keeps a document whose title holds the word over newer ones that only mention it" do
+    scope = setup_scope()
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    titled =
+      seed!(scope, "Poolcover handbook", updated_at: DateTime.add(now, -7200, :second))
+
+    for n <- 1..3 do
+      doc_id = "bp-body-#{n}-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => doc_id, "title" => "Other #{n}", "content" => %{"body" => "poolcover"}},
+          @ds,
+          scope
+        )
+
+      {:ok, _} = Content.publish_document(doc_id, "post", @ds, scope)
+    end
+
+    parsed = %{terms: ["poolcover"], phrases: [], prefixes: [], excludes: []}
+
+    {hits, total, _} =
+      DocumentsRetriever.search(@ds, parsed, %{}, [ranking_pool_size: 1, limit: 1] ++ scope)
+
+    assert total == 4
+    assert [%{doc_id: ^titled}] = hits
+  end
+
+  test "offset pages past the pool: the pool grows to hold the requested page" do
+    scope = setup_scope()
+
+    for i <- 1..12 do
+      seed!(scope, "Pagedeep doc #{String.pad_leading("#{i}", 3, "0")}")
+    end
+
+    parsed = %{terms: ["pagedeep"], phrases: [], prefixes: [], excludes: []}
+    opts = [ranking_pool_size: 5] ++ scope
+
+    pages =
+      for offset <- [0, 5, 10] do
+        {hits, total, _} =
+          DocumentsRetriever.search(@ds, parsed, %{}, [limit: 5, offset: offset] ++ opts)
+
+        assert total == 12
+        Enum.map(hits, & &1.doc_id)
+      end
+
+    assert Enum.map(pages, &length/1) == [5, 5, 2]
+    assert pages |> List.flatten() |> Enum.uniq() |> length() == 12
   end
 
   test "default pool: 600 matching docs are NOT all ranked (bound applies by default)" do
@@ -113,7 +171,9 @@ defmodule Barkpark.Search.DocumentsRetrieverBoundedPoolTest do
     # in the default flow (without re-asserting recency to seed positions):
     # at pool=1, exactly one result, and that result must be the very last
     # doc inserted (highest updated_at).
-    {hits1, _, _} = DocumentsRetriever.search(@ds, parsed, %{}, [ranking_pool_size: 1] ++ scope)
+    {hits1, _, _} =
+      DocumentsRetriever.search(@ds, parsed, %{}, [ranking_pool_size: 1, limit: 1] ++ scope)
+
     assert length(hits1) == 1
     assert hd(hits1).doc_id == List.last(seeds)
   end

@@ -78,8 +78,8 @@ defmodule BarkparkWeb.ResponseEnvelopeConventionTest do
     # respond_json/6 -> envelope/5 or the bare `inner`, chosen by the
     # ?filterresponse=false opt-out. Serves :index and :show.
     {BarkparkWeb.QueryController, :respond_json},
-    {BarkparkWeb.SearchController, :do_search},
-    {BarkparkWeb.SearchController, :search_local}
+    {BarkparkWeb.SearchController, :run_search},
+    {BarkparkWeb.SearchController, :do_search_local}
   ]
 
   # Controllers on the /v1/data GET surface that legitimately emit no JSON body

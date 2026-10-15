@@ -1466,6 +1466,39 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  @doc """
+  The `?filter[...]` map of a search request (task-c7395e0d27e1121b), read and
+  refused exactly as `/v1/data/query` reads and refuses it: the same three
+  spellings, the same operator door, the same malformed-param and
+  hidden-field refusals. `schema` is the searched type's schema (nil when the
+  type has none). Returns `{:ok, map}` (`%{}` without a filter) or
+  `{:error, reason}` for `ErrorResponse.emit/3`.
+  """
+  @spec search_filter_map(Plug.Conn.t(), map(), map() | nil) :: {:ok, map()} | {:error, term()}
+  def search_filter_map(conn, params, schema) do
+    filter_map = params |> Map.get("filter", %{}) |> normalize_filter_map()
+
+    cond do
+      param = malformed_filter_param(params) ->
+        {:error, {:malformed_filter_param, param}}
+
+      match?({:error, _}, filter_map) ->
+        filter_map
+
+      bad = invalid_filter_op(filter_map, reference_ops_allowed?(conn)) ->
+        case bad do
+          {:clause, message, details} -> {:error, {:invalid_filter_clause, message, details}}
+          {field, op} -> {:error, {:invalid_filter_op, field, op}}
+        end
+
+      field = forbidden_query_field(filter_map, [], schema, CallerContext.from_conn(conn)) ->
+        {:error, {:forbidden_field, field}}
+
+      true ->
+        {:ok, filter_map}
+    end
+  end
+
   # WS-B MEDIUM-4 guard: the first filter/order field NOT readable by this
   # caller (per the type schema + CallerContext), or nil when every referenced
   # field is allowed. Internal/admin callers and undeclared/promoted fields pass

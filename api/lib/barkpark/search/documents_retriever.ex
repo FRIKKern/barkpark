@@ -14,7 +14,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.Search.TypoPolicy
+  alias Barkpark.Search.{Fold, TypoPolicy}
 
   # Default ranking-pool size (Barkpark Cloud P4 / Move B). The expensive
   # per-row ranking computation (`ts_rank` + `similarity`) runs only on this
@@ -38,6 +38,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # is already paid by the ranking ORDER BY on the keyword path, so this is pure
   # ship+decode savings there. MUST stay in sync with the drop fragment below.
   @heavy_content_keys ~w(body body_html blocks cells)
+
+  # A search query carries its words as values, so it is prepared unnamed and
+  # Postgres plans it for the values it is sent (the tsquery constants and the
+  # LIKE patterns), as `Barkpark.Groq.DocumentSource` does. A named statement
+  # switches to a generic plan after five runs, which cannot see how selective
+  # a word is.
+  @planned_per_call [prepare: :unnamed]
+
+  @search_random_page_cost "1.1"
+
+  # The ranking pool of a suggestion request: the type-ahead shows a handful
+  # of rows, so it ranks the 100 best by the cheap signals, not 500.
+  @suggest_pool_size 100
 
   @impl Barkpark.Search.Retriever
   @spec search(String.t(), map(), map(), keyword()) ::
@@ -109,76 +122,256 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # task-3c68de39a19285c4). Only an admin (or the internal sentinel) may
     # match words inside private fields; everyone else matches the public
     # index, so a word that occurs only in a field they cannot read neither
-    # matches nor moves the count.
-    index = text_index(Keyword.get(opts, :caller_context))
+    # matches nor moves the count. A search of one type whose schemas restrict
+    # no field reads the full vector: the public vector of every such document
+    # is NULL, so the two are the same index, and only the full one is a plain
+    # GIN probe.
+    index = text_index(Keyword.get(opts, :caller_context), type, Keyword.get(opts, :types))
+    match = match_mode(opts)
+    suggest? = Keyword.get(opts, :suggest, false) == true
+    groups = if browse?, do: [], else: term_groups(parsed)
 
+    # A text search compares the type without its btree index. With the index,
+    # Postgres reads every document of the type and runs the text match on each
+    # row, decompressing its stored vector, which its cost model counts as
+    # nearly free: 198 ms for `lydbok` over 10,592 products, against 26 ms
+    # through the GIN and trigram indexes. A browse keeps the index.
     base =
-      if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed, index)
+      cond do
+        is_nil(type) -> base
+        browse? -> where(base, [d], d.type == ^type)
+        true -> where(base, [d], fragment("(?::text || '') = ?", d.type, ^type))
+      end
 
-    base = if type, do: where(base, [d], d.type == ^type), else: base
     # Optional type allowlist (the finder's content types) — applied to `base`
     # so results, count, AND facets are all consistent over the same set.
     types = Keyword.get(opts, :types)
     base = if is_list(types) and types != [], do: where(base, [d], d.type in ^types), else: base
     base = perspective_filter(base, perspective)
 
-    # Count + all four facet dimensions in ONE round trip over the match set
-    # (search-latency slice c). Runs BEFORE the retrieve so its exact `count`
-    # can gate the bounded-pool self-subquery below. Facets + count stay on the
-    # FULL match set (not the ranking pool): the user wants "this query matched
-    # 1.2k items across these facets", not "the top 500 break down this way".
-    {count, facets} = count_and_facets(base, scope, opts)
+    # The query API's field filters (task-c7395e0d27e1121b). Applied to `base`,
+    # so they run before the limit, and the count and every facet describe the
+    # filtered match.
+    base = apply_field_filters(base, Keyword.get(opts, :filter_map), type, scope, opts)
 
-    # Bounded ranking pool: for real queries, narrow to a cheap-signal candidate
-    # set BEFORE running the expensive ranking ORDER BY. Browse stays unbounded
-    # (its only ORDER BY is `updated_at DESC` — already cheap, and its contract
-    # returns the whole scoped set in recency order). ELIDE the pool when the
-    # match set already fits inside it (`count <= pool_size`): `bounded_pool`
-    # would then select EVERY matched id into the `id IN (...)` subquery, a
-    # no-op filter that only costs a second scan of the predicate. Skipping it
-    # is provably identical (|match| ≤ pool ⇒ {top pool by updated_at} ⊇ match ⇒
-    # the intersection IS the match set) and halves the retrieve's predicate
-    # evals on the common small-corpus path (prod: ≤335 matches < 500 pool). At
-    # `count > pool_size` the bound is load-bearing and stays.
-    ranking_input =
-      if browse? or count <= pool_size do
-        base
-      else
-        bounded_pool(base, pool_size)
-      end
+    with_trgm_thresholds(browse?, config, relaxed, fn ->
+      # Count + all four facet dimensions in ONE round trip over the match set
+      # (search-latency slice c). Runs BEFORE the retrieve so its exact `count`
+      # can gate the bounded-pool self-subquery below. Facets + count stay on the
+      # FULL match set (not the ranking pool): the user wants "this query matched
+      # 1.2k items across these facets", not "the top 500 break down this way".
+      #
+      # The match runs in two steps. First the words: the full-text index and
+      # the document id, one GIN probe that needs no recheck of the stored
+      # vector, so a broad word costs a visit to its matching rows only. When
+      # no document holds the words (or on the widened recovery pass), the
+      # substring, fold and typo arms on the search title and slug join in.
+      #
+      # A suggestion request (`:suggest`, the type-ahead fast path) skips the
+      # facets and, when the words find nothing, tries only a near-miss of a
+      # word in the search names (the trigram index), never the full second
+      # step.
+      count_fun =
+        if suggest?,
+          do: fn q -> {count_only(q), %{}} end,
+          else: fn q -> count_and_facets(q, scope, opts) end
 
-    docs =
-      ranking_input
-      |> order_rank(parsed, config, index, Keyword.get(opts, :boost))
-      |> limit(^limit)
-      |> offset(^offset)
-      |> maybe_light_select(Keyword.get(opts, :fields))
-      |> Repo.all()
+      fallback_arms = if suggest?, do: :names_typo, else: :broad
 
-    {docs, count, %{facets: facets}}
+      {base, count, facets, near_miss?} =
+        if browse? do
+          {count, facets} = count_fun.(base)
+          {base, count, facets, false}
+        else
+          words = where_match(base, parsed, groups, config, relaxed, index, match, :words)
+          {count, facets} = if relaxed, do: {0, %{}}, else: count_fun.(words)
+
+          if count > 0 do
+            {words, count, facets, false}
+          else
+            wider =
+              where_match(base, parsed, groups, config, relaxed, index, match, fallback_arms)
+
+            {count, facets} = count_fun.(wider)
+            {wider, count, facets, true}
+          end
+        end
+
+      facets = put_field_facets(facets, base, Keyword.get(opts, :facet_fields))
+
+      # Bounded ranking pool: for real queries, narrow to a cheap-signal
+      # candidate set BEFORE running the expensive ranking ORDER BY. Browse
+      # stays unbounded (its only ORDER BY is `updated_at DESC`). The pool is
+      # skipped when the match set fits inside it, and it always holds the
+      # requested page, so `offset` pages through the whole match set rather
+      # than stopping at the pool's edge.
+      pool = if(suggest?, do: @suggest_pool_size, else: pool_size)
+
+      # Paging stays one order across pages: the pool's documents, ranked, then
+      # every other match, ranked. A page inside the pool reads the pool only;
+      # a deeper page ranks the whole match set with the pool first, so
+      # `offset` walks the whole match without a repeat or a gap.
+      {ranking_input, lead} =
+        cond do
+          browse? or count <= pool -> {base, []}
+          offset + limit <= pool -> {bounded_pool(base, pool, groups), []}
+          true -> {base, [{:desc, in_pool_key(base, pool, groups)}]}
+        end
+
+      docs =
+        ranking_input
+        |> order_rank(
+          parsed,
+          groups,
+          config,
+          if(suggest?, do: :none, else: index),
+          near_miss?,
+          lead,
+          Keyword.get(opts, :boost)
+        )
+        |> limit(^limit)
+        |> offset(^offset)
+        |> maybe_light_select(Keyword.get(opts, :fields))
+        |> Repo.all(@planned_per_call)
+
+      {docs, count, %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}}
+    end)
   end
 
-  # Apply the bounded ranking pool: filter the query to the `pool_size` rows
-  # with the highest cheap-signal score (`updated_at DESC`, with exact-title
-  # matches always surviving via the ranking ORDER BY's #1 sort key). The full
-  # ranking computation in `order_rank/3` then runs on at most `pool_size`
-  # rows, regardless of how big the match set is.
+  # `:all` (the default): a document must match every word of the query.
+  # `:any`: a document matches when it matches one word. The pipeline asks for
+  # `:any` only when `:all` found nothing (task-3623955d22974d71).
+  defp match_mode(opts) do
+    case Keyword.get(opts, :match, :all) do
+      m when m in [:any, "any"] -> :any
+      _ -> :all
+    end
+  end
+
+  # The substring and typo arms use pg_trgm's `%` and `<%` operators, which the
+  # trigram GIN indexes on the search title serve. Their thresholds are
+  # settings, so the search runs in a transaction that sets them for itself
+  # only: `similarity_threshold` is the surface's `typo_policy` floor,
+  # `word_similarity_threshold` its word-level twin. A browse runs no trigram
+  # arm and skips the transaction.
   #
-  # Implementation: a subquery selecting just the id of the top-pool candidates,
-  # used as an `id IN (...)` filter on the outer query. Two index lookups, one
-  # cheap, one expensive — but expensive runs on a bounded input.
-  defp bounded_pool(base, pool_size) when pool_size > 0 do
-    candidate_ids =
-      base
-      |> exclude(:order_by)
-      |> order_by([d], desc: d.updated_at)
-      |> limit(^pool_size)
-      |> select([d], d.id)
+  # The same transaction sets `random_page_cost` to 1.1, the value Postgres
+  # documents for solid-state storage, in place of the default 4. At 4 the
+  # planner read every row of the table for a common word (154 ms for `har`
+  # over 47,361 documents); at 1.1 it reads the bitmap of the word's index
+  # entries (35 ms). It also turns off the sequential scan, which only loses
+  # its place to an index path: every arm of the match has an index, and the
+  # cost model counts the decompression of each stored vector as free, so for
+  # a word in nearly every document (`norsk`, in the publisher's name) it chose
+  # to read all 47,361 rows (277 ms) over the word's bitmap (28 ms).
+  #
+  # It also turns off parallel workers. The names vector arm
+  # (`bp_search_names_vector/2`) is costed as a `to_tsvector` call per row, so
+  # its plans cost more and crossed the parallel threshold, while the work
+  # stays the same index bitmap: starting two workers made `barnebok` 11 to
+  # 16 ms against 6 ms serial on the gyldendal-no copy.
+  defp with_trgm_thresholds(true, _config, _relaxed, fun), do: fun.()
 
-    base |> exclude(:order_by) |> where([d], d.id in subquery(candidate_ids))
+  defp with_trgm_thresholds(false, config, relaxed, fun) do
+    {:ok, result} =
+      Repo.transaction(fn ->
+        Repo.query!(
+          "SELECT set_config('pg_trgm.similarity_threshold', $1, true), " <>
+            "set_config('pg_trgm.word_similarity_threshold', $2, true), " <>
+            "set_config('random_page_cost', '#{@search_random_page_cost}', true), " <>
+            "set_config('enable_seqscan', 'off', true), " <>
+            "set_config('max_parallel_workers_per_gather', '0', true)",
+          [
+            Float.to_string(TypoPolicy.threshold(config, relaxed) * 1.0),
+            Float.to_string(TypoPolicy.word_threshold(config, relaxed))
+          ]
+        )
+
+        fun.()
+      end)
+
+    result
   end
 
-  defp bounded_pool(base, _), do: base
+  defp apply_field_filters(query, filter_map, _type, _scope, _opts)
+       when not is_map(filter_map) or map_size(filter_map) == 0,
+       do: query
+
+  defp apply_field_filters(query, filter_map, type, scope, opts),
+    do: Barkpark.Content.Query.apply_search_filters(query, filter_map, type, scope, opts)
+
+  # Value counts of content fields the caller named with `?facet=`, over the
+  # filtered match set. A string field counts its value, an array field each
+  # string element once per document. At most 100 values per field, biggest
+  # first.
+  @field_facet_limit 100
+
+  defp put_field_facets(facets, _base, fields) when not is_list(fields) or fields == [],
+    do: facets
+
+  defp put_field_facets(facets, base, fields) do
+    by_field =
+      Map.new(fields, fn field ->
+        rows =
+          base
+          |> exclude(:order_by)
+          |> exclude(:select)
+          |> join(
+            :inner_lateral,
+            [d],
+            v in fragment(
+              "SELECT DISTINCT e.value FROM jsonb_array_elements_text(CASE jsonb_typeof(?->?) WHEN 'array' THEN ?->? WHEN 'string' THEN jsonb_build_array(?->?) ELSE '[]'::jsonb END) AS e(value)",
+              d.content,
+              ^field,
+              d.content,
+              ^field,
+              d.content,
+              ^field
+            ),
+            on: true
+          )
+          |> group_by([_d, v], v.value)
+          |> select([d, v], {v.value, count(d.id)})
+          |> order_by([d, v], desc: count(d.id), asc: v.value)
+          |> limit(@field_facet_limit)
+          |> Repo.all(@planned_per_call)
+
+        {field, Enum.map(rows, fn {label, count} -> %{"label" => label, "count" => count} end)}
+      end)
+
+    Map.put(facets, "fields", by_field)
+  end
+
+  # Apply the bounded ranking pool: keep the `pool_size` rows with the highest
+  # cheap signal, then run the full ranking in `order_rank/4` on those only.
+  # The cheap signal is how many query words start a word of the search title
+  # or author (`cover_key/1`, read from the narrow title and author columns,
+  # never the `content` blob), then recency. A book whose name holds the query
+  # therefore always reaches the ranking, however many documents mention the
+  # words in a description.
+  defp bounded_pool(base, pool_size, groups) when pool_size > 0 do
+    base |> exclude(:order_by) |> where([d], d.id in subquery(pool_ids(base, pool_size, groups)))
+  end
+
+  defp bounded_pool(base, _, _), do: base
+
+  # The pool: the `pool_size` matches with the most query words at a word
+  # start of the title or author, then the newest, then by id so the set is the
+  # same on every request.
+  defp pool_ids(base, pool_size, groups) do
+    base
+    |> exclude(:order_by)
+    |> order_by(
+      ^[desc: cover_key(groups), desc: dynamic([d], d.updated_at), asc: dynamic([d], d.id)]
+    )
+    |> limit(^pool_size)
+    |> select([d], d.id)
+  end
+
+  defp in_pool_key(base, pool_size, groups) do
+    ids = pool_ids(base, pool_size, groups)
+    dynamic([d], d.id in subquery(ids))
+  end
 
   # Retrieval column projection (search-latency slice a). The DB-level twin of
   # `Content.Envelope.project/2`: when the caller passed `?fields=`, SELECT the
@@ -294,7 +487,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           d.category_text
         )
       )
-      |> Repo.all()
+      |> Repo.all(@planned_per_call)
 
     readable = facet_readability(rows, scope, opts)
 
@@ -338,6 +531,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> put_facet("category", acc.category)
 
     {acc.count, facets}
+  end
+
+  # The suggestion fast path's count: the match set's size, without facets.
+  defp count_only(base) do
+    base
+    |> exclude(:order_by)
+    |> select([d], count(d.id))
+    |> Repo.one(@planned_per_call)
   end
 
   # {type, field} -> may THIS caller read that field on that type? Resolved once
@@ -523,69 +724,323 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # vector over the content with every restricted field removed, NULL (so the
   # full vector stands in) when the document carries nothing restricted. See
   # migration 20261003200000_add_documents_public_search_vector.
-  defp text_index(%Barkpark.Content.CallerContext{is_admin: true}), do: :full
-  defp text_index(:internal), do: :full
-  defp text_index(_ctx), do: :public
+  defp text_index(%Barkpark.Content.CallerContext{is_admin: true}, _type, _types), do: :full
+  defp text_index(:internal, _type, _types), do: :full
 
-  defp ts_match(:full, term),
-    do: dynamic([d], fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term))
+  defp text_index(_ctx, type, types) when is_binary(type) and (types == nil or types == []) do
+    # The same test the public vector's trigger makes (migration
+    # 20261003200000): a schema row of this name anywhere whose fields mention
+    # a restriction. Read over every row of the name, so it can only answer
+    # "restricted" more often than the trigger, never less.
+    %{rows: [[restricted?]]} =
+      Repo.query!(
+        "SELECT EXISTS (SELECT 1 FROM schema_definitions sd WHERE sd.name = $1 " <>
+          "AND to_jsonb(sd.fields)::text ~ '\"(private|visibility|readable_by)\"')",
+        [type]
+      )
 
-  defp ts_match(:public, term),
+    if restricted?, do: :public, else: :full
+  end
+
+  defp text_index(_ctx, _type, _types), do: :public
+
+  # The full index is two vectors: the stored `search_vector` (every content
+  # string) and the names vector (the search title and the author slot, in
+  # English and folded; migration 20261014150000). A query matches when either
+  # vector holds it, each through its own GIN index. A query that needs several
+  # words is split per word by the caller (`words_dynamic/3`), so a word in the
+  # names vector and a word in the body still match together.
+  defp vec_match(:full, text),
     do:
       dynamic(
         [d],
         fragment(
-          "coalesce(?.public_search_vector, ?.search_vector) @@ plainto_tsquery('english', ?)",
+          "(?.search_vector @@ (?::text)::tsquery OR bp_search_names_vector(?.search_names_tsv, ?.title) @@ (?::text)::tsquery)",
+          d,
+          ^text,
           d,
           d,
-          ^term
+          ^text
         )
       )
 
-  # The words that prefix-match: the last plain term (the word being typed) and
-  # every `word*` the parser split off.
-  defp prefix_words(parsed) do
-    Enum.take(Map.get(parsed, :terms, []), -1) ++ Map.get(parsed, :prefixes, [])
+  # The public index is `coalesce(public_search_vector, <full index>)`, spelled
+  # as arms so each one is served by its own GIN index (the full vector's, the
+  # names vector's, and the partial one on the public vector). The coalesce
+  # form is not indexed, and made every non-admin search a filter scan of the
+  # whole type. The public vector already holds the slots of the redacted
+  # content (`bp_public_search_vector`).
+  defp vec_match(:public, text),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "((?.public_search_vector IS NULL AND (?.search_vector @@ (?::text)::tsquery OR bp_search_names_vector(?.search_names_tsv, ?.title) @@ (?::text)::tsquery)) OR (?.public_search_vector IS NOT NULL AND ?.public_search_vector @@ (?::text)::tsquery))",
+          d,
+          d,
+          ^text,
+          d,
+          d,
+          ^text,
+          d,
+          d,
+          ^text
+        )
+      )
+
+  # The vector the ranking reads: the names vector, then the stored vector.
+  # Together they hold the same words, weights and positions as one vector
+  # built with the slots, names first (byte for byte on the gyldendal-no copy),
+  # so `ts_rank` is unchanged. The names vector reads no content, so no row is
+  # detoasted for it.
+  defp rank_vector(:full),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "(bp_search_names_vector(?.search_names_tsv, ?.title) || ?.search_vector)",
+          d,
+          d,
+          d
+        )
+      )
+
+  defp rank_vector(:public),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "coalesce(?.public_search_vector, bp_search_names_vector(?.search_names_tsv, ?.title) || ?.search_vector)",
+          d,
+          d,
+          d,
+          d
+        )
+      )
+
+  # ── The search title (task-3c6d02392d430c98) ──────────────────────────────
+  #
+  # The title the search arms read: `search_title` (the schema's declared
+  # search title, or the preview field of a type with no title field), else the
+  # `title` column. Migration 20261014150000 keeps `search_title` and indexes
+  # this exact expression and its fold with trigram GIN indexes; the SQL text
+  # here must stay identical to the index expressions for the planner to use
+  # them.
+  defp search_label,
+    do: dynamic([d], fragment("coalesce(?, nullif(?, ''))", d.search_title, d.title))
+
+  # The search title folded, and the search names (the search title and the
+  # author slot, which holds `content.author` too, folded, in one text).
+  # Migration 20261014150000 stores both for a row with a slot and indexes
+  # both expressions with trigram GIN indexes. A row without a slot folds its
+  # title here.
+  defp folded_search_label,
+    do: dynamic([d], fragment("bp_search_label_fold(?.search_title_fold, ?.title)", d, d))
+
+  defp search_names,
+    do:
+      dynamic(
+        [d],
+        fragment("bp_search_names(?.search_names_fold, ?.title)", d, d)
+      )
+
+  # ── Term groups ───────────────────────────────────────────────────────────
+  #
+  # One group per thing the query asks for: a word, a `word*` or a "quoted
+  # phrase". A group's members are the item and its synonyms, so a synonym is
+  # an alternative to its word, not one more word every document must hold.
+  # The last plain word of the query is the word being typed: it also
+  # prefix-matches, when it has at least 2 letters. A last word of 1 letter
+  # with other words before it is left out of the match (it would make the
+  # query wider, never narrower) and only counts in the ranking.
+  #
+  # A word that is only an English stop word ("i", "the", "a") is dropped when
+  # other words remain: the index holds no such word in the body, so requiring
+  # it would empty the result.
+  @min_prefix_chars 2
+
+  defp term_groups(parsed) do
+    alternatives = Map.get(parsed, :alternatives, %{})
+    synonyms = alternatives |> Map.values() |> List.flatten() |> MapSet.new()
+
+    words =
+      parsed
+      |> Map.get(:terms, [])
+      |> Enum.reject(&(&1 == "" or MapSet.member?(synonyms, &1)))
+      |> Enum.uniq()
+
+    last = List.last(words)
+
+    word_groups =
+      Enum.map(words, fn w ->
+        %{
+          kind: :word,
+          text: w,
+          prefix?: w == last and String.length(w) >= @min_prefix_chars,
+          members: [w | Map.get(alternatives, w, [])]
+        }
+      end)
+
+    prefix_groups =
+      for p <- Map.get(parsed, :prefixes, []), p != "" do
+        %{kind: :word, text: p, prefix?: true, members: [p]}
+      end
+
+    phrase_groups =
+      for p <- Map.get(parsed, :phrases, []), p != "" do
+        %{kind: :phrase, text: p, prefix?: false, members: [p | Map.get(alternatives, p, [])]}
+      end
+
+    groups = word_groups ++ prefix_groups ++ phrase_groups
+
+    groups
+    |> drop_short_last_word(last)
+    |> resolve_group_queries()
+    |> drop_stop_words()
   end
 
-  # `excer` -> "excer:*"; `e-mail` -> "e & mail:*". Only letters and digits reach
-  # to_tsquery, so no operator in the user's text can change the query.
-  defp prefix_tsquery(term) do
-    case Regex.scan(~r/[\p{L}\p{N}]+/u, term) |> List.flatten() do
-      [] -> nil
-      words -> Enum.join(words, " & ") <> ":*"
+  defp drop_short_last_word([_, _ | _] = groups, last) when is_binary(last) do
+    if String.length(last) < @min_prefix_chars,
+      do: Enum.reject(groups, &(&1.kind == :word and &1.text == last)),
+      else: groups
+  end
+
+  defp drop_short_last_word(groups, _last), do: groups
+
+  defp drop_stop_words([_, _ | _] = groups) do
+    case Enum.reject(groups, &(&1.kind == :word and &1.stop?)) do
+      [] -> groups
+      kept -> kept
     end
   end
 
-  defp ts_prefix_match(:full, tsq),
-    do: dynamic([d], fragment("?.search_vector @@ to_tsquery('english', ?)", d, ^tsq))
+  defp drop_stop_words(groups), do: groups
 
-  defp ts_prefix_match(:public, tsq),
-    do:
-      dynamic(
-        [d],
-        fragment(
-          "coalesce(?.public_search_vector, ?.search_vector) @@ to_tsquery('english', ?)",
-          d,
-          d,
-          ^tsq
-        )
+  # ── The full-text query of a group ────────────────────────────────────────
+  #
+  # Every word goes in with each spelling the Norwegian fold can stand for
+  # (`Fold.variants/1`), so "knausgard" and "knausgaard" find "Knausgård" in
+  # any field, and with its fold in the `simple` config, which matches the
+  # folded copy of the title and author words. A prefix query puts `:*` on the
+  # last word. Only letters and digits reach `to_tsquery`, so no operator in
+  # the user's text can change the query.
+  #
+  # The queries are resolved to tsquery TEXT in one round trip before the
+  # search runs, and the search binds them as `$n::tsquery` constants. With a
+  # constant the planner reads the vector's statistics and costs the GIN index;
+  # a `to_tsquery(...)` call in the query hides both, and the planner then
+  # filtered every vector of the type instead (272 ms against 13 ms for
+  # `lydbok` over 10,592 products).
+  defp resolve_group_queries([]), do: []
+
+  defp resolve_group_queries(groups) do
+    items =
+      for {group, gi} <- Enum.with_index(groups),
+          member <- group.members,
+          source = tsquery_source(group.kind, member),
+          source != nil,
+          do: {gi, group.kind, source}
+
+    resolved = resolve_tsqueries(Enum.map(items, fn {_gi, kind, source} -> {kind, source} end))
+
+    by_group =
+      items
+      |> Enum.zip(resolved)
+      |> Enum.group_by(fn {{gi, _, _}, _} -> gi end, fn {_, texts} -> texts end)
+
+    groups
+    |> Enum.with_index()
+    |> Enum.map(fn {group, gi} ->
+      texts = Map.get(by_group, gi, [])
+
+      Map.merge(group, %{
+        exact_q: or_texts(Enum.map(texts, & &1.exact)),
+        prefix_q: or_texts(Enum.map(texts, & &1.prefix)),
+        stop?: texts == [] or Enum.all?(texts, &(&1.english_nodes == 0))
+      })
+    end)
+  end
+
+  # `{english, simple, english_prefix, simple_prefix}` for a word member, the
+  # phrase itself for a phrase member, nil when the text holds no word.
+  defp tsquery_source(:phrase, member), do: if(String.trim(member) == "", do: nil, else: member)
+
+  defp tsquery_source(_kind, member) do
+    case Regex.scan(~r/[\p{L}\p{N}]+/u, String.downcase(member)) |> List.flatten() do
+      [] ->
+        nil
+
+      words ->
+        n = length(words)
+
+        english = fn prefix? ->
+          words
+          |> Enum.with_index()
+          |> Enum.map_join(" & ", fn {w, i} ->
+            suffix = if prefix? and i == n - 1, do: ":*", else: ""
+            "(" <> Enum.map_join(Fold.variants(w), " | ", &(&1 <> suffix)) <> ")"
+          end)
+        end
+
+        simple = fn prefix? ->
+          words
+          |> Enum.with_index()
+          |> Enum.map_join(" & ", fn {w, i} ->
+            suffix = if prefix? and i == n - 1, do: ":*", else: ""
+            Fold.fold(w) <> suffix
+          end)
+        end
+
+        {english.(false), simple.(false), english.(true), simple.(true)}
+    end
+  end
+
+  defp resolve_tsqueries([]), do: []
+
+  defp resolve_tsqueries(items) do
+    cols =
+      Enum.map(items, fn
+        {:phrase, phrase} -> ["phrase", phrase, "", "", ""]
+        {_kind, {e, s, ep, sp}} -> ["word", e, s, ep, sp]
+      end)
+
+    [kinds, es, ss, eps, sps] = Enum.zip_with(cols, & &1)
+
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT
+          CASE WHEN k = 'phrase' THEN phraseto_tsquery('english', e)::text
+               ELSE (to_tsquery('english', e) || to_tsquery('simple', s))::text END,
+          CASE WHEN k = 'phrase' THEN phraseto_tsquery('english', e)::text
+               ELSE (to_tsquery('english', ep) || to_tsquery('simple', sp))::text END,
+          CASE WHEN k = 'phrase' THEN numnode(phraseto_tsquery('english', e))
+               ELSE numnode(to_tsquery('english', e)) END
+        FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[])
+          WITH ORDINALITY AS t(k, e, s, ep, sp, o)
+        ORDER BY o
+        """,
+        [kinds, es, ss, eps, sps]
       )
 
-  defp ts_phrase_match(:full, phrase),
-    do: dynamic([d], fragment("?.search_vector @@ phraseto_tsquery('english', ?)", d, ^phrase))
+    Enum.map(rows, fn [exact, prefix, nodes] ->
+      %{exact: exact, prefix: prefix, english_nodes: nodes}
+    end)
+  end
 
-  defp ts_phrase_match(:public, phrase),
-    do:
-      dynamic(
-        [d],
-        fragment(
-          "coalesce(?.public_search_vector, ?.search_vector) @@ phraseto_tsquery('english', ?)",
-          d,
-          d,
-          ^phrase
-        )
-      )
+  defp or_texts(texts), do: join_texts(texts, " | ")
+
+  defp join_texts(texts, op) do
+    case Enum.reject(texts, &(&1 in [nil, ""])) do
+      [] -> nil
+      [one] -> one
+      many -> Enum.map_join(many, op, &("(" <> &1 <> ")"))
+    end
+  end
+
+  # The tsquery text of a group: its prefix form for the word being typed.
+  defp group_text(%{prefix?: true, prefix_q: q}), do: q
+  defp group_text(%{exact_q: q}), do: q
 
   # The slug substring arm reads `slug_text`, a copy of `content.slug` that is
   # not schema-aware. For the public index it only runs on documents with no
@@ -597,8 +1052,25 @@ defmodule Barkpark.Search.DocumentsRetriever do
     do:
       dynamic([d], fragment("?.public_search_vector IS NULL", d) and ilike(d.slug_text, ^pattern))
 
-  defp where_match(queryable, parsed, terms, config, relaxed, index) do
-    include_dyn = include_dynamic(terms, parsed, config, relaxed, index)
+  # Every arm here is served by an index, so a group is a BitmapOr and the
+  # whole match a BitmapAnd of the groups (measured on 10,592 products: a
+  # two-word query went from a 250 ms filter scan of the type to 3 ms):
+  #
+  #   * the full-text query of the group      -> documents_search_vector_idx and
+  #                                              documents_search_names_vector_idx
+  #   * the document id                        -> the (doc_id, ...) btree
+  #   * the search title holding the word, as typed and folded, and the slug
+  #     (words of 3 or more letters)           -> the trigram GIN indexes
+  #   * a near-miss of the search title, whole (`%`) or word (`<%`), for
+  #     words `TypoPolicy` admits             -> the trigram GIN index
+  defp where_match(queryable, parsed, groups, config, relaxed, index, match, arms) do
+    include_dyn =
+      case arms do
+        :words -> words_dynamic(groups, index, match)
+        :broad -> include_dynamic(groups, config, index, match)
+        :names_typo -> names_typo_dynamic(groups, config, index, match)
+      end
+
     exclude_dyn = exclude_dynamic(Map.get(parsed, :excludes, []), relaxed, index)
 
     queryable =
@@ -613,86 +1085,171 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end
   end
 
-  defp include_dynamic(terms, parsed, config, relaxed, index) do
-    threshold = TypoPolicy.threshold(config, relaxed)
-    prefix_words = prefix_words(parsed)
+  # The first step, built so every arm is an index probe that does not make
+  # Postgres decompress the stored vector of each candidate row:
+  #
+  #   * the whole words of every group, as ONE tsquery (`&&` for `:all`, `||`
+  #     for `:any`) against the vector's GIN index. A whole-word query needs no
+  #     recheck of the stored vector;
+  #   * the word being typed (the prefix group), as a word start in the search
+  #     names (`search_names/0`: the search title and the author slot, folded)
+  #     through their trigram index, or as a whole word anywhere;
+  #   * the document id.
+  #
+  # A prefix of a word that occurs only in a description is left to the second
+  # step: a `:*` query against the full vector costs the planner a scan of the
+  # vectors of the whole table (measured 609 ms for `lydbok:*` over 47,361
+  # documents, against 13 ms for the whole word).
+  defp words_dynamic(groups, index, match) do
+    {prefix_groups, word_groups} = Enum.split_with(groups, & &1.prefix?)
 
-    term_dyn =
-      Enum.reduce(terms, nil, fn term, dyn ->
-        pattern = like_pattern(term)
-        prefix_pattern = prefix_pattern(term)
+    # Under `:all` each word is its own arm (a BitmapAnd of the words), so a
+    # word found only in the names vector and one found only in the body still
+    # match together. Under `:any` one query serves every word.
+    word_arm =
+      case match do
+        :all ->
+          word_groups
+          |> Enum.map(&group_text/1)
+          |> Enum.reject(&(&1 in [nil, ""]))
+          |> Enum.map(&vec_match(index, &1))
+          |> combine_clauses(:all)
 
-        clause =
-          dynamic(
-            [d],
-            ^ts_match(index, term) or
-              ilike(d.title, ^pattern) or
-              ^folded_title_match(term) or
-              ^slug_match(index, pattern) or
-              ^id_match(term)
-          )
+        :any ->
+          case word_groups |> Enum.map(&group_text/1) |> join_texts(" | ") do
+            nil -> nil
+            word_query -> vec_match(index, word_query)
+          end
+      end
 
-        # Fuzzy title arm only for tokens long enough to be meaningful.
-        #
-        # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this). This
-        # `similarity(?, ?) > ?` arm is index-OPAQUE, but rewriting it to the
-        # GIN-engaging `%` operator (the D46 idiom) still buys NOTHING: it is OR-d
-        # (`^clause or …`) with the UNINDEXED `slug_text ILIKE ?` sibling in
-        # `clause` above. A BitmapOr can only form when EVERY branch is
-        # independently indexable, so the slug-ILIKE keeps the whole disjunction a
-        # bitmap-filter scan — PROVEN live: even a trgm expression index on
-        # content->>'slug', created CONCURRENTLY, went EXPLAIN-unused (planner
-        # bitmap-scans documents_type_dataset_index then FILTERs the OR arms
-        # per row), and was dropped. The `%`-rewrite prohibition therefore stands.
-        #
-        # What slice b (migration 20260718090000) DID fix is the poison the D49
-        # note called out separately: the slug arm no longer reads
-        # `content->>'slug'` (a per-row detoast of the ~88KB `content` jsonb,
-        # measured +1,501 buffers on EVERY predicate eval — count + facets re-run
-        # it 4-5x/keystroke). It now reads the narrow `slug_text` GENERATED STORED
-        # column, so the filter is cheap without changing the plan shape or the
-        # matched set (slug_text = coalesce(content->>'slug','') by construction).
-        # The fuzzy arm runs only for terms `TypoPolicy` admits: typo tolerance
-        # ON (`typo_policy.enabled`) and the token at least `min_len_1typo`
-        # long. Short tokens like "hi"/"by" otherwise trigram-match almost
-        # anything above threshold — pure false positives — and an admin who
-        # switched typo tolerance off used to get this arm anyway.
-        clause =
-          if TypoPolicy.fuzzy_term?(config, term) do
-            dynamic([d], ^clause or fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold))
-          else
-            clause
+    prefix_arms =
+      Enum.map(prefix_groups, fn group ->
+        exact =
+          case group.exact_q do
+            nil -> nil
+            q -> vec_match(index, q)
           end
 
-        clause =
-          if prefix_pattern do
-            dynamic([d], ^clause or ilike(d.title, ^prefix_pattern))
-          else
-            clause
-          end
-
-        # The last typed word (and any `word*`) also prefix-matches content
-        # text, so results follow typing: `excer` finds "excerpt"
-        # (task-2590983e26a88496). `:*` on a tsquery lexeme uses the same GIN
-        # index as the whole-word arm.
-        clause =
-          case term in prefix_words and prefix_tsquery(term) do
-            tsq when is_binary(tsq) -> dynamic([d], ^clause or ^ts_prefix_match(index, tsq))
-            _ -> clause
-          end
-
-        if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
+        names = names_prefix_dynamic(group)
+        if exact, do: dynamic([d], ^names or ^exact), else: names
       end)
 
-    # Phrase arms: phraseto_tsquery enforces true word adjacency, so the
-    # advertised "exact phrase" syntax actually matches adjacent words (a phrase
-    # also still matches its words individually via the term arms above, since
-    # each phrase is folded into `terms` by search_terms/1).
-    Enum.reduce(Map.get(parsed, :phrases, []), term_dyn, fn phrase, dyn ->
-      clause = ts_phrase_match(index, phrase)
+    text_arm =
+      [word_arm | prefix_arms]
+      |> Enum.reject(&is_nil/1)
+      |> combine_clauses(match)
 
-      if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
+    id_arm =
+      groups
+      |> Enum.flat_map(& &1.members)
+      |> Enum.map(&id_match/1)
+      |> combine_clauses(:any)
+
+    combine_clauses(Enum.reject([text_arm, id_arm], &is_nil/1), :any)
+  end
+
+  # The suggestion fallback: the words of the first step, where a word that
+  # `TypoPolicy` admits may also be a near miss (`<%`) of a word of the search
+  # names. "harry poter" finds "Harry Potter ..." through the names trigram
+  # index alone.
+  defp names_typo_dynamic(groups, config, index, match) do
+    groups
+    |> Enum.map(fn group ->
+      exact = words_dynamic([group], index, :all)
+
+      typo =
+        group.members
+        |> Enum.filter(&(group.kind == :word and TypoPolicy.fuzzy_term?(config, &1)))
+        |> Enum.map(fn member ->
+          dynamic([d], fragment("? <% ?", ^Fold.fold(member), ^search_names()))
+        end)
+        |> combine_clauses(:any)
+
+      combine_clauses(Enum.reject([exact, typo], &is_nil/1), :any)
     end)
+    |> Enum.reject(&is_nil/1)
+    |> combine_clauses(match)
+  end
+
+  defp combine_clauses([], _match), do: nil
+
+  defp combine_clauses([first | rest], match) do
+    Enum.reduce(rest, first, fn clause, acc ->
+      case match do
+        :all -> dynamic([d], ^acc and ^clause)
+        :any -> dynamic([d], ^acc or ^clause)
+      end
+    end)
+  end
+
+  # A member starts a word of the search names: at the start, or after a
+  # space. The trigram index on `search_names/0` serves both patterns.
+  defp names_prefix_dynamic(group), do: word_start(search_names(), group)
+
+  defp include_dynamic(groups, config, index, match) do
+    groups
+    |> Enum.map(&group_dynamic(&1, config, index))
+    |> Enum.reject(&is_nil/1)
+    |> case do
+      [] ->
+        nil
+
+      [first | rest] ->
+        Enum.reduce(rest, first, fn clause, acc ->
+          case match do
+            :all -> dynamic([d], ^acc and ^clause)
+            :any -> dynamic([d], ^acc or ^clause)
+          end
+        end)
+    end
+  end
+
+  defp group_dynamic(group, config, index) do
+    text_arm =
+      case group_text(group) do
+        nil -> nil
+        text -> vec_match(index, text)
+      end
+
+    group.members
+    |> Enum.map(&member_dynamic(&1, group.kind, config, index))
+    |> then(&if(text_arm, do: [text_arm | &1], else: &1))
+    |> Enum.reduce(fn clause, acc -> dynamic([d], ^acc or ^clause) end)
+  end
+
+  @min_substring_chars 3
+
+  defp member_dynamic(member, kind, config, index) do
+    clause = id_match(member)
+
+    clause =
+      if String.length(member) >= @min_substring_chars do
+        pattern = like_pattern(member)
+        folded = like_pattern(Fold.fold(member))
+
+        dynamic(
+          [d],
+          ^clause or ilike(^search_label(), ^pattern) or
+            like(^folded_search_label(), ^folded) or ^slug_match(index, pattern)
+        )
+      else
+        clause
+      end
+
+    # WHY `%` / `<%` and not `similarity(?, ?) > ?` (authoring-excellence D49).
+    # The function form is index-opaque and forced a filter scan of the whole
+    # type. Every other arm of the group is now indexed, so the operator forms
+    # let the planner build one BitmapOr. Their thresholds are the transaction
+    # settings `with_trgm_thresholds/4` sets from `typo_policy`.
+    if kind == :word and TypoPolicy.fuzzy_term?(config, member) do
+      dynamic(
+        [d],
+        ^clause or fragment("? % ?", ^search_label(), ^member) or
+          fragment("? <% ?", ^member, ^search_label())
+      )
+    else
+      clause
+    end
   end
 
   defp exclude_dynamic(excludes, relaxed, index) do
@@ -704,37 +1261,62 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     Enum.reduce(excludes, nil, fn term, dyn ->
       pattern = like_pattern(term)
+      folded = like_pattern(Fold.fold(term))
+
+      text_arm =
+        case resolve_tsqueries(List.wrap(if src = tsquery_source(:word, term), do: {:word, src})) do
+          [%{exact: text}] when text not in [nil, ""] -> vec_match(index, text)
+          _ -> dynamic([d], false)
+        end
 
       # WHY-LEFT (authoring-excellence D49 — do NOT `%`-rewrite this exclude
-      # arm). This whole clause is NEGATED at `where_match/5` via
-      # `not(^exclude_dyn)` — the query asks "which rows do NOT match this
-      # term". A trgm GIN answers "which rows MATCH" (it enumerates candidates
-      # ABOVE the similarity floor), never the complement; `NOT (title % ?)`
-      # alone Seq-Scans even under `enable_seqscan=off` (proven live), because
-      # the planner has no index that lists non-matching rows. Rewriting the
-      # `similarity() > ?` to `%` changes nothing — the negation is the hard
-      # disqualifier, not the operator form. See D49(b).
+      # arm). This whole clause is NEGATED at `where_match/7` via
+      # `not(^exclude_dyn)`. A trgm GIN answers "which rows MATCH", never the
+      # complement, so the operator form would buy nothing here.
       clause =
         dynamic(
           [d],
-          ^ts_match(index, term) or
-            ilike(d.title, ^pattern) or
-            ^folded_title_match(term) or
+          ^text_arm or
+            ilike(^search_label(), ^pattern) or
+            like(^folded_search_label(), ^folded) or
             ^slug_match(index, pattern) or
-            fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold)
+            fragment("similarity(coalesce(?, ''), ?) > ?", ^search_label(), ^term, ^threshold)
         )
 
       if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
     end)
   end
 
-  defp order_rank(queryable, parsed, config, index, boost) do
+  # ── Ranking ───────────────────────────────────────────────────────────────
+  #
+  # ORDER BY, most significant first:
+  #
+  #   0. the document whose id IS the query;
+  #   1. the search title equal to the query (as typed or folded);
+  #   2. the relevance score, the sum of
+  #        * the full-text rank;
+  #        * on the near-miss pass only, the weighted per-field similarity,
+  #          the signal the surface config's `searchable_fields` weights move;
+  #        * 0.5 x the share of query words that are a whole word of the
+  #          search title or an author;
+  #        * 1.0 x the share of query words that start a word of the search
+  #          title or of an author, 0.6 for one inside a title word
+  #          (`cover_key/1`), so a book named by the query, or written by the
+  #          person it names, ranks above a book whose description mentions it;
+  #        * for a query of two or more words, 0.5 when the search title
+  #          starts with the whole query, 0.4 when a title or author word
+  #          does ("knut ham" in "Knut Hamsun"), 0.25 when the title holds it,
+  #          and 0.3 when the document holds the words next to each other, so
+  #          word order counts;
+  #        * the weighted-tag boost, and with `boost=popularity` the view
+  #          score (`boosted/2`);
+  #   3. recency, then the id, so the order is total and paging is stable.
+  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
-    # token. plainto_tsquery AND-chains the words, so a multi-word query ranks
-    # on ALL of them; for a single term this is identical to the old hd(terms).
+    # token.
     positive_query =
       (Map.get(parsed, :terms, []) ++ Map.get(parsed, :phrases, []))
-      |> Enum.reject(&(&1 == ""))
+      |> Enum.reject(&(&1 == "" or synonym?(parsed, &1)))
       |> Enum.join(" ")
 
     # Lowercased query tokens for the weighted-tag boost arm below — a tag's
@@ -745,35 +1327,116 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> String.downcase()
       |> String.split()
 
-    if positive_query == "" do
+    if positive_query == "" and groups == [] do
       # Browse path (empty query) — recency, then the id PK so the order is TOTAL.
       # updated_at is not unique; without the tiebreaker LIMIT/OFFSET paging over
       # same-timestamp rows can skip or duplicate across page boundaries.
       order_by(queryable, [d], desc: d.updated_at, asc: d.id)
     else
-      # Dynamic ORDER BY so the relevance key can fold the ADMIN-CONFIGURED
-      # `searchable_fields` per-field weights into the trigram-similarity arm
-      # (charter W7 / bpb-searchable-fields-dead-config). The knob was echoed in
-      # admin settings but never read on the query path — a lie in the UI. Now a
-      # per-field weight change actually reorders results (Kinsta/Vercel bar).
       order_by(
         queryable,
-        ^[
-          # 0) The document whose id IS the query.
-          {:desc, exact_id_key(positive_query)},
-          # 1) Exact title match wins outright — typing a doc's exact title
-          #    guarantees it ranks #1, ahead of any relevance score.
-          {:desc, exact_title_key(positive_query)},
-          # 2) Relevance: GREATEST(full-text rank, weighted per-field similarity)
-          #    + the weighted-tag boost.
-          {:desc, boosted(relevance_key(positive_query, tag_terms, config, index), boost)},
-          # 3) Recency tiebreak.
-          {:desc, dynamic([d], d.updated_at)},
-          # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
-          #    (rank AND recency can both tie); keeps LIMIT/OFFSET paging stable.
-          {:asc, dynamic([d], d.id)}
-        ]
+        ^(lead ++
+            [
+              {:desc, exact_id_key(positive_query)},
+              {:desc, exact_title_key(positive_query)},
+              {:desc,
+               boosted(
+                 relevance_key(positive_query, groups, tag_terms, config, index, near_miss?),
+                 boost
+               )},
+              {:desc, dynamic([d], d.updated_at)},
+              {:asc, dynamic([d], d.id)}
+            ])
       )
+    end
+  end
+
+  defp synonym?(parsed, term) do
+    parsed
+    |> Map.get(:alternatives, %{})
+    |> Enum.any?(fn {_word, alts} -> term in alts end)
+  end
+
+  # The share of groups that start a word of the search names, the title or
+  # an author (1.0), or occur inside a word of the title (0.6). A book named by
+  # the query and a book written by the person the query names score alike;
+  # the full-text rank's title weight then puts the title first. Reads the two
+  # narrow folded columns only.
+  defp cover_key([]), do: dynamic([_d], fragment("0::float"))
+
+  defp cover_key(groups) do
+    n = length(groups) * 1.0
+
+    groups
+    |> Enum.map(fn group ->
+      dynamic(
+        [_d],
+        fragment(
+          "(CASE WHEN ? THEN 1.0 WHEN ? THEN 0.6 ELSE 0.0 END)",
+          ^word_start(search_names(), group),
+          ^inside(folded_search_label(), group)
+        )
+      )
+    end)
+    |> Enum.reduce(fn term, acc -> dynamic([_d], fragment("? + ?", ^acc, ^term)) end)
+    |> then(&dynamic([_d], fragment("(?) / ?", ^&1, ^n)))
+  end
+
+  # 0.5 x the share of groups that are a whole word of the search names (title
+  # or author), so "Peppa er storesøster" ranks above "Peppas nye sykkel" for
+  # "peppa". A regex, run on the ranked pool only.
+  defp whole_word_key([]), do: dynamic([_d], fragment("0.0"))
+
+  defp whole_word_key(groups) do
+    n = length(groups) * 1.0
+
+    groups
+    |> Enum.map(fn %{members: members} ->
+      alternation =
+        members
+        |> Enum.map(&Fold.fold/1)
+        |> Enum.reject(&(&1 == ""))
+        |> Enum.map_join("|", &Regex.escape/1)
+
+      regex = "(^|[^[:alnum:]])(" <> alternation <> ")([^[:alnum:]]|$)"
+
+      dynamic(
+        [_d],
+        fragment("CASE WHEN ? ~ ? THEN 0.5 ELSE 0.0 END", ^search_names(), ^regex)
+      )
+    end)
+    |> Enum.reduce(fn term, acc -> dynamic([_d], fragment("? + ?", ^acc, ^term)) end)
+    |> then(&dynamic([_d], fragment("(?) / ?", ^&1, ^n)))
+  end
+
+  # A member of the group, folded, occurs anywhere in `column`: the second
+  # half of a compound ("krim" in "Hatkrim").
+  defp inside(column, %{members: members}) do
+    members
+    |> Enum.map(&Fold.fold/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn folded -> dynamic([_d], like(^column, ^like_pattern(folded))) end)
+    |> case do
+      [] -> dynamic([_d], false)
+      clauses -> combine_clauses(clauses, :any)
+    end
+  end
+
+  # A member of the group, folded, starts a word of `column`: at its start or
+  # after a space. Two LIKE tests per member, which cost a fraction of a regex
+  # and run on every row of a broad match when the pool is chosen.
+  defp word_start(column, %{members: members}) do
+    members
+    |> Enum.map(&Fold.fold/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(fn folded ->
+      start = escape_like(folded) <> "%"
+      inner = "% " <> escape_like(folded) <> "%"
+      dynamic([_d], like(^column, ^start) or like(^column, ^inner))
+    end)
+    |> case do
+      [] -> dynamic([_d], false)
+      clauses -> combine_clauses(clauses, :any)
     end
   end
 
@@ -812,63 +1475,119 @@ defmodule Barkpark.Search.DocumentsRetriever do
     )
   end
 
-  # ORDER BY key #1: exact (case-insensitive) title match → 1, else 0.
+  # ORDER BY key #1: the search title equals the query, case-insensitively or
+  # after the Norwegian fold → 1, else 0.
   defp exact_title_key(positive_query) do
     dynamic(
       [d],
-      fragment("CASE WHEN lower(?) = lower(?) THEN 1 ELSE 0 END", d.title, ^positive_query)
+      fragment(
+        "CASE WHEN lower(?) = lower(?) OR ? = ? THEN 1 ELSE 0 END",
+        ^search_label(),
+        ^positive_query,
+        ^folded_search_label(),
+        ^Fold.fold(positive_query)
+      )
     )
   end
 
-  # ORDER BY key #2: GREATEST(full-text ts_rank, weighted per-field trigram
-  # similarity) PLUS the weighted-tag boost (authoring excellence D8/D21):
-  # + 0.1·max(strength)/100 over the doc's weighted tags whose name matches a
-  # query term. ADDITIVE with small w=0.1, never a bare GREATEST arm — a
-  # normalized strength (0.2–0.95) would dwarf typical ts_rank (~0.05) and erase
-  # textual relevance.
-  #
-  # The similarity arm is no longer hardcoded to `similarity(title, query)`: it
-  # is the weighted composite over `config["searchable_fields"]` (per-field
-  # {path, weight}), max-weight-normalized so the default `[{title,10},…]` still
-  # reduces to title-dominated ranking when no other field matches.
+  # ORDER BY key #2. The full-text rank reads the OR of every group's query, so
+  # a document holding more of the words ranks higher.
   #
   # WHY-LEFT (authoring-excellence D49 — these `similarity()` arms are NOT
-  # trgm-index material). They live in an ORDER BY GREATEST(ts_rank, …)
-  # composite ranking key, not a WHERE candidate filter. A GIN trgm index
-  # accelerates set MEMBERSHIP (`%` / `similarity() > floor`), never a KNN/ranked
-  # ORDER BY — only a GiST `<->` distance operator can drive an ordered index
-  # scan, and this is a GREATEST of scalar signals, not a single-column
-  # distance. The pool is already bounded to 500 rows upstream, so the per-row
-  # cost is negligible; leave it. See D49(d).
-  defp relevance_key(positive_query, tag_terms, config, index) do
-    ts_rank =
-      case index do
-        :full ->
-          dynamic(
-            [d],
-            fragment(
-              "ts_rank(?.search_vector, plainto_tsquery('english', ?))",
-              d,
-              ^positive_query
-            )
-          )
-
-        :public ->
-          dynamic(
-            [d],
-            fragment(
-              "ts_rank(coalesce(?.public_search_vector, ?.search_vector), plainto_tsquery('english', ?))",
-              d,
-              d,
-              ^positive_query
-            )
-          )
+  # trgm-index material). They live in an ORDER BY composite, not a WHERE
+  # candidate filter, and the pool is bounded upstream. See D49(d).
+  defp relevance_key(positive_query, groups, tag_terms, config, index, near_miss?) do
+    rank_query =
+      groups
+      |> Enum.map(&group_text/1)
+      |> or_texts()
+      |> case do
+        nil -> dynamic([_d], fragment("plainto_tsquery('english', ?)", ^positive_query))
+        text -> dynamic([_d], fragment("(?::text)::tsquery", ^text))
       end
 
-    field_sim = weighted_field_similarity(positive_query, config)
-    boost = tag_boost_key(tag_terms)
+    ts_rank =
+      case index do
+        # A suggestion ranks on the narrow columns only: no stored vector is
+        # read, so no row is decompressed.
+        :none ->
+          dynamic([_d], fragment("0.0::real"))
 
-    dynamic([_d], fragment("GREATEST(?, ?) + ?", ^ts_rank, ^field_sim, ^boost))
+        index ->
+          dynamic([_d], fragment("ts_rank(?, ?)", ^rank_vector(index), ^rank_query))
+      end
+
+    folded_query = Fold.fold(positive_query)
+
+    phrase =
+      if folded_query == "" or length(String.split(folded_query)) < 2 do
+        dynamic([_d], fragment("0.0"))
+      else
+        dynamic(
+          [_d],
+          fragment(
+            "(CASE WHEN ? LIKE ? THEN 0.5 WHEN ? LIKE ? THEN 0.4 WHEN ? LIKE ? THEN 0.25 ELSE 0.0 END)",
+            ^folded_search_label(),
+            ^(escape_like(folded_query) <> "%"),
+            ^search_names(),
+            ^("% " <> escape_like(folded_query) <> "%"),
+            ^folded_search_label(),
+            ^like_pattern(folded_query)
+          )
+        )
+      end
+
+    # The words in the query's order, next to each other, anywhere in the
+    # document ("sofies verden" in a description): 0.3, for a query of two or
+    # more words. Reads the stored vector, so a suggestion skips it.
+    adjacent =
+      case {index, String.split(positive_query)} do
+        {:none, _} ->
+          dynamic([_d], fragment("0.0"))
+
+        {_, [_, _ | _]} ->
+          vector = rank_vector(index)
+
+          dynamic(
+            [_d],
+            fragment(
+              "(CASE WHEN ? @@ phraseto_tsquery('english', ?) THEN 0.3 ELSE 0.0 END)",
+              ^vector,
+              ^positive_query
+            )
+          )
+
+        _ ->
+          dynamic([_d], fragment("0.0"))
+      end
+
+    # Trigram similarity is a near-miss signal. When the documents matched the
+    # words themselves, a title that merely looks like the query is no better a
+    # hit ("Den lydige datteren" for "lydbok"), so the per-field similarity
+    # counts only on the near-miss pass, where the `searchable_fields` weights
+    # decide which field's near miss ranks first.
+    field_sim =
+      if near_miss?,
+        do: weighted_field_similarity(positive_query, config),
+        else: dynamic([_d], fragment("0.0"))
+
+    boost = tag_boost_key(tag_terms)
+    cover = cover_key(groups)
+    whole = whole_word_key(groups)
+
+    dynamic(
+      [_d],
+      fragment(
+        "? + ? + ? + ? + ? + ? + ?",
+        ^ts_rank,
+        ^field_sim,
+        ^cover,
+        ^whole,
+        ^phrase,
+        ^adjacent,
+        ^boost
+      )
+    )
   end
 
   # `?boost=popularity` (task-5feac4e826cff9a5): adds
@@ -942,15 +1661,15 @@ defmodule Barkpark.Search.DocumentsRetriever do
     dynamic([_d], fragment("(?) / ?", ^sum, ^max_weight))
   end
 
-  # Per-field weighted trigram-similarity term. `title` is a column; every other
+  # Per-field weighted trigram-similarity term. `title` is the search title; every other
   # path is a jsonb path into `content` (a leading `content.` prefix is optional,
   # so both "content.slug" and "slug" resolve to content->>'slug'). Deeper dotted
   # paths ("a.b") use the `#>>` text-array accessor. All keys are bound params —
   # no identifier interpolation, so config values can never inject SQL.
   defp field_similarity_term("title", weight, query) do
     dynamic(
-      [d],
-      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), d.title, ^query)
+      [_d],
+      fragment("? * similarity(coalesce(?, ''), ?)", ^(weight * 1.0), ^search_label(), ^query)
     )
   end
 
@@ -1046,37 +1765,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
   defp field_weight(nil), do: 1.0
   defp field_weight(_), do: 0.0
 
-  # task-1429eb7cfc6217ea — the Norwegian fold on BOTH sides: `bp_fold` on the
-  # stored title, `Fold.fold/1` on the query, one rule (fold_test.exs pins the
-  # two equal). "aerlig" finds "Ærlig", "okonomi"/"oekonomi" find "økonomi",
-  # "arsrapport"/"aarsrapport" find "årsrapport". An extra OR arm in the same
-  # filter scan as the title ILIKE beside it (see the D49 note in
-  # include_dynamic/5: no index serves this disjunction), so it only ADDS
-  # matches; the exact spelling still matches every arm it matched before.
-  defp folded_title_match(term) do
-    pattern = like_pattern(Barkpark.Search.Fold.fold(term))
-    dynamic([d], fragment("bp_fold(?) LIKE ?", d.title, ^pattern))
-  end
+  def like_pattern(term), do: "%" <> escape_like(term) <> "%"
 
-  def like_pattern(term) do
-    escaped =
-      term
-      |> String.replace("\\", "\\\\")
-      |> String.replace("%", "\\%")
-      |> String.replace("_", "\\_")
-
-    "%" <> escaped <> "%"
-  end
-
-  defp prefix_pattern(term) do
-    if String.ends_with?(term, "*") do
-      String.trim_trailing(term, "*")
-      |> then(fn t ->
-        if t == "", do: nil, else: like_pattern(t)
-      end)
-    else
-      nil
-    end
+  defp escape_like(term) do
+    term
+    |> String.replace("\\", "\\\\")
+    |> String.replace("%", "\\%")
+    |> String.replace("_", "\\_")
   end
 
   # Defense-in-depth: fail CLOSED. Only the explicit `:raw` ATOM (which a

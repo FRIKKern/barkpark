@@ -38,7 +38,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
                  encrypted private visibility readable_by options onix fields of
                  rows layout source refType to refTypes refTypeTolerant hotspot alt
                  editor blocks ordered codelistId version issue_version languages format
-                 fallbackChain groups default required?)
+                 fallbackChain groups default required? search)
 
   @rule_keys ~w(required min max pattern unique message level)
 
