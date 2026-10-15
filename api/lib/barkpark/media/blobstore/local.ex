@@ -92,26 +92,23 @@ defmodule Barkpark.Media.Blobstore.Local do
   # `full_path` is `Media.file_path/1` — see PATH PROVENANCE above. `source_path`
   # is the `%Plug.Upload{path: …}` temp file chosen by Plug — `Media.upload/3` is
   # the only caller of this verb — never client text.
-  def put_file(relative_path, source_path, _opts) do
-    LocalWrite.run(relative_path, fn -> admitted_put_file(relative_path, source_path) end)
-  end
-
-  # The existing PATH PROVENANCE bound follows the native implementation.
   # sobelow_skip ["Traversal.FileModule"]
-  defp admitted_put_file(relative_path, source_path) do
-    full_path = Media.file_path(relative_path)
+  def put_file(relative_path, source_path, _opts) do
+    LocalWrite.run(relative_path, fn ->
+      full_path = Media.file_path(relative_path)
 
-    with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         :ok <- File.cp(source_path, full_path),
-         {:ok, %File.Stat{size: received}} <- File.stat(source_path) do
-      Blobstore.receipt(received, :stat, stat_blob(relative_path))
-    else
-      # cp may have written a partial file before failing → best-effort cleanup
-      # so no orphan blob survives (moved here verbatim from Media.upload/3).
-      {:error, _reason} ->
-        _ = File.rm(full_path)
-        {:error, :storage_unavailable}
-    end
+      with :ok <- File.mkdir_p(Path.dirname(full_path)),
+           :ok <- File.cp(source_path, full_path),
+           {:ok, %File.Stat{size: received}} <- File.stat(source_path) do
+        Blobstore.receipt(received, :stat, stat_blob(relative_path))
+      else
+        # cp may have written a partial file before failing → best-effort cleanup
+        # so no orphan blob survives (moved here verbatim from Media.upload/3).
+        {:error, _reason} ->
+          _ = File.rm(full_path)
+          {:error, :storage_unavailable}
+      end
+    end)
   end
 
   @impl true
@@ -121,21 +118,18 @@ defmodule Barkpark.Media.Blobstore.Local do
   # `Media.valid_blob_path?/1` rejects — a per-segment allowlist that
   # fails closed on `.`, `..`, a leading `/`, a trailing `/`, and any
   # backslash/null/space shape.
-  def put_bytes(relative_path, body, _opts) do
-    LocalWrite.run(relative_path, fn -> admitted_put_bytes(relative_path, body) end)
-  end
-
-  # The existing PATH PROVENANCE bound follows the native implementation.
   # sobelow_skip ["Traversal.FileModule"]
-  defp admitted_put_bytes(relative_path, body) do
-    full_path = Media.file_path(relative_path)
+  def put_bytes(relative_path, body, _opts) do
+    LocalWrite.run(relative_path, fn ->
+      full_path = Media.file_path(relative_path)
 
-    with :ok <- File.mkdir_p(Path.dirname(full_path)),
-         :ok <- File.write(full_path, body) do
-      Blobstore.receipt(byte_size(body), :stat, stat_blob(relative_path))
-    else
-      {:error, _reason} -> {:error, :storage_unavailable}
-    end
+      with :ok <- File.mkdir_p(Path.dirname(full_path)),
+           :ok <- File.write(full_path, body) do
+        Blobstore.receipt(byte_size(body), :stat, stat_blob(relative_path))
+      else
+        {:error, _reason} -> {:error, :storage_unavailable}
+      end
+    end)
   end
 
   @impl true

@@ -118,19 +118,20 @@ defmodule Barkpark.Media.Storage.LocalWrite do
     # Unicode/legacy ordinary writes remain unchanged with no pending operation.
     unless windows_key?(key), do: Repo.rollback(:media_cleanup_unknown_address)
 
-    query = """
-    SELECT EXISTS(
-      SELECT FROM public.media_delete_operations_v1 o
-      WHERE o.state NOT IN ('prepared','pending_cleanup')
-        OR jsonb_typeof(o.request->'expectedKey') IS DISTINCT FROM 'string'
-        OR public.media_object_address_v1(o.request->>'expectedKey')=public.media_object_address_v1($1)
-    ) OR EXISTS(
-      SELECT FROM public.media_object_reservations_v1 r
-      WHERE r.address=public.media_object_address_v1($1) AND r.operation_id IS NOT NULL
-    )
-    """
-
-    case Repo.query!(query, [key]).rows do
+    case Repo.query!(
+           """
+           SELECT EXISTS(
+             SELECT FROM public.media_delete_operations_v1 o
+             WHERE o.state NOT IN ('prepared','pending_cleanup')
+               OR jsonb_typeof(o.request->'expectedKey') IS DISTINCT FROM 'string'
+               OR public.media_object_address_v1(o.request->>'expectedKey')=public.media_object_address_v1($1)
+           ) OR EXISTS(
+             SELECT FROM public.media_object_reservations_v1 r
+             WHERE r.address=public.media_object_address_v1($1) AND r.operation_id IS NOT NULL
+           )
+           """,
+           [key]
+         ).rows do
       [[false]] -> :ok
       _ -> Repo.rollback(:media_cleanup_pending)
     end
