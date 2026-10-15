@@ -264,6 +264,12 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # cost model counts the decompression of each stored vector as free, so for
   # a word in nearly every document (`norsk`, in the publisher's name) it chose
   # to read all 47,361 rows (277 ms) over the word's bitmap (28 ms).
+  #
+  # It also turns off parallel workers. The names vector arm
+  # (`bp_search_names_vector/2`) is costed as a `to_tsvector` call per row, so
+  # its plans cost more and crossed the parallel threshold, while the work
+  # stays the same index bitmap: starting two workers made `barnebok` 11 to
+  # 16 ms against 6 ms serial on the gyldendal-no copy.
   defp with_trgm_thresholds(true, _config, _relaxed, fun), do: fun.()
 
   defp with_trgm_thresholds(false, config, relaxed, fun) do
@@ -273,7 +279,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
           "SELECT set_config('pg_trgm.similarity_threshold', $1, true), " <>
             "set_config('pg_trgm.word_similarity_threshold', $2, true), " <>
             "set_config('random_page_cost', '#{@search_random_page_cost}', true), " <>
-            "set_config('enable_seqscan', 'off', true)",
+            "set_config('enable_seqscan', 'off', true), " <>
+            "set_config('max_parallel_workers_per_gather', '0', true)",
           [
             Float.to_string(TypoPolicy.threshold(config, relaxed) * 1.0),
             Float.to_string(TypoPolicy.word_threshold(config, relaxed))
@@ -737,25 +744,77 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp text_index(_ctx, _type, _types), do: :public
 
+  # The full index is two vectors: the stored `search_vector` (every content
+  # string) and the names vector (the search title and the author slot, in
+  # English and folded; migration 20261014150000). A query matches when either
+  # vector holds it, each through its own GIN index. A query that needs several
+  # words is split per word by the caller (`words_dynamic/3`), so a word in the
+  # names vector and a word in the body still match together.
   defp vec_match(:full, text),
-    do: dynamic([d], fragment("?.search_vector @@ (?::text)::tsquery", d, ^text))
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "(?.search_vector @@ (?::text)::tsquery OR bp_search_names_vector(?.search_names_tsv, ?.title) @@ (?::text)::tsquery)",
+          d,
+          ^text,
+          d,
+          d,
+          ^text
+        )
+      )
 
-  # The public index is `coalesce(public_search_vector, search_vector)`, spelled
-  # as two arms so each one is served by its own GIN index (the full vector's,
-  # and the partial one on the public vector). The coalesce form is not
-  # indexed, and made every non-admin search a filter scan of the whole type.
+  # The public index is `coalesce(public_search_vector, <full index>)`, spelled
+  # as arms so each one is served by its own GIN index (the full vector's, the
+  # names vector's, and the partial one on the public vector). The coalesce
+  # form is not indexed, and made every non-admin search a filter scan of the
+  # whole type. The public vector already holds the slots of the redacted
+  # content (`bp_public_search_vector`).
   defp vec_match(:public, text),
     do:
       dynamic(
         [d],
         fragment(
-          "((?.public_search_vector IS NULL AND ?.search_vector @@ (?::text)::tsquery) OR (?.public_search_vector IS NOT NULL AND ?.public_search_vector @@ (?::text)::tsquery))",
+          "((?.public_search_vector IS NULL AND (?.search_vector @@ (?::text)::tsquery OR bp_search_names_vector(?.search_names_tsv, ?.title) @@ (?::text)::tsquery)) OR (?.public_search_vector IS NOT NULL AND ?.public_search_vector @@ (?::text)::tsquery))",
+          d,
+          d,
+          ^text,
           d,
           d,
           ^text,
           d,
           d,
           ^text
+        )
+      )
+
+  # The vector the ranking reads: the names vector, then the stored vector.
+  # Together they hold the same words, weights and positions as one vector
+  # built with the slots, names first (byte for byte on the gyldendal-no copy),
+  # so `ts_rank` is unchanged. The names vector reads no content, so no row is
+  # detoasted for it.
+  defp rank_vector(:full),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "(bp_search_names_vector(?.search_names_tsv, ?.title) || ?.search_vector)",
+          d,
+          d,
+          d
+        )
+      )
+
+  defp rank_vector(:public),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "coalesce(?.public_search_vector, bp_search_names_vector(?.search_names_tsv, ?.title) || ?.search_vector)",
+          d,
+          d,
+          d,
+          d
         )
       )
 
@@ -770,13 +829,20 @@ defmodule Barkpark.Search.DocumentsRetriever do
   defp search_label,
     do: dynamic([d], fragment("coalesce(?, nullif(?, ''))", d.search_title, d.title))
 
-  # The search title folded, and the search names (the search title, the
-  # author slot and `content.author`, folded, in one text). Migration
-  # 20261014150000 stores both as generated columns with trigram GIN indexes,
-  # so neither the match nor the ranking folds a string per row.
-  defp folded_search_label, do: dynamic([d], fragment("?.search_label_fold", d))
+  # The search title folded, and the search names (the search title and the
+  # author slot, which holds `content.author` too, folded, in one text).
+  # Migration 20261014150000 stores both for a row with a slot and indexes
+  # both expressions with trigram GIN indexes. A row without a slot folds its
+  # title here.
+  defp folded_search_label,
+    do: dynamic([d], fragment("bp_search_label_fold(?.search_title_fold, ?.title)", d, d))
 
-  defp search_names, do: dynamic([d], fragment("?.search_names", d))
+  defp search_names,
+    do:
+      dynamic(
+        [d],
+        fragment("bp_search_names(?.search_names_fold, ?.title)", d, d)
+      )
 
   # ── Term groups ───────────────────────────────────────────────────────────
   #
@@ -990,7 +1056,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # whole match a BitmapAnd of the groups (measured on 10,592 products: a
   # two-word query went from a 250 ms filter scan of the type to 3 ms):
   #
-  #   * the full-text query of the group      -> documents_search_vector_idx
+  #   * the full-text query of the group      -> documents_search_vector_idx and
+  #                                              documents_search_names_vector_idx
   #   * the document id                        -> the (doc_id, ...) btree
   #   * the search title holding the word, as typed and folded, and the slug
   #     (words of 3 or more letters)           -> the trigram GIN indexes
@@ -1036,12 +1103,24 @@ defmodule Barkpark.Search.DocumentsRetriever do
   defp words_dynamic(groups, index, match) do
     {prefix_groups, word_groups} = Enum.split_with(groups, & &1.prefix?)
 
-    word_query =
-      word_groups
-      |> Enum.map(&group_text/1)
-      |> join_texts(if(match == :all, do: " & ", else: " | "))
+    # Under `:all` each word is its own arm (a BitmapAnd of the words), so a
+    # word found only in the names vector and one found only in the body still
+    # match together. Under `:any` one query serves every word.
+    word_arm =
+      case match do
+        :all ->
+          word_groups
+          |> Enum.map(&group_text/1)
+          |> Enum.reject(&(&1 in [nil, ""]))
+          |> Enum.map(&vec_match(index, &1))
+          |> combine_clauses(:all)
 
-    word_arm = if word_query, do: vec_match(index, word_query), else: nil
+        :any ->
+          case word_groups |> Enum.map(&group_text/1) |> join_texts(" | ") do
+            nil -> nil
+            word_query -> vec_match(index, word_query)
+          end
+      end
 
     prefix_arms =
       Enum.map(prefix_groups, fn group ->
@@ -1434,19 +1513,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
         :none ->
           dynamic([_d], fragment("0.0::real"))
 
-        :full ->
-          dynamic([d], fragment("ts_rank(?.search_vector, ?)", d, ^rank_query))
-
-        :public ->
-          dynamic(
-            [d],
-            fragment(
-              "ts_rank(coalesce(?.public_search_vector, ?.search_vector), ?)",
-              d,
-              d,
-              ^rank_query
-            )
-          )
+        index ->
+          dynamic([_d], fragment("ts_rank(?, ?)", ^rank_vector(index), ^rank_query))
       end
 
     folded_query = Fold.fold(positive_query)
@@ -1478,11 +1546,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           dynamic([_d], fragment("0.0"))
 
         {_, [_, _ | _]} ->
-          vector =
-            if index == :full,
-              do: dynamic([d], fragment("?.search_vector", d)),
-              else:
-                dynamic([d], fragment("coalesce(?.public_search_vector, ?.search_vector)", d, d))
+          vector = rank_vector(index)
 
           dynamic(
             [_d],
