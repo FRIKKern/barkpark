@@ -330,15 +330,19 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
 
     # The names part of the search vector: the search title and the author
     # slot, in English and folded. Reads no content.
+    #
+    # The functions below are index expressions, and Postgres 17 runs
+    # CREATE INDEX, VACUUM and ANALYZE with search_path set to pg_catalog only,
+    # so every call they make to a function of ours names its schema.
     execute("""
     CREATE OR REPLACE FUNCTION bp_search_names_vector_of(
       title text, search_title text, search_author text
     ) RETURNS tsvector LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
       SELECT
         setweight(to_tsvector('english', coalesce(search_title, '')), 'A') ||
-        setweight(to_tsvector('simple', bp_fold(coalesce(search_title, nullif(title, ''), ''))), 'A') ||
+        setweight(to_tsvector('simple', public.bp_fold(coalesce(search_title, nullif(title, ''), ''))), 'A') ||
         setweight(to_tsvector('english', coalesce(search_author, '')), 'B') ||
-        setweight(to_tsvector('simple', bp_fold(coalesce(search_author, ''))), 'B')
+        setweight(to_tsvector('simple', public.bp_fold(coalesce(search_author, ''))), 'B')
     $$
     """)
 
@@ -350,10 +354,10 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
     ) RETURNS TABLE(title_fold text, names_fold text, names_tsv tsvector)
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
       SELECT
-        bp_fold(coalesce(search_title, nullif(title, ''), '')),
-        bp_fold(coalesce(search_title, nullif(title, ''), '') || ' ' ||
+        public.bp_fold(coalesce(search_title, nullif(title, ''), '')),
+        public.bp_fold(coalesce(search_title, nullif(title, ''), '') || ' ' ||
                 coalesce(search_author, '')),
-        bp_search_names_vector_of(title, search_title, search_author)
+        public.bp_search_names_vector_of(title, search_title, search_author)
       WHERE search_title IS NOT NULL OR search_author IS NOT NULL
       UNION ALL
       SELECT NULL, NULL, NULL
@@ -365,7 +369,7 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
     execute("""
     CREATE OR REPLACE FUNCTION bp_search_label_fold(stored text, title text) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-      SELECT coalesce(stored, bp_fold(coalesce(nullif(title, ''), '')))
+      SELECT coalesce(stored, public.bp_fold(coalesce(nullif(title, ''), '')))
     $$
     """)
 
@@ -373,7 +377,7 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
     execute("""
     CREATE OR REPLACE FUNCTION bp_search_names(stored text, title text) RETURNS text
     LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
-      SELECT coalesce(stored, bp_fold(coalesce(nullif(title, ''), '')))
+      SELECT coalesce(stored, public.bp_fold(coalesce(nullif(title, ''), '')))
     $$
     """)
 
@@ -383,7 +387,7 @@ defmodule Barkpark.Repo.Migrations.AddDocumentsSearchSlots do
     CREATE OR REPLACE FUNCTION bp_search_names_vector(stored tsvector, title text)
     RETURNS tsvector LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
       SELECT coalesce(stored,
-        setweight(to_tsvector('simple', bp_fold(coalesce(nullif(title, ''), ''))), 'A'))
+        setweight(to_tsvector('simple', public.bp_fold(coalesce(nullif(title, ''), ''))), 'A'))
     $$
     """)
 
