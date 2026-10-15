@@ -155,6 +155,10 @@ defmodule Barkpark.Media.Storage.LocalWriteLiveTest do
           assert {:error, :storage_unavailable} =
                    Local.put_bytes("c109/Chø.bin", "replacement", [])
 
+          for alias_key <- ["c109/SHORTN~1.BIN", "c109/CONOUT$", key <> ":stream"] do
+            assert {:error, :storage_unavailable} = Local.put_bytes(alias_key, "replacement", [])
+          end
+
           unrelated = "c109/#{phase}/unrelated.bin"
           assert {:ok, %{stored: 5}} = Local.put_bytes(unrelated, "other", [])
           assert File.read!(Media.file_path(unrelated)) == "other"

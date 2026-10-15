@@ -67,6 +67,9 @@ defmodule Barkpark.Media.Storage.LocalWriteTest do
           key <> ".",
           key <> " ",
           "../" <> key,
+          "2026/SHORTN~1.PNG",
+          "2026/CONOUT$",
+          "2026/file.bin:stream",
           "2026/Chø-note.png"
         ] do
       assert {:error, :storage_unavailable} = Local.put_bytes(alias_key, "replacement", [])

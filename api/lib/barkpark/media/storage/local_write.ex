@@ -137,8 +137,9 @@ defmodule Barkpark.Media.Storage.LocalWrite do
   end
 
   defp windows_key?(key) do
-    byte_size(key) in 1..4096 and Regex.match?(~r/\A[ -~]+\z/, key) and
-      not Regex.match?(~r/[\\:<>"|?*]/, key) and
+    # The generated key alphabet excludes NTFS short-name and device/stream
+    # spellings as well as separators with alternate Windows semantics.
+    byte_size(key) in 1..4096 and Regex.match?(~r/\A[A-Za-z0-9._\/-]+\z/, key) and
       Enum.all?(String.split(key, "/"), fn part ->
         part not in ["", ".", ".."] and not String.ends_with?(part, [".", " "]) and
           not Regex.match?(~r/\A(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|\z)/i, part)
