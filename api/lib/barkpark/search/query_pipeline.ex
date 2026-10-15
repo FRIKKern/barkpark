@@ -197,6 +197,10 @@ defmodule Barkpark.Search.QueryPipeline do
         match: Keyword.get(opts, :match, :all),
         filter_map: Keyword.get(opts, :filter_map),
         facet_fields: Keyword.get(opts, :facet_fields),
+        # With a field filter, the retriever counts the words' matches without
+        # the filter up to this many (`meta.text_count`), so the recovery
+        # choice below is the one the unfiltered search makes.
+        text_count_cap: Map.get(config, "low_hit_threshold", 3),
         # The type-ahead fast path (task-7e7891dbf1f488ee): no facets, a small
         # ranking pool, no stored vector read, and no recovery pass below.
         suggest: Keyword.get(opts, :suggest, false),
@@ -232,6 +236,25 @@ defmodule Barkpark.Search.QueryPipeline do
     # below this count (the zero-hit path below is unchanged).
     low_hit_threshold = Map.get(config, "low_hit_threshold", 3)
 
+    # A field filter leaves fewer hits; it does not make the words wrong. So
+    # with a filter, recovery follows the words' match WITHOUT the filter
+    # (`text_count`, set by the retriever only for a filtered search, counted
+    # up to `low_hit_threshold`): enough matches there and no recovery runs,
+    # because widening would add near misses the unfiltered search never
+    # shows (task-6496d34cb0a43ca7) and the passes cost seconds
+    # (task-b2a224d49a3f27eb). A few matches there and the filtered search
+    # gets the one typo-widened pass the unfiltered search would get, not the
+    # zero-hit chain.
+    words_found = Map.get(engine_meta, :text_count)
+
+    {total_for_recovery, filter_narrowed?} =
+      cond do
+        not is_integer(words_found) -> {total, false}
+        words_found >= low_hit_threshold -> {total, true}
+        total == 0 and words_found > 0 -> {words_found, false}
+        true -> {total, false}
+      end
+
     # Every branch also reports which retriever the FINAL hits came from: the
     # recovery passes (recover_documents / try_typo_widen) run the Postgres
     # DocumentsRetriever regardless of the primary engine, so a successful
@@ -248,10 +271,13 @@ defmodule Barkpark.Search.QueryPipeline do
         retriever_opts[:suggest] == true ->
           {hits, total, nil, primary_engine, %{}}
 
+        filter_narrowed? ->
+          {hits, total, nil, primary_engine, %{}}
+
         # Zero-hit path. When every word had to match: the typo-widened pass
         # under the same rule, then any word (`match_any`, ranked by how many
         # words a document holds), then the drop_tokens / typo_widen chain.
-        total == 0 ->
+        total_for_recovery == 0 ->
           case recover_documents(scope, parsed, config, retriever_opts, strategy) do
             {rh, rt, recovery, meta} -> {rh, rt, recovery, "postgres", meta}
             nil -> {hits, total, nil, primary_engine, %{}}
@@ -263,7 +289,7 @@ defmodule Barkpark.Search.QueryPipeline do
         # natively typo-tolerant, so widening an Indx result set would just
         # replace its hits with Postgres ones (a surprising engine swap). The
         # zero-hit path above still falls back to Postgres for any engine.
-        engine == "postgres" and total < low_hit_threshold and strategy != "none" ->
+        engine == "postgres" and total_for_recovery < low_hit_threshold and strategy != "none" ->
           case try_typo_widen(scope, parsed, config, retriever_opts, strategy) do
             {rh, rt, _r, meta} when rt > total -> {rh, rt, "typo_widen", "postgres", meta}
             _ -> {hits, total, nil, primary_engine, %{}}
