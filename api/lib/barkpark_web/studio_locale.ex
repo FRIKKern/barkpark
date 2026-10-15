@@ -625,6 +625,7 @@ defmodule BarkparkWeb.StudioLocale do
       "navigate" => gettext("navigate"),
       "No blocks match" => gettext("No blocks match"),
       "No commands match" => gettext("No commands match"),
+      "No equation yet — type TeX below" => gettext("No equation yet — type TeX below"),
       "No image yet — paste or drop a picture, or enter a URL below" =>
         gettext("No image yet — paste or drop a picture, or enter a URL below"),
       "No matching pages" => gettext("No matching pages"),
