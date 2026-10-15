@@ -2459,6 +2459,42 @@ defmodule Barkpark.Content.Query do
   end
 
   @doc """
+  The type of the document `doc_id` names in `dataset`, under the caller's
+  workspace scope, as `{:ok, type}` or `:error`.
+
+  Sanity's mutate API deletes by id alone, and Barkpark's `delete` needs a type
+  (task-645fcbef64fac473). This finds it. It reads the exact id first, then the
+  draft or published sibling, the same row set `delete_document` removes. The
+  owner and grant checks are not applied here: the caller re-reads the row
+  through `get_document/4` and the typed delete path, which apply them.
+  """
+  @spec document_type(String.t(), String.t(), keyword()) :: {:ok, String.t()} | :error
+  def document_type(doc_id, dataset, opts) when is_binary(doc_id) and is_binary(dataset) do
+    pub_id = DraftId.published_id(doc_id)
+    ids = Enum.uniq([doc_id, pub_id, DraftId.draft_id(pub_id)])
+
+    rows =
+      Document
+      |> where([d], d.doc_id in ^ids)
+      |> scope_to_dataset(dataset, opts)
+      # global-read: same scope pipeline as get_document/4; the typed delete re-reads through it, owner and grant arms included.
+      |> scope_to_workspace_or_global(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> select([d], {d.doc_id, d.type})
+      |> Repo.all()
+      |> Map.new()
+
+    case Enum.find_value(ids, &Map.get(rows, &1)) do
+      nil -> :error
+      type -> {:ok, type}
+    end
+  end
+
+  def document_type(_doc_id, _dataset, _opts), do: :error
+
+  @doc """
   BATCHED `get_document/4` EXISTENCE — which of `doc_ids` resolve as `type` in
   `dataset` under this caller's scope, as a `MapSet` of the ids that do.
 
