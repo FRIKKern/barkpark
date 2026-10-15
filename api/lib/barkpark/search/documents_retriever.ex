@@ -218,21 +218,28 @@ defmodule Barkpark.Search.DocumentsRetriever do
           true -> {base, [{:desc, in_pool_key(base, pool, groups)}]}
         end
 
+      # An empty match ranks nothing. A recovery pass that finds no document
+      # (task-722697f4650b2a21) used to run the ranking statement anyway, a
+      # second evaluation of the whole match for an empty page.
       docs =
-        ranking_input
-        |> order_rank(
-          parsed,
-          groups,
-          config,
-          if(suggest?, do: :none, else: index),
-          near_miss?,
-          lead,
-          Keyword.get(opts, :boost)
-        )
-        |> limit(^limit)
-        |> offset(^offset)
-        |> maybe_light_select(Keyword.get(opts, :fields))
-        |> Repo.all(@planned_per_call)
+        if count == 0 do
+          []
+        else
+          ranking_input
+          |> order_rank(
+            parsed,
+            groups,
+            config,
+            if(suggest?, do: :none, else: index),
+            near_miss?,
+            lead,
+            Keyword.get(opts, :boost)
+          )
+          |> limit(^limit)
+          |> offset(^offset)
+          |> maybe_light_select(Keyword.get(opts, :fields))
+          |> Repo.all(@planned_per_call)
+        end
 
       {docs, count, %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}}
     end)
@@ -829,6 +836,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
   defp search_label,
     do: dynamic([d], fragment("coalesce(?, nullif(?, ''))", d.search_title, d.title))
 
+  # The search title as the whole-title typo arm (`%`) reads it. The trailing
+  # `''` changes no match (an empty title is similar to nothing, like NULL),
+  # but makes it a different expression from `search_label/0`, so this arm is
+  # the only one the GiST trigram index of migration 20261015170000 serves.
+  # GiST keeps each title's trigrams in its leaves and answers `%` without
+  # visiting the table; the GIN index of `search_label/0` returns every title
+  # that shares one trigram with the word, 12,102 rows for `basis` at the
+  # relaxed threshold, and the table read to recheck them was most of the
+  # widened recovery pass (190 ms of 446 ms on the gyldendal-no copy). The
+  # other arms stay on the GIN index, which is faster for them.
+  defp similar_search_label,
+    do: dynamic([d], fragment("coalesce(?, nullif(?, ''), '')", d.search_title, d.title))
+
   # The search title folded, and the search names (the search title and the
   # author slot, which holds `content.author` too, folded, in one text).
   # Migration 20261014150000 stores both for a row with a slot and indexes
@@ -1244,7 +1264,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     if kind == :word and TypoPolicy.fuzzy_term?(config, member) do
       dynamic(
         [d],
-        ^clause or fragment("? % ?", ^search_label(), ^member) or
+        ^clause or fragment("? % ?", ^similar_search_label(), ^member) or
           fragment("? <% ?", ^member, ^search_label())
       )
     else
