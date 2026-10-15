@@ -19,6 +19,8 @@ defmodule Barkpark.Media.Blobstore.Local do
 
   alias Barkpark.Media
   alias Barkpark.Media.Blobstore
+  alias Barkpark.Media.Storage.LocalWrite
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   # ── PATH PROVENANCE ────────────────────────────────────────────────────────
   #
@@ -90,8 +92,13 @@ defmodule Barkpark.Media.Blobstore.Local do
   # `full_path` is `Media.file_path/1` — see PATH PROVENANCE above. `source_path`
   # is the `%Plug.Upload{path: …}` temp file chosen by Plug — `Media.upload/3` is
   # the only caller of this verb — never client text.
-  # sobelow_skip ["Traversal.FileModule"]
   def put_file(relative_path, source_path, _opts) do
+    LocalWrite.run(relative_path, fn -> admitted_put_file(relative_path, source_path) end)
+  end
+
+  # The existing PATH PROVENANCE bound follows the native implementation.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp admitted_put_file(relative_path, source_path) do
     full_path = Media.file_path(relative_path)
 
     with :ok <- File.mkdir_p(Path.dirname(full_path)),
@@ -114,8 +121,13 @@ defmodule Barkpark.Media.Blobstore.Local do
   # `Media.valid_blob_path?/1` rejects — a per-segment allowlist that
   # fails closed on `.`, `..`, a leading `/`, a trailing `/`, and any
   # backslash/null/space shape.
-  # sobelow_skip ["Traversal.FileModule"]
   def put_bytes(relative_path, body, _opts) do
+    LocalWrite.run(relative_path, fn -> admitted_put_bytes(relative_path, body) end)
+  end
+
+  # The existing PATH PROVENANCE bound follows the native implementation.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp admitted_put_bytes(relative_path, body) do
     full_path = Media.file_path(relative_path)
 
     with :ok <- File.mkdir_p(Path.dirname(full_path)),
@@ -144,8 +156,16 @@ defmodule Barkpark.Media.Blobstore.Local do
   # here, not clause (1).
   # sobelow_skip ["Traversal.FileModule"]
   def delete(relative_path) do
-    _ = File.rm(Media.file_path(relative_path))
-    :ok
+    managed? = Door.enabled?()
+
+    LocalWrite.run(relative_path, fn ->
+      case File.rm(Media.file_path(relative_path)) do
+        :ok -> :ok
+        {:error, :enoent} -> :ok
+        {:error, _} when managed? -> {:error, :storage_unavailable}
+        {:error, _} -> :ok
+      end
+    end)
   end
 
   @impl true
