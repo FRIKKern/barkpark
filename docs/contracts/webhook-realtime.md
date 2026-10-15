@@ -44,7 +44,8 @@ field-derived tags are the only source. All six events
 
 Handler: `200 {ok:true}` · `200 {deduped:true}` (delivery-id LRU, 512 ids) ·
 `401 bad_signature|stale` · `400 bad_request` · `500 handler_failed` · GET → `405`.
-Dispatcher: jittered backoff (base `[1s,5s,30s]`, capped), 3 attempts; retries
+Dispatcher: jittered backoff (base `[1s,5s,30s,60s,120s×4]`, cap 180s), 9
+attempts, at least ~4.8 min per delivery; retries
 5xx/transport + transient 4xx `429/408/425` (honors `Retry-After`), other 4xx
 terminal; dedup `UNIQUE(endpoint_id,event_id)`. Media mirrors the classification.
 

@@ -2977,6 +2977,9 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # Every webhook verb carries the scoped prefix. The server has had
+      # `/w/:workspace_slug/p/:project_slug/v1/webhooks/*` for all ten routes,
+      # but without the prefix bp refused `-w` (task-ebb207785fcb75ec).
       core_cmd(
         "webhook.ls",
         "webhook",
@@ -2986,7 +2989,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/webhooks/:dataset",
         "admin",
         writes: false,
-        default_output: "table"
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.create",
@@ -3008,7 +3012,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("name", true, "string", "Subscription name (required by the server).")
         ],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.get",
@@ -3020,7 +3025,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
         writes: false,
-        default_output: "table"
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.delete",
@@ -3032,7 +3038,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.update",
@@ -3047,7 +3054,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("url", true, "string", "New delivery URL.")
         ],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       # ── C5 operator-console webhook surface (delivery log / replay / rotate) ──
       # These three land the C5 routes into the manifest so `bp` and the cloud
@@ -3063,7 +3071,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
         writes: false,
-        default_output: "table"
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.replay",
@@ -3078,7 +3087,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg("event_id", true, "string", "Mutation event id to replay.")
         ],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.rotate",
@@ -3090,7 +3100,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.reenable",
@@ -3102,7 +3113,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "webhook.test-send",
@@ -3114,7 +3126,8 @@ defmodule Barkpark.Plugins.Capabilities do
         "admin",
         args: [arg("id", true, "string", "Webhook id.")],
         writes: true,
-        default_output: "minimal"
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
         "plugin.ls",
