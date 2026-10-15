@@ -11,7 +11,9 @@ defmodule Barkpark.Media.Storage.LocalWriteLiveTest do
 
   defp gate(fun) do
     previous = Application.get_env(:barkpark, :write_admission)
-    instance = "live-effect-#{System.unique_integer([:positive])}"
+    # Each phase boots a fresh VM; its integer counter can repeat. Retained
+    # journals must never be reused or removed just to make a fixture start.
+    instance = "live-effect-#{Ecto.UUID.generate()}"
     journal = Path.join(System.fetch_env!("C109_JOURNALS"), instance <> ".dets")
     options = [journal: journal, instance_id: instance, initialize: true]
     {:ok, server} = WriteAdmission.start_link(options)
