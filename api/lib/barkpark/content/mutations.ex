@@ -897,6 +897,22 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # Sanity's mutate API deletes by id alone: `{"delete": {"id": "drafts.x"}}`.
+  # Barkpark's delete heads above need a type, so this one finds it from the
+  # stored row and runs the typed head. Every fence, owner check and reference
+  # check stays on that one path (task-645fcbef64fac473). An id that matches no
+  # row answers 404, the same as a typed delete of a missing document.
+  defp apply_one(%{"delete" => %{"id" => id} = op} = mutation, dataset, opts)
+       when is_binary(id) and not is_map_key(op, "type") do
+    case Barkpark.Content.Query.document_type(id, dataset, opts) do
+      {:ok, type} ->
+        apply_one(%{mutation | "delete" => Map.put(op, "type", type)}, dataset, opts)
+
+      :error ->
+        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+    end
+  end
+
   defp apply_one(%{"replace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
