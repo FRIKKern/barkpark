@@ -24,9 +24,8 @@ A database lock alone cannot prove filesystem settlement after connection loss.
 Renditions, caches, remote writers, native identity, HTTP receipt propagation,
 full writer coverage and reconciliation remain separate integration work.
 
-Release proofs: `media_pending_delete_live.exs`,
-`media_pending_delete_interrupt_live.exs` and `local_write_live.exs` under
-`api/test/barkpark/media/`. Use owned fresh databases and native-observed
+[Windows release proof](../../../../../docs/media/evidence/C109-windows-managed-blob/README.md)
+uses the three live scripts in `api/test/barkpark/media/`. Use owned fresh databases and native-observed
 fixtures through `C105_PROOF_INPUT`; the writer proof also needs `C109_JOURNALS`.
 Host-local operations/reservations never enter workspace bundles; unresolved
 intent refuses export before copy. An export-time snapshot fence remains open.

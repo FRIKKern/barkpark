@@ -1,0 +1,504 @@
+03:28:45.146 [notice]     :alarm_handler: {:set, {{:disk_almost_full, ~c"C:\\"}, []}}
+03:28:45.166 [notice]     :alarm_handler: {:set, {{:disk_almost_full, ~c"E:\\"}, []}}
+03:28:45.257 [warning] MAIL IS NOT DELIVERABLE — this node accepts transactional email and discards it.
+
+  adapter: Swoosh.Adapters.Local (local_mailbox)
+
+Magic-link sign-in, password reset, email verification and access-grant
+invitations will be ACCEPTED and never sent. The HTTP responses stay 200 by
+design (anti-enumeration), so nothing else will tell you this.
+
+Set SMTP_HOST (plus SMTP_PORT / SMTP_USERNAME / SMTP_PASSWORD as your relay
+requires) to enable delivery — see deploy/smtp.env.example. Ignore this if
+the box is not meant to send mail.
+
+03:28:45.258 [warning] [Operator] The instance-operator allowlist is UNSET (BARKPARK_OPERATOR_EMAILS and BARKPARK_OPERATOR_TOKEN_IDS are
+both empty), so the `admin` permission alone still opens these eight INSTANCE-GLOBAL
+route groups to ANY admin-permissioned token, including one whose only membership is an
+admin seat in a single workspace:
+  1. POST|GET /v1/admin/self-update, POST /v1/admin/rollback, POST|GET /v1/admin/site-deploy
+  2. GET /v1/plugins
+  3. GET|PUT|DELETE /v1/plugins/settings/:plugin_name
+  4. GET /v1/secrets, GET /v1/secrets/:name, GET /v1/secrets/:name/audit,
+     PUT /v1/secrets/:name, DELETE /v1/secrets/:name
+  5. POST /v1/status/incidents, POST /v1/status/incidents/:id/resolve
+  6. POST /api/playground
+  7. POST /api/workspaces/:workspace_slug/import
+  8. GET /v1/instance/site-deploy, GET /v1/instance/metrics
+On a SINGLE-TENANT instance that is fine — the only admin is the operator. On a
+MULTI-TENANT one it hands your first customer-admin the instance: run-secrets in
+cleartext, the instance-wide plugin credentials record, and the release itself.
+Set BARKPARK_OPERATOR_EMAILS (comma-separated operator emails) and/or BARKPARK_OPERATOR_TOKEN_IDS
+(comma-separated api_token ids) to arm the allowlist; once either is non-empty the
+eight groups are allowlist-only and fail closed.
+
+03:28:45.403 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:28:45.699 [info] Plugins.Bootstrap: registered schema "paper" (dataset="production", visibility="public") from plugin "bulldocs"
+03:28:45.703 [info] Plugins.Bootstrap: registered schema "form_response" (dataset="production", visibility="private") from plugin "bulldocs"
+03:28:45.707 [info] Plugins.Bootstrap: registered schema "session" (dataset="production", visibility="private") from plugin "bulldocs"
+03:28:45.711 [info] Plugins.Bootstrap: registered schema "paper_master" (dataset="production", visibility="private") from plugin "bulldocs"
+03:28:45.715 [info] Plugins.Bootstrap: registered schema "mediaAsset" (dataset="production", visibility="private") from plugin "media"
+03:28:45.717 [info] Plugins.Bootstrap: registered schema "mediaCollection" (dataset="production", visibility="private") from plugin "media"
+     warning: Barkpark.PubSubSingletons.drain!/0 is undefined (module Barkpark.PubSubSingletons is not available or is yet to be defined)
+     │
+ 104 │       Barkpark.PubSubSingletons.drain!()
+     │                                 ~
+     │
+     └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:104:33: Barkpark.DataCase.setup_sandbox/1
+
+     warning: Barkpark.TenancyFixtures.ensure_default_scope!/0 is undefined (module Barkpark.TenancyFixtures is not available or is yet to be defined)
+     │
+ 180 │     _ = Barkpark.TenancyFixtures.ensure_default_scope!()
+     │                                  ~
+     │
+     └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:180:34: Barkpark.DataCase.ensure_default_tenancy/0
+
+     warning: Barkpark.TenancyFixtures.create_workspace!/0 is undefined (module Barkpark.TenancyFixtures is not available or is yet to be defined)
+     │
+ 137 │     workspace = Barkpark.TenancyFixtures.create_workspace!()
+     │                                          ~
+     │
+     └─ c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:137:42: Barkpark.Media.PendingDeleteBoundaryTest."test pending host-local cleanup refuses both bundle paths instead of disappearing"/1
+
+Running ExUnit with seed: 977368, max_cases: 40
+
+.....    warning: redefining module Barkpark.Media.PendingDeleteMigrationDigestTest.SourceId71 (current version defined in memory)
+    │
+  1 │ defmodule Barkpark.Media.PendingDeleteMigrationDigestTest.SourceId71 do
+    │ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ c:/Users/Frikk/AppData/Local/Temp/Barkdown-C105-2UbEuN/pending-source-id-digest-1026/api/priv/repo/migrations/source_id.exs:1: Barkpark.Media.PendingDeleteMigrationDigestTest.SourceId71 (module)
+
+....
+
+  1) test unknown retained operations refuse mutation, and rollback restores availability (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:102
+     ** (UndefinedFunctionError) function Barkpark.TenancyFixtures.ensure_default_scope!/0 is undefined (module Barkpark.TenancyFixtures is not available)
+     stacktrace:
+       Barkpark.TenancyFixtures.ensure_default_scope!()
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:180: Barkpark.DataCase.ensure_default_tenancy/0
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:34: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  2) test unsupported aliases cannot bypass a pending key; unrelated ASCII writes remain usable (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:59
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  3) test ordinary Unicode media writes remain supported without unresolved cleanup (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:85
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  4) test database refusal before I/O releases the unused effect admission (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:145
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  5) test a raised effect propagates and retains its pending root (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:137
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  6) test an ordinary server does not acquire managed admission or inspect pending operations (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:177
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  7) test an error after I/O begins retains physical uncertainty (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:122
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  8) test missing enabled coordinator refuses before its callback (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:159
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+  9) test unverified receipts cannot be reported settled (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:130
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+ 10) test managed delete failure retains uncertainty; ordinary delete preserves its contract (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:91
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+ 11) test prepared and logically deleted keys refuse byte, copy and delete effects before I/O (Barkpark.Media.Storage.LocalWriteTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:35
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/local_write_test.exs:1: Barkpark.Media.Storage.LocalWriteTest.__ex_unit__/2
+
+
+
+ 12) test ordinary co-owners survive until individually deleted (Barkpark.Media.PendingDeleteBoundaryTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:102
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:1: Barkpark.Media.PendingDeleteBoundaryTest.__ex_unit__/2
+
+
+
+ 13) test current media schema preserves SHA-1 in intent and refuses case-alias reuse (Barkpark.Media.PendingDeleteBoundaryTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:28
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:1: Barkpark.Media.PendingDeleteBoundaryTest.__ex_unit__/2
+
+
+
+ 14) test an imported source id is captured exactly and cannot change on an intent retry (Barkpark.Media.PendingDeleteBoundaryTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:60
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:1: Barkpark.Media.PendingDeleteBoundaryTest.__ex_unit__/2
+
+
+
+ 15) test pending host-local cleanup refuses both bundle paths instead of disappearing (Barkpark.Media.PendingDeleteBoundaryTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:122
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:1: Barkpark.Media.PendingDeleteBoundaryTest.__ex_unit__/2
+
+
+
+ 16) test a future unknown column still refuses the raw-row schema (Barkpark.Media.PendingDeleteBoundaryTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:90
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:1: Barkpark.Media.PendingDeleteBoundaryTest.__ex_unit__/2
+
+
+
+ 17) test ordinary absolute and Unicode media addresses retain reservation ownership (Barkpark.Media.PendingDeleteBoundaryTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:8
+     ** (MatchError) no match of right hand side value:
+
+         {:error,
+          {{:badmatch, :already_shared},
+           [
+             {Ecto.Adapters.SQL.Sandbox, :"-start_owner!/2-fun-0-", 3,
+              [file: ~c"lib/ecto/adapters/sql/sandbox.ex", line: 457]},
+             {Agent.Server, :init, 1, [file: ~c"lib/agent/server.ex", line: 12]},
+             {:gen_server, :init_it, 2, [file: ~c"gen_server.erl", line: 2276]},
+             {:gen_server, :init_it, 6, [file: ~c"gen_server.erl", line: 2236]},
+             {:proc_lib, :init_p_do_apply, 3, [file: ~c"proc_lib.erl", line: 333]}
+           ]}}
+
+     stacktrace:
+       (ecto_sql 3.13.5) lib/ecto/adapters/sql/sandbox.ex:451: Ecto.Adapters.SQL.Sandbox.start_owner!/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:99: Barkpark.DataCase.setup_sandbox/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:33: Barkpark.DataCase.__ex_unit_setup_0/1
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/support/data_case.ex:1: Barkpark.DataCase.__ex_unit__/2
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/media/pending_delete_boundary_test.exs:1: Barkpark.Media.PendingDeleteBoundaryTest.__ex_unit__/2
+
+........03:28:48.231 [error] GenServer {Barkpark.ManagedRuntime.WriteAdmission, "fixture-A"} terminating
+** (stop) {:journal_unavailable, :closed_journal}
+Last message (from #PID<0.615.0>): :admission_message_redacted
+..........
+
+ 18) test abrupt VM halt preserves held exclusion without journal repair (Barkpark.ManagedRuntime.WriteAdmissionTest)
+     c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/managed_runtime/write_admission_test.exs:448
+     Elixir executable is required
+     code: executable = System.find_executable("elixir") || flunk("Elixir executable is required")
+     stacktrace:
+       c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/managed_runtime/write_admission_test.exs:460: (test)
+
+.......03:28:48.416 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:28:48.416 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:28:48.416 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+03:28:48.416 [warning] OS_MON (:cpu_sup) called by #PID<0.302.0>, unavailable
+
+..03:28:48.429 [error] GenServer {Barkpark.ManagedRuntime.WriteAdmission, "fixture-A"} terminating
+** (stop) {:journal_unavailable, :closed_journal}
+Last message (from #PID<0.785.0>): :admission_message_redacted
+...03:28:48.452 [error] Task #PID<0.818.0> started from #PID<0.817.0> terminating
+** (stop) :kill
+    c:/Users/Frikk/Documents/GitHub/barkpark-windows-media-settlement/api/test/barkpark/managed_runtime/write_admission/physical_effect_test.exs:118: anonymous fn/2 in Barkpark.ManagedRuntime.WriteAdmission.PhysicalEffectTest."test a physical child death retains a live ordinary parent root"/1
+    (elixir 1.20.1) lib/task/supervised.ex:105: Task.Supervised.invoke_mfa/2
+    (elixir 1.20.1) lib/task/supervised.ex:40: Task.Supervised.reply/4
+Function: #Function<14.68614465/0 in Barkpark.ManagedRuntime.WriteAdmission.PhysicalEffectTest."test a physical child death retains a live ordinary parent root"/1>
+    Args: []
+......
+Finished in 0.5 seconds (0.09s async, 0.4s sync)
+
+Result: 45/63 passed
+Failed: 18 tests
+[os_mon] win32 supervisor port (win32sysinfo): Erlang has closed

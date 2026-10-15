@@ -1,0 +1,158 @@
+[
+  {
+    "name": "target",
+    "rawRow": {
+      "id": "716dcb7b-e997-4e5f-b82f-4780a7352064",
+      "path": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-target-----------bf918b4e-6cfe-47d4-97d8-191b5ce4ecb8-8fe92b1a.png",
+      "sha1": "e1468ab667bfd1ae7fa8c486ef3b661e22fd8d37",
+      "size": 1004,
+      "dataset": "production",
+      "filename": "c105-target-----------bf918b4e-6cfe-47d4-97d8-191b5ce4ecb8-8fe92b1a.png",
+      "mime_type": "image/png",
+      "source_id": null,
+      "dataset_id": "0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f",
+      "object_key": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-target-----------bf918b4e-6cfe-47d4-97d8-191b5ce4ecb8-8fe92b1a.png",
+      "project_id": "b7431285-e395-497f-977e-259dd7901a02",
+      "updated_at": "2026-10-15T01:30:44.057",
+      "inserted_at": "2026-10-15T01:30:44.057",
+      "workspace_id": "14dba454-fb26-4ba8-b0bf-2c8290173760",
+      "original_name": "c105-target-日本語-bf918b4e-6cfe-47d4-97d8-191b5ce4ecb8.png"
+    },
+    "request": {
+      "version": 1,
+      "operationId": "dc187aa9-bddb-488b-b4b7-9127e0380b20",
+      "mediaId": "716dcb7b-e997-4e5f-b82f-4780a7352064",
+      "expectedKey": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-target-----------bf918b4e-6cfe-47d4-97d8-191b5ce4ecb8-8fe92b1a.png",
+      "root": {
+        "path": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-bjkPON\\data\\media",
+        "device": "4238067767",
+        "inode": "1407374893624114"
+      },
+      "file": {
+        "bytes": 1004,
+        "sha256": "19bf355d59da860d46c69e31acbc1c657bb081c3615c487ed2e8703260769f7d",
+        "device": "4238067767",
+        "inode": "844424940202807",
+        "links": 1,
+        "observedAt": "2026-10-15T01:30:45.070Z"
+      }
+    }
+  },
+  {
+    "name": "refused",
+    "rawRow": {
+      "id": "7ff15b10-df8f-48e8-ac23-b869acb1f08a",
+      "path": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-refused-----------27f99a30-fc69-4871-88db-c3a6a0e09a12-fdbe4f4f.png",
+      "sha1": "11303947d93ce8ec79c61674648f343a9159a882",
+      "size": 1022,
+      "dataset": "production",
+      "filename": "c105-refused-----------27f99a30-fc69-4871-88db-c3a6a0e09a12-fdbe4f4f.png",
+      "mime_type": "image/png",
+      "source_id": null,
+      "dataset_id": "0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f",
+      "object_key": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-refused-----------27f99a30-fc69-4871-88db-c3a6a0e09a12-fdbe4f4f.png",
+      "project_id": "b7431285-e395-497f-977e-259dd7901a02",
+      "updated_at": "2026-10-15T01:30:45.082",
+      "inserted_at": "2026-10-15T01:30:45.082",
+      "workspace_id": "14dba454-fb26-4ba8-b0bf-2c8290173760",
+      "original_name": "c105-refused-日本語-27f99a30-fc69-4871-88db-c3a6a0e09a12.png"
+    },
+    "request": {
+      "version": 1,
+      "operationId": "d9d53b2a-097c-4c5d-af88-b7b72e52602c",
+      "mediaId": "7ff15b10-df8f-48e8-ac23-b869acb1f08a",
+      "expectedKey": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-refused-----------27f99a30-fc69-4871-88db-c3a6a0e09a12-fdbe4f4f.png",
+      "root": {
+        "path": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-bjkPON\\data\\media",
+        "device": "4238067767",
+        "inode": "1407374893624114"
+      },
+      "file": {
+        "bytes": 1022,
+        "sha256": "f9432f12f4a814f0c1ad7a1d0c3d358d75673f0751ad451d096737ee33037684",
+        "device": "4238067767",
+        "inode": "1125899916913470",
+        "links": 1,
+        "observedAt": "2026-10-15T01:30:45.943Z"
+      }
+    }
+  },
+  {
+    "name": "protected",
+    "rawRow": {
+      "id": "77550818-4b0d-4a75-8dc7-a640a252ed52",
+      "path": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-protected-----------c7fa2c40-352d-485d-859b-31b3eed58d26-622674f3.png",
+      "sha1": "4f00b08a98ac7c554adff8f09b727c59b8c0bd0e",
+      "size": 1013,
+      "dataset": "production",
+      "filename": "c105-protected-----------c7fa2c40-352d-485d-859b-31b3eed58d26-622674f3.png",
+      "mime_type": "image/png",
+      "source_id": null,
+      "dataset_id": "0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f",
+      "object_key": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-protected-----------c7fa2c40-352d-485d-859b-31b3eed58d26-622674f3.png",
+      "project_id": "b7431285-e395-497f-977e-259dd7901a02",
+      "updated_at": "2026-10-15T01:30:45.957",
+      "inserted_at": "2026-10-15T01:30:45.957",
+      "workspace_id": "14dba454-fb26-4ba8-b0bf-2c8290173760",
+      "original_name": "c105-protected-日本語-c7fa2c40-352d-485d-859b-31b3eed58d26.png"
+    },
+    "request": {
+      "version": 1,
+      "operationId": "2755e617-8180-4b3a-8273-79ce91f60d83",
+      "mediaId": "77550818-4b0d-4a75-8dc7-a640a252ed52",
+      "expectedKey": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-protected-----------c7fa2c40-352d-485d-859b-31b3eed58d26-622674f3.png",
+      "root": {
+        "path": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-bjkPON\\data\\media",
+        "device": "4238067767",
+        "inode": "1407374893624114"
+      },
+      "file": {
+        "bytes": 1013,
+        "sha256": "8e6840eb1bcb6ab7ba357e41f8c39371a7639aa65b514441548bc47da1f44748",
+        "device": "4238067767",
+        "inode": "2251799823368662",
+        "links": 1,
+        "observedAt": "2026-10-15T01:30:46.804Z"
+      }
+    }
+  },
+  {
+    "name": "ordinary",
+    "rawRow": {
+      "id": "34b2b9f8-7cc7-49c1-850b-56d2c483eddf",
+      "path": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-ordinary-----------8768aa5f-08a1-44d9-a177-f0cd601fe568-7e6dd069.png",
+      "sha1": "5fd8948182e86ff2505d4df6c5bab3bd71bd76f3",
+      "size": 1013,
+      "dataset": "production",
+      "filename": "c105-ordinary-----------8768aa5f-08a1-44d9-a177-f0cd601fe568-7e6dd069.png",
+      "mime_type": "image/png",
+      "source_id": null,
+      "dataset_id": "0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f",
+      "object_key": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-ordinary-----------8768aa5f-08a1-44d9-a177-f0cd601fe568-7e6dd069.png",
+      "project_id": "b7431285-e395-497f-977e-259dd7901a02",
+      "updated_at": "2026-10-15T01:30:46.814",
+      "inserted_at": "2026-10-15T01:30:46.814",
+      "workspace_id": "14dba454-fb26-4ba8-b0bf-2c8290173760",
+      "original_name": "c105-ordinary-日本語-8768aa5f-08a1-44d9-a177-f0cd601fe568.png"
+    },
+    "request": {
+      "version": 1,
+      "operationId": "654cf8a9-d365-464c-8784-1bf636c1abf5",
+      "mediaId": "34b2b9f8-7cc7-49c1-850b-56d2c483eddf",
+      "expectedKey": "d/0b52bacb-3d05-4cb6-a9ce-c12e386ccd9f/2026/10/c105-ordinary-----------8768aa5f-08a1-44d9-a177-f0cd601fe568-7e6dd069.png",
+      "root": {
+        "path": "C:\\Users\\Frikk\\AppData\\Local\\Temp\\Barkdown-C105-bjkPON\\data\\media",
+        "device": "4238067767",
+        "inode": "1407374893624114"
+      },
+      "file": {
+        "bytes": 1013,
+        "sha256": "ff99dd116872f021346b4db1b58c7cf7fdb722ace705e24111db08b09394dcc6",
+        "device": "4238067767",
+        "inode": "1125899916913482",
+        "links": 1,
+        "observedAt": "2026-10-15T01:30:47.847Z"
+      }
+    }
+  }
+]
