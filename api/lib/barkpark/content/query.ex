@@ -556,21 +556,11 @@ defmodule Barkpark.Content.Query do
                   )
                 )
 
-              field["type"] == "arrayOf" and get_in(field, ["of", "type"]) == "reference" ->
-                dynamic(
-                  [d],
-                  fragment(
-                    "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(?::text) OR ?->? @> jsonb_build_array(jsonb_build_object('_ref', ?::text)))",
-                    d.content,
-                    ^name,
-                    d.content,
-                    ^name,
-                    ^pub_id,
-                    d.content,
-                    ^name,
-                    ^pub_id
-                  )
-                )
+              # One arm for every array. A multi-type array can allow a
+              # reference AND an image member, so each member kind it allows
+              # adds its own match (task-e7a8f98e6924df10).
+              field["type"] == "arrayOf" ->
+                array_holder_match(name, array_member_types(field), pub_id, draft_id)
 
               # An `image` field's stored shape is `{asset: {_ref}, hotspot:
               # {...}, crop: {...}}` (docs/contracts/schema-v2.md) — one level
@@ -593,22 +583,6 @@ defmodule Barkpark.Content.Query do
                   )
                 )
 
-              field["type"] == "arrayOf" and get_in(field, ["of", "type"]) == "image" ->
-                dynamic(
-                  [d],
-                  fragment(
-                    "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))) OR ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))))",
-                    d.content,
-                    ^name,
-                    d.content,
-                    ^name,
-                    ^pub_id,
-                    d.content,
-                    ^name,
-                    ^draft_id
-                  )
-                )
-
               # A `file` field's stored shape is the SAME `{asset: {_ref}}`
               # wrapper an `image` field uses, minus the image-only hotspot/
               # crop subfields (`Validation.walk_field/4`'s own "same split as
@@ -626,22 +600,6 @@ defmodule Barkpark.Content.Query do
                     d.content,
                     ^name,
                     ^pub_id,
-                    ^draft_id
-                  )
-                )
-
-              field["type"] == "arrayOf" and get_in(field, ["of", "type"]) == "file" ->
-                dynamic(
-                  [d],
-                  fragment(
-                    "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))) OR ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))))",
-                    d.content,
-                    ^name,
-                    d.content,
-                    ^name,
-                    ^pub_id,
-                    d.content,
-                    ^name,
                     ^draft_id
                   )
                 )
@@ -680,6 +638,64 @@ defmodule Barkpark.Content.Query do
       |> Repo.all()
     end)
   end
+
+  # Matches a document whose array field `name` holds the target, for each
+  # member kind the field allows: a bare `_ref` or id string for a reference
+  # member, `{asset: {_ref}}` for an image or file member.
+  defp array_holder_match(name, member_types, pub_id, draft_id) do
+    ref_match =
+      if "reference" in member_types do
+        dynamic(
+          [d],
+          fragment(
+            "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(?::text) OR ?->? @> jsonb_build_array(jsonb_build_object('_ref', ?::text)))",
+            d.content,
+            ^name,
+            d.content,
+            ^name,
+            ^pub_id,
+            d.content,
+            ^name,
+            ^pub_id
+          )
+        )
+      else
+        dynamic(false)
+      end
+
+    asset_match =
+      if Enum.any?(member_types, &(&1 in ["image", "file"])) do
+        dynamic(
+          [d],
+          fragment(
+            "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))) OR ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))))",
+            d.content,
+            ^name,
+            d.content,
+            ^name,
+            ^pub_id,
+            d.content,
+            ^name,
+            ^draft_id
+          )
+        )
+      else
+        dynamic(false)
+      end
+
+    dynamic([d], ^ref_match or ^asset_match)
+  end
+
+  # The member types an `arrayOf` field allows. A single-type array stores `of`
+  # as one map, a multi-type array as a list of member maps. `get_in/2` with a
+  # string key raises on a list, so the where-used check used to crash on any
+  # schema with a multi-type array (task-e7a8f98e6924df10).
+  defp array_member_types(%{"of" => %{"type" => type}}), do: [type]
+
+  defp array_member_types(%{"of" => members}) when is_list(members),
+    do: for(%{"type" => type} <- members, do: type)
+
+  defp array_member_types(_field), do: []
 
   defp base_query(type, dataset, filter_map, opts) do
     Document
