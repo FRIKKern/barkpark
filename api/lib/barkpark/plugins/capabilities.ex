@@ -1674,6 +1674,16 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/media/:dataset/:id",
         "write",
         args: [arg("id", true, "string", "Asset id.")],
+        # The server refuses to delete an asset that documents still use and
+        # names `?force=true` as the override. Without this flag bp could not
+        # send it (task-e7a8f98e6924df10).
+        flags: [
+          flag(
+            "force",
+            "bool",
+            "Delete the asset even though documents still use it (their images break)."
+          )
+        ],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

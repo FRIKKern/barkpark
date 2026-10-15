@@ -328,6 +328,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "id" in Enum.map(cmd["args"], & &1["name"])
     end
 
+    # task-e7a8f98e6924df10: the delete door refuses an asset in use and names
+    # `?force=true` as the override, so bp needs a --force flag to send it.
+    test "media.delete carries a bool --force flag", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "media.delete")
+      force = Enum.find(cmd["flags"] || [], &(&1["name"] == "force"))
+
+      assert force, "media.delete has no force flag"
+      assert force["type"] == "bool"
+    end
+
     # CLI parity with the SDK's getAssetRelations / checkoutAsset /
     # undoCheckoutAsset (#584): the API + SDK have these asset ops; the manifest
     # must expose them too so `bp media relations|checkout|undo-checkout <id>` exist.
