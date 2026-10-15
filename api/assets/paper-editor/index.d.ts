@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.7.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.8.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -137,6 +137,10 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-selection-change": CustomEvent<ToolbarState>;
   /** With format-bubble="off": Mod+K or the link card's Edit. Cancelable; detail.href is the current link or null. */
   "bp-canvas-link-request": CustomEvent<{ href: string | null }>;
+  /** An edit moved or dropped a comment range; detail equals commentRanges(). One per animation frame. */
+  "bp-canvas-comment-ranges": CustomEvent<LiveCommentRange[]>;
+  /** A click inside a comment range; id is the innermost one. */
+  "bp-canvas-comment-click": CustomEvent<{ id: string }>;
 }
 
 /** A mark a toolbar toggles (portable-doc names). */
@@ -180,6 +184,16 @@ export interface RemoteSelection extends CanvasSelection {
   name: string;
   /** CSS color; anything but plain color syntax falls back to grey. */
   color: string;
+}
+/** A comment on a span of text; active marks the host's open thread. */
+export interface CommentRange extends CanvasSelection {
+  id: string;
+  active?: boolean;
+}
+/** A comment range as mapped through edits, with the text it spans. */
+export interface LiveCommentRange extends CanvasSelection {
+  id: string;
+  text: string;
 }
 
 export interface WikilinkSuggestion {
@@ -276,6 +290,12 @@ export interface BpPaperCanvasElement extends HTMLElement {
   replaceAll(text: string): FindState & { replaced: number };
   /** Replace the remote carets (decorations only; [] clears). */
   setRemoteSelections(list: RemoteSelection[]): void;
+  /** Replace the comment ranges (decorations that follow edits; [] clears). */
+  setCommentRanges(list: CommentRange[]): void;
+  /** The live comment ranges in document order; a range whose text is gone is absent. */
+  commentRanges(): LiveCommentRange[];
+  /** The ids of the comment ranges the selection overlaps. */
+  commentsInSelection(): string[];
   /** Toolbar commands on the current selection: true when applied. */
   run(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
   toggleMark(mark: ToolbarMark, attrs?: { href?: string; docId?: string; target?: string }): boolean;

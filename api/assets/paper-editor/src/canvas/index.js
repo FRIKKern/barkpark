@@ -173,6 +173,7 @@ import { Equation, Footnote, Toc, Video } from "./island-node.js";
 import { searchEmoji } from "../emoji.js";
 // Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
 import { remoteSelections, setRemoteSelections as rsSet, pointsFromSelection } from "./remote-selections.js";
+import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsInSelection as crInSelection } from "./comment-ranges.js";
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
@@ -774,6 +775,10 @@ class BpPaperCanvas extends HTMLElement {
     this._remoteSelections = [];
     this._selectionFrame = null;
     this._lastSelectionDetail = undefined;
+    // Comment ranges: the host's last setCommentRanges list (re-applied on mount),
+    // and the rAF-coalesced bp-canvas-comment-ranges emit.
+    this._commentRanges = [];
+    this._commentRangesFrame = null;
     // Toolbar state: the rAF-coalesced bp-selection-change emit.
     this._toolbarFrame = null;
     this._lastToolbarState = undefined;
@@ -1045,6 +1050,9 @@ class BpPaperCanvas extends HTMLElement {
         // Shared carets: the host's remote selections as decorations. See
         // ./remote-selections.js.
         remoteSelections(),
+        // Comments on a span of text: the host's ranges as decorations that follow
+        // edits. See ./comment-ranges.js.
+        commentRanges(this),
         // A hydrated run rests on a caret, not on an AllSelection a first keystroke would
         // replace wholesale. See ./resting-selection.js.
         RestingSelection,
@@ -1373,6 +1381,7 @@ class BpPaperCanvas extends HTMLElement {
     // (construction threw) or an empty one: show the read-only fallback instead.
     if (!this._editor || !this._verifyPainted("create")) return;
     if (this._remoteSelections.length) rsSet(this._editor, this._remoteSelections);
+    if (this._commentRanges.length) crSet(this._editor, this._commentRanges);
 
     // Selection format toolbar — REUSED verbatim from ../format-bubble.js. It is
     // agnostic to how many blocks the editor holds: it floats on any non-empty
@@ -1605,6 +1614,10 @@ class BpPaperCanvas extends HTMLElement {
       cancelAnimationFrame(this._toolbarFrame);
       this._toolbarFrame = null;
     }
+    if (this._commentRangesFrame != null) {
+      cancelAnimationFrame(this._commentRangesFrame);
+      this._commentRangesFrame = null;
+    }
     this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -1703,6 +1716,38 @@ class BpPaperCanvas extends HTMLElement {
   setRemoteSelections(list) {
     this._remoteSelections = Array.isArray(list) ? list : [];
     if (this._editor && !this._editor.isDestroyed) rsSet(this._editor, this._remoteSelections);
+  }
+
+  // ── comment ranges (see canvas/comment-ranges.js) ──
+  // Replace the host's comment ranges: [{ id, anchor, head, active? }], each end a
+  // Point. Decorations only. [] clears. Before mount the list waits for the editor.
+  setCommentRanges(list) {
+    this._commentRanges = Array.isArray(list) ? list : [];
+    if (this._editor && !this._editor.isDestroyed) crSet(this._editor, this._commentRanges);
+  }
+
+  // The live ranges as mapped through edits: [{ id, anchor, head, text }], in
+  // document order. A range whose text is gone is absent.
+  commentRanges() {
+    const editor = this._editor;
+    return editor && !editor.isDestroyed ? commentRangesState(editor) : [];
+  }
+
+  // The ids of the comment ranges the selection overlaps.
+  commentsInSelection() {
+    const editor = this._editor;
+    return editor && !editor.isDestroyed ? crInSelection(editor) : [];
+  }
+
+  // bp-canvas-comment-ranges: an edit moved or dropped a range. One per frame.
+  _scheduleCommentRangesEmit() {
+    if (this._commentRangesFrame != null) return;
+    this._commentRangesFrame = requestAnimationFrame(() => {
+      this._commentRangesFrame = null;
+      const editor = this._editor;
+      if (!editor || editor.isDestroyed) return;
+      this.dispatchEvent(new CustomEvent("bp-canvas-comment-ranges", { bubbles: true, composed: true, detail: commentRangesState(editor) }));
+    });
   }
 
   // bp-canvas-selection: the local selection as { anchor, head } Points, or null
