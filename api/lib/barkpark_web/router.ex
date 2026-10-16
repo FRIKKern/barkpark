@@ -1341,6 +1341,10 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  pipeline :scoped_action_read do
+    plug(BarkparkWeb.Plugs.RequireTokenOrMemberSession, token_policy: :scoped_admin)
+  end
+
   # task-5feac4e826cff9a5 — the view counter, `POST .../v1/data/views/:dataset`.
   # :shared_docs_query_post with two changes. RateLimit bills `class: :view`
   # (60 a minute per anonymous IP, 6000 per token; rate_limit.ex). A `:docs`
@@ -3803,7 +3807,7 @@ defmodule BarkparkWeb.Router do
     get("/files/:sanity_project/:dataset/*rest", MediaController, :serve_sanity_file)
   end
 
-  # Token-required scoped reads (listen/export/analytics/history/revision/locale/codelists).
+  # Token-required scoped reads (export/analytics/locale/codelists).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token])
 
@@ -3819,9 +3823,6 @@ defmodule BarkparkWeb.Router do
 
     get("/v1/data/export/:dataset", ExportController, :export)
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
-    get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
-    get("/v1/data/revision/:dataset/:id", HistoryController, :show)
-    get("/v1/data/schedules/:dataset", ScheduleController, :index)
     # Paper masters, member-token read half (task-2dc7b441443f3aaf) — the
     # masters an author may insert into paper :slug. Writes (save/insert/
     # pin/detach) ride the scoped-mutate pipeline below.
@@ -3837,6 +3838,11 @@ defmodule BarkparkWeb.Router do
   # editor's studio joins presence and listens with their own session.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token_or_member_session])
+
+    # task-d950c303ef58303d: editor reads share the seated bearer gate.
+    get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
+    get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+    get("/v1/data/schedules/:dataset", ScheduleController, :index)
 
     get("/v1/data/listen/:dataset", ListenController, :listen)
     # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
@@ -3864,7 +3870,7 @@ defmodule BarkparkWeb.Router do
   # scoped-read pipeline, mirroring the flat restore split above. Kept out of the
   # token-only scoped-read scope so a read/public-read token cannot overwrite a
   # document via restore; the scoped history + revision GET reads stay open to
-  # any member token.
+  # a member API token or seated login-session bearer.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token, :flat_within_quota, :require_write])
 
@@ -3925,6 +3931,13 @@ defmodule BarkparkWeb.Router do
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
   end
 
+  # Personal members may inspect actions; API tokens retain the existing
+  # scoped-admin chain. Dispatch below remains admin/token-only.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_action_read])
+    get("/v1/data/doc/:dataset/:type/:doc_id/actions", DocumentActionsController, :index)
+  end
+
   # Scoped document actions (task-bd311f4b5ea2b3b8) — the schema-declared
   # action registry `BarkparkWeb.Studio.StudioLive.DocActions` resolves today
   # ONLY through the LiveView socket (`DocActions.dispatch_action/5`,
@@ -3936,8 +3949,6 @@ defmodule BarkparkWeb.Router do
   # tier invented for this route.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
-
-    get("/v1/data/doc/:dataset/:type/:doc_id/actions", DocumentActionsController, :index)
 
     post(
       "/v1/data/doc/:dataset/:type/:doc_id/actions/:name",

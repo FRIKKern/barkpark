@@ -20,7 +20,7 @@ defmodule BarkparkWeb.ScheduleController do
   use BarkparkWeb, :controller
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
-  alias Barkpark.Content.{Errors, ScheduledPublish, ScheduledPublishes}
+  alias Barkpark.Content.{CallerContext, Errors, ScheduledPublish, ScheduledPublishes}
   alias BarkparkWeb.ErrorResponse
 
   def create(conn, %{"dataset" => dataset} = params) do
@@ -42,14 +42,34 @@ defmodule BarkparkWeb.ScheduleController do
   end
 
   def index(conn, %{"dataset" => dataset} = params) do
+    opts = scope_opts(conn)
+
     rows =
       ScheduledPublishes.list(
         dataset,
         Map.take(params, ["id", "type", "status"]),
-        scope_opts(conn)
+        opts
       )
+      |> readable_schedules(dataset, opts)
 
     json(conn, %{result: %{schedules: Enum.map(rows, &schedule_json/1)}})
+  end
+
+  # Newly admitted personal readers must not discover another owner's draft
+  # through schedule metadata. Require its readable draft, even for historical
+  # rows: a published twin can have a different owner, and ACL refusal is not
+  # proof of draft absence. Existing API-token results stay intact.
+  defp readable_schedules(rows, dataset, opts) do
+    case Keyword.get(opts, :caller_context) do
+      %CallerContext{principal_type: :user} ->
+        Enum.filter(rows, fn row ->
+          draft_id = Barkpark.Content.draft_id(row.doc_id)
+          match?({:ok, _}, Barkpark.Content.get_document(draft_id, row.type, dataset, opts))
+        end)
+
+      _ ->
+        rows
+    end
   end
 
   def delete(conn, %{"dataset" => dataset, "schedule_id" => id}) do
