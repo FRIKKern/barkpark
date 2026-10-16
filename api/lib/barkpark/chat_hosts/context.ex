@@ -570,6 +570,9 @@ defmodule Barkpark.ChatHosts do
     now = DateTime.utc_now()
 
     cond do
+      # Application turns have a separate atomic context/terminal commit gate.
+      # Generic runtime events and herd reports cannot mutate those leases.
+      lease.provider == "application" -> {:error, :stale_fence}
       lease.host_id != host.id -> {:error, :stale_fence}
       lease.epoch != epoch -> {:error, :stale_fence}
       not is_nil(lease.revoked_at) -> {:error, :stale_fence}

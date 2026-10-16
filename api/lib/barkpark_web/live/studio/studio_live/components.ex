@@ -2142,6 +2142,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         width_bucket={@width_bucket}
       />
 
+      <!-- Custom Portable Text block dialog (task-19392d1e6fc661e6) -->
+      <BarkparkWeb.Components.Fields.ObjectForm.block_dialog
+        dialog={Map.get(assigns, :object_dialog)}
+        dataset={@dataset}
+        scope_prefix={Map.get(assigns, :scope_prefix) || ""}
+        api_token_raw={Map.get(assigns, :api_token_raw) || ""}
+      />
+
       <!-- E2 secondary picker modal -->
       <.secondary_picker_modal
         show_secondary_picker={@show_secondary_picker}

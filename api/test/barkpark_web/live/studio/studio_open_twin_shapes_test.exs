@@ -234,8 +234,11 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
       assert html =~ "Bestill nå"
       # A row whose member the schema no longer declares still shows.
       assert html =~ ~s(data-member-type="retiredSection")
-      # Read-only: no input posts the list, so a save cannot rewrite it.
-      refute html =~ ~s(name="doc[landingPageSections])
+      # Each row opens in the form of its member (task-e24e33a2a1a4fe10)...
+      assert html =~ ~s(name="doc[landingPageSections][0].heading")
+      assert html =~ ~s(name="doc[landingPageSections][1].href")
+      # ...and a row whose member is gone shows its JSON, with no field inputs.
+      refute html =~ ~s(name="doc[landingPageSections][2].note")
     end
 
     test "editing another field keeps the section list byte-identical",

@@ -1636,7 +1636,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         _ -> []
       end
 
-    Path.field_at(fields, path)
+    # The form value rides along so a path through a several-member array
+    # resolves the member each row's `_type` names (task-e24e33a2a1a4fe10).
+    Path.field_at(fields, path, socket.assigns[:editor_form] || %{})
   end
 
   # THE EDITOR CLAMP FOR A NON-EDITING VIEWER (task-df2ea2e004ff4caf).

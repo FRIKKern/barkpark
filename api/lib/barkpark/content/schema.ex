@@ -1192,6 +1192,30 @@ defmodule Barkpark.Content.Schema do
 
   def inline_named_types(other, _dataset, _opts), do: other
 
+  @doc """
+  The named object type `name` as an inlined composite field map
+  (`%{"type" => "composite", "fields" => [...], "namedType" => name}`), through
+  the same scope ladder and inliner a document schema uses. The Studio opens a
+  custom Portable Text block (a `mediaModule`, a `quote`) in a form with it
+  (task-19392d1e6fc661e6). `:error` when no object type has that name.
+  """
+  @spec object_type_field(String.t(), String.t(), keyword()) :: {:ok, map()} | :error
+  def object_type_field(name, dataset, opts \\ []) when is_binary(name) do
+    synthetic = %SchemaDefinition{
+      name: "__object__:" <> name,
+      fields: [%{"name" => name, "type" => name}]
+    }
+
+    case inline_named_types(synthetic, dataset, opts) do
+      %SchemaDefinition{fields: [%{"type" => "composite", "fields" => fields} = field]}
+      when is_list(fields) ->
+        {:ok, field}
+
+      _ ->
+        :error
+    end
+  end
+
   # Inlining runs in two passes. The first resolves every named object type the
   # schemas reach, transitively, ONCE each, into a map. The second inlines from
   # that map and reads nothing. Before, each reference resolved on its own:
@@ -1270,6 +1294,10 @@ defmodule Barkpark.Content.Schema do
       (type == "arrayOf" and references_named_type?(f["of"] || %{}))
   end
 
+  # Several member types (`of: [...]`, Sanity's page-builder array).
+  defp references_named_type?(list) when is_list(list),
+    do: Enum.any?(list, &references_named_type?/1)
+
   defp references_named_type?(_), do: false
 
   defp inline_fields(fields, resolved, visited) when is_list(fields),
@@ -1283,6 +1311,12 @@ defmodule Barkpark.Content.Schema do
     cond do
       type == "composite" ->
         Map.put(f, "fields", inline_fields(f["fields"] || [], resolved, visited))
+
+      # Several named member types (Sanity's page-builder array): each
+      # member is inlined like a single `of`, so the Studio can show and save
+      # an item by the fields its `_type` names (task-e24e33a2a1a4fe10).
+      type == "arrayOf" and is_list(f["of"]) ->
+        Map.put(f, "of", Enum.map(f["of"], &inline_field(&1, resolved, visited)))
 
       type == "arrayOf" ->
         Map.put(f, "of", inline_field(f["of"] || %{}, resolved, visited))

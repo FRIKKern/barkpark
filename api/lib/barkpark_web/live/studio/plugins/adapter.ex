@@ -268,6 +268,13 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   # ─── raw map → %Field{} conversion (mirrors SchemaDefinition.parse_field/2,
   # which is private; we deliberately avoid `Code.eval_*` per D7). ─────────
 
+  @doc """
+  The `%Field{}` the editor components render for a raw schema field map, the
+  same parse `render/2` applies. The Portable Text block dialog uses it for a
+  block type's fields (task-19392d1e6fc661e6).
+  """
+  def field_struct(%{} = raw), do: raw |> stringify() |> to_field_struct()
+
   defp to_field_struct(%{"type" => type, "name" => name} = raw) do
     base = %Field{
       name: name,

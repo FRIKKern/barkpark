@@ -573,6 +573,9 @@ defmodule Barkpark.StudioChat do
       nil ->
         :noop
 
+      %Session{application_state: state} when is_map(state) ->
+        Barkpark.StudioChat.ApplicationTurns.archive(id, value, scope)
+
       session ->
         session
         |> Ecto.Changeset.change(archived_at: value)

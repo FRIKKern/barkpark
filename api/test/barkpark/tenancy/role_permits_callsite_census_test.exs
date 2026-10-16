@@ -82,6 +82,13 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
   # this site. Every entry's provenance must name a loaded, non-nil membership
   # row; a site that cannot state one is a live hole, not a census entry.
   @expected_callsites %{
+    {"lib/barkpark/studio_chat/application_turns.ex", "actor!"} =>
+      "ApplicationTurns.actor!/3 loads the accepting login and its User, then loads a non-nil " <>
+        "Membership with `workspace_id == ws`, `principal_id == user_id` and `principal_type == user` " <>
+        "under FOR SHARE. The loaded seat and SAME workspace id reach seat_capabilities/3; " <>
+        "a missing membership refuses first. User/workspace come from authenticated personal " <>
+        "scope on creation or the stored session's immutable owners for existing work, never " <>
+        "caller-supplied role strings.",
     {"lib/barkpark_web/controllers/token_self_controller.ex", "session_seat"} =>
       "TokenSelfController.session_seat/2 (GET /v1/auth/token with a login-session bearer, " <>
         "task-a89ef18ee88ba6a0) passes the row it just loaded: `TenancyAuth.membership(user, ws.id)` " <>
@@ -123,7 +130,7 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
 
   # A second call added INSIDE an already-pinned function would not change the
   # keyed set, so the raw expression count is pinned alongside it.
-  @expected_call_count 6
+  @expected_call_count 7
 
   # The two doors, named once. `role_permits?/3` answers ONE action from the
   # resolver; `seat_capabilities/3` answers all three off one resolution. Both
@@ -177,7 +184,7 @@ defmodule Barkpark.Tenancy.RolePermitsCallsiteCensusTest do
              "the scan did not reach auth.ex — the census cannot be trusted"
 
       refute Enum.empty?(sites), "the call-site scan found ZERO sites"
-      assert map_size(@expected_callsites) == 6
+      assert map_size(@expected_callsites) == 7
     end
 
     test "the raw call-expression count is pinned, so a second call in a pinned function also reds",

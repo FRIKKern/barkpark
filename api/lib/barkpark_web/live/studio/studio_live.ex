@@ -48,6 +48,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     History,
     ItemShare,
     Lifecycle,
+    ObjectBlocks,
     Media,
     Paper,
     Refs,
@@ -514,6 +515,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("width-bucket", _params, socket), do: {:noreply, socket}
 
   def handle_event("array_op", params, socket), do: Fields.array_op(params, socket)
+
+  # The Classic rich-text editor's block dialog (task-19392d1e6fc661e6).
+  def handle_event("pt-block-open", params, socket), do: ObjectBlocks.open(params, socket)
+  def handle_event("pt-block-insert", params, socket), do: ObjectBlocks.insert(params, socket)
+
+  def handle_event("object-dialog-change", params, socket),
+    do: ObjectBlocks.change(params, socket)
+
+  def handle_event("object-dialog-array-op", params, socket),
+    do: ObjectBlocks.array_op(params, socket)
+
+  def handle_event("object-dialog-save", params, socket), do: ObjectBlocks.save(params, socket)
+  def handle_event("object-dialog-close", _params, socket), do: ObjectBlocks.close(socket)
 
   def handle_event("open-image-picker", params, socket),
     do: Media.open_image_picker(params, socket)

@@ -257,6 +257,8 @@ services:
       # name refuses the boot.
       - BARKPARK_CAPABILITIES_OFF
       - BARKPARK_CLAUDE_CHAT
+      # Closed application bindings: unset stays disabled; explicit empty refuses.
+      - BARKPARK_PERSONAL_CHAT_APPLICATIONS
       - BARKPARK_TMUX_CONSOLE
       # Write admission for a dedicated managed instance (Barkdown C083).
       # Passthrough-only: unset keeps admission OFF; INSTANCE and JOURNAL must

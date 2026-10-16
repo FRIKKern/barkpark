@@ -435,7 +435,7 @@ defmodule Barkpark.Content.Validation do
       # comment above `validate_flat/4`: same check, this path's finding
       # shape (`check_findings/3` wants code + params, not just a message).
       pt =
-        if get_in_field(field, "type") == "richText" do
+        if get_in_field(field, "type") == "richText" and portable_doc_field?(field) do
           value
           |> richtext_blocks()
           |> portable_text_findings(top_path, level)
@@ -603,7 +603,7 @@ defmodule Barkpark.Content.Validation do
   # is whole-schema) onto the heavier v2 walker for every OTHER field in it
   # too, a much wider behavior change than this task asks for.
   defp flat_portable_text_messages(field, value, level) do
-    if get_in_field(field, "type") == "richText" do
+    if get_in_field(field, "type") == "richText" and portable_doc_field?(field) do
       value
       |> richtext_blocks()
       |> Enum.filter(&portable_text_block?/1)
@@ -867,7 +867,10 @@ defmodule Barkpark.Content.Validation do
     # `blocks.of` names), so it would otherwise fall through BOTH arms'
     # `_ -> []` catch-alls and find nothing, in either case.
     pt_findings =
-      portable_text_findings(richtext_blocks(value), path, level) ++
+      if(portable_doc_field?(raw),
+        do: portable_text_findings(richtext_blocks(value), path, level),
+        else: []
+      ) ++
         inline_object_findings(raw, richtext_blocks(value), path, level)
 
     case object_block_types(raw) do
@@ -945,6 +948,17 @@ defmodule Barkpark.Content.Validation do
       []
     end
   end
+
+  # The Portable Text finding is for a field the block editor edits
+  # (`"editor": "blocks"`), whose blocks are PortableDoc blocks. A Classic
+  # richText stores Portable Text by owner ruling #44, and the Classic editor
+  # opens and saves it (task-5fe67fc396077304), so Portable Text there is the
+  # field's own shape, not a broken write. Flagged, it blocked publishing every
+  # gyldendal.no twin article from Studio, and, once page-builder members were
+  # inlined, every page-builder item holding a body (task-e24e33a2a1a4fe10).
+  defp portable_doc_field?(%Field{raw: raw}), do: portable_doc_field?(raw)
+  defp portable_doc_field?(%{} = raw), do: FieldVocabulary.blocks_field?(stringify_keys(raw))
+  defp portable_doc_field?(_), do: false
 
   # task-2d96f71d3fe52ee7 — one finding per Portable Text block, so a field
   # holding a MIX (a partial migration) names every offending block, not

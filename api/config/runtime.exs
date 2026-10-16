@@ -192,6 +192,15 @@ if System.get_env("BARKPARK_CLAUDE_CHAT") in ["0", "false", "no", "off"] do
   config :barkpark, :claude_chat, enabled: false
 end
 
+# Closed personal applications are explicitly configured at release startup.
+# Missing means disabled; malformed supplied configuration never partially binds.
+case Barkpark.StudioChat.ApplicationBinding.parse_env(
+       System.get_env("BARKPARK_PERSONAL_CHAT_APPLICATIONS")
+     ) do
+  {:ok, bindings} -> config :barkpark, :personal_chat_applications, bindings
+  {:error, _} -> raise ArgumentError, "Invalid BARKPARK_PERSONAL_CHAT_APPLICATIONS configuration"
+end
+
 # Capability switches for the non-plugin subsystems (task-2f59ba23bcad333e,
 # `Barkpark.Capability`): studio_chat, cycle_fleet, epic_fleet. All ON unless
 # listed here, e.g. BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet. An OFF

@@ -279,6 +279,7 @@ defmodule Barkpark.Accounts.Privacy do
         :owner_workspace_id,
         :title,
         :draft,
+        :application_state,
         :archived_at,
         :inserted_at,
         :updated_at
