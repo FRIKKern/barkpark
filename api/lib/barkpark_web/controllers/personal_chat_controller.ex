@@ -3,6 +3,10 @@ defmodule BarkparkWeb.PersonalChatController do
   Account-owned storage in the existing StudioChat engine. Execution and live
   transport remain unavailable until a personal application runtime is bound.
   No client may import assistant history, choose ownership, or run a provider.
+
+  Stored `claude`/`plan` defaults are inert legacy values, not an application
+  provider choice. A future closed application binding must explicitly handle
+  existing rows; it must never activate these defaults as a repo-worker runtime.
   """
   use BarkparkWeb, :controller
   alias Barkpark.StudioChat
