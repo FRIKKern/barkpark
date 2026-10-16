@@ -108,6 +108,8 @@ defmodule Barkpark.StudioChatApplicationTurnsTest do
     assert view.context["language"] == "nb"
     assert view.context["audience"] == "experienced practitioners"
     assert view.last_answer.turn_id == second.id
+    assert view.last_answer.query == "Actually, experienced practitioners"
+    assert view.latest_turn.query == view.last_answer.query
     assert view.last_answer.revision == 2
     assert view.last_answer.answer == result(second)["result"]["answer"]
 

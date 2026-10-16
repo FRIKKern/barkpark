@@ -446,6 +446,7 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
     %{
       message_id: message.id,
       turn_id: lease.id,
+      query: lease.application_turn["query"],
       revision: state["revision"],
       answer: message.metadata["application"]["answer"]
     }
@@ -506,6 +507,7 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
   defp accepted(lease),
     do: %{
       id: lease.id,
+      query: lease.application_turn["query"],
       epoch: lease.epoch,
       base_revision: lease.application_turn["base_revision"],
       request_digest: lease.application_turn["request_digest"],

@@ -68,6 +68,7 @@ bytes, answer text at most 64,000 bytes and the complete result at most 128,000
 bytes. The application validates the domain-specific contents before committing
 and when consuming them. The required `presentation` object preserves typed
 statements/citations under that application version in existing message metadata.
+Both latest turn and last-committed answer include their exact accepted question.
 State GET returns one bounded last-committed answer envelope, not an unbounded
 history. The generic plain-text history route gains no typed-source authority.
 Backend version/bounds validation establishes neither
