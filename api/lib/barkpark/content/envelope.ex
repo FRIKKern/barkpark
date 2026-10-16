@@ -230,7 +230,8 @@ defmodule Barkpark.Content.Envelope do
         {schema, cache}
 
       :error ->
-        schema = schema_fun.(type)
+        # Indexed once per type, not once per document (`field_index/1`).
+        schema = {:indexed, schema_fun.(type) |> raw_fields() |> field_index()}
         {schema, Map.put(cache, type, schema)}
     end
   end
@@ -639,7 +640,7 @@ defmodule Barkpark.Content.Envelope do
     do: envelope
 
   defp redact_by_field_visibility(envelope, schema, %CallerContext{} = ctx, owner_id) do
-    fields = raw_fields(schema)
+    fields = indexed_fields(schema)
 
     envelope
     |> Enum.reduce(%{}, fn {key, value}, acc ->
@@ -986,10 +987,31 @@ defmodule Barkpark.Content.Envelope do
 
   defp restricted_anywhere?(_field), do: false
 
+  # The top-level fields by name, the first declaration of a name winning as
+  # in `find_raw_field/2` over the list. Redaction looks up every key of
+  # every document it renders: over the list that was 21 million comparisons
+  # for 3,796 documents of a 90-field schema, most of a 2 s GROQ read.
+  defp field_index(fields) do
+    by_name =
+      Enum.reduce(fields, %{}, fn field, acc ->
+        case get_attr(field, "name") do
+          nil -> acc
+          name -> Map.put_new(acc, name, field)
+        end
+      end)
+
+    {:index, by_name}
+  end
+
+  defp indexed_fields({:indexed, index}), do: index
+  defp indexed_fields(schema), do: schema |> raw_fields() |> field_index()
+
   defp raw_fields(%SchemaDefinition{fields: f}) when is_list(f), do: f
   defp raw_fields(%SchemaDefinition.Parsed{raw: %{"fields" => f}}) when is_list(f), do: f
   defp raw_fields(%{"fields" => f}) when is_list(f), do: f
   defp raw_fields(_), do: []
+
+  defp find_raw_field({:index, by_name}, key), do: Map.get(by_name, key)
 
   defp find_raw_field(fields, key) when is_list(fields) do
     Enum.find(fields, fn f -> get_attr(f, "name") == key end)

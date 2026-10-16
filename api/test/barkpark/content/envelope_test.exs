@@ -298,6 +298,46 @@ defmodule Barkpark.Content.EnvelopeTest do
     assert author_env["title"] == "A"
   end
 
+  test "render_many_by_type redacts as render/3 does, the first declaration of a name winning",
+       %{doc: post} do
+    {:ok, post2} =
+      Content.create_document(
+        "post",
+        %{
+          "doc_id" => "env-4",
+          "title" => "Z",
+          "content" => %{
+            "body" => "b",
+            "tags" => ["t"],
+            "meta" => %{"secret" => "s", "open" => "o"}
+          }
+        },
+        "test"
+      )
+
+    # `body` is declared twice, private first; `tags` as an atom-keyed map;
+    # `meta` with a private kid.
+    schema =
+      schema_with([
+        %{"name" => "body", "private" => true},
+        %{"name" => "body"},
+        %{name: "tags", private: true},
+        %{
+          "name" => "meta",
+          "type" => "object",
+          "fields" => [%{"name" => "secret", "private" => true}, %{"name" => "open"}]
+        }
+      ])
+
+    ctx = CallerContext.anonymous()
+    many = Envelope.render_many_by_type([post, post2], fn _ -> schema end, ctx)
+
+    assert many == Enum.map([post, post2], &Envelope.render(&1, schema, ctx))
+    refute Map.has_key?(Enum.at(many, 1), "body")
+    refute Map.has_key?(Enum.at(many, 1), "tags")
+    assert Enum.at(many, 1)["meta"] == %{"open" => "o"}
+  end
+
   test "render_many_by_type leaves an admin unredacted", %{doc: post} do
     resolver = fn _ -> schema_with([%{"name" => "body", "private" => true}]) end
     [env] = Envelope.render_many_by_type([post], resolver, admin())
