@@ -356,7 +356,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       value =
         BarkparkWeb.Components.FieldInputs.reference_id(get_value(assigns.value, sub.name, ""))
 
+      {ref_filter, ref_filter_params} =
+        BarkparkWeb.Components.FieldInputs.reference_filter_attrs(raw, Map.get(assigns, :root), nil)
+
       reference_subfield_input(%{
+        ref_filter: ref_filter,
+        ref_filter_params: ref_filter_params,
         input_name: child_path(assigns.path, sub.name),
         input_id: input_id(assigns.path, assigns.field.name, sub.name),
         value: value,
@@ -385,11 +390,12 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
 
   defp reference_subfield_input(assigns) do
     ~H"""
-    <div id={"bp-ref-wrap-#{@input_id}-#{:erlang.phash2(@value)}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={"bp-ref-wrap-#{@input_id}-#{:erlang.phash2(@value)}"} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-filter-params={@ref_filter_params}>
       <input type="hidden" id={"bp-ref-hidden-#{@input_id}"} name={@input_name} value={@value} phx-change={@on_change} phx-debounce="500" />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@value}
         ref-type={@ref_type}
+        filter={@ref_filter}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-ref-hidden-#{@input_id}"}

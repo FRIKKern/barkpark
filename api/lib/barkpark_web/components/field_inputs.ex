@@ -414,14 +414,24 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # hit and on the selected pill. A single `refType` renders byte-identically.
   def input(%{field: %{"type" => "reference", "name" => name} = f} = assigns) do
     val = reference_id(Map.get(assigns.editor_form, name, ""))
-    assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
+    {filter, filter_params} = reference_filter_attrs(f, assigns.editor_form, assigns[:doc_key])
+
+    assigns =
+      assign(assigns,
+        n: name,
+        v: val,
+        ref_type: Enum.join(reference_types(f), ","),
+        ref_filter: filter,
+        ref_filter_params: filter_params
+      )
 
     ~H"""
-    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-filter-params={@ref_filter_params}>
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
         ref-type={@ref_type}
+        filter={@ref_filter}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-ref-hidden-#{@n}"}
@@ -790,6 +800,24 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def reference_id(%{"_ref" => ref}) when is_binary(ref), do: ref
   def reference_id(%{_ref: ref}) when is_binary(ref), do: ref
   def reference_id(_), do: ""
+
+  @doc """
+  The picker's filter attributes for a reference field (or an `arrayOf`
+  reference item): `{groq | nil, params_json | nil}` (task-281dfb5b6e350517).
+  The params are read from `root`, the form as it stands, and ride on the
+  picker's wrapper as `data-filter-params`. LiveView patches a data attribute
+  on a `phx-update="ignore"` container, so a `fromDocument` value follows edits.
+  """
+  def reference_filter_attrs(field, root, doc_id) do
+    case Barkpark.Content.ReferenceFilter.of(field) do
+      nil ->
+        {nil, nil}
+
+      %{filter: filter, params: spec} ->
+        params = Barkpark.Content.ReferenceFilter.params(spec, root, doc_id)
+        {filter, Jason.encode!(params)}
+    end
+  end
 
   @doc """
   Every target type a reference field may point at, in declaration order and

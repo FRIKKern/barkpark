@@ -123,6 +123,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_no_bare_required()
     |> validate_inline_field_names()
     |> validate_visible_when_scopes()
+    |> validate_reference_filters()
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
@@ -264,6 +265,21 @@ defmodule Barkpark.Content.SchemaDefinition do
   end
 
   def inline_reserved_field_paths(_fields, _prefix), do: []
+
+  # A reference field's `options.filter` must be GROQ that parses with its
+  # `filterParams` (task-281dfb5b6e350517), so a typo is refused at apply
+  # instead of leaving the picker with no hits.
+  defp validate_reference_filters(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        fields
+        |> Barkpark.Content.ReferenceFilter.problems()
+        |> Enum.reduce(changeset, fn msg, cs -> add_error(cs, :fields, msg) end)
+
+      _ ->
+        changeset
+    end
+  end
 
   # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (default) or
   # "parent". A top-level field has no parent, so "parent" there is refused with
