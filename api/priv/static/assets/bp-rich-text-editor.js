@@ -1,9 +1,11 @@
 // bp-rich-text-editor — Studio rich-text Web Component (Task #11 WI4 v1).
 //
-// Contenteditable with paste-as-plain-text and a minimal formatting
-// toolbar: Bold, Italic, and Link (inline URL row, selection preserved
-// across the focus hop — Sanity's portable-text editor has links as a
-// core mark; this WC had no affordance at all). Emits a bubbling
+// Contenteditable with paste-as-plain-text and a formatting toolbar:
+// Bold, Italic, Underline, Strike, the block styles Normal and H2 to H4,
+// bullet and numbered lists, and Link (inline URL row, selection preserved
+// across the focus hop). These are the styles, lists and decorators Sanity's
+// Portable Text editor offers for a body; the server turns the HTML into
+// Portable Text (Barkpark.Content.PortableText). Emits a bubbling
 // CustomEvent("bp-change", {detail: {value}}) on every input. The
 // LiveView hook BarkparkFieldBridge (see root.html.heex) catches the
 // bubbled event on the wrapper and mirrors detail.value into the
@@ -94,6 +96,16 @@ class BpRichTextEditor extends HTMLElement {
     bar.innerHTML =
       '<button type="button" class="bp-rte-btn" data-cmd="bold" title="' + t("Bold (mod+B)") + '" aria-label="' + t("Bold") + '"><b aria-hidden="true">B</b></button>' +
       '<button type="button" class="bp-rte-btn" data-cmd="italic" title="' + t("Italic (mod+I)") + '" aria-label="' + t("Italic") + '"><i aria-hidden="true">I</i></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="underline" title="' + t("Underline (mod+U)") + '" aria-label="' + t("Underline") + '"><u aria-hidden="true">U</u></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="strikeThrough" title="' + t("Strikethrough") + '" aria-label="' + t("Strikethrough") + '"><s aria-hidden="true">S</s></button>' +
+      '<span class="bp-rte-sep" aria-hidden="true"></span>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="p" title="' + t("Normal text") + '" aria-label="' + t("Normal text") + '"><span aria-hidden="true">¶</span></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="h2" title="' + t("Heading 2") + '" aria-label="' + t("Heading 2") + '"><span aria-hidden="true">H2</span></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="h3" title="' + t("Heading 3") + '" aria-label="' + t("Heading 3") + '"><span aria-hidden="true">H3</span></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="h4" title="' + t("Heading 4") + '" aria-label="' + t("Heading 4") + '"><span aria-hidden="true">H4</span></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="insertUnorderedList" title="' + t("Bulleted list") + '" aria-label="' + t("Bulleted list") + '"><span aria-hidden="true">•</span></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="insertOrderedList" title="' + t("Numbered list") + '" aria-label="' + t("Numbered list") + '"><span aria-hidden="true">1.</span></button>' +
+      '<span class="bp-rte-sep" aria-hidden="true"></span>' +
       '<button type="button" class="bp-rte-btn bp-rte-link" title="' + t("Link") + '" aria-label="' + t("Link") + '"><span aria-hidden="true">🔗</span></button>' +
       '<span class="bp-rte-linkrow" hidden>' +
       '<input type="text" class="bp-rte-url" placeholder="https://…" aria-label="' + t("Link address") + '" />' +
@@ -154,7 +166,7 @@ class BpRichTextEditor extends HTMLElement {
     bar.querySelectorAll("[data-cmd]").forEach((b) => {
       press(b, () => {
         reselect();
-        exec(b.dataset.cmd);
+        exec(b.dataset.cmd, b.dataset.arg);
       });
     });
 

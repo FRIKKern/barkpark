@@ -70,8 +70,9 @@ defmodule Barkpark.Content.Forms do
               raw
 
             # A plain richText field stores Portable Text (owner ruling #44);
-            # the Classic contenteditable edits it as HTML.
-            plain_rich_text?(field) and PortableText.blocks?(raw) ->
+            # the Classic contenteditable edits it as HTML. So does a `body`
+            # that holds Portable Text, as an imported Sanity body does.
+            portable_text_field?(field, raw) ->
               PortableText.to_html(raw)
 
             # An `image` value decoded into a map at the save boundary rides
@@ -361,8 +362,7 @@ defmodule Barkpark.Content.Forms do
       # stored blocks, so a block the edit did not touch is kept verbatim and
       # a mark the editor has no UI for survives. A plugin-owned type
       # (`@keep_shape`) posts HTML that was not coerced; it gets blocks too.
-      plain_rich_text?(field) and is_list(stored) and PortableText.blocks?(stored) and
-        is_binary(posted) and String.trim(posted) != "" ->
+      portable_text_field?(field, stored) and is_binary(posted) and String.trim(posted) != "" ->
         PortableText.from_html(posted, stored)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
@@ -416,7 +416,7 @@ defmodule Barkpark.Content.Forms do
   defp form_image(%{"type" => "date"}, v) when is_binary(v), do: date_form_value(v)
 
   defp form_image(%{"type" => "richText"} = field, v) when is_list(v) do
-    if plain_rich_text?(field) and PortableText.blocks?(v), do: PortableText.to_html(v), else: v
+    if portable_text_field?(field, v), do: PortableText.to_html(v), else: v
   end
 
   defp form_image(%{"type" => "slug"}, %{} = v), do: SlugValue.text(v) || ""
@@ -676,6 +676,20 @@ defmodule Barkpark.Content.Forms do
 
   defp plain_rich_text?(_), do: false
 
+  # A richText field whose STORED value is Portable Text and which Classic
+  # edits as HTML: a plain richText field (#44), or a `body` richText that
+  # holds Portable Text instead of a PortableDoc block list. Sanity bodies keep
+  # that shape (the gyldendal.no twin, decision 0007); read as PortableDoc,
+  # every block rendered as "invalid block" and a Classic save dropped the edit.
+  defp portable_text_field?(field, value) do
+    PortableText.value?(value) and (plain_rich_text?(field) or portable_text_body?(field))
+  end
+
+  defp portable_text_body?(%{"type" => "richText", "name" => "body"} = field),
+    do: not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+
+  defp portable_text_body?(_), do: false
+
   # `%{"0" => a, "2" => c, "1" => b}` → `[a, b, c]`. Only a map whose EVERY key
   # is a non-negative integer string qualifies; anything else is returned
   # untouched so a genuinely map-shaped value is never guessed into a list.
@@ -921,11 +935,12 @@ defmodule Barkpark.Content.Forms do
   defp historical_body_blocks(%{"body" => %{"blocks" => _blocks}}),
     do: :malformed_historical_body
 
+  # A Portable Text body is a field value, not a PortableDoc block authority.
   defp historical_body_blocks(%{"body" => blocks} = content) when is_list(blocks) do
-    if block_maps?(blocks) do
-      {:ok, Projection.read_blocks(content), :list}
-    else
-      :malformed_historical_body
+    cond do
+      PortableText.value?(blocks) -> :none
+      block_maps?(blocks) -> {:ok, Projection.read_blocks(content), :list}
+      true -> :malformed_historical_body
     end
   end
 
