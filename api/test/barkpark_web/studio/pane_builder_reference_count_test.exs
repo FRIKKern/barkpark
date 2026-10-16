@@ -109,6 +109,12 @@ defmodule BarkparkWeb.Studio.PaneBuilderReferenceCountTest do
         "title" => "Kategorier uten utgivelser",
         "filter" => %{"_id" => %{"notReferencedBy" => "publication"}}
       },
+      %{
+        "kind" => "documentTypeList",
+        "id" => "utgivelser",
+        "type" => "publication",
+        "title" => "Utgivelser"
+      },
       # task-d99d878b061b435a: items whose filter names no type or field.
       %{
         "kind" => "documentTypeList",
@@ -184,5 +190,69 @@ defmodule BarkparkWeb.Studio.PaneBuilderReferenceCountTest do
     assert pane.filter_error =~ "names no field \"nope\""
 
     assert titles("kategorier-med-utgivelser") == ["Krim"]
+  end
+
+  # task-cca3c6d48e57097e: the Studio builds the desk for every URL. On gyl the
+  # «Etter virksomhet» group's reference test over 18,020 products ran inside
+  # every document open. The Studio now builds a group's children only when a
+  # walk enters the group.
+  describe "deferred groupBy children" do
+    test "opening a document elsewhere on the desk runs no reference test" do
+      sqls = capture_document_sql(fn -> PaneBuilder.build(@dataset, ["utgivelser", "pub-1"]) end)
+
+      refute Enum.any?(sqls, &(&1 =~ "jsonb_path_query_array")),
+             "a document open ran a reference-count query: #{inspect(sqls)}"
+    end
+
+    test "a group's child list still opens from its own path" do
+      {panes, _editor} = PaneBuilder.build(@dataset, ["etter-kategori", "desk-1-cat-krim"])
+
+      assert Enum.map(Enum.at(panes, -2).items, & &1.title) == ["Krim"]
+      assert List.last(panes).items |> Enum.map(& &1.title) == ["Nordic Noir"]
+    end
+
+    test "the structure API still carries the children; the Studio build defers them" do
+      eager = Barkpark.Structure.build(@dataset)
+      deferred = Barkpark.Structure.build(@dataset, defer_group_by: true)
+
+      group = fn tree -> Enum.find(tree.items, &(&1.id == "etter-kategori")) end
+
+      assert Enum.map(group.(eager).items, & &1.title) == ["Krim"]
+      assert group.(deferred).items == []
+      assert {:group_by, _item, _idx} = group.(deferred).deferred
+
+      expanded = Barkpark.Structure.expand(group.(deferred), @dataset, [])
+      assert Enum.map(expanded.items, & &1.title) == ["Krim"]
+    end
+  end
+
+  defp capture_document_sql(fun) do
+    parent = self()
+    id = "deferred-group-by-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      id,
+      [:barkpark, :repo, :query],
+      fn _e, _m, meta, _ ->
+        if self() == parent and meta[:source] == "documents", do: send(parent, {id, meta[:query]})
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(id)
+    end
+
+    collect(id, [])
+  end
+
+  defp collect(id, acc) do
+    receive do
+      {^id, sql} -> collect(id, [sql | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 end
