@@ -205,8 +205,41 @@ defmodule Barkpark.Content.Mutations do
         rescue
           Ecto.StaleEntryError -> {:error, :rev_mismatch}
         end
+
+      # task-bb3d759d9354bae9 — Postgres broke a lock cycle with a concurrent
+      # writer (40P01) or refused a serialization (40001) and rolled the batch
+      # back. Nothing was written and nothing was refused on its merits, so the
+      # batch runs once more, as for a stale row; a second loss answers the typed
+      # `rev_mismatch` (409) instead of 500 "unknown error (Postgrex.Error)".
+      e in Postgrex.Error ->
+        if lost_to_concurrent_writer?(e) do
+          require Logger
+
+          Logger.warning(
+            "[Mutations] #{e.postgres.code} under a concurrent writer; retrying the batch once"
+          )
+
+          Barkpark.Content.Warnings.restore(warnings)
+          Process.sleep(5 + :rand.uniform(20))
+
+          try do
+            do_apply_mutations(mutations, dataset, opts)
+          rescue
+            e in Postgrex.Error ->
+              if lost_to_concurrent_writer?(e),
+                do: {:error, :rev_mismatch},
+                else: reraise(e, __STACKTRACE__)
+          end
+        else
+          reraise(e, __STACKTRACE__)
+        end
     end
   end
+
+  defp lost_to_concurrent_writer?(%Postgrex.Error{postgres: %{code: code}}),
+    do: code in [:deadlock_detected, :serialization_failure]
+
+  defp lost_to_concurrent_writer?(_), do: false
 
   defp do_apply_mutations(mutations, dataset, opts) do
     dry_run? = Keyword.get(opts, :dry_run, false) == true
