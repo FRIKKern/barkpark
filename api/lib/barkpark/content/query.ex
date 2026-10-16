@@ -3186,7 +3186,9 @@ defmodule Barkpark.Content.Query do
     end
   end
 
-  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
+  # `:memoize` rides along so an HTTP request's catalog read is shared by every
+  # reference-count op it resolves; `request_memo/4` keys on scope, not on it.
+  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id, :memoize])
 
   defp maybe_require_published(query, opts) do
     if Keyword.get(opts, :require_published, false) do

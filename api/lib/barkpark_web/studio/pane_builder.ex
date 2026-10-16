@@ -69,7 +69,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # The DISPLAYED desk is the default-gated tree (charter Decisions 1/3): a
     # disabled plugin's tree and top-menu Media are absent, so panes[0] tells
     # the enablement truth. `gated` renders the root pane in EVERY case.
-    gated = dataset |> Structure.build(scope(opts)) |> StructureCopy.localize()
+    gated = dataset |> Structure.build(desk_opts(opts)) |> StructureCopy.localize()
 
     # Resolution walks gated-first. A raw nav_path whose head no longer sits at
     # the gated root (a stale pre-tiering deep link — e.g. the router's legacy
@@ -283,7 +283,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           nil ->
             ungated =
               dataset
-              |> Structure.build([gating: :none] ++ scope(opts))
+              |> Structure.build([gating: :none] ++ desk_opts(opts))
               |> StructureCopy.localize()
 
             cond do
@@ -429,6 +429,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         {panes, nil}
 
       %{type: :list} = node ->
+        node = node |> Structure.expand(dataset, scope(opts)) |> StructureCopy.localize()
+
         list_pane = %{
           title: node.title,
           role: :list,
@@ -896,6 +898,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # Returns the `[workspace_id: …, project_id: …]` list (or `[]` when no scope
   # was threaded), ready to append onto a Content read's opts. Nil-safe: the
   # Content query path no-ops on an empty/absent scope.
+  # The Studio builds the desk for every URL, so it defers what only an open
+  # pane shows: a `groupBy` node's children (task-cca3c6d48e57097e).
+  defp desk_opts(opts), do: [defer_group_by: true] ++ scope(opts)
+
   defp scope(opts) do
     case Keyword.get(opts, :scope) do
       kw when is_list(kw) -> kw
