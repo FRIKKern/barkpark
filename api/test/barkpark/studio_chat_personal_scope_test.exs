@@ -85,6 +85,8 @@ defmodule Barkpark.StudioChatPersonalScopeTest do
     assert restored.archived_at == nil
   end
 
+  # Plugins-off: this assertion needs the studio_chat Recorder registry running.
+  @tag :requires_plugins
   test "fresh and resumed provider starts are refused before adapter or host dispatch", ctx do
     for resume <- [false, true], target <- ["managed", "registered_host"] do
       assert {:error, :personal_chat_runtime_unavailable} =

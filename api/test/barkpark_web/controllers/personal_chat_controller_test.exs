@@ -1,5 +1,6 @@
 defmodule BarkparkWeb.PersonalChatControllerTest do
   use BarkparkWeb.ConnCase, async: false
+  # Plugins-off: the studio_chat capability owns these routes and the Recorder registry.
   @moduletag :requires_plugins
   import Barkpark.TenancyFixtures
   import Ecto.Query
