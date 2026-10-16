@@ -67,7 +67,18 @@ defmodule Barkpark.Groq.Source do
               take :: pos_integer()
             ) :: {:ok, [map()]} | :error
 
-  @optional_callbacks count: 2, scan_count: 4, slice: 5, scan_slice: 6
+  @doc """
+  Optional. Every document `constraints` match, which the caller guarantees
+  match exactly, in `_id` order as `fetch/2` returns them. The evaluator keeps
+  them all without testing the filter again. With `fields` a list of
+  top-level keys, a document need hold only those keys and the system fields;
+  the caller reads no other key. `:error` when the source cannot answer
+  without loading; the evaluator then fetches and filters.
+  """
+  @callback fetch_exact(state :: term(), constraints :: map(), fields :: [String.t()] | :all) ::
+              {:ok, [map()]} | :error
+
+  @optional_callbacks count: 2, scan_count: 4, slice: 5, scan_slice: 6, fetch_exact: 3
 
   @spec fetch(t(), map()) :: [map()]
   def fetch({mod, state}, constraints), do: mod.fetch(state, constraints)
@@ -106,6 +117,13 @@ defmodule Barkpark.Groq.Source do
   def scan_slice({mod, state}, constraints, cache, keep?, rank, take) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :scan_slice, 6),
       do: mod.scan_slice(state, constraints, cache, keep?, rank, take),
+      else: :error
+  end
+
+  @spec fetch_exact(t(), map(), [String.t()] | :all) :: {:ok, [map()]} | :error
+  def fetch_exact({mod, state}, constraints, fields) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_exact, 3),
+      do: mod.fetch_exact(state, constraints, fields),
       else: :error
   end
 

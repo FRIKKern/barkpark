@@ -338,6 +338,94 @@ defmodule Barkpark.Content.EnvelopeTest do
     assert Enum.at(many, 1)["meta"] == %{"open" => "o"}
   end
 
+  test "render_many_by_type on a schema that restricts nothing and declares no object kids drops only ciphertext",
+       %{doc: post} do
+    enc = FieldCipher.encrypt("ssn-9", "dataset:test")
+
+    # Built in memory: the write path refuses a ciphertext it did not seal.
+    doc = %{
+      post
+      | doc_id: "env-5",
+        content: %{
+          "body" => "b",
+          "tags" => ["t", %{"_bpenc" => 1}],
+          "meta" => %{"inner" => %{"_bpenc" => 1}},
+          "ssn" => enc,
+          "undeclared" => enc,
+          "plain" => 1.5
+        }
+    }
+
+    # Kidless declarations: a scalar, an array of scalars, an array whose
+    # item shape has no kids, and an object with no declared kids.
+    plain =
+      schema_with([
+        %{"name" => "body"},
+        %{"name" => "tags", "type" => "array", "of" => [%{"type" => "string"}]},
+        %{"name" => "list", "type" => "arrayOf", "of" => %{"type" => "string"}},
+        %{"name" => "meta", "type" => "object"},
+        %{"name" => "ssn"}
+      ])
+
+    # The same with one object kid, which takes the full walk.
+    walked =
+      schema_with([
+        %{"name" => "body"},
+        %{"name" => "tags", "type" => "array", "of" => [%{"type" => "string"}]},
+        %{"name" => "meta", "type" => "object", "fields" => [%{"name" => "inner"}]},
+        %{"name" => "ssn"}
+      ])
+
+    ctx = CallerContext.anonymous()
+
+    for schema <- [plain, walked], caller <- [ctx, nil] do
+      [many] = Envelope.render_many_by_type([doc], fn _ -> schema end, caller)
+      assert many == Envelope.render(doc, schema, caller)
+    end
+
+    [env] = Envelope.render_many_by_type([doc], fn _ -> plain end, ctx)
+    refute Map.has_key?(env, "ssn")
+    refute Map.has_key?(env, "undeclared")
+    assert env["tags"] == ["t", %{"_bpenc" => 1}]
+    assert env["meta"] == %{"inner" => %{"_bpenc" => 1}}
+    assert env["_id"] == "env-5"
+
+    # The declared kid holding ciphertext is dropped by the walk.
+    [env] = Envelope.render_many_by_type([doc], fn _ -> walked end, ctx)
+    assert env["meta"] == %{}
+  end
+
+  test "drops_ciphertext? is true for a caller without admin when a field at any depth is encrypted" do
+    nested =
+      schema_with([
+        %{
+          "name" => "meta",
+          "type" => "object",
+          "fields" => [%{"name" => "pin", "encrypted" => true}]
+        }
+      ])
+
+    item =
+      schema_with([
+        %{
+          "name" => "rows",
+          "type" => "arrayOf",
+          "of" => %{"type" => "object", "fields" => [%{"name" => "pin", "encrypted" => true}]}
+        }
+      ])
+
+    top = schema_with([%{"name" => "ssn", "encrypted" => true}])
+
+    for schema <- [nested, item, top] do
+      assert Envelope.drops_ciphertext?(schema, CallerContext.anonymous())
+      assert Envelope.drops_ciphertext?(schema, nil)
+      refute Envelope.drops_ciphertext?(schema, admin())
+      refute Envelope.drops_ciphertext?(schema, :internal)
+    end
+
+    refute Envelope.drops_ciphertext?(schema_with([%{"name" => "ssn", "private" => true}]), nil)
+  end
+
   test "render_many_by_type leaves an admin unredacted", %{doc: post} do
     resolver = fn _ -> schema_with([%{"name" => "body", "private" => true}]) end
     [env] = Envelope.render_many_by_type([post], resolver, admin())
