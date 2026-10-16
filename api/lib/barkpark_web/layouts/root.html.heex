@@ -3706,6 +3706,19 @@
       border-bottom: 1px solid var(--border-muted);
     }
     bp-reference-picker .bp-ref-dropdown-item:hover { background: var(--bg-accent); }
+    /* A hit with a list preview (task-75cb2cac1e875214) reads like its desk
+       row: thumbnail, title, subtitle and description lines. */
+    bp-reference-picker .bp-ref-dropdown-item.bp-ref-hit { display: flex; align-items: center; gap: 10px; }
+    bp-reference-picker .bp-ref-hit-media {
+      width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0; overflow: hidden;
+      display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
+    }
+    bp-reference-picker .bp-ref-hit-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    bp-reference-picker .bp-ref-hit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    bp-reference-picker .bp-ref-hit-sub {
+      font-size: var(--text-xs); color: var(--fg-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     bp-reference-picker .bp-ref-dropdown-empty {
       padding: 8px 12px; font-size: var(--text-sm); color: var(--fg-dim);
     }

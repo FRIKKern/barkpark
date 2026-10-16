@@ -491,6 +491,9 @@ defmodule BarkparkWeb.StudioComponents.Panes do
                           subtitle line under the title (a declared/manifest
                           summary, or a humanized updated-at fallback supplied
                           by PaneBuilder). nil → no subtitle line.
+    * `:description`    — optional string; a second line under `:meta`, the
+                          schema's `list_preview.description` (Sanity's preview
+                          `description`). nil → no line.
 
   ## Slots
 
@@ -508,6 +511,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   attr :selected, :boolean, default: false
   attr :badge, :string, default: nil
   attr :meta, :string, default: nil
+  attr :description, :string, default: nil
 
   # ── Row media (Gyldendal parity E3.3) ──────────────────────────────────
   # `media` is the image url a schema's `list_preview.media` field resolved
@@ -597,6 +601,9 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           <%= if @meta do %>
             <span class="pane-doc-sub"><%= @meta %></span>
           <% end %>
+          <%= if @description do %>
+            <span class="pane-doc-sub pane-doc-desc"><%= @description %></span>
+          <% end %>
         </span>
         <span class="pane-doc-chevron" aria-hidden="true">
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24"
@@ -621,7 +628,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   defp doc_row_label(assigns) do
     status = status_word(if assigns.is_draft, do: "draft", else: assigns.status)
 
-    [assigns.title, status, assigns[:badge], assigns[:meta]]
+    [assigns.title, status, assigns[:badge], assigns[:meta], assigns[:description]]
     |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
     |> Enum.join(", ")
   end

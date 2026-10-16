@@ -37,6 +37,7 @@ Exact id, then the title equal to the query, then a score: the full-text rank; t
 | `filter[...]` | The query API's field filters ([query-surface-limits.md](query-surface-limits.md)), applied before the limit, the count and the facets. Needs `type`. |
 | `facet=a,b` | Up to 10 top-level content fields: value counts over the filtered match in `facets.fields.<name>`, at most 100 values, biggest first. Needs `type`; a field the caller may not read is `forbidden_field`. |
 | `limit`, `offset` | `limit` 1 to 200. `offset` pages through the whole match set; `count` is exact. |
+| `preview=1` | Each hit gains `_preview`: the `subtitle`, `description` and `media` its type's `list_preview` declares, as a Studio desk row shows them (`HitPreview`). Referenced documents are rendered for the caller first. No previews for an anonymous caller. |
 
 ## Code anchors
 

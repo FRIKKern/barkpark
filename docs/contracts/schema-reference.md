@@ -5,7 +5,7 @@ Every key a schema may declare when you `POST /v1/schemas/:dataset` (or `bp sche
 
 ## The schema object
 
-`name` and `title` are required. The changeset stores these keys and drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `fieldsets`, `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), `list_preview`, `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`).
+`name` and `title` are required. The changeset stores these keys and drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `fieldsets`, `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), [`list_preview`](list-preview.md), `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`).
 
 A top-level `validations` list is read by `parse/2` but not cast, so it is not stored.
 
