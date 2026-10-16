@@ -563,13 +563,15 @@ defmodule Barkpark.Groq.DocumentSource do
 
   # The conditions of a key that the indexes serve, on the stored `content`
   # and the columns, so the index finds the candidate rows the copy then
-  # tests: the `_id` list, the first `references()` list, and every equality,
-  # `in`, member and element test as one jsonpath predicate,
-  # `strict $ ? (@."a" == 1 && (@."b" == "x" || ...) && exists(...))`, which
-  # `documents_content_path_idx` answers in full and which reads a row once.
-  # A key with none of these narrows by its first probe list, a probe join or
-  # an `||` whose every branch narrows. Each condition is implied by the key,
-  # so the narrowing changes no result.
+  # tests: the `_id` list, each `references()` or mixed probe list, and every
+  # equality, `in`, member and element test and containment probe list as one
+  # jsonpath predicate, `lax $ ? (@."a" == 1 && (@."b" == "x" || ...) &&
+  # exists(...))`. `documents_content_path_idx` answers the predicate in full,
+  # with every term, and it reads a row once. Lax mode makes it a superset of
+  # the exact tests and of containment, which also matches a value inside an
+  # array. A key with none of these narrows by a probe join or an `||` whose
+  # every branch narrows. Each condition is implied by the key, so the
+  # narrowing changes no result.
   defp narrowing(key, perspective) do
     case narrowings(key, perspective) do
       [] -> dynamic(true)
@@ -578,31 +580,51 @@ defmodule Barkpark.Groq.DocumentSource do
   end
 
   defp narrowings({_types, ids, eq, any, checks}, perspective) do
+    {path_probes, other_probes} = Enum.split_with(any, &probes_test/1)
+
     tests =
       Enum.flat_map(eq, fn
         {["title"], _value} -> []
         {path, value} -> ["@" <> jsonpath_fields(path) <> " == " <> Jason.encode!(value)]
-      end) ++ Enum.flat_map(checks, &path_test/1)
-
-    refs =
-      Enum.find(any, fn probes -> probes != [] and Enum.all?(probes, &match?({:refs, _}, &1)) end)
+      end) ++ Enum.map(path_probes, &probes_test/1) ++ Enum.flat_map(checks, &path_test/1)
 
     found =
       Enum.filter(
         [
           ids && ids_condition(ids, perspective),
-          refs && stored_probes(refs, perspective),
-          tests != [] && stored_jsonpath("strict $ ? (" <> Enum.join(tests, " && ") <> ")")
+          tests != [] && stored_jsonpath("lax $ ? (" <> Enum.join(tests, " && ") <> ")")
+          | Enum.map(other_probes, &stored_probes(&1, perspective))
         ],
         & &1
       )
 
-    cond do
-      found != [] -> found
-      any != [] -> [stored_probes(hd(any), perspective)]
-      true -> checks |> Enum.find_value(&check_narrowing(&1, perspective)) |> List.wrap()
+    case found do
+      [] -> checks |> Enum.find_value(&check_narrowing(&1, perspective)) |> List.wrap()
+      found -> found
     end
   end
+
+  # A probe list of containment maps as one jsonpath term, or nil. Each map
+  # is one chain from `Pushdown.nest/2`, `{"a": [{"b": v}]}`, read as
+  # `@."a"[*]."b" == v`. An empty list matches nothing.
+  defp probes_test([]), do: "false"
+
+  defp probes_test(probes) do
+    terms = Enum.map(probes, &probe_term(&1, "@"))
+    if Enum.all?(terms, &is_binary/1), do: "(" <> Enum.join(terms, " || ") <> ")"
+  end
+
+  defp probe_term(map, at) when is_map(map) and map_size(map) == 1 do
+    [{key, value}] = Map.to_list(map)
+    probe_term(value, at <> "." <> Jason.encode!(key))
+  end
+
+  defp probe_term([value], at), do: probe_term(value, at <> "[*]")
+
+  defp probe_term(value, at) when is_binary(value) or is_number(value) or is_boolean(value),
+    do: at <> " == " <> Jason.encode!(value)
+
+  defp probe_term(_value, _at), do: nil
 
   # An exact test as one term of the jsonpath predicate, or none.
   defp path_test({:in, _path, []}), do: ["false"]
