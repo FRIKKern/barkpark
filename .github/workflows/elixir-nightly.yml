@@ -233,7 +233,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload the full log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: elixir-nightly-log-${{ github.sha }}
           path: api/nightly-test.log
@@ -455,7 +455,7 @@ jobs:
 
       - name: Upload parity artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: view-edit-parity-${{ github.sha }}
           path: ${{ runner.temp }}/view-edit-parity
