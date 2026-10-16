@@ -5466,8 +5466,8 @@
   <script src="/assets/bp-tab-keys.js"></script>
   <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
         nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
-        delegates to `window.BarkparkDatetimeFieldHook` and waits for
-        DOMContentLoaded, which fires only after deferred scripts have run. --%>
+        delegates to `window.BarkparkDatetimeFieldHook` and waits until this
+        script has run when it mounts first (task-cf45242ef3477fba). --%>
   <script src="/assets/bp-datetime-field.js" defer></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
@@ -6715,27 +6715,74 @@
 
     // BarkparkDatetimeField — a datetime field shows local wall time and
     // saves a UTC instant ("...Z"). The logic lives in the deferred
-    // /assets/bp-datetime-field.js; this entry delegates to it, waiting for
-    // DOMContentLoaded (after every deferred script) if it is not there yet.
+    // /assets/bp-datetime-field.js; this entry delegates to it.
+    //
+    // The hook can mount BEFORE that script has run (task-cf45242ef3477fba):
+    // LiveView joins while the document is "interactive", which is before
+    // deferred scripts execute, and on gyl the event pickers stayed empty
+    // because the old entry ran once, found no implementation and never
+    // retried. So a call made before the implementation exists waits for it:
+    // the script's load event, DOMContentLoaded, window load, or a short poll,
+    // whichever sees it first. Only `mounted` waits; an `updated` before that
+    // is dropped (mounted reads the current value anyway), and a `destroyed`
+    // before that cancels the wait.
+    // bp-deferred-hook:start
     Hooks.BarkparkDatetimeField = (() => {
+      const GLOBAL = "BarkparkDatetimeFieldHook";
+      const SCRIPT = 'script[src^="/assets/bp-datetime-field.js"]';
+      let waiting = null;
+      const whenReady = (cb) => {
+        if (window[GLOBAL]) return cb();
+        if (!waiting) {
+          waiting = [];
+          let timer = null;
+          let tries = 0;
+          const flush = () => {
+            if (!window[GLOBAL] || !waiting) return;
+            const queued = waiting;
+            waiting = null;
+            if (timer) clearInterval(timer);
+            queued.forEach((fn) => fn());
+          };
+          const el = document.querySelector(SCRIPT);
+          if (el) el.addEventListener("load", flush, { once: true });
+          document.addEventListener("DOMContentLoaded", flush, { once: true });
+          window.addEventListener("load", flush, { once: true });
+          // The poll covers a script that ran before the listeners above
+          // were added. It stops after 30 s.
+          timer = setInterval(() => {
+            tries += 1;
+            if (window[GLOBAL]) flush();
+            else if (tries > 600) clearInterval(timer);
+          }, 50);
+        }
+        waiting.push(cb);
+      };
       const call = (name, self) => {
-        const run = () => {
-          const impl = window.BarkparkDatetimeFieldHook;
-          if (!impl || !impl[name]) return;
-          // The implementation's private helpers (`_sync`, `_hidden`, …)
-          // ride on `this`, as they would for a directly registered hook.
-          for (const k of Object.keys(impl)) if (k.startsWith("_")) self[k] = impl[k];
-          impl[name].call(self);
-        };
-        if (window.BarkparkDatetimeFieldHook || document.readyState !== "loading") run();
-        else document.addEventListener("DOMContentLoaded", run, { once: true });
+        const impl = window[GLOBAL];
+        if (!impl || !impl[name]) return;
+        // The implementation's private helpers (`_sync`, `_hidden`, …)
+        // ride on `this`, as they would for a directly registered hook.
+        for (const k of Object.keys(impl)) if (k.startsWith("_")) self[k] = impl[k];
+        impl[name].call(self);
       };
       return {
-        mounted() { call("mounted", this); },
-        updated() { call("updated", this); },
-        destroyed() { call("destroyed", this); }
+        mounted() {
+          this.__bpLive = true;
+          whenReady(() => {
+            if (!this.__bpLive) return;
+            this.__bpMounted = true;
+            call("mounted", this);
+          });
+        },
+        updated() { if (this.__bpMounted) call("updated", this); },
+        destroyed() {
+          this.__bpLive = false;
+          if (this.__bpMounted) call("destroyed", this);
+        }
       };
     })();
+    // bp-deferred-hook:end
 
     // BarkparkColorField — keeps an OPTIONAL color field from autosaving a
     // phantom hex. Mounted on the wrapper holding a hidden <input> (the only
