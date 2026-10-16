@@ -47,9 +47,28 @@ class BpRichTextEditor extends HTMLElement {
     if (this.dataset.label) this._editor.setAttribute("aria-label", this.dataset.label);
     this._editor.innerHTML = initial;
     this.appendChild(this._editor);
+    this._decorateBlocks();
 
     this._onInput = () => this._emit();
     this._editor.addEventListener("input", this._onInput);
+
+    // A custom Portable Text block (a mediaModule, a quote) is a box the text
+    // cannot edit. Clicking it, or Enter or Space on it, asks the host to open
+    // its fields (task-19392d1e6fc661e6).
+    this._onBlockClick = (e) => {
+      const box = e.target.closest && e.target.closest(".bp-pt-block[data-pt-block]");
+      if (!box || !this._editor.contains(box) || box.dataset.ptPending) return;
+      e.preventDefault();
+      this._openBlock(box);
+    };
+    this._onBlockKey = (e) => {
+      const box = e.target.closest && e.target.closest(".bp-pt-block[data-pt-block]");
+      if (!box || box.dataset.ptPending || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      this._openBlock(box);
+    };
+    this._editor.addEventListener("click", this._onBlockClick);
+    this._editor.addEventListener("keydown", this._onBlockKey);
 
     // Paste-as-plain-text: strip formatting + sanitise XSS surface.
     // document.execCommand is deprecated but supported across current
@@ -69,6 +88,8 @@ class BpRichTextEditor extends HTMLElement {
     if (this._editor) {
       if (this._onInput) this._editor.removeEventListener("input", this._onInput);
       if (this._onPaste) this._editor.removeEventListener("paste", this._onPaste);
+      if (this._onBlockClick) this._editor.removeEventListener("click", this._onBlockClick);
+      if (this._onBlockKey) this._editor.removeEventListener("keydown", this._onBlockKey);
     }
   }
 
@@ -77,9 +98,118 @@ class BpRichTextEditor extends HTMLElement {
       new CustomEvent("bp-change", {
         bubbles: true,
         composed: false,
-        detail: { value: this._html() }
+        detail: { value: this._serialize() }
       })
     );
+  }
+
+  // The editor HTML without the attributes the editor adds for display: a
+  // link's document title (`_loadLinkTitles`) and what `_decorateBlocks` adds
+  // to make a block box a button. A post carries the server's markup.
+  _serialize() {
+    if (!this._editor) return "";
+    if (!this._editor.querySelector("[data-bp-title], .bp-pt-block[data-pt-decorated]")) return this._editor.innerHTML;
+    const copy = this._editor.cloneNode(true);
+    for (const a of copy.querySelectorAll("[data-bp-title]")) {
+      a.removeAttribute("title");
+      a.removeAttribute("data-bp-title");
+    }
+    copy.querySelectorAll(".bp-pt-block[data-pt-decorated]").forEach((b) => {
+      ["tabindex", "role", "title", "aria-label", "data-pt-decorated"].forEach((a) => b.removeAttribute(a));
+    });
+    return copy.innerHTML;
+  }
+
+  _t(text) {
+    let strings = {};
+    try { strings = JSON.parse(this.getAttribute("data-strings") || "{}") || {}; } catch (_e) { strings = {}; }
+    return typeof strings[text] === "string" ? strings[text] : text;
+  }
+
+  // Each block box becomes a button: focusable, named, and opened on Enter.
+  _decorateBlocks() {
+    if (!this._editor) return;
+    this._editor.querySelectorAll(".bp-pt-block[data-pt-block]").forEach((b) => {
+      if (b.dataset.ptPending) return;
+      const label = this._t("Edit block") + ": " + (b.dataset.ptType || "");
+      b.setAttribute("tabindex", "0");
+      b.setAttribute("role", "button");
+      b.setAttribute("title", label);
+      b.setAttribute("aria-label", label);
+      b.setAttribute("data-pt-decorated", "");
+    });
+  }
+
+  _openBlock(box) {
+    this.dispatchEvent(
+      new CustomEvent("bp-pt-block-open", {
+        bubbles: true,
+        composed: false,
+        detail: { key: box.dataset.ptBlock, type: box.dataset.ptType, html: this._serialize() }
+      })
+    );
+  }
+
+  // "Insert block": a placeholder box goes after the block the caret is in,
+  // and the host asks the server for the new block. The placeholder names no
+  // stored block, so a post that races the answer adds nothing for it.
+  _insertBlock(type) {
+    if (!this._editor) return;
+    this._pendingSeq = (this._pendingSeq || 0) + 1;
+    const pending = "p" + Date.now().toString(36) + this._pendingSeq;
+    const ph = document.createElement("div");
+    ph.className = "bp-pt-block bp-pt-pending";
+    ph.setAttribute("contenteditable", "false");
+    ph.setAttribute("data-pt-block", "__pending-" + pending);
+    ph.setAttribute("data-pt-pending", pending);
+    ph.textContent = this._t("Inserting block…");
+
+    let anchor = null;
+    const range = this._lastRange;
+    if (range && this._editor.contains(range.startContainer)) {
+      anchor = range.startContainer;
+      while (anchor && anchor.parentNode !== this._editor) anchor = anchor.parentNode;
+    }
+    if (anchor && anchor.nextSibling) this._editor.insertBefore(ph, anchor.nextSibling);
+    else this._editor.appendChild(ph);
+
+    this.dispatchEvent(
+      new CustomEvent("bp-pt-block-insert", {
+        bubbles: true,
+        composed: false,
+        detail: { type, pending, html: this._serialize() }
+      })
+    );
+  }
+
+  _boxFrom(html) {
+    const tmp = document.createElement("div");
+    tmp.innerHTML = html || "";
+    return tmp.firstElementChild;
+  }
+
+  // The server's answer to `_insertBlock`: the new block's box (or nothing,
+  // when the server refused) takes the placeholder's place.
+  ptBlockReady(pending, key, html) {
+    if (!this._editor) return;
+    const ph = this._editor.querySelector('[data-pt-pending="' + CSS.escape(pending) + '"]');
+    if (!ph) return;
+    const box = key ? this._boxFrom(html) : null;
+    if (box) ph.replaceWith(box);
+    else ph.remove();
+    this._decorateBlocks();
+    this._emit();
+  }
+
+  // A saved block's box shows its new summary.
+  ptBlockUpdate(key, html) {
+    if (!this._editor) return;
+    const old = this._editor.querySelector('.bp-pt-block[data-pt-block="' + CSS.escape(key) + '"]');
+    const box = this._boxFrom(html);
+    if (old && box) {
+      old.replaceWith(box);
+      this._decorateBlocks();
+    }
   }
 
   // ── Toolbar (B / I / Link) ────────────────────────────────────────────
@@ -132,7 +262,33 @@ class BpRichTextEditor extends HTMLElement {
       "</span>" +
       '<button type="button" class="bp-rte-btn bp-rte-unset">' + t("Remove") + "</button>" +
       "</span>";
+    // The custom blocks the field declares (`blocks.of`), as an "Insert block"
+    // menu (task-19392d1e6fc661e6). No declared block, no menu.
+    let blockTypes = [];
+    try { blockTypes = JSON.parse(this.getAttribute("data-block-types") || "[]") || []; } catch (_e) { blockTypes = []; }
+    if (Array.isArray(blockTypes) && blockTypes.length) {
+      const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+      bar.insertAdjacentHTML(
+        "beforeend",
+        '<span class="bp-rte-sep" aria-hidden="true"></span>' +
+        '<select class="bp-rte-insert" aria-label="' + t("Insert block") + '">' +
+        '<option value="">' + t("Insert block…") + "</option>" +
+        blockTypes.map((b) => '<option value="' + esc(b.name) + '">' + esc(b.title || b.name) + "</option>").join("") +
+        "</select>"
+      );
+    }
     this.appendChild(bar);
+    const insertMenu = bar.querySelector(".bp-rte-insert");
+    if (insertMenu) {
+      // The menu keeps the caret the author left in the text (`_lastRange`).
+      insertMenu.addEventListener("change", (e) => {
+        e.stopPropagation();
+        const type = insertMenu.value;
+        insertMenu.value = "";
+        if (type) this._insertBlock(type);
+      });
+      insertMenu.addEventListener("input", (e) => e.stopPropagation());
+    }
 
     const exec = (cmd, arg) => {
       this._editor.focus();
@@ -396,13 +552,7 @@ class BpRichTextEditor extends HTMLElement {
 
   // The editor's HTML without the titles _paintTitle added.
   _html() {
-    if (!this._editor.querySelector("[data-bp-title]")) return this._editor.innerHTML;
-    const copy = this._editor.cloneNode(true);
-    for (const a of copy.querySelectorAll("[data-bp-title]")) {
-      a.removeAttribute("title");
-      a.removeAttribute("data-bp-title");
-    }
-    return copy.innerHTML;
+    return this._serialize();
   }
 
   // The <a> the current selection sits inside, if any — pre-fills the URL
@@ -421,7 +571,7 @@ class BpRichTextEditor extends HTMLElement {
   // Programmatic getter/setter for future server-pushed updates and
   // for tests. Reflects to the contenteditable's innerHTML.
   get value() {
-    return this._editor ? this._html() : "";
+    return this._serialize();
   }
 
   set value(v) {

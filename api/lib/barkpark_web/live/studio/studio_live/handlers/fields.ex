@@ -376,6 +376,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
   defp fold_dot_paths(params, socket) do
+    params = BarkparkWeb.Studio.StudioLive.Path.unmangle_params(params)
     touched = touched_paths(socket)
     base_form = base_form(socket)
 
@@ -565,7 +566,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
       new_list =
         case action do
-          "add_row" -> ArrayField.add_row(current, StudioLive.empty_for_of(field))
+          "add_row" -> add_row(current, field, params["member"], keyed_parent?(form, key_path))
           "remove_row" -> ArrayField.remove_row(current, idx)
           "move_up" -> ArrayField.move_up(current, idx)
           "move_down" -> ArrayField.move_down(current, idx)
@@ -575,6 +576,74 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       new_form = StudioLive.put_value_at(form, key_path, new_list)
       {:noreply, mark_dirty(Shared.do_autosave(socket, new_form, :array_op))}
     end
+  end
+
+  @doc false
+  # A new row. In a several-member array (`of` is a list) it is the member the
+  # editor chose, with `_type` and a fresh `_key`; with no chosen member,
+  # nothing is added. In a single-`of` array whose rows carry Sanity's `_key`
+  # (and `_type`), the new row gets them too, so the list keeps one shape
+  # (task-e24e33a2a1a4fe10).
+  #
+  # `keyed_parent?` says the list sits inside an object that carries a `_key`
+  # (a page-builder item, a custom block): Sanity's shape, where every object
+  # in an array has a `_key`. A first row of an empty list there gets one too.
+  def add_row(current, field, member, keyed_parent? \\ false)
+
+  def add_row(current, %{"of" => members} = field, member, _keyed_parent?)
+      when is_list(members) do
+    case BarkparkWeb.Studio.StudioLive.Path.empty_for_of(field, member) do
+      %{} = row -> ArrayField.add_row(current, row)
+      _ -> current
+    end
+  end
+
+  def add_row(current, field, _member, keyed_parent?) do
+    row = StudioLive.empty_for_of(field)
+
+    keyed? =
+      if current == [],
+        do: keyed_parent?,
+        else: Enum.all?(current, &match?(%{"_key" => _}, &1))
+
+    row =
+      if is_map(row) and keyed? do
+        row
+        |> Map.put("_key", BarkparkWeb.Studio.StudioLive.Path.new_key())
+        |> maybe_put_type(field, current)
+      else
+        row
+      end
+
+    ArrayField.add_row(current, row)
+  end
+
+  defp maybe_put_type(row, %{"of" => %{"namedType" => t}}, current) when is_binary(t) do
+    if Enum.all?(current, &match?(%{"_type" => _}, &1)), do: Map.put(row, "_type", t), else: row
+  end
+
+  defp maybe_put_type(row, _field, _current), do: row
+
+  @doc false
+  # True when an object on the way to the list at `path` carries a `_key`.
+  def keyed_parent?(value, path) do
+    path
+    |> Enum.drop(-1)
+    |> Enum.reduce_while({value, false}, fn seg, {v, _} ->
+      next =
+        cond do
+          is_integer(seg) and is_list(v) -> Enum.at(v, seg)
+          is_binary(seg) and is_map(v) -> Map.get(v, seg)
+          true -> nil
+        end
+
+      cond do
+        is_map(next) and is_map_key(next, "_key") -> {:halt, {next, true}}
+        is_nil(next) -> {:halt, {nil, false}}
+        true -> {:cont, {next, false}}
+      end
+    end)
+    |> elem(1)
   end
 
   # A user-driven form edit leaves the browser buffer ahead of the last remote

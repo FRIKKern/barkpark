@@ -3700,6 +3700,16 @@
       user-select: none;
     }
     .bp-rte-body .bp-pt-block strong { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-xs); }
+    /* A block box opens its fields on click or Enter (task-19392d1e6fc661e6). */
+    .bp-rte-body .bp-pt-block[data-pt-decorated] { cursor: pointer; }
+    .bp-rte-body .bp-pt-block[data-pt-decorated]:hover { border-color: var(--primary); color: var(--fg); }
+    .bp-rte-body .bp-pt-block[data-pt-decorated]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+    .bp-rte-body .bp-pt-pending { opacity: 0.6; }
+    .bp-rte-insert {
+      height: 24px; padding: 0 6px;
+      border: 1px solid var(--input); border-radius: 4px;
+      background: var(--bg); color: var(--fg); font-size: var(--text-xs);
+    }
     bp-reference-picker { display: block; }
     bp-reference-picker .bp-ref-search-input { width: 100%; }
     bp-reference-picker .bp-ref-dropdown {
@@ -4035,6 +4045,18 @@
       border-color: var(--primary); border-style: solid;
     }
 
+    /* "Add item" of a several-member array: a menu of the member types. */
+    .bp-array-add-menu > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
+    .bp-array-add-menu > summary::-webkit-details-marker { display: none; }
+    .bp-array-add-members {
+      display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none;
+    }
+    .bp-array-add-member {
+      height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); color: var(--fg); font-size: var(--text-sm); cursor: pointer;
+    }
+    .bp-array-add-member:hover { background: var(--bg-accent); border-color: var(--primary); }
+
     /* LocalizedText rows */
     .bp-localized-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
     .bp-localized-warning {
@@ -4190,6 +4212,15 @@
     }
     .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
     .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
+    /* The Portable Text block dialog: wider than a picker, the fields scroll
+       and Cancel and Save stay in view (task-19392d1e6fc661e6). */
+    .bp-object-dialog { width: min(720px, 100%); max-height: min(88vh, 900px); }
+    .bp-object-dialog > form { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+    .bp-object-dialog-body { flex: 1 1 auto; min-height: 0; }
+    .bp-object-dialog-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+      padding: 12px 20px; border-top: 1px solid var(--border-muted);
+    }
 
     /* Schema-action confirm modal (spd-w5f). `components/confirm_modal.ex`
        carried this whole surface in a `style="…"` attribute: `position: fixed;
@@ -6718,6 +6749,42 @@
     // subfields always show); `updated()` re-applies the choice after every
     // LiveView patch so an autosave never snaps the author back to tab one.
     // Every subfield stays in the DOM, so the form serialises the whole object.
+    // BarkparkPtBlocks — the Classic rich-text editor's custom Portable Text
+    // blocks (task-19392d1e6fc661e6). Mounted on the div around the ignored
+    // editor wrapper. A click on a block box (`bp-pt-block-open`) asks the
+    // server to open that block's fields in the block dialog; "Insert block"
+    // (`bp-pt-block-insert`) asks it for a new block at the caret. The server
+    // answers `bp:pt-block-ready` (put the new block's box where the
+    // placeholder is) and `bp:pt-block-update` (redraw a saved block's box).
+    Hooks.BarkparkPtBlocks = {
+      mounted() {
+        const field = this.el.dataset.field;
+        const editor = () => this.el.querySelector("bp-rich-text-editor");
+        this._onOpen = (e) => {
+          const d = e.detail || {};
+          this.pushEvent("pt-block-open", { field, key: d.key, html: d.html });
+        };
+        this._onInsert = (e) => {
+          const d = e.detail || {};
+          this.pushEvent("pt-block-insert", { field, type: d.type, pending: d.pending, html: d.html });
+        };
+        this.el.addEventListener("bp-pt-block-open", this._onOpen);
+        this.el.addEventListener("bp-pt-block-insert", this._onInsert);
+        this.handleEvent("bp:pt-block-ready", (p) => {
+          const ed = editor();
+          if (p.field === field && ed && ed.ptBlockReady) ed.ptBlockReady(p.pending, p.key, p.html);
+        });
+        this.handleEvent("bp:pt-block-update", (p) => {
+          const ed = editor();
+          if (p.field === field && ed && ed.ptBlockUpdate) ed.ptBlockUpdate(p.key, p.html);
+        });
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-pt-block-open", this._onOpen);
+        this.el.removeEventListener("bp-pt-block-insert", this._onInsert);
+      },
+    };
+
     Hooks.BarkparkFieldGroups = {
       mounted() {
         this.active = this.el.dataset.defaultGroup || null;

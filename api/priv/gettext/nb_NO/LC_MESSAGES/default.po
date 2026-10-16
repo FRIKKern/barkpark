@@ -12943,3 +12943,48 @@ msgstr "Handlingen %{name} hører til et tillegg som er slått av i dette arbeid
 #, elixir-autogen, elixir-format
 msgid "Not one of the options"
 msgstr "Ikke et av valgene"
+
+#: lib/barkpark_web/components/fields/array_field.ex
+#, elixir-autogen, elixir-format
+msgid "Add item"
+msgstr "Legg til element"
+
+#: lib/barkpark_web/components/fields/array_field.ex
+#, elixir-autogen, elixir-format
+msgid "No items"
+msgstr "Ingen elementer"
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "read-only — no schema declares this item type; saved unchanged"
+msgstr "skrivebeskyttet – ingen skjema beskriver denne elementtypen; lagres uendret"
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "Save block"
+msgstr "Lagre blokk"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This block cannot be opened in a form."
+msgstr "Denne blokken kan ikke åpnes i et skjema."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This block type cannot be inserted here."
+msgstr "Denne blokktypen kan ikke settes inn her."
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Insert block…"
+msgstr "Sett inn blokk…"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Inserting block…"
+msgstr "Setter inn blokk…"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Edit block"
+msgstr "Rediger blokk"

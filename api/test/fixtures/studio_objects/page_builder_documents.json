@@ -1,0 +1,1001 @@
+{
+ "source": "Synthetic: invented schemas and documents with the shapes of a Sanity page-builder site.",
+ "article_tier": [
+  "mediaModule",
+  "inlineFeaturedProducts",
+  "featureModule",
+  "quote",
+  "personCard",
+  "videoClip",
+  "textModule",
+  "conferenceModule",
+  "faqBlock",
+  "newsletterFormSection",
+  "anchorPoint"
+ ],
+ "object_schemas": [
+  {
+   "name": "themeStyling",
+   "kind": "object",
+   "title": "Theme",
+   "fields": [
+    {
+     "name": "theme",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "link",
+   "kind": "object",
+   "title": "Link",
+   "fields": [
+    {
+     "name": "href",
+     "type": "string"
+    },
+    {
+     "name": "openInNewTab",
+     "type": "boolean",
+     "default": true
+    }
+   ]
+  },
+  {
+   "name": "featureCard",
+   "kind": "object",
+   "title": "Feature card",
+   "fields": [
+    {
+     "name": "title",
+     "type": "string"
+    },
+    {
+     "name": "body",
+     "type": "text"
+    },
+    {
+     "name": "buttonHref",
+     "type": "string"
+    },
+    {
+     "name": "backgroundImage",
+     "type": "image"
+    }
+   ]
+  },
+  {
+   "name": "productItem",
+   "kind": "object",
+   "title": "Product item",
+   "fields": [
+    {
+     "name": "label",
+     "type": "string"
+    },
+    {
+     "name": "product",
+     "type": "reference",
+     "to": [
+      {
+       "type": "product"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "articleItem",
+   "kind": "object",
+   "title": "Article item",
+   "fields": [
+    {
+     "name": "article",
+     "type": "reference",
+     "to": [
+      {
+       "type": "article"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "anchorJumpNav",
+   "kind": "object",
+   "title": "Jump navigation",
+   "fields": [
+    {
+     "name": "items",
+     "type": "arrayOf",
+     "ordered": true,
+     "of": {
+      "type": "composite",
+      "fields": [
+       {
+        "name": "label",
+        "type": "string"
+       },
+       {
+        "name": "anchorId",
+        "type": "string"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "anchorJumpNavSection",
+   "kind": "object",
+   "title": "Jump navigation section",
+   "fields": [
+    {
+     "name": "nav",
+     "type": "anchorJumpNav"
+    },
+    {
+     "name": "styling",
+     "type": "themeStyling"
+    }
+   ]
+  },
+  {
+   "name": "contentSection",
+   "kind": "object",
+   "title": "Content section",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "body",
+     "type": "richText"
+    },
+    {
+     "name": "styling",
+     "type": "themeStyling"
+    }
+   ]
+  },
+  {
+   "name": "ctaSection",
+   "kind": "object",
+   "title": "Call to action",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "cta",
+     "type": "composite",
+     "fields": [
+      {
+       "name": "text",
+       "type": "string"
+      },
+      {
+       "name": "link",
+       "type": "link"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "digitalResourcesSection",
+   "kind": "object",
+   "title": "Digital resources section",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "resources",
+     "type": "arrayOf",
+     "of": {
+      "type": "reference",
+      "to": [
+       {
+        "type": "digitalResource"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "eventsSection",
+   "kind": "object",
+   "title": "Events section",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "autoFill",
+     "type": "boolean",
+     "default": false
+    },
+    {
+     "name": "linkHref",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "featureCardsSection",
+   "kind": "object",
+   "title": "Feature cards section",
+   "fields": [
+    {
+     "name": "cards",
+     "type": "arrayOf",
+     "of": {
+      "type": "featureCard"
+     }
+    },
+    {
+     "name": "layout",
+     "type": "select",
+     "options": [
+      {
+       "value": "equal",
+       "title": "Equal"
+      },
+      {
+       "value": "left-larger",
+       "title": "Left larger"
+      }
+     ],
+     "default": "equal"
+    }
+   ]
+  },
+  {
+   "name": "featureHeroSection",
+   "kind": "object",
+   "title": "Feature hero",
+   "fields": [
+    {
+     "name": "title",
+     "type": "string"
+    },
+    {
+     "name": "cta",
+     "type": "composite",
+     "fields": [
+      {
+       "name": "link",
+       "type": "link"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "heroSection",
+   "kind": "object",
+   "title": "Hero",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "latestNewsSection",
+   "kind": "object",
+   "title": "Latest news section",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "columns",
+     "type": "number",
+     "default": 2
+    },
+    {
+     "name": "articles",
+     "type": "arrayOf",
+     "of": {
+      "type": "articleItem"
+     }
+    }
+   ]
+  },
+  {
+   "name": "newsletterSection",
+   "kind": "object",
+   "title": "Newsletter section",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "subheading",
+     "type": "string"
+    },
+    {
+     "name": "buttonLabel",
+     "type": "string",
+     "default": "Sign up"
+    }
+   ]
+  },
+  {
+   "name": "priceMatrixSection",
+   "kind": "object",
+   "title": "Price matrix",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "productCardsSection",
+   "kind": "object",
+   "title": "Product cards section",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    },
+    {
+     "name": "columns",
+     "type": "number"
+    },
+    {
+     "name": "showPrice",
+     "type": "boolean"
+    },
+    {
+     "name": "products",
+     "type": "arrayOf",
+     "of": {
+      "type": "productItem"
+     }
+    }
+   ]
+  },
+  {
+   "name": "productCompositionSection",
+   "kind": "object",
+   "title": "Product composition",
+   "fields": [
+    {
+     "name": "title",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "subjectTilesSection",
+   "kind": "object",
+   "title": "Subject tiles",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "trinnBlokkSection",
+   "kind": "object",
+   "title": "Level blocks",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "videoHeroSection",
+   "kind": "object",
+   "title": "Video hero",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "mediaModule",
+   "kind": "object",
+   "title": "Media module",
+   "fields": [
+    {
+     "name": "image",
+     "type": "image"
+    },
+    {
+     "name": "description",
+     "type": "text"
+    },
+    {
+     "name": "creditPlacement",
+     "type": "select",
+     "options": [
+      {
+       "value": "left",
+       "title": "Left"
+      },
+      {
+       "value": "right",
+       "title": "Right"
+      }
+     ],
+     "default": "right"
+    }
+   ]
+  },
+  {
+   "name": "inlineFeaturedProducts",
+   "kind": "object",
+   "title": "Featured products",
+   "fields": [
+    {
+     "name": "showAuthors",
+     "type": "boolean",
+     "default": false
+    },
+    {
+     "name": "showDescription",
+     "type": "boolean",
+     "default": false
+    },
+    {
+     "name": "items",
+     "type": "arrayOf",
+     "of": {
+      "type": "reference",
+      "to": [
+       {
+        "type": "product"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "featureModule",
+   "kind": "object",
+   "title": "Feature module",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "quote",
+   "kind": "object",
+   "title": "Quote",
+   "fields": [
+    {
+     "name": "image",
+     "type": "image"
+    },
+    {
+     "name": "quote",
+     "type": "text"
+    },
+    {
+     "name": "author",
+     "type": "composite",
+     "fields": [
+      {
+       "name": "label",
+       "type": "string"
+      },
+      {
+       "name": "reference",
+       "type": "reference",
+       "to": [
+        {
+         "type": "person"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "name": "diceReview",
+     "type": "number"
+    }
+   ]
+  },
+  {
+   "name": "personCard",
+   "kind": "object",
+   "title": "Person card",
+   "fields": [
+    {
+     "name": "name",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "videoClip",
+   "kind": "object",
+   "title": "Video",
+   "fields": [
+    {
+     "name": "url",
+     "type": "url"
+    }
+   ]
+  },
+  {
+   "name": "textModule",
+   "kind": "object",
+   "title": "Text module",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "conferenceModule",
+   "kind": "object",
+   "title": "Conference module",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "faqBlock",
+   "kind": "object",
+   "title": "FAQ",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "newsletterFormSection",
+   "kind": "object",
+   "title": "Newsletter form",
+   "fields": [
+    {
+     "name": "heading",
+     "type": "string"
+    }
+   ]
+  },
+  {
+   "name": "anchorPoint",
+   "kind": "object",
+   "title": "Anchor point",
+   "fields": [
+    {
+     "name": "label",
+     "type": "string"
+    }
+   ]
+  }
+ ],
+ "document_schemas": [
+  {
+   "name": "frontPage",
+   "title": "Front page",
+   "fields": [
+    {
+     "name": "title",
+     "type": "string"
+    },
+    {
+     "name": "description",
+     "type": "text"
+    },
+    {
+     "name": "frontpageSections",
+     "type": "arrayOf",
+     "ordered": true,
+     "title": "Sections",
+     "of": [
+      {
+       "name": "digitalResourcesSection",
+       "type": "digitalResourcesSection"
+      },
+      {
+       "name": "eventsSection",
+       "type": "eventsSection"
+      },
+      {
+       "name": "featureCardsSection",
+       "type": "featureCardsSection"
+      },
+      {
+       "name": "latestNewsSection",
+       "type": "latestNewsSection"
+      },
+      {
+       "name": "newsletterSection",
+       "type": "newsletterSection"
+      },
+      {
+       "name": "productCardsSection",
+       "type": "productCardsSection"
+      },
+      {
+       "name": "videoHeroSection",
+       "type": "videoHeroSection"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "page",
+   "title": "Page",
+   "fields": [
+    {
+     "name": "title",
+     "type": "string"
+    },
+    {
+     "name": "landingPageSections",
+     "type": "arrayOf",
+     "ordered": true,
+     "title": "Sections",
+     "of": [
+      {
+       "name": "anchorJumpNavSection",
+       "type": "anchorJumpNavSection"
+      },
+      {
+       "name": "contentSection",
+       "type": "contentSection"
+      },
+      {
+       "name": "ctaSection",
+       "type": "ctaSection"
+      },
+      {
+       "name": "digitalResourcesSection",
+       "type": "digitalResourcesSection"
+      },
+      {
+       "name": "eventsSection",
+       "type": "eventsSection"
+      },
+      {
+       "name": "featureCardsSection",
+       "type": "featureCardsSection"
+      },
+      {
+       "name": "featureHeroSection",
+       "type": "featureHeroSection"
+      },
+      {
+       "name": "heroSection",
+       "type": "heroSection"
+      },
+      {
+       "name": "latestNewsSection",
+       "type": "latestNewsSection"
+      },
+      {
+       "name": "newsletterSection",
+       "type": "newsletterSection"
+      },
+      {
+       "name": "priceMatrixSection",
+       "type": "priceMatrixSection"
+      },
+      {
+       "name": "productCardsSection",
+       "type": "productCardsSection"
+      },
+      {
+       "name": "productCompositionSection",
+       "type": "productCompositionSection"
+      },
+      {
+       "name": "subjectTilesSection",
+       "type": "subjectTilesSection"
+      },
+      {
+       "name": "trinnBlokkSection",
+       "type": "trinnBlokkSection"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "article",
+   "title": "Article",
+   "fields": [
+    {
+     "name": "title",
+     "type": "string"
+    },
+    {
+     "name": "body",
+     "type": "richText",
+     "title": "Body"
+    }
+   ]
+  }
+ ],
+ "documents": [
+  {
+   "doc_id": "frontPage",
+   "type": "frontPage",
+   "title": "Demo front page",
+   "content": {
+    "title": "Demo front page",
+    "frontpageSections": [
+     {
+      "_key": "a1f0c0de0001",
+      "_type": "featureCardsSection",
+      "layout": "left-larger",
+      "cards": [
+       {
+        "_key": "a1f0c0de0101",
+        "_type": "featureCard",
+        "title": "Autumn reading week",
+        "body": "Free events for every age",
+        "buttonHref": "/events",
+        "backgroundImage": {
+         "_type": "image",
+         "asset": {
+          "_ref": "image-0000000000000000000000000000000000000001-1200x400-png",
+          "_type": "reference"
+         }
+        }
+       }
+      ]
+     },
+     {
+      "_key": "a1f0c0de0002",
+      "_type": "productCardsSection",
+      "heading": "New books",
+      "columns": 5,
+      "showPrice": false,
+      "products": [
+       {
+        "_key": "a1f0c0de0201",
+        "_type": "productItem",
+        "product": {
+         "_ref": "product-demo-1",
+         "_type": "reference",
+         "_weak": true
+        }
+       },
+       {
+        "_key": "a1f0c0de0202",
+        "_type": "productItem",
+        "label": "Prize winner",
+        "product": {
+         "_ref": "product-demo-2",
+         "_type": "reference",
+         "_weak": true
+        }
+       }
+      ]
+     },
+     {
+      "_key": "a1f0c0de0003",
+      "_type": "newsletterSection",
+      "heading": "Stay in touch",
+      "subheading": "Get our newsletter",
+      "buttonLabel": "Sign up"
+     },
+     {
+      "_key": "a1f0c0de0004",
+      "_type": "digitalResourcesSection",
+      "heading": "Digital resources",
+      "resources": [
+       {
+        "_key": "a1f0c0de0401",
+        "_ref": "digital-resource-demo-1",
+        "_type": "reference"
+       },
+       {
+        "_key": "a1f0c0de0402",
+        "_ref": "digital-resource-demo-2",
+        "_type": "reference"
+       }
+      ]
+     },
+     {
+      "_key": "a1f0c0de0005",
+      "_type": "eventsSection",
+      "heading": "Events and courses",
+      "autoFill": true,
+      "linkHref": "/events"
+     },
+     {
+      "_key": "a1f0c0de0006",
+      "_type": "latestNewsSection",
+      "heading": "News",
+      "columns": 2,
+      "articles": [
+       {
+        "_key": "a1f0c0de0601",
+        "_type": "articleItem",
+        "article": {
+         "_ref": "article-demo-2",
+         "_type": "reference"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": "demo-landing-page",
+   "type": "page",
+   "title": "Demo landing page",
+   "content": {
+    "title": "Demo landing page",
+    "landingPageSections": [
+     {
+      "_key": "b2e0c0de0001",
+      "_type": "productCompositionSection",
+      "title": "Demo composition"
+     }
+    ]
+   }
+  },
+  {
+   "doc_id": "article-demo-1",
+   "type": "article",
+   "title": "How a demo article reads",
+   "content": {
+    "title": "How a demo article reads",
+    "body": [
+     {
+      "_key": "c3d0c0de0001",
+      "_type": "block",
+      "style": "h2",
+      "markDefs": [],
+      "children": [
+       {
+        "_key": "c3d0c0de0001s0",
+        "_type": "span",
+        "text": "A heading for the demo",
+        "marks": []
+       }
+      ]
+     },
+     {
+      "_key": "c3d0c0de0002",
+      "_type": "block",
+      "style": "normal",
+      "markDefs": [],
+      "children": [
+       {
+        "_key": "c3d0c0de0002s0",
+        "_type": "span",
+        "text": "The first paragraph of an invented article.",
+        "marks": []
+       }
+      ]
+     },
+     {
+      "_key": "c3d0c0de0003",
+      "_type": "block",
+      "style": "normal",
+      "markDefs": [],
+      "children": [
+       {
+        "_key": "c3d0c0de0003s0",
+        "_type": "span",
+        "text": "A second paragraph, so a block can go after it.",
+        "marks": []
+       }
+      ]
+     },
+     {
+      "_key": "c3d0c0de0004",
+      "_type": "mediaModule",
+      "objectFit": "contain",
+      "creditPlacement": "right",
+      "image": {
+       "_type": "imageAsset",
+       "caption": "Demo photo",
+       "asset": {
+        "_ref": "image-0000000000000000000000000000000000000002-800x600-jpg",
+        "_type": "reference"
+       }
+      }
+     },
+     {
+      "_key": "c3d0c0de0005",
+      "_type": "block",
+      "style": "normal",
+      "markDefs": [],
+      "children": [
+       {
+        "_key": "c3d0c0de0005s0",
+        "_type": "span",
+        "text": "Text between the media and the quote.",
+        "marks": []
+       }
+      ]
+     },
+     {
+      "_key": "c3d0c0de0006",
+      "_type": "quote",
+      "quote": "An invented line someone once said."
+     },
+     {
+      "_key": "c3d0c0de0007",
+      "_type": "block",
+      "style": "normal",
+      "markDefs": [],
+      "children": [
+       {
+        "_key": "c3d0c0de0007s0",
+        "_type": "span",
+        "text": "Text after the quote.",
+        "marks": []
+       }
+      ]
+     },
+     {
+      "_key": "c3d0c0de0008",
+      "_type": "inlineFeaturedProducts",
+      "showAuthors": true,
+      "items": [
+       {
+        "_key": "c3d0c0de0801",
+        "_ref": "product-demo-1",
+        "_type": "reference",
+        "_weak": true
+       },
+       {
+        "_key": "c3d0c0de0802",
+        "_ref": "product-demo-2",
+        "_type": "reference",
+        "_weak": true
+       }
+      ]
+     },
+     {
+      "_key": "c3d0c0de0009",
+      "_type": "block",
+      "style": "normal",
+      "markDefs": [],
+      "children": [
+       {
+        "_key": "c3d0c0de0009s0",
+        "_type": "span",
+        "text": "The last paragraph.",
+        "marks": []
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}
