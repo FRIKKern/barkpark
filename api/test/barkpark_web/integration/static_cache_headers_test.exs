@@ -79,10 +79,11 @@ defmodule BarkparkWeb.Integration.StaticCacheHeadersTest do
       conn = get(conn, "/assets/bp-graph.js")
 
       assert conn.status == 200
-      # `gzip: not code_reloading?` is what makes Plug.Static advertise the two
-      # representations. Removing the flag is a byte no-op today (no .gz
-      # siblings exist) but silently drops this header, so caches would stop
-      # keying encodings apart. Pinned here so that removal is a red test.
+      # `gzip:` / `brotli:` are what make Plug.Static advertise the encoded
+      # representations. The source tree has no .gz/.br siblings (the slot
+      # deploy builds them), so this file answers identity here, but dropping
+      # both flags silently drops this header and caches would stop keying
+      # encodings apart. Pinned here so that removal is a red test.
       assert get_resp_header(conn, "vary") == ["Accept-Encoding"]
     end
   end
