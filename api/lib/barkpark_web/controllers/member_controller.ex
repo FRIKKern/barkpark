@@ -43,13 +43,35 @@ defmodule BarkparkWeb.MemberController do
   def index(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace] do
       {limit, offset} = page_window(params)
-      members = Members.list_members(ws_id, limit: limit, offset: offset)
+
+      members =
+        ws_id |> Members.list_members(limit: limit, offset: offset) |> with_display_names()
+
       total = Members.count_members(ws_id)
 
       json(conn, page_envelope(:members, members, total, limit, offset))
     else
       _ -> unresolved_workspace(conn)
     end
+  end
+
+  # Each person's display name, as the user menu shows your own (task-2eae7f4056c3a970):
+  # read-only, the account's profile name, null when unset. A token seat has no
+  # person behind it, so it carries none.
+  defp with_display_names(members) do
+    names =
+      members
+      |> Enum.filter(&(&1.principal_type == "user"))
+      |> Enum.map(& &1.principal_id)
+      |> Barkpark.Accounts.display_names()
+
+    Enum.map(members, fn
+      %{principal_type: "user", principal_id: id} = m ->
+        Map.put(m, :display_name, Map.get(names, id))
+
+      m ->
+        m
+    end)
   end
 
   @doc "`GET /w/:ws/p/:proj/v1/invitations` — pending invitations (owner ruling #7)."

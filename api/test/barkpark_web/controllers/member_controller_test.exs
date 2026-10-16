@@ -136,6 +136,31 @@ defmodule BarkparkWeb.MemberControllerTest do
       refute body |> Jason.encode!() |> String.contains?(admin_raw)
     end
 
+    test "a person carries their display name, null when unset; a token seat has none",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      named = unique_email("named")
+      unnamed = unique_email("unnamed")
+      seat_user!(ws, named, "member")
+      seat_user!(ws, unnamed, "member")
+
+      {:ok, _} =
+        named
+        |> Barkpark.Accounts.get_user_by_email()
+        |> Barkpark.Accounts.update_display_name(%{"display_name" => "Ada Lovelace"})
+
+      members =
+        req(admin_raw)
+        |> get("#{base(ws, project)}/members")
+        |> json_response(200)
+        |> Map.get("members")
+
+      by_identity = Map.new(members, &{&1["identity"], &1})
+      assert by_identity[named]["display_name"] == "Ada Lovelace"
+      assert Map.has_key?(by_identity[unnamed], "display_name")
+      assert by_identity[unnamed]["display_name"] == nil
+      refute Map.has_key?(by_identity["roster-a"], "display_name")
+    end
+
     test "owners sort before admins before members", %{
       ws: ws,
       project: project,
