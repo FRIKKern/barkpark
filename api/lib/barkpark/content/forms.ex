@@ -150,6 +150,23 @@ defmodule Barkpark.Content.Forms do
 
   def datetime_form_value(_), do: ""
 
+  @doc """
+  The value a stored `date` hands the Studio's date picker: the "YYYY-MM-DD"
+  day (task-cf45242ef3477fba). A stored "YYYY-MM-DD" is handed over as is, so
+  an untouched field posts back equal. A longer ISO value shows its day, and
+  anything else shows `""`; either way an untouched field keeps the stored
+  text (`form_image/2`).
+  """
+  @spec date_form_value(term()) :: String.t()
+  def date_form_value(raw) when is_binary(raw) do
+    case Regex.run(~r/^(\d{4}-\d{2}-\d{2})(?:$|[T ])/, String.trim(raw)) do
+      [_, day] -> if match?({:ok, _}, Date.from_iso8601(day)), do: day, else: ""
+      _ -> ""
+    end
+  end
+
+  def date_form_value(_), do: ""
+
   # The other half of the datetime round-trip: a posted datetime that EQUALS
   # what datetime_form_value/1 showed for the stored value was not edited, so
   # the stored value is kept byte-identical (its offset and seconds included)
@@ -163,7 +180,9 @@ defmodule Barkpark.Content.Forms do
 
         case Map.fetch(acc, key) do
           {:ok, posted} when is_binary(stored) and stored != "" ->
-            if posted == datetime_form_value(stored), do: Map.put(acc, key, stored), else: acc
+            if posted == datetime_form_value(stored),
+              do: Map.put(acc, key, stored),
+              else: Map.put(acc, key, same_instant_format(posted, stored))
 
           _ ->
             acc
@@ -233,6 +252,20 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp preserve_datetime_values(params, _base_content, _schema), do: params
+
+  # An EDITED datetime is written in the stored value's format
+  # (task-cf45242ef3477fba). The picker posts a UTC instant with seconds,
+  # `2026-10-29T15:30:00Z`; a value Sanity wrote carries milliseconds,
+  # `2026-10-29T14:00:00.000Z`, so the edit keeps them. Any other pair is left
+  # as posted.
+  defp same_instant_format(posted, stored) when is_binary(posted) do
+    if Regex.match?(~r/\.\d{3}Z\z/, stored) and
+         Regex.match?(~r/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z\z/, posted),
+       do: String.replace_suffix(posted, "Z", ".000Z"),
+       else: posted
+  end
+
+  defp same_instant_format(posted, _stored), do: posted
 
   # ── THE UNTOUCHED-FIELD RULE, generalised (Run-4 save-path matrix) ────────
   #
@@ -380,6 +413,7 @@ defmodule Barkpark.Content.Forms do
   # posts back when the author does not touch it.
   defp form_image(%{"type" => "reference"}, %{"_ref" => ref}) when is_binary(ref), do: ref
   defp form_image(%{"type" => "datetime"}, v) when is_binary(v), do: datetime_form_value(v)
+  defp form_image(%{"type" => "date"}, v) when is_binary(v), do: date_form_value(v)
 
   defp form_image(%{"type" => "richText"} = field, v) when is_list(v) do
     if plain_rich_text?(field) and PortableText.blocks?(v), do: PortableText.to_html(v), else: v
@@ -567,8 +601,18 @@ defmodule Barkpark.Content.Forms do
     of = Map.get(field, "of") || %{}
 
     case indexed_map_to_list(val) do
-      list when is_list(list) -> Enum.map(list, &coerce_field_value(of, &1))
-      other -> other
+      # The checkbox list of an array of select values posts a leading ""
+      # so an empty selection still reaches the save (task-b8bce68623e758ae).
+      # "" is never a value of a select, so it is dropped here.
+      list
+      when is_list(list) and is_map_key(of, "type") and :erlang.map_get("type", of) == "select" ->
+        list |> Enum.reject(&(&1 == "")) |> Enum.map(&coerce_field_value(of, &1))
+
+      list when is_list(list) ->
+        Enum.map(list, &coerce_field_value(of, &1))
+
+      other ->
+        other
     end
   end
 
