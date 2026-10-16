@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.8.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.9.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -213,6 +213,10 @@ export interface LinkPreview {
   title?: string;
   excerpt?: string;
   href?: string;
+  /** 1.9.0, a wikilink's: replaces the card's [[target]] line ("" hides it). */
+  subtitle?: string;
+  /** 1.9.0, a wikilink's: the document's type, beside the title. */
+  badge?: string;
 }
 export type MediaUploadResult = string | { src?: string; url?: string; alt?: string };
 type MaybePromise<T> = T | Promise<T>;
