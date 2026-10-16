@@ -8,6 +8,7 @@ lib/barkpark/coupled_artifacts.ex	required_contexts
 lib/barkpark/epic_fleet/benchmark.ex	cleanup_temporary_file
 lib/barkpark/epic_fleet/benchmark.ex	select_attrs
 lib/barkpark/epic_fleet/benchmark.ex	write_json_file
+lib/barkpark/groq/document_source.ex	read_keys
 lib/barkpark/media/blobstore/local.ex	delete
 lib/barkpark/media/blobstore/local.ex	put_bytes
 lib/barkpark/media/blobstore/local.ex	put_file
