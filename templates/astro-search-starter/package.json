@@ -16,8 +16,8 @@
     "@barkpark/core": "file:./vendor/barkpark-core.tgz",
     "@barkpark/react": "file:./vendor/barkpark-react.tgz",
     "@tailwindcss/vite": "^4",
-    "astro": "^7.3.5",
-    "phoenix": "^1.8.14",
+    "astro": "^7.3.8",
+    "phoenix": "^1.8.15",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "tailwindcss": "^4"
