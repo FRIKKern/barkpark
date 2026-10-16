@@ -16,7 +16,8 @@ defmodule Barkpark.Content.PortableText do
   as is) and becomes blocks the next time its document is saved in Studio.
 
   Supported: paragraphs (`p`, `div`), headings `h1`–`h6`, `blockquote`,
-  bulleted and numbered lists (`ul`/`ol` > `li`), line breaks (`br`, stored as
+  bulleted and numbered lists (`ul`/`ol` > `li`, a list nested in an item one
+  `level` deeper), line breaks (`br`, stored as
   `"\\n"` in the span text), the decorators `strong`/`b`, `em`/`i`, `u`,
   `s`/`strike`/`del`, `code`, and links (`a href`, stored as a `link` mark
   definition). Other tags are dropped and their text is kept.
@@ -228,7 +229,9 @@ defmodule Barkpark.Content.PortableText do
   defp empty?(_), do: false
 
   # The HTML one stored block shows in the editor: a list item as its `<li>`.
-  defp fragment_html(%{"listItem" => _} = b), do: "<li>" <> spans_html(b) <> "</li>"
+  # A list item's own HTML is its `<li>` up to its text's end: a nested list
+  # inside it belongs to the deeper items.
+  defp fragment_html(%{"listItem" => _} = b), do: "<li>" <> spans_html(b)
   defp fragment_html(b), do: to_html([b])
 
   # A browser serialises a `"` in text as is and a no-break space as
@@ -237,6 +240,10 @@ defmodule Barkpark.Content.PortableText do
     html
     |> String.replace("&quot;", "\"")
     |> String.replace("&nbsp;", "\u00A0")
+    |> then(fn
+      "<li>" <> _ = li -> String.replace_suffix(li, "</li>", "")
+      other -> other
+    end)
   end
 
   # An edited block takes the `_key` of the stored text block at its position
@@ -692,19 +699,56 @@ defmodule Barkpark.Content.PortableText do
   @spec to_html([map()]) :: String.t()
   def to_html(blocks) when is_list(blocks) do
     blocks
-    |> Enum.chunk_by(&list_kind/1)
+    |> Enum.chunk_by(&(list_kind(&1) != nil))
     |> Enum.map_join(fn
       [first | _] = group ->
-        case list_kind(first) do
-          nil ->
-            Enum.map_join(group, &block_html/1)
-
-          kind ->
-            "<#{kind}>" <>
-              Enum.map_join(group, &("<li>" <> spans_html(&1) <> "</li>")) <> "</#{kind}>"
-        end
+        if list_kind(first),
+          do: lists_html(group, 1),
+          else: Enum.map_join(group, &block_html/1)
     end)
   end
+
+  # List items nest by `level`: an item deeper than the one before it goes in
+  # a `<ul>`/`<ol>` inside that item's `<li>`, which `from_html/2` reads back as
+  # the same level (its depth in open lists). A run of one kind is one list.
+  defp lists_html(items, level) do
+    items
+    |> split_items(level)
+    |> Enum.chunk_by(fn {item, kids} -> list_kind(item || hd(kids)) end)
+    |> Enum.map_join(fn [{item, kids} | _] = run ->
+      kind = list_kind(item || hd(kids))
+
+      "<#{kind}>" <>
+        Enum.map_join(run, fn {item, kids} ->
+          "<li>" <>
+            if(item, do: spans_html(item), else: "") <>
+            if(kids == [], do: "", else: lists_html(kids, level + 1)) <> "</li>"
+        end) <> "</#{kind}>"
+    end)
+  end
+
+  # `[{item, deeper_items}]` at this level. An item deeper than the level with
+  # no item above it gets an empty `<li>` to hang from (`item` nil).
+  defp split_items(items, level) do
+    items
+    |> Enum.reduce([], fn b, acc ->
+      cond do
+        item_level(b) <= level ->
+          [{b, []} | acc]
+
+        acc == [] ->
+          [{nil, [b]}]
+
+        true ->
+          [{item, kids} | rest] = acc
+          [{item, kids ++ [b]} | rest]
+      end
+    end)
+    |> Enum.reverse()
+  end
+
+  defp item_level(%{"level" => n}) when is_integer(n) and n > 0, do: n
+  defp item_level(_), do: 1
 
   defp list_kind(%{"listItem" => "number"}), do: "ol"
   defp list_kind(%{"listItem" => _}), do: "ul"

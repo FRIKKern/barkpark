@@ -277,6 +277,79 @@ defmodule Barkpark.Content.PortableTextBodyTest do
     end
   end
 
+  describe "nested list items" do
+    defp item(key, text, list_item, level) do
+      %{
+        "_type" => "block",
+        "_key" => key,
+        "style" => "normal",
+        "listItem" => list_item,
+        "level" => level,
+        "markDefs" => [],
+        "children" => [
+          %{"_type" => "span", "_key" => key <> "s", "text" => text, "marks" => []}
+        ]
+      }
+    end
+
+    defp nested do
+      [
+        %{
+          "_type" => "block",
+          "_key" => "intro",
+          "style" => "normal",
+          "markDefs" => [],
+          "children" => [
+            %{"_type" => "span", "_key" => "introS", "text" => "Liste:", "marks" => []}
+          ]
+        },
+        item("l1a", "Garn", "bullet", 1),
+        item("l2a", "Alpakka", "bullet", 2),
+        item("l3a", "Tweed", "number", 3),
+        item("l2b", "Ull", "bullet", 2),
+        item("l1b", "Pinner", "bullet", 1)
+      ]
+    end
+
+    test "the editor HTML nests lists by level and reads them back" do
+      html = PortableText.to_html(nested())
+
+      assert html ==
+               "<p>Liste:</p><ul><li>Garn<ul><li>Alpakka<ol><li>Tweed</li></ol></li>" <>
+                 "<li>Ull</li></ul></li><li>Pinner</li></ul>"
+
+      assert PortableText.from_html(html, nested()) == nested()
+    end
+
+    test "editing the text of a level-2 item keeps its level, listItem and key" do
+      doc = doc!("nested-edit", nested())
+      form = Forms.doc_to_form(doc, @schema)
+      edited = String.replace(form["body"], "Alpakka", "Alpakka Tweed")
+      assert edited != form["body"]
+
+      saved = save!(doc, Map.put(form, "body", edited)).content["body"]
+
+      assert Enum.map(saved, &{&1["_key"], &1["listItem"], &1["level"]}) ==
+               Enum.map(nested(), &{&1["_key"], &1["listItem"], &1["level"]})
+
+      block = Enum.find(saved, &(&1["_key"] == "l2a"))
+      assert text(block) == "Alpakka Tweed"
+      assert block["level"] == 2
+      assert block["listItem"] == "bullet"
+
+      assert Enum.reject(saved, &(&1["_key"] == "l2a")) ==
+               Enum.reject(nested(), &(&1["_key"] == "l2a"))
+    end
+
+    test "editing a level-3 numbered item keeps level 3 and number" do
+      html = String.replace(PortableText.to_html(nested()), "Tweed", "Tweed, brun")
+      saved = PortableText.from_html(html, nested())
+
+      assert %{"level" => 3, "listItem" => "number", "_key" => "l3a"} =
+               Enum.find(saved, &(text(&1) == "Tweed, brun"))
+    end
+  end
+
   test "a PortableDoc body list is still read as PortableDoc blocks" do
     refute PortableText.value?([%{"id" => "b1", "type" => "paragraph", "text" => "x"}])
   end
