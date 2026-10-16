@@ -178,7 +178,7 @@ exit 0
 EOF
   cat > "$dir/mix" <<'EOF'
 #!/usr/bin/env bash
-echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}] [BARKPARK_DB_STATEMENT_TIMEOUT=${BARKPARK_DB_STATEMENT_TIMEOUT-unset}]" >> "$MIXLOG"
+echo "mix $* [MIX_BUILD_ROOT=${MIX_BUILD_ROOT:-}] [BARKPARK_DB_STATEMENT_TIMEOUT=${BARKPARK_DB_STATEMENT_TIMEOUT-unset}] [NI=$(ps -o ni= -p $$ | tr -d ' ')]" >> "$MIXLOG"
 # MIX_FAIL=<subcommand> fails exactly that step (e.g. compile -> exit 12,
 # ecto.migrate -> exit 13): the build-failure half of the slot-stamp ordering.
 [ -n "${MIX_FAIL:-}" ] && [ "$1" = "${MIX_FAIL}" ] && exit 1
@@ -418,6 +418,8 @@ check "build used MIX_BUILD_ROOT=_build_green" "grep -q 'MIX_BUILD_ROOT=_build_g
 check "exactly one clean build (2 compile lines)" "[ \"\$(grep -c compile '$MIXLOG')\" = '2' ]"
 check "migrate runs with the statement timeout OFF" "grep -q 'ecto.migrate .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG'"
 check "the build steps do NOT inherit that export"  "! grep -E 'mix (deps.get|deps.compile|compile) .*BARKPARK_DB_STATEMENT_TIMEOUT=0' '$MIXLOG' >/dev/null"
+check "the compile steps run niced, so the live slot keeps the CPU (task-0fbe272a366541f4)" "[ \"\$(grep -cE '^mix (deps.get|deps.compile|compile) .*\\[NI=19\\]' '$MIXLOG')\" = '3' ]"
+check "migrate is NOT niced (it holds locks)" "grep 'ecto.migrate' '$MIXLOG' | grep -vq 'NI=19'"
 check "slot env files written"            "grep -q 'BARKPARK_PORT_OVERRIDE=4001' '$APP/.slots/green.env' && grep -q '_build_blue' '$APP/.slots/blue.env'"
 check "indx state dir created outside the build roots (task-527b519e47669559)" "grep -q 'install -d -m 0750 -o root -g root /var/lib/barkpark/indx-state' '$SYSCTLLOG'"
 check "green slot booted"                 "grep -q 'restart barkpark-slot@green' '$SYSCTLLOG'"

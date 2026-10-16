@@ -1899,15 +1899,26 @@ cd "$APP/api" || { log "no $APP/api"; exit 10; }
 NEW_ROOT="_build_$TARGET.new"
 PREV_ROOT="_build_$TARGET.prev"
 build() { MIX_ENV=prod MIX_BUILD_ROOT="$NEW_ROOT" mix "$@"; }
+# The idle slot compiles on the SAME box the live slot serves from (2 cores on
+# guerrilla). Un-niced, deps.compile --force + compile take both cores for
+# minutes and the live slot's reads stall 2-10 s for the whole window: every
+# barkpark-studio e2e run that overlapped a deploy on 2026-10-12/13 logged
+# Barkpark calls over 2 s (8 of 8), against 8 of 73 that did not
+# (task-0fbe272a366541f4). Same contract as site-deploy.sh's BP_NICE: nice -n 19,
+# plus idle-class ionice where present. The compile steps only: migrate stays
+# at normal priority so it never holds its locks longer than it must.
+BP_NICE="nice -n 19"
+command -v ionice >/dev/null 2>&1 && BP_NICE="nice -n 19 ionice -c3"
+build_low() { MIX_ENV=prod MIX_BUILD_ROOT="$NEW_ROOT" $BP_NICE mix "$@"; }
 log "clean build into $NEW_ROOT (deps.get; deps.compile --force; compile) — _build_$TARGET stays intact until the swap"
 # A run killed mid-build (or mid-swap) leaves these behind; a stale .new would
 # make the next build incremental against foreign artifacts, and a stale .prev
 # would pin disk forever. Both are scratch by construction — never a rollback
 # target, which only ever reads _build_$TARGET.
 rm -rf "$NEW_ROOT" "$PREV_ROOT"
-if ! build deps.get;             then log "deps.get failed (_build_$TARGET kept — rollback still possible)";     git -C "$APP" reset --hard "$OLD"; exit 12; fi
-if ! build deps.compile --force; then log "deps.compile failed (_build_$TARGET kept — rollback still possible)"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
-if ! build compile;              then log "compile failed (_build_$TARGET kept — rollback still possible)";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
+if ! build_low deps.get;             then log "deps.get failed (_build_$TARGET kept — rollback still possible)";     git -C "$APP" reset --hard "$OLD"; exit 12; fi
+if ! build_low deps.compile --force; then log "deps.compile failed (_build_$TARGET kept — rollback still possible)"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
+if ! build_low compile;              then log "compile failed (_build_$TARGET kept — rollback still possible)";      git -C "$APP" reset --hard "$OLD"; exit 12; fi
 if [ ! -d "$NEW_ROOT/prod" ]; then log "build produced no $NEW_ROOT/prod — abort, live slot untouched, _build_$TARGET kept"; git -C "$APP" reset --hard "$OLD"; exit 12; fi
 log "migrate (new code, active slot still serving)"
 # BARKPARK_DB_STATEMENT_TIMEOUT=0 — `mix ecto.migrate` boots the repo with the
@@ -1957,7 +1968,7 @@ cd "$APP" || { log "no $APP"; exit 10; }
 # own Go toolchain via GOTOOLCHAIN.
 log "building pdrender wasm (non-fatal)"
 if command -v go >/dev/null 2>&1; then
-  if make wasm; then log "pdrender wasm built"; else log "WARN: pdrender wasm build failed — reader TUI view degrades to its fallback"; fi
+  if $BP_NICE make wasm; then log "pdrender wasm built"; else log "WARN: pdrender wasm build failed — reader TUI view degrades to its fallback"; fi
 else
   log "go not found — skipping pdrender wasm build"
 fi
