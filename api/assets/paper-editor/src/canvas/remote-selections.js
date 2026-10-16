@@ -257,10 +257,18 @@ export function remoteSelections() {
 }
 
 // Replace the whole set. A meta-only transaction: no doc change, no history
-// entry, the local selection untouched.
+// entry, the local selection untouched. The new decorations make ProseMirror write
+// its selection back to the DOM, so first read a DOM selection change the browser
+// has not reported yet (a Shift+Arrow a moment ago), or it is overwritten with the
+// old one (task-4bef7c60f0791d15).
 export function setRemoteSelections(editor, list) {
-  const { state, view } = editor;
-  view.dispatch(state.tr.setMeta(remoteSelectionsKey, { list }).setMeta("addToHistory", false));
+  const { view } = editor;
+  try {
+    if (view.domObserver && typeof view.domObserver.flush === "function") view.domObserver.flush();
+  } catch (_e) {
+    // A view mid-teardown: the remotes go on the state it has.
+  }
+  view.dispatch(view.state.tr.setMeta(remoteSelectionsKey, { list }).setMeta("addToHistory", false));
 }
 
 // The live set as Points, for tests and hosts that want to read it back.
