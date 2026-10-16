@@ -374,8 +374,19 @@ defmodule Barkpark.Content.Schema do
         _ ->
           insert_or_converge(attrs, dataset, opts)
       end
+      |> kick_search_refresh()
     end
   end
+
+  # A write on a large type leaves its search refresh to a worker
+  # (`Barkpark.Search.SearchRefresh`); queue it now rather than at the next
+  # cron minute.
+  defp kick_search_refresh({:ok, _} = result) do
+    Barkpark.Search.SearchRefresh.kick()
+    result
+  end
+
+  defp kick_search_refresh(result), do: result
 
   defp update_schema(existing, attrs, dataset, opts) do
     existing

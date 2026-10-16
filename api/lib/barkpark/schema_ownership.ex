@@ -54,7 +54,7 @@ defmodule Barkpark.SchemaOwnership do
     pulse_counters pulse_events pulse_meters revisions role_permissions roles
     saml_assertion_replays saml_connections scheduled_publishes schema_definitions schema_migrations
     scim_groups scim_tokens search_intel_crystals search_intel_events
-    search_intel_merge_patterns search_surface_config search_synonyms secrets
+    search_intel_merge_patterns search_refresh_pending search_surface_config search_synonyms secrets
     secrets_audit share_links shares social_identities social_providers
     status_incidents sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs task_edges token_sessions user_email_tokens
@@ -103,7 +103,6 @@ defmodule Barkpark.SchemaOwnership do
     # Norwegian search fold (task-1429eb7cfc6217ea), read by DocumentsRetriever.
     "bp_fold(text)",
     "bp_public_search_vector(text,text,uuid,text,jsonb)",
-    "bp_schema_public_search_reindex_trg()",
     "bp_search_field_restricted(jsonb)",
     "bp_search_item_field(jsonb)",
     "bp_search_redact(jsonb,jsonb,integer)",
@@ -111,7 +110,13 @@ defmodule Barkpark.SchemaOwnership do
     # Search slots (task-3c6d02392d430c98, migration 20261014150000).
     "bp_documents_search_slots_trg()",
     "bp_refresh_search_slots(uuid)",
-    "bp_schema_search_slots_trg()",
+    # Search refresh after a schema write (task-9d83c3e0c3b8fabf, migration
+    # 20261016130000).
+    "bp_schema_search_refresh_trg()",
+    "bp_search_refresh_batch(text,text,uuid,boolean,boolean,boolean,uuid,integer,timestamp without time zone)",
+    "bp_search_refresh_request(text,text,uuid,boolean,boolean,boolean,boolean)",
+    "bp_search_restriction_signature(jsonb,integer)",
+    "bp_search_slots_signature(jsonb,jsonb)",
     "bp_search_join(jsonb,text[])",
     "bp_search_folds(text,text,text)",
     "bp_search_label_fold(text,text)",
