@@ -26,7 +26,7 @@ Required wrapper attributes:
 - `phx-update="ignore"` — see above
 - `phx-hook="BarkparkFieldBridge"`
 
-WC contract: `customElements.define`, read initial state from `value` attribute, emit `CustomEvent("bp-change", { bubbles: true, composed: false, detail: { value } })`, implement `disconnectedCallback` with defensive guards. A WC's own nameless controls (a search box, a link address box) stop their `input` and `change` events: LiveView posts `phx-change="autosave"` for any that reach the window, and the server skips a post whose `_target` is "undefined".
+WC contract: `customElements.define`, read initial state from `value` attribute, emit `CustomEvent("bp-change", { bubbles: true, composed: false, detail: { value } })`, implement `disconnectedCallback` with defensive guards.
 
 ## Adding a new bp-* widget
 
