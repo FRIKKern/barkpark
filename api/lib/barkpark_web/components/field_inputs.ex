@@ -77,6 +77,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :scope_prefix, :string, default: ""
   attr :id_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document types an internal link in a Portable Text body may point at
+  # (`Shared.internal_link_types/3`). Empty: the link row takes an address only.
+  attr :link_types, :list, default: []
 
   # An OPTIONAL select whose stored value matches NO option must NOT drag its
   # first option into autosave. A native <select> always form-serializes SOME
@@ -710,11 +713,19 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp rich_text_label(_field, name), do: name
 
+  # With link types (task-088575052b459f3e) the editor also carries the
+  # dataset and scope its document picker searches in; without, the markup is
+  # unchanged.
   defp rich_text_editor(assigns) do
     ~H"""
     <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}></bp-rich-text-editor>
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}
+        dataset={if @link_types != [], do: @dataset}
+        scope-prefix={if @link_types != [], do: @scope_prefix}
+        data-link-types={if @link_types != [], do: Enum.join(@link_types, ",")}
+        data-picker-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:reference)}
+      ></bp-rich-text-editor>
     </div>
     """
   end

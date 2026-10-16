@@ -11479,6 +11479,26 @@ msgstr ""
 msgid "Link address"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Link type"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Internal"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "External"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Link to a document"
+msgstr ""
+
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:76
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:118
 #, elixir-autogen, elixir-format

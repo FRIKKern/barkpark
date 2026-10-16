@@ -41,7 +41,10 @@ defmodule Barkpark.Content.PortableText do
   box removes the block. A Sanity `linkAnnotation` shows as a link to its
   target (`#internal:<id>` for a document link) and keeps every field until its
   address is changed. A new link in a value whose links are `linkAnnotation`s
-  is one too (task-5fe67fc396077304).
+  is one too (task-5fe67fc396077304). A link to `#internal:<id>`, which the
+  editor's document picker writes, is a `linkAnnotation` with `linkType`
+  internal and an `internalLink` reference in any value
+  (task-088575052b459f3e).
 
   Keys are derived from position (`"b0"`, `"b0s1"`, `"b0m0"`), so converting
   the same HTML twice gives the same blocks. That is what lets an untouched
@@ -145,7 +148,7 @@ defmodule Barkpark.Content.PortableText do
       keep_empty: stored != [],
       objects: stored_objects,
       stored_blocks: stored_blocks,
-      link_type: link_dialect(stored)
+      link_type: link_dialect(stored, html)
     }
 
     stored_defs =
@@ -179,15 +182,18 @@ defmodule Barkpark.Content.PortableText do
   # The mark definition type a new link gets. A value whose stored links are
   # Sanity `linkAnnotation`s (the gyldendal.no twin) gets one too, so the site
   # that renders that type renders the new link; any other value gets `link`.
-  defp link_dialect(stored) do
+  # So does a value whose edit links to a document (`#internal:<id>`): that
+  # link is a `linkAnnotation`, and its neighbours follow it.
+  defp link_dialect(stored, html) do
     annotation? =
-      Enum.any?(stored, fn
-        %{"markDefs" => defs} when is_list(defs) ->
-          Enum.any?(defs, &match?(%{"_type" => "linkAnnotation"}, &1))
+      String.contains?(html, ~s(href="#internal:)) or
+        Enum.any?(stored, fn
+          %{"markDefs" => defs} when is_list(defs) ->
+            Enum.any?(defs, &match?(%{"_type" => "linkAnnotation"}, &1))
 
-        _ ->
-          false
-      end)
+          _ ->
+            false
+        end)
 
     if annotation?, do: "linkAnnotation", else: "link"
   end
@@ -598,6 +604,9 @@ defmodule Barkpark.Content.PortableText do
   end
 
   defp new_link(key, href, defs, link_type) do
+    # A document link has no `link` form: it is a `linkAnnotation` in any value.
+    link_type = if internal_href?(href), do: "linkAnnotation", else: link_type
+
     case Enum.find(defs, &(link_def_href(&1) == href and &1["_type"] == link_type)) do
       %{"_key" => k} ->
         {k, defs}
@@ -621,7 +630,7 @@ defmodule Barkpark.Content.PortableText do
     else
       def
       |> Map.drop(
-        ~w(linkType url href email internalLink damFileUrl damFileName isExternal isMailto)
+        ~w(linkType url href email internalLink linkParams damFileUrl damFileName isExternal isMailto)
       )
       |> Map.merge(annotation_target(href))
     end
@@ -631,7 +640,21 @@ defmodule Barkpark.Content.PortableText do
   defp edited_link_def(def, _href), do: def
 
   defp annotation_target("mailto:" <> email), do: %{"linkType" => "email", "email" => email}
+
+  # A link to a document (the editor's `#internal:<id>`, chosen with the link
+  # row's document picker) is the shape the twin's Sanity bodies store and its
+  # site renders: `linkType: internal` and an `internalLink` reference
+  # (task-088575052b459f3e).
+  defp annotation_target("#internal:" <> id = href) do
+    if internal_href?(href),
+      do: %{"linkType" => "internal", "internalLink" => %{"_type" => "reference", "_ref" => id}},
+      else: %{"linkType" => "external", "url" => href}
+  end
+
   defp annotation_target(href), do: %{"linkType" => "external", "url" => href}
+
+  defp internal_href?("#internal:" <> id), do: Regex.match?(~r/\A[^\s"'<>]+\z/, id)
+  defp internal_href?(_href), do: false
 
   # The address a link mark definition shows in the editor. A Sanity
   # `linkAnnotation` keeps its target in one of four fields by `linkType`; an

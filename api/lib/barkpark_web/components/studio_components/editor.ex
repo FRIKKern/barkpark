@@ -424,6 +424,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+            link_types={Map.get(@parent_assigns, :editor_link_types) || []}
             doc_key={@doc_key}
             doc_type={@doc_type}
             document_rev={@document_rev}
@@ -488,6 +489,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+            link_types={Map.get(@parent_assigns, :editor_link_types) || []}
             doc_key={@doc_key}
             doc_type={@doc_type}
             document_rev={@document_rev}
