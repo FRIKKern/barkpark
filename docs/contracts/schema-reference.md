@@ -18,6 +18,7 @@ A top-level `validations` list is read by `parse/2` but not cast, so it is not s
 | `title`, `description` | Label and help text in Studio. |
 | `validation` | Rules, see [Validation](#validation). |
 | `visibleWhen` | `{field, operator, value?, scope?}`. Operators: `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`, `count_eq`, `count_neq`, `count_gt`, `count_lt`. An unknown operator means visible. `field` is a dotted path; `scope` is `document` (default) or `parent` (the enclosing object or array item; refused 422 on a top-level field). Hidden fields are still validated. |
+| `hidden` | `true` hides the field in Studio whatever `visibleWhen` says. The stored value stays: a save writes only the fields the form posts, so the hidden value is kept. Only the literal `true` counts; for a condition use `visibleWhen`. Hidden fields are still validated and still returned by the API. |
 | `readOnly` | `true`, or a `visibleWhen`-shaped predicate (read-only while it holds). Enforced for non-admin API writes on top-level fields only. |
 | `group` | The schema `groups` tab this field sits on (or a composite's `groups` tab). |
 | `surface` | `body` or `sidebar`; anything else is refused. Metadata only. |
@@ -88,17 +89,7 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Unknown keys
 
-On `POST /v1/schemas/:dataset`, only the field `type` is refused when unknown. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
-
-| You send | Result |
-|---|---|
-| Unknown `type` anywhere: a top-level field, a `composite`/`image`/`file` subfield, an `arrayOf.of` (one shape or list member), an `array.of` entry, a `richText` `blocks.of` object field | 422 `validation_failed`, `details.fields`: `unknown field type "strng": …` |
-| Misspelled field key (`requred: true`) | 201, stored and echoed; never read; warning at `/fields/0/requred` |
-| Misspelled rule key (`validation: {requird: true}`) | 201, stored; the rule never runs; warning at `/fields/0/validation/requird` |
-| Misspelled schema key (`singelton: true`) | 201, dropped; not echoed; warning at `/singelton` |
-| Bare `required` on a field, bad `surface`, `visibleWhen.scope`, a reserved `blocks.inline` field name | 422 `validation_failed` |
-
-Check the echo: `required?` on each field says whether an error-level `required` rule is in force.
+An unknown field `type` is refused 422; any other unknown key is stored or dropped with an advisory warning: [schema-unknown-keys.md](schema-unknown-keys.md).
 
 ## Code anchors
 

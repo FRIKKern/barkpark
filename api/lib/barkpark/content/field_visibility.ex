@@ -37,6 +37,10 @@ defmodule Barkpark.Content.FieldVisibility do
   When the path traverses a list, the walk flat-maps the rest of the path
   across every row — useful for `subjects.subject.subjectCode`-style refs.
 
+  `"hidden": true` on a field hides it whatever `visibleWhen` says: the field
+  keeps its stored value, the Studio form does not draw it, and the save path
+  merges the posted fields into the stored content, so the value survives.
+
   Field input flavours handled transparently:
 
     * Raw string-keyed maps (the studio_field_renderer path — fields come
@@ -56,14 +60,35 @@ defmodule Barkpark.Content.FieldVisibility do
   predicate reads. With no parent (a top-level field) it reads the document.
   """
   def visible?(field, doc, parent) when is_map(doc) do
-    case extract_visible_when(field) do
-      nil -> true
-      %{} = cond -> evaluate(cond, scope_root(cond, doc, parent))
-      _ -> true
+    if hidden?(field) do
+      false
+    else
+      case extract_visible_when(field) do
+        nil -> true
+        %{} = cond -> evaluate(cond, scope_root(cond, doc, parent))
+        _ -> true
+      end
     end
   end
 
-  def visible?(_field, _doc, _parent), do: true
+  def visible?(field, _doc, _parent), do: not hidden?(field)
+
+  @doc """
+  `true` when the field declares `hidden: true`: Sanity's literal `hidden`, a
+  field kept in the stored document that no editor sees (task-7d4c026f3749ebee).
+  It wins over `visibleWhen`. Only the literal `true` hides; any other value,
+  including a string, leaves the field to `visibleWhen`.
+  """
+  def hidden?(field) when is_map(field) do
+    cond do
+      Map.get(field, "hidden") == true -> true
+      Map.get(field, :hidden) == true -> true
+      is_map(Map.get(field, :raw)) -> Map.get(field.raw, "hidden") == true
+      true -> false
+    end
+  end
+
+  def hidden?(_), do: false
 
   @doc "The map a predicate's path starts from: the parent for `\"scope\": \"parent\"`."
   def scope_root(cond, doc, parent) do
