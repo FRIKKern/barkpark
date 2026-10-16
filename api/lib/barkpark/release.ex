@@ -263,6 +263,23 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  Store the title search folds of rows written before migration 20261016190000
+  (`Barkpark.Search.SearchSlots.fill_title_folds/1`). An operator step: a dry
+  run (the default) counts, `apply: true` writes in batches.
+
+      bin/barkpark eval 'Barkpark.Release.fill_title_folds()'
+      bin/barkpark eval 'Barkpark.Release.fill_title_folds(apply: true)'
+  """
+  def fill_title_folds(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    stats = Barkpark.Search.SearchSlots.fill_title_folds(opts)
+    IO.puts("title search folds: #{inspect(stats)}")
+    stats
+  end
+
+  @doc """
   The prepared data step for task-fa5ccc714ad4a939: stamp `media_files.dataset_id`
   on legacy unstamped blobs (`Barkpark.Media.DatasetIdBackfill`). The OWNER runs
   it; a dry run (the default) writes nothing and prints the census.
