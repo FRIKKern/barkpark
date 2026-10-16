@@ -547,10 +547,87 @@ defmodule BarkparkWeb.GroqControllerTest do
       end
     end
 
+    test "a read that SQL filters alone still hides the hidden fields",
+         %{token: token, admin: admin} do
+      read = fn tok, q ->
+        scoped_conn() |> get_query(tok, q) |> json_response(200) |> Map.fetch!("result")
+      end
+
+      filter = ~s'_type == "record" && kind == "a"'
+
+      assert read.(token, "*[#{filter}]{_id, kind, secret, meta}") == [
+               %{"_id" => "r1", "kind" => "a", "secret" => nil, "meta" => %{"kind" => "a"}},
+               %{"_id" => "r2", "kind" => "a", "secret" => nil, "meta" => %{"kind" => "a"}},
+               %{"_id" => "r3", "kind" => "a", "secret" => nil, "meta" => %{"kind" => "a"}}
+             ]
+
+      assert read.(token, "*[#{filter}].secret") == [nil, nil, nil]
+      assert read.(token, "*[#{filter}].meta") == List.duplicate(%{"kind" => "a"}, 3)
+      assert Enum.all?(read.(token, "*[#{filter}]"), &(not Map.has_key?(&1, "secret")))
+
+      assert read.(admin, "*[#{filter}].secret") == ["x", "x", "y"]
+
+      assert read.(admin, "*[#{filter}]{_id, meta}") |> Enum.map(& &1["meta"]["note"]) == [
+               "x",
+               "x",
+               "y"
+             ]
+    end
+
     test "a caller that sees every field counts the hidden field in SQL", %{admin: admin} do
       assert count_query(admin, ~s'count(*[_type == "record" && secret == "x"])', true) == 2
       assert count_query(admin, ~s'count(*[_type == "record" && meta.note == "x"])', true) == 2
       assert count_query(admin, ~s'count(*[_type == "record" && kind == "a"])', true) == 3
+    end
+  end
+
+  describe "a type with an encrypted field" do
+    # `vault` encrypts `secret`. v1 holds one and v2 does not. Render drops the
+    # ciphertext for a caller without admin, so to that caller neither holds
+    # `secret`, while the stored content of v1 does.
+    setup %{scope: scope} do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "vault",
+            "title" => "vault",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "kind", "type" => "string"},
+              %{"name" => "secret", "type" => "string", "encrypted" => true}
+            ]
+          },
+          @dataset,
+          scope
+        )
+
+      publish!("vault", %{"_id" => "v1", "kind" => "a", "secret" => "x"}, scope)
+      publish!("vault", %{"_id" => "v2", "kind" => "a"}, scope)
+
+      admin = "groq-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(admin, "groq admin", @dataset, ["read", "admin"], scope[:workspace_id])
+
+      {:ok, admin: admin}
+    end
+
+    test "a filter on it matches what the caller reads, in count() and in a read",
+         %{token: token, admin: admin} do
+      read = fn tok, q ->
+        scoped_conn() |> get_query(tok, q) |> json_response(200) |> Map.fetch!("result")
+      end
+
+      assert read.(token, ~s'*[_type == "vault"]{_id, secret}') == [
+               %{"_id" => "v1", "secret" => nil},
+               %{"_id" => "v2", "secret" => nil}
+             ]
+
+      assert read.(token, ~s'count(*[_type == "vault" && defined(secret)])') == 0
+      assert read.(token, ~s'*[_type == "vault" && defined(secret)]._id') == []
+
+      assert read.(admin, ~s'count(*[_type == "vault" && defined(secret)])') == 1
+      assert read.(admin, ~s'*[_type == "vault" && defined(secret)]._id') == ["v1"]
     end
   end
 

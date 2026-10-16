@@ -231,7 +231,8 @@ defmodule Barkpark.Content.Envelope do
 
       :error ->
         # Indexed once per type, not once per document (`field_index/1`).
-        schema = {:indexed, schema_fun.(type) |> raw_fields() |> field_index()}
+        fields = schema_fun.(type) |> raw_fields()
+        schema = {:indexed, field_index(fields), only_ciphertext_hidden?(fields)}
         {schema, Map.put(cache, type, schema)}
     end
   end
@@ -639,6 +640,23 @@ defmodule Barkpark.Content.Envelope do
   defp redact_by_field_visibility(envelope, _schema, %CallerContext{is_admin: true}, _owner_id),
     do: envelope
 
+  # A schema that restricts no field at any depth, and whose fields declare
+  # no object kids at any depth, hides from this caller only what
+  # `drop_field?/5` drops by value: a top-level key holding ciphertext. The
+  # walk below would find nothing else to drop, so this clause skips it. See
+  # `only_ciphertext_hidden?/1`.
+  defp redact_by_field_visibility(
+         envelope,
+         {:indexed, _index, true},
+         %CallerContext{},
+         _owner_id
+       ),
+       do:
+         :maps.filter(
+           fn key, value -> key in @reserved or not FieldCipher.encrypted?(value) end,
+           envelope
+         )
+
   defp redact_by_field_visibility(envelope, schema, %CallerContext{} = ctx, owner_id) do
     fields = indexed_fields(schema)
 
@@ -977,6 +995,48 @@ defmodule Barkpark.Content.Envelope do
   def renders_all_fields?(schema, _caller_context),
     do: not Enum.any?(raw_fields(schema), &restricted_anywhere?/1)
 
+  @doc """
+  True when `render/3` drops a stored ciphertext for `caller_context` on a
+  document of `schema`: the caller is neither internal nor an admin and a
+  field at any depth of the schema is marked `encrypted`. A filter that SQL
+  tests against the stored values would then see a value the rendered
+  document does not hold.
+  """
+  @spec drops_ciphertext?(term(), term()) :: boolean()
+  def drops_ciphertext?(_schema, :internal), do: false
+  def drops_ciphertext?(_schema, %CallerContext{is_admin: true}), do: false
+
+  def drops_ciphertext?(schema, _caller_context),
+    do: Enum.any?(raw_fields(schema), &encrypted_anywhere?/1)
+
+  defp encrypted_anywhere?(field) when is_map(field) do
+    truthy?(Map.get(field, "encrypted")) or truthy?(Map.get(field, :encrypted)) or
+      Enum.any?(nested_kids(field), &encrypted_anywhere?/1) or
+      case Map.get(field, "of") || Map.get(field, :of) do
+        %{} = of -> encrypted_anywhere?(of)
+        members when is_list(members) -> Enum.any?(members, &encrypted_anywhere?/1)
+        _ -> false
+      end
+  end
+
+  defp encrypted_anywhere?(_field), do: false
+
+  # True when, for every caller, `redact_by_field_visibility/4` drops only the
+  # top-level keys that hold ciphertext: no field at any depth is restricted,
+  # so every declared field is visible, and no field leads `redact_nested/5`
+  # to declared object kids, the only place it tests a value. An array's item
+  # shape without kids is walked but changes nothing.
+  defp only_ciphertext_hidden?(fields),
+    do: not Enum.any?(fields, &restricted_anywhere?/1) and Enum.all?(fields, &kidless?/1)
+
+  defp kidless?(field) do
+    nested_kids(field) == [] and
+      case item_field(field) do
+        nil -> true
+        item -> kidless?(item)
+      end
+  end
+
   defp restricted_anywhere?(field) when is_map(field) do
     restricted?(field) or Enum.any?(nested_kids(field), &restricted_anywhere?/1) or
       case item_field(field) do
@@ -1003,7 +1063,7 @@ defmodule Barkpark.Content.Envelope do
     {:index, by_name}
   end
 
-  defp indexed_fields({:indexed, index}), do: index
+  defp indexed_fields({:indexed, index, _only_ciphertext_hidden?}), do: index
   defp indexed_fields(schema), do: schema |> raw_fields() |> field_index()
 
   defp raw_fields(%SchemaDefinition{fields: f}) when is_list(f), do: f
