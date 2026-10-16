@@ -1460,15 +1460,24 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       refute sql =~ "#>", sql
     end
 
+    # The department is `dept-small`, about 300 of the 10,500 products, so the
+    # content index is the cheap way to find them. `dept-big` matches about
+    # 98 % of the table; for it the planner may read the project's rows
+    # through a tenant index instead, which is a sound plan for such a
+    # predicate, and the test went red on that choice with unchanged SQL.
     test "the index finds the candidate rows of both", %{token: token} do
       Repo.query!("SET LOCAL enable_seqscan = off")
 
       plans =
         explain_reads("count(", fn ->
-          result!(token, ~s'count(*[#{@category_filter}])', @category_params)
+          result!(
+            token,
+            ~s'count(*[#{@category_filter}])',
+            Map.put(@category_params, "dept", "dept-small")
+          )
 
           result!(token, ~s'count(*[_type == "product" && department._ref == $d])', %{
-            "d" => "dept-big"
+            "d" => "dept-small"
           })
         end)
 
