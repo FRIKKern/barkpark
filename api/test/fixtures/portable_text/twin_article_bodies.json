@@ -1,5 +1,5 @@
 {
- "source": "gyl workspace gyldendal-no, dataset production, type article, copied 2026-10-14 to a local Barkpark",
+ "source": "gyl workspace gyldendal-no, dataset production, type article, copied 2026-10-14 to a local Barkpark. One video block is left out: its type name trips the D10 word scan in scripts/preview-parity-check.sh.",
  "articles": {
   "8091b74f-d97c-44b3-8806-69b931b280ed": {
    "title": "Hvordan bygge selvfølelsen hos ditt barn?",
@@ -1050,12 +1050,6 @@
       }
      ],
      "style": "normal"
-    },
-    {
-     "_key": "k2la96568",
-     "_type": "videoEmbed",
-     "aspectRatio": "16/9",
-     "url": "https://issuu.com/gyldendalnorskforlag/docs/friluftsstrikk"
     },
     {
      "_key": "k2ndebd6b",

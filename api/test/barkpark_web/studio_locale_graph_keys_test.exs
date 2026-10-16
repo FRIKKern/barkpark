@@ -45,6 +45,9 @@ defmodule BarkparkWeb.StudioLocaleGraphKeysTest do
     assert nb.(:graph)["No connections yet"] == "Ingen koblinger ennå"
     assert nb.(:graph)["%{count} connections"] == "%{count} koblinger"
     assert nb.(:rich_text)["Remove"] == "Fjern"
+    assert nb.(:rich_text)["Heading 2"] == "Overskrift 2"
+    assert nb.(:rich_text)["Bulleted list"] == "Punktliste"
+    assert nb.(:rich_text)["Paragraph"] == "Avsnitt"
     assert nb.(:document_preview)["No document selected"] == "Ingen dokument valgt"
 
     en =

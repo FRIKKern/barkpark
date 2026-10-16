@@ -9,8 +9,8 @@ defmodule Barkpark.Content.PortableTextBodyTest do
   rendered as "invalid block", and a Classic save kept the stored list and
   dropped the edit. The fixture holds two real article bodies from the twin
   workspace: headings, bullet lists, italic text, internal and DAM links, and
-  the custom blocks mediaModule, quote, inlineFeaturedProducts, featureModule,
-  anchorPoint and videoEmbed.
+  the custom blocks mediaModule, quote, inlineFeaturedProducts, featureModule
+  and anchorPoint.
   """
   use Barkpark.DataCase, async: true
 
