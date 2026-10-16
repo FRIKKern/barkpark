@@ -781,8 +781,65 @@ record_deploy_lock_holder() {
   } > "$LOCK_HOLDER_RECORD" 2>/dev/null \
     || log "could not write $LOCK_HOLDER_RECORD — the next contender falls back to fuser/lsof"
   # Held while the trap runs (fds close after traps), so this can never delete a
-  # successor's record.
-  trap 'rm -f "$LOCK_HOLDER_RECORD" 2>/dev/null || true' EXIT
+  # successor's record. The sibling sync runs first, still under the lock, once
+  # a source move has armed it (see sync_static_siblings below).
+  trap '[ "$STATIC_SIBLINGS_ARMED" = 1 ] && sync_static_siblings; rm -f "$LOCK_HOLDER_RECORD" 2>/dev/null || true' EXIT
+}
+
+# ---- Precompressed siblings for the committed static assets. Plug.Static
+# (api/lib/barkpark_web/endpoint.ex, gzip:/brotli:) answers Content-Encoding
+# only when a <file>.gz / <file>.br sits next to the file, and nothing else on
+# a slot box compresses: Caddy is a bare reverse_proxy. The canvas bundle
+# (bp-paper-editor.bundle.js) is ~945 KB raw, ~288 KB gzip -9, and every Studio
+# doc page loads it (task-c154d0d6f4be1cf6).
+#
+# Plug.Static serves a sibling WITHOUT checking it against its source, so a
+# stale one ships old JS to every compressing browser while an identity client
+# gets the new file. So every sibling carries its source's mtime (touch -r) and
+# counts as current only while the two mtimes are equal. git writes a changed
+# file with a fresh mtime, so any source move (forward, --rollback, a failure
+# path's reset to $OLD) leaves exactly the changed files' siblings stale, and
+# the next sync rebuilds just those. The same mtime keeps Plug.Static's etag
+# (size+mtime of the file it serves) stable across deploys that do not touch
+# the file, so a browser's no-cache revalidation still answers 304. An orphan
+# (its source is gone) is removed: Plug.Static would still serve it.
+#
+# Called next to the wasm build on both paths, and from the EXIT trap once a
+# source move has set STATIC_SIBLINGS_ARMED=1, so every exit leaves siblings
+# that match whatever the checkout holds. Non-fatal and niced like the wasm
+# build: a sibling that fails to build is deleted, so its file is served
+# uncompressed (larger, never wrong). .br only where a brotli binary exists.
+# Only *.js / *.css: bp-pdrender.wasm.gz is `make wasm`'s own output.
+STATIC_ASSETS_DIR="$APP/api/priv/static/assets"
+STATIC_SIBLINGS_ARMED=0
+sync_static_siblings() {
+  local f s enc rebuilt=0 current=0 failed=0
+  [ -d "$STATIC_ASSETS_DIR" ] || return 0
+  for s in "$STATIC_ASSETS_DIR"/*.js.gz "$STATIC_ASSETS_DIR"/*.css.gz "$STATIC_ASSETS_DIR"/*.js.br "$STATIC_ASSETS_DIR"/*.css.br; do
+    [ -e "$s" ] || continue
+    [ -f "${s%.*}" ] || rm -f "$s"
+  done
+  for f in "$STATIC_ASSETS_DIR"/*.js "$STATIC_ASSETS_DIR"/*.css; do
+    [ -f "$f" ] || continue
+    for enc in gz br; do
+      s="$f.$enc"
+      if [ -f "$s" ] && [ ! "$s" -nt "$f" ] && [ ! "$s" -ot "$f" ]; then current=$((current + 1)); continue; fi
+      rm -f "$s" "$s.tmp"
+      if [ "$enc" = br ]; then
+        command -v brotli >/dev/null 2>&1 || continue
+        nice -n 19 brotli -q 11 -c "$f" > "$s.tmp"
+      else
+        nice -n 19 gzip -9 -n -c "$f" > "$s.tmp"
+      fi
+      if [ $? -eq 0 ] && touch -r "$f" "$s.tmp" && mv -f "$s.tmp" "$s"; then
+        rebuilt=$((rebuilt + 1))
+      else
+        rm -f "$s.tmp"; failed=$((failed + 1))
+      fi
+    done
+  done
+  log "static siblings: $rebuilt rebuilt, $current current, $failed failed (served uncompressed)$(command -v brotli >/dev/null 2>&1 || echo ', no brotli: .gz only')"
+  return 0
 }
 
 # Break the lock by ending its holders, then retry. NEVER called on its own
@@ -991,6 +1048,7 @@ if [ "$MODE" != "deploy" ]; then
     log "git reset --hard $TARGET_SHA failed — checkout unchanged, Caddy untouched, no flip"
     exit 24
   fi
+  STATIC_SIBLINGS_ARMED=1
 
   # Rebuild the pdrender wasm at the OLD sha (same non-fatal contract as the
   # forward path: a failed build only degrades the reader's TUI view to its
@@ -1001,6 +1059,7 @@ if [ "$MODE" != "deploy" ]; then
   else
     log "go not found — skipping pdrender wasm build"
   fi
+  sync_static_siblings
 
   log "boot barkpark-slot@$TARGET_SLOT on :$TARGET_PORT"
   systemctl restart "barkpark-slot@$TARGET_SLOT"
@@ -1123,6 +1182,7 @@ else
 fi
 NEW="$(git rev-parse HEAD)"
 log "target=$NEW"
+STATIC_SIBLINGS_ARMED=1
 
 # Coalesce: the run ahead of us already deployed this exact commit healthily.
 if [ "$NEW" = "$OLD" ] && [ "$(cat "$STATE" 2>/dev/null)" = "$NEW" ]; then
@@ -1972,6 +2032,7 @@ if command -v go >/dev/null 2>&1; then
 else
   log "go not found — skipping pdrender wasm build"
 fi
+sync_static_siblings
 
 log "boot barkpark-slot@$TARGET on :$TARGET_PORT"
 systemctl restart "barkpark-slot@$TARGET"

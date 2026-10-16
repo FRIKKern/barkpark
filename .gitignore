@@ -124,6 +124,13 @@ tooling/doc-truth/doc-refs.json
 api/priv/static/assets/bp-pdrender.wasm
 api/priv/static/assets/bp-pdrender.wasm.gz
 
+# Precompressed siblings of the committed js/css — build outputs of the slot
+# deploy (deploy/instance-deploy.sh, sync_static_siblings), never committed.
+api/priv/static/assets/*.js.gz
+api/priv/static/assets/*.css.gz
+api/priv/static/assets/*.js.br
+api/priv/static/assets/*.css.br
+
 # Claude Code harness RUNTIME state — machine-local, never cloned. These lived
 # only in one Mac's .git/info/exclude (which git never clones), so a fresh clone
 # showed them as untracked noise and could commit another machine's worktrees,

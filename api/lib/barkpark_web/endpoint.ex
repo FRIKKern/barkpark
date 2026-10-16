@@ -113,13 +113,18 @@ defmodule BarkparkWeb.Endpoint do
   #
   # DO NOT add an etag-based freshness comparison here: the etag is a hash of
   # the served FILE's size+mtime, never content identity, so it cannot witness
-  # staleness (cch charter D139). DO NOT drop `gzip:` — with zero `.gz`
-  # siblings it is a byte no-op today, but removing it also drops
-  # `vary: Accept-Encoding`.
+  # staleness (cch charter D139).
+  #
+  # `gzip:` / `brotli:` serve the `.gz` / `.br` sibling of a file when the
+  # client accepts it, and add `vary: Accept-Encoding`. The slot deploy
+  # (deploy/instance-deploy.sh, sync_static_siblings) builds those siblings for
+  # every `assets/*.js|css` and keeps them in step with the checkout; a file
+  # without one is served as-is. Off in dev, where the files are edited live.
   plug Plug.Static,
     at: "/",
     from: :barkpark,
     gzip: not code_reloading?,
+    brotli: not code_reloading?,
     only: BarkparkWeb.static_paths(),
     raise_on_missing_only: code_reloading?,
     headers: %{"cache-control" => "no-cache"},

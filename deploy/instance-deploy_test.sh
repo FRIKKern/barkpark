@@ -2122,6 +2122,49 @@ check "maint/upgrade: the no-op deploy logs 'already armed', not another upgrade
   "grep -q 'caddy maintenance page already armed' '$TMP/out.log'"
 rm -rf "$TMP"
 
+echo "== Case: precompressed static siblings track the checkout (task-c154d0d6f4be1cf6) =="
+# Plug.Static serves <file>.gz/.br WITHOUT checking it against <file>, so the
+# deploy must never leave a stale or orphaned sibling. The fake git moves no
+# files, so staleness is planted: a .gz with other bytes and an older mtime.
+plant_static_assets() {
+  ASSETS="$APP/api/priv/static/assets"; mkdir -p "$ASSETS"
+  printf 'console.log("bundle %s");\n' "$RANDOM$RANDOM" > "$ASSETS/a.bundle.js"
+  printf '.x{color:red}\n' > "$ASSETS/b.css"
+  printf 'stale bytes' | gzip -c > "$ASSETS/a.bundle.js.gz"; touch -t 202001010000 "$ASSETS/a.bundle.js.gz"
+  printf 'orphan' | gzip -c > "$ASSETS/gone.js.gz"
+  printf 'wasm' > "$ASSETS/bp-pdrender.wasm.gz"
+}
+sibling_ok() { # $1=source $2=enc — sibling decodes to the source and carries its mtime
+  local s="$1.$2"
+  [ -f "$s" ] || return 1
+  if [ "$2" = gz ]; then gzip -dc "$s" | cmp -s - "$1" || return 1; else brotli -dc "$s" | cmp -s - "$1" || return 1; fi
+  [ ! "$s" -nt "$1" ] && [ ! "$s" -ot "$1" ]
+}
+setup_case
+plant_static_assets
+rc="$(run_deploy 200 sibsha)"
+check "siblings: the deploy succeeds"                              "[ '$rc' = '0' ]"
+check "siblings: a stale .gz is rebuilt to decode to its source"   "sibling_ok '$ASSETS/a.bundle.js' gz"
+check "siblings: a .css gets a .gz with its source's mtime"        "sibling_ok '$ASSETS/b.css' gz"
+check "siblings: .br matches its source where brotli exists, else none is written" \
+  "if command -v brotli >/dev/null 2>&1; then sibling_ok '$ASSETS/a.bundle.js' br; else [ ! -e '$ASSETS/a.bundle.js.br' ]; fi"
+check "siblings: an orphan (source gone) is removed"               "[ ! -e '$ASSETS/gone.js.gz' ]"
+check "siblings: make wasm's own .gz is left alone"                "[ \"\$(cat '$ASSETS/bp-pdrender.wasm.gz')\" = 'wasm' ]"
+check "siblings: the build runs before the new slot boots" \
+  "awk '!s && /static siblings:/{s=NR} /boot barkpark-slot@/{b=NR} END{exit !(s && b && s < b)}' '$TMP/out.log'"
+rc="$(run_deploy 200 sibsha2)"
+check "siblings: a second deploy rebuilds nothing it already has (etag stays put)" \
+  "grep -q 'static siblings: 0 rebuilt' '$TMP/out.log'"
+rm -rf "$TMP"
+# A failure path resets the checkout to \$OLD and exits before the build step;
+# the EXIT trap still leaves siblings that match what the checkout holds.
+setup_case
+plant_static_assets
+rc="$(MIX_FAIL=compile run_deploy 200 sibfail)"
+check "siblings: a failed compile still exits 12"                  "[ '$rc' = '12' ]"
+check "siblings: ...and the exit trap leaves no stale .gz behind"  "sibling_ok '$ASSETS/a.bundle.js' gz"
+rm -rf "$TMP"
+
 echo "== Case: the deploy lock names its HOLDER, and the stale policy is proved in BOTH directions (task-e0e4fa0b709c093e) =="
 # THE DEFECT THIS REPLAYS. On 2026-09-22 fifteen deploy.yml `instance` jobs
 # exited 15 after ~30 min each behind one holder, and NOT ONE of them could say
