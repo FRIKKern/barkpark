@@ -1790,8 +1790,12 @@
       font-family: var(--paper-font-sans, var(--font)); color: var(--paper-ink);
       animation: bp-paper-format-fade var(--dur-1) ease-out;
     }
-    .bp-link-preview__title { font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .bp-link-preview__title { flex: 1; min-width: 0; font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 1.9.0: the host's type label for a wikilink's document, and its subtitle in place of [[target]]. */
+    .bp-link-preview__badge { flex: none; font-size: var(--text-2xs); color: var(--paper-ink-soft); }
     .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: var(--text-2xs); color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__addr--subtitle { font-family: var(--paper-font-sans, var(--font)); font-size: var(--text-xs); }
     .bp-link-preview__excerpt { font-size: var(--text-xs); line-height: var(--text-xs-lh); color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     .bp-link-preview__actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--paper-rule); }
     .bp-link-preview__btn {

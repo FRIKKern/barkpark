@@ -114,8 +114,16 @@ export class LinkPreview {
     el.setAttribute("aria-label", t("Link preview"));
     el.style.display = "none";
 
+    const head = document.createElement("div");
+    head.className = `${CLASS}__head`;
     const title = document.createElement("div");
     title.className = `${CLASS}__title`;
+    // The host's type label for a wikilink's document (contract 1.9.0 `badge`).
+    const badge = document.createElement("span");
+    badge.className = `${CLASS}__badge`;
+    badge.style.display = "none";
+    head.appendChild(title);
+    head.appendChild(badge);
     const addr = document.createElement("div");
     addr.className = `${CLASS}__addr`;
     const excerpt = document.createElement("div");
@@ -130,9 +138,15 @@ export class LinkPreview {
     edit.type = "button";
     edit.className = `${CLASS}__btn ${CLASS}__edit`;
     edit.textContent = t("Edit");
+    // 1.9.0: Remove drops the whole link in one click, as Sanity's "Remove annotation".
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = `${CLASS}__btn ${CLASS}__remove`;
+    remove.textContent = t("Remove");
     actions.appendChild(open);
     actions.appendChild(edit);
-    el.appendChild(title);
+    actions.appendChild(remove);
+    el.appendChild(head);
     el.appendChild(addr);
     el.appendChild(excerpt);
     el.appendChild(actions);
@@ -144,8 +158,9 @@ export class LinkPreview {
     el.addEventListener("mouseleave", () => this._scheduleHide());
     open.addEventListener("click", () => this.open());
     edit.addEventListener("click", () => this.edit());
+    remove.addEventListener("click", () => this.remove());
 
-    this._parts = { title, addr, excerpt, open, edit };
+    this._parts = { title, badge, addr, excerpt, open, edit, remove };
     document.body.appendChild(el);
     this._el = el;
   }
@@ -175,7 +190,12 @@ export class LinkPreview {
     }
     p.excerpt.textContent = "";
     p.excerpt.style.display = "none";
+    p.addr.style.display = "";
+    p.addr.classList.remove(`${CLASS}__addr--subtitle`);
+    p.badge.textContent = "";
+    p.badge.style.display = "none";
     p.edit.style.display = this._editable() ? "" : "none";
+    p.remove.style.display = this._editable() ? "" : "none";
     this._el.dataset.kind = info.kind;
     this._el.style.display = "block";
     this._reposition();
@@ -202,6 +222,17 @@ export class LinkPreview {
     if (!meta || typeof meta !== "object" || !this._el) return;
     const p = this._parts;
     if (typeof meta.title === "string" && meta.title) p.title.textContent = meta.title;
+    // 1.9.0: a document's preview, as Sanity's card: its subtitle in place of the
+    // `[[target]]` markup (an empty one hides that line), and its type as a badge.
+    if (typeof meta.subtitle === "string" && this._info && this._info.kind === "wikilink") {
+      p.addr.textContent = meta.subtitle;
+      p.addr.classList.add(`${CLASS}__addr--subtitle`);
+      p.addr.style.display = meta.subtitle ? "" : "none";
+    }
+    if (typeof meta.badge === "string" && meta.badge) {
+      p.badge.textContent = meta.badge;
+      p.badge.style.display = "";
+    }
     if (typeof meta.excerpt === "string" && meta.excerpt) {
       p.excerpt.textContent = meta.excerpt;
       p.excerpt.style.display = "";
@@ -256,6 +287,16 @@ export class LinkPreview {
       this._editor.commands.focus();
     }
     this._onEdit({ kind: info.kind, href: info.href || null, target: info.target || null, docId: info.docId || null, range });
+  }
+
+  // Drop the hovered link (or document link) from its whole run, words kept, in one step.
+  remove() {
+    const info = this._info;
+    if (!info || !this._editable()) return;
+    const range = this.markRange(info);
+    this.hide();
+    if (!range) return;
+    this._editor.chain().focus().setTextSelection(range).unsetMark(info.kind === "link" ? "link" : "wikilink").run();
   }
 
   // The doc range of the contiguous text carrying the hovered mark (same href / same target).

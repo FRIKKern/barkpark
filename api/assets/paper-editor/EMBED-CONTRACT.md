@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.8.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.10.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.8.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.10.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`.
 
 ## The element
 
@@ -101,7 +101,7 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 |---|---|---|
 | `wikilinkSource` | `(query) => [{ title, id, type }]` | the `[[` menu never opens |
 | `tagSource` | `(query) => [name, ...]` (strings) | the `#` menu never opens |
-| `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href? } \| null` | the hover card shows the address only |
+| `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href?, subtitle?, badge? } \| null` | the hover card shows the address only |
 | `mediaUploader` | `(file) => url \| { src?, url?, alt? }` | a pasted or dropped image shows `no media uploader is connected` |
 | `mediaPicker` | `({ kind: "insert" \| "replace", current: { src, alt } \| null }) => { src, alt?, width? } \| null` | an Image insert is the empty image block, and images offer no Select |
 | `editBlockObject` | `({ type, title, inline, fields, value, error }) => value \| null` | declared objects are edited in the canvas's own popover |
@@ -109,7 +109,10 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 The menus drop a result that arrives after a newer query or after close. A
 `linkPreviewSource` that throws or rejects is ignored. For a `link`, `kind`/`href`
 are set; for a `wikilink`, `kind`/`target`/`docId`/`alias` are. A returned `href`
-becomes the address `bp-canvas-open-link` reports. `mediaUploader` gets one
+becomes the address `bp-canvas-open-link` reports. For a `wikilink`, a returned
+`subtitle` replaces the card's `[[target]]` line (an empty one hides it) and `badge`
+shows beside the title (the document's type). In edit mode the card's Remove drops
+the whole link (or document link) from its run, keeping the words. `mediaUploader` gets one
 `File` per image (`image/*` only); a result with no `src`/`url` (or a throw) marks
 the image with the error message instead. `mediaPicker` is the host's own image
 dialog (upload or library): an Image insert (slash menu, palette, `insertBlock`)
@@ -150,6 +153,7 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-server-insert` | a `terminal`, `stage`, `image` or `equation` pick, only when the editor or an ancestor carries `data-server-insert` (the host inserts it); without it they insert in the canvas | `{ type, after_id }` |
 | `bp-canvas-selection` | the local selection changed, at most once per animation frame | `{ anchor: Point, head: Point }`, or `null` when blurred or none (see Shared carets) |
 | `bp-selection-change` | the toolbar state changed, at most once per animation frame | `state()` (see Toolbar commands) |
+| `bp-canvas-history` | the undo history changed depth (1.10.0), at once | `{ kind, count, undo, redo }` (see Toolbar commands) |
 | `bp-canvas-link-request` | with `format-bubble="off"`: Mod+K on a selection, or Edit on the link card. Cancelable; the host opens its own link input and sets the link with `toggleMark("link", { href })` | `{ href }`, the selection's current link or `null` |
 | `bp-canvas-comment-ranges` | an edit moved or dropped a comment range, at most once per animation frame | `commentRanges()` (see Comment ranges) |
 | `bp-canvas-comment-click` | a click inside a comment range | `{ id }`, the innermost range there |
@@ -239,8 +243,9 @@ less than 500 ms apart group into one undo step, as typing does. Such a host usu
 | `setBlockStyle(style)` | `normal`, `h1`–`h6`, `blockquote`. A quote keeps the block's id and text; in a field canvas it is the quote kind the field admits (its pullquote when `blockquote` maps there), as `> ` makes |
 | `toggleList(kind)` | `bullet` or `number`. Off a list: makes one. In a list of the other kind: converts it, keeping the list's id. In a list of that kind: lifts the item out |
 | `insertBlock(type, { level }?)` | any type the canvas's slash menu offers here (narrowed to the field's vocabulary). Inserts after the caret's block, an empty paragraph is replaced; a declared object block opens its fields first, a type the host builds on the server emits `bp-server-insert` |
+| `undo()` / `redo()` | one step of the canvas's own history, as Mod+Z / Shift+Mod+Z in it (1.10.0). For a host that keeps one undo across its form and this canvas, with `bp-canvas-history` |
 | `insertInline(type)` | a declared inline object (the field's `blocks.inline`), at the caret, as the slash pick does: its field editor opens first (the popover, or the host's `editBlockObject`) and its answer puts the object in; a cancel inserts nothing. `true` when the editor opened. Only inside text the field writes in (not a code block) |
-| `run(command, args?)` | the same, by name: `toggleMark` `{ mark, href? }`, `setBlockStyle` `{ style }`, `toggleList` `{ kind }`, `insertBlock` `{ type, attrs? }`, `insertInline` `{ type }`. An unknown command is `false` |
+| `run(command, args?)` | the same, by name: `toggleMark` `{ mark, href? }`, `setBlockStyle` `{ style }`, `toggleList` `{ kind }`, `insertBlock` `{ type, attrs? }`, `insertInline` `{ type }`, `undo`, `redo`. An unknown command is `false` |
 | `can(command, args?)` | whether `run(command, args)` would apply now, without applying it. `false` for what the field's vocabulary forbids (its veto would drop the edit) |
 | `state()` | the active state, below |
 
@@ -259,6 +264,16 @@ wikilink: null, selection: { empty: true, inBlockType: null } }`.
 `bp-selection-change` (bubbles, composed) fires when that state changes (a
 selection move, a stored mark, a block turned into a heading), at most once per
 animation frame. Its `detail` equals `state()`.
+
+`bp-canvas-history` (bubbles, composed; 1.10.0) fires at once, inside the transaction,
+whenever the canvas's undo history changes depth. Its `detail` is `{ kind, count, undo,
+redo }`: `kind` is `"step"` (a new undo step, which also ends what could be redone;
+typing within 500 ms of the last is the same step), `"undo"` or `"redo"` (one taken
+here, by Mod+Z / Shift+Mod+Z or `undo()` / `redo()`), or `"clear"` (the history gone,
+as on a remount); `count` is how many steps moved; `undo` and `redo` are the depths
+after. Depths alone can't tell a redo from a step typed right after an undo; `kind`
+does. `can("undo")` / `can("redo")` say whether a step is there. Remote edits and the
+canvas's own bookkeeping never add a step.
 
 ### Shared carets
 
