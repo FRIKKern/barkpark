@@ -917,6 +917,9 @@ defmodule Barkpark.Groq.DocumentSource do
   defp load_rows(ids, fields) when fields == :all or length(fields) > @max_read_fields,
     do: from(d in Document, where: d.id in ^ids) |> select_rendered() |> Repo.all()
 
+  # The SQL text interpolates only the column names in `@row_fields` and the
+  # placeholders `$2`..`$n`; the keys and ids are bound parameters.
+  # sobelow_skip ["SQL.Query"]
   defp load_rows(ids, fields) do
     keys = Enum.uniq(["title" | fields])
 
