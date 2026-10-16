@@ -65,7 +65,15 @@ defmodule Barkpark.Media.ImageBackend do
   """
   @callback avif_ms_per_megapixel() :: number() | nil
 
-  @optional_callbacks transform: 4, avif?: 0, avif_ms_per_megapixel: 0
+  @doc """
+  Read what Sanity keeps as an image asset's `metadata` from `src`
+  (task-fd05a9327034f89c): `has_alpha`, `is_opaque`, `blur_hash`, `palette`
+  (`Barkpark.Media.Palette`), and, when `opts[:meta]` lists them, `exif` and
+  `location`. Optional; a backend without it leaves those keys out.
+  """
+  @callback analyze(src :: Path.t(), opts :: keyword()) :: {:ok, map()} | {:error, term()}
+
+  @optional_callbacks transform: 4, avif?: 0, avif_ms_per_megapixel: 0, analyze: 2
 
   @doc "Whether the selected backend runs URL-parameter transforms."
   @spec transforms?() :: boolean()
@@ -89,6 +97,16 @@ defmodule Barkpark.Media.ImageBackend do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :avif_ms_per_megapixel, 0),
       do: mod.avif_ms_per_megapixel(),
       else: nil
+  end
+
+  @doc "The image's Sanity-style metadata, or `{:error, :analyze_unsupported}`."
+  @spec analyze(Path.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def analyze(src, opts \\ []) do
+    mod = impl()
+
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :analyze, 2),
+      do: mod.analyze(src, opts),
+      else: {:error, :analyze_unsupported}
   end
 
   @doc "The selected backend module (config override, else OS default)."

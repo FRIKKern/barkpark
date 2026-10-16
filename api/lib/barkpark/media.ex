@@ -66,6 +66,9 @@ defmodule Barkpark.Media do
     * `:asset_metadata` — `mediaAsset` metadata (`metadata_fields/0` keys,
       string-keyed) for the media plugin to write in the same create as the
       asset document, instead of a follow-up patch. Ignored for a dedupe hit.
+    * `:meta` — the optional image metadata to read at upload besides the
+      default set, as Sanity's `meta` upload parameter names it: `"exif"`,
+      `"location"` (task-fd05a9327034f89c). Ignored for a dedupe hit.
     * `:dedupe` — when `true`, bytes whose SHA-1 already belongs to a file in
       the same dataset and workspace return `{:existing, file}` and store
       nothing (task-b6e57c37f6928344). Off by default: a caller that owns its
@@ -174,7 +177,8 @@ defmodule Barkpark.Media do
             temp_path,
             mime_type,
             dataset,
-            Keyword.get(opts, :asset_metadata, %{})
+            Keyword.get(opts, :asset_metadata, %{}),
+            Keyword.get(opts, :meta, [])
           )
       end
     else
@@ -344,7 +348,7 @@ defmodule Barkpark.Media do
     |> Repo.update()
   end
 
-  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata) do
+  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata, meta) do
     # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
     # (see Blobstore.receipt/3). The row's `size` stays the SOURCE size (what the
     # client uploaded); the receipt is not persisted here, it is the seam that
@@ -356,7 +360,8 @@ defmodule Barkpark.Media do
           Map.put(attrs, :path, relative_path),
           relative_path,
           dataset,
-          asset_metadata
+          asset_metadata,
+          meta
         )
 
       {:error, _reason} ->
@@ -373,7 +378,7 @@ defmodule Barkpark.Media do
     end
   end
 
-  defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata) do
+  defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata, meta) do
     %MediaFile{}
     |> MediaFile.changeset(attrs)
     |> Repo.insert()
@@ -383,7 +388,8 @@ defmodule Barkpark.Media do
           Barkpark.Plugins.Registry.run_after_media_upload(%{
             media_file: file,
             dataset: dataset,
-            asset_metadata: asset_metadata
+            asset_metadata: asset_metadata,
+            meta: meta
           })
 
         ok
