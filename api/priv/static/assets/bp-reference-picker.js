@@ -75,6 +75,10 @@ class BpReferencePicker extends HTMLElement {
     // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on
     // the flat surface keeps every fetch byte-identical.
     this._scopePrefix = this.getAttribute("scope-prefix") || "";
+    // A reference field's GROQ filter (options.filter, task-281dfb5b6e350517):
+    // hits are kept only when the filter matches them. Its parameters ride on
+    // the wrapper as `data-filter-params`, which LiveView keeps current.
+    this._filter = (this.getAttribute("filter") || "").trim();
     // bp-search-intel.js is a sibling script; a surface that loads the picker
     // without it still gets a working picker, only without search telemetry.
     this._searchIntel.clientId = typeof BpSearchIntel === "undefined"
@@ -430,7 +434,8 @@ class BpReferencePicker extends HTMLElement {
     const params = new URLSearchParams({
       q: query,
       perspective: "raw",
-      limit: "50"
+      // A filtered field drops hits after the search, so it searches deeper.
+      limit: this._filter ? "100" : "50"
     });
     if (this._refTypes.length === 1) params.set("type", this._refTypes[0]);
     else if (this._refTypes.length > 1) params.set("types", this._refTypes.join(","));
@@ -451,7 +456,11 @@ class BpReferencePicker extends HTMLElement {
     if (!res.ok) return [];
     const body = await res.json();
     this._captureSearchEventId(body);
-    const docs = body.documents || [];
+    let docs = body.documents || [];
+    if (this._filter) {
+      const allowed = await this._filterIds(docs.map((d) => d._id || d.id || "").filter(Boolean));
+      docs = docs.filter((d) => allowed.has(d._id || d.id || ""));
+    }
     // One row per document: a doc mid-edit exists as BOTH drafts.<id> and
     // <id>; key on the canonical id and prefer the draft row (the authoring
     // state — what Sanity's reference search shows).
@@ -473,6 +482,48 @@ class BpReferencePicker extends HTMLElement {
     }
     this._lastSearchMatches = Array.from(byCanonical.values());
     return this._lastSearchMatches;
+  }
+
+  _filterParams() {
+    const host = this.closest("[data-filter-params]");
+    const raw = (host && host.getAttribute("data-filter-params")) || this.getAttribute("filter-params") || "{}";
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_e) {
+      return {};
+    }
+  }
+
+  // The ids among `ids` the field's filter matches, as one GROQ read on the
+  // scoped query endpoint. A failed read keeps none: a filtered field never
+  // offers a document the filter was not checked against.
+  async _filterIds(ids) {
+    if (!ids.length) return new Set();
+    const params = new URLSearchParams({
+      query: "*[_id in $bpCandidateIds && (" + this._filter + ")]._id",
+      perspective: "raw",
+      returnQuery: "false"
+    });
+    params.set("$bpCandidateIds", JSON.stringify(ids));
+    for (const [name, value] of Object.entries(this._filterParams())) {
+      if (name === "bpCandidateIds") continue;
+      params.set("$" + name, JSON.stringify(value === undefined ? null : value));
+    }
+    const url =
+      (this._scopePrefix || "") +
+      "/v2025-02-19/data/query/" +
+      encodeURIComponent(this._dataset) +
+      "?" +
+      params.toString();
+    try {
+      const res = await fetch(url, { credentials: "same-origin" });
+      if (!res.ok) return new Set();
+      const body = await res.json();
+      return new Set(Array.isArray(body.result) ? body.result : []);
+    } catch (_e) {
+      return new Set();
+    }
   }
 
   async _fetchSuggestions(prefix) {

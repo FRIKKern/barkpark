@@ -394,7 +394,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         # internal DOM to the id, so a reorder/selection that changes the
         # row's value changes the id too → LiveView swaps in a fresh wrapper
         # rendering the right value instead of leaving a stale ignored node.
+        {ref_filter, ref_filter_params} =
+          BarkparkWeb.Components.FieldInputs.reference_filter_attrs(item, assigns[:root], nil)
+
         reference_row(%{
+          ref_filter: ref_filter,
+          ref_filter_params: ref_filter_params,
           wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
           row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
@@ -557,7 +562,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # else gets the generic document typeahead.
   defp reference_row(%{ref_type: "mediaAsset"} = assigns) do
     ~H"""
-    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-ref-row">
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-ref-row" data-filter-params={@ref_filter_params}>
       <input
         type="hidden"
         id={"#{@wrap_id}-h"}
@@ -590,6 +595,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@row_value}
         ref-type={@ref_type}
+        filter={@ref_filter}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
         data-field-label={@row_label}
