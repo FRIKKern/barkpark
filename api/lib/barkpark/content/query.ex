@@ -1761,6 +1761,18 @@ defmodule Barkpark.Content.Query do
   # above makes, for the sibling column.
   defp apply_field_op(query, "_type", op, v), do: apply_field_op(query, "type", op, v)
 
+  # A desk filter is JSON, so its value can be a boolean or a number
+  # (`{"content.isCustom": {"neq": true}}` on the twin's «Roller (PIM)»,
+  # `{"content.hitCount": {"gt": 0}}` on «Mest besøkte»). The column side is
+  # text, so the value travels as its JSON text: `true` reads "true", and the
+  # range ops still parse "0" into their numeric compare. A raw boolean or
+  # number reached Postgrex as a text parameter and the list pane, and with it
+  # every document opened from it, answered 500 (task-592dee75ffef0c06).
+  defp apply_field_op(query, field, op, v)
+       when op in ["eq", "neq", "gt", "gte", "lt", "lte"] and (is_boolean(v) or is_number(v)) and
+              field not in ["title", "status", "doc_id", "_id", "type", "_type"],
+       do: apply_field_op(query, field, op, json_scalar_text(v))
+
   defp apply_field_op(query, field, "eq", v) do
     if nested_path?(field) do
       segs = nested_segments(field)
@@ -3228,4 +3240,8 @@ defmodule Barkpark.Content.Query do
         where(query, [x], x.dataset == ^dataset)
     end
   end
+
+  defp json_scalar_text(v) when is_boolean(v), do: to_string(v)
+  defp json_scalar_text(v) when is_integer(v), do: Integer.to_string(v)
+  defp json_scalar_text(v) when is_float(v), do: Jason.encode!(v)
 end

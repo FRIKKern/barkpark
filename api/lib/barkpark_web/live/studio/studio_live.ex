@@ -268,6 +268,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   def handle_params(params, uri, socket) do
+    # The dead render reads through the same per-callback memo the connected
+    # socket uses, for exactly this callback (task-cca3c6d48e57097e). Without it
+    # one document URL on the gyldendal-no copy built the inlined schema
+    # catalog about 20 times: once per desk filter that names a reference
+    # count, plus the desk tree, the pane and the editor.
+    # `with_process_memo/1` switches the memo off again when the callback
+    # returns or raises, so the request process carries nothing onward.
+    if connected?(socket),
+      do: do_handle_params(params, uri, socket),
+      else:
+        Barkpark.Content.WriteScope.with_process_memo(fn ->
+          do_handle_params(params, uri, socket)
+        end)
+  end
+
+  defp do_handle_params(params, uri, socket) do
     dataset = params["dataset"] || default_dataset()
     path = Map.get(params, "path", [])
     desk = params["desk"]

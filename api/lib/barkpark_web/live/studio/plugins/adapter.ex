@@ -290,6 +290,37 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
               |> Enum.reject(&is_nil/1)
         }
 
+      # Several named member types (`of: [{"name": "ctaSection", ...}, ...]`,
+      # Sanity's page-builder array). Each item names its member in `_type`.
+      # Before, the list reached `stringify/1`, which takes a map only, and
+      # the whole document route answered 500 (task-592dee75ffef0c06).
+      "arrayOf" when is_map_key(raw, "of") and is_list(:erlang.map_get("of", raw)) ->
+        members =
+          raw["of"]
+          |> Enum.filter(&is_map/1)
+          |> Enum.map(&stringify/1)
+          |> Enum.flat_map(fn member ->
+            case member["name"] || member["type"] do
+              member_name when is_binary(member_name) and member_name != "" ->
+                field =
+                  member
+                  |> Map.put_new("type", member_name)
+                  |> Map.put("name", member_name)
+                  |> to_field_struct()
+
+                [{member_name, field}]
+
+              _ ->
+                []
+            end
+          end)
+
+        %Field{
+          base
+          | ordered: !!Map.get(raw, "ordered", false),
+            of_types: Map.new(members)
+        }
+
       "arrayOf" ->
         of_raw = Map.get(raw, "of") || %{"type" => "string", "name" => "#{name}[item]"}
         of_raw = of_raw |> stringify() |> Map.put_new("name", "#{name}[item]")
