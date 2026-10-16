@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.7.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.8.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.7.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.8.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges.
 
 ## The element
 
@@ -151,6 +151,8 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-canvas-selection` | the local selection changed, at most once per animation frame | `{ anchor: Point, head: Point }`, or `null` when blurred or none (see Shared carets) |
 | `bp-selection-change` | the toolbar state changed, at most once per animation frame | `state()` (see Toolbar commands) |
 | `bp-canvas-link-request` | with `format-bubble="off"`: Mod+K on a selection, or Edit on the link card. Cancelable; the host opens its own link input and sets the link with `toggleMark("link", { href })` | `{ href }`, the selection's current link or `null` |
+| `bp-canvas-comment-ranges` | an edit moved or dropped a comment range, at most once per animation frame | `commentRanges()` (see Comment ranges) |
+| `bp-canvas-comment-click` | a click inside a comment range | `{ id }`, the innermost range there |
 
 `ops` is a non-empty array of: `patch-block { id, patch }`, `replace-block { id,
 block }`, `insert-after { afterId, block }`, `append-block { block }`,
@@ -282,6 +284,26 @@ syntax (anything else is grey); `name` is text. Classes: `.bp-remote-caret`,
 A host relays both halves through editor presence: post the event's `detail`
 as `selection` on `POST …/presence/:dataset/focus`, and hand the other
 sessions' entries to `setRemoteSelections` (`docs/api/presence.md`).
+
+### Comment ranges
+
+A comment on a span of text (Sanity's inline comments). The host owns the
+comments; the canvas paints their spans and keeps them on their text. Ends are
+`Point`s, as in Shared carets.
+
+| Method | Effect | Returns |
+|---|---|---|
+| `setCommentRanges(list)` | replace the set: `[{ id, anchor: Point, head: Point, active? }]`. Each paints `.bp-comment-range` over its span, plus `.bp-comment-range--active` when `active`. A span that resolves empty is skipped. `[]` clears; set before mount, it waits for the editor | nothing |
+| `commentRanges()` | the live set as mapped through edits, in document order | `[{ id, anchor, head, text }]`, `anchor` the start and `head` the end; `text` is the span's plain text |
+| `commentsInSelection()` | the ranges the selection overlaps (a caret strictly inside one counts) | `string[]` of ids |
+
+Comment ranges are decorations: no ops, no history entry, the local caret never
+moves. Each maps inward through local typing and `applyServerBlocks`: text typed
+at either edge stays outside the range, text typed inside it grows it. An end
+whose block was replaced is found again by its `Point`. A range whose text is all
+deleted, or whose block or path is gone, is dropped, and `commentRanges()` no
+longer lists it. When an edit moves or drops a range the canvas fires
+`bp-canvas-comment-ranges` so the host can save the new `Point`s.
 
 ### Recipe: an HTTP host
 
