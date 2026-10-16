@@ -357,7 +357,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         BarkparkWeb.Components.FieldInputs.reference_id(get_value(assigns.value, sub.name, ""))
 
       {ref_filter, ref_filter_params} =
-        BarkparkWeb.Components.FieldInputs.reference_filter_attrs(raw, Map.get(assigns, :root), nil)
+        BarkparkWeb.Components.FieldInputs.reference_filter_attrs(
+          raw,
+          Map.get(assigns, :root),
+          nil
+        )
 
       reference_subfield_input(%{
         ref_filter: ref_filter,

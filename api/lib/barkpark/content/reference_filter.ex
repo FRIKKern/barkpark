@@ -70,7 +70,8 @@ defmodule Barkpark.Content.ReferenceFilter do
 
   def params(_spec, _root, _doc_id), do: %{}
 
-  defp read(_root, "_id", doc_id) when is_binary(doc_id), do: Barkpark.Content.published_id(doc_id)
+  defp read(_root, "_id", doc_id) when is_binary(doc_id),
+    do: Barkpark.Content.published_id(doc_id)
 
   defp read(root, path, _doc_id) when is_map(root) do
     path

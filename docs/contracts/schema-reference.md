@@ -42,7 +42,7 @@ The `builtin_field_types/0` list in `Barkpark.Content.Schema`. "No value check" 
 | `slug` | Text with a Generate button. `options.source` (or `source`) names the field it derives from, default `title`. Stored as `{_type: "slug", current}` or a string. |
 | `select` | `options` is a list of values or `{value, title}` (or `label`) pairs. `layout: "radio"` draws radio buttons. The server does not check membership. |
 | `tags` | No value check. |
-| `reference` | Points at another document. Targets: `refType` (one type), `to` (list of type names or `{type}`), or `refTypes`. `refTypeTolerant: true` keeps `refType` for the picker but resolves the target as any type. Stored as `{_ref, _type: "reference"}` or a bare id. `options.filter` is a GROQ condition on the candidate (Sanity's `options.filter`, for example `isSeriesParent == true`) and `options.filterParams` its parameters; a value `{"fromDocument": "<path>"}` reads the open document (`_id` is its published id). The picker lists only matching hits; GROQ that does not parse is refused 422. Writes are not checked against the filter: a target can stop matching after it is linked, and refusing would block unrelated saves. |
+| `reference` | Points at another document. Targets: `refType` (one type), `to` (list of type names or `{type}`), or `refTypes`. `refTypeTolerant: true` keeps `refType` for the picker but resolves the target as any type. Stored as `{_ref, _type: "reference"}` or a bare id. `options.filter` (GROQ) and `options.filterParams` narrow the picker: [reference-filter.md](reference-filter.md). |
 | `image` | URL or `{asset: {_ref}, hotspot, crop}`. `options.hotspot: true` (or `hotspot: true`) enables the focal point and checks `hotspot`/`crop` sides are numbers 0–1. `fields` adds subfields (for example `alt`) checked like a composite's; `alt: true` shows an alt input. |
 | `file` | URL or `{asset: {_ref}}`. `fields` as for `image`; no hotspot. |
 | `richText` | Rich text. `editor: "blocks"` opts into the block editor; `blocks` narrows its vocabulary: `styles` (`normal`, `h1`–`h6`, `blockquote`), `lists` (`bullet`, `number`), `marks` (`strong`, `em`, `strikethrough`, `underline`, `code`), `annotations` (`link`), `of` (`image`, `divider`, `code`, `diagram`, or `{name, fields}` custom object blocks whose fields are checked, including `options.list` membership), `inline` (inline objects, [schema-v2.md](schema-v2.md)). Block writes outside the vocabulary are refused. |
@@ -84,7 +84,7 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Cross-field rules
 
-`cross_validations` entries: `{name, title, rule, level, fields}`. `rule` is a `visibleWhen` predicate, or `{all: [...]}` / `{any: [...]}` of them. Studio shows unsatisfied rules as a banner; API writes get the same rules as findings (code `cross_validation`, path `/<first of fields>`) through the warnings/422 door above, by `level`. A rule naming an undeclared field or an unknown operator, or with no `rule`, is skipped and logged.
+`cross_validations`: [schema-cross-validations.md](schema-cross-validations.md).
 
 ## Unknown keys
 

@@ -42,7 +42,10 @@ defmodule BarkparkWeb.Studio.ReferenceFilterTest do
         "of" => %{
           "type" => "reference",
           "refType" => "event",
-          "options" => %{"filter" => "isSeriesParent != $flag", "filterParams" => %{"flag" => true}}
+          "options" => %{
+            "filter" => "isSeriesParent != $flag",
+            "filterParams" => %{"flag" => true}
+          }
         }
       }
     ]
@@ -74,7 +77,11 @@ defmodule BarkparkWeb.Studio.ReferenceFilterTest do
       {:ok, _} =
         Content.upsert_document(
           "event",
-          %{"doc_id" => id, "title" => title, "content" => %{"title" => title, "isSeriesParent" => parent?}},
+          %{
+            "doc_id" => id,
+            "title" => title,
+            "content" => %{"title" => title, "isSeriesParent" => parent?}
+          },
           @dataset,
           Keyword.put(scope, :source, :api)
         )
