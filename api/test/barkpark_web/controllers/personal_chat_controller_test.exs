@@ -270,7 +270,20 @@ defmodule BarkparkWeb.PersonalChatControllerTest do
     end
 
     assert cookie.() |> get(url) |> response(200)
-    assert cookie.() |> post(url, "{}") |> response(403)
+    denied = cookie.() |> post(url, "{}")
+    assert denied.status == 403
+    assert get_resp_header(denied, "x-content-type-options") == ["nosniff"]
+    assert denied.resp_body =~ "csrf_required"
+
+    row = create(ctx)
+    session_url = url <> "/#{row["id"]}"
+    assert cookie.() |> post(session_url <> "/messages", "{}") |> response(403)
+    assert cookie.() |> get(session_url <> "/events") |> response(503)
+    assert call("invalid", :get, session_url).status == 401
+
+    assert get_resp_header(call("invalid", :get, session_url), "x-content-type-options") == [
+             "nosniff"
+           ]
 
     assert cookie.()
            |> put_req_header("x-requested-with", "XMLHttpRequest")

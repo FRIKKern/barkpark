@@ -1273,15 +1273,13 @@ defmodule BarkparkWeb.Router do
 
   # Separate account-owned storage door. Do not broaden the operator/connector
   # API-token door: membership alone never grants somebody else's conversation.
-  pipeline :personal_chat do
-    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
-    plug(:accepts, ["json"])
+  pipeline :personal_chat_headers do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
-    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
-    plug(BarkparkWeb.Plugs.RateLimit)
-    plug(:fetch_session)
-    plug(BarkparkWeb.Plugs.RequireUserSession)
-    plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
+  end
+
+  # Compose the existing :user_auth + :require_user account/CSRF gates before
+  # this ownership seal; do not duplicate their session-admission policy.
+  pipeline :personal_chat do
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.RequirePersonalChatAccess)
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
@@ -2830,18 +2828,14 @@ defmodule BarkparkWeb.Router do
     get("/analytics/:dataset", AnalyticsController, :index)
   end
 
-  # ── Claude chat transport (charter bp-chat-tui D21-D24; Connectors D18/D19a).
-  # `[:api, :require_chat_access]`: RequireToken + RequireChatAccess resolve
-  # `conn.assigns.chat_scope` BEFORE any UUID/store/runtime work — `:global` for
-  # a global-admin token (instance-wide authority UNCHANGED, D21) or
-  # `{:workspace, ws}` for a workspace-bound `chat` Connector, else 403. `:api`
-  # supplies AcceptBarkparkVendor, which rewrites a `text/event-stream` Accept so
-  # the SSE `:events` route negotiates JSON (D6) instead of 406-ing. The
-  # controller confines a workspace scope to sessions its tenant owns; a
-  # wrong-tenant read joins the not-found oracle. A strict Recorder/ClaudeChat
-  # adapter: no adopt_sink, no launcher controls, no shed-and-close.
   scope "/w/:workspace_slug/v1/personal-chat", BarkparkWeb do
-    pipe_through([:studio_chat_capability, :personal_chat])
+    pipe_through([
+      :studio_chat_capability,
+      :personal_chat_headers,
+      :user_auth,
+      :require_user,
+      :personal_chat
+    ])
 
     get("/sessions", PersonalChatController, :index)
     post("/sessions", PersonalChatController, :create)
@@ -2852,18 +2846,28 @@ defmodule BarkparkWeb.Router do
 
     # Reserved operations fail explicitly, after the same ownership lookup.
     # They never subscribe, write a turn, or start a model in this storage slice.
-    get("/events", PersonalChatController, :unavailable)
-    get("/rollup", PersonalChatController, :unavailable)
-    get("/managed-session", PersonalChatController, :unavailable)
-    post("/sessions/:id/messages", PersonalChatController, :unavailable)
-    post("/sessions/:id/interrupt", PersonalChatController, :unavailable)
-    post("/sessions/:id/approval", PersonalChatController, :unavailable)
-    post("/sessions/:id/answer", PersonalChatController, :unavailable)
-    get("/sessions/:id/events", PersonalChatController, :unavailable)
-    post("/sessions/:id/attachments", PersonalChatController, :unavailable)
-    get("/sessions/:id/attachments/:attachment_id", PersonalChatController, :unavailable)
+    get("/events", PersonalChatController, :read_unavailable)
+    get("/rollup", PersonalChatController, :read_unavailable)
+    get("/managed-session", PersonalChatController, :read_unavailable)
+    post("/sessions/:id/messages", PersonalChatController, :write_unavailable)
+    post("/sessions/:id/interrupt", PersonalChatController, :write_unavailable)
+    post("/sessions/:id/approval", PersonalChatController, :write_unavailable)
+    post("/sessions/:id/answer", PersonalChatController, :write_unavailable)
+    get("/sessions/:id/events", PersonalChatController, :read_unavailable)
+    post("/sessions/:id/attachments", PersonalChatController, :write_unavailable)
+    get("/sessions/:id/attachments/:attachment_id", PersonalChatController, :read_unavailable)
   end
 
+  # ── Claude chat transport (charter bp-chat-tui D21-D24; Connectors D18/D19a).
+  # `[:api, :require_chat_access]`: RequireToken + RequireChatAccess resolve
+  # `conn.assigns.chat_scope` BEFORE any UUID/store/runtime work — `:global` for
+  # a global-admin token (instance-wide authority UNCHANGED, D21) or
+  # `{:workspace, ws}` for a workspace-bound `chat` Connector, else 403. `:api`
+  # supplies AcceptBarkparkVendor, which rewrites a `text/event-stream` Accept so
+  # the SSE `:events` route negotiates JSON (D6) instead of 406-ing. The
+  # controller confines a workspace scope to sessions its tenant owns; a
+  # wrong-tenant read joins the not-found oracle. A strict Recorder/ClaudeChat
+  # adapter: no adopt_sink, no launcher controls, no shed-and-close.
   scope "/v1/chat", BarkparkWeb do
     pipe_through([:studio_chat_capability, :api, :require_chat_access])
 

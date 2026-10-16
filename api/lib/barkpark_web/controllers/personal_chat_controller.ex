@@ -69,14 +69,18 @@ defmodule BarkparkWeb.PersonalChatController do
   def unarchive(conn, %{"id" => id}),
     do: lifecycle(conn, StudioChat.unarchive_session(id, conn.assigns.chat_scope))
 
-  def unavailable(conn, %{"id" => id}) do
+  # Keep read and write routes distinct even while both are refusal-only.
+  def read_unavailable(conn, params), do: unavailable(conn, params)
+  def write_unavailable(conn, params), do: unavailable(conn, params)
+
+  defp unavailable(conn, %{"id" => id}) do
     case owned(conn, id) do
       %Session{} -> unavailable(conn, %{})
       nil -> missing(conn)
     end
   end
 
-  def unavailable(conn, _params) do
+  defp unavailable(conn, _params) do
     ErrorResponse.emit_custom(
       conn,
       503,
