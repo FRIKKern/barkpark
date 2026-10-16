@@ -670,7 +670,10 @@ defmodule Barkpark.Content.Mutations do
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
              :ok <-
                ensure_read_only_unchanged(type, nil, incoming_content(attrs), id, dataset, opts),
-             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
+             # exclusive: a create racing this one may land between the read above and
+             # the write; it is a 409 then, never an update over it (task-b6f9ff71d96c42aa).
+             {:ok, doc} <-
+               Content.create_document(type, attrs, dataset, Keyword.put(opts, :exclusive, true)) do
           warn_create_over_published("create", type, id, dataset, opts, doc)
           {:ok, doc, "create"}
         end

@@ -715,6 +715,7 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp create_after_dedup(type, attrs, dataset, doc_id, ctx, prev_doc, opts) do
+    exclusive = Keyword.get(opts, :exclusive, false)
     # THE CREATOR STAMP (task-aa3502ad7645afbd). Server-set, here, so the
     # `:before_save` payload below already carries it. See
     # `stamp_task_creator/6`.
@@ -747,6 +748,14 @@ defmodule Barkpark.Content.Writer do
       :ok ->
         result =
           case prev_doc do
+            # task-b6f9ff71d96c42aa — `exclusive: true` (the mutate door's `create`): the
+            # caller checked the id was free, but a create racing it may have landed since.
+            # Updating that row would put this writer's document over the other's with a
+            # 200 for both (two CI shards both took one dataset lease, 2026-10-16). A row
+            # that exists now is the 409 a create of an existing id gets.
+            %Document{} when exclusive ->
+              {:error, :conflict}
+
             %Document{} = existing ->
               # Field-encryption chokepoint: marked fields become ciphertext
               # BEFORE the changeset, so plaintext never reaches storage. A field
@@ -841,11 +850,27 @@ defmodule Barkpark.Content.Writer do
               end
           end
 
+        # The other order of the same race: both found the id free and both inserted;
+        # the later insert met the earlier one in the unique index.
+        result = if exclusive, do: taken_is_conflict(result), else: result
+
         if Keyword.get(opts, :build_only),
           do: result,
           else: finish_deferred_after_save(result, payload)
     end
   end
+
+  defp taken_is_conflict({:error, %Ecto.Changeset{errors: errors}} = error) do
+    case Keyword.get(errors, :doc_id) do
+      {_, meta} ->
+        if Keyword.get(meta, :constraint) == :unique, do: {:error, :conflict}, else: error
+
+      _ ->
+        error
+    end
+  end
+
+  defp taken_is_conflict(result), do: result
 
   @doc false
   def finish_deferred_after_save(result, payload) when is_map(payload) do
