@@ -226,6 +226,10 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"POST", "/v1/chat-host/events"} => "chat-host daemon pushes runtime events",
     {"POST", "/v1/chat-host/heartbeat"} => "chat-host daemon liveness ping",
     {"POST", "/v1/chat-host/rotate"} => "chat-host daemon rotates its own secret",
+    {"GET", "/v1/chat-host/application-turns/:*"} =>
+      "bound application executor fetches accepted personal work with its Host credential; not an operator bearer verb",
+    {"POST", "/v1/chat-host/application-turns/:*/commit"} =>
+      "bound application executor commits a fenced result with its Host credential; not an operator bearer verb",
     {"POST", "/v1/chat/sessions/:*/state"} => "chat-host daemon reports session state",
 
     # ── Tickets SUBMITTER surface — a RATIFIED omission, not a gap ──────────
