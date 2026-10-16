@@ -62,6 +62,79 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :target, :any, default: nil
 
   def array_field(assigns) do
+    if select_list?(assigns.field),
+      do: select_list(assigns),
+      else: row_list(assigns)
+  end
+
+  # An array of `select` values is Sanity's array of strings with
+  # `options.list` (task-b8bce68623e758ae): one checkbox per option, with the
+  # option's title, in option order. Every checkbox posts `<path>[]`, so the
+  # form sends a list in option order; the leading hidden "" keeps the key in
+  # the post when nothing is ticked, and `Content.Forms` drops it. A stored
+  # value that is not an option is listed after the options, ticked and marked
+  # invalid, so it stays until the editor unticks it.
+  defp select_list(assigns) do
+    item = element_field(assigns.field)
+    options = Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options))
+    values = Enum.map(assigns[:value] || [], &leaf_display/1)
+    known = Enum.map(options, & &1.value)
+    path = Map.get(assigns, :path, "")
+
+    assigns =
+      assigns
+      |> Map.put_new(:readonly, false)
+      |> Map.put_new(:on_change, nil)
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
+      |> Map.put(:path, path)
+      |> Map.put(:dom_id, "bp-array-" <> sanitize_id("#{assigns.field.name}#{path}"))
+      |> Map.put(:options, Enum.map(options, &Map.put(&1, :checked, &1.value in values)))
+      |> Map.put(:unknown, values |> Enum.reject(&(&1 in known or &1 == "")) |> Enum.uniq())
+      |> Map.put(:grid, select_layout(assigns.field) == "grid")
+
+    ~H"""
+    <fieldset class="bp-field bp-field-array bp-select-list" data-field-type="arrayOf"
+              data-array-kind="select" id={@dom_id} data-field-name={@field.name}>
+      <legend class="bp-field-title"><%= @title %></legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
+      <input type="hidden" name={@path <> "[]"} value="" />
+      <div class={"bp-select-list-options" <> if(@grid, do: " bp-select-list-grid", else: "")}>
+        <label :for={o <- @options} class="bp-select-list-option">
+          <input type="checkbox" name={@path <> "[]"} value={o.value} checked={o.checked}
+                 phx-change={@on_change} disabled={@readonly} />
+          <span><%= o.label %></span>
+        </label>
+        <label :for={v <- @unknown} class="bp-select-list-option bp-select-list-invalid" data-invalid-value={v}>
+          <input type="checkbox" name={@path <> "[]"} value={v} checked aria-invalid="true"
+                 phx-change={@on_change} disabled={@readonly} />
+          <span><code><%= v %></code></span>
+          <span class="error" role="note"><%= gettext("Not one of the options") %></span>
+        </label>
+      </div>
+    </fieldset>
+    """
+  end
+
+  defp select_list?(field) do
+    item = element_field(field)
+
+    subfield_attr(item, :type) == "select" and
+      Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options)) != []
+  end
+
+  # Sanity's `options.layout` on the array ("grid" draws the options in columns).
+  defp select_layout(field) do
+    raw = subfield_attr(field, :raw) || %{}
+
+    case raw do
+      %{"layout" => layout} -> layout
+      %{"options" => %{"layout" => layout}} -> layout
+      _ -> nil
+    end
+  end
+
+  defp row_list(assigns) do
     assigns =
       assigns
       |> Map.put_new(:value, [])
@@ -213,7 +286,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       # composite itself renders `bare` inside; three feature cards read as
       # three one-line rows instead of six thousand pixels of raw inputs.
       "composite" ->
-        preview = item_preview(item, row_value)
+        preview = item_preview(item, row_value, preview_ctx(assigns))
 
         item_row(%{
           item: item,
@@ -259,7 +332,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           preview: %{
             title: image_row_title(map, item),
             subtitle: nil,
-            media: media_url(map)
+            media: media_url(map, preview_ctx(assigns))
           },
           open: map == %{},
           row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
@@ -270,6 +343,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               row_value: if(map == %{}, do: "", else: Jason.encode!(map)),
               hotspot: image_opt(opts, "hotspot"),
               alt: image_opt(opts, "alt"),
+              value_shape: BarkparkWeb.Components.FieldInputs.image_value_shape(opts),
               dataset: assigns[:dataset] || "production",
               scope_prefix: assigns[:scope_prefix] || "",
               api_token_raw: assigns[:api_token_raw] || "",
@@ -376,7 +450,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # url, subtitle nil. An empty row reads as the element's title ("Feature-
   # kort") so a freshly added card is named before it has content.
   @doc false
-  def item_preview(item, row_value) do
+  def item_preview(item, row_value, ctx \\ %{}) do
     row = if is_map(row_value), do: row_value, else: %{}
     spec = (subfield_attr(item, :raw) || %{}) |> Map.get("preview") || %{}
     subs = (Map.get(item, :fields) || []) |> Enum.reject(&is_nil/1)
@@ -390,7 +464,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     %{
       title: title,
       subtitle: pick(row, spec["subtitle"]),
-      media: media_url(pick(row, spec["media"]) || first_image(row, subs))
+      media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx)
     }
   end
 
@@ -431,10 +505,24 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end)
   end
 
-  # A picker value is a bare URL or a JSON/map {url, assetId, …}.
-  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
+  # Where a Sanity image id is served from: the field's dataset and scope.
+  defp preview_ctx(assigns),
+    do: %{dataset: assigns[:dataset] || "production", scope_prefix: assigns[:scope_prefix] || ""}
 
-  defp media_url(v) when is_binary(v) do
+  # A picker value is a bare URL or a JSON/map {url, assetId, …}, or the
+  # reference shape {asset: {_ref}} (task-7ea6f41cede5ee97).
+  defp media_url(%{"url" => url}, _ctx) when is_binary(url) and url != "", do: url
+
+  defp media_url(%{"asset" => %{"_ref" => ref}}, ctx) when is_binary(ref) do
+    BarkparkWeb.Components.FieldInputs.sanity_image_url(
+      ref,
+      Map.get(ctx, :scope_prefix, ""),
+      Map.get(ctx, :dataset, "production"),
+      120
+    )
+  end
+
+  defp media_url(v, _ctx) when is_binary(v) do
     cond do
       v == "" ->
         nil
@@ -452,7 +540,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end
   end
 
-  defp media_url(_), do: nil
+  defp media_url(_, _ctx), do: nil
 
   defp row_empty?(nil), do: true
 
@@ -583,6 +671,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         scope-prefix={@scope_prefix}
         data-bridge-target={"#{@wrap_id}-h"}
         data-token={@api_token_raw}
+        value-shape={@value_shape}
         hotspot={@hotspot}
         alt={@alt}
       ></bp-media-picker>

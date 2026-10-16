@@ -298,15 +298,37 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # only control the form posts; the nameless picker is the editor's view,
   # and `BarkparkDatetimeField` (priv/static/assets/bp-datetime-field.js)
   # converts between the two.
+  #
+  # The picker sits in a `phx-update="ignore"` span (task-cf45242ef3477fba).
+  # It has no `value` attribute, so every LiveView patch of the form reset it
+  # to "" right after the hook filled it, and the event dates read empty. The
+  # stored value also rides on the wrapper as `data-value`, so a new value from
+  # the server changes the wrapper and the hook's `updated` shows it.
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v}>
       <input type="hidden" id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
-      <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+      <span id={"bp-dt-pick-#{@id_prefix}#{@n}"} phx-update="ignore" class="bp-datetime-picker">
+        <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+      </span>
     </div>
+    """
+  end
+
+  # A date is a calendar day with no time zone, stored as "YYYY-MM-DD" like
+  # Sanity's `date` (task-cf45242ef3477fba). It used to fall through to a text
+  # box. A native date picker posts the same format, so the stored value
+  # round-trips unchanged; `Forms.date_form_value/1` cuts a longer ISO value to
+  # its day for display, and an untouched field keeps the stored text.
+  def input(%{field: %{"type" => "date", "name" => name}} = assigns) do
+    val = Barkpark.Content.Forms.date_form_value(Map.get(assigns.editor_form, name, ""))
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="date" name={"doc[#{@n}]"} value={@v} class="form-input" aria-label={@field["title"] || @n} phx-debounce="300" />
     """
   end
 
@@ -423,7 +445,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
         n: name,
         v: val,
         hotspot: image_option?(f, "hotspot"),
-        alt: image_option?(f, "alt")
+        alt: image_option?(f, "alt"),
+        value_shape: image_value_shape(f)
       )
 
     ~H"""
@@ -435,6 +458,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-mp-hidden-#{@n}"}
         data-token={@api_token_raw}
+        value-shape={@value_shape}
         hotspot={@hotspot}
         alt={@alt}
       ></bp-media-picker>
@@ -608,6 +632,48 @@ defmodule BarkparkWeb.Components.FieldInputs do
     do: %{hotspot: image_option?(field, "hotspot"), alt: image_option?(field, "alt")}
 
   def image_picker_flags(_), do: %{hotspot: nil, alt: nil}
+
+  @doc """
+  The value shape an EMPTY image field writes when an image is picked
+  (task-7ea6f41cede5ee97): `"asset-ref"` when the schema field declares
+  `"valueShape": "assetRef"` (also under `options`), so a pick writes Sanity's
+  `{asset: {_ref}}`; `nil` keeps the `{url, assetId}` value. A field that
+  already holds `{asset: {_ref}}` keeps that shape either way: the picker
+  reads it from the value.
+  """
+  @spec image_value_shape(map() | nil) :: String.t() | nil
+  def image_value_shape(%{"valueShape" => "assetRef"}), do: "asset-ref"
+  def image_value_shape(%{"options" => %{"valueShape" => "assetRef"}}), do: "asset-ref"
+  def image_value_shape(%{raw: %{} = raw}), do: image_value_shape(raw)
+  def image_value_shape(_), do: nil
+
+  @doc """
+  The URL Barkpark serves a Sanity image id from, `image-<sha1>-<w>x<h>-<ext>`
+  (task-7ea6f41cede5ee97): the Sanity-compatible
+  `<scope>/images/<project>/<dataset>/<sha1>-<w>x<h>.<ext>` route, which
+  ignores the project segment. `width` asks for a smaller copy. `nil` for any
+  other id. The same rule as `bpSanityImageUrl` in bp-media-picker.js.
+  """
+  @spec sanity_image_url(String.t(), String.t(), String.t(), pos_integer() | nil) ::
+          String.t() | nil
+  def sanity_image_url(ref, scope_prefix, dataset, width \\ nil)
+
+  def sanity_image_url(ref, scope_prefix, dataset, width) when is_binary(ref) do
+    case Regex.run(
+           ~r/\Aimage-([0-9a-fA-F]{40})-([1-9][0-9]*)x([1-9][0-9]*)-([A-Za-z0-9]+)\z/,
+           ref
+         ) do
+      [_, sha1, w, h, ext] ->
+        file = "#{String.downcase(sha1)}-#{w}x#{h}.#{String.downcase(ext)}"
+        url = "#{scope_prefix}/images/barkpark/#{URI.encode_www_form(dataset)}/#{file}"
+        if width, do: "#{url}?w=#{width}&fit=max", else: url
+
+      _ ->
+        nil
+    end
+  end
+
+  def sanity_image_url(_ref, _scope_prefix, _dataset, _width), do: nil
 
   # The picker's wire value is a STRING (a bare URL or a JSON object). A value
   # that was decoded into a map at the save boundary (Forms.coerce_field_value)

@@ -317,16 +317,16 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       input_name: child_path(assigns.path, sub.name),
       input_id: input_id(assigns.path, assigns.field.name, sub.name),
       value: value,
-      hotspot:
-        if(Map.get(opts, "hotspot") == true or get_in(opts, ["options", "hotspot"]) == true,
-          do: true,
-          else: nil
-        ),
-      alt:
-        if(Map.get(opts, "alt") == true or get_in(opts, ["options", "alt"]) == true,
-          do: true,
-          else: nil
-        ),
+      # The same picker options as a top-level image field, so an `alt`
+      # declared as a subfield shows its box here too.
+      hotspot: BarkparkWeb.Components.FieldInputs.image_picker_flags(opts).hotspot,
+      alt: BarkparkWeb.Components.FieldInputs.image_picker_flags(opts).alt,
+      value_shape: BarkparkWeb.Components.FieldInputs.image_value_shape(opts),
+      # Picker context (task-7ea6f41cede5ee97): the preview of a Sanity image
+      # id and the library read the field's own dataset and scope.
+      dataset: Map.get(assigns, :dataset) || "production",
+      scope_prefix: Map.get(assigns, :scope_prefix) || "",
+      api_token_raw: Map.get(assigns, :api_token_raw) || "",
       readonly: assigns.readonly
     }
 
@@ -409,6 +409,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       <input type="hidden" id={"bp-mp-hidden-#{@input_id}"} name={@input_name} value={@value} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@value}
+        dataset={@dataset}
+        scope-prefix={@scope_prefix}
+        data-token={@api_token_raw}
+        value-shape={@value_shape}
         data-bridge-target={"bp-mp-hidden-#{@input_id}"}
         hotspot={@hotspot}
         alt={@alt}
@@ -480,7 +484,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # author types into carries the same title as its own aria-label.
   defp leaf_input(%{field: %{type: "datetime"}} = assigns) do
     ~H"""
-    <span id={"#{@input_id}-dt"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+    <span id={"#{@input_id}-dt"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={to_string(@value || "")}>
       <input
         type="hidden"
         id={@input_id}
@@ -490,13 +494,36 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         phx-change={@on_change}
         disabled={@readonly}
       />
-      <input
-        type="datetime-local"
-        class="bp-input"
-        aria-label={title_for(@field)}
-        disabled={@readonly}
-      />
+      <%!-- Ignored by LiveView patches, which reset a picker with no value
+            attribute (task-cf45242ef3477fba); see FieldInputs' datetime. --%>
+      <span id={"#{@input_id}-dt-pick"} phx-update="ignore" class="bp-datetime-picker">
+        <input
+          type="datetime-local"
+          class="bp-input"
+          aria-label={title_for(@field)}
+          disabled={@readonly}
+        />
+      </span>
     </span>
+    """
+  end
+
+  # A date subfield: a native date picker on the stored "YYYY-MM-DD"
+  # (task-cf45242ef3477fba), as the top-level date input.
+  defp leaf_input(%{field: %{type: "date"}} = assigns) do
+    assigns = Map.put(assigns, :day, Barkpark.Content.Forms.date_form_value(assigns.value))
+
+    ~H"""
+    <input
+      type="date"
+      class="bp-input"
+      id={@input_id}
+      name={@input_name}
+      value={@day}
+      aria-label={title_for(@field)}
+      phx-change={@on_change}
+      disabled={@readonly}
+    />
     """
   end
 

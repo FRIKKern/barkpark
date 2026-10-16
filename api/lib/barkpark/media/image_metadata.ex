@@ -91,7 +91,86 @@ defmodule Barkpark.Media.ImageMetadata do
     end
   end
 
+  # The reference shape, `{asset: {_ref}}` (task-7ea6f41cede5ee97). The Studio
+  # picker points a picked image at its asset DOCUMENT, `asset-<blob id>`.
+  # A site that reads Sanity's shape follows `asset._ref` as a Sanity image id
+  # (`@sanity/image-url` parses it, GROQ `asset->` resolves it), so the save
+  # writes the id Sanity would have: the media file's `source_id` when it is
+  # one (an imported Sanity asset, whose asset document has that id), else
+  # `image-<sha1>-<w>x<h>-<ext>` from the stored bytes, which
+  # `MediaController.serve_sanity_image` serves. A ref already in that form, or
+  # a blob that cannot be found or measured, is left as posted.
+  def backfill(%{"asset" => %{"_ref" => "asset-" <> _ = ref} = asset} = image, dataset, opts) do
+    case sanity_image_id(file_id(ref), dataset, scope(opts)) do
+      id when is_binary(id) -> Map.put(image, "asset", Map.put(asset, "_ref", id))
+      _ -> image
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "ImageMetadata.backfill #{ref}: #{Exception.message(e)} — value kept as posted"
+      )
+
+      image
+  end
+
+  def backfill(%{"asset" => %{"_ref" => "drafts.asset-" <> rest} = asset} = image, dataset, opts),
+    do: backfill(Map.put(image, "asset", Map.put(asset, "_ref", "asset-" <> rest)), dataset, opts)
+
   def backfill(other, _dataset, _opts), do: other
+
+  @sanity_image_id ~r/\Aimage-[0-9a-f]{40}-[1-9][0-9]*x[1-9][0-9]*-[a-z0-9]+\z/
+
+  @doc false
+  # The Sanity image id for a Barkpark media file, or nil.
+  def sanity_image_id(file_id, dataset, scope) do
+    with {:ok, %Media.Storage.MediaFile{} = file} <- Media.get_file(file_id, scope) do
+      cond do
+        is_binary(file.source_id) and Regex.match?(@sanity_image_id, file.source_id) ->
+          file.source_id
+
+        is_binary(file.sha1) and Regex.match?(~r/\A[0-9a-f]{40}\z/, file.sha1) ->
+          with {w, h} when is_integer(w) and is_integer(h) <-
+                 file_dimensions(file, dataset, scope),
+               ext when is_binary(ext) <- sanity_ext(file) do
+            "image-#{file.sha1}-#{w}x#{h}-#{ext}"
+          else
+            _ -> nil
+          end
+
+        true ->
+          nil
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  defp file_dimensions(file, dataset, scope) do
+    fi = asset_file_info(Media.asset_doc_for_file(file, dataset, scope))
+
+    case {int(Map.get(fi, "width")), int(Map.get(fi, "height"))} do
+      {w, h} when is_integer(w) and w > 0 and is_integer(h) and h > 0 ->
+        {w, h}
+
+      _ ->
+        with {:ok, path} <- Blobstore.ensure_local(file),
+             {:ok, %{width: w, height: h}} <- Probe.probe(path, file.mime_type) do
+          {w, h}
+        else
+          _ -> nil
+        end
+    end
+  end
+
+  # Sanity's extension for an image: its mime subtype, "jpg" for JPEG.
+  defp sanity_ext(%{mime_type: "image/jpeg"}), do: "jpg"
+  defp sanity_ext(%{mime_type: "image/svg+xml"}), do: "svg"
+
+  defp sanity_ext(%{mime_type: "image/" <> sub}) when sub != "",
+    do: if(Regex.match?(~r/\A[a-z0-9]+\z/, sub), do: sub, else: nil)
+
+  defp sanity_ext(_), do: nil
 
   # ── the walk ────────────────────────────────────────────────────────────────
 

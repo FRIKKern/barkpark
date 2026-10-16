@@ -12915,3 +12915,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Action %{name} belongs to a plugin that is turned off in this workspace"
 msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex
+#, elixir-autogen, elixir-format
+msgid "Not one of the options"
+msgstr ""
