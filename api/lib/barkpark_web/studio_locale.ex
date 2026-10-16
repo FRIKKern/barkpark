@@ -798,7 +798,11 @@ defmodule BarkparkWeb.StudioLocale do
       "Heading 3" => gettext("Heading 3"),
       "Heading 4" => gettext("Heading 4"),
       "Bulleted list" => gettext("Bulleted list"),
-      "Numbered list" => gettext("Numbered list")
+      "Numbered list" => gettext("Numbered list"),
+      "Insert block" => gettext("Insert block"),
+      "Insert block…" => gettext("Insert block…"),
+      "Inserting block…" => gettext("Inserting block…"),
+      "Edit block" => gettext("Edit block")
     })
   end
 

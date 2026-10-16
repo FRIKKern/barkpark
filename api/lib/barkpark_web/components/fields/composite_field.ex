@@ -46,6 +46,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # The document root a `visibleWhen` with the default "document" scope reads;
   # nil reads this object's own value, as before (task-9905a69475b1ff3b).
   attr :root, :map, default: nil
+  # The `phx-click` event and target of the buttons of an `arrayOf` inside
+  # this object. The document form keeps "array_op"; the Portable Text block
+  # dialog routes them to its own buffer (task-19392d1e6fc661e6).
+  attr :on_reorder, :string, default: "array_op"
+  attr :target, :any, default: nil
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -64,6 +69,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:scope_prefix, "")
       |> Map.put_new(:api_token_raw, "")
       |> Map.put_new(:root, nil)
+      |> Map.put_new(:on_reorder, "array_op")
+      |> Map.put_new(:target, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -78,6 +85,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            on_reorder={@on_reorder} target={@target}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -87,6 +95,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            on_reorder={@on_reorder} target={@target}
           />
         </details>
       <% true -> %>
@@ -97,6 +106,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            on_reorder={@on_reorder} target={@target}
           />
         </fieldset>
     <% end %>
@@ -129,6 +139,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # The document root a `visibleWhen` with the default "document" scope reads;
   # nil reads this object's own value, as before (task-9905a69475b1ff3b).
   attr :root, :map, default: nil
+  attr :on_reorder, :string, default: "array_op"
+  attr :target, :any, default: nil
 
   defp composite_body(assigns) do
     ~H"""
@@ -218,7 +230,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
-      root: Map.get(assigns, :root)
+      root: Map.get(assigns, :root),
+      on_reorder: Map.get(assigns, :on_reorder) || "array_op",
+      target: Map.get(assigns, :target)
     }
 
     composite_field(sub_assigns)
@@ -237,7 +251,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
-      root: Map.get(assigns, :root)
+      root: Map.get(assigns, :root),
+      on_reorder: Map.get(assigns, :on_reorder) || "array_op",
+      target: Map.get(assigns, :target)
     }
 
     ArrayField.array_field(sub_assigns)

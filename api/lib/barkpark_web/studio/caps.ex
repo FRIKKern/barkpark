@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Studio.Caps do
     desk-search desk-search-clear desk-list-more
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
-    close-unpublish-guard close-confirm-modal
+    close-unpublish-guard close-confirm-modal object-dialog-close
     open-secondary-picker close-secondary-picker secondary-search
     select-secondary close-secondary view-graph node-clicked
     sidebar-toggle-panel sidebar-toggle-section
@@ -217,6 +217,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-unbind-property paper-delete-block paper-move-block
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
+    pt-block-open pt-block-insert object-dialog-change object-dialog-array-op object-dialog-save
     sidebar-description-change sidebar-label-add
     paper-save-master paper-insert-master paper-detach-master paper-pin-master
   )
