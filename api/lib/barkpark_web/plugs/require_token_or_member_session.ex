@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.Plugs.RequireTokenOrMemberSession do
   @moduledoc """
-  The credential gate for the scoped editor streams — `GET /v1/data/listen`,
+  The credential gate for scoped history, revision, schedules and action reads,
+  plus the editor streams — `GET /v1/data/listen`,
   `GET /v1/data/presence` and presence's `focus` / `leave` — on
   `/w/:ws/p/:proj` (task-cc6ad07a8aa36338): an API token, OR a login session
   presented as `Authorization: Bearer` by a member of the URL's workspace.
@@ -23,25 +24,35 @@ defmodule BarkparkWeb.Plugs.RequireTokenOrMemberSession do
   Anything else — an API token included — takes the unchanged
   `:require_token` chain (`RequireToken`, `PublicRead`,
   `RequireWriteForMutation`), so every API-token answer, refusal and clamp is
-  byte-identical.
+  byte-identical. The action-list GET selects `:scoped_admin` to preserve its
+  stricter API-token chain; it grants no dispatch permission.
   """
 
-  alias BarkparkWeb.Plugs.{PublicRead, RequireToken, RequireWriteForMutation}
+  alias BarkparkWeb.Plugs.{
+    PublicRead,
+    RequireToken,
+    RequireWriteForMutation,
+    RequireWorkspaceRole,
+    RefuseWhileHeld
+  }
 
   @doc """
   The plugs an API token runs here, in order: router.ex's `pipeline
   :require_token`, plug for plug. `RequireTokenOrMemberSessionTest` fails if
   the two ever differ.
   """
-  def token_chain, do: [RequireToken, PublicRead, RequireWriteForMutation]
+  def token_chain, do: token_chain(:read)
+  def token_chain(:read), do: [RequireToken, PublicRead, RequireWriteForMutation]
+  def token_chain(:scoped_admin), do: [RequireToken, RequireWorkspaceRole, RefuseWhileHeld]
 
   def init(opts), do: opts
 
-  def call(%Plug.Conn{assigns: assigns} = conn, _opts) do
+  def call(%Plug.Conn{assigns: assigns} = conn, opts) do
     if member_session?(assigns) do
       conn
     else
-      Enum.reduce_while(token_chain(), conn, fn plug, conn ->
+      Enum.reduce_while(token_chain(Keyword.get(opts, :token_policy, :read)), conn, fn plug,
+                                                                                       conn ->
         case plug.call(conn, plug.init([])) do
           %Plug.Conn{halted: true} = halted -> {:halt, halted}
           conn -> {:cont, conn}
