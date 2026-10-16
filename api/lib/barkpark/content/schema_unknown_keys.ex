@@ -34,7 +34,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
     "ownerScoped" => "owner_scoped"
   }
 
-  @field_keys ~w(name type title description validation visibleWhen readOnly group surface
+  @field_keys ~w(name type title description validation visibleWhen hidden readOnly group surface
                  encrypted private visibility readable_by options onix fields of
                  rows layout source refType to refTypes refTypeTolerant hotspot alt
                  editor blocks ordered codelistId version issue_version languages format
