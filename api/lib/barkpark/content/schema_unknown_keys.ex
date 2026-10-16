@@ -21,7 +21,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
   # — still flagged below as dropped) and the echo keys a pulled schema carries
   # back (`id`, `schemaHash`), so a pull → apply round trip stays quiet.
   @schema_keys ~w(name title icon visibility owner_scoped singleton kind fields dataset
-                  cors_origins actions groups desk_groups desk list_preview initial_values
+                  cors_origins actions groups fieldsets desk_groups desk list_preview initial_values
                   cross_validations layout prefill reader_writes readerWrites workspace_id project_id dataset_id
                   id schemaHash)
 
@@ -38,7 +38,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
                  encrypted private visibility readable_by options onix fields of
                  rows layout source refType to refTypes refTypeTolerant hotspot alt
                  editor blocks ordered codelistId version issue_version languages format
-                 fallbackChain groups default required? search)
+                 fallbackChain groups fieldset fieldsets default required? search)
 
   @rule_keys ~w(required min max pattern unique message level)
 
