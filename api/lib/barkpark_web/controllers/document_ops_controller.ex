@@ -132,8 +132,10 @@ defmodule BarkparkWeb.DocumentOpsController do
 
       true ->
         target = edit_target(doc_id, type, dataset, opts)
+        opts = opts ++ [if_rev: if_rev]
 
-        Content.apply_field_block_ops(target, type, field, ops, dataset, opts ++ [if_rev: if_rev])
+        Content.apply_field_block_ops(target, type, field, ops, dataset, opts)
+        |> draft_gone_under(target, type, dataset, opts)
         |> field_ops_response(conn)
     end
   end
@@ -162,12 +164,39 @@ defmodule BarkparkWeb.DocumentOpsController do
         {:single, op} -> Content.apply_document_block_op(target, type, op, dataset, opts)
         {:batch, ops} -> Content.apply_document_block_ops(target, type, ops, dataset, opts)
       end
+      |> draft_gone_under(target, type, dataset, opts)
 
     case result do
       {:ok, result} -> json(conn, %{result: result})
       error -> op_error_response(error, conn)
     end
   end
+
+  @doc """
+  task-61b7cf04d2662f85 — `edit_target/4` names the draft before the op runs; a publish in
+  between removes it, and the op found nothing: a 404 where the document only moved under
+  the fence (five editors on one post, one of them publishing every 30 s, studio
+  task-86f75846c256e3b4). With the draft gone and the published row standing, the answer
+  is the one any stale `ifRev` gets: `{:rev_mismatch, %{actual: <the published rev>}}`, a
+  412 the caller resends on. Anything else passes through.
+  """
+  def draft_gone_under(
+        {:error, :not_found} = result,
+        "drafts." <> published_id,
+        type,
+        dataset,
+        opts
+      ) do
+    case Content.get_document(published_id, type, dataset, opts) do
+      {:ok, %{rev: actual}} when is_binary(actual) ->
+        {:error, {:rev_mismatch, %{expected: Keyword.get(opts, :if_rev), actual: actual}}}
+
+      _ ->
+        result
+    end
+  end
+
+  def draft_gone_under(result, _target, _type, _dataset, _opts), do: result
 
   # The refusals both doors share: one envelope per reason, whichever route ran.
   defp op_error_response(error, conn) do
