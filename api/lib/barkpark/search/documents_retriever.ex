@@ -14,7 +14,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.Search.{Fold, TypoPolicy}
+  alias Barkpark.Search.{Fold, SearchRefresh, TypoPolicy}
 
   # Default ranking-pool size (Barkpark Cloud P4 / Move B). The expensive
   # per-row ranking computation (`ts_rank` + `similarity`) runs only on this
@@ -127,6 +127,12 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # is NULL, so the two are the same index, and only the full one is a plain
     # GIN probe.
     index = text_index(Keyword.get(opts, :caller_context), type, Keyword.get(opts, :types))
+
+    # A schema change that made a field restricted on a large type recomputes
+    # the public vectors in batches after the write (task-9d83c3e0c3b8fabf).
+    # Until that is done, a stale vector may still hold a word the field now
+    # hides, so a non-admin text search leaves those documents out.
+    base = exclude_pending_refresh(base, Keyword.get(opts, :caller_context), browse?)
     match = match_mode(opts)
     suggest? = Keyword.get(opts, :suggest, false) == true
     groups = if browse?, do: [], else: term_groups(parsed)
@@ -913,6 +919,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp text_index(_ctx, _type, _types), do: :public
+
+  # The scopes `SearchRefresh.gates/0` names, left out of a text search by
+  # anyone who reads the public index. A browse reads no vector and keeps them.
+  defp exclude_pending_refresh(base, _ctx, true), do: base
+  defp exclude_pending_refresh(base, %Barkpark.Content.CallerContext{is_admin: true}, _), do: base
+  defp exclude_pending_refresh(base, :internal, _), do: base
+
+  defp exclude_pending_refresh(base, _ctx, false) do
+    case SearchRefresh.exclude(SearchRefresh.gates()) do
+      nil -> base
+      condition -> where(base, ^condition)
+    end
+  end
 
   # The full index is two vectors: the stored `search_vector` (every content
   # string) and the names vector (the search title and the author slot, in

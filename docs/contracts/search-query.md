@@ -13,7 +13,9 @@ What `GET …/v1/data/search/:dataset?q=` matches, how it ranks, and the paramet
 
 ## Search slots
 
-The index weights a title slot 'A' and an author slot 'B'. A schema names them with the field key `search`: `"search": "title"` or `"search": "author"`. Without it the title slot is the `title` column; for a type with no title, the `list_preview.title` field, else the first declared field among `name`, `displayName`, `label`, `heading`, `headline`. The author slot is `content.author` plus the declared `Author`/`Authors` fields. A trigger keeps `documents.search_title`/`search_author` current on every write and on every schema change; a bundle import refreshes them after it commits (`Barkpark.Search.SearchSlots.refresh/1`).
+The index weights a title slot 'A' and an author slot 'B'. A schema names them with the field key `search`: `"search": "title"` or `"search": "author"`. Without it the title slot is the `title` column; for a type with no title, the `list_preview.title` field, else the first declared field among `name`, `displayName`, `label`, `heading`, `headline`. The author slot is `content.author` plus the declared `Author`/`Authors` fields. A trigger keeps `documents.search_title`/`search_author` current on every write; a bundle import refreshes them after it commits (`Barkpark.Search.SearchSlots.refresh/1`).
+
+A schema change recomputes the slots and the public vector only when it changes what they read: the fields above and their `search` keys, `list_preview.title`, or a restriction. A type with at most 1,000 documents is recomputed in the schema write. A larger one is recomputed after it, in batches of 500, by `Barkpark.Search.Workers.SearchRefresh`. Until that is done after a change that made a field restricted, non-admin text searches leave the type's documents out; a browse still lists them.
 
 ## Two steps
 
@@ -41,5 +43,6 @@ Exact id, then the title equal to the query, then a score: the full-text rank; t
 - api/lib/barkpark/search/documents_retriever.ex — def search
 - api/lib/barkpark/search/query_pipeline.ex — defp recover_documents
 - api/lib/barkpark/search/search_slots.ex — def refresh
+- api/lib/barkpark/search/search_refresh.ex — def drain
 - api/lib/barkpark/search/fold.ex — def variants
 - api/priv/repo/migrations/20261014150000_add_documents_search_slots.exs

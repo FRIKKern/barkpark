@@ -400,6 +400,12 @@ config :barkpark, Oban,
        # and prunes day rows past 90 days. Every 10 minutes, so a sort by
        # views is at most about 10 minutes behind the views it counts.
        {"*/10 * * * *", Barkpark.Search.Workers.ViewsRollup},
+       # Search refresh (task-9d83c3e0c3b8fabf) — recomputes the search data of
+       # a large type whose schema changed, in batches, outside the schema
+       # write. A schema write queues it at once; this entry picks up a refresh
+       # left by a restart or another write path. A tick with nothing pending
+       # reads one row.
+       {"* * * * *", Barkpark.Search.Workers.SearchRefresh},
        # edit-on-the-link slice 4 — retention sweep for the paper view/edit
        # trail (`paper_access_log`). Daily, fifteen minutes after the search
        # prune so the two range deletes never open their scans in one tick.
