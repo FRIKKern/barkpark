@@ -35,6 +35,12 @@ defmodule BarkparkWeb.DocumentOpsController do
   papers/sessions rules apply. A field that is missing or not a block-editor
   field answers 422 `invalid_op`, as does a block outside the field's
   vocabulary. Success: `{"result": {"field", "blocks", "written_doc_id", "rev"}}`.
+
+  `"fence": "blocks"` on the field route narrows a stale `ifRev` to the blocks
+  the batch names (targets and anchors): when each reads the same at `ifRev`
+  (its revision snapshot) as now, the ops apply to the current field. Another
+  writer's paragraph, or another field, no longer refuses the batch; a change
+  to a block it names still answers 412. Without the key, any stale rev is 412.
   """
   use BarkparkWeb, :controller
 
@@ -133,7 +139,16 @@ defmodule BarkparkWeb.DocumentOpsController do
       true ->
         target = edit_target(doc_id, type, dataset, opts)
 
-        Content.apply_field_block_ops(target, type, field, ops, dataset, opts ++ [if_rev: if_rev])
+        fence = if params["fence"] == "blocks", do: [fence: :blocks], else: []
+
+        Content.apply_field_block_ops(
+          target,
+          type,
+          field,
+          ops,
+          dataset,
+          opts ++ [if_rev: if_rev] ++ fence
+        )
         |> field_ops_response(conn)
     end
   end
