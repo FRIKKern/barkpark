@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias Barkpark.{Content, Tenancy}
   alias Barkpark.Content.Forms
   alias Barkpark.Content.Warnings
+  alias Barkpark.Media.SanityImageAssetDoc
   alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
@@ -534,6 +535,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     end
   end
 
+  # A saved image value whose `asset._ref` is a Sanity image id with no
+  # `sanityImageAsset` document yet gets one, so GROQ `asset->url` resolves
+  # (task-b3e57f301bd502d8). Only for a socket that may write in its own right:
+  # a reader seat writing under `readerWrites` creates no asset documents, and
+  # a grant-graded socket creates one only when its grants admit a write of
+  # that document. The draft is already saved; nothing here can fail it.
+  defp ensure_sanity_image_assets(socket, schema, saved_doc) do
+    unless Paper.write_denied?(socket) do
+      opts = hook_opts(socket)
+      ids = sanity_asset_ids(saved_doc, schema)
+
+      ids =
+        if Caps.grant_graded?(socket.assigns),
+          do:
+            Enum.reject(
+              ids,
+              &Paper.grant_target_denied?(socket, SanityImageAssetDoc.type_name(), &1)
+            ),
+          else: ids
+
+      SanityImageAssetDoc.ensure(ids, socket.assigns.dataset, opts)
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("studio.sanity_image_assets: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp sanity_asset_ids(%{content: content}, schema) when is_map(content),
+    do:
+      SanityImageAssetDoc.sanity_refs(Barkpark.Media.ImageMetadata.image_values(content, schema))
+
+  defp sanity_asset_ids(_doc, _schema), do: []
+
   defp autosave_write(socket, params, trigger) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
@@ -590,6 +627,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
+          ensure_sanity_image_assets(socket, schema, saved_doc)
+
           # The persisted title, not the posted one: a titleless type's column
           # is derived on write (Gyldendal parity E1.8), and the desk row must
           # show what the store holds.
