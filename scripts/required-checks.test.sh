@@ -2421,6 +2421,9 @@ FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
 # simulator of that step body, and the spec-authority marker) and stopped there.
 # ADDING A BLOCKING JOB TO security.yml? Add its rendered name below.
 ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
+        # Added after the frozen pair; explicitly acknowledge these PR-only names.
+        --expect-unrendered "Barkdown parity gate"
+        --expect-unrendered "Parity dispatch and dependency checks"
         --expect-unrendered "Dispatch (compose-smoke paths)"
         --expect-unrendered "Elixir path-escape ratchet"
         --expect-unrendered "gofmt drift ceiling (blocking)"
@@ -7154,13 +7157,17 @@ fi
 # the wrong reason — each of which still reads as plausible S7 prose, so no
 # per-row text comparison can be trusted until the pairing is.
 RC24_GEN_ARITY="$TMP/rc24-gen-arity.sh"
+RC24_ARITY_BASE="$(s7_report "$GEN" "$SPEC" aritybase | awk -F'\t' '$1 == "CHECKED" && !found { print $2 "\t" $3; found = 1 }')"
+IFS=$'\t' read -r RC24_NAMES RC24_REASONS <<<"$RC24_ARITY_BASE"
 sed 's/^  "Security gate"$//' "$GEN" > "$RC24_GEN_ARITY"
 if [ "$(grep -c '^  "Security gate"$' "$RC24_GEN_ARITY" || true)" = "0" ]; then
   ok "the arity mutation applies: a COPY of the generator names one fewer context than it carries reasons"
 else
   bad "the arity mutation did not apply — the entry survived, so the clause below is vacuous"
 fi
-if grep -q '^ARITY	1	2$' <<<"$(s7_report "$RC24_GEN_ARITY" "$SPEC" genarity)"; then
+RC24_ARITY_WANT="$(printf 'ARITY\t%s\t%s' "$((RC24_NAMES - 1))" "$RC24_REASONS")"
+if [ "$RC24_NAMES" -ge 2 ] && [ "$RC24_NAMES" -eq "$RC24_REASONS" ] &&
+   grep -qxF "$RC24_ARITY_WANT" <<<"$(s7_report "$RC24_GEN_ARITY" "$SPEC" genarity)"; then
   ok "…and the check REDS on the unpaired lists before it compares a single reason"
 else
   bad "the S7 name and reason arrays can fall out of step without a red — every pairing below the gap would be silently wrong"
@@ -8528,6 +8535,64 @@ if jq -e '[.exclusions[]? | select((.reason // "") | startswith("S2 ADVISORY: go
 else
   bad "§32's premise moved: the real spec no longer has exactly one \`S2 ADVISORY: go-format.yml job\` row, or the plant did not change go-format.yml — re-point the plant at a job an S2 row names"
 fi
+
+
+
+section "33. the pending Barkdown aggregate keeps the four-context floor and its leaves together"
+
+# These names were added after the frozen suite heads. Use the actual workflow
+# tree with an isolated observed-name feed, never a permissive production spec.
+RC33="$TMP/rc33-barkdown"
+mkdir -p "$RC33/fixtures"
+jq '[.protection.required_status_checks.checks[].context] +
+    ["Barkdown parity gate", "Barkdown parity rows", "Parity dispatch and dependency checks"]
+    | unique | map({name: ., conclusion: "success", status: "completed",
+                   started_at: "2026-10-14T00:00:00Z", app: {id: 15368}})
+    | {check_runs: .}' "$SPEC" > "$RC33/fixtures/checkruns-acctA.json"
+cp "$RC33/fixtures/checkruns-acctA.json" "$RC33/fixtures/checkruns-acctB.json"
+cp "$RC33/fixtures/checkruns-acctA.json" "$RC33/fixtures/checkruns-acctMain.json"
+printf '%s\n' acctMain > "$RC33/fixtures/main-shas.txt"
+
+if emit_spec "$RC33/held.json" bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" \
+    --fixture-dir "$RC33/fixtures" --sha acctA --sha acctB --no-merge --out "$RC33/held.json"; then
+  if jq -e --slurpfile base "$SPEC" '
+      ([.protection.required_status_checks.checks[].context] | sort) ==
+      ([$base[0].protection.required_status_checks.checks[].context] | sort)
+      and ([.exclusions[] | select(.context == "Barkdown parity gate" and
+        (.reason | startswith("S7 EXCLUDED BY DECISION:")))] | length) == 1
+      and ([.exclusions[] | select((.context == "Barkdown parity rows" or
+        .context == "Parity dispatch and dependency checks") and
+        (.reason | startswith("S6 LEAF OF AN EXCLUDED AGGREGATOR:")))] | length) == 2
+    ' "$RC33/held.json" >/dev/null; then
+    ok "Barkdown's actual optional aggregate is held explicitly and both real leaves are S6; the four-context floor is unchanged"
+  else
+    bad "Barkdown aggregate/leaf classification or the existing required floor changed: $(jq -c '.protection.required_status_checks.checks' "$RC33/held.json")"
+  fi
+else
+  fail_emit "Barkdown's exact observed-name accounting fixture could not emit: $(why_emit 'missing held.json')"
+fi
+
+# Remove only the named pending-promotion decision. A healthy future window
+# must then promote the aggregate; this proves the hold is not decorative.
+sed '/^  "Barkdown parity gate"$/d' "$GEN" > "$RC33/unheld.sh"
+if [ "$(grep -c '^  "Barkdown parity gate"$' "$GEN" || true)" -eq 1 ] &&
+   ! grep -q '^  "Barkdown parity gate"$' "$RC33/unheld.sh"; then
+  if emit_spec "$RC33/unheld.json" bash "$RC33/unheld.sh" \
+      --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$RC33/fixtures" \
+      --sha acctA --sha acctB --no-merge --out "$RC33/unheld.json"; then
+    if jq -e '[.protection.required_status_checks.checks[].context] |
+        index("Barkdown parity gate") != null' "$RC33/unheld.json" >/dev/null; then
+      ok "removing only the pending Barkdown decision promotes its aggregate on the identical healthy fixture; the hold is mutation-proven"
+    else
+      bad "removing the Barkdown decision did not demonstrate automatic promotion"
+    fi
+  else
+    fail_emit "the disarmed Barkdown fixture could not emit: $(why_emit 'missing unheld.json')"
+  fi
+else
+  bad "the named Barkdown decision mutation did not apply exactly once"
+fi
+
 
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
