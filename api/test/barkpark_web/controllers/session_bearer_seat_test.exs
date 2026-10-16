@@ -19,7 +19,7 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
 
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Accounts, Auth, Content}
+  alias Barkpark.{Access, Accounts, Auth, Content}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @password "correct horse battery staple"
@@ -52,7 +52,7 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
     Accounts.confirm_provisioned_user(user)
 
-    %{ws: ws, project: project, admin_raw: admin_raw, email: email, user: user}
+    %{ws: ws, project: project, admin: admin, admin_raw: admin_raw, email: email, user: user}
   end
 
   defp json_conn(bearer) do
@@ -129,11 +129,44 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
                "post"
     end
 
+    test "a type-limited grant without a workspace seat cannot read any schema", ctx do
+      {:ok, %{token: raw}} =
+        Access.mint(ctx.admin, %{
+          grantee_email: ctx.email,
+          workspace_id: ctx.ws.id,
+          project_id: ctx.project.id,
+          dataset: @dataset,
+          type: "granted-type",
+          capabilities: ["read"]
+        })
+
+      assert {:ok, _} = Access.claim(raw, ctx.user)
+      refute TenancyAuth.member?(ctx.user, ctx.ws.id)
+      token = login!(ctx.email)
+
+      # Introspection still accepts a live login session without a workspace seat.
+      assert json_response(json_conn(token) |> get("/v1/auth/token"), 200)["kind"] == "session"
+
+      statuses =
+        for path <- [schemas_path(ctx), schemas_path(ctx) <> "/post"] do
+          (json_conn(token) |> get(path)).status
+        end
+
+      assert statuses == [403, 403]
+    end
+
     test "missing, revoked and expired sessions cannot read schemas", ctx do
       path = schemas_path(ctx)
       assert (scoped_conn() |> get(path)).status in [401, 403]
       token = member!(ctx)
       assert (json_conn(token) |> get(path)).status == 200
+
+      cookie_only =
+        scoped_conn()
+        |> Plug.Test.init_test_session(%{"user_session" => token})
+        |> get(path)
+
+      assert cookie_only.status in [401, 403]
       json_conn(token) |> delete("/v1/auth/logout") |> json_response(200)
       assert (json_conn(token) |> get(path)).status == 401
 

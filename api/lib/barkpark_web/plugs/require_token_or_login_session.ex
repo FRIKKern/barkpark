@@ -13,8 +13,9 @@ defmodule BarkparkWeb.Plugs.RequireTokenOrLoginSession do
   `:require_token` path — `RequireToken` then `PublicRead` — so every API-token
   answer, refusal and clamp is byte-identical. Bearer only: the session COOKIE
   is not read here, so this gate gains no ambient credential. Scoped schema
-  routes run ResolveWorkspace/ResolveProject first: the same current membership
-  and read authority as scoped document reads (task-b21d1b647d448142).
+  routes run ResolveWorkspace/ResolveProject first and set `member_only: true`:
+  only their positive `:member_user` assignment admits a session. A grant/share
+  admit is not a workspace seat (task-b21d1b647d448142).
   """
 
   import Plug.Conn
@@ -24,12 +25,16 @@ defmodule BarkparkWeb.Plugs.RequireTokenOrLoginSession do
 
   def init(opts), do: opts
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
     case login_session(conn) do
       {user, session} ->
-        conn
-        |> assign(:current_user, user)
-        |> assign(:current_user_session, session)
+        if Keyword.get(opts, :member_only, false) and conn.assigns[:member_user] != true do
+          RequireToken.deny(conn, {:error, :forbidden_membership})
+        else
+          conn
+          |> assign(:current_user, user)
+          |> assign(:current_user_session, session)
+        end
 
       nil ->
         conn
