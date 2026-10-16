@@ -209,6 +209,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # object field dialog and `document.body.append(el)`s it before it is shown
     # (task-85fee859cf3bfef6); `close/1` removes it. Never inside the panel.
     ".bp-inline-object-dialog" => :body_portal,
+    # canvas/inline-object.js `InlineObjectBar._build/0` builds the selected
+    # atom's Edit/Remove bar and `document.body.appendChild(el)`s it before it is
+    # shown (task-8c509718bc320d1d); `destroy/0` removes it. Never inside the panel.
+    ".bp-inline-object-bar" => :body_portal,
     # The canvas owns this notice and appends it to itself. Its viewport/caret
     # coordinates rely on the same panel containing-block ban as the toolbar;
     # it is not a body portal. Scroll/resize dismiss it before its anchor moves.
