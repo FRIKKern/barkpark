@@ -716,6 +716,74 @@ defmodule Barkpark.StudioChatApplicationTurnsTest do
              ApplicationTurns.history(ctx.scope, login.id, session.id, params)
   end
 
+  defmodule HistorySigningEndpoint do
+    def config(:secret_key_base), do: String.duplicate("fictional-history-signing-key", 3)
+  end
+
+  test "history uses the configured core endpoint and refuses a missing signer", ctx do
+    old = Application.get_env(:barkpark, :studio_chat, [])
+    on_exit(fn -> Application.put_env(:barkpark, :studio_chat, old) end)
+    {session, _} = committed_history(ctx, 2)
+
+    {:ok, original} =
+      ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "1"})
+
+    {:ok, legacy_payload} =
+      Phoenix.Token.verify(
+        BarkparkWeb.Endpoint,
+        "personal-application-history-v1",
+        original.next_cursor,
+        max_age: 3600
+      )
+
+    legacy_cursor =
+      Phoenix.Token.sign(BarkparkWeb.Endpoint, "personal-application-history-v1", legacy_payload)
+
+    assert {:ok, _} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+               "cursor" => legacy_cursor
+             })
+
+    Application.put_env(
+      :barkpark,
+      :studio_chat,
+      Keyword.put(old, :endpoint, HistorySigningEndpoint)
+    )
+
+    assert {:error, :invalid_request} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+               "cursor" => original.next_cursor
+             })
+
+    assert {:ok, page} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "1"})
+
+    assert {:ok, _} =
+             Phoenix.Token.verify(
+               HistorySigningEndpoint,
+               "personal-application-history-v1",
+               page.next_cursor,
+               max_age: 3600
+             )
+
+    assert {:ok, _} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+               "cursor" => page.next_cursor
+             })
+
+    for endpoint <- [nil, String] do
+      Application.put_env(:barkpark, :studio_chat, Keyword.put(old, :endpoint, endpoint))
+
+      assert {:error, :application_unavailable} =
+               ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "1"})
+
+      assert {:error, :application_unavailable} =
+               ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+                 "cursor" => page.next_cursor
+               })
+    end
+  end
+
   test "history terminalizes expired accepted work without another accept", ctx do
     {:ok, session} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
 

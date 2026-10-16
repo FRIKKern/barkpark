@@ -9,7 +9,7 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
   alias Barkpark.{Accounts, Repo, StudioChat, Tenancy}
   alias Barkpark.Accounts.{User, UserSession}
   alias Barkpark.ChatHosts.{ExecutionLease, RegisteredHost}
-  alias Barkpark.StudioChat.{ApplicationBinding, Message, Session}
+  alias Barkpark.StudioChat.{ApplicationBinding, Endpoints, Message, Session}
   alias Barkpark.Tenancy.Membership
 
   @ttl 120
@@ -85,7 +85,8 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
     transaction(fn ->
       session = personal!(scope, login, id)
       state = state!(session)
-      page = history_page!(session, state, params)
+      signer = history_signer!()
+      page = history_page!(session, state, params, signer)
       before_seq = page["before"] || page["snapshot"] + 1
 
       rows =
@@ -115,7 +116,11 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
       more = length(rows) > length(turns)
       lower = if more, do: hd(turns).user_seq, else: 0
       history_span!(id, lower, min(before_seq - 1, page["snapshot"]), turns)
-      cursor = if more, do: history_cursor(Map.put(page, "before", hd(turns).user_seq)), else: nil
+
+      cursor =
+        if more,
+          do: history_cursor(Map.put(page, "before", hd(turns).user_seq), signer),
+          else: nil
 
       result = %{
         id: id,
@@ -134,14 +139,14 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
 
   def history(_, _, _, _), do: {:error, :invalid_request}
 
-  defp history_page!(session, state, params) do
+  defp history_page!(session, state, params, signer) do
     scope =
       digest({session.id, session.owner_workspace_id, session.owner_user_id, state["binding"]})
 
     case params do
       %{"cursor" => cursor}
       when map_size(params) == 1 and is_binary(cursor) and byte_size(cursor) <= 4096 ->
-        case Phoenix.Token.verify(BarkparkWeb.Endpoint, @history_salt, cursor, max_age: 3600) do
+        case Phoenix.Token.verify(signer, @history_salt, cursor, max_age: 3600) do
           {:ok,
            %{
              "scope" => ^scope,
@@ -185,7 +190,18 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
     end
   end
 
-  defp history_cursor(page), do: Phoenix.Token.sign(BarkparkWeb.Endpoint, @history_salt, page)
+  defp history_cursor(page, signer), do: Phoenix.Token.sign(signer, @history_salt, page)
+
+  defp history_signer! do
+    with endpoint when not is_nil(endpoint) <- Endpoints.endpoint_module(),
+         true <- Code.ensure_loaded?(endpoint),
+         true <- function_exported?(endpoint, :config, 1),
+         key when is_binary(key) and byte_size(key) >= 20 <- endpoint.config(:secret_key_base) do
+      key
+    else
+      _ -> fail(:application_unavailable)
+    end
+  end
 
   defp safe_integer?(value, minimum),
     do: is_integer(value) and value >= minimum and value <= @max_safe_integer
