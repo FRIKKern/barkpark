@@ -104,10 +104,20 @@ defmodule Barkpark.Repo.Migrations.SearchRefreshOutsideSchemaWrite do
 
     drop_invalid_index("search_refresh_pending_scope_index")
 
-    execute("""
-    CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS search_refresh_pending_scope_index
-    ON search_refresh_pending (type, scope_dataset, scope_dataset_id, wide) NULLS NOT DISTINCT
-    """)
+    # NULLS NOT DISTINCT needs Postgres 15. Before 15 the index keys a NULL
+    # scope_dataset_id as the zero uuid, which no dataset has.
+    if server_version_num() >= 150_000 do
+      execute("""
+      CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS search_refresh_pending_scope_index
+      ON search_refresh_pending (type, scope_dataset, scope_dataset_id, wide) NULLS NOT DISTINCT
+      """)
+    else
+      execute("""
+      CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS search_refresh_pending_scope_index
+      ON search_refresh_pending (type, scope_dataset,
+        (COALESCE(scope_dataset_id, '00000000-0000-0000-0000-000000000000'::uuid)), wide)
+      """)
+    end
 
     create_functions()
 
@@ -148,6 +158,11 @@ defmodule Barkpark.Repo.Migrations.SearchRefreshOutsideSchemaWrite do
     execute("DROP FUNCTION IF EXISTS bp_search_slots_signature(jsonb, jsonb)")
     execute("DROP INDEX CONCURRENTLY IF EXISTS search_refresh_pending_scope_index")
     execute("DROP TABLE IF EXISTS search_refresh_pending")
+  end
+
+  defp server_version_num do
+    %{rows: [[v]]} = repo().query!("SELECT current_setting('server_version_num')::int")
+    v
   end
 
   defp drop_invalid_index(name) do
