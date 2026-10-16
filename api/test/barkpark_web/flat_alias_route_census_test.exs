@@ -592,6 +592,15 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into ScheduledPublishes, whose reads and cancel " <>
          "go through Content.Scope.scope_to_workspace/3 (fail-closed) and whose new row " <>
          "stamps the pipeline-derived :current_workspace (task-8e88b5539acafdae)."},
+    # ScheduleController.pause / resume (Sanity's "Pause to edit")
+    {"POST", "/v1/data/schedules/:dataset/:schedule_id/pause"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into ScheduledPublishes.pause/3, whose row read " <>
+         "goes through Content.Scope.scope_to_workspace/3 (fail-closed)."},
+    {"POST", "/v1/data/schedules/:dataset/:schedule_id/resume"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into ScheduledPublishes.resume/4, whose row read " <>
+         "goes through Content.Scope.scope_to_workspace/3 (fail-closed)."},
     # SearchController.search
     {"GET", "/v1/data/search/:dataset"} =>
       {:workspace_derived,

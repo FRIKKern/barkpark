@@ -245,6 +245,43 @@ defmodule BarkparkWeb.ScheduledPublishTest do
            |> json_response(409)
   end
 
+  test "pause keeps the time and runs nothing; resume re-arms it; a paused one can be cancelled",
+       %{ws_id: ws_id} do
+    {raw, _} = token!(ws_id)
+    {id, _} = new_draft!()
+
+    sched =
+      schedule(raw, %{"id" => id, "type" => @type_name, "publishAt" => future()})
+      |> json_response(201)
+      |> Map.fetch!("schedule")
+
+    base = "/v1/data/schedules/#{@dataset}/#{sched["_id"]}"
+    post_json = fn path, body -> raw |> authed() |> post(path, Jason.encode!(body)) end
+
+    paused = post_json.(base <> "/pause", %{}) |> json_response(200)
+    assert paused["schedule"]["status"] == "paused"
+    assert paused["schedule"]["publishAt"] == sched["publishAt"]
+    refute_enqueued(worker: ScheduledPublishWorker, args: %{id: sched["_id"]})
+    assert :ok = perform_job(ScheduledPublishWorker, %{"id" => sched["_id"]})
+    refute published?(id)
+    assert post_json.(base <> "/pause", %{}) |> json_response(409)
+
+    later = future(7200)
+    resumed = post_json.(base <> "/resume", %{"publishAt" => later}) |> json_response(200)
+    assert resumed["schedule"]["status"] == "scheduled"
+    {:ok, want, _} = DateTime.from_iso8601(later)
+    {:ok, got, _} = DateTime.from_iso8601(resumed["schedule"]["publishAt"])
+    assert DateTime.compare(want, got) == :eq
+    assert_enqueued(worker: ScheduledPublishWorker, args: %{id: sched["_id"]})
+    assert post_json.(base <> "/resume", %{}) |> json_response(409)
+
+    # Paused again, then cancelled (Delete schedule on a paused one).
+    assert post_json.(base <> "/pause", %{}) |> json_response(200)
+
+    assert raw |> authed() |> delete(base) |> json_response(200) |> get_in(["schedule", "status"]) ==
+             "cancelled"
+  end
+
   test "a pinned rev that moved fails the schedule and leaves the draft", %{ws_id: ws_id} do
     {raw, _} = token!(ws_id)
     {id, draft} = new_draft!()

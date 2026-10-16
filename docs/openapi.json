@@ -1125,7 +1125,7 @@
             }
           },
           {
-            "description": "scheduled | published | cancelled | refused | failed | missed | all.",
+            "description": "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -7488,7 +7488,7 @@
             }
           },
           {
-            "description": "scheduled | published | cancelled | refused | failed | missed | all.",
+            "description": "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -8692,6 +8692,83 @@
         "summary": "Heartbeat a held claim: write the now-line (what you're doing right now) AND renew the lease (epoch bump + ts refresh) in one atomic write. No epoch arg — pulse survives fence bumps; a lost lease (reaped/released/closed) is 409 not_holder, never a silent re-claim. Boards render claim.now with its ts so a stale pulse reads stale.",
         "tags": [
           "task"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
+    "/v1/data/schedules/{dataset}/{schedule_id}/resume": {
+      "post": {
+        "operationId": "doc.schedule-resume",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: publishAt.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resume a paused scheduled publish, at its own time or a new one.",
+        "tags": [
+          "doc"
         ],
         "x-barkpark-scope": "write"
       }
@@ -10204,6 +10281,99 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/schedules/{dataset}/{schedule_id}/resume": {
+      "post": {
+        "operationId": "doc.schedule-resume.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: publishAt.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Resume a paused scheduled publish, at its own time or a new one.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/mutate/{dataset}": {
       "post": {
         "operationId": "doc.patch.scoped",
@@ -10896,7 +11066,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Cancel a pending scheduled publish.",
+        "summary": "Cancel a pending or paused scheduled publish.",
         "tags": [
           "doc"
         ],
@@ -12351,6 +12521,83 @@
           "workspace"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/data/schedules/{dataset}/{schedule_id}/pause": {
+      "post": {
+        "operationId": "doc.schedule-pause",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pause a pending scheduled publish: it keeps its time and runs nothing until resumed.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/tasks/{doc_id}/claim": {
@@ -15893,7 +16140,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Cancel a pending scheduled publish.",
+        "summary": "Cancel a pending or paused scheduled publish.",
         "tags": [
           "doc"
         ],
@@ -18814,6 +19061,99 @@
           "token"
         ],
         "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/schedules/{dataset}/{schedule_id}/pause": {
+      "post": {
+        "operationId": "doc.schedule-pause.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "schedule_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pause a pending scheduled publish: it keeps its time and runs nothing until resumed.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/tasks/{doc_id}/sessions": {

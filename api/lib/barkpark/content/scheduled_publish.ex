@@ -9,7 +9,7 @@ defmodule Barkpark.Content.ScheduledPublish do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(scheduled published cancelled refused failed missed)
+  @statuses ~w(scheduled paused published cancelled refused failed missed)
   @principal_types ~w(user api_token)
 
   schema "scheduled_publishes" do
@@ -50,6 +50,18 @@ defmodule Barkpark.Content.ScheduledPublish do
     ])
     |> validate_required([:dataset, :type, :doc_id, :publish_at, :principal_type, :principal_id])
     |> validate_inclusion(:principal_type, @principal_types)
+    |> unique_constraint([:workspace_id, :dataset, :type, :doc_id],
+      name: :scheduled_publishes_one_pending_per_doc
+    )
+  end
+
+  # Paused (Sanity's "Pause to edit"): not pending, not finished. Resuming puts it
+  # back to `scheduled`, at its time or a new one, under the same one-pending rule.
+  def pause_changeset(%__MODULE__{} = row), do: change(row, status: "paused")
+
+  def resume_changeset(%__MODULE__{} = row, %DateTime{} = publish_at) do
+    row
+    |> change(status: "scheduled", publish_at: publish_at)
     |> unique_constraint([:workspace_id, :dataset, :type, :doc_id],
       name: :scheduled_publishes_one_pending_per_doc
     )
