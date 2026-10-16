@@ -538,17 +538,21 @@ defmodule Barkpark.ChatHosts do
   # four-state rides literally; reverse-mapping through the wave-5 activity
   # vocabulary would distort "unknown" through the :offline prior rule).
   defp broadcast_reported_state(session_id, agent_state, ts) do
-    owner_ws =
-      case Barkpark.StudioChat.get_session(session_id) do
-        %{owner_workspace_id: ws} -> ws
-        _ -> nil
-      end
+    session = Barkpark.StudioChat.get_session(session_id)
+    owner = Barkpark.StudioChat.fleet_owner(session)
+
+    frame = %{
+      agent_state: agent_state,
+      ts: ts,
+      owner_workspace_id: session && session.owner_workspace_id
+    }
+
+    frame = if is_tuple(owner), do: Map.put(frame, :owner_scope, owner), else: frame
 
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
       Barkpark.StudioChat.Recorder.activity_topic(),
-      {:chat_reported_state, session_id,
-       %{agent_state: agent_state, ts: ts, owner_workspace_id: owner_ws}}
+      {:chat_reported_state, session_id, frame}
     )
   catch
     :exit, _ -> :ok

@@ -1,5 +1,6 @@
 defmodule Barkpark.ChatHosts.RuntimeMatrixTest do
-  use ExUnit.Case, async: false
+  # Runtime admission now checks durable personal ownership before dispatch.
+  use Barkpark.DataCase, async: false
 
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Command

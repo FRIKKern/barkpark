@@ -1271,6 +1271,21 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireChatAccess)
   end
 
+  # Separate account-owned storage door. Do not broaden the operator/connector
+  # API-token door: membership alone never grants somebody else's conversation.
+  pipeline :personal_chat_headers do
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+  end
+
+  # Compose the existing :user_auth + :require_user account/CSRF gates before
+  # this ownership seal; do not duplicate their session-admission policy.
+  pipeline :personal_chat do
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.RequirePersonalChatAccess)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
+  end
+
   # Capability switches (task-2f59ba23bcad333e, `Barkpark.Capability`). Each is
   # listed FIRST in its scopes' pipe_through, so a disabled subsystem answers a
   # plain 404 before any token lookup. Default on; turned off by
@@ -2811,6 +2826,36 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token, :api_grant_read])
 
     get("/analytics/:dataset", AnalyticsController, :index)
+  end
+
+  scope "/w/:workspace_slug/v1/personal-chat", BarkparkWeb do
+    pipe_through([
+      :studio_chat_capability,
+      :personal_chat_headers,
+      :user_auth,
+      :require_user,
+      :personal_chat
+    ])
+
+    get("/sessions", PersonalChatController, :index)
+    post("/sessions", PersonalChatController, :create)
+    get("/sessions/:id", PersonalChatController, :show)
+    patch("/sessions/:id", PersonalChatController, :update)
+    post("/sessions/:id/archive", PersonalChatController, :archive)
+    post("/sessions/:id/unarchive", PersonalChatController, :unarchive)
+
+    # Reserved operations fail explicitly, after the same ownership lookup.
+    # They never subscribe, write a turn, or start a model in this storage slice.
+    get("/events", PersonalChatController, :read_unavailable)
+    get("/rollup", PersonalChatController, :read_unavailable)
+    get("/managed-session", PersonalChatController, :read_unavailable)
+    post("/sessions/:id/messages", PersonalChatController, :write_unavailable)
+    post("/sessions/:id/interrupt", PersonalChatController, :write_unavailable)
+    post("/sessions/:id/approval", PersonalChatController, :write_unavailable)
+    post("/sessions/:id/answer", PersonalChatController, :write_unavailable)
+    get("/sessions/:id/events", PersonalChatController, :read_unavailable)
+    post("/sessions/:id/attachments", PersonalChatController, :write_unavailable)
+    get("/sessions/:id/attachments/:attachment_id", PersonalChatController, :read_unavailable)
   end
 
   # ── Claude chat transport (charter bp-chat-tui D21-D24; Connectors D18/D19a).
