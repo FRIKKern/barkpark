@@ -90,7 +90,7 @@ defmodule Barkpark.Plugins.Media do
   """
   @spec after_media_upload(map()) :: :ok
   def after_media_upload(%{media_file: media_file} = ctx) do
-    extracted = Processing.extract(media_file)
+    extracted = Processing.extract(media_file, meta: Map.get(ctx, :meta, []))
     processed = Processing.asset_fields(extracted)
     metadata = Map.get(ctx, :asset_metadata) || %{}
 
