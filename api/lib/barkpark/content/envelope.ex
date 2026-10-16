@@ -247,9 +247,12 @@ defmodule Barkpark.Content.Envelope do
   never appears in the map" for free — no separate visibility check, no risk
   of the two decisions drifting apart.
 
-  FLAT FIELDS ONLY (scope cut, recorded on the task row): a nested
-  object/array value's OWN sub-fields are not walked — the whole value is one
-  mapping entry naming its top-level key. Provenance through `?expand=`
+  NESTED VALUES (task-651999345821b5dd): every top-level field is one mapping
+  entry naming its key, as before, AND an object or array value is walked, so
+  `$["seo"]["metaTitle"]` and `$["links"][0]["title"]` are mapped too (a keyed
+  array item's source path names its `_key`: `$["links"][?(@._key=="l1")]`).
+  System keys are not mapped, and a document stops at `@nested_cap` nested
+  entries. Before, a nested value was only ever its whole top-level field. Provenance through `?expand=`
   (a different source document), computed fields (no single source to name)
   and aggregate/derived views each need their own rule, filed separately as
   task-0e0cb2167c6fcdea rather than guessed at here.
@@ -300,14 +303,23 @@ defmodule Barkpark.Content.Envelope do
         nil
 
       keys ->
-        {mappings, table} =
-          Enum.reduce(keys, {%{}, path_table_new()}, fn key, {m_acc, table} ->
+        {mappings, table, _n} =
+          Enum.reduce(keys, {%{}, path_table_new(), 0}, fn key, {m_acc, table, n} ->
             {idx, table} = path_table_index(table, result_path(key))
 
-            {Map.put(m_acc, result_path(key), %{
-               "source" => %{"document" => 0, "path" => idx},
-               "type" => "value"
-             }), table}
+            m_acc =
+              Map.put(m_acc, result_path(key), %{
+                "source" => %{"document" => 0, "path" => idx},
+                "type" => "value"
+              })
+
+            walk_nested(
+              Map.get(rendered, key),
+              result_path(key),
+              result_path(key),
+              0,
+              {m_acc, table, n}
+            )
           end)
 
         {expand_mappings, expand_docs, _next_doc_idx, table} =
@@ -340,7 +352,7 @@ defmodule Barkpark.Content.Envelope do
   gets a `documents` entry (keeping the index correspondence intact for
   every later row) but contributes no mapping.
 
-  Flat fields only, same scope cut as `source_map/2` — see that function's
+  Nested values walked, same rule as `source_map/2` — see that function's
   doc for what is deliberately NOT covered here (computed fields, aggregate
   views — `?expand=` is now covered, via the optional third arg below).
   Returns `nil` when no row has a single visible field at all (an empty
@@ -397,14 +409,23 @@ defmodule Barkpark.Content.Envelope do
           {%{}, table, false}
 
         keys ->
-          {m, table} =
-            Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+          {m, table, _n} =
+            Enum.reduce(keys, {%{}, table, 0}, fn key, {m_acc, table, n} ->
               {idx, table} = path_table_index(table, result_path(key))
 
-              {Map.put(m_acc, row_result_path(row_idx, key), %{
-                 "source" => %{"document" => row_idx, "path" => idx},
-                 "type" => "value"
-               }), table}
+              m_acc =
+                Map.put(m_acc, row_result_path(row_idx, key), %{
+                  "source" => %{"document" => row_idx, "path" => idx},
+                  "type" => "value"
+                })
+
+              walk_nested(
+                Map.get(rendered, key),
+                row_result_path(row_idx, key),
+                result_path(key),
+                row_idx,
+                {m_acc, table, n}
+              )
             end)
 
           {m, table, true}
@@ -521,7 +542,7 @@ defmodule Barkpark.Content.Envelope do
 
   defp diff_expanded_field(_base, _exp), do: :unchanged
 
-  # An expanded sub-document's own flat-field mapping, exactly the same walk
+  # An expanded sub-document's own field mapping, exactly the same walk
   # `source_map/3` does for the root — one more level of `?expand=` nesting
   # is out of scope (same as `Expand.expand/4` itself never recursing).
   defp sub_document_source_map(
@@ -532,17 +553,83 @@ defmodule Barkpark.Content.Envelope do
        ) do
     keys = sub_doc |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort()
 
-    {mappings, table} =
-      Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+    {mappings, table, _n} =
+      Enum.reduce(keys, {%{}, table, 0}, fn key, {m_acc, table, n} ->
         {idx, table} = path_table_index(table, result_path(key))
 
-        {Map.put(m_acc, append_path(prefix, key), %{
-           "source" => %{"document" => doc_index, "path" => idx},
-           "type" => "value"
-         }), table}
+        m_acc =
+          Map.put(m_acc, append_path(prefix, key), %{
+            "source" => %{"document" => doc_index, "path" => idx},
+            "type" => "value"
+          })
+
+        walk_nested(
+          Map.get(sub_doc, key),
+          append_path(prefix, key),
+          result_path(key),
+          doc_index,
+          {m_acc, table, n}
+        )
       end)
 
     {mappings, %{"_id" => sub_id, "_type" => sub_type}, table}
+  end
+
+  # NESTED VALUES (task-651999345821b5dd): a field holding an object or an array is
+  # mapped whole AND walked, so a site can mark `seo.metaTitle` or one link's title
+  # click-to-edit as Sanity's content source map lets it (every leaf there). Result
+  # keys index arrays by position (`$["links"][0]["title"]`); the SOURCE path names a
+  # keyed item by its `_key`, as Sanity's does (`$["links"][?(@._key=="l1")]["title"]`),
+  # so it still names the item after a reorder. System keys (`_key`, `_type`, `_ref`)
+  # are not mapped. At most @nested_cap entries per document: a long rich-text body
+  # stops being walked there rather than growing the opt-in map without bound.
+  @nested_cap 2_000
+
+  defp walk_nested(%{} = map, result, source, doc_index, acc) do
+    map
+    |> Map.keys()
+    |> Enum.reject(&(not is_binary(&1) or String.starts_with?(&1, "_")))
+    |> Enum.sort()
+    |> Enum.reduce(acc, fn key, acc ->
+      map_nested(
+        Map.get(map, key),
+        append_path(result, key),
+        append_path(source, key),
+        doc_index,
+        acc
+      )
+    end)
+  end
+
+  defp walk_nested(list, result, source, doc_index, acc) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.reduce(acc, fn {item, i}, acc ->
+      segment =
+        case item do
+          %{"_key" => key} when is_binary(key) and key != "" -> "[?(@._key==#{inspect(key)})]"
+          _ -> "[#{i}]"
+        end
+
+      map_nested(item, result <> "[#{i}]", source <> segment, doc_index, acc)
+    end)
+  end
+
+  defp walk_nested(_leaf, _result, _source, _doc_index, acc), do: acc
+
+  defp map_nested(_value, _result, _source, _doc_index, {_m, _t, n} = acc) when n >= @nested_cap,
+    do: acc
+
+  defp map_nested(value, result, source, doc_index, {mappings, table, n}) do
+    {idx, table} = path_table_index(table, source)
+
+    mappings =
+      Map.put(mappings, result, %{
+        "source" => %{"document" => doc_index, "path" => idx},
+        "type" => "value"
+      })
+
+    walk_nested(value, result, source, doc_index, {mappings, table, n + 1})
   end
 
   defp result_path(key), do: "$[#{inspect(key)}]"
