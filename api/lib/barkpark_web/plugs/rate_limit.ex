@@ -32,6 +32,13 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   SCIM/anonymous budgets are untouched by either of these -- only a resolved
   SESSION or OWNED principal ever sees the wider default.
 
+  A LOGIN-SESSION token sent as a Bearer (`POST /v1/auth/login`'s `token`,
+  which `OptionalSessionToken` accepts as a bearer since task-ce99fd602a697010)
+  is the same `:session` principal as the `user_session` cookie, keyed on the
+  same user: it is how Barkpark Studio's account sign-in (J67) writes. Without
+  its resolver every signed-in editor fell to the one per-IP 60/min bucket of
+  the studio's egress address.
+
   ## The `:browser` class — SHADOW ONLY (charter D2/D4 Gate A)
 
   A mount may pass `class: :browser` to meter a browser pipeline. That path is
@@ -476,6 +483,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     # `owner_user_id`); `Scim.resolve_token_id/1` returns a bare id — a SCIM
     # token has no owner concept, so it is never `:owned`.
     {"api", {Barkpark.Auth, :verify_token_principal}},
+    # A login-session bearer (Studio account sign-in, J67): `{:session, id}`,
+    # keyed "user:<id>" like the `user_session` cookie, so one human holding
+    # both is one bucket. Ahead of SCIM because Studio typing is the hot path.
+    {"user", {__MODULE__, :login_session_principal}},
     {"scim", {Barkpark.Scim, :resolve_token_id}}
   ]
 
@@ -554,18 +565,27 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp session_user_principal_id(conn) do
     case session_value(conn, "user_session") do
       raw when is_binary(raw) and raw != "" ->
-        case Barkpark.Accounts.verify_user_session(raw) do
-          {%Barkpark.Accounts.User{id: id}, _session} when is_binary(id) ->
-            {:session, "user:" <> id}
-
-          _ ->
-            nil
+        case login_session_principal(raw) do
+          {:session, id} -> {:session, "user:" <> id}
+          nil -> nil
         end
 
       _ ->
         nil
     end
   end
+
+  # A login session (cookie value or bearer) to its user's id, or nil. Public
+  # only because `@principal_resolvers` applies it by {module, function}.
+  @doc false
+  def login_session_principal(raw) when is_binary(raw) do
+    case Barkpark.Accounts.verify_user_session(String.trim(raw)) do
+      {%Barkpark.Accounts.User{id: id}, _session} when is_binary(id) -> {:session, id}
+      _ -> nil
+    end
+  end
+
+  def login_session_principal(_), do: nil
 
   defp session_value(conn, key) do
     get_session(conn, key)
@@ -585,6 +605,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
       {id, _owner_user_id} when is_binary(id) ->
         kind <> ":" <> id
+
+      # A login-session resolver: the editor's own session budget.
+      {:session, id} when is_binary(id) ->
+        {:session, kind <> ":" <> id}
 
       # A bare-id resolver (e.g. Scim.resolve_token_id/1) — no owner concept.
       id when is_binary(id) ->

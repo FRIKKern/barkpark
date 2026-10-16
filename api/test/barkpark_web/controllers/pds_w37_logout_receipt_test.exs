@@ -75,7 +75,9 @@ defmodule BarkparkWeb.PdsW37LogoutReceiptTest do
   # SELECT against user_sessions completes — i.e. after `require_user` has
   # already resolved the session and before the controller's own revoke. The
   # controller's `update_all` then stamps NOTHING, which is the only zero this
-  # door can reach.
+  # door can reach. RateLimit reads the same row first, to key a login-session
+  # bearer's bucket (task-2c31de0cf6597d32); that read is not the auth read, so
+  # the observer lets it pass.
   defp revoke_between_auth_and_revoke(token) do
     hash = UserSession.hash_token(token)
     key = {__MODULE__, :race, make_ref()}
@@ -87,7 +89,7 @@ defmodule BarkparkWeb.PdsW37LogoutReceiptTest do
         query = to_string(meta[:query] || "")
 
         if String.starts_with?(query, "SELECT") and query =~ "user_sessions" and
-             Process.get(key) == nil do
+             Process.get(key) == nil and not rate_limiter_read?() do
           Process.put(key, :fired)
 
           Repo.update_all(
@@ -100,6 +102,11 @@ defmodule BarkparkWeb.PdsW37LogoutReceiptTest do
     )
 
     on_exit(fn -> :telemetry.detach(key) end)
+  end
+
+  defp rate_limiter_read? do
+    {:current_stacktrace, stack} = Process.info(self(), :current_stacktrace)
+    Enum.any?(stack, &match?({BarkparkWeb.Plugs.RateLimit, _, _, _}, &1))
   end
 
   test "the receipt's `revoked` EQUALS the rows the revoke stamped", %{user: user, token: token} do

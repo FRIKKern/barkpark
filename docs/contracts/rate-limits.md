@@ -14,7 +14,7 @@ budget numbers and WHO gets which one.
 |---|---|---|---|
 | `:verified` | `Authorization: Bearer <raw>` → `@principal_resolvers` (`api_token` via `Auth.verify_token_principal/1`, SCIM via `Scim.resolve_token_id/1`), `owner_user_id` nil | `:write_per_minute` (60) | `:read_per_minute` (300) |
 | `:owned` | same Bearer resolution, but `owner_user_id` set — a personal PAT, or an app token from `POST /v1/auth/app-tokens` (always owner-set, one per editor email) | `:session_write_per_minute` (180) | `:read_per_minute` (300) |
-| `:session` | a session cookie, no Bearer present: `session["api_token"]` (token-sign-in) → `Auth.verify_token_id/1`, else `session["user_session"]` (account/SSO login) → `Accounts.verify_user_session/1` | `:session_write_per_minute` (180) | `:read_per_minute` (300) |
+| `:session` | a login-session Bearer (`/v1/auth/login`'s token; Studio account sign-in), or a session cookie with no Bearer: `session["api_token"]` → `Auth.verify_token_id/1`, else `session["user_session"]` → `Accounts.verify_user_session/1`. Bearer and cookie of one login share one bucket | `:session_write_per_minute` (180) | `:read_per_minute` (300) |
 | `:anonymous` | no resolvable credential at all | `client_ip/1`-keyed, `:write_per_minute` (60) | `:read_per_minute` (300) |
 
 A Bearer wins over a session cookie on the same request, same precedence
@@ -26,14 +26,11 @@ abuse ceiling means it regardless of who is asking.
 
 ## Why `:session` and `:owned` are wider (task-2c31de0cf6597d32 + follow-up)
 
-Barkpark Studio proxies many human editors through one server-side
-credential and/or egress IP. Before `:session` existed, N editors shared
-ONE 60/min write bucket — one person typing for ~15s could 429 everyone
-else. `:session` keys each editor's resolved cookie into its own bucket;
-Studio's editors in fact authenticate with a per-editor BEARER, so `:owned`
-extends the same fix there: a Bearer whose `owner_user_id` names one human
-gets the same wider budget, keyed per token. `:verified`/`:anonymous` are
-untouched — a shared/service Bearer with no owner stays at 60/min.
+Barkpark Studio proxies many editors through one server and egress IP, so
+N editors shared ONE 60/min write bucket — one person typing for ~15s could
+429 everyone. `:session` gives each editor's login its own bucket; `:owned`
+does the same for a Bearer whose `owner_user_id` names one human.
+`:verified`/`:anonymous` are untouched — a shared/service Bearer with no owner stays at 60/min.
 
 ## Tuning
 
