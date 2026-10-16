@@ -300,6 +300,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     |> Barkpark.Tenancy.slugify()
   end
 
+  # A change from an input with no name is not a field edit. LiveView posts the
+  # whole form for it with `_target` "undefined": typing in a reference
+  # picker's search box did that once per keystroke, and each post wrote a
+  # draft of an untouched document (task-32d983d47299e137).
+  def autosave(%{"_target" => ["undefined"]}, socket), do: {:noreply, socket}
+
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 

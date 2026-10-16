@@ -694,11 +694,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       # ran the whole studio suite. A blank title always writes.
       blank_title?(doc) -> true
       params == %{} -> false
-      true -> Enum.any?(params, fn {k, v} -> Map.fetch(stored, k) != {:ok, v} end)
+      true -> Enum.any?(params, fn {k, v} -> changed_key?(stored, k, v) end)
     end
   end
 
   defp autosave_changes_something?(_doc, _schema, _params), do: true
+
+  # Two shapes the browser posts that are not changes (task-32d983d47299e137).
+  # LiveView adds an `_unused_<name>` key beside every input the author has not
+  # touched; it is bookkeeping, never a value. And a reference picker posts the
+  # bare id of a reference the store keeps as `{_ref, _type, _weak}`; the same
+  # id is the same reference.
+  defp changed_key?(_stored, "_unused_" <> _, _v), do: false
+
+  defp changed_key?(stored, k, v) do
+    case Map.fetch(stored, k) do
+      {:ok, s} -> not same_value?(s, v)
+      :error -> true
+    end
+  end
+
+  defp same_value?(a, a), do: true
+
+  defp same_value?(%{"_ref" => id}, id) when is_binary(id), do: true
+  defp same_value?(id, %{"_ref" => id}) when is_binary(id), do: true
+
+  defp same_value?(%{"_ref" => id, "_type" => "reference"}, %{
+         "_ref" => id,
+         "_type" => "reference"
+       }),
+       do: true
+
+  defp same_value?(a, b) when is_list(a) and is_list(b) and length(a) == length(b),
+    do: a |> Enum.zip(b) |> Enum.all?(fn {x, y} -> same_value?(x, y) end)
+
+  defp same_value?(_a, _b), do: false
 
   # The stored document as the form the browser was handed. Read TOTALLY: a
   # pane doc is a `%Content.Document{}` on the live path but a bare map in the

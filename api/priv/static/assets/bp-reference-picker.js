@@ -222,7 +222,15 @@ class BpReferencePicker extends HTMLElement {
     // after it (the Paper canvas field node view).
     const fieldLabel = this.getAttribute("data-field-label");
     if (fieldLabel) input.setAttribute("aria-label", fieldLabel);
-    input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
+    // The search box is not a field of the document. Its input and change
+    // events stop here: bubbling to the editor form, each keystroke posted
+    // phx-change="autosave" and wrote a draft (task-32d983d47299e137). Only a
+    // pick or a Remove changes the value, through bp-change.
+    input.addEventListener("input", (e) => {
+      e.stopPropagation();
+      this._onSearchInput(e.target.value);
+    });
+    input.addEventListener("change", (e) => e.stopPropagation());
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
