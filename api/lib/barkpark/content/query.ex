@@ -1791,23 +1791,30 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  # `in` matches a scalar field whose value is one of the values, and an array
+  # field that holds one of them (task-1c1558e9c5d9eda3). An array element
+  # matches the way `has` matches one: its own text, or the `_ref` of a
+  # reference. `filter[BookGroupCodes][in]=801,802` used to compare the text
+  # of the whole array, `["801"]`, with each value and matched nothing.
+  #
+  # The field is read once per row: the inner `SELECT ... OFFSET 0` keeps the
+  # planner from copying the extract into each use, and each copy would
+  # decompress the stored `content` again.
   defp apply_field_op(query, field, "in", vs) when is_list(vs) do
-    if nested_path?(field) do
-      segs = nested_segments(field)
+    segs = nested_segments(field)
 
-      where(
-        query,
-        [d],
-        fragment(
-          "jsonb_extract_path_text(?, VARIADIC ?) = ANY(?)",
-          d.content,
-          ^segs,
-          ^vs
-        )
+    where(
+      query,
+      [d],
+      fragment(
+        "EXISTS (SELECT 1 FROM (SELECT jsonb_extract_path(?, VARIADIC ?) AS v OFFSET 0) AS f WHERE CASE WHEN jsonb_typeof(f.v) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(f.v) AS e WHERE e #>> '{}' = ANY(?) OR e->>'_ref' = ANY(?)) ELSE f.v #>> '{}' = ANY(?) END)",
+        d.content,
+        ^segs,
+        ^vs,
+        ^vs,
+        ^vs
       )
-    else
-      where(query, [d], fragment("?->>? = ANY(?)", d.content, ^field, ^vs))
-    end
+    )
   end
 
   # `nin` = NOT IN. `<> ALL` excludes NULL/absent rows (NULL <> ALL → NULL →

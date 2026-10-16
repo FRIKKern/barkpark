@@ -79,7 +79,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # empty-query browse so the finder's landing has docs + facets on Postgres
     # too. A real query adds the full-text/trigram match.
     base =
-      Document
+      from(d in Document, as: :search_doc)
       |> scope_to_dataset(scope, project_id, workspace_id)
       |> scope_to_workspace_or_global(workspace_id, project_id)
       # Row/ownership ACL (Phase 4, core-auth). Applied UNCONDITIONALLY: it is
@@ -152,7 +152,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # The query API's field filters (task-c7395e0d27e1121b). Applied to `base`,
     # so they run before the limit, and the count and every facet describe the
     # filtered match.
-    base = apply_field_filters(base, Keyword.get(opts, :filter_map), type, scope, opts)
+    filter_map = Keyword.get(opts, :filter_map)
+    filtered? = is_map(filter_map) and map_size(filter_map) > 0
+    text_base = base
+    base = apply_field_filters(base, filter_map, type, scope, opts)
 
     with_trgm_thresholds(browse?, config, relaxed, fn ->
       # Count + all four facet dimensions in ONE round trip over the match set
@@ -178,26 +181,38 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
       fallback_arms = if suggest?, do: :names_typo, else: :broad
 
-      {base, count, facets, near_miss?} =
+      # A field filter narrows the hits of the words; it does not make the
+      # words wrong. So with a filter, the choice between the words and the
+      # wider arms is the one the search makes without the filter: when a
+      # document holds the words but the filter leaves none, the answer is
+      # empty, not a typo match (task-6496d34cb0a43ca7). `text_count` is how
+      # many documents the words find without the filter, counted up to
+      # `:text_count_cap`, so the pipeline can make the same choice for its
+      # recovery passes.
+      text_probe = text_probe(filtered? and not suggest? and not relaxed, opts)
+
+      match_on = fn q, arms ->
+        where_match(q, parsed, groups, config, relaxed, index, match, arms)
+      end
+
+      {base, count, facets, near_miss?, text_count, arms} =
         if browse? do
           {count, facets} = count_fun.(base)
-          {base, count, facets, false}
+          {base, count, facets, false, nil, nil}
         else
-          words = where_match(base, parsed, groups, config, relaxed, index, match, :words)
+          words = match_on.(base, :words)
           {count, facets} = if relaxed, do: {0, %{}}, else: count_fun.(words)
+          text_count = text_probe.(count, fn -> match_on.(text_base, :words) end)
 
-          if count > 0 do
-            {words, count, facets, false}
+          if count > 0 or (is_integer(text_count) and text_count > 0) do
+            {words, count, facets, false, text_count, :words}
           else
-            wider =
-              where_match(base, parsed, groups, config, relaxed, index, match, fallback_arms)
-
+            wider = match_on.(base, fallback_arms)
             {count, facets} = count_fun.(wider)
-            {wider, count, facets, true}
+            text_count = text_probe.(count, fn -> match_on.(text_base, fallback_arms) end)
+            {wider, count, facets, true, text_count, fallback_arms}
           end
         end
-
-      facets = put_field_facets(facets, base, Keyword.get(opts, :facet_fields))
 
       # Bounded ranking pool: for real queries, narrow to a cheap-signal
       # candidate set BEFORE running the expensive ranking ORDER BY. Browse
@@ -213,9 +228,17 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # `offset` walks the whole match without a repeat or a gap.
       {ranking_input, lead} =
         cond do
-          browse? or count <= pool -> {base, []}
-          offset + limit <= pool -> {bounded_pool(base, pool, groups), []}
-          true -> {base, [{:desc, in_pool_key(base, pool, groups)}]}
+          browse? or count <= pool ->
+            {base, []}
+
+          offset + limit <= pool and filtered? ->
+            {filtered_pool(base, match_on.(text_base, arms), pool, groups), []}
+
+          offset + limit <= pool ->
+            {bounded_pool(base, pool, groups), []}
+
+          true ->
+            {base, [{:desc, in_pool_key(base, pool, groups)}]}
         end
 
       # An empty match ranks nothing. A recovery pass that finds no document
@@ -241,8 +264,36 @@ defmodule Barkpark.Search.DocumentsRetriever do
           |> Repo.all(@planned_per_call)
         end
 
-      {docs, count, %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}}
+      meta = %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}
+      meta = if is_integer(text_count), do: Map.put(meta, :text_count, text_count), else: meta
+
+      {docs, count, meta}
     end)
+  end
+
+  # With a field filter, how many documents the words match without it, up to
+  # `:text_count_cap` (at least 1). A filtered count at or over the cap already
+  # answers that, so the probe runs only below it, and it stops at the cap.
+  defp text_probe(false, _opts), do: fn _count, _query_fun -> nil end
+
+  defp text_probe(true, opts) do
+    cap = max(Keyword.get(opts, :text_count_cap, 1), 1)
+
+    fn
+      count, _query_fun when count >= cap ->
+        count
+
+      _count, query_fun ->
+        capped =
+          query_fun.()
+          |> exclude(:order_by)
+          |> exclude(:select)
+          |> select([d], %{id: d.id})
+          |> limit(^cap)
+
+        from(s in subquery(capped), select: count())
+        |> Repo.one(@planned_per_call)
+    end
   end
 
   # `:all` (the default): a document must match every word of the query.
@@ -304,49 +355,58 @@ defmodule Barkpark.Search.DocumentsRetriever do
        when not is_map(filter_map) or map_size(filter_map) == 0,
        do: query
 
-  defp apply_field_filters(query, filter_map, type, scope, opts),
-    do: Barkpark.Content.Query.apply_search_filters(query, filter_map, type, scope, opts)
+  # The filters test the stored `content`, which Postgres decompresses for
+  # each row it tests. Written as plain conditions, they cost the planner
+  # about as little as the type test, so it ran them on every document of the
+  # workspace before the type and the words narrowed the rows: `norsk` with
+  # `filter[IsHidden][notContains]=true` decompressed 47,334 documents to keep
+  # 10,232 (1.3 s against 0.2 s with no filter, task-b2a224d49a3f27eb).
+  #
+  # A correlated `EXISTS` on the same row with `OFFSET 0` stays a subplan, and
+  # Postgres tests a subplan after every cheaper condition of the scan. So
+  # the filters only see documents that are already in scope, of the type
+  # and matching the words.
+  defp apply_field_filters(query, filter_map, type, scope, opts) do
+    filtered =
+      from(f in Document,
+        where: f.id == parent_as(:search_doc).id,
+        select: 1,
+        offset: 0
+      )
+      |> Barkpark.Content.Query.apply_search_filters(filter_map, type, scope, opts)
+
+    where(query, [d], exists(filtered))
+  end
 
   # Value counts of content fields the caller named with `?facet=`, over the
   # filtered match set. A string field counts its value, an array field each
-  # string element once per document. At most 100 values per field, biggest
-  # first.
+  # element once per document. At most 100 values per field, biggest first.
+  #
+  # They ride in the count's own scan (`count_and_facets/3`) as one more
+  # grouping set, `(field, value)`, so a named facet costs one read of each
+  # matched document's `content` and no second run of the match. They used
+  # to be one more query per field that ran the whole match again and read
+  # `content` three times per document: the facet on `norsk` cost more than
+  # the search itself (task-b2a224d49a3f27eb).
   @field_facet_limit 100
 
-  defp put_field_facets(facets, _base, fields) when not is_list(fields) or fields == [],
-    do: facets
+  defp field_facets(fields, rows) do
+    counts =
+      for %{fg: 0, field: field, values: values, field_count: n} <- rows,
+          label <- values,
+          reduce: %{} do
+        acc -> Map.update(acc, {field, label}, n, &(&1 + n))
+      end
 
-  defp put_field_facets(facets, base, fields) do
-    by_field =
-      Map.new(fields, fn field ->
-        rows =
-          base
-          |> exclude(:order_by)
-          |> exclude(:select)
-          |> join(
-            :inner_lateral,
-            [d],
-            v in fragment(
-              "SELECT DISTINCT e.value FROM jsonb_array_elements_text(CASE jsonb_typeof(?->?) WHEN 'array' THEN ?->? WHEN 'string' THEN jsonb_build_array(?->?) ELSE '[]'::jsonb END) AS e(value)",
-              d.content,
-              ^field,
-              d.content,
-              ^field,
-              d.content,
-              ^field
-            ),
-            on: true
-          )
-          |> group_by([_d, v], v.value)
-          |> select([d, v], {v.value, count(d.id)})
-          |> order_by([d, v], desc: count(d.id), asc: v.value)
-          |> limit(@field_facet_limit)
-          |> Repo.all(@planned_per_call)
+    Map.new(fields, fn field ->
+      buckets =
+        for({{^field, label}, count} <- counts, do: {label, count})
+        |> Enum.sort_by(fn {label, count} -> {-count, label} end)
+        |> Enum.take(@field_facet_limit)
+        |> Enum.map(fn {label, count} -> %{"label" => label, "count" => count} end)
 
-        {field, Enum.map(rows, fn {label, count} -> %{"label" => label, "count" => count} end)}
-      end)
-
-    Map.put(facets, "fields", by_field)
+      {field, buckets}
+    end)
   end
 
   # Apply the bounded ranking pool: keep the `pool_size` rows with the highest
@@ -361,6 +421,37 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp bounded_pool(base, _, _), do: base
+
+  # The pool of a filtered search. The filter reads each document's stored
+  # `content`, so testing it on every match costs a decompression per match,
+  # and the count has already paid that once. The pool takes the matches in
+  # pool order WITHOUT the filter, twice the pool's size, and tests the
+  # filter on those only. When at least a pool's worth pass, they are the
+  # first `pool_size` filtered matches in pool order, the same pool
+  # `bounded_pool/3` builds. When fewer pass (a narrow filter), the pool
+  # falls back to `bounded_pool/3`.
+  @filtered_pool_factor 2
+
+  defp filtered_pool(base, text_match, pool_size, groups) when pool_size > 0 do
+    candidates =
+      text_match
+      |> pool_ids(pool_size * @filtered_pool_factor, groups)
+      |> Repo.all(@planned_per_call)
+
+    ids =
+      base
+      |> exclude(:order_by)
+      |> where([d], d.id in ^candidates)
+      |> pool_ids(pool_size, groups)
+      |> Repo.all(@planned_per_call)
+
+    if length(ids) == pool_size,
+      do: base |> exclude(:order_by) |> where([d], d.id in ^ids),
+      else: bounded_pool(base, pool_size, groups)
+  end
+
+  defp filtered_pool(base, _text_match, pool_size, groups),
+    do: bounded_pool(base, pool_size, groups)
 
   # The pool: the `pool_size` matches with the most query words at a word
   # start of the title or author, then the newest, then by id so the set is the
@@ -471,37 +562,27 @@ defmodule Barkpark.Search.DocumentsRetriever do
   @g_total 0b1111
 
   defp count_and_facets(base, scope, opts) do
+    facet_fields =
+      case Keyword.get(opts, :facet_fields) do
+        fields when is_list(fields) and fields != [] -> fields
+        _ -> nil
+      end
+
     rows =
       base
       |> exclude(:order_by)
-      |> select([d], %{
-        g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
-        type: d.type,
-        status: d.status,
-        author: d.author_text,
-        category: d.category_text,
-        count: count(d.id)
-      })
-      |> group_by(
-        [d],
-        fragment(
-          "GROUPING SETS ((?), (?), (?, ?), (?, ?), ())",
-          d.type,
-          d.status,
-          d.type,
-          d.author_text,
-          d.type,
-          d.category_text
-        )
-      )
+      |> count_and_facets_query(facet_fields)
       |> Repo.all(@planned_per_call)
 
     readable = facet_readability(rows, scope, opts)
 
     init = %{count: 0, type: [], status: [], author: [], category: []}
 
+    # The `(field, value)` rows of named facets are read by `field_facets/2`.
+    set_rows = Enum.reject(rows, &(Map.get(&1, :fg) == 0))
+
     acc =
-      Enum.reduce(rows, init, fn row, acc ->
+      Enum.reduce(set_rows, init, fn row, acc ->
         case row.g do
           @g_total ->
             %{acc | count: row.count}
@@ -537,7 +618,89 @@ defmodule Barkpark.Search.DocumentsRetriever do
       |> put_facet("author", acc.author)
       |> put_facet("category", acc.category)
 
+    facets =
+      if facet_fields,
+        do: Map.put(facets, "fields", field_facets(facet_fields, rows)),
+        else: facets
+
     {acc.count, facets}
+  end
+
+  defp count_and_facets_query(base, nil) do
+    base
+    |> select([d], %{
+      g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
+      type: d.type,
+      status: d.status,
+      author: d.author_text,
+      category: d.category_text,
+      count: count(d.id)
+    })
+    |> group_by(
+      [d],
+      fragment(
+        "GROUPING SETS ((?), (?), (?, ?), (?, ?), ())",
+        d.type,
+        d.status,
+        d.type,
+        d.author_text,
+        d.type,
+        d.category_text
+      )
+    )
+  end
+
+  # With named facets, each matched document joins one row per field (`o` is
+  # the field's place, 1 for the first), holding the field's value. The four
+  # facet sets and the total count only the rows of the first field, so they
+  # count each document once, as without facets. The `(field, value)` set
+  # counts documents per value of each field; `values` turns a value into the
+  # distinct texts the facet counts: the elements of an array, a string
+  # itself, nothing for any other value. `fg` is 0 on those rows only.
+  defp count_and_facets_query(base, fields) do
+    base
+    |> join(
+      :inner_lateral,
+      [d],
+      fx in fragment(
+        "SELECT u.k, u.o, ?->u.k AS v FROM unnest(?::text[]) WITH ORDINALITY AS u(k, o) OFFSET 0",
+        d.content,
+        ^fields
+      ),
+      on: true
+    )
+    |> select([d, ..., fx], %{
+      g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
+      fg: fragment("grouping(?, ?)", fx.k, fx.v),
+      type: d.type,
+      status: d.status,
+      author: d.author_text,
+      category: d.category_text,
+      count: fragment("count(?) FILTER (WHERE ? = 1)", d.id, fx.o),
+      field: fx.k,
+      values:
+        fragment(
+          "ARRAY(SELECT DISTINCT e.value FROM jsonb_array_elements_text(CASE jsonb_typeof(?) WHEN 'array' THEN ? WHEN 'string' THEN jsonb_build_array(?) ELSE '[]'::jsonb END) AS e(value))",
+          fx.v,
+          fx.v,
+          fx.v
+        ),
+      field_count: count(d.id)
+    })
+    |> group_by(
+      [d, ..., fx],
+      fragment(
+        "GROUPING SETS ((?), (?), (?, ?), (?, ?), (), (?, ?))",
+        d.type,
+        d.status,
+        d.type,
+        d.author_text,
+        d.type,
+        d.category_text,
+        fx.k,
+        fx.v
+      )
+    )
   end
 
   # The suggestion fast path's count: the match set's size, without facets.
