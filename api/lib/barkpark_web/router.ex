@@ -1271,6 +1271,23 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireChatAccess)
   end
 
+  # Separate account-owned storage door. Do not broaden the operator/connector
+  # API-token door: membership alone never grants somebody else's conversation.
+  pipeline :personal_chat do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(:fetch_session)
+    plug(BarkparkWeb.Plugs.RequireUserSession)
+    plug(BarkparkWeb.Plugs.RequireOrgMfaEnrolment)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.RequirePersonalChatAccess)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+    plug(BarkparkWeb.Plugs.RefuseWhileHeld)
+  end
+
   # Capability switches (task-2f59ba23bcad333e, `Barkpark.Capability`). Each is
   # listed FIRST in its scopes' pipe_through, so a disabled subsystem answers a
   # plain 404 before any token lookup. Default on; turned off by
@@ -2823,6 +2840,30 @@ defmodule BarkparkWeb.Router do
   # controller confines a workspace scope to sessions its tenant owns; a
   # wrong-tenant read joins the not-found oracle. A strict Recorder/ClaudeChat
   # adapter: no adopt_sink, no launcher controls, no shed-and-close.
+  scope "/w/:workspace_slug/v1/personal-chat", BarkparkWeb do
+    pipe_through([:studio_chat_capability, :personal_chat])
+
+    get("/sessions", PersonalChatController, :index)
+    post("/sessions", PersonalChatController, :create)
+    get("/sessions/:id", PersonalChatController, :show)
+    patch("/sessions/:id", PersonalChatController, :update)
+    post("/sessions/:id/archive", PersonalChatController, :archive)
+    post("/sessions/:id/unarchive", PersonalChatController, :unarchive)
+
+    # Reserved operations fail explicitly, after the same ownership lookup.
+    # They never subscribe, write a turn, or start a model in this storage slice.
+    get("/events", PersonalChatController, :unavailable)
+    get("/rollup", PersonalChatController, :unavailable)
+    get("/managed-session", PersonalChatController, :unavailable)
+    post("/sessions/:id/messages", PersonalChatController, :unavailable)
+    post("/sessions/:id/interrupt", PersonalChatController, :unavailable)
+    post("/sessions/:id/approval", PersonalChatController, :unavailable)
+    post("/sessions/:id/answer", PersonalChatController, :unavailable)
+    get("/sessions/:id/events", PersonalChatController, :unavailable)
+    post("/sessions/:id/attachments", PersonalChatController, :unavailable)
+    get("/sessions/:id/attachments/:attachment_id", PersonalChatController, :unavailable)
+  end
+
   scope "/v1/chat", BarkparkWeb do
     pipe_through([:studio_chat_capability, :api, :require_chat_access])
 

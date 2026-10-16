@@ -73,6 +73,15 @@ workspace_required` listing them.
 - **Kill switch.** `revoked_at` is set by `revoke_user_session_token/1`
   (single logout) and `revoke_all_user_sessions/1` (sign-out-everywhere).
 
+**Personal chat:** `/w/:ws/v1/personal-chat/sessions` requires login and a current
+seat. Create/list/read, title/draft edits and archive/restore use server-stamped
+workspace/user ownership. Workspace tokens cannot see personal rows; operators
+remain privileged. Reads page 100 persisted user/assistant rows after `since`
+with `page.has_more/next_since`. Send/resume, SSE, controls and attachments are
+unavailable. Export/erasure includes personal rows; future runtime binding must
+integrate normal deletion's runtime, attachment and ledger cleanup.
+Wire: `PersonalChatController`; scope: `StudioChat.scope_sessions/2`.
+
 ### Expiry predicates (pure, opt-in)
 
 `UserSession` exposes pure predicates for a future hardened verify path:

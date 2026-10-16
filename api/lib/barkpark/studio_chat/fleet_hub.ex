@@ -208,7 +208,7 @@ defmodule Barkpark.StudioChat.FleetHub do
 
   @impl true
   def handle_info({:chat_activity, sid, activity}, state) do
-    owner_ws = Map.get(activity, :owner_workspace_id)
+    owner_ws = Map.get(activity, :owner_scope, Map.get(activity, :owner_workspace_id))
     mapped = map_state(Map.get(activity, :state), Map.get(state.states, sid))
     {:noreply, record_flip(touch(state, sid), sid, mapped, owner_ws)}
   end
@@ -221,7 +221,8 @@ defmodule Barkpark.StudioChat.FleetHub do
   # rule). Same flips-only ring discipline as a derived transition.
   def handle_info({:chat_reported_state, sid, %{agent_state: mapped} = frame}, state)
       when mapped in ["working", "blocked", "idle", "unknown"] do
-    {:noreply, record_flip(touch(state, sid), sid, mapped, Map.get(frame, :owner_workspace_id))}
+    owner = Map.get(frame, :owner_scope, Map.get(frame, :owner_workspace_id))
+    {:noreply, record_flip(touch(state, sid), sid, mapped, owner)}
   end
 
   def handle_info({:chat_heartbeat, sid, ts}, state) do

@@ -17,7 +17,7 @@ Elixir/Phoenix backend: CRUD, real-time, plugins, Studio. Dev: `mix phx.server` 
 | `lib/barkpark_web/live/studio/studio_live.ex` | Multi-pane Studio LiveView — section index in its header comment |
 | `lib/barkpark_web/studio/pane_builder.ex` | Pane construction — **under `studio/`, NOT `live/studio/`** |
 | `lib/barkpark_web/studio/presence_state.ex` | Studio presence tracking |
-| `lib/barkpark_web/controllers/` | Query (also `/v1/preview`), Mutate, Schema, Listen, Media, Tasks, Capabilities, Webhook, Legacy |
+| `lib/barkpark_web/controllers/` | Query/preview, Mutate, Schema, Listen, Media, Tasks, PersonalChat, Capabilities, Webhook, Legacy |
 | `priv/repo/seeds.exs` → `Barkpark.Seeds.run/0` | dispatches by `BARKPARK_SEED_PROFILE` (`demo`\|`clean`); demo (`seeds/demo.ex`) seeds 8 schemas + ~27 docs + dev token; tail (`seeds.ex`) runs `Bootstrap.register_all_schemas/0` |
 
 ## Bulldocs (the Papers surface)

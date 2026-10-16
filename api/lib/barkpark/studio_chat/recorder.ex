@@ -77,11 +77,13 @@ defmodule Barkpark.StudioChat.Recorder do
   @spec ensure(%{session_id: String.t(), mode: String.t(), resume: boolean()}) ::
           {:ok, pid()} | {:error, term()}
   def ensure(%{session_id: id} = opts) when is_binary(id) do
-    case DynamicSupervisor.start_child(@supervisor, {__MODULE__, opts}) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> {:ok, pid}
-      {:error, {:shutdown, reason}} -> {:error, reason}
-      other -> other
+    with :ok <- StudioChat.runtime_access(id) do
+      case DynamicSupervisor.start_child(@supervisor, {__MODULE__, opts}) do
+        {:ok, pid} -> {:ok, pid}
+        {:error, {:already_started, pid}} -> {:ok, pid}
+        {:error, {:shutdown, reason}} -> {:error, reason}
+        other -> other
+      end
     end
   end
 

@@ -59,6 +59,9 @@ defmodule Barkpark.StudioChat.Session do
     # Stamped by `StudioChat.create_session/2` from the caller's scope; the
     # `:global` superuser path stamps NULL. See `Barkpark.StudioChat` store seal.
     field :owner_workspace_id, Ecto.UUID
+    # Personal conversations are stamped from a verified account scope. NULL
+    # retains the existing workspace/operator conversation contract.
+    field :owner_user_id, Ecto.UUID
 
     # Provider identity and execution location are independent, durable axes.
     # They are create-only: no update changeset casts them. `provider_session_id`
@@ -189,7 +192,7 @@ defmodule Barkpark.StudioChat.Session do
   def persistable_modes, do: @persistable_modes
 
   @create_fields ~w(
-    id owner_workspace_id provider execution_target execution_host_id provider_session_id
+    id owner_workspace_id owner_user_id provider execution_target execution_host_id provider_session_id
     title title_source cwd mode model status last_active_at summary
   )a
 
@@ -205,6 +208,9 @@ defmodule Barkpark.StudioChat.Session do
     |> maybe_default_last_active()
     |> validate_required([:id])
     |> validate_uuid(:id)
+    |> validate_uuid(:owner_user_id)
+    |> foreign_key_constraint(:owner_user_id)
+    |> check_constraint(:owner_user_id, name: :chat_sessions_personal_workspace_check)
     |> validate_uuid(:execution_host_id)
     |> validate_inclusion(:provider, @providers)
     |> validate_inclusion(:execution_target, @execution_targets)
