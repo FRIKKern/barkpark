@@ -116,6 +116,29 @@
     }
   };
 
-  root.BarkparkDatetime = { toLocalInput: toLocalInput, toInstant: toInstant };
+  // Fill the pickers of the static render before LiveView connects
+  // (task-cf45242ef3477fba). Hooks run only on the connected render, and on
+  // gyl a document's connected mount comes seconds after the form is drawn,
+  // so the event dates read empty until then. Only an empty, unfocused picker
+  // is filled; the hook takes over once it mounts.
+  function fillStatic(doc) {
+    var wrappers = doc.querySelectorAll(".bp-datetime-field");
+    for (var i = 0; i < wrappers.length; i++) {
+      var picker = wrappers[i].querySelector('input[type="datetime-local"]');
+      var hidden = wrappers[i].querySelector("input[data-datetime-value]");
+      if (!picker || !hidden || picker.value !== "" || doc.activeElement === picker) continue;
+      picker.value = toLocalInput(hidden.value);
+    }
+  }
+
+  root.BarkparkDatetime = { toLocalInput: toLocalInput, toInstant: toInstant, fillStatic: fillStatic };
   root.BarkparkDatetimeFieldHook = Hook;
+
+  if (typeof document !== "undefined" && document.querySelectorAll) {
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", function () { fillStatic(document); }, { once: true });
+    } else {
+      fillStatic(document);
+    }
+  }
 })(typeof window !== "undefined" ? window : globalThis);
