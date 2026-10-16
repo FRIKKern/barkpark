@@ -1,15 +1,31 @@
 <!-- doc-tier: agent | canonical-for: personal-application-turns | budget: 1800tok -->
 # Personal application turns
 
-StudioChat sessions, messages and host leases store accepted
-input and committed application state. No model or repository worker runs here;
-legacy personal Claude/plan defaults remain inert.
+Sessions, messages and host leases persist application turns. No model or
+repository worker runs here; legacy Claude/plan defaults stay inert.
 
-The instance must explicitly configure `:personal_chat_applications` as a map
-from application ID to `%{workspace_id:, host_id:, version:, contract_version:}`.
-Absent or changed configuration refuses use. The bound machine must be registered
-and unrevoked in that workspace. Requests cannot choose the host, provider, model,
-tools, callback, system prompt or owner, or bind existing rows via title/draft.
+## Deployment configuration
+
+Release startup reads `BARKPARK_PERSONAL_CHAT_APPLICATIONS` as a JSON object.
+Nonusable placeholder shape:
+
+```json
+{"application-id":{"workspace_id":"WORKSPACE_UUID","host_id":"HOST_UUID","version":"1","contract_version":"APP_CONTRACT"}}
+```
+
+Unset or `{}` disables bindings. Supplied malformed/empty input fails startup
+with a fixed error, never its values. Maximum: 16 applications, 16,384 UTF-8 bytes.
+Unknown/duplicate keys refuse the entire map. UUIDs must be canonical lowercase;
+IDs use ASCII letters/digits plus `._-`; versions/contracts also allow `:/`.
+All start alphanumeric, at most 100 bytes. There is no default Pensum profile.
+
+Set the value through the instance's approved environment/restart procedure
+([operations](../ops/PROD_OPS.md)), then verify deployed commit and authenticated
+binding behavior; config alone proves neither release nor execution. Remove the
+variable to recover from invalid config. Host registration/enrollment is separate;
+it must already be unrevoked in the named workspace. No credentials belong here.
+Changed/removed binding refuses existing sessions. Requests cannot choose a
+host/provider/model/tools/owner or bind an old session through title/draft edits.
 
 ## Personal input
 
@@ -21,18 +37,16 @@ a personal login.
 | Method and suffix | Body or result |
 |---|---|
 | `POST /applications/:application_id/sessions` | Optional `title`; returns `id`, revision 0 and `runtime_available:false`. |
-| `GET /sessions/:id/application` | Last committed revision, context, selection, source identities, contract version, last turn and typed answer, plus latest turn status. Expired work becomes terminal on read. |
-| `GET /sessions/:id/application/history` | Bounded typed whole turns with signed snapshot continuation; see below. |
+| `GET /sessions/:id/application` | Committed state/identities/typed answer and exact question; latest question/status. Read terminalizes expiry. |
+| `GET /sessions/:id/application/history` | Bounded whole turns; signed snapshot continuation. |
 | `POST /sessions/:id/turns` | Exactly `query`, `request_id`, `expected_revision`; returns accepted turn ID, epoch, base revision, digest and status. |
-| `POST /sessions/:id/turns/:turn_id/cancel` | Cancels pending work and advances its fence. A committed turn cannot be cancelled retrospectively. |
+| `POST /sessions/:id/turns/:turn_id/cancel` | Fences pending work; cannot cancel committed turns. |
 
-Verified user/workspace owns the session. Acceptance stores the exact question
-and login-session ID, never its bearer. Limits: 6,400 UTF-8 question bytes, 100
-request-ID bytes, revision 2,147,483,646. One pending turn owns a revision. Identical
-requests replay; changed payload or stale revision conflicts. Work survives in
-Postgres independently of the host queue. Reader-editable title/draft confer no
-context authority; personal callers cannot submit assistant history, reader facts,
-selection, source identities or context.
+Verified user/workspace owns the session. Store exact question/login ID, never
+bearer. Limits: 6,400 question bytes, 100 request-ID bytes, revision 2,147,483,646.
+One pending turn owns a revision. Identical requests replay; changed payload/stale
+revision conflicts. Postgres work survives host queues. Editable title/draft cannot
+supply assistant history, reader facts, selection, source identities or context.
 
 ## Executor
 
@@ -57,41 +71,33 @@ Commit requires `epoch`, `expected_revision`, `request_digest` and `result`:
 }
 ```
 
-Version must match. Context and presentation are JSON objects. Limits: three
-selections, 100 source identities, 200 answer-ID bytes, 64,000 answer-text bytes,
-128,000 complete-result bytes. Applications validate domain semantics before
-commit and consumption. Message metadata retains typed statements/citations.
-State GET includes latest-turn and last-committed exact questions and one typed
-answer. Generic plain-text history gains no typed authority. Backend structural
-validation establishes neither semantic truth nor source permission.
+Version must match; context/presentation are objects. Limits: three selections,
+100 sources, 200 answer-ID bytes, 64,000 answer-text bytes, 128,000 result bytes.
+Applications validate domain semantics at commit/read. Metadata retains typed
+statements/citations; generic plain-text history gains no typed authority.
+Structural validation establishes neither semantic truth nor source permission.
 
-Fetch and commit recheck the exact accepting login (expiry, revocation and org
-policy), MFA policy, current read seat, host credential/version, binding and
-nonarchived personal owner. A host credential never becomes delegated source
-authority. Applications that read sources using a configured personal session
-must independently introspect that session and match the accepted actor, or
-refuse. A broader delegated-reader facility is not part of this contract.
+Fetch/commit recheck accepting-login expiry/revocation/org/MFA policy, read seat,
+host credential/version, binding and nonarchived owner. Host auth never delegates
+source authority. Applications must introspect their personal source reader and
+match the accepted actor or refuse; broader delegation is unsupported.
 
-The session row lock serializes acceptance and commit. Commit atomically writes
-the assistant message with turn/revision/answer/selection/source metadata,
-updates the last committed application context and marks the lease complete.
-An identical commit replays its receipt; different content conflicts. Pending,
-cancelled, expired and archived work never advances committed context. A fixed
-120-second application deadline cannot be extended by a host heartbeat. Archive
-cancels pending work; restore does not revive it. Generic host events and herd
-reports cannot write application leases. Personal CLI runtime entry remains
-closed, including for an operator.
+A session lock serializes acceptance/commit. Commit atomically writes the typed
+assistant message, updates context and completes the lease. Identical commits
+replay; changed content conflicts. Pending/cancelled/expired/archived work cannot
+advance context. The 120-second deadline cannot be extended by host heartbeat.
+Archive cancels work; restore cannot revive it. Generic host/herd events cannot
+write application leases. Personal CLI runtime stays closed, even for operators.
 
-Stored source IDs require rereading; they grant no prose/source/rights reuse.
-The application guards withdrawal/cancellation and currentness before commit and
-before displaying restored licensed text. Withdrawal retains the question and an
-unavailable-answer notice, never stale prose. Storage is not current permission.
+Stored source IDs grant no reuse. The application rechecks withdrawal, cancellation
+and current source-use authority before commit/display. Withdrawal keeps the
+question and an unavailable-answer notice, never stale prose.
 
 ## Typed history
 
 Accept only `limit` (canonical integer string 1–10, default 5) or only opaque
 `cursor` (4,096 bytes maximum, one hour). Framework signing binds owner, workspace,
-session, application binding, revision and maximum sequence. Every page rechecks
+session, application binding, revision and maximum sequence. Pages recheck
 personal access. Later questions stay outside the snapshot; new commits return
 409. Pending statuses are current observations; expiry becomes terminal. Fresh
 owner login may read older turns; archive/changed configuration still refuses.
@@ -120,6 +126,7 @@ cancellation; storage fences late commits, not model billing.
 
 Owners: `StudioChat.ApplicationTurns`, `ApplicationBinding`,
 `ApplicationChatController`, `RequirePersonalChatAccess`, `RequireChatHost`.
-Run the strict wrapper over `studio_chat_application_turns_test.exs` and
-`application_chat_controller_test.exs`, plus personal/legacy/host regressions.
+Run strict `runtime_personal_chat_applications_test.exs`,
+`studio_chat_application_turns_test.exs`, `application_chat_controller_test.exs`
+and personal/legacy/host/layering regressions.
 Ecto tests use fictional payloads, not deployment/sign-in/model proof.
