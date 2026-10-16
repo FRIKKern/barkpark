@@ -61,6 +61,49 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # instead of the parent LiveView.
   attr :target, :any, default: nil
 
+  # Several named member types (`field.of_types`, Sanity's page-builder
+  # array): each row is shown by the member its `_type` names, read-only.
+  # The row editor posts plain `doc[f][i][sub]` inputs with no `_type` or
+  # `_key`, and the save path coerces rows against one `of` shape, so an
+  # editable typed row could not save back what it showed. With no inputs
+  # the whole-form autosave never posts the field, and `Forms` keeps the
+  # stored list byte-identical (task-592dee75ffef0c06).
+  def array_field(%{field: %{of_types: %{} = types}} = assigns) when map_size(types) > 0 do
+    assigns =
+      assigns
+      |> Map.put_new(:value, [])
+      |> Map.put_new(:path, "")
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
+      |> Map.put(:rows, typed_rows(assigns.field, types, assigns[:value] || [], assigns[:path] || ""))
+
+    ~H"""
+    <fieldset class="bp-field bp-field-array" data-field-type="arrayOf" data-typed-array
+              id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}")}
+              data-field-name={@field.name}>
+      <legend class="bp-field-title"><%= @title %></legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
+      <ol class="bp-array-rows">
+        <li :for={row <- @rows} class="bp-array-row bp-array-row-item" data-row-index={row.idx}
+            data-member-type={row.type}>
+          <div class="bp-array-row-body">
+            <.item_row
+              item={row.member}
+              idx={row.idx}
+              preview={row.preview}
+              open={false}
+              row_id={row.row_id}
+              body={typed_row_body(%{json: row.json})}
+            />
+          </div>
+        </li>
+      </ol>
+      <p :if={@rows == []} class="bp-field-description"><%= gettext("No items") %></p>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — this list holds several item types, which this editor cannot edit yet; saved unchanged") %></span>
+    </fieldset>
+    """
+  end
+
   def array_field(assigns) do
     if select_list?(assigns.field),
       do: select_list(assigns),
@@ -708,6 +751,56 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp leaf_display(v) when is_binary(v), do: v
   defp leaf_display(v) when is_number(v) or is_boolean(v) or is_atom(v), do: to_string(v)
   defp leaf_display(v), do: Jason.encode!(v)
+
+  defp typed_rows(field, types, value, path) when is_list(value) do
+    value
+    |> Enum.with_index()
+    |> Enum.map(fn {row, idx} ->
+      type = if is_map(row), do: row["_type"], else: nil
+      member = Map.get(types, type) || %{type: type, name: type || "item", title: nil}
+      preview = item_preview(member, row)
+
+      %{
+        idx: idx,
+        type: type,
+        member: member,
+        preview: %{preview | title: typed_title(member, row, preview.title)},
+        row_id: "bp-item-" <> sanitize_id("#{field.name}#{path}[#{idx}]"),
+        json: Jason.encode!(row, pretty: true)
+      }
+    end)
+  end
+
+  defp typed_rows(_field, _types, _value, _path), do: []
+
+  # A named member (`{"name": "ctaSection", "type": "ctaSection"}`) carries no
+  # subfields here, so `item_preview/2` falls back to the member's own name.
+  # Prefer the row's first text value, then show which member it is.
+  defp typed_title(member, row, fallback) do
+    label = title_for(member)
+
+    text =
+      if is_map(row) do
+        Enum.find_value(~w(title heading name label internalTitle text), fn k ->
+          case row[k] do
+            v when is_binary(v) and v != "" -> v
+            _ -> nil
+          end
+        end)
+      end
+
+    cond do
+      is_binary(text) and label not in [nil, ""] -> "#{text} (#{label})"
+      is_binary(text) -> text
+      true -> fallback
+    end
+  end
+
+  defp typed_row_body(assigns) do
+    ~H"""
+    <pre class="bp-input" data-structured-value style="margin:0;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @json %></pre>
+    """
+  end
 
   # The arrayOf parser stores the element shape on `field.of` (a `%Field{}`).
   defp element_field(%{of: %{} = of}), do: of
