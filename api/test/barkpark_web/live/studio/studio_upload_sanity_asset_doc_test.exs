@@ -65,7 +65,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
   end
 
   defp open!(raw, doc_id) do
-    conn = build_conn() |> Plug.Test.init_test_session(%{"api_token" => raw})
+    conn = scoped_conn() |> Plug.Test.init_test_session(%{"api_token" => raw})
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/article/#{doc_id}"))
     view
   end
@@ -87,7 +87,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
   end
 
   defp groq(raw, ws, project, query) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer " <> raw)
     |> get("/w/#{ws.slug}/p/#{project.slug}/#{@version}/data/query/#{@dataset}", %{
       "query" => query,
@@ -135,7 +135,7 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
 
     # The URL it names serves the bytes.
     path = URI.parse(body["result"]["url"]).path
-    served = build_conn() |> put_req_header("authorization", "Bearer " <> raw) |> get(path)
+    served = scoped_conn() |> put_req_header("authorization", "Bearer " <> raw) |> get(path)
     assert served.status == 200
 
     # Saving again writes no second document and leaves the first unchanged.
