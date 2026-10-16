@@ -940,6 +940,13 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/interrupt", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
     {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/messages", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
     {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/unarchive", "BarkparkWeb.PersonalChatController", :unarchive, :status_only_receipt},
+    # task-3d73a77c159d4a6b: these application writes return persisted session,
+    # turn or commit projections, without an `ok: true` literal. Classification
+    # registers the arrivals; it does not attest source rights or semantic truth.
+    {:post, "/w/:workspace_slug/v1/personal-chat/applications/:application_id/sessions", "BarkparkWeb.ApplicationChatController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/turns", "BarkparkWeb.ApplicationChatController", :accept, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/turns/:turn_id/cancel", "BarkparkWeb.ApplicationChatController", :cancel, :status_only_receipt},
+    {:post, "/v1/chat-host/application-turns/:turn_id/commit", "BarkparkWeb.ApplicationChatController", :commit, :status_only_receipt},
     # THE FOUR MEMBER-ADMIN ARRIVALS (workspace roster surface). Each returns a
     # DB-derived body — the persisted membership row, or the `revoked_at` the
     # update stamped — but none emits the `ok: true` / `"ok" => true` literal

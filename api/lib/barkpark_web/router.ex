@@ -2844,6 +2844,11 @@ defmodule BarkparkWeb.Router do
     post("/sessions/:id/archive", PersonalChatController, :archive)
     post("/sessions/:id/unarchive", PersonalChatController, :unarchive)
 
+    post("/applications/:application_id/sessions", ApplicationChatController, :create)
+    get("/sessions/:id/application", ApplicationChatController, :show)
+    post("/sessions/:id/turns", ApplicationChatController, :accept)
+    post("/sessions/:id/turns/:turn_id/cancel", ApplicationChatController, :cancel)
+
     # Reserved operations fail explicitly, after the same ownership lookup.
     # They never subscribe, write a turn, or start a model in this storage slice.
     get("/events", PersonalChatController, :read_unavailable)
@@ -2936,6 +2941,9 @@ defmodule BarkparkWeb.Router do
 
   scope "/v1/chat-host", BarkparkWeb do
     pipe_through([:studio_chat_capability, :registered_chat_host])
+
+    get("/application-turns/:turn_id", ApplicationChatController, :fetch)
+    post("/application-turns/:turn_id/commit", ApplicationChatController, :commit)
     post("/heartbeat", ChatHostController, :heartbeat)
     post("/rotate", ChatHostController, :rotate)
     get("/commands", ChatHostController, :commands)

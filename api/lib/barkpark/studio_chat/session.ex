@@ -62,6 +62,9 @@ defmodule Barkpark.StudioChat.Session do
     # Personal conversations are stamped from a verified account scope. NULL
     # retains the existing workspace/operator conversation contract.
     field :owner_user_id, Ecto.UUID
+    # Written only by ApplicationTurns under its owner/host and revision fence.
+    # Personal title/draft changesets and every legacy runtime ignore this field.
+    field :application_state, :map
 
     # Provider identity and execution location are independent, durable axes.
     # They are create-only: no update changeset casts them. `provider_session_id`

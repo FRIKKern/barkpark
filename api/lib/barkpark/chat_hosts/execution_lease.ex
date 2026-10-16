@@ -6,7 +6,7 @@ defmodule Barkpark.ChatHosts.ExecutionLease do
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
-  @providers ~w(claude codex)
+  @providers ~w(claude codex application)
   @statuses ~w(leased running disconnected completed cancelled)
 
   schema "chat_execution_leases" do
@@ -20,6 +20,7 @@ defmodule Barkpark.ChatHosts.ExecutionLease do
     field :status, :string, default: "leased"
     field :expires_at, :utc_datetime_usec
     field :revoked_at, :utc_datetime_usec
+    field :application_turn, :map
     timestamps(type: :utc_datetime_usec)
   end
 
