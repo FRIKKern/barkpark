@@ -901,6 +901,7 @@ defmodule Barkpark.Content.Schema do
       fields: Enum.map(schema.fields || [], &serialize_field/1),
       actions: schema.actions || [],
       groups: schema.groups || [],
+      fieldsets: schema.fieldsets || [],
       deskGroups: schema.desk_groups || [],
       # Gyldendal parity E3 — the schema-level desk block (orderings today).
       desk: schema.desk || %{},
@@ -1215,6 +1216,7 @@ defmodule Barkpark.Content.Schema do
             |> Map.put("namedType", type)
             |> Map.put_new("title", obj.title)
             |> maybe_put_groups(obj)
+            |> maybe_put_fieldsets(obj)
 
           :error ->
             f
@@ -1230,6 +1232,13 @@ defmodule Barkpark.Content.Schema do
   end
 
   defp maybe_put_groups(field, _obj), do: field
+
+  defp maybe_put_fieldsets(field, %SchemaDefinition{fieldsets: fieldsets})
+       when is_list(fieldsets) and fieldsets != [] do
+    Map.put_new(field, "fieldsets", fieldsets)
+  end
+
+  defp maybe_put_fieldsets(field, _obj), do: field
 
   # Apply-time gate: every non-builtin field type must name a resolvable object
   # type, and no reference chain may come back to the schema being written.

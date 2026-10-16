@@ -43,6 +43,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :cors_origins, {:array, :string}, default: []
     field :actions, {:array, :map}, default: []
     field :groups, {:array, :map}, default: []
+    # Sanity's document-level fieldsets: `[%{"name", "title", "options"}]`.
+    # A field joins one by its `fieldset` key.
+    field :fieldsets, {:array, :map}, default: []
     field :desk_groups, {:array, :map}, default: []
 
     # Generic list-row preview (additive, SOFT — pure render metadata).
@@ -101,6 +104,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :cors_origins,
       :actions,
       :groups,
+      :fieldsets,
       :desk_groups,
       :desk,
       :list_preview,
