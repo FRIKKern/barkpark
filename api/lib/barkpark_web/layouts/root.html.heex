@@ -3961,9 +3961,9 @@
     /* An array of select values: one checkbox per option (task-b8bce68623e758ae). */
     .bp-select-list-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
     .bp-select-list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
-    .bp-select-list-option { display: flex; align-items: center; gap: 8px; font-size: 14px; cursor: pointer; }
+    .bp-select-list-option { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); cursor: pointer; }
     .bp-select-list-option input[type="checkbox"] { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
-    .bp-select-list-invalid .error { font-size: 12px; }
+    .bp-select-list-invalid .error { font-size: var(--text-xs); }
     /* Checklist progress badge (lvw-t6): "m/n met" next to the arrayOf legend
        when the element composite carries a boolean `met` subfield (the task
        schema's acceptance_criteria). Render-only metadata. */
