@@ -78,7 +78,9 @@ defmodule Barkpark.Content.PreviewTextTest do
       }
 
       two = %{"onix" => %{"contributors" => [item.("c1", "r1"), item.("c2", "r2")]}}
-      assert PreviewText.format(spec, two, deref) == "Kari Nord (forfatter), Ola Sør (illustratør)"
+
+      assert PreviewText.format(spec, two, deref) ==
+               "Kari Nord (forfatter), Ola Sør (illustratør)"
 
       three = %{"onix" => %{"contributors" => two["onix"]["contributors"] ++ [item.("c3", "r9")]}}
 
@@ -137,12 +139,17 @@ defmodule Barkpark.Content.PreviewTextTest do
 
     test "a stored value shown by its label" do
       spec = %{
-        "parts" => ["/{slug}", %{"path" => "pageType", "map" => %{"landingPage" => "Landingsside"}}]
+        "parts" => [
+          "/{slug}",
+          %{"path" => "pageType", "map" => %{"landingPage" => "Landingsside"}}
+        ]
       }
 
       root = %{"slug" => %{"current" => "om-oss"}, "pageType" => "landingPage"}
       assert PreviewText.format(spec, root, nobody()) == "/om-oss · Landingsside"
-      assert PreviewText.format(spec, %{root | "pageType" => "other"}, nobody()) == "/om-oss · other"
+
+      assert PreviewText.format(spec, %{root | "pageType" => "other"}, nobody()) ==
+               "/om-oss · other"
     end
 
     test "a second reference on one path is not followed" do
@@ -157,15 +164,24 @@ defmodule Barkpark.Content.PreviewTextTest do
       assert PreviewText.ref_ids(nil, %{}) == []
 
       each = %{"each" => "onix.contributors", "show" => "{contributor.title} ({role.title})"}
-      root = %{"onix" => %{"contributors" => [%{"contributor" => "c1", "role" => %{"_ref" => "r1"}}]}}
+
+      root = %{
+        "onix" => %{"contributors" => [%{"contributor" => "c1", "role" => %{"_ref" => "r1"}}]}
+      }
+
       assert Enum.sort(PreviewText.ref_ids([each, nil], root)) == ["c1", "r1"]
-      assert PreviewText.ref_ids(%{"each" => "refs"}, %{"refs" => ["x", %{"_ref" => "y"}]}) == ["x", "y"]
+
+      assert PreviewText.ref_ids(%{"each" => "refs"}, %{"refs" => ["x", %{"_ref" => "y"}]}) == [
+               "x",
+               "y"
+             ]
     end
   end
 
   describe "media/3" do
     test "the first path that holds an image URL" do
       root = %{"onix" => %{"thumbnail" => "null", "coverImage" => "https://cdn.example/c.jpg"}}
+
       assert PreviewText.media(["onix.thumbnail", "onix.coverImage"], root, nobody()) ==
                "https://cdn.example/c.jpg"
 
@@ -227,15 +243,23 @@ defmodule Barkpark.Content.PreviewTextTest do
   test "a product row shows the ONIX cover, ISBN · format and the first two contributors" do
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "contributor", "title" => "Bidragsyter", "visibility" => "public",
-          "fields" => [%{"name" => "title", "title" => "Navn", "type" => "string"}]},
+        %{
+          "name" => "contributor",
+          "title" => "Bidragsyter",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Navn", "type" => "string"}]
+        },
         @dataset
       )
 
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "role", "title" => "Rolle", "visibility" => "public",
-          "fields" => [%{"name" => "title", "title" => "Tittel", "type" => "string"}]},
+        %{
+          "name" => "role",
+          "title" => "Rolle",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Tittel", "type" => "string"}]
+        },
         @dataset
       )
 
@@ -251,7 +275,10 @@ defmodule Barkpark.Content.PreviewTextTest do
             %{"name" => "onix", "title" => "ONIX", "type" => "json"}
           ],
           "list_preview" => %{
-            "subtitle" => %{"parts" => ["isbn", "onix.productFormatTitle"], "empty" => "Ingen ISBN"},
+            "subtitle" => %{
+              "parts" => ["isbn", "onix.productFormatTitle"],
+              "empty" => "Ingen ISBN"
+            },
             "description" => %{
               "each" => "onix.contributors",
               "show" => ["{contributor.title} ({role.title|lower})", "contributor.title"],
@@ -272,13 +299,20 @@ defmodule Barkpark.Content.PreviewTextTest do
           {"role", "r2", "Illustratør"}
         ] do
       {:ok, _} =
-        Content.create_document(type, %{"doc_id" => id, "title" => title, "content" => %{}}, @dataset)
+        Content.create_document(
+          type,
+          %{"doc_id" => id, "title" => title, "content" => %{}},
+          @dataset
+        )
 
       {:ok, _} = Content.publish_document(id, type, @dataset)
     end
 
     contributor = fn c, r ->
-      %{"contributor" => %{"_ref" => c, "_type" => "reference"}, "role" => %{"_ref" => r, "_type" => "reference"}}
+      %{
+        "contributor" => %{"_ref" => c, "_type" => "reference"},
+        "role" => %{"_ref" => r, "_type" => "reference"}
+      }
     end
 
     for {id, onix, isbn} <- [
@@ -286,7 +320,11 @@ defmodule Barkpark.Content.PreviewTextTest do
            %{
              "productFormatTitle" => "Bok",
              "thumbnail" => "https://media.example/book_thumb.jpg",
-             "contributors" => [contributor.("c1", "r1"), contributor.("c2", "r2"), contributor.("c3", "r1")]
+             "contributors" => [
+               contributor.("c1", "r1"),
+               contributor.("c2", "r2"),
+               contributor.("c3", "r1")
+             ]
            }, "9788205627765"},
           {"p-ebook",
            %{
@@ -300,7 +338,11 @@ defmodule Barkpark.Content.PreviewTextTest do
       {:ok, _} =
         Content.create_document(
           "product",
-          %{"doc_id" => id, "title" => "Eventyrnettene", "content" => %{"isbn" => isbn, "onix" => onix}},
+          %{
+            "doc_id" => id,
+            "title" => "Eventyrnettene",
+            "content" => %{"isbn" => isbn, "onix" => onix}
+          },
           @dataset
         )
 

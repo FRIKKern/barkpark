@@ -26,7 +26,12 @@ defmodule BarkparkWeb.SearchHitPreviewTest do
           "visibility" => "public",
           "fields" => [
             %{"name" => "title", "title" => "Navn", "type" => "string"},
-            %{"name" => "secret", "title" => "Hemmelig", "type" => "string", "visibility" => "private"}
+            %{
+              "name" => "secret",
+              "title" => "Hemmelig",
+              "type" => "string",
+              "visibility" => "private"
+            }
           ]
         },
         @ds
@@ -92,7 +97,12 @@ defmodule BarkparkWeb.SearchHitPreviewTest do
   end
 
   defp search(conn, params),
-    do: get(conn, "/v1/data/search/#{@ds}", Keyword.merge([q: "Eventyrnettene", type: "product"], params))
+    do:
+      get(
+        conn,
+        "/v1/data/search/#{@ds}",
+        Keyword.merge([q: "Eventyrnettene", type: "product"], params)
+      )
 
   test "each hit carries its list preview", %{conn: conn, token: token} do
     body =

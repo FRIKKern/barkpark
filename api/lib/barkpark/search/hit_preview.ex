@@ -28,11 +28,15 @@ defmodule Barkpark.Search.HitPreview do
 
   def attach(documents, _dataset, _scope_opts, _schema_fun, nil), do: documents
 
-  def attach(documents, _dataset, _scope_opts, _schema_fun, %CallerContext{principal_type: :anonymous}),
-    do: documents
+  def attach(documents, _dataset, _scope_opts, _schema_fun, %CallerContext{
+        principal_type: :anonymous
+      }),
+      do: documents
 
-  def attach(documents, dataset, scope_opts, schema_fun, caller_context) when is_list(documents) do
-    specs = documents |> Enum.map(&type_of/1) |> Enum.uniq() |> Map.new(&{&1, specs(schema_fun.(&1))})
+  def attach(documents, dataset, scope_opts, schema_fun, caller_context)
+      when is_list(documents) do
+    specs =
+      documents |> Enum.map(&type_of/1) |> Enum.uniq() |> Map.new(&{&1, specs(schema_fun.(&1))})
 
     ids =
       documents
@@ -79,7 +83,8 @@ defmodule Barkpark.Search.HitPreview do
   defp targets([], _dataset, _scope_opts, _schema_fun, _ctx), do: %{}
 
   defp targets(ids, dataset, scope_opts, schema_fun, ctx) do
-    found = Content.get_documents_by_ids(ids ++ Enum.map(ids, &("drafts." <> &1)), dataset, scope_opts)
+    found =
+      Content.get_documents_by_ids(ids ++ Enum.map(ids, &("drafts." <> &1)), dataset, scope_opts)
 
     rows = for id <- ids, row = found[id] || found["drafts." <> id], do: row
 

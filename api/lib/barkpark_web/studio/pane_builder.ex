@@ -968,8 +968,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # subtitle fallback so a row is never a bare mono id; the render picks
         # `meta || updated`. Threading updated_at only READS a field already on
         # every Document — no /v1/structure wire change.
-        meta:
-          preview_line(doc, subtitle, deref) || row_meta(doc, Map.get(preview, "meta")),
+        meta: preview_line(doc, subtitle, deref) || row_meta(doc, Map.get(preview, "meta")),
         # A second line under the subtitle: Sanity's `description`.
         description: preview_line(doc, description, deref),
         updated: relative_updated(doc)
