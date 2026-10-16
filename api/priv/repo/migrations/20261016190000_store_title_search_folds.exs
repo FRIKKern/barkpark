@@ -1,8 +1,6 @@
 defmodule Barkpark.Repo.Migrations.StoreTitleSearchFolds do
   use Ecto.Migration
 
-  require Logger
-
   @moduledoc """
   Every document stores its folded search names, not only a document with a
   search slot (task-146f3a4fd5c2f348).
@@ -38,20 +36,22 @@ defmodule Barkpark.Repo.Migrations.StoreTitleSearchFolds do
 
     * `bp_search_folds/3`, which the document trigger, the schema refresh
       (`bp_search_refresh_batch`) and `bp_refresh_search_slots/1` call, returns the title folds for a row with
-      no slot instead of NULLs.
+      no slot instead of NULLs. Every document written from here on stores
+      them.
     * `bp_refresh_search_slots/1` also writes a row whose folds are NULL: a
       bundle import's COPY runs with user triggers disabled.
-    * The rows already there are filled in id order, @batch rows per statement,
-      with a VACUUM after every @vacuum_every written rows, as 20261014150000
-      did. Writing the fold columns fires no trigger (the slot trigger fires on
-      content, title, type, dataset, dataset_id and workspace_id only).
+
+  Two function replacements: no row is written and no table lock is taken, so
+  a deploy never waits on this migration. The rows already there keep NULL
+  folds and stay correct (each expression folds their title, as before), only
+  slower to search. Filling them is an operator step:
+  `mix barkpark.search.fill_title_folds --apply`, or
+  `Barkpark.Release.fill_title_folds(apply: true)`
+  (`Barkpark.Search.SearchSlots.fill_title_folds/1`).
   """
 
   @disable_ddl_transaction true
   @disable_migration_lock true
-
-  @batch 1_000
-  @vacuum_every 5_000
 
   def up do
     execute("""
@@ -75,7 +75,6 @@ defmodule Barkpark.Repo.Migrations.StoreTitleSearchFolds do
     """)
 
     refresh_function(" OR d.search_names_fold IS NULL")
-    fill_folds()
   end
 
   def down do
@@ -96,17 +95,9 @@ defmodule Barkpark.Repo.Migrations.StoreTitleSearchFolds do
     $$
     """)
 
+    # Stored title folds stay: they equal what the expressions compute, so
+    # they change no result, and clearing them would rewrite rows.
     refresh_function("")
-
-    # The stored title folds equal what the expressions compute, so leaving
-    # them is harmless; clearing them restores the old shape exactly.
-    execute("""
-    UPDATE documents
-    SET search_title_fold = NULL, search_names_fold = NULL, search_names_tsv = NULL
-    WHERE search_title IS NULL AND search_author IS NULL
-      AND (search_title_fold IS NOT NULL OR search_names_fold IS NOT NULL
-           OR search_names_tsv IS NOT NULL)
-    """)
   end
 
   defp refresh_function(null_folds) do
@@ -137,54 +128,4 @@ defmodule Barkpark.Repo.Migrations.StoreTitleSearchFolds do
     $$
     """)
   end
-
-  defp fill_folds do
-    flush()
-    {written, _since_vacuum} = fill_folds(nil, {0, 0})
-    if written > 0, do: vacuum_documents()
-    Logger.info("title search folds stored on #{written} documents")
-  end
-
-  defp fill_folds(after_id, {written, since_vacuum}) do
-    %{rows: [[last_id, n]]} =
-      repo().query!(
-        """
-        WITH batch AS (
-          SELECT id FROM documents
-          WHERE $1::uuid IS NULL OR id > $1::uuid
-          ORDER BY id
-          LIMIT $2
-        ), upd AS (
-          UPDATE documents d
-          SET search_title_fold = f.title_fold, search_names_fold = f.names_fold,
-              search_names_tsv = f.names_tsv
-          FROM documents d2
-          CROSS JOIN LATERAL bp_search_folds(d2.search_title, d2.title, d2.search_author) f
-          WHERE d2.id IN (SELECT id FROM batch)
-            AND d.id = d2.id
-            AND (d2.search_title_fold IS NULL OR d2.search_names_fold IS NULL
-                 OR d2.search_names_tsv IS NULL)
-          RETURNING 1
-        )
-        SELECT (SELECT max(id::text) FROM batch), (SELECT count(*) FROM upd)
-        """,
-        [after_id && Ecto.UUID.dump!(after_id), @batch],
-        timeout: :infinity
-      )
-
-    since_vacuum =
-      if since_vacuum + n >= @vacuum_every do
-        vacuum_documents()
-        0
-      else
-        since_vacuum + n
-      end
-
-    if last_id,
-      do: fill_folds(last_id, {written + n, since_vacuum}),
-      else: {written + n, since_vacuum}
-  end
-
-  defp vacuum_documents,
-    do: repo().query!("VACUUM documents", [], timeout: :infinity)
 end

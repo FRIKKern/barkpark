@@ -229,6 +229,18 @@ defmodule Barkpark.Search.SearchSlotsTest do
 
     assert SearchSlots.refresh(workspace_id: ws.id) >= 1
     assert %{rows: [[true, true]]} = Repo.query!(same)
+
+    # Rows written before migration 20261016190000: the operator step fills them.
+    Repo.query!(
+      "UPDATE documents SET search_title_fold = NULL, search_names_fold = NULL, " <>
+        "search_names_tsv = NULL WHERE doc_id = 'drafts.n1'"
+    )
+
+    assert %{to_fill: n, written: 0} = SearchSlots.fill_title_folds()
+    assert n >= 1
+    assert %{written: ^n} = SearchSlots.fill_title_folds(apply: true, vacuum: false)
+    assert %{rows: [[true, true]]} = Repo.query!(same)
+    assert %{to_fill: 0} = SearchSlots.fill_title_folds()
   end
 
   test "refresh/1 fills the slots of rows written with user triggers disabled", %{
