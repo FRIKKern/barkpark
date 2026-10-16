@@ -277,7 +277,10 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # returns or raises, so the request process carries nothing onward.
     if connected?(socket),
       do: do_handle_params(params, uri, socket),
-      else: Barkpark.Content.WriteScope.with_process_memo(fn -> do_handle_params(params, uri, socket) end)
+      else:
+        Barkpark.Content.WriteScope.with_process_memo(fn ->
+          do_handle_params(params, uri, socket)
+        end)
   end
 
   defp do_handle_params(params, uri, socket) do

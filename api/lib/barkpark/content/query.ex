@@ -3244,5 +3244,4 @@ defmodule Barkpark.Content.Query do
   defp json_scalar_text(v) when is_boolean(v), do: to_string(v)
   defp json_scalar_text(v) when is_integer(v), do: Integer.to_string(v)
   defp json_scalar_text(v) when is_float(v), do: Jason.encode!(v)
-
 end

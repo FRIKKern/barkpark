@@ -46,8 +46,18 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
   ]
 
   @resources [
-    %{"_key" => "r1", "_type" => "tilleggsressurs", "title" => "Lærerveiledning", "url" => "https://x"},
-    %{"_key" => "r2", "_type" => "tilleggsressursFil", "title" => "Fasit", "file" => %{"asset" => %{"_ref" => "file-1"}}}
+    %{
+      "_key" => "r1",
+      "_type" => "tilleggsressurs",
+      "title" => "Lærerveiledning",
+      "url" => "https://x"
+    },
+    %{
+      "_key" => "r2",
+      "_type" => "tilleggsressursFil",
+      "title" => "Fasit",
+      "file" => %{"asset" => %{"_ref" => "file-1"}}
+    }
   ]
 
   setup %{conn: conn} do
@@ -154,18 +164,34 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
         scope
       )
 
-    page = publish!("page", "salto-landing", %{"title" => "Salto", "landingPageSections" => @sections}, scope)
+    page =
+      publish!(
+        "page",
+        "salto-landing",
+        %{"title" => "Salto", "landingPageSections" => @sections},
+        scope
+      )
 
     product =
       publish!(
         "product",
         "onix.product-1",
-        %{"title" => "Makta", "tilleggsressurser" => @resources, "isCustom" => false, "hitCount" => 3},
+        %{
+          "title" => "Makta",
+          "tilleggsressurser" => @resources,
+          "isCustom" => false,
+          "hitCount" => 3
+        },
         scope
       )
 
     _custom =
-      publish!("product", "onix.product-2", %{"title" => "Egen", "isCustom" => true, "hitCount" => 0}, scope)
+      publish!(
+        "product",
+        "onix.product-2",
+        %{"title" => "Egen", "isCustom" => true, "hitCount" => 0},
+        scope
+      )
 
     conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
     {:ok, conn: conn, ws: ws, proj: proj, page: page, product: product, scope: scope}
@@ -175,7 +201,12 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
     {:ok, _} =
       Content.upsert_document(
         type,
-        %{"doc_id" => id, "title" => content["title"], "status" => "published", "content" => content},
+        %{
+          "doc_id" => id,
+          "title" => content["title"],
+          "status" => "published",
+          "content" => content
+        },
         @dataset,
         Keyword.put(scope, :source, :api)
       )
@@ -184,7 +215,8 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
     doc
   end
 
-  defp doc_path(ws, proj, type, id), do: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/#{type}/#{id}"
+  defp doc_path(ws, proj, type, id),
+    do: "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/#{type}/#{id}"
 
   describe "a list of named member types (page builder sections)" do
     test "the page opens by URL, dead render and connected", %{conn: conn, ws: ws, proj: proj} do
@@ -234,21 +266,27 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
   describe "desk filters with JSON boolean and number values" do
     test "neq true and gt 0 filter instead of raising", %{scope: scope} do
       not_custom =
-        Content.list_documents("product", @dataset,
+        Content.list_documents(
+          "product",
+          @dataset,
           Keyword.merge(scope, filter_map: %{"content.isCustom" => %{"neq" => true}})
         )
 
       assert Enum.map(not_custom, & &1.doc_id) == ["onix.product-1"]
 
       hit =
-        Content.list_documents("product", @dataset,
+        Content.list_documents(
+          "product",
+          @dataset,
           Keyword.merge(scope, filter_map: %{"content.hitCount" => %{"gt" => 0}})
         )
 
       assert Enum.map(hit, & &1.doc_id) == ["onix.product-1"]
 
       custom =
-        Content.list_documents("product", @dataset,
+        Content.list_documents(
+          "product",
+          @dataset,
           Keyword.merge(scope, filter_map: %{"content.isCustom" => %{"eq" => true}})
         )
 
@@ -287,7 +325,9 @@ defmodule BarkparkWeb.Studio.StudioOpenTwinShapesTest do
       section = Enum.find(landing.fields, &(&1["name"] == "b"))
       assert section["type"] == "composite"
       assert section["namedType"] == "contentSection"
-      assert Enum.find(section["fields"], &(&1["name"] == "styling"))["namedType"] == "themeStyling"
+
+      assert Enum.find(section["fields"], &(&1["name"] == "styling"))["namedType"] ==
+               "themeStyling"
     end
   end
 

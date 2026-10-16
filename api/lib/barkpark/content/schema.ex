@@ -1198,7 +1198,10 @@ defmodule Barkpark.Content.Schema do
 
       Enum.map(schemas, fn schema ->
         if schema_references_named_type?(schema),
-          do: %{schema | fields: inline_fields(schema.fields, resolved, MapSet.new([schema.name]))},
+          do: %{
+            schema
+            | fields: inline_fields(schema.fields, resolved, MapSet.new([schema.name]))
+          },
           else: schema
       end)
     else

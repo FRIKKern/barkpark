@@ -13,7 +13,7 @@ All four appear only in plugin-authored schemas. The eight legacy seed schemas u
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
-Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ `array_missing_of`), or `of: [{name, ...}, ...]` — several NAMED types, each item discriminated by its own `_type` key (task-b3ebbd3ab1575e2a; `Field.of_types`, excl. `of`; unnamed/duplicate ⇒ `array_of_type_missing_name` / `_names_not_unique`). `ordered: true` → up/down reorder in the LiveView field component (single-shape only); `ordered: false` → unordered set. The LiveView Studio shows a several-type array read-only: one row per item, named by its `_type`, and a save leaves the stored list unchanged (task-592dee75ffef0c06).
+Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ `array_missing_of`), or `of: [{name, ...}, ...]` — several NAMED types, each item discriminated by its own `_type` key (task-b3ebbd3ab1575e2a; `Field.of_types`, excl. `of`; unnamed/duplicate ⇒ `array_of_type_missing_name` / `_names_not_unique`). `ordered: true` → up/down reorder in the LiveView field component (single-shape only); `ordered: false` → unordered set.
 
 **Empty rows do not publish** (ruling #47): a scalar or reference list holding `null`, a blank string or a ref without `_ref` refuses publish: 422 `validation_failed`, `details.<field>` names the row. Drafts keep it.
 

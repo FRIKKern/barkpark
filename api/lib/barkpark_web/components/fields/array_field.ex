@@ -75,7 +75,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       |> Map.put_new(:path, "")
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, CompositeField.description_for(assigns.field))
-      |> Map.put(:rows, typed_rows(assigns.field, types, assigns[:value] || [], assigns[:path] || ""))
+      |> Map.put(
+        :rows,
+        typed_rows(assigns.field, types, assigns[:value] || [], assigns[:path] || "")
+      )
 
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf" data-typed-array
