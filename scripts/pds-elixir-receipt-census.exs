@@ -926,6 +926,20 @@ defmodule PDS.Census do
   # back. Rows whose module this corpus does not carry are OUT OF SCOPE, never a red: a
   # disposition naming a module nobody can open judges nothing either way.
   @routed_excluded [
+    # task-3c102cbf09dcdab9: create/update/archive/unarchive render the session
+    # returned by the scoped store write. The five runtime/attachment POSTs only
+    # refuse (503 for an owned row, 404 otherwise); they perform no write.
+    # None emits the `ok: true` literal this lens registers. These declarations
+    # count the arrivals; they do not grant a receipt judgement or runtime access.
+    {:patch, "/w/:workspace_slug/v1/personal-chat/sessions/:id", "BarkparkWeb.PersonalChatController", :update, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions", "BarkparkWeb.PersonalChatController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/answer", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/approval", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/archive", "BarkparkWeb.PersonalChatController", :archive, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/attachments", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/interrupt", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/messages", "BarkparkWeb.PersonalChatController", :write_unavailable, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/personal-chat/sessions/:id/unarchive", "BarkparkWeb.PersonalChatController", :unarchive, :status_only_receipt},
     # THE FOUR MEMBER-ADMIN ARRIVALS (workspace roster surface). Each returns a
     # DB-derived body — the persisted membership row, or the `revoked_at` the
     # update stamped — but none emits the `ok: true` / `"ok" => true` literal
