@@ -5622,6 +5622,11 @@ msgstr "Én fotnote per linje"
 msgid "Open"
 msgstr "Åpne"
 
+#: lib/barkpark_web/studio_locale.ex:644
+#, elixir-autogen, elixir-format
+msgid "Open menu"
+msgstr "Åpne meny"
+
 #: lib/barkpark_web/studio_locale.ex:636
 #, elixir-autogen, elixir-format
 msgid "Ordered list"

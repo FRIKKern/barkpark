@@ -5622,6 +5622,11 @@ msgstr ""
 msgid "Open"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:644
+#, elixir-autogen, elixir-format
+msgid "Open menu"
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:636
 #, elixir-autogen, elixir-format
 msgid "Ordered list"
