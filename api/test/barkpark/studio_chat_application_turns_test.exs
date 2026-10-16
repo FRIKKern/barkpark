@@ -215,6 +215,22 @@ defmodule Barkpark.StudioChatApplicationTurnsTest do
 
     assert {:error, :conflict} =
              ApplicationTurns.cancel(ctx.scope, ctx.login.id, session.id, next.id)
+
+    {:ok, later} =
+      ApplicationTurns.accept(ctx.scope, ctx.login.id, session.id, %{
+        "query" => "  Later abandoned question\n",
+        "request_id" => "abandoned",
+        "expected_revision" => 1
+      })
+
+    {:ok, _} = ApplicationTurns.cancel(ctx.scope, ctx.login.id, session.id, later.id)
+    assert {:ok, restored} = ApplicationTurns.read(ctx.scope, ctx.login.id, session.id)
+    assert restored.last_answer.query == "New attempt"
+    assert restored.last_answer.turn_id == next.id
+    assert restored.last_answer.answer == result(next)["result"]["answer"]
+    assert restored.latest_turn.query == "  Later abandoned question\n"
+    assert restored.latest_turn.id == later.id
+    assert restored.latest_turn.status == "cancelled"
   end
 
   test "expired work cannot be revived by a host heartbeat", ctx do
