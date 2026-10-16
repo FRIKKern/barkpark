@@ -475,6 +475,10 @@ defmodule Barkpark.Content.Lifecycle do
                     {:error, reason} -> Repo.rollback(reason)
                   end
 
+                  # Draft row first, then the published row: the lock order every
+                  # two-row write keeps (see `do_unpublish_document/4`).
+                  :ok = lock_draft_row(draft, opts)
+
                   {pub_result, prev_pub_rev} =
                     case Content.get_document(pid, type, dataset, opts) do
                       {:ok, existing} ->
@@ -695,6 +699,25 @@ defmodule Barkpark.Content.Lifecycle do
   end
 
   defp lock_published_row(existing, _type), do: existing
+
+  # The row as committed now, locked until this transaction ends; nil once it
+  # is gone.
+  defp lock_row(%Document{id: id}),
+    do: Repo.one(from(d in Document, where: d.id == ^id, lock: "FOR UPDATE"))
+
+  # Publish locks its draft before it touches the published row, the order
+  # unpublish and a `[patch, publish]` batch take too (task-bb3d759d9354bae9).
+  # A draft gone since it was read is the `:not_found` the fenced draft delete
+  # answered before; a built draft (never stored, or removed unfenced) passes.
+  defp lock_draft_row(%Document{id: nil}, _opts), do: :ok
+
+  defp lock_draft_row(%Document{} = draft, opts) do
+    cond do
+      lock_row(draft) -> :ok
+      Keyword.get(opts, :built_draft, false) -> :ok
+      true -> Repo.rollback(:not_found)
+    end
+  end
 
   # The `:in_transaction` pre-publish fences, run on the LOCKED incumbent. A
   # fence answers `:ok` or `{:error, reason}`; a refusal rolls the publish
@@ -1001,11 +1024,25 @@ defmodule Barkpark.Content.Lifecycle do
                   # Draft wins: an existing draft is the author's newer work and
                   # is kept byte-for-byte. Overwriting it with the published
                   # content silently destroyed unpublished edits.
+                  #
+                  # LOCK ORDER: DRAFT ROW, THEN PUBLISHED ROW (task-bb3d759d9354bae9).
+                  # The existing draft is locked BEFORE the published row is
+                  # deleted. Unpublish used to take the published row first (its
+                  # delete) and the draft second (the revision trigger's pointer
+                  # UPDATE), while a `[patch, publish]` batch takes the draft first
+                  # (the patch) and the published row second: the two deadlocked,
+                  # and Postgres broke the cycle after deadlock_timeout by failing
+                  # the unpublish with 40P01 — a 500 "unknown error
+                  # (Postgrex.Error)" about a second after the request (reproduced
+                  # 5 in 10 on e2e-local by racing the two on one note). Publish
+                  # takes the same order (`lock_draft_row/2`). The draft is read
+                  # again once locked, so the revision snapshot is the committed one.
                   {draft_result, prev_draft_rev} =
-                    case Content.get_document(did, type, dataset, opts) do
-                      {:ok, existing} ->
-                        {{:ok, existing}, existing.rev}
-
+                    with {:ok, existing} <- Content.get_document(did, type, dataset, opts),
+                         %Document{} <- lock_row(existing),
+                         {:ok, locked} <- Content.get_document(did, type, dataset, opts) do
+                      {{:ok, locked}, locked.rev}
+                    else
                       _ ->
                         {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
                     end
@@ -1197,7 +1234,13 @@ defmodule Barkpark.Content.Lifecycle do
                 # Each variant is fenced against ITS OWN read rev — a concurrent
                 # write to either row aborts the whole delete with a rev_mismatch
                 # (412) rather than dropping a row the caller no longer intends.
-                results = Enum.map(docs, &fenced_delete/1)
+                # Draft row first: the lock order publish and unpublish keep
+                # (task-bb3d759d9354bae9). `target` (the published row when
+                # there is one) still names the delete.
+                results =
+                  docs
+                  |> Enum.sort_by(&(not String.starts_with?(&1.doc_id, "drafts.")))
+                  |> Enum.map(&fenced_delete/1)
 
                 # A rev_mismatch means a variant was concurrently edited — delete
                 # must not report success while a live row remains, so roll back.
