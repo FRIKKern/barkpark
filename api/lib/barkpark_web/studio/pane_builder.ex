@@ -938,9 +938,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
-    media_field = preview_field(Map.get(preview, "media"))
+    media_spec = Map.get(preview, "media")
+    media_declared? = PreviewText.media_paths(media_spec) != []
     subtitle = Map.get(preview, "subtitle")
-    targets = subtitle_targets(docs, subtitle, dataset, opts)
+    description = Map.get(preview, "description")
+    targets = preview_targets(docs, [subtitle, description, media_spec], dataset, opts)
+    deref = fn id -> Map.get(targets, id) end
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -951,8 +954,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # Gyldendal parity E3.3 — `list_preview.media` names an image field;
         # the row carries its url (nil when the document has none) and every
         # row of a media-declaring type reserves the slot so titles align.
-        media: media_field && media_url(content_value(doc, media_field)),
-        media_slot: media_field != nil,
+        # task-75cb2cac1e875214: `media` is a path or a list of paths (the
+        # first that holds an image), and a URL string counts: the twin's
+        # product cover is `onix.thumbnail`.
+        media: if(media_declared?, do: PreviewText.media(media_spec, preview_root(doc), deref)),
+        media_slot: media_declared?,
         title: row_title(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
@@ -962,7 +968,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # subtitle fallback so a row is never a bare mono id; the render picks
         # `meta || updated`. Threading updated_at only READS a field already on
         # every Document — no /v1/structure wire change.
-        meta: subtitle_meta(doc, subtitle, targets) || row_meta(doc, Map.get(preview, "meta")),
+        meta:
+          preview_line(doc, subtitle, deref) || row_meta(doc, Map.get(preview, "meta")),
+        # A second line under the subtitle: Sanity's `description`.
+        description: preview_line(doc, description, deref),
         updated: relative_updated(doc)
       }
     end)
@@ -1147,39 +1156,37 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # `list_preview.subtitle` (task-f3203617ae4cf03e): a path, `ref.field` through
   # one reference, `|date`, and parts with a fallback — `PreviewText`. The
   # referenced documents of a whole page load in ONE scoped read.
-  defp subtitle_meta(_doc, nil, _targets), do: nil
+  defp preview_line(_doc, nil, _deref), do: nil
+  defp preview_line(doc, spec, deref), do: PreviewText.format(spec, preview_root(doc), deref)
 
-  defp subtitle_meta(doc, spec, targets) do
-    PreviewText.format(spec, fn path ->
-      case String.split(path, ".", parts: 2) do
-        [field] ->
-          content_value(doc, field)
-
-        [ref, rest] ->
-          with id when is_binary(id) <- ref_id(content_value(doc, ref)),
-               %{} = target <- Map.get(targets, id) do
-            target_value(target, rest)
-          else
-            _ -> nil
-          end
+  # The map a preview path starts from: the content, with the title column as
+  # `title` (a titled type keeps its title there, not in content).
+  defp preview_root(doc) do
+    content =
+      case Map.get(doc, :content) do
+        %{} = c -> c
+        _ -> %{}
       end
-    end)
+
+    case Map.get(doc, :title) do
+      t when is_binary(t) and t != "" -> Map.put(content, "title", t)
+      _ -> content
+    end
   end
 
-  defp subtitle_targets(docs, spec, dataset, opts) do
-    case PreviewText.refs(spec) do
+  # The documents a page of rows references through its preview specs, in ONE
+  # scoped read. The published row wins; a draft-only target still names itself.
+  defp preview_targets(docs, specs, dataset, opts) do
+    ids =
+      docs
+      |> Enum.flat_map(&PreviewText.ref_ids(specs, preview_root(&1)))
+      |> Enum.uniq()
+
+    case ids do
       [] ->
         %{}
 
-      refs ->
-        ids =
-          for doc <- docs,
-              ref <- refs,
-              id = ref_id(content_value(doc, ref)),
-              is_binary(id),
-              uniq: true,
-              do: id
-
+      ids ->
         found =
           Content.get_documents_by_ids(
             ids ++ Enum.map(ids, &("drafts." <> &1)),
@@ -1187,24 +1194,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             scope(opts)
           )
 
-        # The published row wins; a draft-only target still names itself.
-        Map.new(ids, fn id -> {id, found[id] || found["drafts." <> id]} end)
+        for id <- ids, target = found[id] || found["drafts." <> id], into: %{} do
+          {id, preview_root(target)}
+        end
     end
-  end
-
-  defp ref_id(%{"_ref" => id}) when is_binary(id), do: Content.published_id(id)
-  defp ref_id(id) when is_binary(id) and id != "", do: Content.published_id(id)
-  defp ref_id(_), do: nil
-
-  defp target_value(target, "title"), do: target.title || content_value(target, "title")
-
-  defp target_value(target, path) do
-    path
-    |> String.split(".")
-    |> Enum.reduce(Map.get(target, :content), fn
-      key, %{} = map -> Map.get(map, key)
-      _key, _ -> nil
-    end)
   end
 
   defp row_meta(doc, nil), do: manifest_description(doc)
@@ -1222,21 +1215,6 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> nil
     end
   end
-
-  # A list_preview spec is a content-field name or `%{"field" => f, …}`.
-  defp preview_field(field) when is_binary(field) and field != "", do: field
-
-  defp preview_field(%{} = spec),
-    do: preview_field(Map.get(spec, "field") || Map.get(spec, :field))
-
-  defp preview_field(_), do: nil
-
-  # The url off a stored image value: the E1 `image` object and the twin's
-  # denormalised composite both carry `url`; a bare string is a url already.
-  # Anything else (an asset id alone, a malformed value) renders no thumbnail.
-  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
-  defp media_url(url) when is_binary(url) and url != "", do: url
-  defp media_url(_), do: nil
 
   defp schema_list_preview(nil), do: %{}
 

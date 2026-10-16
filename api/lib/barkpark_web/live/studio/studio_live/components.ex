@@ -1738,6 +1738,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     is_draft={item.is_draft}
                     badge={item[:badge]}
                     meta={item[:meta] || item[:updated]}
+                    description={item[:description]}
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
