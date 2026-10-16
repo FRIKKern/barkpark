@@ -5577,6 +5577,11 @@ msgstr "Ingen blokker passer"
 msgid "No commands match"
 msgstr "Ingen kommandoer passer"
 
+#: lib/barkpark_web/studio_locale.ex:628
+#, elixir-autogen, elixir-format
+msgid "No equation yet — type TeX below"
+msgstr "Ingen ligning ennå — skriv TeX under"
+
 #: lib/barkpark_web/studio_locale.ex:621
 #, elixir-autogen, elixir-format
 msgid "No image yet — paste or drop a picture, or enter a URL below"

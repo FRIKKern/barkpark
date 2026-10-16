@@ -86,7 +86,10 @@ export const ISLAND_SPECS = {
       el.className = "bp-equation" + (tex ? "" : " bp-equation--empty") + " bp-canvas-island__preview";
       el.textContent = "";
       if (!tex) {
-        el.textContent = t("equation — no tex source");
+        // An empty block in the editor asks for its input, as the video block does; the
+        // reader's own "equation — no tex source" stays for a published empty one.
+        el.className += " bp-canvas-island__empty";
+        el.textContent = t("No equation yet — type TeX below");
         return;
       }
       const code = document.createElement("code");
