@@ -786,7 +786,15 @@ defmodule BarkparkWeb.StudioLocale do
       "Link" => gettext("Link"),
       "Link address" => gettext("Link address"),
       "Set" => gettext("Set"),
-      "Remove" => gettext("Remove")
+      "Remove" => gettext("Remove"),
+      "Underline" => gettext("Underline"),
+      "Strikethrough" => gettext("Strikethrough"),
+      "Paragraph" => gettext("Paragraph"),
+      "Heading 2" => gettext("Heading 2"),
+      "Heading 3" => gettext("Heading 3"),
+      "Heading 4" => gettext("Heading 4"),
+      "Bulleted list" => gettext("Bulleted list"),
+      "Numbered list" => gettext("Numbered list")
     })
   end
 

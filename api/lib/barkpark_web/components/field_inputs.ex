@@ -250,7 +250,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       # Portable Text (owner ruling #44) edits as HTML in the contenteditable;
       # the save turns it back into blocks.
       blocks when name not in ["body", "blocks"] and is_list(blocks) and blocks != [] ->
-        if Barkpark.Content.PortableText.blocks?(blocks),
+        if Barkpark.Content.PortableText.value?(blocks),
           do:
             rich_text_editor(
               assign(assigns, n: name, v: Barkpark.Content.PortableText.to_html(blocks))
