@@ -3671,6 +3671,16 @@
     .bp-rte-btn:hover { background: var(--bg-accent); color: var(--fg); }
     .bp-rte-linkrow { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
     .bp-rte-linkrow[hidden] { display: none; }
+    /* With Internal / External (task-088575052b459f3e) the row takes its own
+       line: the document picker needs the width. */
+    .bp-rte-linkrow-kinds { flex-basis: 100%; flex-wrap: wrap; margin-left: 0; padding: 4px 0 2px; }
+    .bp-rte-kinds { display: inline-flex; gap: 2px; }
+    .bp-rte-kind[aria-pressed="true"] { background: var(--bg-accent); color: var(--fg); border-color: var(--input); }
+    .bp-rte-internal { flex: 1 1 320px; min-width: 0; }
+    .bp-rte-internal[hidden], .bp-rte-external[hidden] { display: none; }
+    .bp-rte-external { display: inline-flex; align-items: center; gap: 4px; }
+    /* The row's own Remove unlinks; the picker's would only empty the picker. */
+    .bp-rte-internal .ref-selected .btn-destructive { display: none; }
     .bp-rte-url {
       width: 220px; height: 24px; padding: 0 8px;
       border: 1px solid var(--input); border-radius: 4px;

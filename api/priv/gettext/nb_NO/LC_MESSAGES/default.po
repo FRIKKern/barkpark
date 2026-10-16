@@ -11479,6 +11479,26 @@ msgstr "Skift"
 msgid "Link address"
 msgstr "Lenkeadresse"
 
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Link type"
+msgstr "Type lenke"
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Internal"
+msgstr "Intern"
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "External"
+msgstr "Ekstern"
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Link to a document"
+msgstr "Lenk til et dokument"
+
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:76
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:118
 #, elixir-autogen, elixir-format

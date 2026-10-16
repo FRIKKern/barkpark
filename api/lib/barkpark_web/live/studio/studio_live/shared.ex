@@ -1674,6 +1674,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   defp redact_editor_for_viewer(editor, _socket), do: editor
 
+  @doc """
+  The document types an internal link in a Portable Text body of `schema` may
+  point at (task-088575052b459f3e): the `to` of the `internalLink` reference on
+  the dataset's `linkAnnotation` object type, else on its `link` type. The
+  gyldendal.no twin declares `link` with nine types, the set its Sanity
+  `linkAnnotation` links to. `[]` when `schema` has no top-level `richText`
+  field or the dataset declares neither type; the editor's link row then takes
+  an address only.
+  """
+  @spec internal_link_types(map() | nil, String.t(), keyword()) :: [String.t()]
+  def internal_link_types(schema, dataset, opts) do
+    if rich_text_field?(schema) do
+      Enum.find_value(~w(linkAnnotation link), [], &link_target_types(&1, dataset, opts))
+    else
+      []
+    end
+  end
+
+  defp rich_text_field?(%{fields: fields}) when is_list(fields),
+    do: Enum.any?(fields, &match?(%{"type" => "richText"}, &1))
+
+  defp rich_text_field?(_schema), do: false
+
+  defp link_target_types(name, dataset, opts) do
+    with {:ok, %{fields: fields}} when is_list(fields) <- Content.get_schema(name, dataset, opts),
+         %{} = field <-
+           Enum.find(fields, &match?(%{"name" => "internalLink", "type" => "reference"}, &1)),
+         [_ | _] = types <- BarkparkWeb.Components.FieldInputs.reference_types(field) do
+      types
+    else
+      _ -> nil
+    end
+  end
+
   @doc false
   def rebuild_panes(socket) do
     {panes, editor} =
@@ -1736,6 +1770,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         panes: panes,
         editor_doc: editor_doc,
         editor_schema: new_schema,
+        editor_link_types:
+          if(same_doc? and is_list(socket.assigns[:editor_link_types]),
+            do: socket.assigns[:editor_link_types],
+            else:
+              internal_link_types(
+                new_schema,
+                socket.assigns.dataset,
+                ScopeHelpers.scope_opts(socket)
+              )
+          ),
         editor_type: editor_type,
         editor_is_draft: is_draft,
         editor_has_published: has_published,

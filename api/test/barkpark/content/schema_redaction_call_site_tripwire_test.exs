@@ -113,6 +113,11 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       {:envelope_adjacent,
        "reference-FIELD detection only (drives ref_fields_for/2); the neighbouring " <>
          "Envelope.render/3 redacts with ref_schema/3's result, which DOES use the helper"},
+    "barkpark_web/live/studio/studio_live/shared.ex:link_target_types" =>
+      {:envelope_adjacent,
+       "reads only the `to` types of the `link`/`linkAnnotation` object type's " <>
+         "internalLink reference, for the rich-text link row's document picker " <>
+         "(task-088575052b459f3e); never a document field, never rendered"},
     "barkpark/search/query_pipeline.ex:resolve_schema" =>
       "feeds the fail-CLOSED Highlighter, not Envelope",
     "barkpark_web/controllers/schema_controller.ex:show" =>
