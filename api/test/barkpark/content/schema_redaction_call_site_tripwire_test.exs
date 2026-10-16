@@ -130,6 +130,9 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
         "preview href — never a document field, so it never reaches Envelope redaction",
     "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
       "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
+    "barkpark/media/sanity_image_asset_doc.ex:do_ensure" =>
+      "presence check: a workspace without a sanityImageAsset schema gets no asset " <>
+        "documents; the schema is never rendered",
     "barkpark/content.ex:get_schema" => "the facade delegate — this IS the raw lookup",
     "barkpark/content.ex:owner_scoped?" => "reads the owner_scoped flag, not field visibility"
   }
