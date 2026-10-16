@@ -23,8 +23,11 @@ defmodule Barkpark.Groq.DocumentSource do
   `references()` against an expression index
   over the `_ref` values in `content`, and an `||` whose every branch narrows
   as one SQL OR of the branches' conditions. Everything else runs in memory over the
-  loaded documents. An equality on `title` reads the `documents.title`
-  column, where the writer keeps it. Containment and jsonpath use `documents_content_path_idx`
+  loaded documents. A filter with more than one content test reads a copy of
+  `content` that Postgres decompresses once per row, after one condition on
+  the stored `content` has let the index find the candidates (`where_keys/5`).
+  An equality on `title` reads the `documents.title` column, where the writer
+  keeps it. Containment and jsonpath use `documents_content_path_idx`
   (`20260702130000_add_documents_content_gin_index.exs`); the `_ref` index is
   `20261013180000_add_documents_groq_pushdown_indexes.exs`.
 
@@ -435,7 +438,7 @@ defmodule Barkpark.Groq.DocumentSource do
         state
         |> counted_rows()
         |> maybe_where_types(types)
-        |> where(^exact_condition(ids, eq, checks, state.perspective))
+        |> where_keys([{types, ids, eq, [], checks}], :exact, state.perspective)
         |> select([d], %{i: type(^i, :integer), n: count(d.id)})
       end)
 
@@ -472,9 +475,249 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp counted_rows(state), do: base_query(state)
 
-  # `a.b == v` exactly: containment narrows through the GIN index, and the
-  # value at the path must equal `v` (containment alone also matches an array
-  # holding `v`).
+  # The conditions of `keys`, OR-ed, on `query`. Postgres decompresses a
+  # stored `content` again for every function that reads it, so a filter
+  # with fifteen content tests read each row fifteen times: over 10,592
+  # products a category filter took 0.7 s to count where one test takes
+  # 0.1 s. A key with more than one content test therefore reads
+  # `bp_content`, a copy of `content` that a lateral subquery decompresses
+  # once per row (`content #> '{}'` returns the whole value, decompressed).
+  # The copy has no index, so one condition per key (`narrowing/2`) also
+  # tests the stored `content`, where the GIN index finds the candidate rows.
+  # A key with one content test reads `content` itself through `bp_content`:
+  # Postgres flattens the lateral `SELECT content`, so the test keeps its
+  # index and the row is read once. `content_sort?` asks for the copy for an
+  # `order()` on a content path, whose sort keys read the value four times
+  # per path.
+  defp where_keys(query, keys, mode, perspective, content_sort? \\ false) do
+    copy? = content_sort? or Enum.any?(keys, &(content_reads(&1) > 1))
+
+    condition =
+      keys
+      |> Enum.map(&key_condition(&1, mode, perspective, copy?))
+      |> Enum.reduce(fn c, acc -> dynamic(^acc or ^c) end)
+
+    cond do
+      copy? ->
+        narrowing =
+          keys
+          |> Enum.map(&narrowing(&1, perspective))
+          |> Enum.reduce(fn c, acc -> dynamic(^acc or ^c) end)
+
+        query |> where(^narrowing) |> join_content(:copy) |> where(^condition)
+
+      Enum.any?(keys, &(content_reads(&1) > 0)) ->
+        query |> join_content(:stored) |> where(^condition)
+
+      true ->
+        where(query, ^condition)
+    end
+  end
+
+  defp join_content(query, :copy) do
+    join(
+      query,
+      :inner_lateral,
+      [d],
+      c in fragment("SELECT (? #> '{}') AS content OFFSET 0", d.content),
+      on: true,
+      as: :bp_content
+    )
+  end
+
+  defp join_content(query, :stored) do
+    join(query, :inner_lateral, [d], c in fragment("SELECT ? AS content", d.content),
+      on: true,
+      as: :bp_content
+    )
+  end
+
+  defp sorts_on_content?(keys), do: Enum.any?(keys, &match?({{:path, _}, _dir}, &1))
+
+  # How many times the conditions of a key read `content`, as SQL calls that
+  # take it. `_id` lists, view counts and the probe join read none.
+  defp content_reads({_types, _ids, eq, any, checks}) do
+    probes =
+      Enum.sum_by(any, fn probes ->
+        {maps, refs, _ids} = split_probes(probes)
+        if(maps == [], do: 0, else: 1) + if(refs == [], do: 0, else: 1)
+      end)
+
+    length(eq) + probes + Enum.sum_by(checks, &check_reads/1)
+  end
+
+  defp check_reads({:views, _column, _op, _n}), do: 0
+
+  defp check_reads({:or, branches}),
+    do: Enum.sum_by(branches, &content_reads({&1.types, &1.ids, &1.eq, &1.any, &1.checks}))
+
+  defp check_reads({:not, check}), do: check_reads(check)
+  defp check_reads({:none, path, pairs}), do: 1 + check_reads({:some, path, pairs})
+
+  defp check_reads({:some, _path, [{[], values}]}) when length(values) >= @probe_join_min_values,
+    do: 0
+
+  defp check_reads({:defined, _path, nil}), do: 1
+  defp check_reads({kind, _path, _a}) when kind in [:in, :member, :some, :ne], do: 1
+  defp check_reads(_check), do: 2
+
+  # The conditions of a key that the indexes serve, on the stored `content`
+  # and the columns, so the index finds the candidate rows the copy then
+  # tests: the `_id` list, each `references()` or mixed probe list, and every
+  # equality, `in`, member and element test and containment probe list as one
+  # jsonpath predicate, `lax $ ? (@."a" == 1 && (@."b" == "x" || ...) &&
+  # exists(...))`. `documents_content_path_idx` answers the predicate in full,
+  # with every term, and it reads a row once. Lax mode makes it a superset of
+  # the exact tests and of containment, which also matches a value inside an
+  # array. A key with none of these narrows by a probe join or an `||` whose
+  # every branch narrows. Each condition is implied by the key, so the
+  # narrowing changes no result.
+  defp narrowing(key, perspective) do
+    case narrowings(key, perspective) do
+      [] -> dynamic(true)
+      conditions -> Enum.reduce(conditions, fn c, acc -> dynamic(^acc and ^c) end)
+    end
+  end
+
+  defp narrowings({_types, ids, eq, any, checks}, perspective) do
+    {path_probes, other_probes} = Enum.split_with(any, &probes_test/1)
+
+    tests =
+      Enum.flat_map(eq, fn
+        {["title"], _value} -> []
+        {path, value} -> ["@" <> jsonpath_fields(path) <> " == " <> Jason.encode!(value)]
+      end) ++ Enum.map(path_probes, &probes_test/1) ++ Enum.flat_map(checks, &path_test/1)
+
+    found =
+      Enum.filter(
+        [
+          ids && ids_condition(ids, perspective),
+          tests != [] && stored_jsonpath("lax $ ? (" <> Enum.join(tests, " && ") <> ")")
+          | Enum.map(other_probes, &stored_probes(&1, perspective))
+        ],
+        & &1
+      )
+
+    case found do
+      [] -> checks |> Enum.find_value(&check_narrowing(&1, perspective)) |> List.wrap()
+      found -> found
+    end
+  end
+
+  # A probe list of containment maps as one jsonpath term, or nil. Each map
+  # is one chain from `Pushdown.nest/2`, `{"a": [{"b": v}]}`, read as
+  # `@."a"[*]."b" == v`. An empty list matches nothing.
+  defp probes_test([]), do: "false"
+
+  defp probes_test(probes) do
+    terms = Enum.map(probes, &probe_term(&1, "@"))
+    if Enum.all?(terms, &is_binary/1), do: "(" <> Enum.join(terms, " || ") <> ")"
+  end
+
+  defp probe_term(map, at) when is_map(map) and map_size(map) == 1 do
+    [{key, value}] = Map.to_list(map)
+    probe_term(value, at <> "." <> Jason.encode!(key))
+  end
+
+  defp probe_term([value], at), do: probe_term(value, at <> "[*]")
+
+  defp probe_term(value, at) when is_binary(value) or is_number(value) or is_boolean(value),
+    do: at <> " == " <> Jason.encode!(value)
+
+  defp probe_term(_value, _at), do: nil
+
+  # An exact test as one term of the jsonpath predicate, or none.
+  defp path_test({:in, _path, []}), do: ["false"]
+
+  defp path_test({:in, path, values}),
+    do: ["(" <> any_equal("@" <> jsonpath_fields(path), values) <> ")"]
+
+  defp path_test({:member, path, value}),
+    do: ["exists(@" <> jsonpath_fields(path) <> "[*] ? (" <> any_equal("@", [value]) <> "))"]
+
+  defp path_test({:some, _path, [{[], values}]}) when length(values) >= @probe_join_min_values,
+    do: []
+
+  defp path_test({:some, path, pairs}),
+    do: ["exists(@" <> jsonpath_fields(path) <> "[*] ? (" <> element_tests(pairs) <> "))"]
+
+  defp path_test(_check), do: []
+
+  defp check_narrowing({:some, path, [{[], values}]}, _perspective)
+       when length(values) >= @probe_join_min_values,
+       do: probe_join(path, values)
+
+  defp check_narrowing({:or, []}, _perspective), do: dynamic(false)
+
+  defp check_narrowing({:or, branches}, perspective) do
+    narrowed =
+      Enum.map(branches, &narrowings({&1.types, &1.ids, &1.eq, &1.any, &1.checks}, perspective))
+
+    if Enum.all?(narrowed, &(&1 != [])) do
+      narrowed
+      |> Enum.map(fn conditions ->
+        Enum.reduce(conditions, fn c, acc -> dynamic(^acc and ^c) end)
+      end)
+      |> Enum.reduce(fn c, acc -> dynamic(^acc or ^c) end)
+    end
+  end
+
+  defp check_narrowing(_check, _perspective), do: nil
+
+  defp copy_check({:some, path, [{[], [_ | _] = values}]} = check),
+    do: if(Enum.all?(values, &is_binary/1), do: {:has_any, path, values}, else: check)
+
+  defp copy_check({:not, check}), do: {:not, copy_check(check)}
+
+  defp copy_check({:or, branches}),
+    do: {:or, Enum.map(branches, &%{&1 | checks: Enum.map(&1.checks, fn c -> copy_check(c) end)})}
+
+  defp copy_check(check), do: check
+
+  defp stored_jsonpath(path),
+    do: dynamic([d], fragment("? @\\? CAST(? AS jsonpath)", d.content, type(^path, :string)))
+
+  defp stored_probes(probes, perspective) do
+    {maps, refs, ids} = split_probes(probes)
+
+    [
+      maps != [] &&
+        dynamic(
+          [d],
+          fragment(
+            "? @> ANY(CAST(? AS jsonb[]))",
+            d.content,
+            type(^Enum.map(maps, &Jason.encode!/1), {:array, :string})
+          )
+        ),
+      refs != [] &&
+        dynamic(
+          [d],
+          fragment(
+            "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref') \\?| ?",
+            d.content,
+            type(^refs, {:array, :string})
+          )
+        ),
+      ids != [] && ids_condition(ids, perspective)
+    ]
+    |> Enum.reject(&(&1 == false))
+    |> Enum.reduce(dynamic(false), fn c, acc -> dynamic(^acc or ^c) end)
+  end
+
+  defp split_probes(probes) do
+    {maps, refs, ids} =
+      Enum.reduce(probes, {[], [], []}, fn
+        {:refs, r}, {m, rs, is} -> {m, rs ++ r, is}
+        {:ids, i}, {m, rs, is} -> {m, rs, is ++ i}
+        map, {m, rs, is} -> {[map | m], rs, is}
+      end)
+
+    {Enum.reverse(maps), Enum.uniq(refs), Enum.uniq(ids)}
+  end
+
+  # The exact conditions of a key: `a.b == v` as `strict_eq_condition/2`
+  # and every check as `check_condition/2`.
   defp exact_condition(ids, eq, checks, perspective) do
     condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
 
@@ -488,16 +731,18 @@ defmodule Barkpark.Groq.DocumentSource do
     end)
   end
 
+  # One jsonpath predicate, which the GIN index serves and which reads the
+  # row once. Strict mode makes it exact: `$."a"` on a missing key or a
+  # comparison with an array, an object or a value of another type is not
+  # true, so only a scalar equal to `v` matches, `7` matching `7.0`.
   defp strict_eq_condition(path, value) do
     dynamic(
-      [d],
-      ^eq_condition(path, value) and
-        fragment(
-          "? #> ? = CAST(? AS jsonb)",
-          d.content,
-          type(^path, {:array, :string}),
-          type(^Jason.encode!(value), :string)
-        )
+      [bp_content: c],
+      fragment(
+        "? @@ CAST(? AS jsonpath)",
+        c.content,
+        type(^("strict " <> jsonpath(path) <> " == " <> Jason.encode!(value)), :string)
+      )
     )
   end
 
@@ -545,7 +790,7 @@ defmodule Barkpark.Groq.DocumentSource do
     state
     |> counted_rows()
     |> maybe_where_types(types)
-    |> where(^key_condition(key, state.perspective))
+    |> where_keys([key], :key, state.perspective)
     |> limit(@scan_chunk)
   end
 
@@ -553,7 +798,7 @@ defmodule Barkpark.Groq.DocumentSource do
     do: scan_reduce(query, state, after_row, nil, acc, step)
 
   defp scan_reduce(query, state, after_row, last, acc, step) do
-    rows = query |> after_row.(last) |> Repo.all(@planned_per_call)
+    rows = query |> after_row.(last) |> select_rendered() |> Repo.all(@planned_per_call)
     docs = render(rows, state)
     Enum.each(docs, &touch_type(&1["_type"]))
 
@@ -590,7 +835,12 @@ defmodule Barkpark.Groq.DocumentSource do
       state
       |> counted_rows()
       |> maybe_where_types(types)
-      |> where(^exact_condition(ids, eq, checks, state.perspective))
+      |> where_keys(
+        [{types, ids, eq, [], checks}],
+        :exact,
+        state.perspective,
+        sorts_on_content?(keys)
+      )
       |> maybe_join_views(keys, state.perspective)
       |> order_by(^order_terms(keys, state.perspective))
       |> offset(^from)
@@ -600,6 +850,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
     rows =
       from(d in Document, where: d.id in ^ids)
+      |> select_rendered()
       |> Repo.all()
       |> Enum.sort_by(&Map.fetch!(position, &1.id))
 
@@ -648,42 +899,42 @@ defmodule Barkpark.Groq.DocumentSource do
   defp sort_exprs({:path, path}, _perspective) do
     [
       dynamic(
-        [d],
+        [bp_content: c],
         fragment(
           "CASE jsonb_typeof(? #> ?) WHEN 'number' THEN 2 WHEN 'string' THEN 3 WHEN 'boolean' THEN 4 ELSE 100 END",
-          d.content,
+          c.content,
           type(^path, {:array, :string})
         )
       ),
       dynamic(
-        [d],
+        [bp_content: c],
         fragment(
           "CASE WHEN jsonb_typeof(? #> ?) = 'number' THEN CAST(? #> ? AS numeric) END",
-          d.content,
+          c.content,
           type(^path, {:array, :string}),
-          d.content,
+          c.content,
           type(^path, {:array, :string})
         )
       ),
       dynamic(
-        [d],
+        [bp_content: c],
         fragment(
           "(CASE WHEN jsonb_typeof(? #> ?) = 'string' THEN regexp_replace(? #>> ?, ?, ?, 'g') END) COLLATE \"C\"",
-          d.content,
+          c.content,
           type(^path, {:array, :string}),
-          d.content,
+          c.content,
           type(^path, {:array, :string}),
           ^@utf16_pattern,
           ^@utf16_replacement
         )
       ),
       dynamic(
-        [d],
+        [bp_content: c],
         fragment(
           "CASE WHEN jsonb_typeof(? #> ?) = 'boolean' THEN CAST(? #> ? AS boolean) END",
-          d.content,
+          c.content,
           type(^path, {:array, :string}),
-          d.content,
+          c.content,
           type(^path, {:array, :string})
         )
       )
@@ -737,27 +988,24 @@ defmodule Barkpark.Groq.DocumentSource do
   end
 
   defp load_group(state, types, keys) do
-    condition =
-      if Enum.any?(keys, &unconstrained?/1) do
-        dynamic(true)
-      else
-        Enum.reduce(keys, dynamic(false), fn key, acc ->
-          dynamic([d], ^acc or ^key_condition(key, state.perspective))
-        end)
-      end
-
     matching =
       state
       |> base_query()
       |> maybe_where_types(types)
-      |> where(^condition)
+
+    matching =
+      if Enum.any?(keys, &unconstrained?/1),
+        do: matching,
+        else: where_keys(matching, keys, :key, state.perspective)
 
     rows =
       if Enum.all?(keys, fn {_types, ids, _eq, _any, _checks} -> ids != nil end) do
         # Reads by id are bounded by the ids the query named.
-        Repo.all(matching, @planned_per_call)
+        matching |> select_rendered() |> Repo.all(@planned_per_call)
       else
-        matching |> admit!(state) |> then(&Repo.all(from(d in Document, where: d.id in ^&1)))
+        matching
+        |> admit!(state)
+        |> then(&Repo.all(select_rendered(from(d in Document, where: d.id in ^&1))))
       end
 
     rows = if twins_needed?(state, keys), do: with_twins(rows, state, types), else: rows
@@ -843,6 +1091,7 @@ defmodule Barkpark.Groq.DocumentSource do
           |> base_query()
           |> maybe_where_types(types)
           |> where([d], d.doc_id in ^wanted)
+          |> select_rendered()
           |> Repo.all()
 
         rows ++ twins
@@ -852,7 +1101,18 @@ defmodule Barkpark.Groq.DocumentSource do
   defp unconstrained?({_types, nil, [], [], []}), do: true
   defp unconstrained?(_key), do: false
 
-  defp key_condition({_types, ids, eq, any, checks}, perspective) do
+  # On the copy an element test over strings reads the array itself
+  # (`{:has_any, path, strings}`). On the stored `content` it keeps the
+  # jsonpath or the probe join, which the index serves.
+  defp key_condition({types, ids, eq, any, checks}, mode, perspective, true),
+    do: key_condition({types, ids, eq, any, Enum.map(checks, &copy_check/1)}, mode, perspective)
+
+  defp key_condition(key, mode, perspective, false), do: key_condition(key, mode, perspective)
+
+  defp key_condition({_types, ids, eq, _any, checks}, :exact, perspective),
+    do: exact_condition(ids, eq, checks, perspective)
+
+  defp key_condition({_types, ids, eq, any, checks}, :key, perspective) do
     condition = if ids, do: ids_condition(ids, perspective), else: dynamic(true)
 
     condition =
@@ -874,19 +1134,14 @@ defmodule Barkpark.Groq.DocumentSource do
   # `content`, `{:refs, ids}` the GIN index on the `_ref` values and
   # `{:ids, ids}` the `doc_id` index. An empty list matches nothing.
   defp probes_condition(probes, perspective) do
-    {maps, refs, ids} =
-      Enum.reduce(probes, {[], [], []}, fn
-        {:refs, r}, {m, rs, is} -> {m, rs ++ r, is}
-        {:ids, i}, {m, rs, is} -> {m, rs, is ++ i}
-        map, {m, rs, is} -> {[map | m], rs, is}
-      end)
+    {maps, refs, ids} = split_probes(probes)
 
     conditions =
       Enum.reject(
         [
-          maps != [] && contains_any(Enum.reverse(maps)),
-          refs != [] && references_any(Enum.uniq(refs)),
-          ids != [] && ids_condition(Enum.uniq(ids), perspective)
+          maps != [] && contains_any(maps),
+          refs != [] && references_any(refs),
+          ids != [] && ids_condition(ids, perspective)
         ],
         &(&1 == false)
       )
@@ -898,8 +1153,8 @@ defmodule Barkpark.Groq.DocumentSource do
     json = Enum.map(maps, &Jason.encode!/1)
 
     dynamic(
-      [d],
-      fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^json, {:array, :string}))
+      [bp_content: c],
+      fragment("? @> ANY(CAST(? AS jsonb[]))", c.content, type(^json, {:array, :string}))
     )
   end
 
@@ -910,10 +1165,10 @@ defmodule Barkpark.Groq.DocumentSource do
   # `_ref`), so the evaluator's own check decides.
   defp references_any(ids) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref') \\?| ?",
-        d.content,
+        c.content,
         type(^ids, {:array, :string})
       )
     )
@@ -963,8 +1218,8 @@ defmodule Barkpark.Groq.DocumentSource do
   # GROQ test null, so the row is dropped.
   defp check_condition({:none, path, pairs}) do
     dynamic(
-      [d],
-      fragment("jsonb_typeof(? #> ?) = 'array'", d.content, type(^path, {:array, :string})) and
+      [bp_content: c],
+      fragment("jsonb_typeof(? #> ?) = 'array'", c.content, type(^path, {:array, :string})) and
         fragment("(?) IS NOT TRUE", ^check_condition({:some, path, pairs}))
     )
   end
@@ -973,12 +1228,12 @@ defmodule Barkpark.Groq.DocumentSource do
   # GROQ's count() does, and keeps `jsonb_array_length` from raising on one.
   defp check_condition({:length, path, "<", n}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END < ?",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         ^n
       )
@@ -987,12 +1242,12 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp check_condition({:length, path, "<=", n}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END <= ?",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         ^n
       )
@@ -1001,12 +1256,12 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp check_condition({:length, path, ">", n}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END > ?",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         ^n
       )
@@ -1015,12 +1270,12 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp check_condition({:length, path, ">=", n}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END >= ?",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         ^n
       )
@@ -1029,12 +1284,12 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp check_condition({:length, path, "==", n}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "CASE WHEN jsonb_typeof(? #> ?) = 'array' THEN jsonb_array_length(? #> ?) END = ?",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         ^n
       )
@@ -1046,19 +1301,19 @@ defmodule Barkpark.Groq.DocumentSource do
   # GROQ gives null.
   defp check_condition({:defined, path, nil}) do
     dynamic(
-      [d],
-      fragment("jsonb_typeof(? #> ?) <> 'null'", d.content, type(^path, {:array, :string}))
+      [bp_content: c],
+      fragment("jsonb_typeof(? #> ?) <> 'null'", c.content, type(^path, {:array, :string}))
     )
   end
 
   defp check_condition({:defined, path, i}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "(jsonb_typeof(? #> ?) = 'array' AND jsonb_typeof((? #> ?) -> CAST(? AS integer)) <> 'null')",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         ^i
       )
@@ -1083,46 +1338,42 @@ defmodule Barkpark.Groq.DocumentSource do
         "strict " <> jsonpath(path) <> "[*] ? (" <> any_equal("@", [value]) <> ")"
       )
 
-  # `count(a.b[@ in [...]]) > 0` with a long list: one containment probe
-  # `{"a": {"b": [v]}}` per value, each looked up on its own in
-  # `documents_content_path_idx`, and the row ids they find. The jsonpath
-  # below is one index lookup too, but Postgres then re-tests it on every row
-  # the index returns, and that re-test compares each array element with every
-  # value: over 10,592 products, 372 codes in 20 groups took 820 ms against
-  # 9 ms for the index lookups. Here each probe re-tests only its own rows,
-  # with one containment. `OFFSET 0` keeps the lookup per probe; without it
-  # Postgres may join the probes against a full scan of `documents`. The
-  # probe is exact: containment of `[v]` needs an array holding a scalar equal
-  # to `v`, so a string, an object or a nested array at the path does not
-  # match, and `7` matches `7.0` as GROQ's `==` does. The ids are a superset
-  # across every dataset; the outer query applies scope and visibility.
-  defp check_condition({:some, path, [{[], values}]})
-       when length(values) >= @probe_join_min_values do
-    probes = Enum.map(values, &Jason.encode!(Pushdown.nest(path ++ [:each], &1)))
-
+  # `count(a.b[@ in [...]]) > 0` with strings: `?|` is true when the array
+  # holds one of the strings as an element, and the type test keeps it from
+  # matching the keys of an object. It reads the decompressed copy, where it
+  # costs a few microseconds per row however long the list is; the probe join
+  # `narrowing/2` uses for the index would compare each row with every id
+  # the probes found.
+  # `count(a.b[@ in [...]]) > 0` with strings, on the copy: `?|` is true
+  # when the array holds one of the strings as an element, and the type test
+  # keeps it from matching the keys of an object. On the decompressed copy it
+  # costs a few microseconds per row however long the list is, where the
+  # probe join below compares each row with every id its probes found.
+  defp check_condition({:has_any, path, values}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
-        "? = ANY(ARRAY(SELECT x.id FROM unnest(CAST(? AS jsonb[])) AS p(probe) CROSS JOIN LATERAL (SELECT s.id FROM documents AS s WHERE s.content @> p.probe OFFSET 0) AS x))",
-        d.id,
-        type(^probes, {:array, :string})
+        "(jsonb_typeof(? #> ?) = 'array' AND (? #> ?) \\?| ?)",
+        c.content,
+        type(^path, {:array, :string}),
+        c.content,
+        type(^path, {:array, :string}),
+        type(^values, {:array, :string})
       )
     )
   end
+
+  defp check_condition({:some, path, [{[], values}]})
+       when length(values) >= @probe_join_min_values,
+       do: probe_join(path, values)
 
   # Some element of the array at `path` matches every `{field, values}` pair:
   # `strict $."a"."b"[*] ? (@."x"."_ref" == "v" && (@."y" == 1 || @."y" == 2))`.
   # Strict mode does not unwrap an array at a field or step into a non-array
   # at `path`, and a field missing from an element makes that element's test
   # unknown, so only an element GROQ's filter keeps matches.
-  defp check_condition({:some, path, pairs}) do
-    test =
-      Enum.map_join(pairs, " && ", fn {field, values} ->
-        "(" <> any_equal("@" <> jsonpath_fields(field), values) <> ")"
-      end)
-
-    jsonpath_condition("strict " <> jsonpath(path) <> "[*] ? (" <> test <> ")")
-  end
+  defp check_condition({:some, path, pairs}),
+    do: jsonpath_condition(some_jsonpath(path, pairs))
 
   # `a.b != v`: true unless the value at the path equals `v`. A missing
   # field makes the comparison null, which `IS NOT TRUE` keeps, as GROQ keeps
@@ -1130,10 +1381,10 @@ defmodule Barkpark.Groq.DocumentSource do
   # never matches two values of different types, as GROQ's `==` does.
   defp check_condition({:ne, path, value}) do
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "(? #> ? = CAST(? AS jsonb)) IS NOT TRUE",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         type(^Jason.encode!(value), :string)
       )
@@ -1147,8 +1398,8 @@ defmodule Barkpark.Groq.DocumentSource do
   # with the same sort key as `sort_exprs/2`.
   defp check_condition({:range, path, op, value}) when is_binary(value) do
     dynamic(
-      [d],
-      fragment("jsonb_typeof(? #> ?) = 'string'", d.content, type(^path, {:array, :string})) and
+      [bp_content: c],
+      fragment("jsonb_typeof(? #> ?) = 'string'", c.content, type(^path, {:array, :string})) and
         ^string_compare(op, path, value)
     )
   end
@@ -1157,29 +1408,67 @@ defmodule Barkpark.Groq.DocumentSource do
     json_type = if is_boolean(value), do: "boolean", else: "number"
 
     dynamic(
-      [d],
+      [bp_content: c],
       fragment(
         "jsonb_typeof(? #> ?) = ?",
-        d.content,
+        c.content,
         type(^path, {:array, :string}),
         type(^json_type, :string)
       ) and ^json_compare(op, path, Jason.encode!(value))
     )
   end
 
+  defp some_jsonpath(path, pairs),
+    do: "strict " <> jsonpath(path) <> "[*] ? (" <> element_tests(pairs) <> ")"
+
+  defp element_tests(pairs) do
+    Enum.map_join(pairs, " && ", fn {field, values} ->
+      "(" <> any_equal("@" <> jsonpath_fields(field), values) <> ")"
+    end)
+  end
+
+  # `count(a.b[@ in [...]]) > 0` with a long list: one containment probe
+  # `{"a": {"b": [v]}}` per value, each looked up on its own in
+  # `documents_content_path_idx`, and the row ids they find. A jsonpath is
+  # one index lookup too, but Postgres then re-tests it on every row
+  # the index returns, and that re-test compares each array element with every
+  # value: over 10,592 products, 372 codes in 20 groups took 820 ms against
+  # 9 ms for the index lookups. Here each probe re-tests only its own rows,
+  # with one containment. `OFFSET 0` keeps the lookup per probe; without it
+  # Postgres may join the probes against a full scan of `documents`. The
+  # probe is exact: containment of `[v]` needs an array holding a scalar equal
+  # to `v`, so a string, an object or a nested array at the path does not
+  # match, and `7` matches `7.0` as GROQ's `==` does. The ids are a superset
+  # across every dataset; the outer query applies scope and visibility.
+  defp probe_join(path, values) do
+    probes = Enum.map(values, &Jason.encode!(Pushdown.nest(path ++ [:each], &1)))
+
+    dynamic(
+      [d],
+      fragment(
+        "? = ANY(ARRAY(SELECT x.id FROM unnest(CAST(? AS jsonb[])) AS p(probe) CROSS JOIN LATERAL (SELECT s.id FROM documents AS s WHERE s.content @> p.probe OFFSET 0) AS x))",
+        d.id,
+        type(^probes, {:array, :string})
+      )
+    )
+  end
+
   defp jsonpath_condition(path) do
-    dynamic([d], fragment("? @\\? CAST(? AS jsonpath)", d.content, type(^path, :string)))
+    dynamic(
+      [bp_content: c],
+      fragment("? @\\? CAST(? AS jsonpath)", c.content, type(^path, :string))
+    )
   end
 
   for op <- ["<", "<=", ">", ">="] do
     defp string_compare(unquote(op), path, value) do
       dynamic(
-        [d],
+        [bp_content: c],
         fragment(
           unquote(
             "regexp_replace(? #>> ?, ?, ?, 'g') COLLATE \"C\" #{op} regexp_replace(?, ?, ?, 'g') COLLATE \"C\""
           ),
-          d.content,
+          c.content,
           type(^path, {:array, :string}),
           ^@utf16_pattern,
           ^@utf16_replacement,
@@ -1192,10 +1481,10 @@ defmodule Barkpark.Groq.DocumentSource do
 
     defp json_compare(unquote(op), path, json) do
       dynamic(
-        [d],
+        [bp_content: c],
         fragment(
           unquote("? #> ? #{op} CAST(? AS jsonb)"),
-          d.content,
+          c.content,
           type(^path, {:array, :string}),
           type(^json, :string)
         )
@@ -1223,14 +1512,17 @@ defmodule Barkpark.Groq.DocumentSource do
   # rendered document, which drops a row whose column wins with another value.
   defp eq_condition(["title"], value) do
     dynamic(
-      [d],
+      [d, bp_content: c],
       d.title == ^value or
-        fragment("? @> ?", d.content, type(^Pushdown.nest(["title"], value), :map))
+        fragment("? @> ?", c.content, type(^Pushdown.nest(["title"], value), :map))
     )
   end
 
   defp eq_condition(path, value) do
-    dynamic([d], fragment("? @> ?", d.content, type(^Pushdown.nest(path, value), :map)))
+    dynamic(
+      [bp_content: c],
+      fragment("? @> ?", c.content, type(^Pushdown.nest(path, value), :map))
+    )
   end
 
   defp ids_condition(ids, :drafts) do
@@ -1253,6 +1545,7 @@ defmodule Barkpark.Groq.DocumentSource do
       state
       |> base_query()
       |> where([d], d.doc_id in ^Enum.uniq(lookup_ids))
+      |> select_rendered()
       |> Repo.all()
       |> render(state)
 
@@ -1335,6 +1628,24 @@ defmodule Barkpark.Groq.DocumentSource do
   end
 
   defp apply_perspective(query, _perspective), do: query
+
+  # The columns `render/2` and the readers here use. The search columns are
+  # as large as `content` again, and the reads never need them.
+  @rendered_fields [
+    :id,
+    :doc_id,
+    :type,
+    :title,
+    :content,
+    :rev,
+    :inserted_at,
+    :updated_at,
+    :owner_id,
+    :dataset_id,
+    :dataset
+  ]
+
+  defp select_rendered(query), do: select(query, [d], struct(d, @rendered_fields))
 
   defp maybe_where_types(query, nil), do: query
   defp maybe_where_types(query, types), do: where(query, [d], d.type in ^types)
