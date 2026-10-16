@@ -203,6 +203,34 @@ defmodule Barkpark.Search.SearchSlotsTest do
     assert {"Roman", _} = slots("s1")
   end
 
+  test "a row with no slot stores the title folds the search would compute from its title",
+       %{scope: scope, ws: ws} do
+    # task-146f3a4fd5c2f348: stored, a search reads them; NULL, it folded every row's title.
+    {:ok, _} =
+      Content.create_document("note", %{"doc_id" => "n1", "title" => "Ærlig Åse"}, @ds, scope)
+
+    same = """
+    SELECT search_title IS NULL AND search_author IS NULL,
+           search_names_fold IS NOT NULL
+             AND search_title_fold = bp_fold(coalesce(nullif(title, ''), ''))
+             AND search_names_fold = bp_fold(coalesce(nullif(title, ''), ''))
+             AND search_names_tsv =
+                   setweight(to_tsvector('simple', bp_fold(coalesce(nullif(title, ''), ''))), 'A')
+    FROM documents WHERE doc_id = 'drafts.n1'
+    """
+
+    assert %{rows: [[true, true]]} = Repo.query!(same)
+
+    # A bundle import's COPY leaves them NULL; refresh/1 stores them.
+    Repo.query!(
+      "UPDATE documents SET search_title_fold = NULL, search_names_fold = NULL, " <>
+        "search_names_tsv = NULL WHERE doc_id = 'drafts.n1'"
+    )
+
+    assert SearchSlots.refresh(workspace_id: ws.id) >= 1
+    assert %{rows: [[true, true]]} = Repo.query!(same)
+  end
+
   test "refresh/1 fills the slots of rows written with user triggers disabled", %{
     scope: scope,
     ws: ws
