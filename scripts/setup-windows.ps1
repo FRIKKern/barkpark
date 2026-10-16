@@ -63,16 +63,54 @@ function Ok($m)   { Write-Host "    $m" -ForegroundColor Green }
 function Warn($m) { Write-Host "    $m" -ForegroundColor Yellow }
 function Die($m)  { Write-Host "ERROR: $m" -ForegroundColor Red; exit 1 }
 
-# Prepend the Scoop toolchain so it shadows any stale system Erlang/Elixir.
+# Require complete supported installs before invoking a VM or touching Postgres.
+# Nonexistent PATH entries alone do not prevent fallback to a system OTP 21.
 function Use-Toolchain {
+  foreach ($relative in @('erlang\current\bin\erl.exe', 'elixir\current\bin\elixir.bat', 'elixir\current\bin\mix.bat')) {
+    if (-not (Test-Path -LiteralPath (Join-Path "$ScoopRoot\apps" $relative) -PathType Leaf)) {
+      throw "Scoop runtime missing: $relative. Run .\scripts\setup-windows.ps1 full; the system Erlang/Elixir installation will not be used."
+    }
+  }
+
+  $otpPin = [regex]::Match((Get-Content -LiteralPath (Join-Path $RepoRoot '.tool-versions') -Raw), '(?m)^erlang\s+(\d+)\.')
+  $elixirPin = [regex]::Match((Get-Content -LiteralPath (Join-Path $ApiDir 'mix.exs') -Raw), 'elixir:\s*"~>\s*(\d+\.\d+(?:\.\d+)?)"')
+  if (-not $otpPin.Success -or -not $elixirPin.Success) { throw 'Cannot read the repository runtime requirements; refusing to start.' }
+  $release = Get-ChildItem -LiteralPath "$ScoopRoot\apps\erlang\current\releases" -Directory |
+    Where-Object Name -Match '^\d+$' | Sort-Object { [int]$_.Name } -Descending | Select-Object -First 1
+  if (-not $release) { throw 'Cannot read the installed Scoop OTP release; refusing to start.' }
+  $otp = (Get-Content -LiteralPath (Join-Path $release.FullName 'OTP_VERSION') -Raw).Trim()
+  $elixir = (Get-Content -LiteralPath "$ScoopRoot\apps\elixir\current\VERSION" -Raw).Trim()
+  if ($otp -notmatch '^\d+(?:\.\d+)*$' -or $elixir -notmatch '^\d+\.\d+(?:\.\d+)?$') {
+    throw 'Installed Scoop runtime version metadata is invalid; refusing to start.'
+  }
+  if ([int]($otp.Split('.')[0]) -lt [int]$otpPin.Groups[1].Value) {
+    throw "Scoop OTP $otp is too old; the repository requires OTP $($otpPin.Groups[1].Value) or newer. Update the Scoop Erlang installation."
+  }
+  if ([version]$elixir -lt [version]$elixirPin.Groups[1].Value) {
+    throw "Scoop Elixir $elixir is too old; api/mix.exs requires $($elixirPin.Groups[1].Value) or newer. Update the Scoop Elixir installation."
+  }
+
   $dirs = @(
-    "$ScoopRoot\shims",
     "$ScoopRoot\apps\elixir\current\bin",
     "$ScoopRoot\apps\erlang\current\bin",
     "$ScoopRoot\apps\postgresql\current\bin",
-    "$ScoopRoot\apps\imagemagick\current"
+    "$ScoopRoot\apps\imagemagick\current",
+    "$ScoopRoot\shims"
   )
   $env:Path = ($dirs -join ';') + ';' + $env:Path
+
+  # These commands and the Phoenix server do not accept console input. Refuse
+  # prompts rather than entering the console get_line path on redirected stdin.
+  if (($env:ELIXIR_ERL_OPTIONS -split '\s+') -notcontains '-noinput') {
+    $env:ELIXIR_ERL_OPTIONS = (@($env:ELIXIR_ERL_OPTIONS, '-noinput') | Where-Object { $_ }) -join ' '
+  }
+
+  # Keep useful crash headers without letting a failed local VM fill the disk.
+  # Explicit operator limits (including zero, which disables dumps) still win.
+  # https://www.erlang.org/docs/27/apps/erts/erl_cmd.html#environment-variables
+  if ([string]::IsNullOrWhiteSpace($env:ERL_CRASH_DUMP_BYTES)) {
+    $env:ERL_CRASH_DUMP_BYTES = '67108864' # 64 MiB
+  }
 }
 
 # OTP version from the install dir (erl -eval quoting is too shell-fragile).
@@ -173,8 +211,9 @@ function Build-And-Seed {
 # --- server -------------------------------------------------------------------
 function Start-Server {
   Step "Starting Phoenix on :$Port (new window)"
-  $dirs = "$ScoopRoot\shims;$ScoopRoot\apps\elixir\current\bin;$ScoopRoot\apps\erlang\current\bin;$ScoopRoot\apps\postgresql\current\bin;$ScoopRoot\apps\imagemagick\current"
-  $cmd = "`$env:Path='$dirs;'+`$env:Path; `$env:PORT='$Port'; Set-Location '$ApiDir'; Write-Host 'Barkpark dev server -- close this window to stop' -ForegroundColor Cyan; mix phx.server"
+  # Inherit the validated PATH and dump limit. Re-prepending Scoop shims here
+  # would undo the parent's direct-bin preference in a fresh child shell.
+  $cmd = "`$env:PORT='$Port'; Set-Location '$ApiDir'; Write-Host 'Barkpark dev server -- close this window to stop' -ForegroundColor Cyan; mix phx.server"
   Start-Process powershell -ArgumentList '-NoExit','-NoProfile','-Command', $cmd | Out-Null
 
   # The probe is /status.json, NOT the legacy /api/schemas: that route pipes
@@ -236,7 +275,7 @@ if (-not (Test-Path $ApiDir)) { Die "api/ not found under $RepoRoot -- run this 
 
 switch ($Action) {
   'status' { Show-Status; break }
-  'stop'   { Use-Toolchain; Stop-Postgres; Warn 'Close the Phoenix window to stop the server.'; break }
+  'stop'   { Stop-Postgres; Warn 'Close the Phoenix window to stop the server.'; break }
   'start'  {
     Use-Toolchain
     if (-not (Get-Command scoop -ErrorAction SilentlyContinue)) { Die "Toolchain missing -- run: .\scripts\setup-windows.ps1 full" }
