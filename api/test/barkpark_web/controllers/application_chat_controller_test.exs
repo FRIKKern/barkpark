@@ -110,6 +110,23 @@ defmodule BarkparkWeb.ApplicationChatControllerTest do
 
     assert view["context"] == %{"audience" => "students"}
 
+    history =
+      call(
+        "Bearer " <> ctx.raw,
+        :get,
+        base(ctx) <> "/sessions/#{created["id"]}/application/history"
+      )
+      |> json_response(200)
+
+    assert history["revision"] == 1
+    assert history["has_more"] == false
+    assert history["next_cursor"] == nil
+    assert [restored] = history["turns"]
+    assert restored["turn_id"] == turn["id"]
+    assert restored["query"] == work["query"]
+    assert restored["answer"]["answer"] == Jason.decode!(Jason.encode!(body.result.answer))
+    refute Map.has_key?(restored, "actor_session_id")
+
     assert call(
              "Bearer " <> ctx.other,
              :get,
@@ -172,5 +189,57 @@ defmodule BarkparkWeb.ApplicationChatControllerTest do
 
     assert call("Bearer " <> ctx.other, :post, base(ctx) <> "/applications/fixture/sessions").status ==
              503
+  end
+
+  test "history HTTP cursor is bounded and personal-owner-only", ctx do
+    created = create(ctx)
+    path = base(ctx) <> "/sessions/#{created["id"]}"
+
+    for n <- 1..3 do
+      turn =
+        call("Bearer " <> ctx.raw, :post, path <> "/turns", %{
+          query: "Question #{n}",
+          request_id: "page-#{n}",
+          expected_revision: 0
+        })
+        |> json_response(200)
+
+      call("Bearer " <> ctx.raw, :post, path <> "/turns/#{turn["id"]}/cancel")
+      |> json_response(200)
+    end
+
+    first =
+      call("Bearer " <> ctx.raw, :get, path <> "/application/history?limit=2")
+      |> json_response(200)
+
+    assert Enum.map(first["turns"], & &1["query"]) == ["Question 2", "Question 3"]
+    assert first["has_more"]
+
+    second =
+      call(
+        "Bearer " <> ctx.raw,
+        :get,
+        path <> "/application/history?" <> URI.encode_query(%{cursor: first["next_cursor"]})
+      )
+      |> json_response(200)
+
+    assert Enum.map(second["turns"], & &1["query"]) == ["Question 1"]
+    assert second["next_cursor"] == nil
+
+    assert call(
+             "Bearer " <> ctx.raw,
+             :get,
+             path <> "/application/history?limit=999999999999999999999999"
+           ).status == 400
+
+    assert call("Bearer " <> ctx.raw, :get, path <> "/application/history?cursor=forged").status ==
+             400
+
+    assert call("Bearer " <> ctx.other, :get, path <> "/application/history").status == 404
+    assert call("Host " <> ctx.credential, :get, path <> "/application/history").status == 401
+    assert call("Bearer barkpark-dev-token", :get, path <> "/application/history").status == 401
+    assert scoped_conn() |> get(path <> "/application/history") |> Map.fetch!(:status) == 401
+    Accounts.revoke_user_session_token(ctx.raw)
+    assert call("Bearer " <> ctx.raw, :get, path <> "/application/history").status == 401
   end
 end

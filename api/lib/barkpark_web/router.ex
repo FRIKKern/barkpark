@@ -2846,6 +2846,7 @@ defmodule BarkparkWeb.Router do
 
     post("/applications/:application_id/sessions", ApplicationChatController, :create)
     get("/sessions/:id/application", ApplicationChatController, :show)
+    get("/sessions/:id/application/history", ApplicationChatController, :history)
     post("/sessions/:id/turns", ApplicationChatController, :accept)
     post("/sessions/:id/turns/:turn_id/cancel", ApplicationChatController, :cancel)
 

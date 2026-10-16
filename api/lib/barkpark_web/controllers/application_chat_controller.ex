@@ -30,6 +30,18 @@ defmodule BarkparkWeb.ApplicationChatController do
         ApplicationTurns.read(conn.assigns.chat_scope, conn.assigns.current_user_session.id, id)
       )
 
+  def history(conn, %{"id" => id} = params),
+    do:
+      reply(
+        conn,
+        ApplicationTurns.history(
+          conn.assigns.chat_scope,
+          conn.assigns.current_user_session.id,
+          id,
+          Map.drop(params, ["workspace_slug", "id"])
+        )
+      )
+
   def accept(conn, %{"id" => id} = params),
     do:
       reply(

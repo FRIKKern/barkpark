@@ -503,4 +503,389 @@ defmodule Barkpark.StudioChatApplicationTurnsTest do
       end
     end)
   end
+
+  test "typed history pages whole turns without duplicates or internal lease fields", ctx do
+    {:ok, session} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
+
+    {ids, _revision} =
+      Enum.map_reduce(1..7, 0, fn n, revision ->
+        {:ok, turn} =
+          ApplicationTurns.accept(ctx.scope, ctx.login.id, session.id, %{
+            "query" => "  question #{n}\n",
+            "request_id" => "history-#{n}",
+            "expected_revision" => revision
+          })
+
+        if rem(n, 3) == 0 do
+          {:ok, _} = ApplicationTurns.cancel(ctx.scope, ctx.login.id, session.id, turn.id)
+          {turn.id, revision}
+        else
+          {:ok, receipt} = ApplicationTurns.commit(ctx.host, turn.id, result(turn))
+          assert {:ok, ^receipt} = ApplicationTurns.commit(ctx.host, turn.id, result(turn))
+          {turn.id, revision + 1}
+        end
+      end)
+
+    assert {:ok, first} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "2"})
+
+    assert first.revision == 5
+    assert Enum.map(first.turns, & &1.turn_id) == Enum.take(ids, -2)
+    {turns, pages} = history_pages(ctx, session.id, first, first.turns, 1)
+    assert pages == 4
+    assert Enum.map(turns, & &1.turn_id) == ids
+    assert Enum.map(turns, & &1.query) == Enum.map(1..7, &"  question #{&1}\n")
+    assert Enum.count(turns, &is_nil(&1.answer)) == 2
+
+    for turn <- turns do
+      assert turn.user_seq > 0
+
+      if turn.answer do
+        assert turn.answer.seq > turn.user_seq
+        assert turn.committed_revision == turn.base_revision + 1
+        assert turn.answer.answer["presentation"]["statements"] != []
+
+        assert turn.answer.source_identities == [
+                 %{"id" => "fictional-source", "revision" => "source-r1"}
+               ]
+      end
+    end
+
+    encoded = Jason.encode!(turns)
+
+    for forbidden <- ~w(actor_session_id request_digest host_id credential binding),
+        do: refute(String.contains?(encoded, forbidden))
+  end
+
+  defp committed_history(ctx, count, payload \\ &result/1) do
+    {:ok, session} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
+
+    turns =
+      for n <- 1..count do
+        {:ok, turn} =
+          ApplicationTurns.accept(ctx.scope, ctx.login.id, session.id, %{
+            "query" => "  question #{n}\n",
+            "request_id" => "history-#{n}",
+            "expected_revision" => n - 1
+          })
+
+        {:ok, _} = ApplicationTurns.commit(ctx.host, turn.id, payload.(turn))
+        turn
+      end
+
+    {session, turns}
+  end
+
+  test "history cursor binds owner, session, revision and fixed snapshot without hiding later questions",
+       ctx do
+    {session, turns} = committed_history(ctx, 3)
+
+    {:ok, first} =
+      ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "1"})
+
+    {:ok, pending} =
+      ApplicationTurns.accept(ctx.scope, ctx.login.id, session.id, %{
+        "query" => "New question after snapshot",
+        "request_id" => "later",
+        "expected_revision" => 3
+      })
+
+    {older, _} = history_pages(ctx, session.id, first, first.turns, 1)
+    assert Enum.map(older, & &1.turn_id) == Enum.map(turns, & &1.id)
+    {:ok, latest} = ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{})
+    assert List.last(latest.turns).turn_id == pending.id
+    assert List.last(latest.turns).answer == nil
+    {:ok, another} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
+
+    assert {:error, :invalid_request} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, another.id, %{
+               "cursor" => first.next_cursor
+             })
+
+    assert {:error, :not_found} =
+             ApplicationTurns.history(
+               {:personal, ctx.ws.id, Ecto.UUID.generate()},
+               ctx.login.id,
+               session.id,
+               %{"cursor" => first.next_cursor}
+             )
+
+    assert {:error, :not_found} =
+             ApplicationTurns.history(
+               {:personal, Ecto.UUID.generate(), ctx.user.id},
+               ctx.login.id,
+               session.id,
+               %{"cursor" => first.next_cursor}
+             )
+
+    {:ok, _} = ApplicationTurns.commit(ctx.host, pending.id, result(pending))
+
+    assert {:error, :conflict} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+               "cursor" => first.next_cursor
+             })
+  end
+
+  test "history refuses malformed, tampered and expired cursors and returns explicit empty history",
+       ctx do
+    {:ok, empty} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
+
+    assert {:ok, %{turns: [], has_more: false, next_cursor: nil, snapshot_max_seq: 0}} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, empty.id, %{})
+
+    {session, _} = committed_history(ctx, 2)
+
+    {:ok, first} =
+      ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "1"})
+
+    for params <- [
+          %{"limit" => "0"},
+          %{"limit" => "11"},
+          %{"limit" => "01"},
+          %{"limit" => 1},
+          %{"limit" => String.duplicate("9", 100)},
+          %{"since" => "1"},
+          %{"cursor" => first.next_cursor, "limit" => "1"},
+          %{"cursor" => "invalid"},
+          %{"cursor" => String.duplicate("a", 4097)}
+        ] do
+      assert {:error, :invalid_request} =
+               ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, params)
+    end
+
+    {:ok, payload} =
+      Phoenix.Token.verify(
+        BarkparkWeb.Endpoint,
+        "personal-application-history-v1",
+        first.next_cursor,
+        max_age: 3600
+      )
+
+    old =
+      Phoenix.Token.sign(BarkparkWeb.Endpoint, "personal-application-history-v1", payload,
+        signed_at: System.system_time(:second) - 3601
+      )
+
+    assert {:error, :invalid_request} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"cursor" => old})
+
+    changed =
+      Phoenix.Token.sign(
+        BarkparkWeb.Endpoint,
+        "personal-application-history-v1",
+        Map.put(payload, "before", 9_007_199_254_740_992)
+      )
+
+    assert {:error, :invalid_request} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"cursor" => changed})
+  end
+
+  test "history rechecks current identity and binding but accepts fresh login for old committed turns",
+       ctx do
+    {session, _} = committed_history(ctx, 2)
+
+    {:ok, first} =
+      ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "1"})
+
+    params = %{"cursor" => first.next_cursor}
+    Accounts.revoke_user_session_token(ctx.raw)
+
+    assert {:error, :session_lost} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, params)
+
+    {:ok, fresh} = Accounts.create_user_session_token(ctx.user)
+    {_, login} = Accounts.verify_user_session(fresh)
+    assert {:ok, _} = ApplicationTurns.history(ctx.scope, login.id, session.id, params)
+    membership = Barkpark.Tenancy.Auth.membership(ctx.user.id, ctx.ws.id, :user)
+    Repo.delete!(membership)
+
+    assert {:error, :forbidden} =
+             ApplicationTurns.history(ctx.scope, login.id, session.id, params)
+
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ctx.ws.id, ctx.user.id, "member", "user")
+    {:ok, _} = StudioChat.archive_session(session.id, ctx.scope)
+
+    assert {:error, :application_unavailable} =
+             ApplicationTurns.history(ctx.scope, login.id, session.id, params)
+
+    {:ok, _} = StudioChat.unarchive_session(session.id, ctx.scope)
+    assert {:ok, _} = ApplicationTurns.history(ctx.scope, login.id, session.id, params)
+    Application.delete_env(:barkpark, :personal_chat_applications)
+
+    assert {:error, :application_unavailable} =
+             ApplicationTurns.history(ctx.scope, login.id, session.id, params)
+  end
+
+  test "history terminalizes expired accepted work without another accept", ctx do
+    {:ok, session} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
+
+    {:ok, turn} =
+      ApplicationTurns.accept(ctx.scope, ctx.login.id, session.id, %{
+        "query" => "Expire",
+        "request_id" => "expiry",
+        "expected_revision" => 0
+      })
+
+    Repo.get!(Barkpark.ChatHosts.ExecutionLease, turn.id)
+    |> Ecto.Changeset.change(expires_at: DateTime.add(DateTime.utc_now(), -1))
+    |> Repo.update!()
+
+    assert {:ok, %{revision: 0, turns: [item]}} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{})
+
+    assert item.status == "expired"
+    assert item.answer == nil
+    assert item.committed_revision == nil
+  end
+
+  test "history refuses a malformed pending deadline without a server error", ctx do
+    {:ok, session} = ApplicationTurns.create(ctx.scope, ctx.login.id, "test-app", %{})
+
+    {:ok, turn} =
+      ApplicationTurns.accept(ctx.scope, ctx.login.id, session.id, %{
+        "query" => "Pending",
+        "request_id" => "broken",
+        "expected_revision" => 0
+      })
+
+    lease = Repo.get!(Barkpark.ChatHosts.ExecutionLease, turn.id)
+
+    lease
+    |> Ecto.Changeset.change(
+      application_turn: Map.put(lease.application_turn, "deadline", "invalid")
+    )
+    |> Repo.update!()
+
+    assert {:error, :history_invalid} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{})
+  end
+
+  test "history refuses damaged user, assistant and lease joins instead of displaying invented typed state",
+       ctx do
+    mutations = [
+      fn _s, _l, q, _a ->
+        q |> Ecto.Changeset.change(source_markdown: "Changed question") |> Repo.update!()
+      end,
+      fn _s, _l, _q, a ->
+        a |> Ecto.Changeset.change(source_markdown: "Changed answer") |> Repo.update!()
+      end,
+      fn _s, _l, _q, a ->
+        a
+        |> Ecto.Changeset.change(metadata: put_in(a.metadata, ["application", "revision"], 99))
+        |> Repo.update!()
+      end,
+      fn _s, l, _q, _a ->
+        l
+        |> Ecto.Changeset.change(application_turn: Map.put(l.application_turn, "message_id", 99))
+        |> Repo.update!()
+      end,
+      fn _s, l, _q, _a ->
+        l
+        |> Ecto.Changeset.change(
+          application_turn: Map.put(l.application_turn, "actor_user_id", Ecto.UUID.generate())
+        )
+        |> Repo.update!()
+      end,
+      fn _s, l, _q, _a ->
+        l
+        |> Ecto.Changeset.change(
+          application_turn: put_in(l.application_turn, ["binding", "version"], "wrong")
+        )
+        |> Repo.update!()
+      end,
+      fn s, _l, q, _a ->
+        StudioChat.append_message(s.id, %{
+          role: "user",
+          source_markdown: q.source_markdown,
+          metadata: q.metadata
+        })
+      end,
+      fn s, _l, _q, a ->
+        StudioChat.append_message(s.id, %{
+          role: "assistant",
+          source_markdown: a.source_markdown,
+          metadata: a.metadata
+        })
+      end,
+      fn s, _l, _q, _a ->
+        StudioChat.append_message(s.id, %{
+          role: "assistant",
+          source_markdown: "Orphan",
+          metadata: %{}
+        })
+      end
+    ]
+
+    for mutate <- mutations do
+      {session, [turn]} = committed_history(ctx, 1)
+      [question, answer] = StudioChat.list_messages(session.id, ctx.scope)
+      lease = Repo.get!(Barkpark.ChatHosts.ExecutionLease, turn.id)
+      mutate.(session, lease, question, answer)
+
+      assert {:error, :history_invalid} =
+               ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{})
+    end
+  end
+
+  test "UTF-8 page budget yields fewer whole turns and continuation never drops a large answer",
+       ctx do
+    payload = fn turn ->
+      text = String.duplicate("ø", 25_000)
+
+      result(turn)
+      |> put_in(["result", "answer", "text"], text)
+      |> put_in(["result", "answer", "presentation", "statements"], [
+        %{"kind" => "limitation", "text" => text, "evidence_ids" => []}
+      ])
+    end
+
+    {session, turns} = committed_history(ctx, 3, payload)
+
+    assert {:ok, first} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{"limit" => "10"})
+
+    assert length(first.turns) == 2
+    assert first.has_more
+    assert byte_size(Jason.encode!(first)) <= 256_000
+
+    assert {:ok, second} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+               "cursor" => first.next_cursor
+             })
+
+    assert Enum.map(second.turns ++ first.turns, & &1.turn_id) == Enum.map(turns, & &1.id)
+    refute second.has_more
+    assert byte_size(Jason.encode!(second)) <= 256_000
+
+    [answer | _] =
+      Enum.filter(StudioChat.list_messages(session.id, ctx.scope), &(&1.role == "assistant"))
+
+    answer
+    |> Ecto.Changeset.change(
+      metadata:
+        put_in(
+          answer.metadata,
+          ["application", "answer", "presentation", "oversized"],
+          String.duplicate("x", 260_000)
+        )
+    )
+    |> Repo.update!()
+
+    assert {:error, :history_invalid} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, session.id, %{
+               "cursor" => first.next_cursor
+             })
+  end
+
+  defp history_pages(_ctx, _id, %{has_more: false, next_cursor: nil}, turns, count),
+    do: {turns, count}
+
+  defp history_pages(ctx, id, page, turns, count) do
+    assert {:ok, older} =
+             ApplicationTurns.history(ctx.scope, ctx.login.id, id, %{"cursor" => page.next_cursor})
+
+    assert older.revision == page.revision
+    assert older.snapshot_max_seq == page.snapshot_max_seq
+    history_pages(ctx, id, older, older.turns ++ turns, count + 1)
+  end
 end

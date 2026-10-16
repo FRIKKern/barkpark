@@ -76,6 +76,256 @@ defmodule Barkpark.StudioChat.ApplicationTurns do
     end)
   end
 
+  @history_salt "personal-application-history-v1"
+  @history_bytes 256_000
+  @max_safe_integer 9_007_199_254_740_991
+
+  @doc "Bounded whole-turn history; a signed cursor grants no ownership or source permission."
+  def history(scope, login, id, params) when is_map(params) do
+    transaction(fn ->
+      session = personal!(scope, login, id)
+      state = state!(session)
+      page = history_page!(session, state, params)
+      before_seq = page["before"] || page["snapshot"] + 1
+
+      rows =
+        Repo.all(
+          from m in Message,
+            where:
+              m.session_id == ^id and m.role == "user" and m.seq <= ^page["snapshot"] and
+                m.seq < ^before_seq,
+            order_by: [desc: m.seq],
+            limit: ^(page["limit"] + 1)
+        )
+
+      {turns, _bytes} =
+        rows
+        |> Enum.take(page["limit"])
+        |> Enum.reduce_while({[], 8192}, fn message, {turns, bytes} ->
+          turn = history_turn!(session, state, message)
+          size = byte_size(Jason.encode!(turn))
+
+          cond do
+            bytes + size <= @history_bytes -> {:cont, {[turn | turns], bytes + size}}
+            turns == [] -> fail(:history_too_large)
+            true -> {:halt, {turns, bytes}}
+          end
+        end)
+
+      more = length(rows) > length(turns)
+      lower = if more, do: hd(turns).user_seq, else: 0
+      history_span!(id, lower, min(before_seq - 1, page["snapshot"]), turns)
+      cursor = if more, do: history_cursor(Map.put(page, "before", hd(turns).user_seq)), else: nil
+
+      result = %{
+        id: id,
+        revision: state["revision"],
+        contract_version: state["binding"]["contract_version"],
+        snapshot_max_seq: page["snapshot"],
+        turns: turns,
+        has_more: more,
+        next_cursor: cursor
+      }
+
+      unless byte_size(Jason.encode!(result)) <= @history_bytes, do: fail(:history_too_large)
+      result
+    end)
+  end
+
+  def history(_, _, _, _), do: {:error, :invalid_request}
+
+  defp history_page!(session, state, params) do
+    scope =
+      digest({session.id, session.owner_workspace_id, session.owner_user_id, state["binding"]})
+
+    case params do
+      %{"cursor" => cursor}
+      when map_size(params) == 1 and is_binary(cursor) and byte_size(cursor) <= 4096 ->
+        case Phoenix.Token.verify(BarkparkWeb.Endpoint, @history_salt, cursor, max_age: 3600) do
+          {:ok,
+           %{
+             "scope" => ^scope,
+             "revision" => revision,
+             "snapshot" => snapshot,
+             "before" => before_seq,
+             "limit" => limit
+           } = page} ->
+            unless map_size(page) == 5 and revision?(revision) and safe_integer?(snapshot, 0) and
+                     safe_integer?(before_seq, 1) and before_seq <= snapshot and is_integer(limit) and
+                     limit in 1..10,
+                   do: fail(:invalid_request)
+
+            unless revision == state["revision"], do: fail(:conflict)
+            page
+
+          _ ->
+            fail(:invalid_request)
+        end
+
+      _ ->
+        unless Map.keys(params) -- ["limit"] == [], do: fail(:invalid_request)
+        limit = Map.get(params, "limit", "5")
+
+        unless is_binary(limit) and limit in Enum.map(1..10, &Integer.to_string/1),
+          do: fail(:invalid_request)
+
+        snapshot =
+          Repo.one(from m in Message, where: m.session_id == ^session.id, select: max(m.seq)) || 0
+
+        unless safe_integer?(snapshot, 0) and snapshot < @max_safe_integer,
+          do: fail(:history_invalid)
+
+        %{
+          "scope" => scope,
+          "revision" => state["revision"],
+          "snapshot" => snapshot,
+          "before" => nil,
+          "limit" => String.to_integer(limit)
+        }
+    end
+  end
+
+  defp history_cursor(page), do: Phoenix.Token.sign(BarkparkWeb.Endpoint, @history_salt, page)
+
+  defp safe_integer?(value, minimum),
+    do: is_integer(value) and value >= minimum and value <= @max_safe_integer
+
+  defp history_turn!(session, state, message) do
+    unless is_map(message.metadata), do: fail(:history_invalid)
+    turn_id = message.metadata["application_turn_id"]
+
+    unless match?({:ok, _}, Ecto.UUID.cast(turn_id)) and safe_integer?(message.id, 1) and
+             safe_integer?(message.seq, 1),
+           do: fail(:history_invalid)
+
+    lease = lease!(turn_id)
+    unless is_map(lease.application_turn), do: fail(:history_invalid)
+
+    if lease.application_turn["status"] == "accepted" do
+      deadline = lease.application_turn["deadline"]
+
+      unless is_binary(deadline) and match?({:ok, _, _}, DateTime.from_iso8601(deadline)),
+        do: fail(:history_invalid)
+    end
+
+    lease = expire!(lease)
+    turn = lease.application_turn
+
+    unless lease.session_id == session.id and lease.workspace_id == session.owner_workspace_id and
+             lease.host_id == state["binding"]["host_id"] and turn["id"] == lease.id and
+             turn["actor_user_id"] == session.owner_user_id and
+             turn["binding"] == state["binding"] and
+             text?(turn["query"], 6400) and turn["query"] == message.source_markdown and
+             revision?(turn["base_revision"]) and turn["base_revision"] <= state["revision"] and
+             turn["status"] in ~w(accepted committed cancelled expired archived revoked),
+           do: fail(:history_invalid)
+
+    count =
+      Repo.one(
+        from m in Message,
+          where:
+            m.session_id == ^session.id and m.role == "user" and
+              fragment("?->>'application_turn_id'", m.metadata) == ^turn_id,
+          select: count(m.id)
+      )
+
+    unless count == 1, do: fail(:history_invalid)
+    answer = history_answer!(session, state, lease, message)
+
+    %{
+      turn_id: turn_id,
+      user_message_id: message.id,
+      user_seq: message.seq,
+      query: turn["query"],
+      status: turn["status"],
+      base_revision: turn["base_revision"],
+      committed_revision: if(answer, do: turn["committed_revision"], else: nil),
+      answer: answer
+    }
+  end
+
+  defp history_answer!(session, state, lease, question) do
+    turn = lease.application_turn
+
+    messages =
+      Repo.all(
+        from m in Message,
+          where:
+            m.session_id == ^session.id and
+              fragment("?->'application'->>'turn_id'", m.metadata) == ^lease.id,
+          limit: 2
+      )
+
+    if turn["status"] == "committed" do
+      message =
+        case messages do
+          [one] -> one
+          _ -> fail(:history_invalid)
+        end
+
+      data = message.metadata["application"]
+      unless is_map(data), do: fail(:history_invalid)
+      answer = data["answer"]
+
+      unless lease.status == "completed" and is_nil(lease.revoked_at) and
+               message.role == "assistant" and
+               message.id == turn["message_id"] and safe_integer?(message.id, 1) and
+               safe_integer?(message.seq, 1) and message.seq > question.seq and
+               revision?(turn["committed_revision"]) and
+               turn["committed_revision"] == turn["base_revision"] + 1 and
+               turn["committed_revision"] <= state["revision"] and
+               Enum.sort(Map.keys(data)) ==
+                 ~w(answer contract_version revision selection source_identities turn_id),
+             do: fail(:history_invalid)
+
+      unless data["turn_id"] == lease.id and data["revision"] == turn["committed_revision"] and
+               data["contract_version"] == state["binding"]["contract_version"] and
+               is_list(data["selection"]) and length(data["selection"]) <= 3 and
+               is_list(data["source_identities"]) and length(data["source_identities"]) <= 100 and
+               is_map(answer) and Enum.sort(Map.keys(answer)) == ~w(id presentation text) and
+               text?(answer["id"], 200) and text?(answer["text"], 64_000) and
+               is_map(answer["presentation"]) and answer["text"] == message.source_markdown and
+               byte_size(Jason.encode!(data)) <= 130_000,
+             do: fail(:history_invalid)
+
+      %{
+        message_id: message.id,
+        seq: message.seq,
+        contract_version: data["contract_version"],
+        selection: data["selection"],
+        source_identities: data["source_identities"],
+        answer: answer
+      }
+    else
+      unless messages == [], do: fail(:history_invalid)
+
+      if turn["status"] == "accepted" do
+        unless lease.status in ["leased", "running"] and is_nil(lease.revoked_at),
+          do: fail(:history_invalid)
+      else
+        unless lease.status == "cancelled" and not is_nil(lease.revoked_at),
+          do: fail(:history_invalid)
+      end
+
+      nil
+    end
+  end
+
+  defp history_span!(id, lower, upper, turns) do
+    expected =
+      turns
+      |> Enum.flat_map(fn turn -> if turn.answer, do: [turn.answer.message_id], else: [] end)
+      |> Enum.sort()
+
+    query =
+      from m in Message,
+        where: m.session_id == ^id and m.seq >= ^lower and m.seq <= ^upper and m.role != "user"
+
+    count = Repo.one(from m in query, select: count(m.id))
+    unexpected = Repo.exists?(from m in query, where: m.id not in ^expected)
+    unless count == length(expected) and not unexpected, do: fail(:history_invalid)
+  end
+
   def accept(scope, login, id, attrs) when is_map(attrs) do
     transaction(fn ->
       session = personal!(scope, login, id)
