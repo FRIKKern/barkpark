@@ -187,7 +187,9 @@ defmodule Barkpark.Content.Mutations do
     warnings = Barkpark.Content.Warnings.snapshot()
 
     try do
-      do_apply_mutations(mutations, dataset, opts)
+      mutations
+      |> do_apply_mutations(dataset, opts)
+      |> again_if_draft_forked_under(mutations, dataset, opts, warnings)
     rescue
       e in Ecto.StaleEntryError ->
         require Logger
@@ -207,6 +209,40 @@ defmodule Barkpark.Content.Mutations do
         end
     end
   end
+
+  # task-128cda41162676e3 — a patch on a published document with no draft forks
+  # `drafts.<id>` without the block-ops lock, so a field or block op that forked
+  # the same draft a moment earlier wins the INSERT and this batch gets its row in
+  # the unique index: a changeset error the controller can only answer as 422
+  # `invalid_op`. (The op side of the same race is block_ops.ex's to answer.) The
+  # document moved under the batch, so it runs ONCE more, as for a stale row
+  # above: the re-read finds the draft, so a patch fenced on the published rev is
+  # refused with the draft's rev (412 `precondition_failed`, `details.actual`),
+  # and an unfenced patch lands on the draft. Taking the block-ops lock here
+  # instead would order it after locks a multi-document batch already holds.
+  defp again_if_draft_forked_under(
+         {:error, %Ecto.Changeset{errors: errors}} = lost,
+         mutations,
+         dataset,
+         opts,
+         warnings
+       ) do
+    with {_, meta} <- Keyword.get(errors, :doc_id),
+         :unique <- Keyword.get(meta, :constraint) do
+      require Logger
+
+      Logger.warning(
+        "[Mutations] a concurrent writer forked the draft first; retrying the batch once"
+      )
+
+      Barkpark.Content.Warnings.restore(warnings)
+      do_apply_mutations(mutations, dataset, opts)
+    else
+      _ -> lost
+    end
+  end
+
+  defp again_if_draft_forked_under(result, _mutations, _dataset, _opts, _warnings), do: result
 
   defp do_apply_mutations(mutations, dataset, opts) do
     dry_run? = Keyword.get(opts, :dry_run, false) == true
