@@ -274,7 +274,7 @@ defmodule BarkparkWeb.SearchController do
 
     json(
       conn,
-      envelope
+      maybe_preview(envelope, conn, dataset, params, caller_context)
       |> Map.put(:searchEventId, search_event_id)
       |> Map.put(:ms, ms)
     )
@@ -809,4 +809,25 @@ defmodule BarkparkWeb.SearchController do
       "search-settings write requires a workspace-scoped token; this token has no workspace"
     )
   end
+
+  # `?preview=1` (task-75cb2cac1e875214): each hit carries its type's
+  # `list_preview` subtitle, description and media as `_preview`, the text the
+  # Studio desk row shows. The reference picker asks for it. Off by default, so
+  # every other caller's page is unchanged.
+  defp maybe_preview(%{documents: docs} = envelope, conn, dataset, %{"preview" => flag}, ctx)
+       when flag in ["1", "true"] and is_list(docs) do
+    %{
+      envelope
+      | documents:
+          Barkpark.Search.HitPreview.attach(
+            docs,
+            dataset,
+            scope_opts(conn),
+            schema_resolver(conn, dataset),
+            ctx
+          )
+    }
+  end
+
+  defp maybe_preview(envelope, _conn, _dataset, _params, _ctx), do: envelope
 end

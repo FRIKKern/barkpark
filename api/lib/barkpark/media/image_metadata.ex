@@ -91,7 +91,125 @@ defmodule Barkpark.Media.ImageMetadata do
     end
   end
 
+  # The reference shape, `{asset: {_ref}}` (task-7ea6f41cede5ee97). The Studio
+  # picker points a picked image at its asset DOCUMENT, `asset-<blob id>`.
+  # A site that reads Sanity's shape follows `asset._ref` as a Sanity image id
+  # (`@sanity/image-url` parses it, GROQ `asset->` resolves it), so the save
+  # writes the id Sanity would have: the media file's `source_id` when it is
+  # one (an imported Sanity asset, whose asset document has that id), else
+  # `image-<sha1>-<w>x<h>-<ext>` from the stored bytes, which
+  # `MediaController.serve_sanity_image` serves. A ref already in that form, or
+  # a blob that cannot be found or measured, is left as posted.
+  def backfill(%{"asset" => %{"_ref" => "asset-" <> _ = ref} = asset} = image, dataset, opts) do
+    case sanity_image_id(file_id(ref), dataset, scope(opts)) do
+      id when is_binary(id) -> Map.put(image, "asset", Map.put(asset, "_ref", id))
+      _ -> image
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "ImageMetadata.backfill #{ref}: #{Exception.message(e)} — value kept as posted"
+      )
+
+      image
+  end
+
+  def backfill(%{"asset" => %{"_ref" => "drafts.asset-" <> rest} = asset} = image, dataset, opts),
+    do: backfill(Map.put(image, "asset", Map.put(asset, "_ref", "asset-" <> rest)), dataset, opts)
+
   def backfill(other, _dataset, _opts), do: other
+
+  @sanity_image_id ~r/\Aimage-[0-9a-f]{40}-[1-9][0-9]*x[1-9][0-9]*-[a-z0-9]+\z/
+
+  @doc false
+  # The Sanity image id for a Barkpark media file, or nil.
+  def sanity_image_id(file_id, dataset, scope) do
+    with {:ok, %Media.Storage.MediaFile{} = file} <- Media.get_file(file_id, scope) do
+      cond do
+        is_binary(file.source_id) and Regex.match?(@sanity_image_id, file.source_id) ->
+          file.source_id
+
+        is_binary(file.sha1) and Regex.match?(~r/\A[0-9a-f]{40}\z/, file.sha1) ->
+          with {w, h} when is_integer(w) and is_integer(h) <-
+                 file_dimensions(file, dataset, scope),
+               ext when is_binary(ext) <- sanity_ext(file) do
+            "image-#{file.sha1}-#{w}x#{h}-#{ext}"
+          else
+            _ -> nil
+          end
+
+        true ->
+          nil
+      end
+    else
+      _ -> nil
+    end
+  end
+
+  @doc false
+  # The stored image's `{width, height}`: the asset document's `fileInfo`
+  # first, else a probe of the blob. Nil when neither answers.
+  def file_dimensions(file, dataset, scope) do
+    fi = asset_file_info(Media.asset_doc_for_file(file, dataset, scope))
+
+    case {int(Map.get(fi, "width")), int(Map.get(fi, "height"))} do
+      {w, h} when is_integer(w) and w > 0 and is_integer(h) and h > 0 ->
+        {w, h}
+
+      _ ->
+        with {:ok, path} <- Blobstore.ensure_local(file),
+             {:ok, %{width: w, height: h}} <- Probe.probe(path, file.mime_type) do
+          {w, h}
+        else
+          _ -> nil
+        end
+    end
+  end
+
+  # Sanity's extension for an image: its mime subtype, "jpg" for JPEG.
+  defp sanity_ext(%{mime_type: "image/jpeg"}), do: "jpg"
+  defp sanity_ext(%{mime_type: "image/svg+xml"}), do: "svg"
+
+  defp sanity_ext(%{mime_type: "image/" <> sub}) when sub != "",
+    do: if(Regex.match?(~r/\A[a-z0-9]+\z/, sub), do: sub, else: nil)
+
+  defp sanity_ext(_), do: nil
+
+  @doc """
+  Every declared image value in `params`, found by the same schema walk
+  `backfill_params/4` makes: top-level `image` fields, `arrayOf` of `image`,
+  and `image` subfields inside `composite` values.
+  """
+  @spec image_values(map(), map() | nil) :: [term()]
+  def image_values(params, schema) when is_map(params),
+    do: collect_fields(params, schema_fields(schema), [])
+
+  def image_values(_params, _schema), do: []
+
+  defp collect_fields(params, fields, acc) when is_map(params) do
+    Enum.reduce(fields, acc, fn field, acc ->
+      name = Map.get(field, "name")
+
+      case is_binary(name) and Map.fetch(params, name) do
+        {:ok, value} -> collect_value(field, value, acc)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp collect_fields(_params, _fields, acc), do: acc
+
+  defp collect_value(%{"type" => "image"}, value, acc), do: [value | acc]
+
+  defp collect_value(%{"type" => "arrayOf", "of" => of}, value, acc)
+       when is_map(of) and is_list(value),
+       do: Enum.reduce(value, acc, &collect_value(of, &1, &2))
+
+  defp collect_value(%{"type" => "composite", "fields" => subs}, value, acc)
+       when is_list(subs) and is_map(value),
+       do: collect_fields(value, subs, acc)
+
+  defp collect_value(_field, _value, acc), do: acc
 
   # ── the walk ────────────────────────────────────────────────────────────────
 
@@ -177,21 +295,31 @@ defmodule Barkpark.Media.ImageMetadata do
   # (lib/barkpark/media/storage/media_file.ex:5), the `@presets` key
   # `@lqip_preset` and that preset's own declared format. This call passes NO
   # opts, so `watermark_profile/1` yields "none" and the suffix is the empty
-  # string — no argument of `maybe_lqip/2` reaches any path component.
+  # string — no argument of `lqip_data_uri/1` reaches any path component.
   # `Media.file_path/1` (lib/barkpark/media.ex, `def file_path`) then joins that under
   # `Media.upload_dir/0`, so the read is confined to one file inside the
   # rendition cache root.
-  # sobelow_skip ["Traversal.FileModule"]
   defp maybe_lqip(image, file) do
     if blank?(Map.get(image, "lqip")) do
-      with {:ok, rel} <- Renditions.ensure(file, @lqip_preset),
-           {:ok, bytes} when byte_size(bytes) > 0 <- File.read(Media.file_path(rel)) do
-        Map.put(image, "lqip", "data:image/jpeg;base64," <> Base.encode64(bytes))
-      else
+      case lqip_data_uri(file) do
+        uri when is_binary(uri) -> Map.put(image, "lqip", uri)
         _ -> image
       end
     else
       image
+    end
+  end
+
+  @doc false
+  # The `lqip` rendition of `file` as a `data:` URI, or nil. The read is the
+  # one the reachability note above describes.
+  # sobelow_skip ["Traversal.FileModule"]
+  def lqip_data_uri(file) do
+    with {:ok, rel} <- Renditions.ensure(file, @lqip_preset),
+         {:ok, bytes} when byte_size(bytes) > 0 <- File.read(Media.file_path(rel)) do
+      "data:image/jpeg;base64," <> Base.encode64(bytes)
+    else
+      _ -> nil
     end
   end
 

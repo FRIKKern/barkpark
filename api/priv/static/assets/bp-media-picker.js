@@ -121,6 +121,35 @@ function bpLooksLikeUrl(s) {
   return typeof s === "string" && /^(\/|https?:\/\/|data:)/i.test(s);
 }
 
+// Sanity's image id, `image-<sha1>-<w>x<h>-<ext>` (task-7ea6f41cede5ee97).
+const BP_SANITY_IMAGE_ID = /^image-([0-9a-fA-F]{40})-([1-9][0-9]*)x([1-9][0-9]*)-([A-Za-z0-9]+)$/;
+
+// The URL Barkpark serves a Sanity image id from: the Sanity-compatible
+// `<scope>/images/<project>/<dataset>/<sha1>-<w>x<h>.<ext>` route
+// (MediaController.serve_sanity_image), which finds the media file by the id
+// or its sha1 and ignores the project segment. `w` asks for a smaller copy.
+// Null for any other id. Pure.
+function bpSanityImageUrl(ref, scopePrefix, dataset, width) {
+  const m = typeof ref === "string" ? ref.match(BP_SANITY_IMAGE_ID) : null;
+  if (!m) return null;
+  const file = m[1].toLowerCase() + "-" + m[2] + "x" + m[3] + "." + m[4].toLowerCase();
+  const url = (scopePrefix || "") + "/images/barkpark/" + encodeURIComponent(dataset || "production") + "/" + file;
+  return width ? url + "?w=" + width + "&fit=max" : url;
+}
+
+// The pixel size a Sanity image id states, or nulls.
+function bpSanityImageSize(ref) {
+  const m = typeof ref === "string" ? ref.match(BP_SANITY_IMAGE_ID) : null;
+  return m ? { width: Number(m[2]), height: Number(m[3]) } : { width: null, height: null };
+}
+
+// A value in the reference shape: `{asset: {_ref}, hotspot, crop, …}`
+// (docs/contracts/schema-v2.md "Stored value shapes"), what Sanity stores and
+// the gyldendal.no twin keeps (task-7ea6f41cede5ee97).
+function bpIsAssetRefValue(o) {
+  return !!(o && typeof o === "object" && o.asset && typeof o.asset === "object" && typeof o.asset._ref === "string");
+}
+
 function bpParseMediaValue(raw) {
   const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
   if (!raw || typeof raw !== "string") return empty;
@@ -128,6 +157,22 @@ function bpParseMediaValue(raw) {
   if (trimmed.startsWith("{")) {
     try {
       const o = JSON.parse(trimmed);
+      if (bpIsAssetRefValue(o)) {
+        const size = bpSanityImageSize(o.asset._ref);
+        const hs = o.hotspot && typeof o.hotspot === "object" ? o.hotspot : {};
+        return Object.assign({}, empty, {
+          url: typeof o.url === "string" ? o.url : "",
+          assetRef: o.asset._ref,
+          alt: typeof o.alt === "string" ? o.alt : "",
+          focalX: bpFocalCoord(hs.x),
+          focalY: bpFocalCoord(hs.y),
+          width: size.width,
+          height: size.height,
+          // The stored object itself: every key the picker does not edit
+          // (`_type`, `crop`, `caption`, a DAM status) is written back as is.
+          source: o
+        });
+      }
       return {
         url: o.url || "",
         assetId: bpCanonicalAssetId(o.assetId || o.id || ""),
@@ -174,13 +219,55 @@ function bpSerializeMediaValue(url, assetId, extra) {
   return JSON.stringify(o);
 }
 
+// Sanity's hotspot when only the focal point is known: the whole image is
+// the area, centred on the point (@sanity/image-url's default hotspot size).
+const BP_DEFAULT_HOTSPOT_SIZE = 1;
+
+// The stored value in the reference shape (task-7ea6f41cede5ee97):
+// `{_type, asset: {_ref, _type: "reference"}, hotspot, alt, …}`. It starts
+// from the stored object, so keys the picker does not edit (`_type`, `crop`,
+// `caption`, a DAM status) survive an alt or focal edit unchanged. A NEW image
+// drops `crop`, which belongs to the old pixels. No `url` or `assetId` is
+// added: a reader follows `asset._ref`. An empty ref is the empty value.
+function bpSerializeAssetRefValue(meta) {
+  const m = meta || {};
+  const ref = typeof m.assetRef === "string" ? m.assetRef : "";
+  if (ref === "") return "";
+  const src = m.source && typeof m.source === "object" ? m.source : {};
+  const same = bpIsAssetRefValue(src) && src.asset._ref === ref;
+  const o = Object.assign({}, src);
+  if (!o._type) o._type = "image";
+  o.asset = Object.assign({}, same ? src.asset : {}, { _ref: ref, _type: "reference" });
+  if (!same) delete o.crop;
+  const alt = typeof m.alt === "string" ? m.alt : "";
+  if (alt !== "") o.alt = alt;
+  else delete o.alt;
+  const fx = bpFocalCoord(m.focalX);
+  const fy = bpFocalCoord(m.focalY);
+  if (fx != null && fy != null) {
+    const prev = same && src.hotspot && typeof src.hotspot === "object" ? src.hotspot : {};
+    o.hotspot = Object.assign({ _type: "sanity.imageHotspot" }, prev, {
+      x: fx,
+      y: fy,
+      width: typeof prev.width === "number" ? prev.width : BP_DEFAULT_HOTSPOT_SIZE,
+      height: typeof prev.height === "number" ? prev.height : BP_DEFAULT_HOTSPOT_SIZE
+    });
+  } else {
+    delete o.hotspot;
+  }
+  return JSON.stringify(o);
+}
+
 class BpMediaPicker extends HTMLElement {
   constructor() {
     super();
     this._mounted = false;
     this._value = "";
     this._busy = false;
-    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "" };
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "", assetRef: "", source: null };
+    // Set once the field holds (or is declared to hold) the reference shape,
+    // so a Remove then a new pick keeps writing it.
+    this._assetRefShape = false;
   }
 
   connectedCallback() {
@@ -210,9 +297,30 @@ class BpMediaPicker extends HTMLElement {
       this._meta.width = parsed.width;
       this._meta.height = parsed.height;
       this._meta.lqip = parsed.lqip;
+      this._takeAssetRef(parsed);
     }
 
     this._render();
+  }
+
+  // The reference shape: remember the ref and the stored object, and find a
+  // preview. A Sanity image id maps to Barkpark's Sanity-compatible image URL
+  // with no request; a Barkpark asset document id is read like a mediaAsset
+  // reference.
+  _takeAssetRef(parsed) {
+    if (this.getAttribute("value-shape") === "asset-ref") this._assetRefShape = true;
+    this._meta.assetRef = parsed.assetRef || "";
+    this._meta.source = parsed.source || null;
+    if (!this._meta.assetRef) return;
+    this._assetRefShape = true;
+    if (this._meta.url) return;
+    const sanityUrl = bpSanityImageUrl(this._meta.assetRef, this._scopePrefix(), this._dataset(), 800);
+    if (sanityUrl) this._meta.url = sanityUrl;
+    else this._resolveReferencePreview(this._meta.assetRef);
+  }
+
+  _isAssetRefShape() {
+    return this._assetRefShape || this.getAttribute("value-shape") === "asset-ref";
   }
 
   // Gyldendal parity E1 — opt-in affordances on the DEFAULT variant only.
@@ -319,6 +427,7 @@ class BpMediaPicker extends HTMLElement {
       this._meta.width = parsed.width;
       this._meta.height = parsed.height;
       this._meta.lqip = parsed.lqip;
+      this._takeAssetRef(parsed);
     }
     this._renderPreview();
   }
@@ -348,6 +457,8 @@ class BpMediaPicker extends HTMLElement {
   _commitValue() {
     if (this._isReferenceMode()) {
       this._value = this._meta.assetId || "";
+    } else if (this._isAssetRefShape()) {
+      this._value = bpSerializeAssetRefValue(this._meta);
     } else {
       this._value = bpSerializeMediaValue(this._meta.url, this._meta.assetId, {
         alt: this._meta.alt,
@@ -546,7 +657,8 @@ class BpMediaPicker extends HTMLElement {
 
   _clearValue() {
     this._value = "";
-    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "" };
+    // The stored object goes with the image; the shape stays (_assetRefShape).
+    this._meta = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null, mime: "", assetRef: "", source: null };
     this._renderPreview();
     this._emit();
   }
@@ -835,7 +947,14 @@ class BpMediaPicker extends HTMLElement {
     // A NEW image resets the focal point (it belongs to the pixels); the alt
     // text the author typed survives a swap, else the library's own alt seeds it.
     const keptAlt = this._meta.alt && this._meta.alt !== "" ? this._meta.alt : file.alt || "";
+    const blobId = bpCanonicalAssetId(file.assetId || "");
+    // The reference shape points at the asset DOCUMENT (`asset-<blob id>`,
+    // docs/contracts/schema-v2.md); the save path turns it into the Sanity
+    // image id when the media file has one (Barkpark.Media.ImageMetadata).
+    const keptSource = this._meta.source;
     this._meta = {
+      assetRef: this._isAssetRefShape() && blobId ? "asset-" + blobId : "",
+      source: keptSource,
       url: file.url || "",
       assetId: bpCanonicalAssetId(file.assetId || ""),
       alt: keptAlt,
@@ -989,6 +1108,8 @@ if (typeof window !== "undefined") {
     showsActions: bpMediaPickerShowsActions,
     parseValue: bpParseMediaValue,
     serializeValue: bpSerializeMediaValue,
+    serializeAssetRefValue: bpSerializeAssetRefValue,
+    sanityImageUrl: bpSanityImageUrl,
     focalFromClick: bpMediaFocalFromClick
   };
 }

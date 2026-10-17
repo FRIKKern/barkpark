@@ -133,7 +133,7 @@ try {
   const search = fetches.find(({ options }) => options.method !== "POST");
   assert.equal(
     search.url,
-    "/w/default/p/default/v1/data/search/production?q=target&perspective=raw&limit=50&type=paper"
+    "/w/default/p/default/v1/data/search/production?q=target&perspective=raw&limit=50&preview=1&type=paper"
   );
 
   console.log("mounted public reference picker search/select/flush regression passed");

@@ -15,7 +15,7 @@ defmodule BarkparkWeb.GroqBenchTest do
   alias Barkpark.Test.GroqSyntheticProducts
 
   @moduletag :groq_bench
-  # 35 shapes, 10 runs each, twice, and several shapes take seconds on main.
+  # 39 shapes, 10 runs each, twice, and several shapes take seconds on main.
   @moduletag timeout: 1_800_000
   @moduletag ownership_timeout: 1_800_000
 
@@ -49,6 +49,37 @@ defmodule BarkparkWeb.GroqBenchTest do
                 {[_code], i} -> "$g#{i} in themaCodes"
                 {_codes, i} -> "count(themaCodes[@ in $g#{i}]) > 0"
               end)
+
+  # A category listing's filter, as the gyldendal.no twin sends it: the
+  # visibility checks, two display rules, the department fence (an
+  # equality), an `||` of rule groups (one code, 94 codes, 39 codes, 28
+  # codes, the /skjonnlitteratur sizes) and the sold-out rule.
+  @category ~s'#{@visible} && (onix.publicationStatus.value in $statuses || !defined(onix.publicationStatus.value)) && (onix.availability.value in $codes || !defined(onix.availability.value)) && department._ref == $dept && ($c0 in themaCodes || count(themaCodes[@ in $c1]) > 0 || count(themaCodes[@ in $c2]) > 0 || count(themaCodes[@ in $c3]) > 0) && (access.buyStatus != "sold_out" || isMainProduct == true)'
+  @category_params %{
+    "statuses" => ["04", "02", "08", "10"],
+    "codes" => [
+      "21",
+      "20",
+      "22",
+      "23",
+      "30",
+      "31",
+      "33",
+      "40",
+      "43",
+      "44",
+      "45",
+      "47",
+      "99",
+      "10"
+    ],
+    "dept" => "dept-big",
+    "c0" => "U3",
+    "c1" => Enum.map(0..93, &"T#{&1 * 7}"),
+    "c2" => Enum.map(0..38, &"T#{&1 * 11 + 1}"),
+    "c3" => Enum.map(0..27, &"T#{&1 * 13 + 2}")
+  }
+  @listing "{_id, isbn, title, description, themaCodes, seriesIds, onix, access, publishedAt}"
 
   @shapes [
     {"1 sibling editions, references(^._id) in ||",
@@ -169,7 +200,13 @@ defmodule BarkparkWeb.GroqBenchTest do
      %{"codes" => Enum.map(0..371, &"T#{&1}")}},
     {"35 hub row, 20 groups, 372 codes, != filters and an exclude",
      ~s'*[#{@visible} && (#{@hub_groups}) && (!defined(seriesIds) || !(count(seriesIds[@ in $ex]) > 0)) && onix.publicationStatus.value != "02"] | order(publishedAt desc)[0...30]._id',
-     @hub_params}
+     @hub_params},
+    {"36 category listing filter, count()", ~s'count(*[#{@category}])', @category_params},
+    {"37 category listing filter, ._id", ~s'*[#{@category}]._id', @category_params},
+    {"38 category listing filter | order() {listing keys}",
+     ~s'*[#{@category}] | order(publishedAt desc, isbn asc) #{@listing}', @category_params},
+    {"39 category listing filter {listing keys}", ~s'*[#{@category}] #{@listing}',
+     @category_params}
   ]
 
   setup do

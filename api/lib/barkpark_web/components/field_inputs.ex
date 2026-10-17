@@ -77,6 +77,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :scope_prefix, :string, default: ""
   attr :id_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document types an internal link in a Portable Text body may point at
+  # (`Shared.internal_link_types/3`). Empty: the link row takes an address only.
+  attr :link_types, :list, default: []
 
   # An OPTIONAL select whose stored value matches NO option must NOT drag its
   # first option into autosave. A native <select> always form-serializes SOME
@@ -250,7 +253,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       # Portable Text (owner ruling #44) edits as HTML in the contenteditable;
       # the save turns it back into blocks.
       blocks when name not in ["body", "blocks"] and is_list(blocks) and blocks != [] ->
-        if Barkpark.Content.PortableText.blocks?(blocks),
+        if Barkpark.Content.PortableText.value?(blocks),
           do:
             rich_text_editor(
               assign(assigns, n: name, v: Barkpark.Content.PortableText.to_html(blocks))
@@ -298,15 +301,37 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # only control the form posts; the nameless picker is the editor's view,
   # and `BarkparkDatetimeField` (priv/static/assets/bp-datetime-field.js)
   # converts between the two.
+  #
+  # The picker sits in a `phx-update="ignore"` span (task-cf45242ef3477fba).
+  # It has no `value` attribute, so every LiveView patch of the form reset it
+  # to "" right after the hook filled it, and the event dates read empty. The
+  # stored value also rides on the wrapper as `data-value`, so a new value from
+  # the server changes the wrapper and the hook's `updated` shows it.
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field" data-value={@v}>
       <input type="hidden" id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
-      <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+      <span id={"bp-dt-pick-#{@id_prefix}#{@n}"} phx-update="ignore" class="bp-datetime-picker">
+        <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+      </span>
     </div>
+    """
+  end
+
+  # A date is a calendar day with no time zone, stored as "YYYY-MM-DD" like
+  # Sanity's `date` (task-cf45242ef3477fba). It used to fall through to a text
+  # box. A native date picker posts the same format, so the stored value
+  # round-trips unchanged; `Forms.date_form_value/1` cuts a longer ISO value to
+  # its day for display, and an untouched field keeps the stored text.
+  def input(%{field: %{"type" => "date", "name" => name}} = assigns) do
+    val = Barkpark.Content.Forms.date_form_value(Map.get(assigns.editor_form, name, ""))
+    assigns = assign(assigns, n: name, v: val)
+
+    ~H"""
+    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="date" name={"doc[#{@n}]"} value={@v} class="form-input" aria-label={@field["title"] || @n} phx-debounce="300" />
     """
   end
 
@@ -392,14 +417,24 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # hit and on the selected pill. A single `refType` renders byte-identically.
   def input(%{field: %{"type" => "reference", "name" => name} = f} = assigns) do
     val = reference_id(Map.get(assigns.editor_form, name, ""))
-    assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
+    {filter, filter_params} = reference_filter_attrs(f, assigns.editor_form, assigns[:doc_key])
+
+    assigns =
+      assign(assigns,
+        n: name,
+        v: val,
+        ref_type: Enum.join(reference_types(f), ","),
+        ref_filter: filter,
+        ref_filter_params: filter_params
+      )
 
     ~H"""
-    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-filter-params={@ref_filter_params}>
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
         ref-type={@ref_type}
+        filter={@ref_filter}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-ref-hidden-#{@n}"}
@@ -423,7 +458,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
         n: name,
         v: val,
         hotspot: image_option?(f, "hotspot"),
-        alt: image_option?(f, "alt")
+        alt: image_option?(f, "alt"),
+        value_shape: image_value_shape(f)
       )
 
     ~H"""
@@ -435,6 +471,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
         scope-prefix={@scope_prefix}
         data-bridge-target={"bp-mp-hidden-#{@n}"}
         data-token={@api_token_raw}
+        value-shape={@value_shape}
         hotspot={@hotspot}
         alt={@alt}
       ></bp-media-picker>
@@ -609,6 +646,48 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def image_picker_flags(_), do: %{hotspot: nil, alt: nil}
 
+  @doc """
+  The value shape an EMPTY image field writes when an image is picked
+  (task-7ea6f41cede5ee97): `"asset-ref"` when the schema field declares
+  `"valueShape": "assetRef"` (also under `options`), so a pick writes Sanity's
+  `{asset: {_ref}}`; `nil` keeps the `{url, assetId}` value. A field that
+  already holds `{asset: {_ref}}` keeps that shape either way: the picker
+  reads it from the value.
+  """
+  @spec image_value_shape(map() | nil) :: String.t() | nil
+  def image_value_shape(%{"valueShape" => "assetRef"}), do: "asset-ref"
+  def image_value_shape(%{"options" => %{"valueShape" => "assetRef"}}), do: "asset-ref"
+  def image_value_shape(%{raw: %{} = raw}), do: image_value_shape(raw)
+  def image_value_shape(_), do: nil
+
+  @doc """
+  The URL Barkpark serves a Sanity image id from, `image-<sha1>-<w>x<h>-<ext>`
+  (task-7ea6f41cede5ee97): the Sanity-compatible
+  `<scope>/images/<project>/<dataset>/<sha1>-<w>x<h>.<ext>` route, which
+  ignores the project segment. `width` asks for a smaller copy. `nil` for any
+  other id. The same rule as `bpSanityImageUrl` in bp-media-picker.js.
+  """
+  @spec sanity_image_url(String.t(), String.t(), String.t(), pos_integer() | nil) ::
+          String.t() | nil
+  def sanity_image_url(ref, scope_prefix, dataset, width \\ nil)
+
+  def sanity_image_url(ref, scope_prefix, dataset, width) when is_binary(ref) do
+    case Regex.run(
+           ~r/\Aimage-([0-9a-fA-F]{40})-([1-9][0-9]*)x([1-9][0-9]*)-([A-Za-z0-9]+)\z/,
+           ref
+         ) do
+      [_, sha1, w, h, ext] ->
+        file = "#{String.downcase(sha1)}-#{w}x#{h}.#{String.downcase(ext)}"
+        url = "#{scope_prefix}/images/barkpark/#{URI.encode_www_form(dataset)}/#{file}"
+        if width, do: "#{url}?w=#{width}&fit=max", else: url
+
+      _ ->
+        nil
+    end
+  end
+
+  def sanity_image_url(_ref, _scope_prefix, _dataset, _width), do: nil
+
   # The picker's wire value is a STRING (a bare URL or a JSON object). A value
   # that was decoded into a map at the save boundary (Forms.coerce_field_value)
   # is re-encoded here so the same picker reads both.
@@ -634,11 +713,37 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp rich_text_label(_field, name), do: name
 
+  # With link types (task-088575052b459f3e) the editor also carries the
+  # dataset and scope its document picker searches in; without, the markup is
+  # unchanged.
+  #
+  # The outer div carries `BarkparkPtBlocks` (root.html.heex): it forwards the
+  # editor's "open this block" and "insert a block" events to the LiveView and
+  # hands the answers back, while the inner wrapper stays `phx-update="ignore"`
+  # so a re-render never resets what the author is typing
+  # (task-19392d1e6fc661e6). `data-block-types` lists the custom blocks the
+  # field's `blocks.of` declares, for the toolbar's "Insert block" menu.
   defp rich_text_editor(assigns) do
+    assigns =
+      assign(assigns,
+        block_types:
+          assigns.field
+          |> BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks.insertable_types()
+          |> Jason.encode!()
+      )
+
     ~H"""
-    <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
-      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}></bp-rich-text-editor>
+    <div id={"bp-pt-host-" <> doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-hook="BarkparkPtBlocks" data-field={@n}>
+      <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+        <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+        <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}
+          dataset={if @link_types != [], do: @dataset}
+          scope-prefix={if @link_types != [], do: @scope_prefix}
+          data-link-types={if @link_types != [], do: Enum.join(@link_types, ",")}
+          data-picker-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:reference)}
+          data-block-types={@block_types}
+        ></bp-rich-text-editor>
+      </div>
     </div>
     """
   end
@@ -724,6 +829,24 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def reference_id(%{"_ref" => ref}) when is_binary(ref), do: ref
   def reference_id(%{_ref: ref}) when is_binary(ref), do: ref
   def reference_id(_), do: ""
+
+  @doc """
+  The picker's filter attributes for a reference field (or an `arrayOf`
+  reference item): `{groq | nil, params_json | nil}` (task-281dfb5b6e350517).
+  The params are read from `root`, the form as it stands, and ride on the
+  picker's wrapper as `data-filter-params`. LiveView patches a data attribute
+  on a `phx-update="ignore"` container, so a `fromDocument` value follows edits.
+  """
+  def reference_filter_attrs(field, root, doc_id) do
+    case Barkpark.Content.ReferenceFilter.of(field) do
+      nil ->
+        {nil, nil}
+
+      %{filter: filter, params: spec} ->
+        params = Barkpark.Content.ReferenceFilter.params(spec, root, doc_id)
+        {filter, Jason.encode!(params)}
+    end
+  end
 
   @doc """
   Every target type a reference field may point at, in declaration order and

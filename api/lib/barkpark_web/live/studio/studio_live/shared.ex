@@ -19,6 +19,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   alias Barkpark.{Content, Tenancy}
   alias Barkpark.Content.Forms
   alias Barkpark.Content.Warnings
+  alias Barkpark.Media.SanityImageAssetDoc
   alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias BarkparkWeb.Presence
   alias BarkparkWeb.ScopeHelpers
@@ -534,6 +535,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     end
   end
 
+  # A saved image value whose `asset._ref` is a Sanity image id with no
+  # `sanityImageAsset` document yet gets one, so GROQ `asset->url` resolves
+  # (task-b3e57f301bd502d8). Only for a socket that may write in its own right:
+  # a reader seat writing under `readerWrites` creates no asset documents, and
+  # a grant-graded socket creates one only when its grants admit a write of
+  # that document. The draft is already saved; nothing here can fail it.
+  defp ensure_sanity_image_assets(socket, schema, saved_doc) do
+    unless Paper.write_denied?(socket) do
+      opts = hook_opts(socket)
+      ids = sanity_asset_ids(saved_doc, schema)
+
+      ids =
+        if Caps.grant_graded?(socket.assigns),
+          do:
+            Enum.reject(
+              ids,
+              &Paper.grant_target_denied?(socket, SanityImageAssetDoc.type_name(), &1)
+            ),
+          else: ids
+
+      SanityImageAssetDoc.ensure(ids, socket.assigns.dataset, opts)
+    end
+
+    :ok
+  rescue
+    e ->
+      Logger.warning("studio.sanity_image_assets: #{Exception.message(e)}")
+      :ok
+  end
+
+  defp sanity_asset_ids(%{content: content}, schema) when is_map(content),
+    do:
+      SanityImageAssetDoc.sanity_refs(Barkpark.Media.ImageMetadata.image_values(content, schema))
+
+  defp sanity_asset_ids(_doc, _schema), do: []
+
   defp autosave_write(socket, params, trigger) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
@@ -590,6 +627,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
              hook_opts(socket)
            ) do
         {:ok, saved_doc, errs} ->
+          ensure_sanity_image_assets(socket, schema, saved_doc)
+
           # The persisted title, not the posted one: a titleless type's column
           # is derived on write (Gyldendal parity E1.8), and the desk row must
           # show what the store holds.
@@ -694,11 +733,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       # ran the whole studio suite. A blank title always writes.
       blank_title?(doc) -> true
       params == %{} -> false
-      true -> Enum.any?(params, fn {k, v} -> Map.fetch(stored, k) != {:ok, v} end)
+      true -> Enum.any?(params, fn {k, v} -> changed_key?(stored, k, v) end)
     end
   end
 
   defp autosave_changes_something?(_doc, _schema, _params), do: true
+
+  # Two shapes the browser posts that are not changes (task-32d983d47299e137).
+  # LiveView adds an `_unused_<name>` key beside every input the author has not
+  # touched; it is bookkeeping, never a value. And a reference picker posts the
+  # bare id of a reference the store keeps as `{_ref, _type, _weak}`; the same
+  # id is the same reference.
+  defp changed_key?(_stored, "_unused_" <> _, _v), do: false
+
+  defp changed_key?(stored, k, v) do
+    case Map.fetch(stored, k) do
+      {:ok, s} -> not same_value?(s, v)
+      :error -> true
+    end
+  end
+
+  defp same_value?(a, a), do: true
+
+  defp same_value?(%{"_ref" => id}, id) when is_binary(id), do: true
+  defp same_value?(id, %{"_ref" => id}) when is_binary(id), do: true
+
+  defp same_value?(%{"_ref" => id, "_type" => "reference"}, %{
+         "_ref" => id,
+         "_type" => "reference"
+       }),
+       do: true
+
+  defp same_value?(a, b) when is_list(a) and is_list(b) and length(a) == length(b),
+    do: a |> Enum.zip(b) |> Enum.all?(fn {x, y} -> same_value?(x, y) end)
+
+  defp same_value?(_a, _b), do: false
 
   # The stored document as the form the browser was handed. Read TOTALLY: a
   # pane doc is a `%Content.Document{}` on the live path but a bare map in the
@@ -1567,7 +1636,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         _ -> []
       end
 
-    Path.field_at(fields, path)
+    # The form value rides along so a path through a several-member array
+    # resolves the member each row's `_type` names (task-e24e33a2a1a4fe10).
+    Path.field_at(fields, path, socket.assigns[:editor_form] || %{})
   end
 
   # THE EDITOR CLAMP FOR A NON-EDITING VIEWER (task-df2ea2e004ff4caf).
@@ -1604,6 +1675,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   defp redact_editor_for_viewer(editor, _socket), do: editor
+
+  @doc """
+  The document types an internal link in a Portable Text body of `schema` may
+  point at (task-088575052b459f3e): the `to` of the `internalLink` reference on
+  the dataset's `linkAnnotation` object type, else on its `link` type. The
+  gyldendal.no twin declares `link` with nine types, the set its Sanity
+  `linkAnnotation` links to. `[]` when `schema` has no top-level `richText`
+  field or the dataset declares neither type; the editor's link row then takes
+  an address only.
+  """
+  @spec internal_link_types(map() | nil, String.t(), keyword()) :: [String.t()]
+  def internal_link_types(schema, dataset, opts) do
+    if rich_text_field?(schema) do
+      Enum.find_value(~w(linkAnnotation link), [], &link_target_types(&1, dataset, opts))
+    else
+      []
+    end
+  end
+
+  defp rich_text_field?(%{fields: fields}) when is_list(fields),
+    do: Enum.any?(fields, &match?(%{"type" => "richText"}, &1))
+
+  defp rich_text_field?(_schema), do: false
+
+  defp link_target_types(name, dataset, opts) do
+    with {:ok, %{fields: fields}} when is_list(fields) <- Content.get_schema(name, dataset, opts),
+         %{} = field <-
+           Enum.find(fields, &match?(%{"name" => "internalLink", "type" => "reference"}, &1)),
+         [_ | _] = types <- BarkparkWeb.Components.FieldInputs.reference_types(field) do
+      types
+    else
+      _ -> nil
+    end
+  end
 
   @doc false
   def rebuild_panes(socket) do
@@ -1667,6 +1772,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         panes: panes,
         editor_doc: editor_doc,
         editor_schema: new_schema,
+        editor_link_types:
+          if(same_doc? and is_list(socket.assigns[:editor_link_types]),
+            do: socket.assigns[:editor_link_types],
+            else:
+              internal_link_types(
+                new_schema,
+                socket.assigns.dataset,
+                ScopeHelpers.scope_opts(socket)
+              )
+          ),
         editor_type: editor_type,
         editor_is_draft: is_draft,
         editor_has_published: has_published,

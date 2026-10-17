@@ -1738,6 +1738,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     is_draft={item.is_draft}
                     badge={item[:badge]}
                     meta={item[:meta] || item[:updated]}
+                    description={item[:description]}
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
@@ -2139,6 +2140,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         secondary_schema={@secondary_schema}
         secondary_type={@secondary_type}
         width_bucket={@width_bucket}
+      />
+
+      <!-- Custom Portable Text block dialog (task-19392d1e6fc661e6) -->
+      <BarkparkWeb.Components.Fields.ObjectForm.block_dialog
+        dialog={Map.get(assigns, :object_dialog)}
+        dataset={@dataset}
+        scope_prefix={Map.get(assigns, :scope_prefix) || ""}
+        api_token_raw={Map.get(assigns, :api_token_raw) || ""}
       />
 
       <!-- E2 secondary picker modal -->

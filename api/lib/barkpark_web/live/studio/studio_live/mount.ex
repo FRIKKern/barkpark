@@ -266,6 +266,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       secondary_schema: nil,
       secondary_type: nil,
       show_secondary_picker: false,
+      object_dialog: nil,
       secondary_search: "",
       secondary_candidates: [],
       # E3 bulk publish: per-pane multi-select MapSet of published ids.

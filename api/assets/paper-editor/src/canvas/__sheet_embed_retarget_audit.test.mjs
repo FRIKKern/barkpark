@@ -625,7 +625,7 @@ try {
     assert.ok(sheetSearch, "the picker issued no search fetch");
     assert.equal(
       sheetSearch.url,
-      "/w/default/p/default/v1/data/search/production?q=q4&perspective=raw&limit=50&type=sheet",
+      "/w/default/p/default/v1/data/search/production?q=q4&perspective=raw&limit=50&preview=1&type=sheet",
     );
     assert.equal(
       sheetSearch.options.credentials,
@@ -744,7 +744,7 @@ try {
     assert.ok(paperSearch, "the embed picker issued no search fetch");
     assert.equal(
       paperSearch.url,
-      "/w/default/p/default/v1/data/search/production?q=retro&perspective=raw&limit=50&type=paper",
+      "/w/default/p/default/v1/data/search/production?q=retro&perspective=raw&limit=50&preview=1&type=paper",
     );
     assert.equal(
       paperSearch.options.credentials,

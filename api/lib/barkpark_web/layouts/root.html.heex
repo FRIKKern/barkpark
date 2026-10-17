@@ -3671,6 +3671,16 @@
     .bp-rte-btn:hover { background: var(--bg-accent); color: var(--fg); }
     .bp-rte-linkrow { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
     .bp-rte-linkrow[hidden] { display: none; }
+    /* With Internal / External (task-088575052b459f3e) the row takes its own
+       line: the document picker needs the width. */
+    .bp-rte-linkrow-kinds { flex-basis: 100%; flex-wrap: wrap; margin-left: 0; padding: 4px 0 2px; }
+    .bp-rte-kinds { display: inline-flex; gap: 2px; }
+    .bp-rte-kind[aria-pressed="true"] { background: var(--bg-accent); color: var(--fg); border-color: var(--input); }
+    .bp-rte-internal { flex: 1 1 320px; min-width: 0; }
+    .bp-rte-internal[hidden], .bp-rte-external[hidden] { display: none; }
+    .bp-rte-external { display: inline-flex; align-items: center; gap: 4px; }
+    /* The row's own Remove unlinks; the picker's would only empty the picker. */
+    .bp-rte-internal .ref-selected .btn-destructive { display: none; }
     .bp-rte-url {
       width: 220px; height: 24px; padding: 0 8px;
       border: 1px solid var(--input); border-radius: 4px;
@@ -3678,6 +3688,28 @@
     }
     .bp-rte-body { min-height: 60px; padding: 8px; outline: none; }
     .bp-rte-body a { color: var(--primary); text-decoration: underline; }
+    .bp-rte-toolbar { flex-wrap: wrap; }
+    .bp-rte-body ul { list-style: disc; padding-left: 1.5em; margin: 4px 0; }
+    .bp-rte-body ol { list-style: decimal; padding-left: 1.5em; margin: 4px 0; }
+    .bp-rte-sep { width: 1px; align-self: stretch; margin: 2px 4px; background: var(--border-muted); }
+    /* A Portable Text custom block (mediaModule, quote, ...) inside the text:
+       an inert box naming its type, kept in place on save. */
+    .bp-rte-body .bp-pt-block {
+      margin: 8px 0; padding: 6px 10px; border: 1px dashed var(--input); border-radius: 6px;
+      background: var(--bg-accent); color: var(--fg-muted); font-size: var(--text-sm);
+      user-select: none;
+    }
+    .bp-rte-body .bp-pt-block strong { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-xs); }
+    /* A block box opens its fields on click or Enter (task-19392d1e6fc661e6). */
+    .bp-rte-body .bp-pt-block[data-pt-decorated] { cursor: pointer; }
+    .bp-rte-body .bp-pt-block[data-pt-decorated]:hover { border-color: var(--primary); color: var(--fg); }
+    .bp-rte-body .bp-pt-block[data-pt-decorated]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+    .bp-rte-body .bp-pt-pending { opacity: 0.6; }
+    .bp-rte-insert {
+      height: 24px; padding: 0 6px;
+      border: 1px solid var(--input); border-radius: 4px;
+      background: var(--bg); color: var(--fg); font-size: var(--text-xs);
+    }
     bp-reference-picker { display: block; }
     bp-reference-picker .bp-ref-search-input { width: 100%; }
     bp-reference-picker .bp-ref-dropdown {
@@ -3694,6 +3726,19 @@
       border-bottom: 1px solid var(--border-muted);
     }
     bp-reference-picker .bp-ref-dropdown-item:hover { background: var(--bg-accent); }
+    /* A hit with a list preview (task-75cb2cac1e875214) reads like its desk
+       row: thumbnail, title, subtitle and description lines. */
+    bp-reference-picker .bp-ref-dropdown-item.bp-ref-hit { display: flex; align-items: center; gap: 10px; }
+    bp-reference-picker .bp-ref-hit-media {
+      width: 28px; height: 28px; border-radius: 4px; flex-shrink: 0; overflow: hidden;
+      display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
+    }
+    bp-reference-picker .bp-ref-hit-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    bp-reference-picker .bp-ref-hit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    bp-reference-picker .bp-ref-hit-sub {
+      font-size: var(--text-xs); color: var(--fg-muted);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
     bp-reference-picker .bp-ref-dropdown-empty {
       padding: 8px 12px; font-size: var(--text-sm); color: var(--fg-dim);
     }
@@ -3958,6 +4003,12 @@
     }
     .bp-array-row-body { flex: 1; min-width: 0; }
     .bp-array-row-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+    /* An array of select values: one checkbox per option (task-b8bce68623e758ae). */
+    .bp-select-list-options { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+    .bp-select-list-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+    .bp-select-list-option { display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); cursor: pointer; }
+    .bp-select-list-option input[type="checkbox"] { width: 16px; height: 16px; margin: 0; flex-shrink: 0; }
+    .bp-select-list-invalid .error { font-size: var(--text-xs); }
     /* Checklist progress badge (lvw-t6): "m/n met" next to the arrayOf legend
        when the element composite carries a boolean `met` subfield (the task
        schema's acceptance_criteria). Render-only metadata. */
@@ -3993,6 +4044,18 @@
       background: hsl(var(--primary-hsl) / 0.08);
       border-color: var(--primary); border-style: solid;
     }
+
+    /* "Add item" of a several-member array: a menu of the member types. */
+    .bp-array-add-menu > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
+    .bp-array-add-menu > summary::-webkit-details-marker { display: none; }
+    .bp-array-add-members {
+      display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none;
+    }
+    .bp-array-add-member {
+      height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); color: var(--fg); font-size: var(--text-sm); cursor: pointer;
+    }
+    .bp-array-add-member:hover { background: var(--bg-accent); border-color: var(--primary); }
 
     /* LocalizedText rows */
     .bp-localized-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
@@ -4149,6 +4212,15 @@
     }
     .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
     .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
+    /* The Portable Text block dialog: wider than a picker, the fields scroll
+       and Cancel and Save stay in view (task-19392d1e6fc661e6). */
+    .bp-object-dialog { width: min(720px, 100%); max-height: min(88vh, 900px); }
+    .bp-object-dialog > form { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+    .bp-object-dialog-body { flex: 1 1 auto; min-height: 0; }
+    .bp-object-dialog-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+      padding: 12px 20px; border-top: 1px solid var(--border-muted);
+    }
 
     /* Schema-action confirm modal (spd-w5f). `components/confirm_modal.ex`
        carried this whole surface in a `style="…"` attribute: `position: fixed;
@@ -5460,8 +5532,8 @@
   <script src="/assets/bp-tab-keys.js"></script>
   <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
         nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
-        delegates to `window.BarkparkDatetimeFieldHook` and waits for
-        DOMContentLoaded, which fires only after deferred scripts have run. --%>
+        delegates to `window.BarkparkDatetimeFieldHook` and waits until this
+        script has run when it mounts first (task-cf45242ef3477fba). --%>
   <script src="/assets/bp-datetime-field.js" defer></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
@@ -6677,6 +6749,42 @@
     // subfields always show); `updated()` re-applies the choice after every
     // LiveView patch so an autosave never snaps the author back to tab one.
     // Every subfield stays in the DOM, so the form serialises the whole object.
+    // BarkparkPtBlocks — the Classic rich-text editor's custom Portable Text
+    // blocks (task-19392d1e6fc661e6). Mounted on the div around the ignored
+    // editor wrapper. A click on a block box (`bp-pt-block-open`) asks the
+    // server to open that block's fields in the block dialog; "Insert block"
+    // (`bp-pt-block-insert`) asks it for a new block at the caret. The server
+    // answers `bp:pt-block-ready` (put the new block's box where the
+    // placeholder is) and `bp:pt-block-update` (redraw a saved block's box).
+    Hooks.BarkparkPtBlocks = {
+      mounted() {
+        const field = this.el.dataset.field;
+        const editor = () => this.el.querySelector("bp-rich-text-editor");
+        this._onOpen = (e) => {
+          const d = e.detail || {};
+          this.pushEvent("pt-block-open", { field, key: d.key, html: d.html });
+        };
+        this._onInsert = (e) => {
+          const d = e.detail || {};
+          this.pushEvent("pt-block-insert", { field, type: d.type, pending: d.pending, html: d.html });
+        };
+        this.el.addEventListener("bp-pt-block-open", this._onOpen);
+        this.el.addEventListener("bp-pt-block-insert", this._onInsert);
+        this.handleEvent("bp:pt-block-ready", (p) => {
+          const ed = editor();
+          if (p.field === field && ed && ed.ptBlockReady) ed.ptBlockReady(p.pending, p.key, p.html);
+        });
+        this.handleEvent("bp:pt-block-update", (p) => {
+          const ed = editor();
+          if (p.field === field && ed && ed.ptBlockUpdate) ed.ptBlockUpdate(p.key, p.html);
+        });
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-pt-block-open", this._onOpen);
+        this.el.removeEventListener("bp-pt-block-insert", this._onInsert);
+      },
+    };
+
     Hooks.BarkparkFieldGroups = {
       mounted() {
         this.active = this.el.dataset.defaultGroup || null;
@@ -6709,27 +6817,74 @@
 
     // BarkparkDatetimeField — a datetime field shows local wall time and
     // saves a UTC instant ("...Z"). The logic lives in the deferred
-    // /assets/bp-datetime-field.js; this entry delegates to it, waiting for
-    // DOMContentLoaded (after every deferred script) if it is not there yet.
+    // /assets/bp-datetime-field.js; this entry delegates to it.
+    //
+    // The hook can mount BEFORE that script has run (task-cf45242ef3477fba):
+    // LiveView joins while the document is "interactive", which is before
+    // deferred scripts execute, and on gyl the event pickers stayed empty
+    // because the old entry ran once, found no implementation and never
+    // retried. So a call made before the implementation exists waits for it:
+    // the script's load event, DOMContentLoaded, window load, or a short poll,
+    // whichever sees it first. Only `mounted` waits; an `updated` before that
+    // is dropped (mounted reads the current value anyway), and a `destroyed`
+    // before that cancels the wait.
+    // bp-deferred-hook:start
     Hooks.BarkparkDatetimeField = (() => {
+      const GLOBAL = "BarkparkDatetimeFieldHook";
+      const SCRIPT = 'script[src^="/assets/bp-datetime-field.js"]';
+      let waiting = null;
+      const whenReady = (cb) => {
+        if (window[GLOBAL]) return cb();
+        if (!waiting) {
+          waiting = [];
+          let timer = null;
+          let tries = 0;
+          const flush = () => {
+            if (!window[GLOBAL] || !waiting) return;
+            const queued = waiting;
+            waiting = null;
+            if (timer) clearInterval(timer);
+            queued.forEach((fn) => fn());
+          };
+          const el = document.querySelector(SCRIPT);
+          if (el) el.addEventListener("load", flush, { once: true });
+          document.addEventListener("DOMContentLoaded", flush, { once: true });
+          window.addEventListener("load", flush, { once: true });
+          // The poll covers a script that ran before the listeners above
+          // were added. It stops after 30 s.
+          timer = setInterval(() => {
+            tries += 1;
+            if (window[GLOBAL]) flush();
+            else if (tries > 600) clearInterval(timer);
+          }, 50);
+        }
+        waiting.push(cb);
+      };
       const call = (name, self) => {
-        const run = () => {
-          const impl = window.BarkparkDatetimeFieldHook;
-          if (!impl || !impl[name]) return;
-          // The implementation's private helpers (`_sync`, `_hidden`, …)
-          // ride on `this`, as they would for a directly registered hook.
-          for (const k of Object.keys(impl)) if (k.startsWith("_")) self[k] = impl[k];
-          impl[name].call(self);
-        };
-        if (window.BarkparkDatetimeFieldHook || document.readyState !== "loading") run();
-        else document.addEventListener("DOMContentLoaded", run, { once: true });
+        const impl = window[GLOBAL];
+        if (!impl || !impl[name]) return;
+        // The implementation's private helpers (`_sync`, `_hidden`, …)
+        // ride on `this`, as they would for a directly registered hook.
+        for (const k of Object.keys(impl)) if (k.startsWith("_")) self[k] = impl[k];
+        impl[name].call(self);
       };
       return {
-        mounted() { call("mounted", this); },
-        updated() { call("updated", this); },
-        destroyed() { call("destroyed", this); }
+        mounted() {
+          this.__bpLive = true;
+          whenReady(() => {
+            if (!this.__bpLive) return;
+            this.__bpMounted = true;
+            call("mounted", this);
+          });
+        },
+        updated() { if (this.__bpMounted) call("updated", this); },
+        destroyed() {
+          this.__bpLive = false;
+          if (this.__bpMounted) call("destroyed", this);
+        }
       };
     })();
+    // bp-deferred-hook:end
 
     // BarkparkColorField — keeps an OPTIONAL color field from autosaving a
     // phantom hex. Mounted on the wrapper holding a hidden <input> (the only

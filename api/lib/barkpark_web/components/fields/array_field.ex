@@ -31,7 +31,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
-  alias BarkparkWeb.Components.Fields.{CodelistField, CompositeField, LocalizedTextField}
+  alias BarkparkWeb.Components.Fields.{
+    CodelistField,
+    CompositeField,
+    LocalizedTextField,
+    ObjectForm
+  }
 
   attr :field, :map, required: true
   attr :value, :list, default: []
@@ -61,7 +66,180 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # instead of the parent LiveView.
   attr :target, :any, default: nil
 
+  # Several named member types (`field.of_types`, Sanity's page-builder
+  # array, such as `page.landingPageSections`). Each row opens in the form of
+  # the member its `_type` names (`ObjectForm`), with `_type` and `_key` as
+  # hidden inputs beside the fields. Rows move up and down, are removed, and
+  # "Add item" asks which member to add (task-e24e33a2a1a4fe10). A row whose
+  # `_type` names no declared member shows its JSON and is saved unchanged.
+  def array_field(%{field: %{of_types: %{} = types}} = assigns) when map_size(types) > 0 do
+    path = assigns[:path] || ""
+
+    assigns =
+      assigns
+      |> Map.put_new(:value, [])
+      |> Map.put_new(:errors, %{})
+      |> Map.put_new(:warnings, %{})
+      |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:on_reorder, "array_op")
+      |> Map.put_new(:plugin_name, "core")
+      |> Map.put_new(:readonly, false)
+      |> Map.put_new(:target, nil)
+      |> Map.put(:path, path)
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
+      |> Map.put(:ordered?, true)
+      |> Map.put(:rows, typed_rows(assigns.field, types, assigns[:value] || [], path))
+      |> Map.put(:members, member_choices(assigns.field, types))
+      |> Map.put(:dom_id, "bp-array-" <> sanitize_id("#{assigns.field.name}#{path}"))
+
+    ~H"""
+    <fieldset class="bp-field bp-field-array" data-field-type="arrayOf" data-typed-array
+              id={@dom_id} data-field-name={@field.name}>
+      <legend class="bp-field-title"><%= @title %></legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
+      <ol class="bp-array-rows">
+        <li :for={row <- @rows} class="bp-array-row bp-array-row-item" data-row-index={row.idx}
+            data-member-type={row.type} data-row-key={row.key}>
+          <div class="bp-array-row-body">
+            <.item_row
+              item={row.member}
+              idx={row.idx}
+              preview={row.preview}
+              open={row.fresh? or row_findings?(assigns, row.idx)}
+              row_id={row.row_id}
+              body={
+                ObjectForm.object_form(%{
+                  member: row.member,
+                  value: row.value,
+                  path: row.path,
+                  errors: row_subfield_errors(@errors, row.idx),
+                  warnings: row_subfield_errors(@warnings, row.idx),
+                  on_change: @on_change,
+                  on_reorder: @on_reorder,
+                  target: @target,
+                  plugin_name: @plugin_name,
+                  readonly: @readonly,
+                  dataset: assigns[:dataset] || "production",
+                  scope_prefix: assigns[:scope_prefix] || "",
+                  api_token_raw: assigns[:api_token_raw] || "",
+                  root: assigns[:root]
+                })
+              }
+            />
+          </div>
+          <div class="bp-array-row-actions">
+            <button type="button" class="bp-array-btn bp-array-btn-up" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="move_up" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-index={row.idx}
+              disabled={@readonly or row.idx == 0} aria-label={gettext("Move up")}>▲</button>
+            <button type="button" class="bp-array-btn bp-array-btn-down" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="move_down" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-index={row.idx}
+              disabled={@readonly or row.idx == length(@rows) - 1} aria-label={gettext("Move down")}>▼</button>
+            <button type="button" class="bp-array-btn bp-array-btn-remove" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="remove_row" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-index={row.idx}
+              disabled={@readonly} aria-label={gettext("Remove row")}>×</button>
+          </div>
+          <%= for err <- row_errors(@errors, row.idx) do %>
+            <span class="error" data-error-for-row={row.idx}><%= err %></span>
+          <% end %>
+          <%= for warn <- row_errors(@warnings, row.idx) do %>
+            <span class="warning" role="note" data-warning-for-row={row.idx}><%= warn %></span>
+          <% end %>
+        </li>
+      </ol>
+      <p :if={@rows == []} class="bp-field-description"><%= gettext("No items") %></p>
+      <details :if={!@readonly} class="bp-array-add-menu" data-add-member-menu>
+        <summary class="bp-array-btn bp-array-btn-add">+ <%= gettext("Add item") %></summary>
+        <ul class="bp-array-add-members" role="list">
+          <li :for={m <- @members}>
+            <button type="button" class="bp-array-add-member" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="add_row" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-member={m.name}
+              data-member={m.name}><%= m.title %></button>
+          </li>
+        </ul>
+      </details>
+    </fieldset>
+    """
+  end
+
   def array_field(assigns) do
+    if select_list?(assigns.field),
+      do: select_list(assigns),
+      else: row_list(assigns)
+  end
+
+  # An array of `select` values is Sanity's array of strings with
+  # `options.list` (task-b8bce68623e758ae): one checkbox per option, with the
+  # option's title, in option order. Every checkbox posts `<path>[]`, so the
+  # form sends a list in option order; the leading hidden "" keeps the key in
+  # the post when nothing is ticked, and `Content.Forms` drops it. A stored
+  # value that is not an option is listed after the options, ticked and marked
+  # invalid, so it stays until the editor unticks it.
+  defp select_list(assigns) do
+    item = element_field(assigns.field)
+    options = Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options))
+    values = Enum.map(assigns[:value] || [], &leaf_display/1)
+    known = Enum.map(options, & &1.value)
+    path = Map.get(assigns, :path, "")
+
+    assigns =
+      assigns
+      |> Map.put_new(:readonly, false)
+      |> Map.put_new(:on_change, nil)
+      |> Map.put(:title, title_for(assigns.field))
+      |> Map.put(:description, CompositeField.description_for(assigns.field))
+      |> Map.put(:path, path)
+      |> Map.put(:dom_id, "bp-array-" <> sanitize_id("#{assigns.field.name}#{path}"))
+      |> Map.put(:options, Enum.map(options, &Map.put(&1, :checked, &1.value in values)))
+      |> Map.put(:unknown, values |> Enum.reject(&(&1 in known or &1 == "")) |> Enum.uniq())
+      |> Map.put(:grid, select_layout(assigns.field) == "grid")
+
+    ~H"""
+    <fieldset class="bp-field bp-field-array bp-select-list" data-field-type="arrayOf"
+              data-array-kind="select" id={@dom_id} data-field-name={@field.name}>
+      <legend class="bp-field-title"><%= @title %></legend>
+      <p :if={@description} class="bp-field-description"><%= @description %></p>
+      <input type="hidden" name={@path <> "[]"} value="" />
+      <div class={"bp-select-list-options" <> if(@grid, do: " bp-select-list-grid", else: "")}>
+        <label :for={o <- @options} class="bp-select-list-option">
+          <input type="checkbox" name={@path <> "[]"} value={o.value} checked={o.checked}
+                 phx-change={@on_change} disabled={@readonly} />
+          <span><%= o.label %></span>
+        </label>
+        <label :for={v <- @unknown} class="bp-select-list-option bp-select-list-invalid" data-invalid-value={v}>
+          <input type="checkbox" name={@path <> "[]"} value={v} checked aria-invalid="true"
+                 phx-change={@on_change} disabled={@readonly} />
+          <span><code><%= v %></code></span>
+          <span class="error" role="note"><%= gettext("Not one of the options") %></span>
+        </label>
+      </div>
+    </fieldset>
+    """
+  end
+
+  defp select_list?(field) do
+    item = element_field(field)
+
+    subfield_attr(item, :type) == "select" and
+      Barkpark.Content.SelectOptions.normalize(subfield_attr(item, :options)) != []
+  end
+
+  # Sanity's `options.layout` on the array ("grid" draws the options in columns).
+  defp select_layout(field) do
+    raw = subfield_attr(field, :raw) || %{}
+
+    case raw do
+      %{"layout" => layout} -> layout
+      %{"options" => %{"layout" => layout}} -> layout
+      _ -> nil
+    end
+  end
+
+  defp row_list(assigns) do
     assigns =
       assigns
       |> Map.put_new(:value, [])
@@ -213,7 +391,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       # composite itself renders `bare` inside; three feature cards read as
       # three one-line rows instead of six thousand pixels of raw inputs.
       "composite" ->
-        preview = item_preview(item, row_value)
+        preview = item_preview(item, row_value, preview_ctx(assigns))
 
         item_row(%{
           item: item,
@@ -239,7 +417,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               dataset: assigns[:dataset] || "production",
               scope_prefix: assigns[:scope_prefix] || "",
               api_token_raw: assigns[:api_token_raw] || "",
-              root: assigns[:root]
+              root: assigns[:root],
+              on_reorder: assigns[:on_reorder] || "array_op",
+              target: assigns[:target]
             })
         })
 
@@ -259,7 +439,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           preview: %{
             title: image_row_title(map, item),
             subtitle: nil,
-            media: media_url(map)
+            media: media_url(map, preview_ctx(assigns))
           },
           open: map == %{},
           row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
@@ -270,6 +450,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               row_value: if(map == %{}, do: "", else: Jason.encode!(map)),
               hotspot: image_opt(opts, "hotspot"),
               alt: image_opt(opts, "alt"),
+              value_shape: BarkparkWeb.Components.FieldInputs.image_value_shape(opts),
               dataset: assigns[:dataset] || "production",
               scope_prefix: assigns[:scope_prefix] || "",
               api_token_raw: assigns[:api_token_raw] || "",
@@ -320,7 +501,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         # internal DOM to the id, so a reorder/selection that changes the
         # row's value changes the id too → LiveView swaps in a fresh wrapper
         # rendering the right value instead of leaving a stale ignored node.
+        {ref_filter, ref_filter_params} =
+          BarkparkWeb.Components.FieldInputs.reference_filter_attrs(item, assigns[:root], nil)
+
         reference_row(%{
+          ref_filter: ref_filter,
+          ref_filter_params: ref_filter_params,
           wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
           row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
@@ -376,7 +562,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # url, subtitle nil. An empty row reads as the element's title ("Feature-
   # kort") so a freshly added card is named before it has content.
   @doc false
-  def item_preview(item, row_value) do
+  def item_preview(item, row_value, ctx \\ %{}) do
     row = if is_map(row_value), do: row_value, else: %{}
     spec = (subfield_attr(item, :raw) || %{}) |> Map.get("preview") || %{}
     subs = (Map.get(item, :fields) || []) |> Enum.reject(&is_nil/1)
@@ -390,7 +576,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     %{
       title: title,
       subtitle: pick(row, spec["subtitle"]),
-      media: media_url(pick(row, spec["media"]) || first_image(row, subs))
+      media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx)
     }
   end
 
@@ -431,10 +617,24 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end)
   end
 
-  # A picker value is a bare URL or a JSON/map {url, assetId, …}.
-  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
+  # Where a Sanity image id is served from: the field's dataset and scope.
+  defp preview_ctx(assigns),
+    do: %{dataset: assigns[:dataset] || "production", scope_prefix: assigns[:scope_prefix] || ""}
 
-  defp media_url(v) when is_binary(v) do
+  # A picker value is a bare URL or a JSON/map {url, assetId, …}, or the
+  # reference shape {asset: {_ref}} (task-7ea6f41cede5ee97).
+  defp media_url(%{"url" => url}, _ctx) when is_binary(url) and url != "", do: url
+
+  defp media_url(%{"asset" => %{"_ref" => ref}}, ctx) when is_binary(ref) do
+    BarkparkWeb.Components.FieldInputs.sanity_image_url(
+      ref,
+      Map.get(ctx, :scope_prefix, ""),
+      Map.get(ctx, :dataset, "production"),
+      120
+    )
+  end
+
+  defp media_url(v, _ctx) when is_binary(v) do
     cond do
       v == "" ->
         nil
@@ -452,7 +652,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     end
   end
 
-  defp media_url(_), do: nil
+  defp media_url(_, _ctx), do: nil
 
   defp row_empty?(nil), do: true
 
@@ -469,7 +669,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # else gets the generic document typeahead.
   defp reference_row(%{ref_type: "mediaAsset"} = assigns) do
     ~H"""
-    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-ref-row">
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" class="bp-array-ref-row" data-filter-params={@ref_filter_params}>
       <input
         type="hidden"
         id={"#{@wrap_id}-h"}
@@ -502,6 +702,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@row_value}
         ref-type={@ref_type}
+        filter={@ref_filter}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
         data-field-label={@row_label}
@@ -583,6 +784,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         scope-prefix={@scope_prefix}
         data-bridge-target={"#{@wrap_id}-h"}
         data-token={@api_token_raw}
+        value-shape={@value_shape}
         hotspot={@hotspot}
         alt={@alt}
       ></bp-media-picker>
@@ -619,6 +821,85 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp leaf_display(v) when is_binary(v), do: v
   defp leaf_display(v) when is_number(v) or is_boolean(v) or is_atom(v), do: to_string(v)
   defp leaf_display(v), do: Jason.encode!(v)
+
+  defp typed_rows(field, types, value, path) when is_list(value) do
+    value
+    |> Enum.with_index()
+    |> Enum.map(fn {row, idx} ->
+      row_map = if is_map(row), do: row, else: %{}
+      type = row_map["_type"]
+      member = Map.get(types, type) || %{type: type, name: type || "item", title: nil}
+      preview = item_preview(member, row_map)
+      row_path = "#{path}[#{idx}]"
+
+      %{
+        idx: idx,
+        type: type,
+        key: row_map["_key"],
+        member: member,
+        value: row_map,
+        path: row_path,
+        preview: %{preview | title: typed_title(member, row_map, preview.title)},
+        row_id: "bp-item-" <> sanitize_id("#{field.name}#{row_path}"),
+        fresh?: fresh_row?(member, row_map)
+      }
+    end)
+  end
+
+  defp typed_rows(_field, _types, _value, _path), do: []
+
+  # A just-added item holds only `_type`, `_key` and its declared defaults: it
+  # opens, so the editor can fill it in at once.
+  defp fresh_row?(member, row) do
+    defaults =
+      Barkpark.Content.Forms.declared_defaults((subfield_attr(member, :raw) || %{})["fields"])
+
+    Enum.all?(row, fn {k, v} ->
+      k in ["_type", "_key"] or Map.get(defaults, k) == v or v in [nil, "", [], %{}]
+    end)
+  end
+
+  # The members "Add item" offers, in declaration order, named by their title.
+  defp member_choices(field, types) do
+    order =
+      case subfield_attr(field, :raw) do
+        %{"of" => list} when is_list(list) ->
+          for %{} = m <- list, n = m["name"] || m["type"], is_binary(n), do: n
+
+        _ ->
+          Map.keys(types)
+      end
+
+    for name <- Enum.uniq(order), member = Map.get(types, name), member != nil do
+      %{name: name, title: title_for(member) |> blank_to(name)}
+    end
+  end
+
+  defp blank_to("", fallback), do: fallback
+  defp blank_to(nil, fallback), do: fallback
+  defp blank_to(v, _fallback), do: v
+
+  # The row's own text names it, then which member it is: "Nye bøker (Produktkort)".
+  defp typed_title(member, row, fallback) do
+    label = title_for(member)
+
+    text =
+      if is_map(row) do
+        Enum.find_value(~w(title heading name label internalTitle text), fn k ->
+          case row[k] do
+            v when is_binary(v) and v != "" -> v
+            _ -> nil
+          end
+        end)
+      end
+
+    cond do
+      is_binary(text) and label not in [nil, ""] -> "#{text} (#{label})"
+      is_binary(text) -> text
+      label not in [nil, ""] -> label
+      true -> fallback
+    end
+  end
 
   # The arrayOf parser stores the element shape on `field.of` (a `%Field{}`).
   defp element_field(%{of: %{} = of}), do: of

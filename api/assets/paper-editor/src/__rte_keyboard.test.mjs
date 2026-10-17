@@ -17,8 +17,10 @@ for (const name of ["customElements", "CustomEvent", "document", "Element", "Eve
 }
 globalThis.window = window;
 const calls = [];
-window.document.execCommand = (cmd) => {
+const withArgs = [];
+window.document.execCommand = (cmd, _ui, arg) => {
   calls.push(cmd);
+  withArgs.push([cmd, arg]);
   return true;
 };
 await import("../../../priv/static/assets/bp-rich-text-editor.js");
@@ -104,6 +106,36 @@ check("with no stamped words the names read English", () => {
   assert.equal(en.querySelector('[data-cmd="bold"]').getAttribute("aria-label"), "Bold");
   assert.equal(en.querySelector(".bp-rte-body").hasAttribute("aria-label"), false);
   en.remove();
+});
+
+// task-5fe67fc396077304: a Portable Text body has the styles normal and h2 to
+// h4, bullet and numbered lists, and the decorators underline and
+// strike-through. The toolbar now reaches each of them.
+check("the toolbar sets the Portable Text styles, lists and decorators", () => {
+  const pt = mount();
+  const press = (sel) => keyPress(pt.querySelector(sel));
+  withArgs.length = 0;
+  press('[data-cmd="underline"]');
+  press('[data-cmd="strikeThrough"]');
+  press('[data-cmd="formatBlock"][data-arg="p"]');
+  press('[data-cmd="formatBlock"][data-arg="h2"]');
+  press('[data-cmd="formatBlock"][data-arg="h3"]');
+  press('[data-cmd="formatBlock"][data-arg="h4"]');
+  press('[data-cmd="insertUnorderedList"]');
+  press('[data-cmd="insertOrderedList"]');
+  assert.deepEqual(withArgs, [
+    ["underline", undefined],
+    ["strikeThrough", undefined],
+    ["formatBlock", "p"],
+    ["formatBlock", "h2"],
+    ["formatBlock", "h3"],
+    ["formatBlock", "h4"],
+    ["insertUnorderedList", undefined],
+    ["insertOrderedList", undefined],
+  ]);
+  assert.equal(pt.querySelector('[data-arg="h2"]').getAttribute("aria-label"), "Heading 2");
+  assert.equal(pt.querySelector('[data-cmd="insertOrderedList"]').getAttribute("aria-label"), "Numbered list");
+  pt.remove();
 });
 
 if (failures) {

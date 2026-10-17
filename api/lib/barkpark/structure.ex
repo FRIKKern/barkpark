@@ -95,7 +95,11 @@ defmodule Barkpark.Structure do
       # A declared desk item that could not be built (task-d99d878b061b435a):
       # the reason, naming what is wrong. The node keeps its place and title;
       # the rest of the declared desk renders around it.
-      error: nil
+      error: nil,
+      # A `groupBy` node built with `defer_group_by: true` carries
+      # `{:group_by, item, idx}` here and no children. `expand/3` builds them
+      # when a pane opens the node (task-cca3c6d48e57097e).
+      deferred: nil
     ]
   end
 
@@ -1167,11 +1171,17 @@ defmodule Barkpark.Structure do
   end
 
   defp declared_desk(_schemas, dataset, opts) do
-    scope = Keyword.take(opts, [:workspace_id])
+    # `:memoize` (an HTTP request's read memo) rides along so the filter checks
+    # share one schema catalog instead of reading it once per desk item.
+    scope = Keyword.take(opts, [:workspace_id, :memoize])
 
     case Keyword.get(opts, :desk_doc) do
       %{content: %{"items" => items}} when is_list(items) and items != [] ->
-        ctx = %{dataset: dataset, scope: scope}
+        ctx = %{
+          dataset: dataset,
+          scope: scope,
+          defer_group_by: Keyword.get(opts, :defer_group_by, false)
+        }
 
         nodes =
           items
@@ -1331,8 +1341,13 @@ defmodule Barkpark.Structure do
       over_filter = parse_filter(item["overFilter"])
 
       case filter_error(over, over_filter, ctx) do
-        nil -> group_by_node(item, idx, ctx, type, over, by, over_filter)
-        reason -> error_node(item, idx, "overFilter: " <> reason)
+        nil ->
+          if Map.get(ctx, :defer_group_by, false),
+            do: deferred_group_by_node(item, idx, over),
+            else: group_by_node(item, idx, ctx, type, over, by, over_filter)
+
+        reason ->
+          error_node(item, idx, "overFilter: " <> reason)
       end
     end
   end
@@ -1366,6 +1381,44 @@ defmodule Barkpark.Structure do
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  # The children of a `groupBy` node are one document read over `over`, and
+  # with `overFilter` a reference test against every document of the grouped
+  # type. On gyl that read ran inside every Studio open, because the Studio
+  # builds the whole desk tree for each URL, although only the pane that opens
+  # «Etter virksomhet» shows the children. The Studio defers it; `expand/3`
+  # runs it when a walk enters the node. `GET /v1/structure` still builds it.
+  defp deferred_group_by_node(item, idx, over) do
+    %Node{
+      id: item["id"] || idx,
+      title: item["title"] || "By #{over}",
+      icon: item["icon"],
+      type: :list,
+      items: [],
+      deferred: {:group_by, item, idx}
+    }
+  end
+
+  @doc """
+  Build the children of a node that `build/2` deferred (`defer_group_by: true`).
+  Any other node comes back unchanged. `opts` carries the same tenancy scope
+  `build/2` took.
+  """
+  @spec expand(Node.t() | map(), String.t(), keyword()) :: Node.t() | map()
+  def expand(%Node{deferred: {:group_by, item, idx}}, dataset, opts) do
+    ctx = %{
+      dataset: dataset,
+      scope: Keyword.take(opts, [:workspace_id, :memoize]),
+      defer_group_by: false
+    }
+
+    case safe_item_to_node(item, idx, ctx) do
+      %Node{} = node -> node
+      _ -> error_node(item, idx, "the group could not be built")
+    end
+  end
+
+  def expand(node, _dataset, _opts), do: node
 
   defp group_by_node(item, idx, ctx, type, over, by, over_filter) do
     children =

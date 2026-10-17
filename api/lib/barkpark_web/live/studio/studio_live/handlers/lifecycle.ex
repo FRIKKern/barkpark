@@ -40,7 +40,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # clear the dirty flag, any stale concurrent-edit banner, and the
       # touched-path set (`Handlers.Fields`) — a path touched on the previous
       # document must not license folding an empty value on the next one.
-      |> assign(editor_dirty: false, doc_conflict: false, editor_touched_paths: MapSet.new())
+      |> assign(
+        editor_dirty: false,
+        doc_conflict: false,
+        editor_touched_paths: MapSet.new(),
+        object_dialog: nil
+      )
 
     # E3.5 (Gyldendal friction 67): a deep link whose head was a dead display
     # group (`/studio/content-types/<type>/<id>` on a declared desk) opened its

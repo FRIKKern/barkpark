@@ -1338,6 +1338,207 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     end
   end
 
+  describe "a filter with several content tests" do
+    # A category listing's filter, as the gyldendal.no twin sends it: the
+    # visibility checks, two display rules, the department fence, an `||` of
+    # rule groups (one code, a long list and a short list) and the sold-out
+    # rule.
+    @long_group Enum.map(0..39, &"T#{&1 * 3}")
+    @category_filter ~s'_type == "product" && hidden != true && isMainProduct != false && defined(description) && description != "" && (onix.publicationStatus.value in $statuses || !defined(onix.publicationStatus.value)) && department._ref == $dept && ($code in themaCodes || count(themaCodes[@ in $long]) > 0 || count(themaCodes[@ in $short]) > 0) && (access.buyStatus != "sold_out" || isMainProduct == true)'
+    @category_params %{
+      "statuses" => ["04"],
+      "dept" => "dept-big",
+      "code" => "U3",
+      "long" => @long_group,
+      "short" => ["T1", "T2", "T5"]
+    }
+
+    @content_shapes [
+      {~s'*[#{@category_filter}]._id', @category_params},
+      {~s'*[_type == "product" && code == 7]._id', %{}},
+      {~s'*[_type == "product" && code == 7 && kind == "e"]._id', %{}},
+      {~s'*[_type == "product" && kind == "e" && count(tags[@ in $long]) > 0]._id',
+       %{"long" => ["a" | Enum.map(1..9, &"z#{&1}")]}},
+      {~s'*[_type == "product" && kind == "e" && count(tags[@ in ["a", "b"]]) > 0]._id', %{}},
+      {~s'*[_type == "product" && kind == "e" && count(tags[@ in [1, "a"]]) > 0]._id', %{}},
+      {~s'*[_type == "product" && kind == "e" && !(count(tags[@ in $long]) > 0)]._id',
+       %{"long" => ["a" | Enum.map(1..9, &"z#{&1}")]}},
+      {~s'*[_type == "product" && kind == "e" && (code == 7 || "a" in tags)]._id', %{}}
+    ]
+
+    setup %{scope: scope} do
+      # The values SQL could get wrong: a number written as an integer, as a
+      # float, as a string and inside an array or an object, and `tags` as a
+      # string, an object with the key, an array of objects, a nested array,
+      # an array of numbers, an empty array and missing.
+      for {id, doc} <- [
+            {"e1", %{"code" => 7, "tags" => "a"}},
+            {"e2", %{"code" => 7.0, "tags" => %{"a" => 1}}},
+            {"e3", %{"code" => "7", "tags" => [%{"a" => 1}]}},
+            {"e4", %{"code" => [7], "tags" => [["a"]]}},
+            {"e5", %{"code" => %{"v" => 7}, "tags" => [1, 2]}},
+            {"e6", %{"tags" => ["x", "a"]}},
+            {"e7", %{"tags" => []}},
+            {"e8", %{"code" => 8, "tags" => ["b"]}}
+          ] do
+        doc = doc |> Map.put("_id", id) |> Map.put("kind", "e")
+        {:ok, _} = Content.create_document("product", doc, @dataset, scope)
+        {:ok, _} = Content.publish_document(id, "product", @dataset, scope)
+      end
+
+      # e6's draft drops its tags, and e8's draft holds code 7.
+      {:ok, _} =
+        Content.create_document("product", %{"_id" => "e6", "kind" => "e"}, @dataset, scope)
+
+      {:ok, _} =
+        Content.create_document(
+          "product",
+          %{"_id" => "e8", "kind" => "e", "code" => 7, "tags" => ["b"]},
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    test "each shape and its count equal in-memory evaluation in every perspective",
+         %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        docs = products(token, perspective)
+        extra = %{"perspective" => perspective}
+
+        for {q, params} <- @content_shapes do
+          want = in_memory(docs, q, params)
+
+          assert Enum.sort(result!(token, q, params, extra)) == Enum.sort(want),
+                 "#{perspective} #{q}"
+
+          counted =
+            result!(token, "count(" <> String.replace_suffix(q, "._id", ")"), params, extra)
+
+          assert counted == length(want), "#{perspective} count #{q}"
+        end
+      end
+
+      # Spot checks against the seed and the documents above, published.
+      assert Enum.sort(result!(token, ~s'*[_type == "product" && code == 7]._id', %{})) ==
+               ["e1", "e2"]
+
+      assert Enum.sort(
+               result!(
+                 token,
+                 ~s'*[_type == "product" && kind == "e" && count(tags[@ in ["a", "b"]]) > 0]._id',
+                 %{}
+               )
+             ) == ["e6", "e8"]
+
+      assert result!(token, ~s'count(*[#{@category_filter}])', @category_params) == 672
+    end
+
+    test "the rows are read once: one copy of content, and one narrowing on the stored value",
+         %{token: token} do
+      [sql] =
+        token
+        |> count_sql(~s'count(*[#{@category_filter}])', @category_params)
+        |> Enum.filter(&(&1 =~ "count("))
+
+      assert sql =~ ~s|(d0."content" #> '{}') AS content OFFSET 0|
+      # The copy, and the one jsonpath predicate the index serves.
+      assert length(String.split(sql, ~s|d0."content"|)) - 1 == 2, sql
+      refute sql =~ "unnest", sql
+    end
+
+    test "an equality alone is one jsonpath predicate on the stored content", %{token: token} do
+      [sql] =
+        token
+        |> count_sql(~s'count(*[_type == "product" && department._ref == $d])', %{
+          "d" => "dept-big"
+        })
+        |> Enum.filter(&(&1 =~ "count("))
+
+      assert sql =~ "@@", sql
+      refute sql =~ "#>", sql
+    end
+
+    # The keys of a listing projection: content keys, a renamed key, `title`
+    # from the column, the system keys and a key no document holds.
+    @listing_keys ~s'{_id, _type, _rev, _createdAt, _updatedAt, _originalId, title, code, tags, kind, "k": kind, isbn, onix, themaCodes, publishedAt, description, missing}'
+
+    test "an exact read with a projection equals in-memory evaluation in every perspective",
+         %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        extra = %{"perspective" => perspective}
+        # `defined(_id)` is not exact, so these documents are loaded and
+        # filtered in memory, as every read was before the exact read.
+        with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+
+        docs =
+          result!(token, ~s'*[_type == "product" && defined(_id)]', %{}, extra)
+
+        assert result!(token, ~s'*[_type == "product"]', %{}, extra) === docs, perspective
+        with_groq_config([])
+
+        for {q, params} <- @content_shapes,
+            tail <- [" " <> @listing_keys, ".code", ".title", ""] do
+          q = String.replace_suffix(q, "._id", tail)
+          want = docs |> in_memory(q, params) |> Jason.encode!() |> Jason.decode!()
+
+          assert result!(token, q, params, extra) === want, "#{perspective} #{q}"
+        end
+      end
+    end
+
+    test "a projection of plain keys reads only those keys of content", %{token: token} do
+      sql =
+        sql_reads(fn ->
+          result!(token, ~s'*[#{@category_filter}]{_id, isbn, "t": title}', @category_params)
+        end)
+
+      [load] = Enum.filter(sql, &(&1 =~ "-> $"))
+      assert load =~ ~s|(d.content #> '{}') AS content OFFSET 0|, load
+      refute load =~ ~r/SELECT[^$]* d\.content,/, load
+
+      # Every row SQL matches is kept: no second read of a superset.
+      {result, rows} =
+        rows_read(fn ->
+          result!(token, ~s'*[#{@category_filter}]._id', @category_params)
+        end)
+
+      assert length(result) == 672
+      assert rows == 2 * 672
+    end
+
+    # The department is `dept-small`, about 300 of the 10,500 products, so the
+    # content index is the cheap way to find them. `dept-big` matches about
+    # 98 % of the table; for it the planner may read the project's rows
+    # through a tenant index instead, which is a sound plan for such a
+    # predicate, and the test went red on that choice with unchanged SQL.
+    test "the index finds the candidate rows of both", %{token: token} do
+      Repo.query!("SET LOCAL enable_seqscan = off")
+
+      plans =
+        explain_reads("count(", fn ->
+          result!(
+            token,
+            ~s'count(*[#{@category_filter}])',
+            Map.put(@category_params, "dept", "dept-small")
+          )
+
+          result!(token, ~s'count(*[_type == "product" && department._ref == $d])', %{
+            "d" => "dept-small"
+          })
+        end)
+
+      assert length(plans) == 2
+      assert Enum.all?(plans, &(&1 =~ "documents_content_path_idx")), Enum.join(plans, "\n---\n")
+    end
+  end
+
+  defp count_sql(token, q, params) do
+    sql_reads(fn -> result!(token, q, params) end)
+    |> Enum.filter(&(&1 =~ ~s|FROM "documents"|))
+  end
+
   # The SQL of every query the function sends.
   defp sql_reads(fun) do
     ref = make_ref()

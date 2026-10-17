@@ -11494,6 +11494,26 @@ msgstr ""
 msgid "Link address"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Link type"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Internal"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "External"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:787
+#, elixir-autogen, elixir-format
+msgid "Link to a document"
+msgstr ""
+
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:76
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:118
 #, elixir-autogen, elixir-format
@@ -12932,4 +12952,54 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex
 #, elixir-autogen, elixir-format
 msgid "Action %{name} belongs to a plugin that is turned off in this workspace"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex
+#, elixir-autogen, elixir-format
+msgid "Not one of the options"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex
+#, elixir-autogen, elixir-format
+msgid "Add item"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex
+#, elixir-autogen, elixir-format
+msgid "No items"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "read-only — no schema declares this item type; saved unchanged"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "Save block"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This block cannot be opened in a form."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This block type cannot be inserted here."
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Insert block…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Inserting block…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Edit block"
 msgstr ""

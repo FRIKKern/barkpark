@@ -191,13 +191,38 @@ defmodule Barkpark.Groq.Values do
       else: base <> "." <> String.pad_leading(Integer.to_string(millis), 3, "0") <> "Z"
   end
 
-  @doc "Converts an evaluated value to plain JSON-encodable data."
+  @doc """
+  Converts an evaluated value to plain JSON-encodable data. A list or map
+  that holds nothing to convert is returned as it is, not rebuilt.
+  """
   @spec to_json(t()) :: term()
   def to_json(nil), do: nil
   def to_json(v) when is_boolean(v) or is_binary(v), do: v
   def to_json(v) when is_number(v), do: num(v)
-  def to_json(v) when is_list(v), do: Enum.map(v, &to_json/1)
-  def to_json(v) when is_map(v), do: Map.new(v, fn {k, x} -> {k, to_json(x)} end)
+
+  def to_json(v) when is_list(v) do
+    {list, changed?} =
+      Enum.map_reduce(v, false, fn x, changed? ->
+        y = to_json(x)
+        {y, changed? or y !== x}
+      end)
+
+    if changed?, do: list, else: v
+  end
+
+  def to_json(v) when is_map(v) do
+    :maps.fold(
+      fn k, x, acc ->
+        case to_json(x) do
+          ^x -> acc
+          y -> Map.put(acc, k, y)
+        end
+      end,
+      v,
+      v
+    )
+  end
+
   def to_json({:datetime, dt}), do: format_datetime(dt)
   def to_json({:path, pattern, _}), do: pattern
   def to_json(_), do: nil

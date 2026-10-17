@@ -1761,6 +1761,18 @@ defmodule Barkpark.Content.Query do
   # above makes, for the sibling column.
   defp apply_field_op(query, "_type", op, v), do: apply_field_op(query, "type", op, v)
 
+  # A desk filter is JSON, so its value can be a boolean or a number
+  # (`{"content.isCustom": {"neq": true}}` on the twin's «Roller (PIM)»,
+  # `{"content.hitCount": {"gt": 0}}` on «Mest besøkte»). The column side is
+  # text, so the value travels as its JSON text: `true` reads "true", and the
+  # range ops still parse "0" into their numeric compare. A raw boolean or
+  # number reached Postgrex as a text parameter and the list pane, and with it
+  # every document opened from it, answered 500 (task-592dee75ffef0c06).
+  defp apply_field_op(query, field, op, v)
+       when op in ["eq", "neq", "gt", "gte", "lt", "lte"] and (is_boolean(v) or is_number(v)) and
+              field not in ["title", "status", "doc_id", "_id", "type", "_type"],
+       do: apply_field_op(query, field, op, json_scalar_text(v))
+
   defp apply_field_op(query, field, "eq", v) do
     if nested_path?(field) do
       segs = nested_segments(field)
@@ -1791,23 +1803,30 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  # `in` matches a scalar field whose value is one of the values, and an array
+  # field that holds one of them (task-1c1558e9c5d9eda3). An array element
+  # matches the way `has` matches one: its own text, or the `_ref` of a
+  # reference. `filter[BookGroupCodes][in]=801,802` used to compare the text
+  # of the whole array, `["801"]`, with each value and matched nothing.
+  #
+  # The field is read once per row: the inner `SELECT ... OFFSET 0` keeps the
+  # planner from copying the extract into each use, and each copy would
+  # decompress the stored `content` again.
   defp apply_field_op(query, field, "in", vs) when is_list(vs) do
-    if nested_path?(field) do
-      segs = nested_segments(field)
+    segs = nested_segments(field)
 
-      where(
-        query,
-        [d],
-        fragment(
-          "jsonb_extract_path_text(?, VARIADIC ?) = ANY(?)",
-          d.content,
-          ^segs,
-          ^vs
-        )
+    where(
+      query,
+      [d],
+      fragment(
+        "EXISTS (SELECT 1 FROM (SELECT jsonb_extract_path(?, VARIADIC ?) AS v OFFSET 0) AS f WHERE CASE WHEN jsonb_typeof(f.v) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(f.v) AS e WHERE e #>> '{}' = ANY(?) OR e->>'_ref' = ANY(?)) ELSE f.v #>> '{}' = ANY(?) END)",
+        d.content,
+        ^segs,
+        ^vs,
+        ^vs,
+        ^vs
       )
-    else
-      where(query, [d], fragment("?->>? = ANY(?)", d.content, ^field, ^vs))
-    end
+    )
   end
 
   # `nin` = NOT IN. `<> ALL` excludes NULL/absent rows (NULL <> ALL → NULL →
@@ -3167,7 +3186,9 @@ defmodule Barkpark.Content.Query do
     end
   end
 
-  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
+  # `:memoize` rides along so an HTTP request's catalog read is shared by every
+  # reference-count op it resolves; `request_memo/4` keys on scope, not on it.
+  defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id, :memoize])
 
   defp maybe_require_published(query, opts) do
     if Keyword.get(opts, :require_published, false) do
@@ -3221,4 +3242,8 @@ defmodule Barkpark.Content.Query do
         where(query, [x], x.dataset == ^dataset)
     end
   end
+
+  defp json_scalar_text(v) when is_boolean(v), do: to_string(v)
+  defp json_scalar_text(v) when is_integer(v), do: Integer.to_string(v)
+  defp json_scalar_text(v) when is_float(v), do: Jason.encode!(v)
 end

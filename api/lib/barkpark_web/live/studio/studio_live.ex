@@ -48,6 +48,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     History,
     ItemShare,
     Lifecycle,
+    ObjectBlocks,
     Media,
     Paper,
     Refs,
@@ -268,6 +269,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   @impl true
   def handle_params(params, uri, socket) do
+    # The dead render reads through the same per-callback memo the connected
+    # socket uses, for exactly this callback (task-cca3c6d48e57097e). Without it
+    # one document URL on the gyldendal-no copy built the inlined schema
+    # catalog about 20 times: once per desk filter that names a reference
+    # count, plus the desk tree, the pane and the editor.
+    # `with_process_memo/1` switches the memo off again when the callback
+    # returns or raises, so the request process carries nothing onward.
+    if connected?(socket),
+      do: do_handle_params(params, uri, socket),
+      else:
+        Barkpark.Content.WriteScope.with_process_memo(fn ->
+          do_handle_params(params, uri, socket)
+        end)
+  end
+
+  defp do_handle_params(params, uri, socket) do
     dataset = params["dataset"] || default_dataset()
     path = Map.get(params, "path", [])
     desk = params["desk"]
@@ -498,6 +515,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("width-bucket", _params, socket), do: {:noreply, socket}
 
   def handle_event("array_op", params, socket), do: Fields.array_op(params, socket)
+
+  # The Classic rich-text editor's block dialog (task-19392d1e6fc661e6).
+  def handle_event("pt-block-open", params, socket), do: ObjectBlocks.open(params, socket)
+  def handle_event("pt-block-insert", params, socket), do: ObjectBlocks.insert(params, socket)
+
+  def handle_event("object-dialog-change", params, socket),
+    do: ObjectBlocks.change(params, socket)
+
+  def handle_event("object-dialog-array-op", params, socket),
+    do: ObjectBlocks.array_op(params, socket)
+
+  def handle_event("object-dialog-save", params, socket), do: ObjectBlocks.save(params, socket)
+  def handle_event("object-dialog-close", _params, socket), do: ObjectBlocks.close(socket)
 
   def handle_event("open-image-picker", params, socket),
     do: Media.open_image_picker(params, socket)
