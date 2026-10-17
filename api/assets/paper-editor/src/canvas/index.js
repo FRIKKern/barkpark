@@ -4830,6 +4830,21 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  // Select the top-level card `id`, an image or an object block, as a click on it does
+  // (contract 1.12.0, Sanity's selected block object): a host that wakes the body on a
+  // click on its card at rest hands that click on, instead of a caret past the card.
+  // Answers true when selected. Selection-only: no doc change, no ops, no history.
+  selectBlock(id) {
+    const pos = this._editor && typeof id === "string" && id !== "" ? this._topLevelPos(id) : null;
+    if (pos == null) return false;
+    const { state, view } = this._editor;
+    const node = state.doc.nodeAt(pos);
+    if (!node || (node.type.name !== "bpImage" && node.type.name !== "bpOpaque")) return false;
+    view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).setMeta("addToHistory", false));
+    view.focus();
+    return true;
+  }
+
   // Enter with the caret in the locked title. Returns false when the caret is not
   // in it (Enter keeps its normal meaning). Otherwise the caret goes to the first
   // unlocked block after the title in this run; with none, to the next run's first

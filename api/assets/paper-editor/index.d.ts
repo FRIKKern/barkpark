@@ -285,6 +285,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   resolveConflictWithServerBlocks(blocks: PortableDocBlock[]): void;
   recoverySnapshot(): RecoverySnapshot;
   focusBlock(id: string): boolean;
+  /** 1.12.0: select the top-level image or object block card `id`, as a click on it does. */
+  selectBlock(id: string): boolean;
   focusFirstBodyBlock(): boolean;
   toggleSourceMode(): void;
   findSet(query: string, opts?: { caseSensitive?: boolean }): FindState;

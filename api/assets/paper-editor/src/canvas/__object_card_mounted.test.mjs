@@ -2,7 +2,8 @@
 // (the body's callout) is a card as Sanity's block object: a tile with Sanity's
 // DocumentIcon, its preview title, and a "…" (Open menu) whose menu offers Edit (the
 // block's own dialog) and Remove (one remove-block, one undo step); a click selects it.
-// A read-only canvas opens no menu.
+// selectBlock(id) selects a card; text typed onto a selected card keeps it. A read-only
+// canvas opens no menu.
 // Run: node src/canvas/__object_card_mounted.test.mjs   (or: npm test)
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -77,6 +78,23 @@ await tick(50);
 
 row.querySelector(".bp-canvas-object-preview").dispatchEvent(new window.MouseEvent("click", { bubbles: true }));
 assert.ok(row.classList.contains("ProseMirror-selectednode"), "a click selects the card");
+
+// selectBlock: the card, as a click selects it; not a text block.
+assert.equal(canvas.selectBlock("p1"), false, "a text block is not a card");
+assert.equal(canvas.selectBlock("co1"), true);
+assert.ok(row.classList.contains("ProseMirror-selectednode"), "selectBlock selects the card");
+// Typing onto the selected card keeps it (no remove-block for one key).
+batches.length = 0;
+{
+  const view = canvas._editor.view;
+  const { from, to } = view.state.selection;
+  const handled = view.someProp("handleTextInput", (f) => f(view, from, to, "x"));
+  if (!handled) view.dispatch(view.state.tr.insertText("x", from, to));
+  canvas.flushPendingChanges();
+  await tick(50);
+  assert.ok(canvas.querySelector('[data-object-type="callout"]'), "a key typed onto the selected card keeps it");
+  assert.ok(!batches.flat().some((o) => o.op === "remove-block"), "no remove-block");
+}
 
 batches.length = 0;
 more.dispatchEvent(new window.MouseEvent("click", { bubbles: true }));

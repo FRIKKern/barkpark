@@ -6,6 +6,7 @@
 // (overflow:auto), so a menu inside it would be cut off. Out of the host it loses the
 // surface-scoped --paper-* tokens, so the ones it paints with are copied onto it.
 
+import { NodeSelection, Plugin } from "@tiptap/pm/state";
 import { t } from "../i18n.js";
 
 // Sanity's EllipsisHorizontalIcon (21 px in a 25 px button), EditIcon and TrashIcon.
@@ -105,4 +106,22 @@ export function wireCardMenu(more, { dom, menuClass, items, onPick, top, enabled
     open();
   });
   return close;
+}
+
+// A card a click selected (its ring turns blue, as Sanity's) holds a NodeSelection, and a
+// typed character would replace it: the whole image or object block gone for one key. On a
+// canvas with `block-cards` text typed onto a selected card is dropped; Backspace and
+// Delete still remove it, as a deliberate delete.
+export function keepSelectedCard() {
+  return new Plugin({
+    props: {
+      handleTextInput(view) {
+        const sel = view.state.selection;
+        if (!(sel instanceof NodeSelection)) return false;
+        const name = sel.node.type.name;
+        if (name !== "bpImage" && name !== "bpOpaque") return false;
+        return !!(view.dom.closest && view.dom.closest("bp-paper-canvas[block-cards]"));
+      },
+    },
+  });
 }
