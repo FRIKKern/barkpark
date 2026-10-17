@@ -1158,6 +1158,22 @@
     .bp-canvas-object-title { color: var(--paper-ink); font-weight: 600; }
     .bp-canvas-object-sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
     .bp-canvas-object-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--paper-ink-soft); }
+.bp-canvas-object-media { display: contents; }
+.bp-canvas-object-doc, .bp-canvas-opaque .bp-canvas-object-more { display: none; }
+/* Contract 1.12.0 `block-cards`: a declared object block is a card, as Sanity's block
+ * object: 4 px in, a 33 px tile with the type's icon, its preview title (13/19 px, 500)
+ * and a "…" at the right; the ring of the image card. Without the attribute the row
+ * above is unchanged. */
+bp-paper-canvas[block-cards] .bp-canvas-object-row { display: flex; align-items: center; gap: 4px; padding: 4px; border-radius: 1px; background: var(--paper-chrome-bg); box-shadow: 0 0 0 1px var(--paper-rule); }
+bp-paper-canvas[block-cards] .bp-canvas-object-row:hover { box-shadow: 0 0 0 1px var(--paper-chrome-border); }
+bp-paper-canvas[block-cards] .bp-canvas-object-row.ProseMirror-selectednode { outline: none; border-radius: 1px; background: var(--paper-edit-hover); box-shadow: 0 0 0 1px var(--paper-accent); }
+bp-paper-canvas[block-cards] .bp-canvas-object-row .bp-canvas-readonly-chip { flex: 1; min-width: 0; align-items: center; gap: 8px; padding: 0; border: 0; border-radius: 0; background: none; }
+bp-paper-canvas[block-cards] .bp-canvas-object-media { display: flex; flex: none; width: 33px; height: 33px; align-items: center; justify-content: center; border-radius: 1px; box-shadow: inset 0 0 0 1px var(--paper-rule); color: var(--paper-ink); }
+bp-paper-canvas[block-cards] .bp-canvas-object-media .bp-canvas-object-icon { display: none; }
+bp-paper-canvas[block-cards] .bp-canvas-object-doc { display: block; }
+bp-paper-canvas[block-cards] .bp-canvas-object-text:has(.bp-canvas-object-preview) .bp-canvas-object-title { display: none; }
+bp-paper-canvas[block-cards] :is(.bp-canvas-object-title, .bp-canvas-object-preview) { font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink); }
+bp-paper-canvas[block-cards]:not([editable="false"]) .bp-canvas-object-row .bp-canvas-object-more { display: inline-flex; margin-top: 0; height: 33px; }
     /* pd-ee-sheet-embed-retarget: a read-only atom's ONE control — the existing
        <bp-reference-picker>, scoped by ref-type to the documents that atom's reference
        names (sheet → sheets, embed → papers; embed-node.js mountAtomRetarget). It sits
@@ -1280,6 +1296,16 @@
      * `.bp-field` / `.bp-field__l` / `.bp-field__v`. */
     .bp-canvas-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; padding: 0.36rem 0; }
     .bp-canvas-field-label { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); }
+/* Contract 1.13.0: a bound field block's binding (field-binding.js), as LiveView Beta's
+   Properties row: its n/max badge and an unbind x, in a third column at the right. Only
+   on a canvas whose host sets data-field-caps; otherwise the row is unchanged. */
+.bp-canvas-field--bound { grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr) auto; }
+.bp-canvas-field-binding { display: inline-flex; align-items: center; gap: 4px; justify-self: end; align-self: center; }
+.bp-canvas-field-binding[hidden], .bp-canvas-field-badge[hidden], .bp-canvas-field-unbind[hidden] { display: none; }
+.bp-canvas-field-badge { padding: 1px 6px; border: 1px solid var(--paper-chrome-border); border-radius: 999px; background: var(--paper-chrome-bg); color: var(--paper-ink-soft); font: 0.7rem/1.3 var(--paper-font-mono); }
+.bp-canvas-field-badge.is-at-cap { color: var(--paper-ink); }
+.bp-canvas-field-unbind { width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--paper-ink-soft); font: 15px/1 var(--paper-font-sans, system-ui, sans-serif); cursor: pointer; }
+.bp-canvas-field-unbind:hover, .bp-canvas-field-unbind:focus-visible { background: var(--paper-edit-hover); color: var(--paper-ink); }
     /* The label is a focus target (role=textbox): WCAG 2.2's 2.5.8 wants 24x24 px at least,
        and the 0.75rem text alone is 19 px tall (task-b30758fec3a27a16). */
     .bp-canvas-field-label { box-sizing: border-box; min-width: 24px; min-height: 24px; }
@@ -1790,8 +1816,12 @@
       font-family: var(--paper-font-sans, var(--font)); color: var(--paper-ink);
       animation: bp-paper-format-fade var(--dur-1) ease-out;
     }
-    .bp-link-preview__title { font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .bp-link-preview__title { flex: 1; min-width: 0; font-size: var(--text-sm); font-weight: 600; line-height: var(--text-sm-lh); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    /* 1.9.0: the host's type label for a wikilink's document, and its subtitle in place of [[target]]. */
+    .bp-link-preview__badge { flex: none; font-size: var(--text-2xs); color: var(--paper-ink-soft); }
     .bp-link-preview__addr { font-family: var(--paper-font-mono); font-size: var(--text-2xs); color: var(--paper-ink-soft); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-link-preview__addr--subtitle { font-family: var(--paper-font-sans, var(--font)); font-size: var(--text-xs); }
     .bp-link-preview__excerpt { font-size: var(--text-xs); line-height: var(--text-xs-lh); color: var(--paper-ink-soft); margin-top: 6px; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
     .bp-link-preview__actions { display: flex; gap: 6px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--paper-rule); }
     .bp-link-preview__btn {
@@ -2644,6 +2674,24 @@ bp-paper-canvas[data-media-picker] .bp-canvas-image-pick { display: inline-block
 .bp-canvas-image-badge { position: absolute; left: 8px; top: 8px; padding: 2px 8px; border-radius: 4px; background: var(--paper-chrome-bg); border: 1px solid var(--paper-chrome-border); color: var(--paper-ink-soft); font: 0.75rem/1.4 var(--paper-font-sans, system-ui, sans-serif); }
 .bp-canvas-image-badge--error { color: var(--bp-tone-danger-fg); border-color: var(--bp-tone-danger-fg); }
 .ProseMirror-selectednode.bp-canvas-image { outline: 2px solid var(--paper-accent); outline-offset: 2px; border-radius: 4px; }
+/* Contract 1.11.0 `block-cards`: an image is a card, as Sanity's block object: a 1 px ring
+   (darker on hover, the accent when selected), a 33 px head with the file name and a … menu,
+   and the picture across the card's width. Without the attribute the head never shows. */
+.bp-canvas-image-head { display: none; }
+bp-paper-canvas[block-cards] .bp-canvas-image { margin-inline: 0; width: auto; border-radius: 1px; background: var(--paper-chrome-bg); box-shadow: 0 0 0 1px var(--paper-rule); }
+bp-paper-canvas[block-cards] .bp-canvas-image:hover { box-shadow: 0 0 0 1px var(--paper-chrome-border); }
+bp-paper-canvas[block-cards] .ProseMirror-selectednode.bp-canvas-image { outline: none; border-radius: 1px; background: var(--paper-edit-hover); box-shadow: 0 0 0 1px var(--paper-accent); }
+bp-paper-canvas[block-cards] .bp-canvas-image-head { display: flex; align-items: flex-start; gap: 8px; height: 33px; box-sizing: border-box; padding: 3px 4px 0 8px; }
+bp-paper-canvas[block-cards] .bp-canvas-image-img { width: 100%; border-radius: 0; object-fit: contain; }
+bp-paper-canvas[block-cards] .bp-canvas-image-chrome { padding: 0 8px 8px; }
+bp-paper-canvas[block-cards] .bp-canvas-image:not(.bp-canvas-image--focused, .bp-canvas-image--empty) .bp-canvas-image-chrome { display: none !important; }
+.bp-canvas-image-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif); color: var(--paper-ink); }
+.bp-canvas-image-more, .bp-canvas-object-more { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; margin-top: -3px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--paper-ink-soft); cursor: pointer; }
+.bp-canvas-image-more:hover, .bp-canvas-image-more[aria-expanded="true"], .bp-canvas-object-more:hover, .bp-canvas-object-more[aria-expanded="true"] { background: var(--paper-edit-hover); color: var(--paper-ink); }
+.bp-canvas-image-more[hidden] { display: none; }
+.bp-block-menu.bp-canvas-card-menu { min-width: 0; padding: 4px; border-radius: 6px; }
+.bp-canvas-card-menu .bp-block-menu__item { gap: 8px; padding: 6px 12px 6px 6px; }
+.bp-canvas-card-menu svg { flex: none; }
 
 /* ── Block gutter (block-handle.js): + and ⋮⋮ beside the hovered top-level block. ──
    Mirrors styles.css. /papers loads only this shell (BP_PAPER_EDITOR_NO_INJECT), so

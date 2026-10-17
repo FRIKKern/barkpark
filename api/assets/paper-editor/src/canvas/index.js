@@ -57,6 +57,7 @@ import TaskItem from "@tiptap/extension-task-item";
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
 import { TextSelection, NodeSelection, Plugin, Selection } from "@tiptap/pm/state";
+import { undoDepth, redoDepth, isHistoryTransaction } from "@tiptap/pm/history";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
 import { prepareHTMLTablePaste } from "./html-table-paste.js";
@@ -1359,7 +1360,10 @@ class BpPaperCanvas extends HTMLElement {
       },
       // Every transaction may change what a host toolbar shows (a stored mark, a
       // block turned into a heading): bp-selection-change, one per frame at most.
-      onTransaction: () => this._scheduleToolbarState(),
+      onTransaction: ({ transaction }) => {
+        this._scheduleToolbarState();
+        this._emitHistory(transaction);
+      },
       onBlur: () => {
         const version = ++this._richFocusIntentVersion;
         queueMicrotask(() => {
@@ -1808,6 +1812,8 @@ class BpPaperCanvas extends HTMLElement {
       case "toggleList": return hcToggleList(editor, a.kind) === true;
       case "insertBlock": return this._insertToolbarBlock(a.type, a.attrs) === true;
       case "insertInline": return this._insertToolbarInline(a.type) === true;
+      case "undo": return editor.commands.undo() === true;
+      case "redo": return editor.commands.redo() === true;
       default: return false;
     }
   }
@@ -1817,6 +1823,10 @@ class BpPaperCanvas extends HTMLElement {
   toggleList(kind) { return this.run("toggleList", { kind }); }
   insertBlock(type, attrs) { return this.run("insertBlock", { type, attrs }); }
   insertInline(type) { return this.run("insertInline", { type }); }
+  // 1.10.0: the canvas's own history, for a host that keeps one undo across its form
+  // and this canvas (Sanity's document undo). One step, as Mod+Z / Shift+Mod+Z here.
+  undo() { return this.run("undo"); }
+  redo() { return this.run("redo"); }
 
   can(command, args = {}) {
     const editor = this._editor;
@@ -1830,6 +1840,8 @@ class BpPaperCanvas extends HTMLElement {
       case "toggleList": return canToggleList(editor, a.kind, vocab);
       case "insertBlock": return !!this._toolbarInsertItem(a.type);
       case "insertInline": return this._canInsertInline(a.type, vocab);
+      case "undo": return undoDepth(editor.state) > 0;
+      case "redo": return redoDepth(editor.state) > 0;
       default: return false;
     }
   }
@@ -1888,6 +1900,25 @@ class BpPaperCanvas extends HTMLElement {
     const done = insertSlashTypeAtSelection(this._editor, type, undefined, level ? { level } : undefined);
     if (done && type === "image") this._pickInsertedImage();
     return done;
+  }
+
+  // 1.10.0: bp-canvas-history, at once (not per frame) whenever the history's depths
+  // change, saying how: a new undo step ("step", which also ends what could be redone),
+  // an "undo" or "redo" here, or the history "clear"ed. Depths alone can't tell a redo from
+  // a step typed right after an undo; the history's own transaction does. A host that keeps
+  // one undo for its document follows these to keep the canvas's steps in order.
+  _emitHistory(transaction) {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed) return;
+    const last = this._lastHistory || { undo: 0, redo: 0 };
+    const undo = undoDepth(editor.state);
+    const redo = redoDepth(editor.state);
+    if (last.undo === undo && last.redo === redo) return;
+    const history = !!transaction && isHistoryTransaction(transaction);
+    const kind = history ? (undo < last.undo ? "undo" : "redo") : undo > last.undo ? "step" : "clear";
+    this._lastHistory = { undo, redo };
+    const count = Math.abs(undo - last.undo) || 1;
+    this.dispatchEvent(new CustomEvent("bp-canvas-history", { bubbles: true, composed: true, detail: { kind, count, undo, redo } }));
   }
 
   _scheduleToolbarState() {
@@ -4795,6 +4826,21 @@ class BpPaperCanvas extends HTMLElement {
       return false;
     }
     view.dispatch(state.tr.setSelection(selection).setMeta("addToHistory", false));
+    view.focus();
+    return true;
+  }
+
+  // Select the top-level card `id`, an image or an object block, as a click on it does
+  // (contract 1.12.0, Sanity's selected block object): a host that wakes the body on a
+  // click on its card at rest hands that click on, instead of a caret past the card.
+  // Answers true when selected. Selection-only: no doc change, no ops, no history.
+  selectBlock(id) {
+    const pos = this._editor && typeof id === "string" && id !== "" ? this._topLevelPos(id) : null;
+    if (pos == null) return false;
+    const { state, view } = this._editor;
+    const node = state.doc.nodeAt(pos);
+    if (!node || (node.type.name !== "bpImage" && node.type.name !== "bpOpaque")) return false;
+    view.dispatch(state.tr.setSelection(NodeSelection.create(state.doc, pos)).setMeta("addToHistory", false));
     view.focus();
     return true;
   }

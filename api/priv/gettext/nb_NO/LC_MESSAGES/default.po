@@ -5069,6 +5069,7 @@ msgid "Type"
 msgstr "Type"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1477
+#: lib/barkpark_web/studio_locale.ex:408
 #, elixir-autogen, elixir-format
 msgid "Unbind property"
 msgstr "Løsne egenskapen"
@@ -5621,6 +5622,11 @@ msgstr "Én fotnote per linje"
 #, elixir-autogen, elixir-format
 msgid "Open"
 msgstr "Åpne"
+
+#: lib/barkpark_web/studio_locale.ex:644
+#, elixir-autogen, elixir-format
+msgid "Open menu"
+msgstr "Åpne meny"
 
 #: lib/barkpark_web/studio_locale.ex:636
 #, elixir-autogen, elixir-format
@@ -6291,6 +6297,11 @@ msgstr "Rediger tall"
 
 #: lib/barkpark_web/studio_locale.ex:524
 #, elixir-autogen, elixir-format
+msgid "Edit object"
+msgstr "Rediger objekt"
+
+#: lib/barkpark_web/studio_locale.ex:524
+#, elixir-autogen, elixir-format
 msgid "Edit options"
 msgstr "Rediger alternativer"
 
@@ -6303,6 +6314,11 @@ msgstr "Alternativ %{n} etikett"
 #, elixir-autogen, elixir-format
 msgid "Option %{n} value"
 msgstr "Alternativ %{n} verdi"
+
+#: lib/barkpark_web/studio_locale.ex:668
+#, elixir-autogen, elixir-format
+msgid "Remove object"
+msgstr "Fjern objekt"
 
 #: lib/barkpark_web/studio_locale.ex:658
 #, elixir-autogen, elixir-format
