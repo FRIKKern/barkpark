@@ -620,7 +620,7 @@ export function isActivateKey(event) {
 // Bridge a keyboard-focused read-only atom to a ProseMirror NodeSelection so the
 // next Backspace/Delete removes it. Best-effort + guarded: a detached test env, a
 // stale getPos, or a mid-teardown editor must never throw out of a keydown.
-function selectAtomNode(editor, getPos) {
+export function selectAtomNode(editor, getPos) {
   if (!editor || typeof getPos !== "function") return false;
   let pos;
   try {

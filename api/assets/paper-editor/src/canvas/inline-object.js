@@ -17,7 +17,11 @@
 //     document untouched;
 //   * the dialog itself: one control per declared field, required fields
 //     checked before Save, and a field-level reason from the server shown on
-//     the field it names (showRefusal).
+//     the field it names (showRefusal);
+//   * a selected atom keeps its place when the author types (Sanity's Portable
+//     Text editor drops the keystroke; a NodeSelection would otherwise replace
+//     the atom with the letter, task-8c509718bc320d1d), and shows Sanity's bar
+//     above it: the kind's title, Edit object (declared kinds) and Remove object.
 //
 // An undeclared or unknown kind stays an inert atom: shown, selectable,
 // deletable as one unit, never editable, never dropped.
@@ -38,7 +42,14 @@ import { inlineObjectFor } from "./vocabulary.js";
 const ATOM = "bpInlineOpaque";
 const BLOCK = "bpOpaque";
 const CLASS = "bp-inline-object-dialog";
+const BAR = "bp-inline-object-bar";
 const decorationsKey = new PluginKey("bpInlineObjectNames");
+const barKey = new PluginKey("bpInlineObjectBar");
+
+// Sanity's EditIcon and TrashIcon (@sanity/icons), 25×25.
+const ICON = (d) => `<svg viewBox="0 0 25 25" width="25" height="25" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+const EDIT_ICON = ICON("M15 7L18 10M6 19L7 15L17 5L20 8L10 18L6 19Z");
+const REMOVE_ICON = ICON("M5 6.5H20M10 6.5V4.5C10 3.94772 10.4477 3.5 11 3.5H14C14.5523 3.5 15 3.94772 15 4.5V6.5M12.5 9V17M15.5 9L15 17M9.5 9L10 17M18.5 6.5L17.571 18.5767C17.5309 19.0977 17.0965 19.5 16.574 19.5H8.42603C7.90349 19.5 7.46905 19.0977 7.42898 18.5767L6.5 6.5H18.5Z");
 
 // "<kind title>: <label>" — the atom's accessible name.
 export function inlineObjectAccessibleName(stored, vocab) {
@@ -619,6 +630,146 @@ export function insertInlineObject(host, editor, name, { replaceRange } = {}) {
   return true;
 }
 
+// ── the selection bar ───────────────────────────────────────────────────────
+// Sanity's InlineObjectToolbarPopover: while an atom is the selection in an
+// editable canvas, a small bar above it names its kind and offers Edit object
+// (a declared kind) and Remove object. Tab from the editor goes to the bar, Tab
+// past its last button and Escape come back. Portaled to <body> like the dialog.
+export class InlineObjectBar {
+  constructor(host, editor) {
+    this._host = host;
+    this._editor = editor;
+    this._el = null;
+    this._pos = null;
+  }
+
+  get el() {
+    return this._el;
+  }
+
+  isOpen() {
+    return !!(this._el && this._el.style.display !== "none");
+  }
+
+  _build() {
+    const el = document.createElement("div");
+    el.className = BAR;
+    el.setAttribute("role", "toolbar");
+    el.style.display = "none";
+    const title = document.createElement("span");
+    title.className = `${BAR}__title`;
+    const button = (cls, label, icon, act) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `${BAR}__btn ${BAR}__${cls}`;
+      b.setAttribute("aria-label", label);
+      b.title = label;
+      b.innerHTML = icon;
+      b.addEventListener("click", act);
+      return b;
+    };
+    const edit = button("edit", t("Edit object"), EDIT_ICON, () => this.edit());
+    const remove = button("remove", t("Remove object"), REMOVE_ICON, () => this.remove());
+    el.append(title, edit, remove);
+    // A press inside the bar must not move the editor's selection.
+    el.addEventListener("mousedown", (e) => e.preventDefault());
+    el.addEventListener("keydown", (e) => this._key(e));
+    this._parts = { title, edit, remove };
+    document.body.appendChild(el);
+    this._el = el;
+  }
+
+  // Show for the selection, or hide when it is not an atom in an editable canvas.
+  update() {
+    const view = this._editor.view;
+    const sel = this._editor.state.selection;
+    const atom = sel instanceof NodeSelection && sel.node.type.name === ATOM;
+    const inBar = this._el && this._el.contains(document.activeElement);
+    const dialogOpen = typeof this._host._objectEditorOpen === "function" && this._host._objectEditorOpen();
+    if (!atom || !this._host._editable || dialogOpen || !(view.hasFocus() || inBar)) return this.hide();
+    if (!this._el) this._build();
+    const stored = sel.node.attrs.node || {};
+    const kind = inlineObjectFor(this._host.inlineObjectVocabulary(), stored.type);
+    this._pos = sel.from;
+    this._parts.title.textContent = kind ? kind.title : stored.type || t("Inline");
+    this._parts.edit.style.display = kind && editableKind(kind).fields.length ? "" : "none";
+    const dom = view.nodeDOM(sel.from);
+    // Portaled to <body>: carry the paper's theme along.
+    if (dom && dom.nodeType === 1) {
+      const theme = getComputedStyle(dom);
+      for (const name of ["--paper-chrome-bg", "--paper-chrome-border", "--paper-ink", "--paper-ink-soft", "--paper-accent", "--paper-font-sans"]) {
+        this._el.style.setProperty(name, theme.getPropertyValue(name));
+      }
+    }
+    this._el.style.display = "flex";
+    this._place(dom);
+  }
+
+  // Centred above the atom, 8px off it; below it when there is no room above.
+  _place(dom) {
+    const a = dom && typeof dom.getBoundingClientRect === "function" ? dom.getBoundingClientRect() : null;
+    if (!a) return;
+    const box = this._el.getBoundingClientRect();
+    const margin = 8;
+    const vw = window.innerWidth || 0;
+    let left = Math.round(a.left + a.width / 2 - box.width / 2);
+    if (vw) left = Math.min(Math.max(left, margin), Math.max(margin, vw - box.width - margin));
+    let top = Math.round(a.top - box.height - 8);
+    if (top < margin) top = Math.round(a.bottom + 8);
+    this._el.style.left = `${left}px`;
+    this._el.style.top = `${top}px`;
+  }
+
+  hide() {
+    if (this._el) this._el.style.display = "none";
+    this._pos = null;
+  }
+
+  // Tab from the editor: the bar's first button.
+  focusFirst() {
+    if (!this.isOpen()) return false;
+    const first = [this._parts.edit, this._parts.remove].find((b) => b.style.display !== "none");
+    if (!first) return false;
+    first.focus();
+    return true;
+  }
+
+  _key(e) {
+    const buttons = [this._parts.edit, this._parts.remove].filter((b) => b.style.display !== "none");
+    const back = () => {
+      e.preventDefault();
+      this._editor.view.focus();
+    };
+    if (e.key === "Escape") {
+      back();
+      this.hide();
+    } else if (e.key === "Tab" && !e.shiftKey && e.target === buttons[buttons.length - 1]) back();
+    else if (e.key === "Tab" && e.shiftKey && e.target === buttons[0]) back();
+  }
+
+  edit() {
+    const pos = this._pos;
+    this.hide();
+    if (pos != null) editInlineObjectAt(this._host, this._editor, pos);
+  }
+
+  remove() {
+    const pos = this._pos;
+    this.hide();
+    const node = pos == null ? null : this._editor.state.doc.nodeAt(pos);
+    if (!node || node.type.name !== ATOM) return;
+    const tr = this._editor.state.tr.delete(pos, pos + node.nodeSize);
+    tr.setSelection(TextSelection.create(tr.doc, Math.min(pos, tr.doc.content.size)));
+    this._editor.view.dispatch(tr);
+    this._editor.view.focus();
+  }
+
+  destroy() {
+    if (this._el) this._el.remove();
+    this._el = null;
+  }
+}
+
 function safeCoords(view, pos) {
   try {
     const c = view.coordsAtPos(pos);
@@ -632,8 +783,11 @@ function safeCoords(view, pos) {
 // `host` is the canvas element: inlineObjectVocabulary(), inlineObjectDialog(),
 // noteInlineObjectSave(values).
 export function inlineObjects(host) {
+  let bar = null;
   return Extension.create({
     name: "bpInlineObjects",
+    // Ahead of input rules: a keystroke on a selected atom never reaches them.
+    priority: 1000,
     addKeyboardShortcuts() {
       return {
         Enter: ({ editor }) => {
@@ -643,6 +797,8 @@ export function inlineObjects(host) {
           if (sel.node.type.name === BLOCK) return editObjectBlockAt(host, editor, sel.from);
           return false;
         },
+        // Sanity's: Tab from a selected atom goes to its bar.
+        Tab: () => !!(bar && bar.focusFirst()),
       };
     },
     addProseMirrorPlugins() {
@@ -679,6 +835,12 @@ export function inlineObjects(host) {
               if (node.type.name !== ATOM || !host._editable) return false;
               return editInlineObjectAt(host, editor, nodePos);
             },
+            // Typing on a selected atom keeps it (Sanity drops the keystroke):
+            // ProseMirror would replace the NodeSelection with the text.
+            handleTextInput(view) {
+              const sel = view.state.selection;
+              return sel instanceof NodeSelection && sel.node.type.name === ATOM;
+            },
           },
           // The opaque block's node view stops every event before ProseMirror sees
           // it, so its double-click is read off the editor DOM directly.
@@ -691,6 +853,33 @@ export function inlineObjects(host) {
             };
             view.dom.addEventListener("dblclick", onDblClick);
             return { destroy: () => view.dom.removeEventListener("dblclick", onDblClick) };
+          },
+        }),
+        new Plugin({
+          key: barKey,
+          view(view) {
+            bar = new InlineObjectBar(host, editor);
+            host._inlineObjectBar = bar;
+            // Focus leaving for anywhere but the bar hides it; coming back shows it.
+            const onFocusOut = (e) => {
+              if (!(bar.el && bar.el.contains(e.relatedTarget))) bar.hide();
+            };
+            const onFocusIn = () => bar.update();
+            const onScroll = () => bar.isOpen() && bar.update();
+            view.dom.addEventListener("focusout", onFocusOut);
+            view.dom.addEventListener("focusin", onFocusIn);
+            document.addEventListener("scroll", onScroll, true);
+            return {
+              update: () => bar.update(),
+              destroy: () => {
+                view.dom.removeEventListener("focusout", onFocusOut);
+                view.dom.removeEventListener("focusin", onFocusIn);
+                document.removeEventListener("scroll", onScroll, true);
+                bar.destroy();
+                if (host._inlineObjectBar === bar) host._inlineObjectBar = null;
+                bar = null;
+              },
+            };
           },
         }),
       ];
