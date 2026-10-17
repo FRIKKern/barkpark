@@ -5069,6 +5069,7 @@ msgid "Type"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1477
+#: lib/barkpark_web/studio_locale.ex:408
 #, elixir-autogen, elixir-format
 msgid "Unbind property"
 msgstr ""

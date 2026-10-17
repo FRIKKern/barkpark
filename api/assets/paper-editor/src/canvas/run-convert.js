@@ -3043,6 +3043,9 @@ function fieldNodeToPatch(node, prevNode) {
   const patch = {};
   if (canonicalJSON(value) !== canonicalJSON(normalizeFieldValue(prev.bpType || bpType, prev.value))) patch.value = value;
   if ((attrs.label ?? null) !== (prev.label ?? null)) patch.label = attrs.label ?? null;
+  // Unbind (contract 1.13.0): the block's fieldName cleared makes it a free block, the
+  // patch LiveView's Properties × sends ({fieldName: null}).
+  if ((attrs.fieldName || null) !== (prev.fieldName || null)) patch.fieldName = attrs.fieldName || null;
   // Config edited in the field's settings disclosure: a select's options, a number's
   // min / max / step / unit. Each rides only when it changed.
   for (const k of FIELD_SETTINGS_CONFIG) {
@@ -3065,7 +3068,7 @@ function fieldNodeChanged(prevNode, nextNode) {
 function stableFieldKey(node) {
   const a = (node && node.attrs) || {};
   const bpType = a.bpType || "field-string";
-  const key = { value: normalizeFieldValue(bpType, a.value), label: a.label ?? null };
+  const key = { value: normalizeFieldValue(bpType, a.value), label: a.label ?? null, fieldName: a.fieldName || null };
   for (const k of FIELD_SETTINGS_CONFIG) key[k] = a[k] ?? null;
   return canonicalJSON(key);
 }
