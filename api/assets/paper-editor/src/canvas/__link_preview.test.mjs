@@ -76,6 +76,46 @@ await check("hovering the link shows its host and address; Edit shows in edit mo
   canvas.remove();
 });
 
+await check("1.9.0: a wikilink's subtitle replaces the [[target]] line and its type shows as a badge", async () => {
+  const { canvas, w } = await mount();
+  canvas.linkPreviewSource = async () => ({ title: "Grace Hopper", subtitle: "Rear admiral", badge: "Author" });
+  const lp = canvas._linkPreview;
+  lp.showFor(w);
+  await tick(0);
+  const card = document.body.querySelector(".bp-link-preview");
+  assert.equal(card.querySelector(".bp-link-preview__title").textContent, "Grace Hopper");
+  assert.equal(card.querySelector(".bp-link-preview__addr").textContent, "Rear admiral");
+  assert.ok(!card.textContent.includes("[["), "no wiki markup");
+  assert.equal(card.querySelector(".bp-link-preview__badge").textContent, "Author");
+  // An empty subtitle hides the line; the next card starts clean.
+  canvas.linkPreviewSource = async () => ({ title: "Grace Hopper", subtitle: "" });
+  lp.hide(); lp.showFor(w);
+  await tick(0);
+  assert.equal(card.querySelector(".bp-link-preview__addr").style.display, "none");
+  assert.equal(card.querySelector(".bp-link-preview__badge").style.display, "none");
+  canvas.remove();
+});
+
+await check("1.9.0: Remove drops the whole link, and the whole document link, keeping the words; read-only has no Remove", async () => {
+  const { canvas, a, w } = await mount();
+  const lp = canvas._linkPreview;
+  const card = () => document.body.querySelector(".bp-link-preview");
+  lp.showFor(a);
+  assert.notEqual(card().querySelector(".bp-link-preview__remove").style.display, "none");
+  card().querySelector(".bp-link-preview__remove").click();
+  assert.equal(canvas.querySelector("a[href]"), null, "the link is gone");
+  assert.ok(canvas.textContent.includes("the docs"), "its words stay");
+  lp.showFor(canvas.querySelector("span[data-wikilink]") || w);
+  card().querySelector(".bp-link-preview__remove").click();
+  assert.equal(canvas.querySelector("span[data-wikilink]"), null, "the document link is gone");
+  assert.ok(canvas.textContent.includes("Target paper"));
+  canvas.remove();
+  const ro = await mount(false);
+  ro.canvas._linkPreview.showFor(ro.a);
+  assert.equal(card().querySelector(".bp-link-preview__remove").style.display, "none");
+  ro.canvas.remove();
+});
+
 await check("the body portal follows the hovered paper theme on each opening", async () => {
   const { canvas, a } = await mount();
   a.style.setProperty("--paper-ink", "#123456");

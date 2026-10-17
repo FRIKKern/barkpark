@@ -5619,6 +5619,11 @@ msgstr ""
 msgid "Open"
 msgstr ""
 
+#: lib/barkpark_web/studio_locale.ex:644
+#, elixir-autogen, elixir-format
+msgid "Open menu"
+msgstr ""
+
 #: lib/barkpark_web/studio_locale.ex:636
 #, elixir-autogen, elixir-format
 msgid "Ordered list"
@@ -6288,6 +6293,11 @@ msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:524
 #, elixir-autogen, elixir-format
+msgid "Edit object"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:524
+#, elixir-autogen, elixir-format
 msgid "Edit options"
 msgstr ""
 
@@ -6299,6 +6309,11 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:635
 #, elixir-autogen, elixir-format
 msgid "Option %{n} value"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:668
+#, elixir-autogen, elixir-format
+msgid "Remove object"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:658

@@ -106,7 +106,7 @@ try {
   const m = await mount();
   mounts.push(m.canvas);
   const { canvas, editor, batches, states } = m;
-  for (const name of ["run", "toggleMark", "setBlockStyle", "toggleList", "insertBlock", "can", "state"])
+  for (const name of ["run", "toggleMark", "setBlockStyle", "toggleList", "insertBlock", "can", "state", "undo", "redo"])
     assert.equal(typeof canvas[name], "function", `${name} is public`);
   editor.view.dom.focus();
 
@@ -275,17 +275,46 @@ try {
   assert.equal(f.editor.state.doc.child(1).attrs.bpId, "p-2", "same block");
   assert.equal(f.canvas.state().blockStyle, "blockquote");
 
+  // ── 1.10.0: undo / redo and bp-canvas-history ───────────────────────────────
+  const h = await mount();
+  mounts.push(h.canvas);
+  const hist = [];
+  h.canvas.addEventListener("bp-canvas-history", (event) => hist.push(event.detail));
+  assert.equal(h.canvas.can("undo"), false, "a fresh canvas has nothing to undo");
+  select(h.editor, posOfText(h.editor, "world") + 5);
+  h.editor.commands.insertContent("!");
+  assert.deepEqual(hist.at(-1), { kind: "step", count: 1, undo: 1, redo: 0 }, "a new step is reported at once");
+  await sleep(600);
+  h.editor.commands.insertContent("?");
+  assert.deepEqual(hist.at(-1), { kind: "step", count: 1, undo: 2, redo: 0 }, "500 ms later, a second step");
+  assert.equal(h.canvas.can("undo"), true);
+  assert.equal(h.canvas.undo(), true, "undo() applies one step");
+  assert.deepEqual(hist.at(-1), { kind: "undo", count: 1, undo: 1, redo: 1 }, "an undo");
+  assert.equal(h.editor.state.doc.child(0).textContent, "Hello world!");
+  assert.equal(h.canvas.can("redo"), true);
+  assert.equal(h.canvas.run("redo"), true, "run('redo') applies one step");
+  assert.deepEqual(hist.at(-1), { kind: "redo", count: 1, undo: 2, redo: 0 }, "a redo");
+  assert.equal(h.editor.state.doc.child(0).textContent, "Hello world!?");
+  assert.equal(h.canvas.redo(), false, "nothing left to redo");
+  // A step typed right after an undo: the same depths as a redo (undo +1, redo to 0), said apart.
+  assert.equal(h.canvas.undo(), true);
+  await sleep(600);
+  h.editor.commands.insertContent("#");
+  assert.deepEqual(hist.at(-1), { kind: "step", count: 1, undo: 2, redo: 0 }, "a step after an undo is a step, not a redo");
+
   // ── read-only and unmounted: false ──────────────────────────────────────────
   const r = await mount({ editable: false });
   mounts.push(r.canvas);
   selectText(r.editor, "Hello");
   assert.equal(r.canvas.can("toggleMark", { mark: "strong" }), false, "read-only: cannot");
   assert.equal(r.canvas.toggleMark("strong"), false, "read-only: does nothing");
+  assert.equal(r.canvas.can("undo"), false, "read-only: no undo");
+  assert.equal(r.canvas.undo(), false, "read-only: undo does nothing");
   const loose = document.createElement("bp-paper-canvas");
   assert.equal(loose.toggleMark("strong"), false, "unmounted: false");
   assert.deepEqual(loose.state(), { marks: [], blockStyle: null, list: null, link: null, wikilink: null, selection: { empty: true, inBlockType: null } }, "unmounted: the empty state");
 
-  console.log("PASS host_commands: toggleMark, setBlockStyle, toggleList, insertBlock, run; can() honours the vocabulary; state() and bp-selection-change");
+  console.log("PASS host_commands: toggleMark, setBlockStyle, toggleList, insertBlock, run; can() honours the vocabulary; state() and bp-selection-change; undo/redo and bp-canvas-history");
 } catch (error) {
   failed = true;
   throw error;

@@ -21,13 +21,29 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
-import { wireAtomAccessibility } from "./embed-node.js";
+import { selectAtomNode, wireAtomAccessibility } from "./embed-node.js";
+import { cardMoreButton, keepSelectedCard, wireCardMenu } from "./card-menu.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpImage`; the portable-doc `bpType` stays "image"
 // (run-convert.js maps a block.type "image" to this node and back).
 export const BP_IMAGE_NODE_NAME = "bpImage";
+
+// The name an image card shows over the picture (Sanity: its asset's file name). Barkpark
+// stores an upload as `<slug>-<8 hex>.<ext>` (Media.unique_filename): the 8 hex go, so a
+// media URL reads as the file that was uploaded. Any other URL shows its last segment;
+// an upload in flight (no src yet) its alt, the file name it came with.
+export function imageFileName(src, alt) {
+  let name = "";
+  if (src && !/^(data|blob):/i.test(src)) {
+    name = String(src).split(/[?#]/)[0].split("/").pop() || "";
+    try { name = decodeURIComponent(name); } catch (_) {}
+    if (/\/media\/files\//.test(src)) name = name.replace(/-[0-9a-f]{8}(\.[A-Za-z0-9]{1,16})?$/, "$1");
+  }
+  return name || alt || t("Image");
+}
+
 
 const stringAttr = (name) => ({
   default: null,
@@ -125,6 +141,12 @@ export const Image = Node.create({
     return ["figure", mergeAttributes(HTMLAttributes, { "data-bp-type": "image", class: "bp-canvas-image" }), img];
   },
 
+  // Typing onto a selected card keeps it (card-menu.js); the image node carries the
+  // plugin for every card (object rows too), as it is in every canvas.
+  addProseMirrorPlugins() {
+    return [keepSelectedCard()];
+  },
+
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("figure");
@@ -132,6 +154,17 @@ export const Image = Node.create({
       dom.setAttribute("data-bp-type", "image");
       dom.setAttribute("contenteditable", "false");
       dom.setAttribute("data-test-id", "paper-image");
+
+      // The card's head, as Sanity's block object (contract 1.11.0, shown on a canvas
+      // with `block-cards`): the file name, and a … menu with Edit and Remove.
+      const head = document.createElement("div");
+      head.className = "bp-canvas-image-head";
+      const name = document.createElement("span");
+      name.className = "bp-canvas-image-name";
+      const more = cardMoreButton("bp-canvas-image-more");
+      head.appendChild(name);
+      head.appendChild(more);
+      dom.appendChild(head);
 
       // The picture, or the empty frame.
       const frame = document.createElement("div");
@@ -199,6 +232,9 @@ export const Image = Node.create({
           focused: focused && editor.isEditable,
         });
         chrome.style.display = hide && srcInput.value !== "" ? "none" : "";
+        // A card (block-cards) keeps them for Edit, as Sanity edits an image in a dialog:
+        // CSS shows them while one has the focus, or while there is no picture.
+        dom.classList.toggle("bp-canvas-image--focused", focused && editor.isEditable);
       };
 
       const paint = (n) => {
@@ -227,6 +263,10 @@ export const Image = Node.create({
         else if (a.uploadError) { badge.textContent = "Upload failed: " + a.uploadError; badge.style.display = ""; badge.className = "bp-canvas-image-badge bp-canvas-image-badge--error"; }
         else { badge.style.display = "none"; }
         const locked = a.locked === true;
+        const label = imageFileName(src, alt);
+        if (name.textContent !== label) name.textContent = label;
+        name.title = label;
+        more.hidden = !editor.isEditable || locked;
         dom.classList.toggle("bp-canvas-image--empty", !shown);
         dom.classList.toggle("bp-canvas-image--locked", locked);
         srcInput.readOnly = altInput.readOnly = widthInput.readOnly = !editor.isEditable;
@@ -247,6 +287,40 @@ export const Image = Node.create({
       dom.addEventListener("mouseleave", onLeave);
       dom.addEventListener("focusin", onFocusIn);
       dom.addEventListener("focusout", onFocusOut);
+
+      // The … menu: Edit opens the image's own inputs (alt, URL, width, Select), Remove
+      // takes the block out in one undoable step. A body portal like the block menu, so
+      // the canvas's scroll box never clips it; under the button, centred, as Sanity's.
+      const edit = () => {
+        focused = true;
+        syncChrome();
+        altInput.focus();
+      };
+      const remove = () => {
+        if (!editor.isEditable || typeof getPos !== "function") return;
+        const pos = getPos();
+        const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_IMAGE_NODE_NAME) return;
+        editor.chain().command(({ tr }) => (tr.delete(pos, pos + cur.nodeSize), true)).focus().run();
+      };
+      // The … menu (card-menu.js): Edit opens the image's own inputs (alt, URL, width,
+      // Select), Remove takes the block out in one undoable step. Its top at the head's
+      // foot (Sanity's: 33 px under the card's top).
+      const closeMenu = wireCardMenu(more, {
+        dom,
+        menuClass: "bp-canvas-image-menu",
+        items: () => ["edit", "remove"],
+        onPick: (action) => (action === "edit" ? edit() : remove()),
+        top: (r) => Math.max(r.bottom + 4, head.getBoundingClientRect().bottom),
+        enabled: () => editor.isEditable,
+      });
+      // A click on the card's head or picture selects it, as Sanity's (its ring turns blue);
+      // the inputs and buttons keep their own clicks.
+      dom.addEventListener("click", (e) => {
+        if (!dom.closest("bp-paper-canvas[block-cards]") || !editor.isEditable) return;
+        if (e.target.closest("input, button, .bp-canvas-image-chrome")) return;
+        selectAtomNode(editor, getPos);
+      });
 
       wireAtomAccessibility(dom, {
         block: { type: "image", locked: node.attrs && node.attrs.locked === true },
@@ -324,6 +398,7 @@ export const Image = Node.create({
         stopEvent: () => true,
         ignoreMutation: () => true,
         destroy: () => {
+          closeMenu(false);
           if (writeTimer) clearTimeout(writeTimer);
           dom.removeEventListener("bp-flush-node", flushWrite);
           altInput.removeEventListener("input", scheduleWrite);
