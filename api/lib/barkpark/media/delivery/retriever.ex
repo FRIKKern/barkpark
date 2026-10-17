@@ -30,7 +30,7 @@ defmodule Barkpark.Media.Delivery.Retriever do
           [m],
           d in ^asset_doc_join_query(dataset, workspace_id, project_id),
           as: :asset,
-          on: fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
+          on: fragment("?->>'mediaFileId' = ?::text", d.content, m.id)
         )
 
       base =
