@@ -1826,3 +1826,25 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
 .bp-inline-object-dialog__msg,
 .bp-inline-object-dialog__error { color: var(--paper-accent, LinkText); margin: 0; }
 .bp-inline-object-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* ── Inline object selection bar (canvas/inline-object.js InlineObjectBar). ──
+ * Sanity's InlineObjectToolbarPopover: the kind's title, Edit object, Remove
+ * object, over the selected atom. Same token fallbacks as the dialog. */
+.bp-inline-object-bar {
+  position: fixed; z-index: 210;
+  align-items: center; gap: 2px;
+  padding: 4px;
+  background: var(--paper-chrome-bg, Canvas);
+  color: var(--paper-ink, CanvasText);
+  border: 1px solid var(--paper-chrome-border, ButtonBorder);
+  border-radius: 6px;
+  font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif);
+}
+.bp-inline-object-bar__title { padding: 0 6px; white-space: nowrap; }
+.bp-inline-object-bar__btn {
+  display: grid; place-items: center;
+  width: 25px; height: 25px; padding: 0;
+  border: 0; border-radius: 3px; background: none; color: inherit; cursor: pointer;
+}
+.bp-inline-object-bar__btn svg { width: 21px; height: 21px; }
+.bp-inline-object-bar__btn:focus-visible { outline: 2px solid var(--paper-accent, Highlight); outline-offset: 1px; }

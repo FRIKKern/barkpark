@@ -11,6 +11,9 @@
 //   * every atom is named "<kind title>: <label>"; Backspace removes a selected
 //     chip and one undo restores it;
 //   * a server refusal reopens the dialog with the reason on the field it names.
+// task-8c509718bc320d1d: a typed letter on a selected chip keeps the chip (Sanity
+// drops the keystroke; it used to replace the chip), and a selected atom shows
+// Sanity's bar: the kind's title, Edit object (declared kinds) and Remove object.
 // Run: node src/canvas/__inline_object_mounted.test.mjs
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -90,7 +93,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n")[0]}`);
   }
 }
-const EXPECTED = 12;
+const EXPECTED = 17;
 
 const dialog = () => document.querySelector(".bp-inline-object-dialog");
 const field = (name) => dialog().querySelector(`[data-field="${name}"]`);
@@ -262,6 +265,83 @@ try {
       "must be one of positive",
     );
     key(dialog(), "Escape");
+  });
+  const bar = () => document.querySelector(".bp-inline-object-bar");
+  const barShown = () => !!bar() && bar().style.display !== "none";
+  // A typed character as the browser sends it: ProseMirror's keypress path.
+  const type = (ch) => editor.view.dom.dispatchEvent(new KeyboardEvent("keypress", { key: ch, charCode: ch.charCodeAt(0), bubbles: true, cancelable: true }));
+  const chipText = () => editor.state.doc.child([...Array(editor.state.doc.childCount).keys()].find((i) => editor.state.doc.child(i).textContent.startsWith("Status"))).textContent;
+
+  await check("a typed letter on a selected chip keeps the chip and adds nothing (Sanity's)", () => {
+    // Control: on a selected NON-atom node the same keypress does replace it, so the
+    // path is live in this harness (ProseMirror types over any NodeSelection).
+    let endPos = null;
+    editor.state.doc.forEach((node, offset) => { if (node.textContent === "End") endPos = offset; });
+    editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, endPos)));
+    type("Q");
+    assert.ok(!editor.state.doc.textContent.includes("End") && editor.state.doc.textContent.includes("Q"), "the control keypress replaced the selected paragraph");
+    editor.commands.undo();
+    assert.ok(editor.state.doc.textContent.includes("End"), "undo put it back");
+    const before = atoms().length;
+    editor.view.focus();
+    select("chip");
+    type("Z");
+    assert.equal(atoms().length, before, "the chip is still there");
+    assert.ok(atomOf("chip"), "the chip kept its place");
+    assert.ok(!chipText().includes("Z"), `nothing was typed (${chipText()})`);
+    const sel = editor.state.selection;
+    assert.ok(sel instanceof NodeSelection && sel.node.type.name === "bpInlineOpaque", "the chip stays selected");
+  });
+
+  await check("a selected chip shows the bar: its kind, Edit object and Remove object", () => {
+    editor.view.focus();
+    select("chip");
+    assert.ok(barShown(), "the bar shows");
+    assert.equal(bar().getAttribute("role"), "toolbar");
+    assert.equal(bar().querySelector(".bp-inline-object-bar__title").textContent, "Status chip");
+    const buttons = [...bar().querySelectorAll("button")].filter((b) => b.style.display !== "none").map((b) => b.getAttribute("aria-label"));
+    assert.deepEqual(buttons, ["Edit object", "Remove object"]);
+    editor.commands.setTextSelection(1);
+    assert.ok(!barShown(), "a text caret hides it");
+  });
+
+  await check("an undeclared atom's bar offers Remove only; Tab reaches it and Escape comes back", () => {
+    editor.view.focus();
+    select("badge");
+    assert.ok(barShown());
+    assert.equal(bar().querySelector(".bp-inline-object-bar__title").textContent, "badge");
+    const shown = [...bar().querySelectorAll("button")].filter((b) => b.style.display !== "none");
+    assert.deepEqual(shown.map((b) => b.getAttribute("aria-label")), ["Remove object"]);
+    key(editor.view.dom, "Tab");
+    assert.equal(document.activeElement, shown[0], "Tab from the editor focuses the bar's button");
+    key(shown[0], "Escape");
+    assert.equal(document.activeElement, editor.view.dom, "Escape hands focus back to the editor");
+  });
+
+  await check("Edit object opens the dialog; Remove object removes the chip as one undo step", () => {
+    editor.view.focus();
+    select("chip");
+    bar().querySelector(".bp-inline-object-bar__edit").click();
+    assert.ok(dialog(), "Edit object opened the dialog");
+    assert.equal(field("text").value, "Approved");
+    key(dialog(), "Escape");
+    editor.view.focus();
+    select("chip");
+    const before = atoms().length;
+    bar().querySelector(".bp-inline-object-bar__remove").click();
+    assert.equal(atoms().length, before - 1, "Remove object removed it");
+    assert.ok(!editor.state.doc.textContent.includes("Approved"));
+    editor.commands.undo();
+    assert.equal(atoms().length, before, "one undo restores it");
+  });
+
+  await check("a read-only canvas shows no bar", async () => {
+    canvas.setAttribute("editable", "false");
+    await tick(10);
+    select("chip");
+    assert.ok(!barShown(), "no bar while read-only");
+    canvas.setAttribute("editable", "true");
+    await tick(10);
   });
 } catch (e) {
   failures += 1;

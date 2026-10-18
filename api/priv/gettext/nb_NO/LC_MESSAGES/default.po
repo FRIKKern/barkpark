@@ -6291,6 +6291,11 @@ msgstr "Rediger tall"
 
 #: lib/barkpark_web/studio_locale.ex:524
 #, elixir-autogen, elixir-format
+msgid "Edit object"
+msgstr "Rediger objekt"
+
+#: lib/barkpark_web/studio_locale.ex:524
+#, elixir-autogen, elixir-format
 msgid "Edit options"
 msgstr "Rediger alternativer"
 
@@ -6303,6 +6308,11 @@ msgstr "Alternativ %{n} etikett"
 #, elixir-autogen, elixir-format
 msgid "Option %{n} value"
 msgstr "Alternativ %{n} verdi"
+
+#: lib/barkpark_web/studio_locale.ex:668
+#, elixir-autogen, elixir-format
+msgid "Remove object"
+msgstr "Fjern objekt"
 
 #: lib/barkpark_web/studio_locale.ex:658
 #, elixir-autogen, elixir-format

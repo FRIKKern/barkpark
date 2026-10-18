@@ -6291,6 +6291,11 @@ msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:524
 #, elixir-autogen, elixir-format
+msgid "Edit object"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:524
+#, elixir-autogen, elixir-format
 msgid "Edit options"
 msgstr ""
 
@@ -6302,6 +6307,11 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:635
 #, elixir-autogen, elixir-format
 msgid "Option %{n} value"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:668
+#, elixir-autogen, elixir-format
+msgid "Remove object"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:658
