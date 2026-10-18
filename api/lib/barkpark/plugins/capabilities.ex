@@ -970,6 +970,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed."
+          ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
           )
@@ -1309,6 +1314,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "Inline single reference fields (depth 1): a field name or comma list."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed."
+          ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
           )

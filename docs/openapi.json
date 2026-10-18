@@ -449,6 +449,15 @@
             }
           },
           {
+            "description": "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Add result.total (full match count) to the response.",
             "in": "query",
             "name": "count",
@@ -5057,6 +5066,15 @@
             "description": "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc).",
             "in": "query",
             "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed.",
+            "in": "query",
+            "name": "collation",
             "required": false,
             "schema": {
               "type": "string"

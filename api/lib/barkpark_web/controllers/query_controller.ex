@@ -295,6 +295,7 @@ defmodule BarkparkWeb.QueryController do
     limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
     offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
     order = parse_order_param(params["order"])
+    collation = parse_collation(params["collation"])
 
     filter_map =
       params
@@ -336,6 +337,12 @@ defmodule BarkparkWeb.QueryController do
       # envelope (no new error code) naming the bad spec and the grammar.
       match?({:error, _}, order) ->
         order_error(order)
+
+      # An unknown ?collation= is refused by name, like an unknown order spec:
+      # answering in the database collation would be a different order than
+      # the one asked for.
+      match?({:error, _}, collation) ->
+        collation_error(collation)
 
       # Fail CLOSED on an unknown filter operator. Otherwise it falls through
       # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
@@ -380,7 +387,8 @@ defmodule BarkparkWeb.QueryController do
               filter_map: filter_map,
               limit: limit,
               offset: offset,
-              order: order
+              order: order,
+              collation: collation
             ] ++ scope_opts(conn)
           )
 
@@ -1867,6 +1875,28 @@ defmodule BarkparkWeb.QueryController do
             "or a view count: popularity, _popularity, _views7d or _views30d with :asc|desc"
         ]
       }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
+  end
+
+  # `?collation=` (task-4973be61eff3bbe5): absent or blank keeps the database
+  # collation; any other value must be one Content.Query compiles a clause for.
+  defp parse_collation(nil), do: nil
+  defp parse_collation(""), do: nil
+
+  defp parse_collation(value) do
+    if value in Content.Query.order_collations(),
+      do: value,
+      else: {:error, {:invalid_collation, value}}
+  end
+
+  defp collation_error({:error, {:invalid_collation, value}}) do
+    {:error,
+     {:validation_failed, "query parameter collation",
+      %{
+        "collation" => [
+          "unrecognised collation #{inspect(value)}; expected one of " <>
+            Enum.join(Content.Query.order_collations(), ", ")
+        ]
+      }, "Omit collation for the database order, or send one of the accepted values."}}
   end
 
   defp parse_expand(nil), do: []
