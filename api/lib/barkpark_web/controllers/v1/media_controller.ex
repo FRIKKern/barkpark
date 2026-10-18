@@ -484,7 +484,13 @@ defmodule BarkparkWeb.V1.MediaController do
       case Media.upload(
              upload,
              dataset,
-             [dedupe: true, asset_metadata: metadata, source_id: source_id] ++ scope_opts(conn)
+             [
+               dedupe: true,
+               asset_metadata: metadata,
+               source_id: source_id,
+               meta: meta_param(params)
+             ] ++
+               scope_opts(conn)
            ) do
         # task-b6e57c37f6928344 — the same bytes already live in this dataset
         # and workspace, or (task-0bc9247eca1bd741) a file there already
@@ -595,6 +601,22 @@ defmodule BarkparkWeb.V1.MediaController do
   end
 
   defp normalize_tags(metadata), do: metadata
+
+  # Sanity's `meta` upload parameter (task-fd05a9327034f89c): the optional image
+  # metadata to read besides the default set, as a list or comma-separated
+  # (`meta=exif,location`). Only the names Sanity knows pass; the default set
+  # (`palette`, `lqip`, `blurhash`) is always read, so naming it changes nothing.
+  @optional_meta ~w(exif location)
+  defp meta_param(%{"meta" => meta}) when is_list(meta),
+    do: meta |> Enum.filter(&is_binary/1) |> Enum.flat_map(&String.split(&1, ",")) |> known_meta()
+
+  defp meta_param(%{"meta" => meta}) when is_binary(meta),
+    do: meta |> String.split(",") |> known_meta()
+
+  defp meta_param(_params), do: []
+
+  defp known_meta(names),
+    do: names |> Enum.map(&String.trim/1) |> Enum.filter(&(&1 in @optional_meta)) |> Enum.uniq()
 
   # `sourceId` (task-0bc9247eca1bd741): the id the file had in the system it
   # was imported from, such as a Sanity asset id. Sanity-shaped image and file
