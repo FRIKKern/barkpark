@@ -210,4 +210,41 @@ defmodule Barkpark.Content.BlockOpsIfRevLockTest do
     assert {:ok, %{rev: r1, written_doc_id: "drafts." <> ^id}} = a_result
     assert_412_with_actual(b_result, r0, r1)
   end
+
+  # task-128cda41162676e3: the studio's field save (a mutate) forks the draft as its body
+  # batch goes, both at once after a reconnect. The mutate door does not take the block-ops
+  # lock, so the batch read the published row, passed its fence and hit the mutate's
+  # uncommitted draft in the unique index: 422 invalid_op. The document moved under the
+  # fence, so the answer is the 412 any stale ifRev gets, with the draft's rev.
+  test "field ops racing a mutate that forks the draft get 412 with the draft's rev, not 422",
+       %{dataset: dataset, ws_id: ws_id, scope: scope} do
+    {id, r0} = published!(dataset, scope, %{"body" => %{"blocks" => [para("p1", "start")]}})
+
+    mutate = fn ->
+      Content.apply_mutations(
+        [%{"patch" => %{"id" => id, "type" => @type_name, "set" => %{"title" => "theirs"}}}],
+        dataset,
+        scope
+      )
+    end
+
+    op = fn ->
+      Content.apply_field_block_ops(
+        id,
+        @type_name,
+        "body",
+        [patch_text("p1", "mine")],
+        dataset,
+        scope ++ [if_rev: r0]
+      )
+    end
+
+    {a_result, b_result} = race!(ws_id, mutate, op)
+
+    assert {:ok, _} = a_result
+    {:ok, draft} = Content.get_document("drafts." <> id, @type_name, dataset, scope)
+    assert_412_with_actual(b_result, r0, draft.rev)
+    assert draft.title == "theirs"
+    assert [%{"content" => [%{"value" => "start"}]}] = draft.content["body"]["blocks"]
+  end
 end

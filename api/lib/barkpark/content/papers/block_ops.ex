@@ -2637,10 +2637,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
         {:error, reason} ->
           Broadcast.clear_deferred_broadcasts()
           Writer.clear_deferred_after_save()
-          {:error, reason}
+          {:error, draft_forked_under(reason, doc_id, type, dataset, opts)}
       end
     end
   end
+
+  # task-128cda41162676e3 — the mutate door forks `drafts.<id>` without this lock, so a
+  # batch that read the published row can lose the draft INSERT to a mutate (the studio's
+  # field save and its body batch go at once after a reconnect). The document moved under
+  # the fence: answer as any stale `ifRev` is answered, with the draft's rev, not the
+  # changeset error the controller can only call a 422 `invalid_op`.
+  defp draft_forked_under(
+         %Ecto.Changeset{errors: errors} = changeset,
+         doc_id,
+         type,
+         dataset,
+         opts
+       ) do
+    with {_, meta} <- Keyword.get(errors, :doc_id),
+         :unique <- Keyword.get(meta, :constraint),
+         draft_id = DraftId.draft_id(DraftId.published_id(doc_id)),
+         {:ok, %Document{rev: actual}} <- Content.get_document(draft_id, type, dataset, opts) do
+      {:rev_mismatch, %{expected: Keyword.get(opts, :if_rev), actual: actual}}
+    else
+      _ -> changeset
+    end
+  end
+
+  defp draft_forked_under(reason, _doc_id, _type, _dataset, _opts), do: reason
 
   defp finish_document_ops_after_save(nil), do: :ok
 
