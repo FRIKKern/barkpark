@@ -71,6 +71,7 @@ defmodule BarkparkWeb.GroqController do
           code: "malformed",
           message: "the query parameter is required",
           description: "the query parameter is required",
+          hint: "Send the GROQ query in the query parameter: ?query=*[_type == \"post\"]",
           type: "queryParseError"
         })
 
@@ -158,11 +159,15 @@ defmodule BarkparkWeb.GroqController do
     json(conn, fields)
   end
 
+  # A query's own hint: `malformed`'s default speaks of a JSON body, which a GROQ read
+  # does not have (task-b85cf70ca346260a). A hint in the fields wins over that default.
   defp parse_error(conn, query, error) do
     ErrorResponse.emit_fields(conn, 400, %{
       code: "malformed",
       message: "GROQ syntax error at byte #{error.start}: #{error.description}",
       description: error.description,
+      hint:
+        "Fix the GROQ query between bytes start and end (the query parameter, URL-encoded); the request has no JSON body to change.",
       type: "queryParseError",
       query: query,
       start: error.start,
