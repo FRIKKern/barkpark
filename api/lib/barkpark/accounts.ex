@@ -243,6 +243,23 @@ defmodule Barkpark.Accounts do
     |> Repo.update()
   end
 
+  @doc """
+  The display names of these accounts, `%{user_id => name}`, for the ones that
+  set one (task-2eae7f4056c3a970): the roster names its people as the user menu
+  names you. One query; unknown ids and unset names are simply absent.
+  """
+  @spec display_names([binary()]) :: %{binary() => String.t()}
+  def display_names([]), do: %{}
+
+  def display_names(ids) when is_list(ids) do
+    from(u in User,
+      where: u.id in ^ids and not is_nil(u.display_name) and u.display_name != "",
+      select: {u.id, u.display_name}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
   # Owner ruling #34 item 1 (2026-10-03, task-d9e8f02056e39763): ONE per-user
   # budget for every door that re-checks a signed-in user's current password —
   # erase (JSON and Studio), password change, TOTP enrol/verify/disable, passkey
