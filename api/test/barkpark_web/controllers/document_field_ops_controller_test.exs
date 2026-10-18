@@ -126,6 +126,70 @@ defmodule BarkparkWeb.DocumentFieldOpsControllerTest do
     assert_unwritten(doc, scope)
   end
 
+  # `"fence": "blocks"` (studio task-86f75846c256e3b4): a stale ifRev holds only when a
+  # block the batch depends on changed since; another writer's paragraph or another field
+  # does not stop it. Without the opt-in the same stale rev answers 412, as above.
+  test "with fence: blocks, a batch on an older rev lands when its blocks are unchanged", %{
+    scope: scope
+  } do
+    doc = create!(scope)
+
+    ok = fn ops, rev ->
+      post_ops("field-ops-write-token", pub_id(doc), "description", %{
+        "ops" => ops,
+        "ifRev" => rev,
+        "fence" => "blocks"
+      })
+    end
+
+    seeded =
+      Jason.decode!(ok.([append("p1", "one"), append("p2", "two")], doc.rev).resp_body)["result"][
+        "rev"
+      ]
+
+    patch = fn id, text ->
+      %{
+        "op" => "patch-block",
+        "id" => id,
+        "patch" => %{"content" => [%{"type" => "text", "value" => text}]}
+      }
+    end
+
+    # A writes in p1; then B, still on the seeded rev, writes in p2 and appends p3.
+    assert ok.([patch.("p1", "one by A")], seeded).status == 200
+
+    resp =
+      ok.(
+        [
+          patch.("p2", "two by B"),
+          %{"op" => "insert-after", "afterId" => "p2", "block" => para("p3", "three")}
+        ],
+        seeded
+      )
+
+    assert resp.status == 200, resp.resp_body
+
+    {:ok, saved} = draft(doc, scope)
+    texts = Enum.map(saved.content["description"]["blocks"], &hd(&1["content"])["value"])
+    assert texts == ["one by A", "two by B", "three"]
+    assert Jason.decode!(resp.resp_body)["result"]["rev"] == saved.rev
+
+    # B again on the seeded rev, now in p1, which A changed since: 412, nothing written.
+    resp = ok.([patch.("p1", "one by B")], seeded)
+    assert resp.status == 412, resp.resp_body
+    assert {:ok, %{rev: rev}} = draft(doc, scope)
+    assert rev == saved.rev
+
+    # Without the opt-in, the stale rev is refused even for a block nobody touched.
+    resp =
+      post_ops("field-ops-write-token", pub_id(doc), "description", %{
+        "ops" => [patch.("p3", "three by B")],
+        "ifRev" => seeded
+      })
+
+    assert resp.status == 412, resp.resp_body
+  end
+
   test "one invalid op fails the whole batch and nothing is written", %{scope: scope} do
     doc = create!(scope)
 
