@@ -438,5 +438,27 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
       assert close(a).resp_body =~ ": keepalive\n\n"
       close(b)
     end
+
+    # A sleeping laptop keeps its socket: with `staleAfter`, the room stops
+    # showing it once its focus beats stop, and a beat broadcasts nothing.
+    test "a staleAfter stream that hears no focus leaves; one that beats stays", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-st", "staleAfter" => "1"})
+      b = open(ctx.conn, ctx.base, %{"sessionId" => "bob-st", "staleAfter" => "1"})
+      wait_for(fn -> keys(ctx.topic) == ["api:ann-st", "api:bob-st"] end)
+      beat = %{"sessionId" => "bob-st", "documentId" => "p1"}
+
+      for _ <- 1..6 do
+        assert focus(ctx.conn, ctx.base, beat).status == 200
+        Process.sleep(300)
+      end
+
+      assert keys(ctx.topic) == ["api:bob-st"]
+      assert %{status: 200} = Task.await(a, 2_000)
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, ctx.topic)
+      assert focus(ctx.conn, ctx.base, beat).status == 200
+      refute_receive %Phoenix.Socket.Broadcast{event: "presence_diff"}, 200
+      close(b)
+    end
   end
 end
