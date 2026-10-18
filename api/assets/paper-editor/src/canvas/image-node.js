@@ -21,13 +21,33 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
-import { wireAtomAccessibility } from "./embed-node.js";
+import { selectAtomNode, wireAtomAccessibility } from "./embed-node.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpImage`; the portable-doc `bpType` stays "image"
 // (run-convert.js maps a block.type "image" to this node and back).
 export const BP_IMAGE_NODE_NAME = "bpImage";
+
+// The name an image card shows over the picture (Sanity: its asset's file name). Barkpark
+// stores an upload as `<slug>-<8 hex>.<ext>` (Media.unique_filename): the 8 hex go, so a
+// media URL reads as the file that was uploaded. Any other URL shows its last segment;
+// an upload in flight (no src yet) its alt, the file name it came with.
+export function imageFileName(src, alt) {
+  let name = "";
+  if (src && !/^(data|blob):/i.test(src)) {
+    name = String(src).split(/[?#]/)[0].split("/").pop() || "";
+    try { name = decodeURIComponent(name); } catch (_) {}
+    if (/\/media\/files\//.test(src)) name = name.replace(/-[0-9a-f]{8}(\.[A-Za-z0-9]{1,16})?$/, "$1");
+  }
+  return name || alt || t("Image");
+}
+
+// Sanity's EllipsisHorizontalIcon (21 px in a 25 px button), EditIcon and TrashIcon.
+const ICON = (d) => `<svg width="21" height="21" viewBox="0 0 25 25" fill="none" aria-hidden="true">${d}</svg>`;
+const MORE = ICON('<path d="M6.5 11C7.32843 11 8 11.6716 8 12.5C8 13.3284 7.32843 14 6.5 14C5.67157 14 5 13.3284 5 12.5C5 11.6716 5.67157 11 6.5 11Z" fill="currentColor"/><path d="M12.5 11C13.3284 11 14 11.6716 14 12.5C14 13.3284 13.3284 14 12.5 14C11.6716 14 11 13.3284 11 12.5C11 11.6716 11.6716 11 12.5 11Z" fill="currentColor"/><path d="M18.5 11C19.3284 11 20 11.6716 20 12.5C20 13.3284 19.3284 14 18.5 14C17.6716 14 17 13.3284 17 12.5C17 11.6716 17.6716 11 18.5 11Z" fill="currentColor"/>');
+const EDIT = ICON('<path d="M15 7L18 10M6 19L7 15L17 5L20 8L10 18L6 19Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>');
+const TRASH = ICON('<path d="M5 6.5H20M10 6.5V4.5C10 3.94772 10.4477 3.5 11 3.5H14C14.5523 3.5 15 3.94772 15 4.5V6.5M12.5 9V17M15.5 9L15 17M9.5 9L10 17M18.5 6.5L17.571 18.5767C17.5309 19.0977 17.0965 19.5 16.574 19.5H8.42603C7.90349 19.5 7.46905 19.0977 7.42898 18.5767L6.5 6.5H18.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>');
 
 const stringAttr = (name) => ({
   default: null,
@@ -133,6 +153,25 @@ export const Image = Node.create({
       dom.setAttribute("contenteditable", "false");
       dom.setAttribute("data-test-id", "paper-image");
 
+      // The card's head, as Sanity's block object (contract 1.11.0, shown on a canvas
+      // with `block-cards`): the file name, and a … menu with Edit and Remove.
+      const head = document.createElement("div");
+      head.className = "bp-canvas-image-head";
+      const name = document.createElement("span");
+      name.className = "bp-canvas-image-name";
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "bp-canvas-image-more";
+      more.innerHTML = MORE;
+      // Sanity's name for it; never "Block options", the block handle's.
+      more.setAttribute("aria-label", t("Open menu"));
+      more.setAttribute("aria-haspopup", "menu");
+      more.setAttribute("aria-expanded", "false");
+      more.setAttribute("contenteditable", "false");
+      head.appendChild(name);
+      head.appendChild(more);
+      dom.appendChild(head);
+
       // The picture, or the empty frame.
       const frame = document.createElement("div");
       frame.className = "bp-canvas-image-frame";
@@ -199,6 +238,9 @@ export const Image = Node.create({
           focused: focused && editor.isEditable,
         });
         chrome.style.display = hide && srcInput.value !== "" ? "none" : "";
+        // A card (block-cards) keeps them for Edit, as Sanity edits an image in a dialog:
+        // CSS shows them while one has the focus, or while there is no picture.
+        dom.classList.toggle("bp-canvas-image--focused", focused && editor.isEditable);
       };
 
       const paint = (n) => {
@@ -227,6 +269,10 @@ export const Image = Node.create({
         else if (a.uploadError) { badge.textContent = "Upload failed: " + a.uploadError; badge.style.display = ""; badge.className = "bp-canvas-image-badge bp-canvas-image-badge--error"; }
         else { badge.style.display = "none"; }
         const locked = a.locked === true;
+        const label = imageFileName(src, alt);
+        if (name.textContent !== label) name.textContent = label;
+        name.title = label;
+        more.hidden = !editor.isEditable || locked;
         dom.classList.toggle("bp-canvas-image--empty", !shown);
         dom.classList.toggle("bp-canvas-image--locked", locked);
         srcInput.readOnly = altInput.readOnly = widthInput.readOnly = !editor.isEditable;
@@ -247,6 +293,100 @@ export const Image = Node.create({
       dom.addEventListener("mouseleave", onLeave);
       dom.addEventListener("focusin", onFocusIn);
       dom.addEventListener("focusout", onFocusOut);
+
+      // The … menu: Edit opens the image's own inputs (alt, URL, width, Select), Remove
+      // takes the block out in one undoable step. A body portal like the block menu, so
+      // the canvas's scroll box never clips it; under the button, centred, as Sanity's.
+      let menu = null;
+      const onDocDown = (e) => {
+        if (menu && !menu.contains(e.target) && !more.contains(e.target)) closeMenu(false);
+      };
+      const closeMenu = (refocus) => {
+        if (!menu) return;
+        menu.remove();
+        menu = null;
+        more.setAttribute("aria-expanded", "false");
+        document.removeEventListener("mousedown", onDocDown, true);
+        if (refocus) more.focus();
+      };
+      const edit = () => {
+        focused = true;
+        syncChrome();
+        altInput.focus();
+      };
+      const remove = () => {
+        if (!editor.isEditable || typeof getPos !== "function") return;
+        const pos = getPos();
+        const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+        if (!cur || cur.type.name !== BP_IMAGE_NODE_NAME) return;
+        editor.chain().command(({ tr }) => (tr.delete(pos, pos + cur.nodeSize), true)).focus().run();
+      };
+      const openMenu = () => {
+        if (menu) return closeMenu(true);
+        if (!editor.isEditable) return;
+        menu = document.createElement("div");
+        menu.className = "bp-block-menu bp-canvas-image-menu";
+        menu.setAttribute("role", "menu");
+        menu.setAttribute("aria-label", t("Block options"));
+        const item = (label, icon, action, extra = "") => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.setAttribute("role", "menuitem");
+          b.className = "bp-block-menu__item " + extra;
+          b.dataset.action = action;
+          b.innerHTML = icon;
+          b.append(t(label));
+          return b;
+        };
+        menu.append(item("Edit", EDIT, "edit"), item("Remove", TRASH, "remove", "bp-block-menu__item--danger"));
+        // Out of the host it loses the surface-scoped tokens: copy the ones it paints with.
+        const host = dom.closest("bp-paper-canvas");
+        if (host) for (const v of ["--paper-chrome-bg", "--paper-chrome-border", "--paper-ink", "--paper-ink-soft", "--paper-rule", "--paper-edit-hover", "--bp-tone-danger-fg", "--paper-font-sans"]) {
+          const value = getComputedStyle(host).getPropertyValue(v);
+          if (value) menu.style.setProperty(v, value.trim());
+        }
+        menu.addEventListener("mousedown", (e) => e.preventDefault());
+        menu.addEventListener("click", (e) => {
+          const btn = e.target.closest("[data-action]");
+          if (!btn) return;
+          const action = btn.dataset.action;
+          closeMenu(false);
+          if (action === "edit") edit();
+          else remove();
+        });
+        menu.addEventListener("keydown", (e) => {
+          const items = [...menu.querySelectorAll("[role=menuitem]")];
+          const at = items.indexOf(document.activeElement);
+          if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu(true); }
+          else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+            e.preventDefault();
+            items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+          }
+        });
+        document.body.appendChild(menu);
+        const r = more.getBoundingClientRect();
+        const m = menu.getBoundingClientRect();
+        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+        menu.style.position = "fixed";
+        menu.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - m.width / 2, vw - 8 - m.width))}px`;
+        // Its top at the head's foot (Sanity's: 33 px under the card's top).
+        menu.style.top = `${Math.max(r.bottom + 4, head.getBoundingClientRect().bottom)}px`;
+        more.setAttribute("aria-expanded", "true");
+        document.addEventListener("mousedown", onDocDown, true);
+        menu.querySelector("[role=menuitem]").focus();
+      };
+      // A click on the card's head or picture selects it, as Sanity's (its ring turns blue);
+      // the inputs and buttons keep their own clicks.
+      dom.addEventListener("click", (e) => {
+        if (!dom.closest("bp-paper-canvas[block-cards]") || !editor.isEditable) return;
+        if (e.target.closest("input, button, .bp-canvas-image-chrome")) return;
+        selectAtomNode(editor, getPos);
+      });
+      more.addEventListener("mousedown", (e) => e.preventDefault());
+      more.addEventListener("click", (e) => {
+        e.preventDefault();
+        openMenu();
+      });
 
       wireAtomAccessibility(dom, {
         block: { type: "image", locked: node.attrs && node.attrs.locked === true },
@@ -324,6 +464,7 @@ export const Image = Node.create({
         stopEvent: () => true,
         ignoreMutation: () => true,
         destroy: () => {
+          closeMenu(false);
           if (writeTimer) clearTimeout(writeTimer);
           dom.removeEventListener("bp-flush-node", flushWrite);
           altInput.removeEventListener("input", scheduleWrite);

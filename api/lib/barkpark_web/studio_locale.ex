@@ -641,6 +641,7 @@ defmodule BarkparkWeb.StudioLocale do
       "object of subfields" => gettext("object of subfields"),
       "One footnote per line" => gettext("One footnote per line"),
       "Open" => gettext("Open"),
+      "Open menu" => gettext("Open menu"),
       "Option %{n} label" => gettext("Option %{n} label", n: "%{n}"),
       "Option %{n} value" => gettext("Option %{n} value", n: "%{n}"),
       "Ordered list" => gettext("Ordered list"),
