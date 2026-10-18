@@ -22,6 +22,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { selectAtomNode, wireAtomAccessibility } from "./embed-node.js";
+import { cardMoreButton, keepSelectedCard, wireCardMenu } from "./card-menu.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
 
@@ -43,11 +44,6 @@ export function imageFileName(src, alt) {
   return name || alt || t("Image");
 }
 
-// Sanity's EllipsisHorizontalIcon (21 px in a 25 px button), EditIcon and TrashIcon.
-const ICON = (d) => `<svg width="21" height="21" viewBox="0 0 25 25" fill="none" aria-hidden="true">${d}</svg>`;
-const MORE = ICON('<path d="M6.5 11C7.32843 11 8 11.6716 8 12.5C8 13.3284 7.32843 14 6.5 14C5.67157 14 5 13.3284 5 12.5C5 11.6716 5.67157 11 6.5 11Z" fill="currentColor"/><path d="M12.5 11C13.3284 11 14 11.6716 14 12.5C14 13.3284 13.3284 14 12.5 14C11.6716 14 11 13.3284 11 12.5C11 11.6716 11.6716 11 12.5 11Z" fill="currentColor"/><path d="M18.5 11C19.3284 11 20 11.6716 20 12.5C20 13.3284 19.3284 14 18.5 14C17.6716 14 17 13.3284 17 12.5C17 11.6716 17.6716 11 18.5 11Z" fill="currentColor"/>');
-const EDIT = ICON('<path d="M15 7L18 10M6 19L7 15L17 5L20 8L10 18L6 19Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>');
-const TRASH = ICON('<path d="M5 6.5H20M10 6.5V4.5C10 3.94772 10.4477 3.5 11 3.5H14C14.5523 3.5 15 3.94772 15 4.5V6.5M12.5 9V17M15.5 9L15 17M9.5 9L10 17M18.5 6.5L17.571 18.5767C17.5309 19.0977 17.0965 19.5 16.574 19.5H8.42603C7.90349 19.5 7.46905 19.0977 7.42898 18.5767L6.5 6.5H18.5Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>');
 
 const stringAttr = (name) => ({
   default: null,
@@ -145,6 +141,12 @@ export const Image = Node.create({
     return ["figure", mergeAttributes(HTMLAttributes, { "data-bp-type": "image", class: "bp-canvas-image" }), img];
   },
 
+  // Typing onto a selected card keeps it (card-menu.js); the image node carries the
+  // plugin for every card (object rows too), as it is in every canvas.
+  addProseMirrorPlugins() {
+    return [keepSelectedCard()];
+  },
+
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("figure");
@@ -159,15 +161,7 @@ export const Image = Node.create({
       head.className = "bp-canvas-image-head";
       const name = document.createElement("span");
       name.className = "bp-canvas-image-name";
-      const more = document.createElement("button");
-      more.type = "button";
-      more.className = "bp-canvas-image-more";
-      more.innerHTML = MORE;
-      // Sanity's name for it; never "Block options", the block handle's.
-      more.setAttribute("aria-label", t("Open menu"));
-      more.setAttribute("aria-haspopup", "menu");
-      more.setAttribute("aria-expanded", "false");
-      more.setAttribute("contenteditable", "false");
+      const more = cardMoreButton("bp-canvas-image-more");
       head.appendChild(name);
       head.appendChild(more);
       dom.appendChild(head);
@@ -297,18 +291,6 @@ export const Image = Node.create({
       // The … menu: Edit opens the image's own inputs (alt, URL, width, Select), Remove
       // takes the block out in one undoable step. A body portal like the block menu, so
       // the canvas's scroll box never clips it; under the button, centred, as Sanity's.
-      let menu = null;
-      const onDocDown = (e) => {
-        if (menu && !menu.contains(e.target) && !more.contains(e.target)) closeMenu(false);
-      };
-      const closeMenu = (refocus) => {
-        if (!menu) return;
-        menu.remove();
-        menu = null;
-        more.setAttribute("aria-expanded", "false");
-        document.removeEventListener("mousedown", onDocDown, true);
-        if (refocus) more.focus();
-      };
       const edit = () => {
         focused = true;
         syncChrome();
@@ -321,71 +303,23 @@ export const Image = Node.create({
         if (!cur || cur.type.name !== BP_IMAGE_NODE_NAME) return;
         editor.chain().command(({ tr }) => (tr.delete(pos, pos + cur.nodeSize), true)).focus().run();
       };
-      const openMenu = () => {
-        if (menu) return closeMenu(true);
-        if (!editor.isEditable) return;
-        menu = document.createElement("div");
-        menu.className = "bp-block-menu bp-canvas-image-menu";
-        menu.setAttribute("role", "menu");
-        menu.setAttribute("aria-label", t("Block options"));
-        const item = (label, icon, action, extra = "") => {
-          const b = document.createElement("button");
-          b.type = "button";
-          b.setAttribute("role", "menuitem");
-          b.className = "bp-block-menu__item " + extra;
-          b.dataset.action = action;
-          b.innerHTML = icon;
-          b.append(t(label));
-          return b;
-        };
-        menu.append(item("Edit", EDIT, "edit"), item("Remove", TRASH, "remove", "bp-block-menu__item--danger"));
-        // Out of the host it loses the surface-scoped tokens: copy the ones it paints with.
-        const host = dom.closest("bp-paper-canvas");
-        if (host) for (const v of ["--paper-chrome-bg", "--paper-chrome-border", "--paper-ink", "--paper-ink-soft", "--paper-rule", "--paper-edit-hover", "--bp-tone-danger-fg", "--paper-font-sans"]) {
-          const value = getComputedStyle(host).getPropertyValue(v);
-          if (value) menu.style.setProperty(v, value.trim());
-        }
-        menu.addEventListener("mousedown", (e) => e.preventDefault());
-        menu.addEventListener("click", (e) => {
-          const btn = e.target.closest("[data-action]");
-          if (!btn) return;
-          const action = btn.dataset.action;
-          closeMenu(false);
-          if (action === "edit") edit();
-          else remove();
-        });
-        menu.addEventListener("keydown", (e) => {
-          const items = [...menu.querySelectorAll("[role=menuitem]")];
-          const at = items.indexOf(document.activeElement);
-          if (e.key === "Escape" || e.key === "Tab") { e.preventDefault(); closeMenu(true); }
-          else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-            e.preventDefault();
-            items[(at + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
-          }
-        });
-        document.body.appendChild(menu);
-        const r = more.getBoundingClientRect();
-        const m = menu.getBoundingClientRect();
-        const vw = window.innerWidth || document.documentElement.clientWidth || 0;
-        menu.style.position = "fixed";
-        menu.style.left = `${Math.max(8, Math.min(r.left + r.width / 2 - m.width / 2, vw - 8 - m.width))}px`;
-        // Its top at the head's foot (Sanity's: 33 px under the card's top).
-        menu.style.top = `${Math.max(r.bottom + 4, head.getBoundingClientRect().bottom)}px`;
-        more.setAttribute("aria-expanded", "true");
-        document.addEventListener("mousedown", onDocDown, true);
-        menu.querySelector("[role=menuitem]").focus();
-      };
+      // The … menu (card-menu.js): Edit opens the image's own inputs (alt, URL, width,
+      // Select), Remove takes the block out in one undoable step. Its top at the head's
+      // foot (Sanity's: 33 px under the card's top).
+      const closeMenu = wireCardMenu(more, {
+        dom,
+        menuClass: "bp-canvas-image-menu",
+        items: () => ["edit", "remove"],
+        onPick: (action) => (action === "edit" ? edit() : remove()),
+        top: (r) => Math.max(r.bottom + 4, head.getBoundingClientRect().bottom),
+        enabled: () => editor.isEditable,
+      });
       // A click on the card's head or picture selects it, as Sanity's (its ring turns blue);
       // the inputs and buttons keep their own clicks.
       dom.addEventListener("click", (e) => {
         if (!dom.closest("bp-paper-canvas[block-cards]") || !editor.isEditable) return;
         if (e.target.closest("input, button, .bp-canvas-image-chrome")) return;
         selectAtomNode(editor, getPos);
-      });
-      more.addEventListener("mousedown", (e) => e.preventDefault());
-      more.addEventListener("click", (e) => {
-        e.preventDefault();
-        openMenu();
       });
 
       wireAtomAccessibility(dom, {
