@@ -546,6 +546,50 @@ defmodule Barkpark.Content.EnvelopeTest do
     end
   end
 
+  describe "source_map/2 nested values (task-651999345821b5dd)" do
+    # An object field and an array's items are mapped too, as Sanity's source map maps
+    # every leaf: a site can mark `seo.metaTitle` or one link's title click-to-edit.
+    test "maps an object's fields and an array's items; a keyed item's source names its _key",
+         %{doc: doc} do
+      rendered =
+        doc
+        |> Envelope.render()
+        |> Map.merge(%{
+          "seo" => %{"metaTitle" => "Post 3", "_type" => "seo"},
+          "links" => [
+            %{"_key" => "l1", "_type" => "link", "title" => "Docs"},
+            %{"_key" => "l2", "_type" => "link", "title" => "Related"}
+          ],
+          "tags" => ["a", "b"]
+        })
+
+      map = Envelope.source_map(doc, rendered)
+      source = fn result -> Enum.at(map["paths"], map["mappings"][result]["source"]["path"]) end
+
+      # The whole field is still one entry, as before.
+      assert source.(~s($["seo"])) == ~s($["seo"])
+      assert source.(~s($["seo"]["metaTitle"])) == ~s($["seo"]["metaTitle"])
+      assert source.(~s($["links"][1])) == ~s{$["links"][?(@._key=="l2")]}
+      assert source.(~s($["links"][1]["title"])) == ~s{$["links"][?(@._key=="l2")]["title"]}
+      assert source.(~s($["tags"][1])) == ~s($["tags"][1])
+      assert map["mappings"][~s($["links"][0]["title"])]["source"]["document"] == 0
+      # System keys are not mapped.
+      refute Map.has_key?(map["mappings"], ~s($["seo"]["_type"]))
+      refute Map.has_key?(map["mappings"], ~s($["links"][0]["_key"]))
+    end
+
+    test "a document's nested entries stop at the cap", %{doc: doc} do
+      rendered = Map.put(Envelope.render(doc), "list", Enum.map(1..3_000, &"item #{&1}"))
+      map = Envelope.source_map(doc, rendered)
+
+      nested =
+        Enum.count(map["mappings"], fn {k, _} -> String.starts_with?(k, ~s($["list"][)) end)
+
+      assert nested == 2_000
+      assert Map.has_key?(map["mappings"], ~s($["list"]))
+    end
+  end
+
   describe "source_map_many/2 (task-b54d854d43769266)" do
     setup do
       {:ok, doc2} =
