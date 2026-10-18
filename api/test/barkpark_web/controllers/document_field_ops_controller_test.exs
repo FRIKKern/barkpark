@@ -290,4 +290,62 @@ defmodule BarkparkWeb.DocumentFieldOpsControllerTest do
     assert Jason.decode!(resp.resp_body)["error"]["message"] == "document not found"
     assert_unwritten(doc, scope)
   end
+
+  # task-61b7cf04d2662f85: the door named the draft, a publish removed it before the op
+  # ran, and the op answered 404. The document moved under the fence: a 412 with the
+  # published row's rev, which the caller resends on.
+  test "an op whose draft a publish removed answers rev_mismatch with the published rev",
+       %{scope: scope} do
+    doc = create!(scope)
+    {:ok, _} = Content.publish_document(pub_id(doc), "fieldopspub", @dataset, scope)
+    {:ok, published} = Content.get_document(pub_id(doc), "fieldopspub", @dataset, scope)
+    opts = scope ++ [if_rev: doc.rev]
+
+    # The op the door aimed at `drafts.<id>` found it gone.
+    gone =
+      Content.apply_field_block_ops(
+        doc.doc_id,
+        "fieldopspub",
+        "description",
+        [append("p1", "x")],
+        @dataset,
+        opts
+      )
+
+    assert {:error, :not_found} = gone
+
+    result =
+      BarkparkWeb.DocumentOpsController.draft_gone_under(
+        gone,
+        doc.doc_id,
+        "fieldopspub",
+        @dataset,
+        opts
+      )
+
+    actual = published.rev
+    assert {:error, {:rev_mismatch, %{actual: ^actual}}} = result
+
+    assert %{status: 412, code: "precondition_failed"} =
+             Barkpark.Content.Errors.to_envelope(result)
+
+    # A doc gone for good stays a 404; any other answer passes through.
+    assert {:error, :not_found} =
+             BarkparkWeb.DocumentOpsController.draft_gone_under(
+               {:error, :not_found},
+               "drafts.nope",
+               "fieldopspub",
+               @dataset,
+               opts
+             )
+
+    assert {:error, :not_found} =
+             BarkparkWeb.DocumentOpsController.draft_gone_under(
+               {:error, :not_found},
+               pub_id(doc),
+               "fieldopspub",
+               @dataset,
+               opts
+             )
+  end
 end
