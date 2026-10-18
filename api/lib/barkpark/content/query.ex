@@ -53,6 +53,8 @@ defmodule Barkpark.Content.Query do
     - `:offset`       — rows to skip (default 0, max 100_000 — beyond the cap the page is empty)
     - `:order`        — `:updated_at_desc` (default), `:updated_at_asc`,
                         `:created_at_desc`, `:created_at_asc`
+    - `:collation`    — `nil` (default: the database collation) or one of
+                        `order_collations/0`; applies to text field order terms
 
   The `:drafts` perspective merges draft/published pairs at SQL level via
   `DISTINCT ON`, so `limit` and `offset` are applied after the merge.
@@ -127,7 +129,7 @@ defmodule Barkpark.Content.Query do
     perspective = Keyword.get(opts, :perspective, :raw)
     filter_map = Keyword.get(opts, :filter_map, %{})
     offset = opts |> Keyword.get(:offset, 0) |> max(0) |> min(@max_offset)
-    order = Keyword.get(opts, :order, :updated_at_desc)
+    order = opts |> Keyword.get(:order, :updated_at_desc) |> with_collation(opts[:collation])
 
     base = base_query(type, dataset, filter_map, opts)
 
@@ -2384,6 +2386,29 @@ defmodule Barkpark.Content.Query do
     |> String.split(".")
   end
 
+  # Locale-aware text order (task-4973be61eff3bbe5). Without `:collation` the
+  # database collation decides `title:asc`; on the Gyldendal instance
+  # (gyl.barkpark.cloud) that files Å under A and Ø under O and skips leading
+  # punctuation, which is wrong for a Norwegian catalogue, and a client cannot
+  # re-sort across server-side pages. A
+  # collation is a SQL identifier, never a bound parameter, so the accepted
+  # values are this allowlist and each compiles to its own literal fragment in
+  # `apply_order/2`. The ICU collations ship with any PostgreSQL built with ICU.
+  @order_collations [{"nb", "nb-x-icu"}, {"nn", "nn-x-icu"}]
+
+  @doc "The accepted `:collation` values, as `?collation=` spells them."
+  def order_collations, do: Enum.map(@order_collations, &elem(&1, 0))
+
+  # Only content-field terms are text; `_updatedAt`, `_createdAt` and the view
+  # counts keep their order whatever the collation.
+  defp with_collation(order, nil), do: order
+
+  defp with_collation(specs, collation) when is_list(specs),
+    do: Enum.map(specs, &with_collation(&1, collation))
+
+  defp with_collation({:field, field, dir}, collation), do: {:field, field, dir, collation}
+  defp with_collation(other, _collation), do: other
+
   # Multi-field sort: a list of specs applied in order. Ecto's order_by accumulates
   # across calls, so reducing builds primary, then secondary tiebreak, etc.
   defp apply_order(q, specs) when is_list(specs),
@@ -2428,6 +2453,35 @@ defmodule Barkpark.Content.Query do
        )},
       {^dir, fragment("jsonb_extract_path_text(?, VARIADIC ?)", d.content, ^segs)}
     ])
+  end
+
+  # The same three shapes under a named collation: the promoted columns and the
+  # text key of a content field are collated; the numeric key is not text.
+  for {name, collation} <- @order_collations do
+    collated = "(?) COLLATE \"#{collation}\""
+    collated_path = "(jsonb_extract_path_text(?, VARIADIC ?)) COLLATE \"#{collation}\""
+
+    defp apply_order(q, {:field, "title", dir, unquote(name)}),
+      do: order_by(q, [d], [{^dir, fragment(unquote(collated), d.title)}])
+
+    defp apply_order(q, {:field, "status", dir, unquote(name)}),
+      do: order_by(q, [d], [{^dir, fragment(unquote(collated), d.status)}])
+
+    defp apply_order(q, {:field, field, dir, unquote(name)}) do
+      segs = nested_segments(field)
+
+      order_by(q, [d], [
+        {^dir,
+         fragment(
+           "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN (jsonb_extract_path_text(?, VARIADIC ?))::numeric END",
+           d.content,
+           ^segs,
+           d.content,
+           ^segs
+         )},
+        {^dir, fragment(unquote(collated_path), d.content, ^segs)}
+      ])
+    end
   end
 
   # Fail LOUD on an unsupported order term, mirroring InvalidFilterError's
