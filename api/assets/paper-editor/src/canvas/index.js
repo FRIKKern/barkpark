@@ -178,6 +178,7 @@ import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsI
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
+import { CardKeys } from "./card-menu.js";
 // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
 import { TaskList } from "./task-list-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
@@ -1183,6 +1184,8 @@ class BpPaperCanvas extends HTMLElement {
         // ./figure-node.js.
         Figure,
         Image,
+        // A selected card's keys on a block-cards canvas (card-menu.js), ahead of all others.
+        CardKeys,
         // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom
         // (`bpTaskList`). Registers the single node so runToTiptap's { type:"bpTaskList",
         // attrs:{query, title, config} } mounts as a widget whose ROWS paint hole
