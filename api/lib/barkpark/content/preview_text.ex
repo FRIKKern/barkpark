@@ -99,6 +99,23 @@ defmodule Barkpark.Content.PreviewText do
   def value(path, root, deref), do: path |> segments() |> walk(root, deref, 1) |> elem(0)
 
   @doc """
+  The value at `path` inside `content`, without following any reference
+  (task-86b6aa7ee423ecaf). A key that matches `path` as written wins, so a
+  field whose name holds a dot still reads; otherwise the dotted walk goes
+  into objects and list items: `slug.current`, `onix.productFormatTitle`.
+  For the `list_preview` keys that name one field (`title`, `badge`, `meta`).
+  """
+  @spec field_value(map() | nil, String.t()) :: term()
+  def field_value(%{} = content, path) when is_binary(path) do
+    case Map.fetch(content, path) do
+      {:ok, value} -> value
+      :error -> value(path, content, fn _ -> nil end)
+    end
+  end
+
+  def field_value(_content, _path), do: nil
+
+  @doc """
   An image URL from a stored value: a URL string, or a map with `url` (the
   image object and the twin's denormalised image both carry one). A string
   that is not an http(s) or root-relative URL (Sanity exports write `"null"`)

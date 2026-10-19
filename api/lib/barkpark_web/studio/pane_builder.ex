@@ -1244,12 +1244,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   defp preview_value(_doc, _spec), do: nil
 
-  defp content_value(doc, field) do
-    case Map.get(doc, :content) do
-      %{} = content -> Map.get(content, field)
-      _ -> nil
-    end
-  end
+  # A dotted `badge` / `meta` field walks into objects, the same way
+  # `subtitle` paths do (task-86b6aa7ee423ecaf).
+  defp content_value(doc, field), do: PreviewText.field_value(Map.get(doc, :content), field)
 
   # Only scalar values render; nil / "" / structured values are skipped
   # so a misdeclared field degrades to "no badge", never a crash.
