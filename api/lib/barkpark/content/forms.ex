@@ -300,7 +300,10 @@ defmodule Barkpark.Content.Forms do
             if restored === stored, do: Map.delete(acc, key), else: Map.put(acc, key, restored)
 
           {{:ok, posted}, _absent} ->
-            if empty_input_state?(field, posted), do: Map.delete(acc, key), else: acc
+            case absent_post(field, posted) do
+              :absent -> Map.delete(acc, key)
+              {:value, value} -> Map.put(acc, key, value)
+            end
 
           _ ->
             acc
@@ -440,12 +443,17 @@ defmodule Barkpark.Content.Forms do
             Map.put(acc, name, restore_untouched(sub, p, s))
 
           # The top-level rule one level down: a subfield ABSENT from storage
-          # whose post is only its input's empty state (an untouched
-          # checkbox's "false", an empty list) stays absent, so an untouched
-          # page-builder item does not gain `"showPrice": false`
-          # (task-e24e33a2a1a4fe10).
+          # whose post is only what its input shows for absence (an untouched
+          # checkbox, an empty list, a nested object of those) stays absent,
+          # so an untouched page-builder item does not gain
+          # `"showPrice": false` (task-e24e33a2a1a4fe10) and an untouched
+          # object of switches does not gain three `false` values
+          # (task-d89926b8afd3dcb9).
           {{:ok, p}, :error} ->
-            if empty_input_state?(sub, p), do: Map.delete(acc, name), else: acc
+            case absent_post(sub, p) do
+              :absent -> Map.delete(acc, name)
+              {:value, value} -> Map.put(acc, name, value)
+            end
 
           _ ->
             acc
@@ -472,15 +480,70 @@ defmodule Barkpark.Content.Forms do
   defp form_image(_field, nil), do: ""
   defp form_image(_field, v), do: v
 
-  defp empty_input_state?(field, posted) do
-    case coerce_field_value(field, posted) do
-      false -> field["type"] == "boolean"
-      "" -> true
-      [] -> true
-      %{} = m -> map_size(m) == 0
-      _ -> false
+  # A field ABSENT from storage, posted by the form. The form shows an absent
+  # field as its input's empty state, and a boolean as its declared `default`
+  # (`FieldInputs` and `CompositeField` render the switch from it). A post
+  # equal to that image was not touched, so the field stays absent
+  # (`:absent`). Otherwise the field is written, and inside an object only
+  # the subfields the editor changed are written: a sibling still showing its
+  # absence image is left out (task-d89926b8afd3dcb9).
+  defp absent_post(field, posted) do
+    coerced = coerce_field_value(field, posted)
+
+    case prune_absent(field, coerced) do
+      :absent ->
+        :absent
+
+      {:value, _} = written ->
+        if field["type"] == "composite", do: written, else: {:value, posted}
     end
   end
+
+  defp prune_absent(%{"type" => "composite"} = field, %{} = value) do
+    pruned =
+      Enum.reduce(value, %{}, fn {k, v}, acc ->
+        case composite_sub(field, k) do
+          %{} = sub ->
+            case prune_absent(sub, v) do
+              :absent -> acc
+              {:value, kept} -> Map.put(acc, k, kept)
+            end
+
+          # A key the schema does not declare is kept as posted.
+          nil ->
+            Map.put(acc, k, v)
+        end
+      end)
+
+    if map_size(pruned) == 0, do: :absent, else: {:value, pruned}
+  end
+
+  defp prune_absent(field, value) do
+    if absent_image?(field, value), do: :absent, else: {:value, value}
+  end
+
+  defp absent_image?(%{"type" => "boolean"} = field, value) when is_boolean(value),
+    do: value == boolean_default(field)
+
+  defp absent_image?(_field, value), do: value in ["", nil, []] or value == %{}
+
+  @doc """
+  The value a boolean input shows when the stored document has no value for
+  it: its declared `default` when that is a boolean, else `false`. The Classic
+  switch renders from it, and the save treats a post equal to it as untouched.
+  """
+  @spec boolean_default(map()) :: boolean()
+  def boolean_default(%{"default" => d}) when is_boolean(d), do: d
+  def boolean_default(_field), do: false
+
+  defp composite_sub(%{"fields" => subs}, name) when is_list(subs) do
+    Enum.find(subs, fn
+      %{"name" => ^name} -> true
+      _ -> false
+    end)
+  end
+
+  defp composite_sub(_field, _name), do: nil
 
   # A field's projected content value, flattened to the SCALAR the Classic form
   # input expects. A `body` REGION projects to a body map (`%{"blocks" => …,

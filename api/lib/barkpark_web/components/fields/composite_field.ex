@@ -451,7 +451,14 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # does (FieldInputs) — the bare `.bp-input` checkbox stretched to a 32px
   # box, the "giant checkmark" of the twin's feature card (Gyldendal E1.5).
   defp leaf_input(%{field: %{type: "boolean"}} = assigns) do
-    assigns = Map.put(assigns, :checked, truthy?(assigns.value))
+    # An absent subfield shows its declared `default`; the save keeps it
+    # absent while the switch still shows that default (task-d89926b8afd3dcb9).
+    checked =
+      if assigns.value in ["", nil],
+        do: Barkpark.Content.Forms.boolean_default(Map.get(assigns.field, :raw) || %{}),
+        else: truthy?(assigns.value)
+
+    assigns = Map.put(assigns, :checked, checked)
 
     ~H"""
     <label class="form-switch bp-input-checkbox">
