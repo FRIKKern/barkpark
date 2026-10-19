@@ -100,10 +100,14 @@ defmodule Barkpark.Content.Analytics do
     |> maybe_scope_to_grants(opts)
   end
 
+  # `count()` is `count(*)`: the same number as `count(d.id)`, since `id` is the
+  # primary key and never NULL, and it lets Postgres answer from
+  # `documents_workspace_dataset_type_index` alone instead of reading every row
+  # of the table (task-cca3c6d48e57097e).
   defp census_rows(query) do
     query
     |> group_by([d], d.type)
-    |> select([d], %{type: d.type, total: count(d.id)})
+    |> select([d], %{type: d.type, total: count()})
     |> order_by([d], asc: d.type)
     |> Repo.all()
   end

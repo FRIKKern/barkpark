@@ -769,6 +769,15 @@ defmodule Barkpark.Content.Query do
   # locale collation made this sort the slow step of a Studio list over 18,020
   # products (150 to 190 ms against 35 to 75 ms with "C" on the gyldendal-no
   # copy). The outer order below is unchanged.
+  #
+  # The merge and the page sort carry only the columns they read
+  # (task-cca3c6d48e57097e). Both sorts used to carry every column of every row
+  # of the type, the `content` jsonb included, to keep 101 of them: on the
+  # gyldendal-no copy a product list page sorted 18,020 wide rows and spilled
+  # the merge sort to disk. Now the merge selects the sort columns, the page
+  # picks its ids, and the same statement reads the full rows of those ids
+  # alone and orders them by the same keys. One statement, so the ids and the
+  # rows come from one snapshot.
   defp list_with_drafts_merged(query, order, limit, offset) do
     inner =
       from(d in query,
@@ -776,20 +785,42 @@ defmodule Barkpark.Content.Query do
         order_by: [
           fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
           fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
-        ]
+        ],
+        select: struct(d, ^merge_sort_fields(order))
       )
 
-    from(d in subquery(inner))
+    page_ids =
+      from(d in subquery(inner))
+      |> apply_order(order)
+      # Stable pagination — same total-order tiebreaker as list_linear. The inner
+      # DISTINCT collapses each logical doc to a single row, so its `id` is unique
+      # here; appending it makes the outer sort total so LIMIT/OFFSET pages never
+      # skip or duplicate a row when the primary sort key ties.
+      |> order_by([d], asc: d.id)
+      |> limit(^limit)
+      |> offset(^offset)
+      |> select([d], d.id)
+
+    from(d in Document, where: d.id in subquery(page_ids))
     |> apply_order(order)
-    # Stable pagination — same total-order tiebreaker as list_linear. The inner
-    # DISTINCT collapses each logical doc to a single row, so its `id` is unique
-    # here; appending it makes the outer sort total so LIMIT/OFFSET pages never
-    # skip or duplicate a row when the primary sort key ties.
     |> order_by([d], asc: d.id)
-    |> limit(^limit)
-    |> offset(^offset)
     |> Repo.all()
   end
+
+  # The columns the merged page's sort reads: the id and merge key always, the
+  # promoted sort columns, the dataset the view-count join matches on, and
+  # `content` only when the order names a content field.
+  @merge_sort_base [:id, :doc_id, :dataset_id, :updated_at, :inserted_at, :title, :status]
+
+  defp merge_sort_fields(order) do
+    if order |> List.wrap() |> Enum.any?(&content_order?/1),
+      do: [:content | @merge_sort_base],
+      else: @merge_sort_base
+  end
+
+  defp content_order?({:field, field, _dir}), do: field not in ["title", "status"]
+  defp content_order?({:field, field, _dir, _collation}), do: field not in ["title", "status"]
+  defp content_order?(_), do: false
 
   defp apply_perspective(query, :published) do
     prefix = DraftId.drafts_prefix() <> "%"
