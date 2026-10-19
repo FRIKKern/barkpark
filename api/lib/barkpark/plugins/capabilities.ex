@@ -1189,6 +1189,9 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             default: "scheduled"
+          ),
+          flag("order", "string", "asc (soonest first) | desc (latest first). At most 500 rows.",
+            default: "asc"
           )
         ],
         writes: false,

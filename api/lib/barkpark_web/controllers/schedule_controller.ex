@@ -45,7 +45,7 @@ defmodule BarkparkWeb.ScheduleController do
     rows =
       ScheduledPublishes.list(
         dataset,
-        Map.take(params, ["id", "type", "status"]),
+        Map.take(params, ["id", "type", "status", "order"]),
         scope_opts(conn)
       )
 
