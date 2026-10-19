@@ -185,6 +185,75 @@ defmodule BarkparkWeb.Studio.StudioUploadSanityAssetDocTest do
     assert after_doc.content == before.content
   end
 
+  # task-7ea6f41cede5ee97, criterion 2: REPLACING the image of a field that
+  # already holds Sanity's shape. The picker keeps the stored object and swaps
+  # its asset (bp-media-picker.js bpSerializeAssetRefValue), so the save must
+  # keep `_type` and the other keys and still leave a ref that `asset->` reads.
+  test "replacing a Sanity-shaped image keeps its _type and alt and asset-> resolves", %{
+    ws: ws,
+    project: project,
+    scope: scope
+  } do
+    doc_id = "art-replace-#{System.unique_integer([:positive])}"
+    old_ref = "image-0123456789abcdef0123456789abcdef01234567-640x480-jpg"
+
+    {:ok, _} =
+      Content.create_document(
+        "article",
+        %{
+          "_id" => doc_id,
+          "title" => "Bytte",
+          "heroImage" => %{
+            "_type" => "imageAsset",
+            "alt" => "Gammelt bilde",
+            "caption" => "Foto: Eksempel",
+            "asset" => %{"_type" => "reference", "_ref" => old_ref}
+          }
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "article", @dataset, scope)
+
+    file = Fixtures.upload!(scope)
+    want = "image-#{file.sha1}-3x2-png"
+
+    # What the picker writes after a new pick into that value.
+    replaced =
+      Jason.encode!(%{
+        "_type" => "imageAsset",
+        "alt" => "Gammelt bilde",
+        "caption" => "Foto: Eksempel",
+        "asset" => %{"_type" => "reference", "_ref" => "asset-" <> file.id}
+      })
+
+    raw = token!(ws, ["read", "write"])
+    view = open!(raw, doc_id)
+    render_change(view, "autosave", %{"doc" => %{"title" => "Bytte", "heroImage" => replaced}})
+
+    {:ok, draft} = Content.get_document(DraftId.draft_id(doc_id), "article", @dataset, scope)
+
+    assert %{
+             "_type" => "imageAsset",
+             "alt" => "Gammelt bilde",
+             "caption" => "Foto: Eksempel",
+             "asset" => %{"_type" => "reference", "_ref" => ^want}
+           } = draft.content["heroImage"]
+
+    body =
+      groq(
+        raw,
+        ws,
+        project,
+        ~s(*[_type == "article" && _id == "#{doc_id}"][0]{"t": heroImage._type, "url": heroImage.asset->url, "dims": heroImage.asset->metadata.dimensions})
+      )
+
+    assert body["result"]["t"] == "imageAsset"
+    assert body["result"]["url"] =~ "/images/"
+    assert %{"width" => 3, "height" => 2} = body["result"]["dims"]
+  end
+
   test "a reader who cannot write the document creates no asset document", %{
     ws: ws,
     scope: scope
