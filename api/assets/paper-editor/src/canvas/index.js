@@ -1439,6 +1439,14 @@ class BpPaperCanvas extends HTMLElement {
       editor: this._editor,
       host: this,
       editable: () => this._editable,
+      // Contract 1.14.0: a block-cards host gets Sanity's annotation pill, named by the
+      // annotation's schema title (Sanity's start-cased name when none: "Internal Link").
+      pill: () => this.hasAttribute("block-cards"),
+      label: (info) => {
+        const titles = (this._toolbarVocabulary() || {}).annotationTitles || {};
+        if (info.kind === "link") return titles.link || t("Link");
+        return titles.wikilink || titles.internalLink || t("Internal Link");
+      },
       resolve: (info) => (typeof this._linkPreviewSource === "function" ? this._linkPreviewSource(info) : null),
       onOpen: (detail) => {
         const ev = new CustomEvent("bp-canvas-open-link", { detail, bubbles: true, composed: true, cancelable: true });

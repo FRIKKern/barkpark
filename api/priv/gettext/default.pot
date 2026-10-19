@@ -13011,3 +13011,18 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Default order"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:522
+#, elixir-autogen, elixir-format
+msgid "Edit annotation"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:563
+#, elixir-autogen, elixir-format
+msgid "Internal Link"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:672
+#, elixir-autogen, elixir-format
+msgid "Remove annotation"
+msgstr ""

@@ -11,11 +11,21 @@
 // destroy(). Nothing here writes to the document; the card only reads the DOM and the doc marks.
 
 import { t } from "../i18n.js";
+import { EDIT, TRASH } from "./card-menu.js";
 
 const CLASS = "bp-link-preview";
+const PILL = "bp-link-pill";
+// Sanity's LaunchIcon (21 px): a document link's Open, in the pill.
+const LAUNCH = '<svg width="21" height="21" viewBox="0 0 25 25" fill="none" aria-hidden="true"><path d="M12 7.5H6.5V18.5H17.5V13M19.5 5.5L12.5 12.5M14 5.5H19.5V11" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/></svg>';
 
 export class LinkPreview {
-  constructor({ editor, host, editable, resolve, onOpen, onEdit, delay = 350, hideDelay = 220 }) {
+  // `pill` (contract 1.14.0, a host with block-cards): Sanity's annotation pill instead of the
+  // card. It follows the caret, not the pointer: a caret or a click in a link shows it above
+  // the link, labelled with `label(info)` (the annotation's schema title), with Edit and
+  // Remove, and Open for a document link only (D06).
+  constructor({ editor, host, editable, resolve, onOpen, onEdit, pill, label, delay = 350, hideDelay = 220 }) {
+    this._pill = typeof pill === "function" ? pill : () => !!pill;
+    this._label = typeof label === "function" ? label : () => t("Link");
     this._editor = editor;
     this._host = host;
     this._editable = typeof editable === "function" ? editable : () => !!editable;
@@ -32,8 +42,10 @@ export class LinkPreview {
     this._ticket = 0; // guards a late resolve against a card that moved on
     this._onOver = (e) => this._handleOver(e);
     this._onOut = (e) => this._handleOut(e);
-    this._onKey = () => this.hide();
-    this._onScroll = () => this.hide();
+    // A key hides the card; the pill follows the caret instead.
+    this._onKey = () => (this._pill() ? null : this.hide());
+    // A scroll hides the card; the pill stays with its link.
+    this._onScroll = () => (this._pill() ? this._reposition() : this.hide());
     const dom = editor && editor.view && editor.view.dom;
     if (dom) {
       dom.addEventListener("mouseover", this._onOver);
@@ -41,6 +53,33 @@ export class LinkPreview {
       dom.addEventListener("keydown", this._onKey);
     }
     document.addEventListener("scroll", this._onScroll, true);
+    this._onSelection = () => this._followSelection();
+    if (editor && typeof editor.on === "function") {
+      editor.on("selectionUpdate", this._onSelection);
+      editor.on("focus", this._onSelection);
+      editor.on("blur", this._onSelection);
+    }
+  }
+
+  // Pill mode: shown while the caret (or a selection) sits in a link or a document link.
+  _followSelection() {
+    if (!this._pill()) return;
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || !editor.isFocused || !(editor.isActive("link") || editor.isActive("wikilink"))) return this.hide();
+    const { view, state } = editor;
+    const at = (pos) => {
+      try {
+        const { node } = view.domAtPos(pos);
+        return LinkPreview.describe(node && node.nodeType === 3 ? node.parentElement : node);
+      } catch (_e) {
+        return null;
+      }
+    };
+    const pos = state.selection.from;
+    const info = at(pos) || at(Math.min(pos + 1, state.doc.content.size));
+    if (!info) return this.hide();
+    if (info.el === this._anchor && this.isOpen()) return this._reposition();
+    this.showFor(info.el);
   }
 
   // ── what is under the pointer ────────────────────────────────────────────────
@@ -71,6 +110,7 @@ export class LinkPreview {
 
   // ── hover plumbing ──────────────────────────────────────────────────────────
   _handleOver(e) {
+    if (this._pill()) return;
     const info = LinkPreview.describe(e.target);
     if (!info) return;
     if (this._anchor === info.el && this.isOpen()) {
@@ -82,6 +122,7 @@ export class LinkPreview {
   }
 
   _handleOut(e) {
+    if (this._pill()) return;
     const info = LinkPreview.describe(e.target);
     if (!info) return;
     // Leaving the anchor for the card keeps it; leaving for anywhere else hides it soon.
@@ -107,7 +148,38 @@ export class LinkPreview {
   }
 
   // ── the card ────────────────────────────────────────────────────────────────
+  // Sanity's annotation pill: the label, Open (a document link only), Edit, Remove, as icons.
+  _buildPill() {
+    const el = document.createElement("div");
+    el.className = PILL;
+    el.setAttribute("role", "toolbar");
+    el.style.display = "none";
+    const label = document.createElement("span");
+    label.className = `${PILL}__label`;
+    const button = (cls, icon, name) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = `${PILL}__btn ${CLASS}__${cls}`;
+      b.innerHTML = icon;
+      b.setAttribute("aria-label", name);
+      b.title = name;
+      return b;
+    };
+    const open = button("open", LAUNCH, t("Open"));
+    const edit = button("edit", EDIT, t("Edit annotation"));
+    const remove = button("remove", TRASH, t("Remove annotation"));
+    el.append(label, open, edit, remove);
+    el.addEventListener("mousedown", (e) => e.preventDefault());
+    open.addEventListener("click", () => this.open());
+    edit.addEventListener("click", () => this.edit());
+    remove.addEventListener("click", () => this.remove());
+    this._parts = { label, open, edit, remove, pill: true };
+    document.body.appendChild(el);
+    this._el = el;
+  }
+
   _build() {
+    if (this._pill()) return this._buildPill();
     const el = document.createElement("div");
     el.className = CLASS;
     el.setAttribute("role", "dialog");
@@ -181,6 +253,26 @@ export class LinkPreview {
     this._info = info;
     const ticket = ++this._ticket;
     const p = this._parts;
+    if (p.pill) {
+      p.label.textContent = this._label(info);
+      p.open.style.display = info.kind === "wikilink" ? "" : "none";
+      p.edit.style.display = this._editable() ? "" : "none";
+      p.remove.style.display = this._editable() ? "" : "none";
+      this._el.dataset.kind = info.kind;
+      this._el.style.display = "inline-flex";
+      this._reposition();
+      // The host's answer only carries where Open goes now; the pill shows no preview.
+      let pending = null;
+      try {
+        pending = this._resolve({ kind: info.kind, href: info.href, target: info.target, docId: info.docId, alias: info.alias });
+      } catch (_e) {
+        pending = null;
+      }
+      const take = (meta) => { if (ticket === this._ticket && meta && typeof meta.href === "string" && meta.href && this._info) this._info.resolvedHref = meta.href; };
+      if (pending && typeof pending.then === "function") pending.then(take, () => {});
+      else take(pending);
+      return true;
+    }
     if (info.kind === "link") {
       p.title.textContent = hostOf(info.href) || t("Link");
       p.addr.textContent = info.href;
@@ -258,6 +350,16 @@ export class LinkPreview {
     const margin = 8;
     const vw = window.innerWidth || 0;
     const vh = window.innerHeight || 0;
+    if (this._parts && this._parts.pill) {
+      // Sanity's: centred over the link, 4 px above it; under it when the top is too near.
+      let left = Math.round(a.left + a.width / 2 - rect.width / 2);
+      if (vw) left = Math.max(margin, Math.min(left, vw - rect.width - margin));
+      let top = Math.round(a.top - rect.height - 4);
+      if (top < margin) top = Math.round(a.bottom + 4);
+      this._el.style.left = `${left}px`;
+      this._el.style.top = `${top}px`;
+      return;
+    }
     let left = Math.round(a.left);
     if (vw && left + rect.width > vw - margin) left = Math.max(margin, vw - rect.width - margin);
     let top = Math.round(a.bottom + 6);
@@ -352,6 +454,11 @@ export class LinkPreview {
       dom.removeEventListener("keydown", this._onKey);
     }
     document.removeEventListener("scroll", this._onScroll, true);
+    if (this._editor && typeof this._editor.off === "function") {
+      this._editor.off("selectionUpdate", this._onSelection);
+      this._editor.off("focus", this._onSelection);
+      this._editor.off("blur", this._onSelection);
+    }
     if (this._el && this._el.parentNode) this._el.parentNode.removeChild(this._el);
     this._el = null;
     this._anchor = null;

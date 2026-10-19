@@ -13014,3 +13014,18 @@ msgstr "Sorter"
 #, elixir-autogen, elixir-format
 msgid "Default order"
 msgstr "Standard rekkefølge"
+
+#: lib/barkpark_web/studio_locale.ex:522
+#, elixir-autogen, elixir-format
+msgid "Edit annotation"
+msgstr "Rediger annotasjon"
+
+#: lib/barkpark_web/studio_locale.ex:563
+#, elixir-autogen, elixir-format
+msgid "Internal Link"
+msgstr "Intern lenke"
+
+#: lib/barkpark_web/studio_locale.ex:672
+#, elixir-autogen, elixir-format
+msgid "Remove annotation"
+msgstr "Fjern annotasjon"

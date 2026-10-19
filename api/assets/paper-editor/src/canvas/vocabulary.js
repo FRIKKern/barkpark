@@ -73,12 +73,18 @@ export function parseVocabulary(json) {
         .map((a) => (a && typeof a === "object" ? a.name : a))
         .filter((n) => typeof n === "string")
     : [];
+  // An annotation's schema title, by name (the link pill names it so: contract 1.14.0).
+  const annotationTitles = {};
+  for (const a of Array.isArray(parsed.annotations) ? parsed.annotations : []) {
+    if (a && typeof a === "object" && typeof a.name === "string" && typeof a.title === "string" && a.title.trim()) annotationTitles[a.name] = a.title.trim();
+  }
   const objects = objectEntries(parsed.of);
   return {
     styles: stringList(parsed.styles),
     lists: stringList(parsed.lists),
     marks: stringList(parsed.marks),
     annotations,
+    annotationTitles,
     of: [...stringList(parsed.of), ...objects.map((o) => o.name)],
     objects,
     inlineObjects: inlineObjectEntries(parsed.inline),
