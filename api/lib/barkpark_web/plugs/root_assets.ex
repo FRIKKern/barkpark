@@ -33,6 +33,11 @@ defmodule BarkparkWeb.Plugs.RootAssets do
 
   def call(conn, _opts), do: conn
 
+  # SAFE: the body is our own CSS or JavaScript, cut out of root.html.heex at
+  # compile time (BarkparkWeb.RootAssets). Nothing from the request reaches
+  # it: the name only selects one of four compiled bodies, and the content
+  # type is text/css or text/javascript with nosniff, never text/html.
+  # sobelow_skip ["XSS.SendResp"]
   defp send_asset(conn, content_type, body, cache_control) do
     conn
     |> put_resp_header("content-type", content_type)
