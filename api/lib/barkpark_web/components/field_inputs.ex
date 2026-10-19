@@ -280,7 +280,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
     # A stored JSON `true` (what the API, SDK and `bp seed` write) is checked
     # too — reading only the string "true" rendered it UNCHECKED, so the
     # hidden "false" posted and an edit of ANY other field flipped it to false.
-    checked = Map.get(assigns.editor_form, name, "") in [true, "true"]
+    # A field ABSENT from storage shows its declared `default`, as Sanity's
+    # `initialValue` does, and the save keeps it absent while the switch still
+    # shows that default (task-d89926b8afd3dcb9).
+    checked =
+      case Map.get(assigns.editor_form, name, "") do
+        v when v in ["", nil] -> Barkpark.Content.Forms.boolean_default(assigns.field)
+        v -> v in [true, "true"]
+      end
+
     assigns = assign(assigns, n: name, c: checked)
 
     ~H"""
