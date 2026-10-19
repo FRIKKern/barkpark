@@ -43,10 +43,46 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     baseline = default_doc_actions(assigns, ctx)
     disabled = disabled_action_names(ctx)
 
+    withheld = withheld_action_names(assigns[:editor_schema])
+
     [baseline: baseline, ctx: ctx]
     |> Barkpark.Plugins.Registry.collect_doc_actions()
     |> Enum.reject(&MapSet.member?(disabled, &1["name"]))
+    |> Enum.reject(&(&1["name"] in withheld))
   end
+
+  # ── Singleton actions (task-1141bc9aa8bdff34) ───────────────────────────────
+  #
+  # Sanity limits a singleton to publish, discard changes and restore
+  # (gyldendal.no `sanity.config.tsx` `singletonActions`). A singleton is one
+  # fixed document, so removing it from the dataset, copying it, or taking it
+  # off the site breaks every reader that expects it. Studio therefore offers
+  # no Unpublish, Duplicate or Delete on a type with `singleton: true`, and
+  # refuses those events if a stale client still sends one.
+  @singleton_withheld ~w(unpublish duplicate-doc delete-doc)
+
+  @doc """
+  The built-in action names Studio withholds for `schema`. A singleton
+  withholds Unpublish, Duplicate and Delete; any other type withholds nothing.
+  """
+  def withheld_action_names(schema) do
+    if singleton_schema?(schema), do: @singleton_withheld, else: []
+  end
+
+  @doc """
+  Whether Studio offers the built-in action `name` on the document open in
+  `socket_or_assigns`. The event handlers for withheld actions check this so
+  a client cannot run an action the header no longer offers.
+  """
+  def action_offered?(socket_or_assigns, name) do
+    assigns = socket_to_assigns(socket_or_assigns)
+    name not in withheld_action_names(assigns[:editor_schema])
+  end
+
+  defp singleton_schema?(schema) when is_map(schema),
+    do: Map.get(schema, :singleton) == true or Map.get(schema, "singleton") == true
+
+  defp singleton_schema?(_), do: false
 
   defp socket_to_assigns(%{assigns: assigns}), do: assigns
   defp socket_to_assigns(assigns) when is_map(assigns), do: assigns
