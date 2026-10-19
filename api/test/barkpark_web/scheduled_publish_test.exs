@@ -249,6 +249,74 @@ defmodule BarkparkWeb.ScheduledPublishTest do
     assert listed.("&order=sideways") == [soon, late, latest]
   end
 
+  # task-44cfe871ea0edc30: the index pages; without limit/offset it reads as before.
+  test "the list pages with limit and offset; nextOffset walks every row once", %{ws_id: ws_id} do
+    {raw, _} = token!(ws_id)
+    type = "page-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{"name" => type, "title" => "Paged", "visibility" => "public", "fields" => []},
+        @dataset
+      )
+
+    ids =
+      for secs <- [3600, 7200, 7200, 10_800, 14_400] do
+        id = "sched-page-#{System.unique_integer([:positive])}"
+        {:ok, _} = Content.create_document(type, %{"doc_id" => id}, @dataset)
+
+        schedule(raw, %{"id" => id, "type" => type, "publishAt" => future(secs)})
+        |> json_response(201)
+
+        id
+      end
+
+    read = fn query ->
+      raw
+      |> authed()
+      |> get("/v1/data/schedules/#{@dataset}?type=#{type}" <> query)
+      |> json_response(200)
+      |> Map.fetch!("result")
+    end
+
+    whole = read.("")
+
+    assert whole["page"] == %{
+             "limit" => 500,
+             "offset" => 0,
+             "hasMore" => false,
+             "nextOffset" => nil
+           }
+
+    all = Enum.map(whole["schedules"], & &1["documentId"])
+    assert Enum.sort(all) == Enum.sort(ids)
+
+    walk = fn walk, offset, acc ->
+      page = read.("&limit=2&offset=#{offset}")
+      assert page["page"]["limit"] == 2
+      assert page["page"]["hasMore"] == (page["page"]["nextOffset"] != nil)
+      acc = acc ++ Enum.map(page["schedules"], & &1["documentId"])
+
+      case page["page"]["nextOffset"] do
+        nil -> acc
+        next -> walk.(walk, next, acc)
+      end
+    end
+
+    # Pages in the list's own order, the 7200 tie included: no row twice, none missed.
+    assert walk.(walk, 0, []) == all
+    assert read.("&limit=2&offset=4")["page"]["nextOffset"] == nil
+    assert read.("&limit=2&offset=9")["schedules"] == []
+
+    # Not a positive integer: the default, as an unknown order is.
+    for bad <- ["0", "-3", "two", "2.5"] do
+      assert read.("&limit=#{bad}")["page"]["limit"] == 500
+    end
+
+    assert read.("&offset=-1")["page"]["offset"] == 0
+    assert read.("&limit=9999")["page"]["limit"] == 500
+  end
+
   test "cancel: the schedule ends, the job does nothing, the draft stays", %{ws_id: ws_id} do
     {raw, _} = token!(ws_id)
     {id, _} = new_draft!()
