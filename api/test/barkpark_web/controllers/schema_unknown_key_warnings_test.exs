@@ -76,4 +76,25 @@ defmodule BarkparkWeb.SchemaUnknownKeyWarningsTest do
     assert resp.status == 201, resp.resp_body
     refute Map.has_key?(Jason.decode!(resp.resp_body), "warnings")
   end
+
+  # task-59d6a6ba332509a0: an image field's valueShape is read by Studio, so
+  # validate_only and apply name no advisory for it, and the stored field
+  # keeps it.
+  test "valueShape on an image field draws no warning and is kept", %{conn: conn} do
+    body = %{
+      "name" => "value_shape_widget",
+      "title" => "Value Shape Widget",
+      "fields" => [%{"name" => "heroImage", "type" => "image", "valueShape" => "assetRef"}]
+    }
+
+    check = apply_schema(conn, body, "?validate_only=true")
+    assert check.status == 200, check.resp_body
+    refute Map.has_key?(Jason.decode!(check.resp_body), "warnings")
+
+    resp = apply_schema(conn, body)
+    assert resp.status == 201, resp.resp_body
+    stored = Jason.decode!(resp.resp_body)
+    refute Map.has_key?(stored, "warnings")
+    assert [%{"name" => "heroImage", "valueShape" => "assetRef"}] = stored["fields"]
+  end
 end
