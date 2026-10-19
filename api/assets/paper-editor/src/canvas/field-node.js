@@ -106,6 +106,7 @@
 // __smoke.mjs imports run-convert.js (which references the field TYPE/coercion only,
 // never the NodeView) without a browser.
 
+import { mountFieldBinding } from "./field-binding.js";
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
 import { FIELD_SETTINGS_TYPES, buildFieldSettings } from "./field-settings.js";
@@ -637,6 +638,8 @@ export const Field = Node.create({
 
       dom.appendChild(labelEl);
       dom.appendChild(control);
+      // A bound block's n/max badge and unbind × (field-binding.js, contract 1.13.0).
+      const binding = mountFieldBinding(dom, { editor, getPos });
       // field-number shows its unit (if any) after the input, as quiet text. The
       // input and unit share the row's value column. Painted in place (paintUnit)
       // so a unit edited in the settings disclosure keeps the control's focus.
@@ -685,6 +688,7 @@ export const Field = Node.create({
         }
         label.paint(n);
         if (settings) settings.paint(n);
+        binding.paint(n);
       };
 
       // The quiet CONFIG disclosure (a select's options, a number's range + unit).
@@ -803,6 +807,7 @@ export const Field = Node.create({
           if (writeTimer) clearTimeout(writeTimer);
           label.destroy();
           if (settings) settings.destroy();
+          binding.destroy();
           control.removeEventListener(eventName, scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);
         },
@@ -993,6 +998,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
 
   dom.appendChild(labelEl);
   dom.appendChild(picker);
+  const binding = mountFieldBinding(dom, { editor, getPos });
 
   // ── the featured-image PLACEHOLDER affordance (t13) ─────────────────────────
   //
@@ -1113,6 +1119,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     const str = v == null ? "" : String(v);
     if (picker.value !== str) picker.value = str;
     label.paint(n);
+    binding.paint(n);
 
     // Show the ghost frame ONLY for an asset-less image picker that has not yet been
     // revealed; the moment an asset is present the frame steps aside for the WC.
@@ -1150,6 +1157,7 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
     ignoreMutation: () => true,
     destroy: () => {
       label.destroy();
+      binding.destroy();
       dom.removeEventListener("bp-flush-node", label.flush);
       picker.removeEventListener("bp-change", onChange);
       if (placeholder) {

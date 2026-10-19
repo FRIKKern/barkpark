@@ -405,6 +405,7 @@ defmodule BarkparkWeb.StudioLocale do
           "This save may already have reached the server. It cannot be discarded safely here."
         ),
       "title" => gettext("title"),
+      "Unbind property" => gettext("Unbind property"),
       "Undo was not confirmed. Try again." => gettext("Undo was not confirmed. Try again."),
       "Undoing…" => gettext("Undoing…"),
       "unknown" => gettext("unknown"),
