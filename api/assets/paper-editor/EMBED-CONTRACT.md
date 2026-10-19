@@ -145,7 +145,7 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | Event | When | `detail` |
 |---|---|---|
 | `bp-ready` | once, after a successful mount (not on mount failure) | `{ blockCount }` |
-| `bp-canvas-ops` | on debounced edit (300ms; held while an IME composes), or a flush/resend | `{ ops, seq?, conflictBlocks? }` |
+| `bp-canvas-ops` | on debounced edit (300ms), at an IME compositionend, or a flush/resend (`pagehide` flushes); while an IME composes, only the composing run is held back | `{ ops, seq?, conflictBlocks? }` |
 | `bp-noop` | an emit whose edits diff to zero ops | none |
 | `bp-canvas-open-link` | the hover card's Open, **cancelable** | `{ kind: "link"\|"wikilink", href, target, docId, alias }` (each `string \| null`) |
 | `bp-canvas-mount-failed` | the run could not be painted | `{ stage: "create"\|"seed", message, blockIds }` |
@@ -204,8 +204,8 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `applyServerBlocks(blocks, echoMeta?)` | apply confirmed server blocks. Deferred while the author is focused or composing; recognised as the canvas's own echo when it matches the in-flight or acknowledged snapshot. `echoMeta`: `{ mode?: "own"\|"own-stale", requestId? }` | nothing |
 | `applyServerBlocksIfIdle(blocks)` | apply now only if nothing is focused, composing, in source mode or pending. Throws `TypeError` on a non-array when it would apply | `true` when applied |
 | `resolveConflictWithServerBlocks(blocks)` | the user's "use latest": drop pending and in-flight state and take `blocks` | nothing |
-| `flushPendingChanges()` | commit node-view inputs and any debounced edit (or leave source mode) now | `true` when it emitted a batch |
-| `hasPendingChanges()` | debounced, in-flight, queued, unsaved source text or a pending note | boolean |
+| `flushPendingChanges()` | commit node-view inputs and any debounced edit, or the text committed around an open IME composition (or leave source mode) now | `true` when it emitted a batch |
+| `hasPendingChanges()` | debounced, in-flight, queued, an open IME composition, unsaved source text or a pending note | boolean |
 | `recoverySnapshot()` | the live document for a reconnect halt | `{ mode: "rich"\|"markdown", blocks?, raw_source?, raw_editor_document?, serialization_error? }` |
 | `focusBlock(id)` | place the caret in the top-level block `id`; an id not yet in the run is retried on the next external apply within 5s | `true` when placed |
 | `selectBlock(id)` | select the top-level image or object block `id` as a click on its card does (1.12.0); text typed onto a selected card on a `block-cards` canvas is dropped, Backspace/Delete still remove it | `true` when selected |
