@@ -507,7 +507,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         reference_row(%{
           ref_filter: ref_filter,
           ref_filter_params: ref_filter_params,
-          wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
+          wrap_id: reference_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
           row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
           row_label: row_label(assigns, idx),
@@ -717,6 +717,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp ref_row_id(field, row_path, row_value, idx) do
     "bp-aref-#{field.name}-#{idx}-#{:erlang.phash2({row_path, row_value})}"
   end
+
+  # A reference row's id hashes the id the picker shows, not the stored
+  # shape: a new row holds nil until the form posts its hidden input's "", and
+  # a pick may come back as {_ref, _type}. Hashing the raw value changed the
+  # id on those saves, LiveView swapped the ignored wrapper, and a search the
+  # editor was typing in the new row was lost (task-03b2805eda66cef7).
+  defp reference_row_id(field, row_path, row_value, idx),
+    do:
+      ref_row_id(field, row_path, BarkparkWeb.Components.FieldInputs.reference_id(row_value), idx)
 
   # refType lives on the RAW field map (a v1 leaf key parse/2 preserves
   # verbatim); parsed %Field{} carries it under .raw, plain maps directly.
