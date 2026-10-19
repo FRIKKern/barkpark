@@ -685,20 +685,14 @@ class BpReferencePicker extends HTMLElement {
       btn.type = "button";
       btn.className = "bp-ref-dropdown-item";
       btn.setAttribute("role", "option");
-      if (!this._renderHitPreview(btn, doc)) btn.textContent = doc.title || doc.id;
+      if (!this._renderHitPreview(btn, doc)) this._renderHitTitle(btn, doc);
       if (this._refTypes.length > 1 && doc.type) {
         // Sanity shows the hit's type when a reference may point at several.
-        const type = document.createElement("span");
-        type.className = "bp-ref-suggest-meta bp-ref-hit-type";
-        type.textContent = this._typeWord(doc.type);
-        btn.appendChild(type);
+        this._appendHitMeta(btn, "bp-ref-suggest-meta bp-ref-hit-type", this._typeWord(doc.type));
       }
       if (doc.draft) {
         // Sanity-style draft indicator on unpublished candidates.
-        const badge = document.createElement("span");
-        badge.className = "bp-ref-suggest-meta";
-        badge.textContent = this._t("draft", "draft");
-        btn.appendChild(badge);
+        this._appendHitMeta(btn, "bp-ref-suggest-meta", this._t("draft", "draft"));
       }
       btn.addEventListener("mousedown", (e) => e.preventDefault());
       btn.addEventListener("click", () => this._select(doc));
@@ -710,6 +704,30 @@ class BpReferencePicker extends HTMLElement {
     this._announce(
       this._count(matches.length, "one_result", "1 result", "n_results", "%{count} results"),
     );
+  }
+
+  // A hit with no list preview: the title in the same column a preview's
+  // title sits in, so a type word or draft badge after it stands apart at the
+  // row's end (task-522073bdad4a7ad2: main drew "RettsdataVirksomhet").
+  _renderHitTitle(btn, doc) {
+    const main = document.createElement("span");
+    main.className = "bp-ref-hit-main";
+    const title = document.createElement("span");
+    title.className = "bp-ref-hit-title";
+    title.textContent = doc.title || doc.id;
+    main.appendChild(title);
+    btn.appendChild(main);
+  }
+
+  // A trailing word on a hit row (its type, a draft badge). The space before
+  // it does not render inside the flex row; it keeps the row's text and its
+  // accessible name as separate words.
+  _appendHitMeta(btn, className, text) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    btn.appendChild(document.createTextNode(" "));
+    btn.appendChild(span);
   }
 
   // A hit whose type declares a list preview reads like its desk row: the

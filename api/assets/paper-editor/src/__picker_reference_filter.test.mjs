@@ -66,7 +66,7 @@ try {
     picker.querySelector(".bp-ref-search-input").focus();
     await picker._search("festival");
 
-    assert.deepEqual(titles(picker), ["Litteraturfestivalendraft", "Bokhøst"], "only hits the filter matches (the first is a draft)");
+    assert.deepEqual(titles(picker), ["Litteraturfestivalen draft", "Bokhøst"], "only hits the filter matches (the first is a draft)");
 
     const q = urls.find((u) => u.pathname === "/w/gyldendal-no/p/default/v2025-02-19/data/query/production");
     assert.ok(q, "the filter runs on the scoped GROQ endpoint");
