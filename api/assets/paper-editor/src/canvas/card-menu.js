@@ -6,7 +6,8 @@
 // (overflow:auto), so a menu inside it would be cut off. Out of the host it loses the
 // surface-scoped --paper-* tokens, so the ones it paints with are copied onto it.
 
-import { NodeSelection, Plugin } from "@tiptap/pm/state";
+import { Extension } from "@tiptap/core";
+import { NodeSelection, Plugin, Selection, TextSelection } from "@tiptap/pm/state";
 import { t } from "../i18n.js";
 
 // Sanity's EllipsisHorizontalIcon (21 px in a 25 px button), EditIcon and TrashIcon.
@@ -108,20 +109,76 @@ export function wireCardMenu(more, { dom, menuClass, items, onPick, top, enabled
   return close;
 }
 
-// A card a click selected (its ring turns blue, as Sanity's) holds a NodeSelection, and a
-// typed character would replace it: the whole image or object block gone for one key. On a
-// canvas with `block-cards` text typed onto a selected card is dropped; Backspace and
-// Delete still remove it, as a deliberate delete.
+const CARDS = new Set(["bpImage", "bpOpaque"]);
+const isCard = (node) => !!node && CARDS.has(node.type.name);
+const onCardsCanvas = (view) => !!(view.dom.closest && view.dom.closest("bp-paper-canvas[block-cards]"));
+// A top-level card the selection holds: { node, pos, index } or null.
+function selectedCard(state) {
+  const sel = state.selection;
+  if (!(sel instanceof NodeSelection) || sel.$from.depth !== 0 || !isCard(sel.node)) return null;
+  return { node: sel.node, pos: sel.from, index: sel.$from.index(0) };
+}
+
+// The keys of a selected card on a canvas with `block-cards` (contract 1.11.0), as Sanity's
+// Portable Text editor treats a selected block object:
+//   * a typed character never replaces it (the whole block gone for one key);
+//   * ArrowDown/Right and ArrowUp/Left reach an adjacent card directly, with no extra stop
+//     (ProseMirror's gap cursor) between two cards;
+//   * Enter opens a new paragraph after it, the caret in it (Sanity's: no dialog; the
+//     card's "…" Edit and a double-click still edit it);
+//   * Delete / Backspace remove it and leave the caret at the end of the text before.
+// A canvas without the attribute keeps ProseMirror's and the canvas's own keys (Enter
+// edits an object block there).
 export function keepSelectedCard() {
   return new Plugin({
     props: {
       handleTextInput(view) {
-        const sel = view.state.selection;
-        if (!(sel instanceof NodeSelection)) return false;
-        const name = sel.node.type.name;
-        if (name !== "bpImage" && name !== "bpOpaque") return false;
-        return !!(view.dom.closest && view.dom.closest("bp-paper-canvas[block-cards]"));
+        return !!selectedCard(view.state) && onCardsCanvas(view);
+      },
+      handleKeyDown(view, event) {
+        if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !onCardsCanvas(view)) return false;
+        const card = selectedCard(view.state);
+        if (!card) return false;
+        const { state } = view;
+        const doc = state.doc;
+        const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
+        const back = event.key === "ArrowUp" || event.key === "ArrowLeft";
+        if (forward || back) {
+          const at = card.index + (forward ? 1 : -1);
+          if (at < 0 || at >= doc.childCount || !isCard(doc.child(at))) return false;
+          let pos = 0;
+          for (let i = 0; i < at; i++) pos += doc.child(i).nodeSize;
+          view.dispatch(state.tr.setSelection(NodeSelection.create(doc, pos)).scrollIntoView());
+          return true;
+        }
+        if (event.key === "Enter") {
+          const paragraph = state.schema.nodes.paragraph;
+          if (!paragraph) return false;
+          const after = card.pos + card.node.nodeSize;
+          const tr = state.tr.insert(after, paragraph.create());
+          tr.setSelection(TextSelection.create(tr.doc, after + 1)).scrollIntoView();
+          view.dispatch(tr);
+          return true;
+        }
+        if (event.key === "Delete" || event.key === "Backspace") {
+          const tr = state.tr.delete(card.pos, card.pos + card.node.nodeSize);
+          const $at = tr.doc.resolve(Math.min(card.pos, tr.doc.content.size));
+          tr.setSelection(Selection.near($at, -1)).scrollIntoView();
+          view.dispatch(tr);
+          return true;
+        }
+        return false;
       },
     },
   });
 }
+
+// Ahead of every other key handler (the inline objects' Enter-to-edit runs at 1000), so a
+// selected card's keys are decided here first on a block-cards canvas.
+export const CardKeys = Extension.create({
+  name: "bpCardKeys",
+  priority: 1100,
+  addProseMirrorPlugins() {
+    return [keepSelectedCard()];
+  },
+});
