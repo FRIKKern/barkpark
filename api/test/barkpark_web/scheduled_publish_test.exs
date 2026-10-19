@@ -217,6 +217,38 @@ defmodule BarkparkWeb.ScheduledPublishTest do
     end
   end
 
+  test "the list reads soonest first; order=desc reads the latest first", %{ws_id: ws_id} do
+    {raw, _} = token!(ws_id)
+
+    ids =
+      for secs <- [7200, 3600, 10_800] do
+        {id, _} = new_draft!()
+
+        schedule(raw, %{"id" => id, "type" => @type_name, "publishAt" => future(secs)})
+        |> json_response(201)
+
+        id
+      end
+
+    [late, soon, latest] = ids
+
+    listed = fn query ->
+      raw
+      |> authed()
+      |> get("/v1/data/schedules/#{@dataset}?type=#{@type_name}" <> query)
+      |> json_response(200)
+      |> get_in(["result", "schedules"])
+      |> Enum.map(& &1["documentId"])
+      |> Enum.filter(&(&1 in ids))
+    end
+
+    assert listed.("") == [soon, late, latest]
+    assert listed.("&order=asc") == [soon, late, latest]
+    assert listed.("&order=desc") == [latest, late, soon]
+    # Anything else keeps the default, as a server without the parameter does.
+    assert listed.("&order=sideways") == [soon, late, latest]
+  end
+
   test "cancel: the schedule ends, the job does nothing, the draft stays", %{ws_id: ws_id} do
     {raw, _} = token!(ws_id)
     {id, _} = new_draft!()

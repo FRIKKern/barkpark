@@ -1141,6 +1141,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "asc (soonest first) | desc (latest first). At most 500 rows.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -7509,6 +7518,15 @@
             "description": "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "asc (soonest first) | desc (latest first). At most 500 rows.",
+            "in": "query",
+            "name": "order",
             "required": false,
             "schema": {
               "type": "string"

@@ -91,7 +91,8 @@ defmodule Barkpark.Content.ScheduledPublishes do
   The schedules visible in this request's workspace (and project, when the URL
   names one) for `dataset`, soonest first. Filters: `"id"` (a document id,
   draft or published spelling), `"type"`, and `"status"` (default
-  `"scheduled"`; `"all"` for every status).
+  `"scheduled"`; `"all"` for every status). `"order"` `"desc"` lists the latest
+  first. At most 500 rows.
   """
   def list(dataset, filters, opts) when is_binary(dataset) and is_map(filters) do
     ScheduledPublish
@@ -100,7 +101,7 @@ defmodule Barkpark.Content.ScheduledPublishes do
     |> filter_doc(filters["id"])
     |> filter_type(filters["type"])
     |> filter_status(Map.get(filters, "status", "scheduled"))
-    |> order_by([s], asc: s.publish_at, asc: s.inserted_at)
+    |> order_publish(filters["order"])
     |> limit(500)
     |> Repo.all()
   end
@@ -416,6 +417,13 @@ defmodule Barkpark.Content.ScheduledPublishes do
     do: where(query, [s], s.type == ^type)
 
   defp filter_type(query, _), do: query
+
+  # Soonest first; `order=desc` reads the latest first, so the 500 kept are the newest
+  # (an archive with more than 500 rows listed the oldest ones only).
+  defp order_publish(query, "desc"),
+    do: order_by(query, [s], desc: s.publish_at, desc: s.inserted_at)
+
+  defp order_publish(query, _), do: order_by(query, [s], asc: s.publish_at, asc: s.inserted_at)
 
   defp filter_status(query, "all"), do: query
 
