@@ -34,7 +34,10 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
     # the form is present regardless of whether a token was supplied.
     conn = init_test_session(conn, %{})
     {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
-    assert html =~ ~s|action="/logout"|
+    # On main at d43298a8e this match finds only the stylesheet's
+    # `form[action="/logout"]` selector, so it reads the served page with its
+    # root assets inlined, as it did when they were inline.
+    assert BarkparkWeb.RootAssetsInline.inline(html) =~ ~s|action="/logout"|
   end
 
   test "POST /logout via the button form clears session", %{conn: conn} do

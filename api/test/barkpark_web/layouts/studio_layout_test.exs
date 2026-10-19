@@ -110,6 +110,7 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       |> init_test_session(%{"api_token" => @admin_token})
       |> get(scoped_studio("/d/production/studio"))
       |> html_response(200)
+      |> BarkparkWeb.RootAssetsInline.inline()
     end
 
     test "generated block emits --primary-hover/-hsl/-soft for BOTH light and dark", %{conn: conn} do

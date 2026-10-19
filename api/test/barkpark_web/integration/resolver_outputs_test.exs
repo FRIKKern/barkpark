@@ -269,6 +269,10 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
     test "HTML contains the nav-plugin-entry marker", %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
         {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+        # On main at d43298a8e this match finds only the stylesheet's
+        # `a.pane-item.nav-plugin-entry` rule, so it reads the served page
+        # with its root assets inlined, as it did when they were inline.
+        html = BarkparkWeb.RootAssetsInline.inline(html)
 
         assert html =~ "nav-plugin-entry",
                "expected nav-plugin-entry marker (rendered when a :plugin_link desk item is present)"

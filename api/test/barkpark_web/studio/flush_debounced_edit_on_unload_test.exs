@@ -45,7 +45,11 @@ defmodule BarkparkWeb.Studio.FlushDebouncedEditOnUnloadTest do
   end
 
   test "the served Studio page blurs a focused phx-change control on beforeunload", %{conn: conn} do
-    html = conn |> get(scoped_studio("/d/#{@dataset}/studio/note/n1")) |> html_response(200)
+    html =
+      conn
+      |> get(scoped_studio("/d/#{@dataset}/studio/note/n1"))
+      |> html_response(200)
+      |> BarkparkWeb.RootAssetsInline.inline()
 
     found = Regex.run(~r/addEventListener\("beforeunload",[^}]*\}\);/s, html)
 

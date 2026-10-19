@@ -120,6 +120,11 @@ defmodule BarkparkWeb.Endpoint do
   # (deploy/instance-deploy.sh, sync_static_siblings) builds those siblings for
   # every `assets/*.js|css` and keeps them in step with the checkout; a file
   # without one is served as-is. Off in dev, where the files are edited live.
+  # The root layout's stylesheets and body scripts, cut out of the template
+  # at compile time and served under a content hash with a year of
+  # `immutable` caching (BarkparkWeb.RootAssets, task-cca3c6d48e57097e).
+  plug BarkparkWeb.Plugs.RootAssets
+
   plug Plug.Static,
     at: "/",
     from: :barkpark,
