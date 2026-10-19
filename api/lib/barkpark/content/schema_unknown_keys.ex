@@ -36,7 +36,7 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
 
   @field_keys ~w(name type title description validation visibleWhen hidden readOnly group surface
                  encrypted private visibility readable_by options onix fields of
-                 rows layout source refType to refTypes refTypeTolerant hotspot alt
+                 rows layout source refType to refTypes refTypeTolerant hotspot alt valueShape
                  editor blocks ordered codelistId version issue_version languages format
                  fallbackChain groups fieldset fieldsets default required? search)
 
