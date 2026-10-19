@@ -33,7 +33,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias Barkpark.Content.CallerContext
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.Caps
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{DocActions, Mount, Path, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     AccessPanel,
@@ -555,22 +555,46 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("preview-profile", params, socket), do: History.preview_profile(params, socket)
   def handle_event("save-profile", params, socket), do: History.save_profile(params, socket)
 
-  def handle_event("delete-doc", _params, socket), do: Delete.delete_doc(socket)
+  def handle_event("delete-doc", _params, socket) do
+    if DocActions.action_offered?(socket, "delete-doc"),
+      do: Delete.delete_doc(socket),
+      else: {:noreply, socket}
+  end
+
   def handle_event("close-delete", _params, socket), do: Delete.close_delete(socket)
-  def handle_event("confirm-delete", params, socket), do: Delete.confirm_delete(params, socket)
+
+  def handle_event("confirm-delete", params, socket) do
+    if DocActions.action_offered?(socket, "delete-doc"),
+      do: Delete.confirm_delete(params, socket),
+      else: {:noreply, socket}
+  end
 
   def handle_event("discard-draft", _params, socket), do: Discard.discard_draft(socket)
   def handle_event("close-discard", _params, socket), do: Discard.close_discard(socket)
   def handle_event("confirm-discard", _params, socket), do: Discard.confirm_discard(socket)
 
   def handle_event("publish", _params, socket), do: Doc.publish(socket)
-  def handle_event("unpublish", _params, socket), do: Doc.unpublish(socket)
+
+  def handle_event("unpublish", _params, socket) do
+    if DocActions.action_offered?(socket, "unpublish"),
+      do: Doc.unpublish(socket),
+      else: {:noreply, socket}
+  end
 
   def handle_event("close-unpublish-guard", _params, socket),
     do: Doc.close_unpublish_guard(socket)
 
-  def handle_event("confirm-unpublish", params, socket), do: Doc.confirm_unpublish(params, socket)
-  def handle_event("duplicate-doc", _params, socket), do: Doc.duplicate_doc(socket)
+  def handle_event("confirm-unpublish", params, socket) do
+    if DocActions.action_offered?(socket, "unpublish"),
+      do: Doc.confirm_unpublish(params, socket),
+      else: {:noreply, socket}
+  end
+
+  def handle_event("duplicate-doc", _params, socket) do
+    if DocActions.action_offered?(socket, "duplicate-doc"),
+      do: Doc.duplicate_doc(socket),
+      else: {:noreply, socket}
+  end
 
   def handle_event("shares-open", params, socket), do: Shares.shares_open(params, socket)
   def handle_event("shares-close", _params, socket), do: Shares.shares_close(socket)
