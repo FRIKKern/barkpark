@@ -340,7 +340,13 @@ defmodule Barkpark.StudioChat.Runtime do
   end
 
   @doc "Start or resume a managed runtime using one provider-neutral entry point."
-  def open(provider, %{execution_target: "registered_host"} = opts) do
+  def open(provider, opts) when is_map(opts) do
+    with :ok <- Barkpark.StudioChat.runtime_access(Map.get(opts, :session_id)) do
+      open_runtime(provider, opts)
+    end
+  end
+
+  defp open_runtime(provider, %{execution_target: "registered_host"} = opts) do
     session_opts = Map.get(opts, :session_opts, %{})
 
     ref = %RemoteRef{
@@ -379,7 +385,7 @@ defmodule Barkpark.StudioChat.Runtime do
     end
   end
 
-  def open(provider, opts) when is_map(opts) do
+  defp open_runtime(provider, opts) do
     ws = Map.get(opts, :workspace_id)
 
     # Backstop for every caller (task-6ca882967fd95dda): a managed turn that
@@ -397,11 +403,18 @@ defmodule Barkpark.StudioChat.Runtime do
   @doc "Dispatch one command to managed compute or a registered host."
   def dispatch(execution_target, provider, command, opts \\ [])
 
-  def dispatch("managed", provider, %Command{} = command, opts) do
+  def dispatch(target, provider, %Command{} = command, opts) do
+    with :ok <- Barkpark.StudioChat.runtime_access(command.session_id),
+         :ok <- Barkpark.StudioChat.runtime_access(Map.get(command.payload, :session_id)) do
+      dispatch_runtime(target, provider, command, opts)
+    end
+  end
+
+  defp dispatch_runtime("managed", provider, %Command{} = command, opts) do
     dispatch_managed(adapter(provider), command, opts)
   end
 
-  def dispatch("registered_host", _provider, %Command{} = command, opts) do
+  defp dispatch_runtime("registered_host", _provider, %Command{} = command, opts) do
     with {:ok, directory} <- fetch_contract(:host_directory, opts),
          {:ok, dispatcher} <- fetch_contract(:remote_dispatch, opts),
          {:ok, host} <- directory.resolve(opts[:workspace_id], opts[:execution_host_id]) do

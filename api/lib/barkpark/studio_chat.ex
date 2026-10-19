@@ -3,10 +3,10 @@ defmodule Barkpark.StudioChat do
   The provider-neutral Studio chat context — the session index + display history
   behind the `/studio/chat` tab (epic studio-claude-chat, charter D6-D8/D13).
 
-  Two tables, `chat_sessions` + `chat_messages`, with **no HTTP route ever**: the
-  admin LiveView reads `Repo` directly, so transcripts (cwd, tool inputs, host
-  paths) are admin-gated by construction (charter D6 — the doc route is
-  disqualified because a private-schema query gate is any-api-token).
+  Two tables, `chat_sessions` + `chat_messages`, shared by the admin LiveView
+  and sealed chat HTTP routes. Legacy workspace/API access excludes personal
+  owners; the personal account route projects only persisted user/assistant
+  text, never internal metadata, tool inputs or host paths.
 
   ## Identity + resume (D8)
 
@@ -62,6 +62,9 @@ defmodule Barkpark.StudioChat do
   # Longest sidebar preview we keep denormalised on the session row.
   @summary_max 140
 
+  @type personal_scope :: {:personal, binary(), binary()}
+  @type scope :: :global | binary() | personal_scope()
+
   # ---------------------------------------------------------------------------
   # sessions
   # ---------------------------------------------------------------------------
@@ -69,13 +72,17 @@ defmodule Barkpark.StudioChat do
   # ---------------------------------------------------------------------------
   # Tenant scope (Connectors epic wave 1, charter D15/D17) — the store seal.
   #
-  # Every read/list/mutate funnel takes a `scope` argument that is either
-  # `:global` or a `workspace_id` binary, defaulting to `:global` so no non-chat
+  # Every read/list/mutate funnel takes a `scope` argument: `:global`, a workspace binary, or
+  # `{:personal, workspace_id, user_id}`, defaulting to `:global` so no non-chat
   # caller (Recorder, internal helpers, admin LiveView) breaks:
   #
   #   * `:global`     → NO filter (the admin superuser path, mirrors
   #                     `Content.Scope.scope_to_workspace_global/1`).
-  #   * a workspace id → `owner_workspace_id == ^ws` — the fail-closed semantics
+  #   * a workspace id → matching workspace AND no personal owner; ordinary
+  #                     workspace credentials never inherit private chats.
+  #   * {:personal, ws, user} → both owner columns must match. Ownership is
+  #                     create-only and comes from a verified account scope.
+  #                     The workspace boundary follows the semantics
   #                     of `Content.Scope.scope_to_workspace/3`, applied DIRECTLY
   #                     to `chat_sessions.owner_workspace_id` (the table has no
   #                     `workspace_id` column, so we cannot call Scope, which
@@ -90,7 +97,10 @@ defmodule Barkpark.StudioChat do
   defp scope_sessions(query, :global), do: query
 
   defp scope_sessions(query, workspace_id) when is_binary(workspace_id),
-    do: where(query, [s], s.owner_workspace_id == ^workspace_id)
+    do: where(query, [s], s.owner_workspace_id == ^workspace_id and is_nil(s.owner_user_id))
+
+  defp scope_sessions(query, {:personal, ws, user}) when is_binary(ws) and is_binary(user),
+    do: where(query, [s], s.owner_workspace_id == ^ws and s.owner_user_id == ^user)
 
   defp scope_sessions(query, _fail_closed), do: where(query, false)
 
@@ -103,14 +113,17 @@ defmodule Barkpark.StudioChat do
   Ecto `scope_sessions/2`. The three clauses are byte-faithful to that query:
 
     * `:global` — instance-wide authority sees every session (the identity clause).
+    * a personal tuple — matches only that exact workspace and user scope;
+      it never equals a workspace binary. `fleet_owner/1` stamps this term.
     * a workspace binary — confined to `owner_ws == ws`; a `nil` (NULL-owner /
       admin/global) session never equals a binary, so it is INVISIBLE to every
       workspace scope — the same NULL-owner invisibility `scope_sessions/2` gets
       from SQL `= NULL` never being true.
     * anything else — fail closed (no match), mirroring the `where(false)` clause.
   """
-  @spec scope_match?(binary() | nil, :global | binary() | term()) :: boolean()
+  @spec scope_match?(binary() | nil | personal_scope(), scope() | term()) :: boolean()
   def scope_match?(_owner_ws, :global), do: true
+  def scope_match?({:personal, ws, user}, {:personal, ws, user}), do: true
   def scope_match?(owner_ws, ws) when is_binary(ws), do: owner_ws == ws
   def scope_match?(_owner_ws, _fail_closed), do: false
 
@@ -139,7 +152,7 @@ defmodule Barkpark.StudioChat do
   `owner_workspace_id` rows (NULL-owner sessions invisible), anything else
   `where: false` (zero rows).
   """
-  @spec rollup(:global | {:workspace, binary()} | binary() | term()) :: %{
+  @spec rollup(scope() | {:workspace, binary()} | term()) :: %{
           counts: %{
             working: non_neg_integer(),
             blocked: non_neg_integer(),
@@ -171,13 +184,18 @@ defmodule Barkpark.StudioChat do
     %{counts: counts, precedence: precedence}
   end
 
-  # The owner_workspace_id to STAMP on a new session from the create scope. The
-  # controller threads the resolved `chat_scope` (`:global | {:workspace, ws}`,
-  # charter D18); a bare workspace binary is also accepted defensively. Anything
-  # else (`:global`, nil) stamps NULL — the admin/global session.
+  # Stamp owners from verified scope, never from submitted attributes. Workspace
+  # scopes stamp only the workspace; personal scopes stamp workspace AND user.
+  # Global/nil scopes stamp NULL owners for the legacy admin path.
   defp owner_ws_from_scope({:workspace, ws}) when is_binary(ws), do: ws
+  defp owner_ws_from_scope({:personal, ws, user}) when is_binary(ws) and is_binary(user), do: ws
   defp owner_ws_from_scope(ws) when is_binary(ws), do: ws
   defp owner_ws_from_scope(_), do: nil
+
+  defp owner_user_from_scope({:personal, ws, user}) when is_binary(ws) and is_binary(user),
+    do: user
+
+  defp owner_user_from_scope(_), do: nil
 
   @doc """
   Create a session from `attrs`. `id` is Barkpark's REQUIRED public UUID;
@@ -186,16 +204,61 @@ defmodule Barkpark.StudioChat do
   `scope` (charter D17) stamps `owner_workspace_id`: `{:workspace, ws}` (or a
   bare `ws` binary) stamps that workspace; `:global` (the default) stamps NULL —
   the admin/global session. The scope is authoritative — it overrides any
-  `owner_workspace_id` in `attrs`.
+  `owner_workspace_id` in `attrs`. A `{:personal, ws, user}` scope stamps both
+  owner columns; other scopes clear any caller-supplied personal owner.
 
   Returns `{:ok, %Session{}}` or `{:error, changeset}`.
   """
-  @spec create_session(map(), :global | {:workspace, binary()} | binary()) ::
+  @spec create_session(map(), scope() | {:workspace, binary()}) ::
           {:ok, Session.t()} | {:error, Ecto.Changeset.t()}
   def create_session(attrs, scope \\ :global) do
+    attrs =
+      attrs
+      |> Map.put(:owner_workspace_id, owner_ws_from_scope(scope))
+      |> Map.put(:owner_user_id, owner_user_from_scope(scope))
+
     %Session{}
-    |> Session.create_changeset(Map.put(attrs, :owner_workspace_id, owner_ws_from_scope(scope)))
+    |> Session.create_changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc "Personal storage is available before a reviewed personal runtime binding exists."
+  def runtime_access(session_id) do
+    case get_session(session_id) do
+      %Session{owner_user_id: user} when not is_nil(user) ->
+        {:error, :personal_chat_runtime_unavailable}
+
+      _ ->
+        :ok
+    end
+  end
+
+  @doc "Ownership carried on internal fleet events; personal rows never become workspace rows."
+  def fleet_owner(%Session{owner_workspace_id: ws, owner_user_id: user}) when not is_nil(user),
+    do: {:personal, ws, user}
+
+  def fleet_owner(%Session{owner_workspace_id: ws}), do: ws
+  def fleet_owner(_), do: nil
+
+  @doc "Update only personal title/draft continuity, through the same sealed scope as reads."
+  def update_personal_session(id, attrs, {:personal, _, _} = scope) do
+    case get_session(id, scope) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        session
+        |> Ecto.Changeset.cast(attrs, [:title, :draft])
+        |> Ecto.Changeset.validate_required([:title])
+        |> Ecto.Changeset.validate_length(:title, max: 256, count: :bytes)
+        |> Ecto.Changeset.validate_length(:draft, max: 65_536, count: :bytes)
+        |> then(fn change ->
+          if Ecto.Changeset.changed?(change, :title),
+            do: Ecto.Changeset.put_change(change, :title_source, "human"),
+            else: change
+        end)
+        |> Repo.update()
+    end
   end
 
   @doc """
@@ -204,7 +267,7 @@ defmodule Barkpark.StudioChat do
   the scope cannot see (a workspace-scoped caller reading a foreign/`:global`
   session gets `nil` — fail-closed, indistinguishable from missing).
   """
-  @spec get_session(String.t() | nil, :global | binary()) :: Session.t() | nil
+  @spec get_session(String.t() | nil, scope()) :: Session.t() | nil
   def get_session(id, scope \\ :global)
 
   def get_session(id, scope) when is_binary(id) do
@@ -226,7 +289,7 @@ defmodule Barkpark.StudioChat do
   Fetch a session and its messages (ordered by `seq`), within `scope`. Returns
   `nil` if missing OR invisible to the scope (fail-closed).
   """
-  @spec get_session_with_messages(String.t() | nil, :global | binary()) :: Session.t() | nil
+  @spec get_session_with_messages(String.t() | nil, scope()) :: Session.t() | nil
   def get_session_with_messages(id, scope \\ :global) do
     case get_session(id, scope) do
       nil -> nil
@@ -253,7 +316,7 @@ defmodule Barkpark.StudioChat do
   only that workspace's sessions (fail-closed — the tenant-scoped sidebar served
   by the `owner_workspace_id, last_active_at` partial index).
   """
-  @spec list_sessions(keyword(), :global | binary()) :: [Session.t()]
+  @spec list_sessions(keyword(), scope()) :: [Session.t()]
   def list_sessions(opts \\ [], scope \\ :global) do
     archived? = Keyword.get(opts, :archived, false)
 
@@ -309,7 +372,7 @@ defmodule Barkpark.StudioChat do
   is fail-closed SEAM 1 of the three fleet-scope seams (live-flip + ring-replay
   reuse the `scope_match?/2` term twin above).
   """
-  @spec fleet_snapshot(:global | binary() | term()) :: [
+  @spec fleet_snapshot(scope() | term()) :: [
           %{
             session_id: binary(),
             agent_state: binary(),
@@ -348,11 +411,15 @@ defmodule Barkpark.StudioChat do
   is now asked for BY NAME (`:global`), and a bounded read goes through the
   scoped 3-arity. Anything else is a `FunctionClauseError`, not a silent read.
   """
-  @spec list_messages(String.t(), :global | binary()) :: [Message.t()]
+  @spec list_messages(String.t(), scope()) :: [Message.t()]
   def list_messages(session_id, :global), do: do_messages_all(session_id)
 
   def list_messages(session_id, ws) when is_binary(ws) do
     if scoped_session_visible?(session_id, ws), do: do_messages_all(session_id), else: []
+  end
+
+  def list_messages(session_id, {:personal, _, _} = scope) do
+    if scoped_session_visible?(session_id, scope), do: do_messages_all(session_id), else: []
   end
 
   @doc """
@@ -366,7 +433,7 @@ defmodule Barkpark.StudioChat do
   threads the tenant gate: a workspace-scoped caller that cannot see the session
   gets `[]` (fail-closed); `:global` is unfiltered.
   """
-  @spec list_messages(String.t(), pos_integer(), :global | binary()) :: [Message.t()]
+  @spec list_messages(String.t(), pos_integer(), scope()) :: [Message.t()]
   def list_messages(session_id, limit, scope) when is_integer(limit) and limit > 0 do
     if scoped_session_visible?(session_id, scope),
       do: do_messages_last(session_id, limit),
@@ -374,6 +441,35 @@ defmodule Barkpark.StudioChat do
   end
 
   def list_messages(session_id, _limit, scope), do: list_messages(session_id, scope)
+
+  @doc """
+  Page persisted personal user/assistant text after `since`, ascending by seq.
+  SQL projects only public text fields and fetches at most 101 rows, returning
+  100 plus an explicit continuation. This is not a completed-turn guarantee.
+  The immutable parent ownership is checked before reading any message.
+  """
+  @spec personal_messages_since(String.t(), non_neg_integer(), personal_scope()) ::
+          {:ok, map()} | {:error, :not_found}
+  def personal_messages_since(session_id, since, {:personal, _, _} = scope)
+      when is_integer(since) and since >= 0 and since <= 2_147_483_647 do
+    if scoped_session_visible?(session_id, scope) do
+      rows =
+        Message
+        |> where([m], m.session_id == ^session_id and m.seq > ^since)
+        |> where([m], m.role in ["user", "assistant"])
+        |> order_by([m], asc: m.seq)
+        |> limit(101)
+        |> select([m], map(m, [:id, :seq, :role, :source_markdown, :inserted_at]))
+        |> Repo.all()
+
+      messages = Enum.take(rows, 100)
+      has_more = length(rows) > 100
+      next_since = if has_more, do: List.last(messages).seq, else: nil
+      {:ok, %{messages: messages, page: %{has_more: has_more, next_since: next_since}}}
+    else
+      {:error, :not_found}
+    end
+  end
 
   defp do_messages_all(session_id) do
     Message
@@ -391,8 +487,8 @@ defmodule Barkpark.StudioChat do
     |> Enum.reverse()
   end
 
-  # A session is visible to `:global` always; to a workspace scope only when the
-  # scoped `get_session` resolves it (fail-closed on a foreign / NULL owner).
+  # A session is visible to `:global` always; workspace/personal scopes require
+  # the same sealed `get_session` lookup (fail-closed on an invisible owner).
   defp scoped_session_visible?(_session_id, :global), do: true
   defp scoped_session_visible?(session_id, scope), do: get_session(session_id, scope) != nil
 
@@ -423,7 +519,7 @@ defmodule Barkpark.StudioChat do
   Callers offer archive instead (`archive_session/2`), which leaves the ledgers
   intact.
   """
-  @spec delete_session(String.t(), :global | binary()) ::
+  @spec delete_session(String.t(), scope()) ::
           {:ok, Session.t()} | {:error, term()} | :noop
   def delete_session(id, scope \\ :global) do
     case get_session(id, scope) do
@@ -459,7 +555,7 @@ defmodule Barkpark.StudioChat do
   onto the archived shelf. Orthogonal to `status`: a working/exited session can
   be archived without touching its liveness. `:noop` if the session is gone.
   """
-  @spec archive_session(String.t(), :global | binary()) ::
+  @spec archive_session(String.t(), scope()) ::
           {:ok, Session.t()} | {:error, term()} | :noop
   def archive_session(id, scope \\ :global),
     do: set_archived_at(id, DateTime.utc_now(), scope)
@@ -468,7 +564,7 @@ defmodule Barkpark.StudioChat do
   Unarchive a session — clear `archived_at` so it returns to the active sidebar.
   `:noop` if the session is gone or invisible to `scope` (fail-closed).
   """
-  @spec unarchive_session(String.t(), :global | binary()) ::
+  @spec unarchive_session(String.t(), scope()) ::
           {:ok, Session.t()} | {:error, term()} | :noop
   def unarchive_session(id, scope \\ :global), do: set_archived_at(id, nil, scope)
 

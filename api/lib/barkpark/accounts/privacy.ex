@@ -151,6 +151,7 @@ defmodule Barkpark.Accounts.Privacy do
   def export_subject(%User{} = user) do
     %{
       exported_at: DateTime.utc_now(),
+      personal_chats: personal_chats(user.id),
       account: %{
         id: user.id,
         email: user.email,
@@ -264,6 +265,33 @@ defmodule Barkpark.Accounts.Privacy do
     }
   end
 
+  defp personal_chats(user_id) do
+    Repo.all(
+      from s in Barkpark.StudioChat.Session,
+        where: s.owner_user_id == ^user_id,
+        order_by: [asc: s.inserted_at],
+        preload: [:messages]
+    )
+    |> Enum.map(fn session ->
+      session
+      |> Map.take([
+        :id,
+        :owner_workspace_id,
+        :title,
+        :draft,
+        :archived_at,
+        :inserted_at,
+        :updated_at
+      ])
+      |> Map.put(
+        :messages,
+        session.messages
+        |> Enum.sort_by(& &1.seq)
+        |> Enum.map(&Map.take(&1, [:seq, :role, :source_markdown, :metadata, :inserted_at]))
+      )
+    end)
+  end
+
   # Revisions the subject authored: stamped `actor_kind "user"` + their id, or
   # (history written before the kind/id columns) the legacy `actor_user_id`.
   defp export_revisions(%User{id: id}) do
@@ -370,6 +398,13 @@ defmodule Barkpark.Accounts.Privacy do
   end
 
   defp do_erase(%User{} = user) do
+    # Erasure pseudonymizes the account instead of deleting the user row, so a
+    # foreign-key cascade alone cannot remove its private conversation text.
+    # Personal runtime/attachments are currently refused. Before binding them,
+    # integrate normal session deletion's runtime, byte-store and ledger cleanup;
+    # this row-only erasure must not become a bypass of those lifecycle guards.
+    Repo.delete_all(from s in Barkpark.StudioChat.Session, where: s.owner_user_id == ^user.id)
+
     {sessions, _} =
       Repo.delete_all(from s in UserSession, where: s.user_id == ^user.id)
 

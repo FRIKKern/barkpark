@@ -50,7 +50,7 @@ defmodule Barkpark.ChatSessionResidue do
   ## What step 2 does NOT do — the ARCHIVED shelf
 
   Archiving is not disappearing. `list_sessions(archived: true, …)` is the same
-  query with `archived_filter/2` inverted (`studio_chat.ex:298-299`), and the
+  query with `Barkpark.StudioChat.archived_filter/2` inverted, and the
   flat `/studio/chat` mount lists `:global` with its tenancy clamp deliberately
   open (`chat_live.ex:5290-5294`, `5376-5383`). So step 2 does not remove pinned
   residue from view — it MOVES it onto the archived shelf, which is the one
