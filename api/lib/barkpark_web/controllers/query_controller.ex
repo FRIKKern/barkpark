@@ -475,6 +475,75 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  # Ids one batch read takes (task-09a413c1d4d582d3).
+  @backlinks_batch_max 100
+
+  @doc """
+  `backlinks/2` for several documents in one request (task-09a413c1d4d582d3):
+  `?ids=a,b,c` (at most #{@backlinks_batch_max}) answers
+  `{"result": {"byId": {"a": {"backlinks": [...], "count": n}, ...}}}`. Each id
+  goes through the same `Content.Graph.backlinks/2` and redaction as a single
+  read, so an id the caller cannot read answers an empty list, as it does there.
+  A studio that read one id per selected document (a bulk unpublish of 300) spent
+  300 requests of its token's budget; this is one. Same auth: preview or a token,
+  otherwise 404.
+  """
+  def backlinks_batch(conn, %{"dataset" => dataset} = params) do
+    if preview?(conn) or authed?(conn) do
+      with {:ok, ids} <- backlinks_batch_ids(params["ids"]) do
+        read_region(
+          :backlinks,
+          "backlinks_batch/2 (dataset=#{inspect(dataset)} ids=#{length(ids)})",
+          fn ->
+            opts = [dataset: dataset] ++ scope_opts(conn)
+
+            by_id =
+              Map.new(ids, fn id ->
+                backlinks =
+                  id |> Content.Graph.backlinks(opts) |> redact_backlink_content(dataset, opts)
+
+                {id, %{backlinks: backlinks, count: length(backlinks)}}
+              end)
+
+            json(conn, %{
+              result: %{byId: by_id},
+              syncTags: Enum.map(ids, &"bp:ds:#{dataset}:backlinks:#{&1}")
+            })
+          end
+        )
+      end
+    else
+      {:error, :not_found}
+    end
+  end
+
+  defp backlinks_batch_ids(raw) do
+    ids =
+      if(is_binary(raw), do: String.split(raw, ","), else: [])
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    cond do
+      ids == [] ->
+        backlinks_batch_error("give the document ids as ?ids=a,b,c")
+
+      length(ids) > @backlinks_batch_max ->
+        backlinks_batch_error(
+          "at most #{@backlinks_batch_max} ids per request; got #{length(ids)}"
+        )
+
+      true ->
+        {:ok, ids}
+    end
+  end
+
+  defp backlinks_batch_error(message) do
+    {:error,
+     {:validation_failed, "query parameter ids", %{"ids" => [message]},
+      "Send 1 to #{@backlinks_batch_max} comma-separated document ids, or read one id at /v1/data/backlinks/:dataset/:id."}}
+  end
+
   @doc """
   "Used on N pages" (Studio J62, task-c5d5e045e7efcc96): backlinks/2's own
   list, resolved into readable consumer-site URLs via each backlink's own
