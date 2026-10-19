@@ -94,7 +94,14 @@ defmodule Barkpark.Content.Schema do
     Barkpark.Content.WriteScope.request_memo(
       opts,
       {:list_schemas, dataset, Keyword.delete(opts, :memoize)},
-      fn -> do_list_schemas(dataset, opts) end,
+      # Across requests the catalog is kept per schema version
+      # (task-cca3c6d48e57097e): see `SchemaCatalogCache` for the version,
+      # the key and the reads it never keeps.
+      fn ->
+        Barkpark.Content.SchemaCatalogCache.fetch(dataset, opts, fn ->
+          do_list_schemas(dataset, opts)
+        end)
+      end,
       4
     )
   end
