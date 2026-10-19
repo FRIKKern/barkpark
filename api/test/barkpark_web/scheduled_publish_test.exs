@@ -277,6 +277,74 @@ defmodule BarkparkWeb.ScheduledPublishTest do
            |> json_response(409)
   end
 
+  # task-29663e18251a8b4c: cancelled schedules can expire; nothing else ever does.
+  test "the sweep deletes cancelled schedules past the window, never pending, paused or finished",
+       %{ws_id: ws_id} do
+    alias Barkpark.Content.ScheduledPublish
+    alias Barkpark.Content.Workers.ScheduledPublishSweeper
+
+    {raw, _} = token!(ws_id)
+
+    rows =
+      for _ <- 1..5 do
+        {id, _} = new_draft!()
+
+        schedule(raw, %{"id" => id, "type" => @type_name, "publishAt" => future()})
+        |> json_response(201)
+        |> get_in(["schedule", "_id"])
+      end
+
+    [old_cancelled, new_cancelled, pending, paused, old_finished] = rows
+
+    for id <- [old_cancelled, new_cancelled] do
+      raw |> authed() |> delete("/v1/data/schedules/#{@dataset}/#{id}") |> json_response(200)
+    end
+
+    raw
+    |> authed()
+    |> post("/v1/data/schedules/#{@dataset}/#{paused}/pause")
+    |> json_response(200)
+
+    long_ago = DateTime.add(DateTime.utc_now(), -31 * 86_400)
+
+    Repo.update_all(from(s in ScheduledPublish, where: s.id == ^old_cancelled),
+      set: [completed_at: long_ago]
+    )
+
+    # A finished row and the live ones, all old: kept whatever their age.
+    Repo.update_all(from(s in ScheduledPublish, where: s.id == ^old_finished),
+      set: [status: "missed", completed_at: long_ago]
+    )
+
+    Repo.update_all(from(s in ScheduledPublish, where: s.id in ^[pending, paused]),
+      set: [updated_at: long_ago, inserted_at: long_ago]
+    )
+
+    # Off by default: no window configured, nothing goes.
+    assert Barkpark.Content.ScheduledPublishes.cancelled_ttl_days() == nil
+    assert {:ok, %{deleted: 0}} = perform_job(ScheduledPublishSweeper, %{})
+    assert Repo.get(ScheduledPublish, old_cancelled)
+
+    assert {:ok, %{deleted: deleted}} = perform_job(ScheduledPublishSweeper, %{"days" => 30})
+    assert deleted >= 1
+    refute Repo.get(ScheduledPublish, old_cancelled)
+
+    for id <- [new_cancelled, pending, paused, old_finished] do
+      assert Repo.get(ScheduledPublish, id), "kept #{id}"
+    end
+
+    assert Repo.get(ScheduledPublish, pending).status == "scheduled"
+    assert Repo.get(ScheduledPublish, paused).status == "paused"
+
+    # With the window at 0 days, the other cancelled one goes too; still nothing else.
+    assert {:ok, %{deleted: _}} = perform_job(ScheduledPublishSweeper, %{"days" => 0})
+    refute Repo.get(ScheduledPublish, new_cancelled)
+    for id <- [pending, paused, old_finished], do: assert(Repo.get(ScheduledPublish, id))
+
+    # A purged schedule's job, still waiting, does nothing.
+    assert :ok = perform_job(ScheduledPublishWorker, %{"id" => old_cancelled})
+  end
+
   test "pause keeps the time and runs nothing; resume re-arms it; a paused one can be cancelled",
        %{ws_id: ws_id} do
     {raw, _} = token!(ws_id)

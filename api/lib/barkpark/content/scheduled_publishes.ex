@@ -183,6 +183,43 @@ defmodule Barkpark.Content.ScheduledPublishes do
   end
 
   @doc """
+  Delete `cancelled` schedules that ended more than `days` ago (default
+  `cancelled_ttl_days/0`), in every workspace; returns `{:ok, count}`. With no
+  window (`nil`, the default) it deletes nothing: retention is off until it is
+  configured, because it changes what Archived shows as history (the owner's
+  call). Only `cancelled` rows: a pending or paused schedule is live, and a
+  published, refused, failed or missed one is the record of what happened to a
+  document. Run daily by `ScheduledPublishSweeper` (task-29663e18251a8b4c: test
+  cleanups cancel hundreds a week on a CI dataset, and the index grew without
+  bound).
+  """
+  def purge_cancelled(days \\ nil) do
+    case days || cancelled_ttl_days() do
+      days when is_integer(days) and days >= 0 -> delete_cancelled_before(days)
+      _ -> {:ok, 0}
+    end
+  end
+
+  defp delete_cancelled_before(days) do
+    cutoff = DateTime.add(DateTime.utc_now(), -days * 86_400)
+
+    {count, _} =
+      ScheduledPublish
+      |> where([s], s.status == "cancelled")
+      |> where([s], coalesce(s.completed_at, s.updated_at) < ^cutoff)
+      |> Repo.delete_all()
+
+    {:ok, count}
+  end
+
+  @doc """
+  Days a cancelled schedule is kept: `:scheduled_publish_cancelled_ttl_days`.
+  `nil` (the default) keeps them for good.
+  """
+  def cancelled_ttl_days,
+    do: Application.get_env(:barkpark, :scheduled_publish_cancelled_ttl_days)
+
+  @doc """
   Re-arm a workspace's pending schedules after a bundle import.
 
   Rows travel in a workspace bundle; their Oban jobs do not. For every
