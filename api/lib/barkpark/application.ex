@@ -535,6 +535,11 @@ defmodule Barkpark.Application do
         # rebroadcast frames on it), before the Endpoint.
         Barkpark.Capability.Supervisor,
         BarkparkWeb.Presence,
+        # Studio dead render to connected mount pane handoff
+        # (task-cca3c6d48e57097e). Owns one ETS table and listens on the
+        # document-list topics, so it starts after PubSub and before the
+        # Endpoint.
+        BarkparkWeb.Studio.ConnectHandoff,
         {Task.Supervisor, name: Barkpark.TaskSupervisor},
         # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
         # could not clean up after itself (PDS-D210). The export engine's
