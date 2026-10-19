@@ -1710,16 +1710,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     end
   end
 
+  defp updated_at(%{updated_at: at}), do: at
+  defp updated_at(_), do: nil
+
   @doc false
   def rebuild_panes(socket) do
+    scope_opts = ScopeHelpers.scope_opts(socket)
+
+    build_opts = [
+      desk: socket.assigns[:nav_desk],
+      list_limits: socket.assigns[:desk_list_limits] || %{},
+      list_sorts: socket.assigns[:desk_list_sorts] || %{},
+      scope: scope_opts,
+      scope_prefix: socket.assigns[:scope_prefix] || ""
+    ]
+
+    # The connected mount takes the dead render's build of the same page when
+    # nothing it read has changed since (task-cca3c6d48e57097e). Every input
+    # of the build is in `handoff_args`; any difference is a miss.
+    handoff_args =
+      {socket.assigns.dataset, socket.assigns.nav_path, build_opts,
+       Gettext.get_locale(BarkparkWeb.Gettext), updated_at(socket.assigns[:current_workspace]),
+       updated_at(socket.assigns[:current_project])}
+
     {panes, editor} =
-      PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path,
-        desk: socket.assigns[:nav_desk],
-        list_limits: socket.assigns[:desk_list_limits] || %{},
-        list_sorts: socket.assigns[:desk_list_sorts] || %{},
-        scope: ScopeHelpers.scope_opts(socket),
-        scope_prefix: socket.assigns[:scope_prefix] || ""
-      )
+      BarkparkWeb.Studio.ConnectHandoff.build(socket, scope_opts, handoff_args, fn ->
+        PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path, build_opts)
+      end)
 
     editor = redact_editor_for_viewer(editor, socket)
 
