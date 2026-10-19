@@ -461,7 +461,9 @@ defmodule Barkpark.Content.Query do
     case perspective do
       :drafts ->
         inner =
-          from(d in base, distinct: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id))
+          from(d in base,
+            distinct: fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id)
+          )
 
         Repo.aggregate(from(d in subquery(inner)), :count)
 
@@ -761,12 +763,18 @@ defmodule Barkpark.Content.Query do
     |> Repo.all()
   end
 
+  # The merge key sorts under the "C" collation (task-cca3c6d48e57097e). It is
+  # a grouping key, never shown, and byte order groups the same rows: equality
+  # is byte equality under every deterministic collation. The database's
+  # locale collation made this sort the slow step of a Studio list over 18,020
+  # products (150 to 190 ms against 35 to 75 ms with "C" on the gyldendal-no
+  # copy). The outer order below is unchanged.
   defp list_with_drafts_merged(query, order, limit, offset) do
     inner =
       from(d in query,
-        distinct: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        distinct: fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
         order_by: [
-          fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+          fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
           fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
         ]
       )

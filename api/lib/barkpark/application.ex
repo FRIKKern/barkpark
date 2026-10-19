@@ -83,10 +83,12 @@ defmodule Barkpark.Application do
 
     # The same ownership rule for three caches that used to be created lazily
     # by their first caller and died with it (task-45913114e6d4ffbe): the DEK
-    # cache, the tenancy default-scope cache and the codelist alias cache.
+    # cache, the tenancy default-scope cache and the codelist alias cache,
+    # plus the schema catalog cache (task-cca3c6d48e57097e).
     Barkpark.Crypto.DataKeys.init_cache()
     Barkpark.Tenancy.DefaultScopeCache.init_cache()
     Barkpark.Content.Codelists.init_cache()
+    Barkpark.Content.SchemaCatalogCache.init_cache()
 
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
