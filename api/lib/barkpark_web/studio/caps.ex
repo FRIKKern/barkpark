@@ -146,6 +146,10 @@ defmodule BarkparkWeb.Studio.Caps do
   # document's own id. It reads no capability the socket does not already hold
   # to see the document it is standing on, and it writes nothing.
   #
+  # `select-sort` (task-fa57815041bead3d) picks a named sort for one desk
+  # list: socket state only, then the same scoped list read the pane already
+  # makes. It writes nothing.
+  #
   # `desk-search` / `desk-search-clear` (Gyldendal parity E8) sit beside
   # `search` and `ref-search` below for the same reason: the only effect is a
   # SCOPED read, through `Query.search_documents_across_types/4`, which carries
@@ -161,7 +165,7 @@ defmodule BarkparkWeb.Studio.Caps do
     width-bucket
     search ref-search validate-upload reload-remote-doc
     select-view
-    desk-search desk-search-clear desk-list-more
+    desk-search desk-search-clear desk-list-more select-sort
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
     close-unpublish-guard close-confirm-modal object-dialog-close

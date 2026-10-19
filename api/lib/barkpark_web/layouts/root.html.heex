@@ -1868,6 +1868,21 @@
       border-color: var(--primary);
     }
 
+    /* The desk list's sort menu (task-fa57815041bead3d). */
+    .bp-desk-sort {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-bottom: 1px solid var(--border-muted);
+      font-size: var(--text-2xs); color: var(--fg-muted);
+    }
+    .bp-desk-sort-select {
+      min-width: 0; flex: 1 1 auto; max-width: 100%;
+      padding: 2px 6px; border-radius: 6px;
+      border: 1px solid var(--border-muted);
+      background: transparent; color: var(--fg);
+      font-size: var(--text-2xs);
+    }
+    .bp-desk-sort-select:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
     /* Pane-level honest state: a STORED filter (a desk chip, a plugin or
        structure filter) the query builder refused, so the list below is empty
        because nothing was queried — not because the type has no documents.
