@@ -1805,6 +1805,15 @@ bp-paper-canvas[block-cards]:not([editable="false"]) .bp-canvas-object-row .bp-c
     .bp-paper-editor span[data-wikilink] { color: var(--paper-accent); text-decoration: underline; text-underline-offset: 2px; }
     /* The link hover card (canvas/link-preview.js): the bubble's chrome, laid out as a small card
        under the hovered link — title (or host), address, an excerpt for a wikilink, Open / Edit. */
+    /* Contract 1.14.0 block-cards: the link card is Sanity's annotation pill, inverted against
+       the page, 33 px high: the annotation's title, then 25 px icon buttons (Open for a document
+       link, Edit, Remove), 4 px apart. A host sets its exact colours. */
+    .bp-link-pill { position: fixed; z-index: 60; align-items: center; gap: 4px; height: 33px; box-sizing: border-box; padding: 4px 4px 4px 12px; border-radius: 6px; background: var(--paper-ink, #13141b); color: var(--paper-bg, #fff); box-shadow: 0 7px 8px -4px rgba(0, 0, 0, 0.2), 0 12px 17px 2px rgba(0, 0, 0, 0.14), 0 5px 22px 4px rgba(0, 0, 0, 0.12); font: 500 13px/19px var(--paper-font-sans, system-ui, sans-serif); }
+    .bp-link-pill__label { margin-right: 8px; white-space: nowrap; }
+    .bp-link-pill__btn { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: inherit; cursor: pointer; }
+    .bp-link-pill__btn:hover, .bp-link-pill__btn:focus-visible { background: rgba(127, 127, 127, 0.25); outline: none; }
+    .bp-link-pill__btn.bp-link-preview__remove { color: var(--bp-tone-danger-fg, #fdafa8); }
+
     .bp-link-preview {
       position: fixed; z-index: 200;
       width: 320px; max-width: calc(100vw - 16px);
