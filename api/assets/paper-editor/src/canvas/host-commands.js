@@ -65,6 +65,24 @@ function listKindAt(state) {
   return null;
 }
 
+// The word an empty caret touches in a text block, as Sanity links it: Link with only a
+// caret applies to the word at the caret (task-fbc0d0f2f0ab1329). `null` when the caret
+// touches no word (a space, an empty line). Inline atoms count as one non-word char.
+const WORD_CHAR = /[\p{L}\p{N}_'’-]/u;
+export function wordAtCaret(state) {
+  const { selection } = state;
+  if (!selection.empty) return null;
+  const $c = selection.$from;
+  if (!$c.parent.isTextblock) return null;
+  const text = $c.parent.textBetween(0, $c.parent.content.size, "\0", "\0");
+  let a = $c.parentOffset;
+  let b = a;
+  while (a > 0 && WORD_CHAR.test(text[a - 1])) a--;
+  while (b < text.length && WORD_CHAR.test(text[b])) b++;
+  if (a === b) return null;
+  return { from: $c.start() + a, to: $c.start() + b };
+}
+
 // ── can ────────────────────────────────────────────────────────────────────
 
 export function canToggleMark(editor, mark, href, vocab, docId) {
@@ -79,7 +97,9 @@ export function canToggleMark(editor, mark, href, vocab, docId) {
   // A link needs an href to set, or one in place to clear.
   if (typeof href === "string" && href.trim()) {
     const safe = linkHref(href);
-    return !!safe && !editor.state.selection.empty && canRun(editor, "setLink", { href: safe });
+    // A caret in a word links that word (Sanity's); a caret touching none has nothing to link.
+    const over = !editor.state.selection.empty || !!wordAtCaret(editor.state);
+    return !!safe && over && canRun(editor, "setLink", { href: safe });
   }
   return editor.isActive("link");
 }
@@ -110,7 +130,18 @@ export function canToggleList(editor, kind, vocab) {
 
 export function toggleMark(editor, mark, href, docId, target) {
   const name = TOOLBAR_MARKS[mark];
-  if (name === "link") return applyLink(editor, editor.isActive("link") && !href ? "" : href);
+  if (name === "link") {
+    // A new link with only a caret goes on the word at the caret, and the caret stays put:
+    // one transaction, one undo step (Sanity's).
+    const word = href && !editor.isActive("link") ? wordAtCaret(editor.state) : null;
+    if (word) {
+      const safe = linkHref(href);
+      if (!safe) return false;
+      const caret = editor.state.selection.from;
+      return editor.chain().focus().setTextSelection(word).setLink({ href: safe }).setTextSelection(caret).run();
+    }
+    return applyLink(editor, editor.isActive("link") && !href ? "" : href);
+  }
   if (name === "wikilink") {
     if (typeof docId === "string" && docId.trim()) {
       const id = docId.trim();
