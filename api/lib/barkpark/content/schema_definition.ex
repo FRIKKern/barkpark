@@ -57,8 +57,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :list_preview, :map, default: %{}
     # Gyldendal parity E3 — the schema-level DESK block. `orderings` is a list of
     # %{"field" => name, "direction" => "asc" | "desc"} the desk list applies
-    # (Sanity's `orderings`); the first entry is the default sort. Empty map ==
-    # no declaration, the list keeps today's order.
+    # that together make the list's default sort. `sortOrderings` holds named
+    # sorts the list's sort menu offers without changing that default. Empty
+    # map == no declaration, the list keeps today's order.
     field :desk, :map, default: %{}
     field :initial_values, :map, default: %{}
     field :cross_validations, {:array, :map}, default: []
@@ -127,6 +128,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
+    |> validate_desk_sort_orderings()
     |> validate_desk_editor()
     |> validate_reader_writes()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
@@ -485,6 +487,56 @@ defmodule Barkpark.Content.SchemaDefinition do
         changeset
     end
   end
+
+  # `desk.sortOrderings` (task-fa57815041bead3d) — Sanity's `orderings`: named
+  # sorts the desk list's sort menu offers. Choosing none keeps the list's
+  # default order, so declaring them never changes how a list opens. Each entry
+  # is %{"name" => id, "title" => label, "by" => [ordering, …]}, where an
+  # ordering has the `desk.orderings` entry shape.
+  #
+  #   "desk": {"sortOrderings": [{"name": "manual", "title": "Manual order",
+  #                               "by": [{"field": "orderRank", "direction": "asc"}]}]}
+  defp validate_desk_sort_orderings(changeset) do
+    case get_change(changeset, :desk) do
+      %{} = desk ->
+        case Map.get(desk, "sortOrderings") || Map.get(desk, :sortOrderings) do
+          nil ->
+            changeset
+
+          list when is_list(list) ->
+            case Enum.find(list, &(not valid_sort_ordering?(&1))) do
+              nil ->
+                changeset
+
+              bad ->
+                add_error(
+                  changeset,
+                  :desk,
+                  "sortOrderings entries need a non-empty \"name\" and \"title\" and a " <>
+                    "non-empty \"by\" list of %{\"field\" => name, \"direction\" => \"asc\" | \"desc\"}, " <>
+                    "got #{inspect(bad)}"
+                )
+            end
+
+          other ->
+            add_error(changeset, :desk, "sortOrderings must be a list, got #{inspect(other)}")
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp valid_sort_ordering?(%{} = o) do
+    name = Map.get(o, "name") || Map.get(o, :name)
+    title = Map.get(o, "title") || Map.get(o, :title)
+    by = Map.get(o, "by") || Map.get(o, :by)
+
+    is_binary(name) and name != "" and is_binary(title) and title != "" and is_list(by) and
+      by != [] and Enum.all?(by, &valid_ordering?/1)
+  end
+
+  defp valid_sort_ordering?(_), do: false
 
   # `desk.editor` — the editor a type's documents open in: "freeform" (the
   # block editor) or "classic" (the schema form, also the default when absent).

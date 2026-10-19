@@ -13003,3 +13003,13 @@ msgstr "Setter inn blokk…"
 #, elixir-autogen, elixir-format
 msgid "Edit block"
 msgstr "Rediger blokk"
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex
+#, elixir-autogen, elixir-format
+msgid "Sort"
+msgstr "Sorter"
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex
+#, elixir-autogen, elixir-format
+msgid "Default order"
+msgstr "Standard rekkefølge"

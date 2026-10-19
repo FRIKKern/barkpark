@@ -1541,6 +1541,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             </div>
           <% end %>
 
+          <%!-- The list's sort menu (task-fa57815041bead3d): the schema's
+                `desk.sortOrderings`, Sanity's `orderings`. The first choice is
+                the list's default order, so a list opens as it always did and
+                a declared sort is only a choice. A native select inside a form
+                is keyboard- and screen-reader-ready with no hook. --%>
+          <%= if Map.get(pane, :sort_options, []) != [] do %>
+            <form
+              class="bp-desk-sort"
+              id={"desk-sort-#{idx}"}
+              phx-change="select-sort"
+              data-test-id="desk-sort"
+            >
+              <input type="hidden" name="type" value={pane.type_name} />
+              <label class="bp-desk-sort-label" for={"desk-sort-select-#{idx}"}><%= gettext("Sort") %></label>
+              <select id={"desk-sort-select-#{idx}"} name="sort" class="bp-desk-sort-select">
+                <option value="" selected={pane[:active_sort] == nil}><%= gettext("Default order") %></option>
+                <%= for opt <- pane.sort_options do %>
+                  <option value={opt.name} selected={pane[:active_sort] == opt.name}><%= opt.title %></option>
+                <% end %>
+              </select>
+            </form>
+          <% end %>
+
           <%!-- A STORED filter this pane could not apply (an unsupported op in a
                 desk-group chip or a plugin/structure filter). The list is empty
                 because nothing was queried, NOT because the type has no

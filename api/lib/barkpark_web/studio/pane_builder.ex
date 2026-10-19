@@ -536,8 +536,18 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # Gyldendal parity E3.1 — the declared sort: a desk group's own
         # `orderings` win, else the schema's `desk.orderings` (Sanity's
         # `orderings`, first entry = default). Absent → today's order.
+        #
+        # task-fa57815041bead3d — a sort the author picked in the list's sort
+        # menu (one of `desk.sortOrderings`) wins over that default for this
+        # list only. Picking nothing leaves the default as it is.
+        sort_options = sort_options(schema)
+
+        active_sort =
+          find_sort(sort_options, opts |> Keyword.get(:list_sorts, %{}) |> Map.get(type_name))
+
         list_opts =
-          case desk_order(active_group, schema, Map.get(node, :orderings)) do
+          case active_sort || desk_order(active_group, schema, Map.get(node, :orderings)) do
+            %{order: order} -> Keyword.put(list_opts, :order, order)
             [] -> list_opts
             order -> Keyword.put(list_opts, :order, order)
           end
@@ -555,6 +565,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           priority: :active,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
+          sort_options: Enum.map(sort_options, &Map.take(&1, [:name, :title])),
+          active_sort: active_sort && active_sort.name,
           filter_error: filter_error,
           has_more: has_more,
           items: doc_items(docs, schema, dataset, opts),
@@ -1360,7 +1372,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         _ -> nil
       end
 
-    (group_orderings || node_orderings || schema_orderings || [])
+    ordering_specs(group_orderings || node_orderings || schema_orderings || [])
+  end
+
+  # `[%{"field" => f, "direction" => d}]` as `Content.Query` `:order` specs.
+  defp ordering_specs(orderings) do
+    orderings
     |> List.wrap()
     |> Enum.flat_map(fn
       %{} = o ->
@@ -1379,6 +1396,47 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         []
     end)
   end
+
+  @doc """
+  The named sorts a type's desk list offers in its sort menu, from the schema's
+  `desk.sortOrderings` (Sanity's `orderings`, task-fa57815041bead3d). Each is
+  `%{name: name, title: title, order: [query order spec]}`. An entry with no
+  name, no title or no usable `by` ordering is skipped, never raised on, so a
+  stored schema that predates the changeset check still renders.
+  """
+  def sort_options(nil), do: []
+
+  def sort_options(schema) do
+    case schema && (Map.get(schema, :desk) || Map.get(schema, "desk")) do
+      %{} = desk ->
+        (Map.get(desk, "sortOrderings") || Map.get(desk, :sortOrderings) || [])
+        |> List.wrap()
+        |> Enum.flat_map(&sort_option/1)
+        |> Enum.uniq_by(& &1.name)
+
+      _ ->
+        []
+    end
+  end
+
+  defp sort_option(%{} = o) do
+    name = Map.get(o, "name") || Map.get(o, :name)
+    title = Map.get(o, "title") || Map.get(o, :title) || name
+    by = Map.get(o, "by") || Map.get(o, :by)
+
+    with true <- is_binary(name) and name != "",
+         true <- is_binary(title),
+         [_ | _] = order <- ordering_specs(by) do
+      [%{name: name, title: title, order: order}]
+    else
+      _ -> []
+    end
+  end
+
+  defp sort_option(_), do: []
+
+  defp find_sort(_options, nil), do: nil
+  defp find_sort(options, name), do: Enum.find(options, &(&1.name == name))
 
   @doc """
   False when the type's desk block declares `"authorCreatable": false`: its

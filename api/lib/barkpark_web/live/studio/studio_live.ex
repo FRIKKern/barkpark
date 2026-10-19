@@ -481,6 +481,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
      |> Shared.rebuild_panes()}
   end
 
+  # The desk list's sort menu (task-fa57815041bead3d): remember the named sort
+  # picked for THAT type on this socket, as Sanity keeps a list's sort per
+  # pane, and rebuild the panes. An empty or unknown name is the default
+  # order; PaneBuilder ignores a name the schema does not declare.
+  def handle_event("select-sort", %{"type" => type} = params, socket) when is_binary(type) do
+    sorts = socket.assigns[:desk_list_sorts] || %{}
+
+    sorts =
+      case params["sort"] do
+        name when is_binary(name) and name != "" -> Map.put(sorts, type, name)
+        _ -> Map.delete(sorts, type)
+      end
+
+    {:noreply,
+     socket
+     |> assign(:desk_list_sorts, sorts)
+     |> Shared.rebuild_panes()}
+  end
+
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
   def handle_event("save", params, socket), do: Fields.save(params, socket)
   def handle_event("reload-remote-doc", _params, socket), do: Fields.reload_remote_doc(socket)

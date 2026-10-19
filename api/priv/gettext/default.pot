@@ -13000,3 +13000,13 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Edit block"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex
+#, elixir-autogen, elixir-format
+msgid "Sort"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components.ex
+#, elixir-autogen, elixir-format
+msgid "Default order"
+msgstr ""
