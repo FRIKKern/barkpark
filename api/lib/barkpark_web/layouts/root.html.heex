@@ -3735,8 +3735,11 @@
       box-shadow: 0 8px 24px hsl(var(--bp-shadow-hsl) / 0.12);
       padding: 6px 0;
     }
+    /* Every hit is a flex row (task-522073bdad4a7ad2): the title column grows
+       and a type word or draft badge sits apart at the end. */
     bp-reference-picker .bp-ref-dropdown-item {
-      display: block; width: 100%; padding: 8px 12px; border: none; background: transparent;
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 8px 12px; border: none; background: transparent;
       text-align: left; cursor: pointer; color: var(--fg); font-size: var(--text-sm);
       border-bottom: 1px solid var(--border-muted);
     }
