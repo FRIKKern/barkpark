@@ -122,9 +122,19 @@ defmodule BarkparkWeb.Plugs.RateLimit do
       :presence_focus -> presence_focus_plan(conn)
       :view -> class_plan(conn, :view)
       :read -> class_plan(conn, :read)
-      _ -> class_plan(conn, method_class(conn.method))
+      _ -> class_plan(conn, delivery_or(conn, method_class(conn.method)))
     end
   end
+
+  # A media DELIVERY GET (the bytes at /media/files, /media/renditions and their
+  # mirrors, marked by `DeliveryAccept`) is billed to its own `:delivery` bucket
+  # (task-fe397d8f5f0a2c47). A Paper with 168 videos and 232 images made ~400 GETs
+  # from one reader; on the 300/min JSON read bucket 21 came back 429 and the
+  # browser never retries a media src, so they stayed broken. Every Range request of
+  # one <video> is a GET too. The bucket key carries the class, so the JSON read
+  # bucket of the same reader is unchanged.
+  defp delivery_or(conn, :read), do: if(conn.private[:bp_delivery], do: :delivery, else: :read)
+  defp delivery_or(_conn, class), do: class
 
   defp class_opt(opts) when is_list(opts), do: Keyword.get(opts, :class)
   defp class_opt(%{} = opts), do: Map.get(opts, :class)
@@ -329,6 +339,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   defp default_per_minute(cfg, :read, _principal_class),
     do: Keyword.get(cfg, :read_per_minute, 300)
+
+  defp default_per_minute(cfg, :delivery, _principal_class),
+    do: Keyword.get(cfg, :delivery_per_minute, 3_000)
 
   # `:session` (a cookie-resolved editor, task-2c31de0cf6597d32) and `:owned`
   # (a Bearer whose owner_user_id names that same ONE human, the follow-up)
