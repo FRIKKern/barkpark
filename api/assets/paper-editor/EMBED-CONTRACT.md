@@ -65,6 +65,11 @@ before the bundle to opt out and avoid doubled rules. The stylesheet ships a
 `:root, :host` fallback for all `--paper-*` tokens (light default; dark via
 `[data-theme="dark"]`), so it renders styled with no host theme.
 
+A host whose column is the text, with no wider evidence band (it sets
+`--bp-evidence-width: 100%; --bp-evidence-pull: 0px`), sets `--bp-table-centre: 0`
+to start tables at the text's left edge instead of centred (default `1`: papers'
+layout).
+
 ## `<bp-paper-canvas>`
 
 One custom element, `bp-paper-canvas`, registered by the same bundle. It edits a
