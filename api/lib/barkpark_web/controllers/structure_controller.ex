@@ -22,7 +22,8 @@ defmodule BarkparkWeb.StructureController do
 
   Auth matches the schema index the TUI already calls (admin token on the
   same pipelines); response: `{"structure": <node>}` where a node is
-  `{id, title, icon, type, typeName, filter, items: [node], child: node}`.
+  `{id, title, icon, type, typeName, filter, items: [node], child: node}`
+  (plus `paneTitle` on a declared list whose pane has its own title).
   `type` is one of `list · document_type_list · document · divider ·
   plugin_link · plugin_document_list`. `filter` is a `"field=value"` string
   (a path on `plugin_link` nodes), EXCEPT on `plugin_document_list` nodes
@@ -57,6 +58,9 @@ defmodule BarkparkWeb.StructureController do
     # task-d99d878b061b435a — a declared desk item that could not be built
     # carries the reason; the rest of the desk is unaffected.
     |> put_present(:error, Map.get(node, :error))
+    # task-a3e829ace0b184ea — the title of the pane a declared list opens,
+    # when it differs from the row's.
+    |> put_present(:paneTitle, Map.get(node, :pane_title))
     |> put_items(node.items)
     |> put_child(node.child)
   end

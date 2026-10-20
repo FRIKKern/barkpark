@@ -432,7 +432,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         node = node |> Structure.expand(dataset, scope(opts)) |> StructureCopy.localize()
 
         list_pane = %{
-          title: node.title,
+          # A declared `paneTitle` names the opened pane (task-a3e829ace0b184ea).
+          title: Map.get(node, :pane_title) || node.title,
           role: :list,
           priority: if(rest == [], do: :active, else: depth + 1),
           items: list_items(node, scope_prefix(opts)),
@@ -556,7 +557,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           list_page_preflighted(type_name, dataset, list_opts, opts)
 
         doc_pane = %{
-          title: node.title || (schema && schema.title) || type_name,
+          title:
+            Map.get(node, :pane_title) || node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
           type_title: schema && schema.title,
