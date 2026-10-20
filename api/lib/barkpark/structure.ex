@@ -1422,7 +1422,7 @@ defmodule Barkpark.Structure do
       values
       |> Enum.map(fn {k, v} -> {is_binary(k) && String.replace_prefix(k, "content.", ""), v} end)
       |> Enum.split_with(fn {name, v} ->
-        is_binary(name) and preset_fits?(Map.get(fields, name), v)
+        is_binary(name) and Content.Validation.desk_preset_fits?(Map.get(fields, name), v)
       end)
 
     if dropped != [] do
@@ -1440,35 +1440,6 @@ defmodule Barkpark.Structure do
   defp field_name(%{name: name}), do: name
   defp field_name(%{"name" => name}), do: name
   defp field_name(_field), do: nil
-
-  defp field_attr(field, key), do: Map.get(field, key) || Map.get(field, Atom.to_string(key))
-
-  # The value a preset may give a field of this kind. A kind not listed here
-  # (an object, an array, a file) takes any JSON value; the write validates it.
-  defp preset_fits?(nil, _value), do: false
-
-  defp preset_fits?(field, value) do
-    case field_attr(field, :type) do
-      "select" -> value in option_values(field_attr(field, :options))
-      t when t in ~w(string text slug url email date datetime) -> is_binary(value)
-      t when t in ~w(number float) -> is_number(value)
-      "integer" -> is_integer(value)
-      "boolean" -> is_boolean(value)
-      "reference" -> is_map(value) and is_binary(value["_ref"])
-      _ -> true
-    end
-  end
-
-  defp option_values(options) when is_list(options) do
-    Enum.map(options, fn
-      %{"value" => v} -> v
-      %{value: v} -> v
-      v -> v
-    end)
-  end
-
-  defp option_values(%{"list" => list}), do: option_values(list)
-  defp option_values(_options), do: []
 
   # The children of a `groupBy` node are one document read over `over`, and
   # with `overFilter` a reference test against every document of the grouped

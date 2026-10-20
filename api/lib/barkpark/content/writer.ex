@@ -299,12 +299,24 @@ defmodule Barkpark.Content.Writer do
     # every other schema violation already has, under the finding code
     # `unknown_type` (the SAME code `Validation`'s own richText block-member
     # check already uses for the analogous "unknown block _type" case).
+    # task-dc9b751450c2c2c4 — a deskStructure's presets that do not fit their
+    # list's type (warn-only; the desk leaves them out).
+    presets =
+      if type == "deskStructure" and is_map(content),
+        do:
+          Barkpark.Content.Validation.desk_preset_findings(
+            Map.get(content, "items"),
+            dataset,
+            scope
+          ),
+        else: []
+
     case Content.get_schema(type, dataset, scope) do
       {:ok, schema} ->
         dispatch_schema_outcome(
           type,
           attrs,
-          findings_for_schema(schema, title, content),
+          schema |> findings_for_schema(title, content) |> add_warnings(presets),
           enforce?
         )
 
@@ -315,11 +327,17 @@ defmodule Barkpark.Content.Writer do
         dispatch_schema_outcome(
           type,
           attrs,
-          {:error, errors, findings, warnings ++ desk},
+          {:error, errors, findings, warnings ++ desk ++ presets},
           enforce?
         )
     end
   end
+
+  defp add_warnings(outcome, []), do: outcome
+  defp add_warnings({:ok, content, warnings}, more), do: {:ok, content, warnings ++ more}
+
+  defp add_warnings({:error, errors, findings, warnings}, more),
+    do: {:error, errors, findings, warnings ++ more}
 
   defp dispatch_schema_outcome(type, attrs, {:ok, _content, warning_findings}, _enforce?) do
     # task-292d6677b94916ef — a write with NO error-level violation used to

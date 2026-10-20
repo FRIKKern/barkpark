@@ -146,7 +146,7 @@ defmodule Barkpark.Content.Validation do
     block_fields_invalid not_in_list list_too_short list_too_long
     list_not_unique number_too_small number_too_large
     string_too_short string_too_long portable_text_not_portabledoc custom
-    cross_validation unknown_desk_icon
+    cross_validation unknown_desk_icon unknown_desk_preset
   )a
 
   @doc "The fixed set of codes `check_findings/3` can ever emit. See the moduledoc."
@@ -342,6 +342,94 @@ defmodule Barkpark.Content.Validation do
   end
 
   defp unknown_desk_icons(_other, _path), do: []
+
+  @doc """
+  A deskStructure's list `initialValues` entries that do not fit the list's
+  type (task-dc9b751450c2c2c4), as warning findings with code
+  `:unknown_desk_preset`: the key names no declared field of the type, or its
+  value does not fit that field (`desk_preset_fits?/2`). The desk leaves those
+  entries out of the list's "+" (the desk structure); this tells the author
+  on save. The target schema is read in `scope`, the write's own.
+  """
+  @spec desk_preset_findings(term(), String.t(), keyword()) :: [finding()]
+  def desk_preset_findings(items, dataset, scope),
+    do: desk_presets(items, "/items", dataset, scope)
+
+  defp desk_presets(items, path, dataset, scope) when is_list(items) do
+    items
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {item, i} -> desk_presets(item, "#{path}/#{i}", dataset, scope) end)
+  end
+
+  defp desk_presets(%{} = item, path, dataset, scope) do
+    own =
+      case item do
+        %{"type" => type, "initialValues" => values} when is_binary(type) and is_map(values) ->
+          fields =
+            case Barkpark.Content.resolve_schema(type, dataset, scope) do
+              {:ok, %{fields: fields}} when is_list(fields) ->
+                Map.new(fields, &{preset_field_attr(&1, :name), &1})
+
+              _ ->
+                %{}
+            end
+
+          for {key, value} <- values,
+              name = is_binary(key) && String.replace_prefix(key, "content.", ""),
+              not (is_binary(name) and desk_preset_fits?(Map.get(fields, name), value)) do
+            %{
+              path: "#{path}/initialValues/#{key}",
+              message:
+                "desk preset #{inspect(key)} does not fit #{type}: name a field of the type with a value of its kind; the list's + leaves it out",
+              code: :unknown_desk_preset,
+              params: %{field: key, type: type}
+            }
+          end
+
+        _ ->
+          []
+      end
+
+    own ++ desk_presets(Map.get(item, "items"), "#{path}/items", dataset, scope)
+  end
+
+  defp desk_presets(_other, _path, _dataset, _scope), do: []
+
+  @doc """
+  Whether a desk preset `value` may go on `field` (a schema field, or nil when
+  the type declares none of that name): a select's one of its options;
+  strings, numbers, integers, booleans and references by shape. A kind not
+  listed (an object, an array, a file) takes any JSON value; the write
+  validates it.
+  """
+  @spec desk_preset_fits?(map() | nil, term()) :: boolean()
+  def desk_preset_fits?(nil, _value), do: false
+
+  def desk_preset_fits?(field, value) do
+    case preset_field_attr(field, :type) do
+      "select" -> value in preset_option_values(preset_field_attr(field, :options))
+      t when t in ~w(string text slug url email date datetime) -> is_binary(value)
+      t when t in ~w(number float) -> is_number(value)
+      "integer" -> is_integer(value)
+      "boolean" -> is_boolean(value)
+      "reference" -> is_map(value) and is_binary(value["_ref"])
+      _ -> true
+    end
+  end
+
+  defp preset_field_attr(field, key),
+    do: Map.get(field, key) || Map.get(field, Atom.to_string(key))
+
+  defp preset_option_values(options) when is_list(options) do
+    Enum.map(options, fn
+      %{"value" => v} -> v
+      %{value: v} -> v
+      v -> v
+    end)
+  end
+
+  defp preset_option_values(%{"list" => list}), do: preset_option_values(list)
+  defp preset_option_values(_options), do: []
 
   defp schema_name(%{name: n}), do: n
   defp schema_name(%{"name" => n}), do: n
