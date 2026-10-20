@@ -139,7 +139,10 @@ defmodule Barkpark.Content.Writer do
     %{errors: cross_errors, warnings: cross_warnings} =
       Barkpark.Content.Validation.cross_findings(content, title, schema)
 
-    warnings = warning_findings ++ cross_warnings
+    # task-af038d8b0d769e82 — a deskStructure naming an icon neither Studio draws.
+    warnings =
+      warning_findings ++
+        cross_warnings ++ Barkpark.Content.Validation.desk_icon_findings(schema, content)
 
     case {Barkpark.Content.Validation.validate(content, title, schema), cross_errors} do
       {{:ok, content}, []} ->
@@ -306,7 +309,15 @@ defmodule Barkpark.Content.Writer do
         )
 
       _ ->
-        dispatch_schema_outcome(type, attrs, unknown_type_outcome(type, dataset), enforce?)
+        {:error, errors, findings, warnings} = unknown_type_outcome(type, dataset)
+        desk = Barkpark.Content.Validation.desk_icon_findings(type, content)
+
+        dispatch_schema_outcome(
+          type,
+          attrs,
+          {:error, errors, findings, warnings ++ desk},
+          enforce?
+        )
     end
   end
 

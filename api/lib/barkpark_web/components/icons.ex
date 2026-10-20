@@ -399,6 +399,32 @@ defmodule BarkparkWeb.Icons do
     Map.get(@icons, "file", "")
   end
 
+  @doc """
+  A desk item's icon (task-af038d8b0d769e82). Desk items name Sanity's icons
+  (`Barkpark.DeskIcons`), as a deskStructure declared for Sanity does; this Studio's
+  own glyph of that name wins when it has one (the desk looks as before), Sanity's
+  draws when it has none, and anything else is `fallback`.
+  """
+  attr :name, :any, required: true
+  attr :size, :integer, default: 16
+  attr :fallback, :string, default: "file"
+
+  def desk_icon(assigns) do
+    body = if known_icon?(assigns.name), do: nil, else: Barkpark.DeskIcons.body(assigns.name)
+    assigns = assign(assigns, :body, body)
+
+    ~H"""
+    <%= if @body do %>
+      <svg xmlns="http://www.w3.org/2000/svg" width={@size} height={@size} viewBox="0 0 25 25"
+        fill="none" style="display:inline-block;vertical-align:middle;flex-shrink:0;" data-desk-icon={@name}>
+        <%= Phoenix.HTML.raw(@body) %>
+      </svg>
+    <% else %>
+      <.icon name={drawable_name(@name, @fallback)} size={@size} />
+    <% end %>
+    """
+  end
+
   attr :name, :string, required: true
   attr :size, :integer, default: 16
 
