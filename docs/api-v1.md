@@ -50,8 +50,8 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact match: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | `eq` `neq` `in` `nin` `nbetween` (`A,B`) `has` `nhas` `hasStrong` (`tag:min`) `contains` `notContains` `startsWith` `endsWith` `gt` `gte` `lt` `lte` `is` (`null`/`notnull`) `count{Eq,Neq,Gt,Gte,Lt,Lte}`. `neq`/`nin`/`nbetween` exclude NULL. `filter[_references]=<id>`: refs `id` |
-| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each parses like a lone `filter=`; clauses **AND** (no OR); different ops on one field compose; **same field+op twice → 400 `invalid_filter`** (use `in`); **one unparseable element fails the request** (400, never an unfiltered 200) |
+| `filter[<field>][<op>]` | — | `eq` `neq` `in` `nin` `nbetween` (`A,B`) `has` `nhas` `hasStrong` (`tag:min`) `contains` `notContains` `startsWith` `endsWith` `gt` `gte` `lt` `lte` `is` (`null`/`notnull`) `count{Eq,Neq,Gt,Gte,Lt,Lte}` `neqOrMissing`. `neq`/`nin`/`nbetween` drop NULL; `neqOrMissing` keeps it (`!=`). `filter[_references]=<id>`: refs `id` |
+| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each parses like a lone `filter=`; clauses **AND** (no OR); ops on one field compose; **same field+op twice → 400 `invalid_filter`** (use `in`); **one unparseable element → 400** (never unfiltered) |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs, §5a) |
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page — so **never infer truncation from `count == limit`**; `nextOffset` when more.
@@ -68,7 +68,7 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 ### 5a. Reference Expansion
 
-`?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string). A non-reference field → 400.
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced doc — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested and missing refs stay raw (expanded = map, raw = string). A non-reference field → 400.
 
 ### 5b/5c. Graph reads + history [token]
 
