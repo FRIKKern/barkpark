@@ -38,6 +38,16 @@ defmodule BarkparkWeb.FallbackController do
     call(conn, {:error, reason})
   end
 
+  # `Media.delete_file/2`'s in-transaction where-used re-check refused
+  # (task-bc53aa9e49742ded): the same 409 census the media doors' own check renders.
+  def call(conn, {:error, {:referenced, %Barkpark.Media.Storage.MediaFile{} = file, census}}) do
+    env = Errors.stamp(Barkpark.Media.WhereUsed.refusal_envelope(file, census), conn)
+
+    conn
+    |> put_status(:conflict)
+    |> json(%{error: env})
+  end
+
   def call(conn, error) do
     env = Errors.to_envelope(error, conn)
 
