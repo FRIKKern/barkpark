@@ -1437,6 +1437,56 @@ defmodule Barkpark.Structure do
 
   defp initial_values(_item, _type, _ctx), do: nil
 
+  @doc """
+  A deskStructure's `initialValues` entries that do not fit their list's type
+  (task-dc9b751450c2c2c4), as warning findings with code `:unknown_desk_preset`:
+  the key names no declared field of the type, or its value does not fit that
+  field. The desk still builds and leaves those entries out (`initial_values/3`);
+  this tells the author on save. `scope` is the write's own.
+  """
+  @spec preset_findings(term(), String.t(), keyword()) :: [map()]
+  def preset_findings(items, dataset, scope), do: preset_findings(items, "/items", dataset, scope)
+
+  defp preset_findings(items, path, dataset, scope) when is_list(items) do
+    items
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {item, i} -> preset_findings(item, "#{path}/#{i}", dataset, scope) end)
+  end
+
+  defp preset_findings(%{} = item, path, dataset, scope) do
+    own =
+      case item do
+        %{"type" => type, "initialValues" => values} when is_binary(type) and is_map(values) ->
+          fields =
+            case Content.resolve_schema(type, dataset, scope) do
+              {:ok, %{fields: fields}} when is_list(fields) ->
+                Map.new(fields, &{field_name(&1), &1})
+
+              _ ->
+                %{}
+            end
+
+          for {key, value} <- values,
+              name = is_binary(key) && String.replace_prefix(key, "content.", ""),
+              not (is_binary(name) and preset_fits?(Map.get(fields, name), value)) do
+            %{
+              path: "#{path}/initialValues/#{key}",
+              message:
+                "desk preset #{inspect(key)} does not fit #{type}: name a field of the type with a value of its kind; the list's + leaves it out",
+              code: :unknown_desk_preset,
+              params: %{field: key, type: type}
+            }
+          end
+
+        _ ->
+          []
+      end
+
+    own ++ preset_findings(Map.get(item, "items"), "#{path}/items", dataset, scope)
+  end
+
+  defp preset_findings(_other, _path, _dataset, _scope), do: []
+
   defp field_name(%{name: name}), do: name
   defp field_name(%{"name" => name}), do: name
   defp field_name(_field), do: nil
