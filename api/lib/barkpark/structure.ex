@@ -1379,11 +1379,20 @@ defmodule Barkpark.Structure do
   #
   #   {"kind":"tree","title":"Hierarkisk struktur","type":"category",
   #    "parent":"content.parent","orderings":[…]}
+  #
+  # An optional `filter` narrows the root and every level below
+  # (task-e9f14aeb3ed09953).
   defp declared_item_to_node(%{"kind" => "tree"} = item, idx, ctx) do
     type = item["type"]
     parent = item["parent"]
 
     if is_binary(type) and type != "" and is_binary(parent) and parent != "" do
+      # task-e9f14aeb3ed09953 — the tree's own `filter` (Sanity's
+      # `pageType == "information" && !defined(parent._ref)`) narrows the root
+      # AND every level below; the level's parent clause is added on top of it.
+      own = if is_map(item["filter"]), do: item["filter"], else: %{}
+      root = Map.merge(own, %{parent => %{"is" => "null"}})
+
       %Node{
         id: item["id"] || "#{idx}-#{type}-tree",
         title: item["title"] || type,
@@ -1391,11 +1400,13 @@ defmodule Barkpark.Structure do
         type: :document_type_list,
         type_name: type,
         visibility: :public,
-        filter: %{parent => %{"is" => "null"}},
+        filter: root,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        tree: %{"parent" => parent},
+        tree:
+          if(own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}),
         pane_title: pane_title(item),
-        initial_values: initial_values(item, type, ctx)
+        initial_values: initial_values(item, type, ctx),
+        error: if(own == %{}, do: nil, else: filter_error(type, root, ctx))
       }
     end
   end
