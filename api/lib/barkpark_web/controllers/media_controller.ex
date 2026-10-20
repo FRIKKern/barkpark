@@ -595,12 +595,23 @@ defmodule BarkparkWeb.MediaController do
       (svg_hint == true and file.mime_type in [nil, @svg_mime, "application/octet-stream"])
   end
 
+  # Opened as a page (`Sec-Fetch-Dest: document`), an SVG is also a download
+  # (task-71cb73cb5f89acef, defence in depth: the CSP already makes it inert).
+  # An `<img>`, a fetch or a client that sends no Sec-Fetch-Dest still gets it
+  # inline, and the answer varies on the header so no cache hands one to the
+  # other.
   defp serve_svg(conn, file, visibility) do
     case Blobstore.ensure_local(file) do
       {:ok, full_path} ->
+        disposition =
+          if get_req_header(conn, "sec-fetch-dest") == ["document"],
+            do: "attachment",
+            else: "inline"
+
         conn
         |> Delivery.put_file_cache_headers(full_path, visibility)
-        |> maybe_send_file(full_path, @svg_mime, svg: true)
+        |> add_vary("Sec-Fetch-Dest")
+        |> maybe_send_file(full_path, @svg_mime, svg: disposition)
 
       {:error, _} ->
         not_found(conn, "media blob missing")
@@ -723,9 +734,10 @@ defmodule BarkparkWeb.MediaController do
   #     request segment — and an unreadable stat degrades to the whole-file
   #     200 rather than guessing a size.
   #
-  # `svg: true` is the one exception to the collapse, set only by
-  # `serve_svg/3`: the type stays `image/svg+xml` and the CSP below stops any
-  # script in it from running.
+  # `svg: disposition` is the one exception to the collapse, set only by
+  # `serve_svg/3`: the type stays `image/svg+xml`, the CSP below stops any
+  # script in it from running, and the disposition is `inline` for an image and
+  # `attachment` for a page.
   #
   # NO CHARSET on a binary type (task-701191424b8d15e8). `put_resp_content_type/2`
   # appends `; charset=utf-8` by default, which is wrong for image and other
@@ -734,7 +746,7 @@ defmodule BarkparkWeb.MediaController do
   defp maybe_send_file(conn, full_path, mime, opts) do
     {served_type, disposition} =
       if opts[:svg],
-        do: {@svg_mime, "inline"},
+        do: {@svg_mime, opts[:svg]},
         else: {MediaFile.serve_content_type(mime), disposition(mime)}
 
     conn =
@@ -828,8 +840,22 @@ defmodule BarkparkWeb.MediaController do
 
   defp clamp_range(_first, _last, _size), do: :unsatisfiable
 
-  defp put_svg_csp(conn, true), do: put_resp_header(conn, "content-security-policy", @svg_csp)
-  defp put_svg_csp(conn, _svg), do: conn
+  defp put_svg_csp(conn, nil), do: conn
+
+  defp put_svg_csp(conn, _disposition),
+    do: put_resp_header(conn, "content-security-policy", @svg_csp)
+
+  # Adds to the Vary an earlier plug set (DatasetCors' `Origin`) instead of replacing it.
+  defp add_vary(conn, value) do
+    present =
+      conn
+      |> get_resp_header("vary")
+      |> Enum.flat_map(&String.split(&1, ","))
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    put_resp_header(conn, "vary", Enum.join(Enum.uniq(present ++ [value]), ", "))
+  end
 
   defp charset_for("text/" <> _), do: "utf-8"
   defp charset_for(_type), do: nil
