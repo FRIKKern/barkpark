@@ -563,6 +563,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           type_name: type_name,
           type_title: schema && schema.title,
           author_creatable: author_creatable?(schema),
+          # The fields this list's "+" presets (task-dc9b751450c2c2c4).
+          initial_values: Map.get(node, :initial_values),
           role: :list,
           priority: :active,
           desk_groups: desk_groups,

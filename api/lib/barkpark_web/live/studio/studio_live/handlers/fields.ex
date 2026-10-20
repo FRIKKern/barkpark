@@ -34,7 +34,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   @create_retry_window_ms 30_000
 
   def new_document(%{"type" => type} = params, socket) do
-    case retry_of_recent_create(socket, type) do
+    preset = pane_preset(params, socket)
+
+    case retry_of_recent_create(socket, type, preset) do
       {:ok, %{path: path}} ->
         # [plus-press-retry-coalesce] THE SECOND PRESS OF "+". spd-w18 measured
         # the "+" navigating in 6.4s on one build and NEVER within 20s across
@@ -84,9 +86,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> focus_new_doc(List.last(path))}
 
       :none ->
-        create_new_document(type, pane_prefix(params, socket), socket)
+        create_new_document(type, pane_prefix(params, socket), preset, socket)
     end
   end
+
+  # A declared desk list's `initialValues` (task-dc9b751450c2c2c4): its "+"
+  # starts the document with those fields set, so a page made from
+  # «Landingssider» is a landing page and shows in that list at once. Read from
+  # the pressed pane, never from the client.
+  defp pane_preset(%{"pane" => pane}, socket) when is_binary(pane) do
+    with {idx, ""} when idx >= 0 <- Integer.parse(pane),
+         %{initial_values: %{} = preset} <- Enum.at(socket.assigns[:panes] || [], idx) do
+      preset
+    else
+      _ -> %{}
+    end
+  end
+
+  defp pane_preset(_params, _socket), do: %{}
 
   # The pressed pane's own address, the prefix `Handlers.Scope.select/2` uses
   # for a row click (#35b). `nav_path ++ [id]` appended the new id after the
@@ -105,7 +122,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   defp pane_prefix(_params, socket), do: socket.assigns.nav_path
 
-  defp create_new_document(type, prefix, socket) do
+  defp create_new_document(type, prefix, preset, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
     # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
@@ -115,7 +132,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     # collision odds. See [doc-id-collision-overwrite] in content/writer.ex.
     case Content.create_document(
            type,
-           new_document_attrs(type),
+           type |> new_document_attrs() |> Map.update!("content", &Map.merge(&1, preset)),
            socket.assigns.dataset,
            Shared.hook_opts(socket)
          ) do
@@ -128,6 +145,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> assign(
            recent_create: %{
              type: type,
+             preset: preset,
              doc_id: doc.doc_id,
              rev: doc.rev,
              path: new_path,
@@ -161,9 +179,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # both differ per type (a paper is born with a template and NO stored title,
   # a task with a seeded content map) while `rev` moves on any write of any
   # type — one predicate, no per-type list to fall out of date.
-  defp retry_of_recent_create(socket, type) do
+  # A press in a list with other presets is a different "+", never a retry.
+  defp retry_of_recent_create(socket, type, preset) do
     with %{type: ^type, doc_id: doc_id, rev: rev} = marker <-
            socket.assigns[:recent_create],
+         true <- Map.get(marker, :preset, %{}) == preset,
          true <- System.monotonic_time(:millisecond) - marker.at <= @create_retry_window_ms,
          {:ok, %{rev: ^rev}} <-
            Content.get_document(doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do

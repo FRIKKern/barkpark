@@ -102,7 +102,11 @@ defmodule Barkpark.Structure do
       deferred: nil,
       # A declared list's `paneTitle`: the title of the pane it opens, when
       # that differs from its row's (task-a3e829ace0b184ea). nil = the row's.
-      pane_title: nil
+      pane_title: nil,
+      # A declared type list's `initialValues`: the content fields its "+"
+      # starts a document with, as Sanity's initialValueTemplates
+      # (task-dc9b751450c2c2c4). nil = an empty document, as before.
+      initial_values: nil
     ]
   end
 
@@ -1114,6 +1118,9 @@ defmodule Barkpark.Structure do
   #   {"kind":"documentTypeList","type":"publication","title":"Uten omslag",
   #      "filter":{"content.cover":{"is":"null"}},"orderings":[{"field":"title","direction":"asc"}]}
   #
+  # A documentTypeList or tree item may carry `initialValues`
+  # (`{"pageType":"landingPage"}`), the fields its "+" starts a document with.
+  #
   # A list, documentTypeList, groupBy or tree item may also carry `paneTitle`,
   # the title of the pane it opens, as Sanity's `S.listItem().title('Med
   # anmeldelser').child(S.documentTypeList('product').title('Produkter med
@@ -1323,7 +1330,8 @@ defmodule Barkpark.Structure do
         filter: filter,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
         error: filter_error(type, filter, ctx),
-        pane_title: pane_title(item)
+        pane_title: pane_title(item),
+        initial_values: initial_values(item)
       }
     end
   end
@@ -1386,7 +1394,8 @@ defmodule Barkpark.Structure do
         filter: %{parent => %{"is" => "null"}},
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
         tree: %{"parent" => parent},
-        pane_title: pane_title(item)
+        pane_title: pane_title(item),
+        initial_values: initial_values(item)
       }
     end
   end
@@ -1395,6 +1404,21 @@ defmodule Barkpark.Structure do
 
   defp pane_title(%{"paneTitle" => title}) when is_binary(title) and title != "", do: title
   defp pane_title(_item), do: nil
+
+  # `{"pageType": "landingPage"}`: content field → value. A key may also be
+  # written as the list's filter path (`content.pageType`). Anything that is not
+  # a non-empty map of string keys is no preset.
+  defp initial_values(%{"initialValues" => values}) when is_map(values) do
+    values
+    |> Enum.filter(fn {k, _v} -> is_binary(k) and k != "" end)
+    |> Map.new(fn {k, v} -> {String.replace_prefix(k, "content.", ""), v} end)
+    |> case do
+      empty when map_size(empty) == 0 -> nil
+      preset -> preset
+    end
+  end
+
+  defp initial_values(_item), do: nil
 
   # The children of a `groupBy` node are one document read over `over`, and
   # with `overFilter` a reference test against every document of the grouped
