@@ -99,7 +99,10 @@ defmodule Barkpark.Structure do
       # A `groupBy` node built with `defer_group_by: true` carries
       # `{:group_by, item, idx}` here and no children. `expand/3` builds them
       # when a pane opens the node (task-cca3c6d48e57097e).
-      deferred: nil
+      deferred: nil,
+      # A declared list's `paneTitle`: the title of the pane it opens, when
+      # that differs from its row's (task-a3e829ace0b184ea). nil = the row's.
+      pane_title: nil
     ]
   end
 
@@ -1111,6 +1114,11 @@ defmodule Barkpark.Structure do
   #   {"kind":"documentTypeList","type":"publication","title":"Uten omslag",
   #      "filter":{"content.cover":{"is":"null"}},"orderings":[{"field":"title","direction":"asc"}]}
   #
+  # A list, documentTypeList, groupBy or tree item may also carry `paneTitle`,
+  # the title of the pane it opens, as Sanity's `S.listItem().title('Med
+  # anmeldelser').child(S.documentTypeList('product').title('Produkter med
+  # anmeldelser'))`. Without it the pane takes the row's title.
+  #
   # Read under the PUBLISHED perspective ("publish to apply"), scoped to the
   # caller's workspace. Absent → :none (the hardcoded tree). A malformed
   # document degrades to :none with a logged reason — never a blank desk.
@@ -1294,7 +1302,8 @@ defmodule Barkpark.Structure do
       title: item["title"] || "Group",
       icon: item["icon"],
       type: :list,
-      items: children
+      items: children,
+      pane_title: pane_title(item)
     }
   end
 
@@ -1313,7 +1322,8 @@ defmodule Barkpark.Structure do
         visibility: :public,
         filter: filter,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        error: filter_error(type, filter, ctx)
+        error: filter_error(type, filter, ctx),
+        pane_title: pane_title(item)
       }
     end
   end
@@ -1375,12 +1385,16 @@ defmodule Barkpark.Structure do
         visibility: :public,
         filter: %{parent => %{"is" => "null"}},
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        tree: %{"parent" => parent}
+        tree: %{"parent" => parent},
+        pane_title: pane_title(item)
       }
     end
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  defp pane_title(%{"paneTitle" => title}) when is_binary(title) and title != "", do: title
+  defp pane_title(_item), do: nil
 
   # The children of a `groupBy` node are one document read over `over`, and
   # with `overFilter` a reference test against every document of the grouped
@@ -1395,7 +1409,8 @@ defmodule Barkpark.Structure do
       icon: item["icon"],
       type: :list,
       items: [],
-      deferred: {:group_by, item, idx}
+      deferred: {:group_by, item, idx},
+      pane_title: pane_title(item)
     }
   end
 
@@ -1448,7 +1463,8 @@ defmodule Barkpark.Structure do
       title: item["title"] || "By #{over}",
       icon: item["icon"],
       type: :list,
-      items: children
+      items: children,
+      pane_title: pane_title(item)
     }
   end
 
