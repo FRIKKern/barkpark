@@ -303,7 +303,12 @@ defmodule Barkpark.Content.Writer do
     # list's type (warn-only; the desk leaves them out).
     presets =
       if type == "deskStructure" and is_map(content),
-        do: Barkpark.Structure.preset_findings(Map.get(content, "items"), dataset, scope),
+        do:
+          Barkpark.Content.Validation.desk_preset_findings(
+            Map.get(content, "items"),
+            dataset,
+            scope
+          ),
         else: []
 
     case Content.get_schema(type, dataset, scope) do

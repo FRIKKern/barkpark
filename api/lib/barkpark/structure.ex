@@ -1422,7 +1422,7 @@ defmodule Barkpark.Structure do
       values
       |> Enum.map(fn {k, v} -> {is_binary(k) && String.replace_prefix(k, "content.", ""), v} end)
       |> Enum.split_with(fn {name, v} ->
-        is_binary(name) and preset_fits?(Map.get(fields, name), v)
+        is_binary(name) and Content.Validation.desk_preset_fits?(Map.get(fields, name), v)
       end)
 
     if dropped != [] do
@@ -1437,88 +1437,9 @@ defmodule Barkpark.Structure do
 
   defp initial_values(_item, _type, _ctx), do: nil
 
-  @doc """
-  A deskStructure's `initialValues` entries that do not fit their list's type
-  (task-dc9b751450c2c2c4), as warning findings with code `:unknown_desk_preset`:
-  the key names no declared field of the type, or its value does not fit that
-  field. The desk still builds and leaves those entries out (`initial_values/3`);
-  this tells the author on save. `scope` is the write's own.
-  """
-  @spec preset_findings(term(), String.t(), keyword()) :: [map()]
-  def preset_findings(items, dataset, scope), do: preset_findings(items, "/items", dataset, scope)
-
-  defp preset_findings(items, path, dataset, scope) when is_list(items) do
-    items
-    |> Enum.with_index()
-    |> Enum.flat_map(fn {item, i} -> preset_findings(item, "#{path}/#{i}", dataset, scope) end)
-  end
-
-  defp preset_findings(%{} = item, path, dataset, scope) do
-    own =
-      case item do
-        %{"type" => type, "initialValues" => values} when is_binary(type) and is_map(values) ->
-          fields =
-            case Content.resolve_schema(type, dataset, scope) do
-              {:ok, %{fields: fields}} when is_list(fields) ->
-                Map.new(fields, &{field_name(&1), &1})
-
-              _ ->
-                %{}
-            end
-
-          for {key, value} <- values,
-              name = is_binary(key) && String.replace_prefix(key, "content.", ""),
-              not (is_binary(name) and preset_fits?(Map.get(fields, name), value)) do
-            %{
-              path: "#{path}/initialValues/#{key}",
-              message:
-                "desk preset #{inspect(key)} does not fit #{type}: name a field of the type with a value of its kind; the list's + leaves it out",
-              code: :unknown_desk_preset,
-              params: %{field: key, type: type}
-            }
-          end
-
-        _ ->
-          []
-      end
-
-    own ++ preset_findings(Map.get(item, "items"), "#{path}/items", dataset, scope)
-  end
-
-  defp preset_findings(_other, _path, _dataset, _scope), do: []
-
   defp field_name(%{name: name}), do: name
   defp field_name(%{"name" => name}), do: name
   defp field_name(_field), do: nil
-
-  defp field_attr(field, key), do: Map.get(field, key) || Map.get(field, Atom.to_string(key))
-
-  # The value a preset may give a field of this kind. A kind not listed here
-  # (an object, an array, a file) takes any JSON value; the write validates it.
-  defp preset_fits?(nil, _value), do: false
-
-  defp preset_fits?(field, value) do
-    case field_attr(field, :type) do
-      "select" -> value in option_values(field_attr(field, :options))
-      t when t in ~w(string text slug url email date datetime) -> is_binary(value)
-      t when t in ~w(number float) -> is_number(value)
-      "integer" -> is_integer(value)
-      "boolean" -> is_boolean(value)
-      "reference" -> is_map(value) and is_binary(value["_ref"])
-      _ -> true
-    end
-  end
-
-  defp option_values(options) when is_list(options) do
-    Enum.map(options, fn
-      %{"value" => v} -> v
-      %{value: v} -> v
-      v -> v
-    end)
-  end
-
-  defp option_values(%{"list" => list}), do: option_values(list)
-  defp option_values(_options), do: []
 
   # The children of a `groupBy` node are one document read over `over`, and
   # with `overFilter` a reference test against every document of the grouped
