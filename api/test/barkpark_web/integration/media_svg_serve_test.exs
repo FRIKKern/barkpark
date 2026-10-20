@@ -82,10 +82,10 @@ defmodule BarkparkWeb.Integration.MediaSvgServeTest do
     result
   end
 
-  defp sanity_url(ctx, query),
+  def sanity_url(ctx, query),
     do: "#{ctx.base}/images/#{@project_id}/production/#{ctx.sha1}-132x39.svg#{query}"
 
-  defp files_url(ctx, query), do: "#{ctx.base}/media/files/#{ctx.svg["path"]}#{query}"
+  def files_url(ctx, query), do: "#{ctx.base}/media/files/#{ctx.svg["path"]}#{query}"
 
   defp assert_svg_original(resp) do
     assert resp.status == 200, resp.resp_body
@@ -115,6 +115,35 @@ defmodule BarkparkWeb.Integration.MediaSvgServeTest do
 
     test "/media/files, #{label}: the SVG unchanged as image/svg+xml", ctx do
       ctx |> files_url(unquote(query)) |> then(&get(as(ctx.raw), &1)) |> assert_svg_original()
+    end
+  end
+
+  # task-71cb73cb5f89acef — defence in depth: opened as a page, an SVG is also
+  # a download; an <img> (or a client that sends no Sec-Fetch-Dest) keeps it
+  # inline. Both answers keep the sandbox CSP and nosniff, and vary on the header.
+  for {route, url_fun} <- [{"Sanity image route", :sanity_url}, {"/media/files", :files_url}] do
+    test "#{route}: opened as a page the SVG is an attachment, as an image inline", ctx do
+      url = apply(__MODULE__, unquote(url_fun), [ctx, ""])
+
+      for {dest, disposition} <- [
+            {"document", "attachment"},
+            {"image", "inline"},
+            {nil, "inline"}
+          ] do
+        conn = as(ctx.raw)
+        conn = if dest, do: put_req_header(conn, "sec-fetch-dest", dest), else: conn
+        resp = get(conn, url)
+
+        assert resp.status == 200, "#{inspect(dest)}: #{resp.resp_body}"
+        assert get_resp_header(resp, "content-disposition") == [disposition], inspect(dest)
+        assert get_resp_header(resp, "content-type") == ["image/svg+xml"]
+        assert get_resp_header(resp, "x-content-type-options") == ["nosniff"]
+        assert [csp] = get_resp_header(resp, "content-security-policy")
+        assert csp =~ "default-src 'none'" and csp =~ "sandbox"
+        assert [vary] = get_resp_header(resp, "vary")
+        assert vary =~ "Sec-Fetch-Dest"
+        assert resp.resp_body == @svg
+      end
     end
   end
 
