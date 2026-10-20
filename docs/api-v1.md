@@ -164,8 +164,8 @@ Per endpoint: [api/error-codes.md](api/error-codes.md); source `Errors.known_cod
 
 ## 10. Legacy `/api/*` Routes
 
-Deprecated (404 after the 2026-12-31 sunset; migrate to `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation`/`Sunset`/`Link`.
+Deprecated (404 after the 2026-12-31 sunset; use `/v1`): `GET/POST/DELETE /api/documents/:type[/:id]` (token), `GET /api/schemas` (public). Responses carry `Deprecation`/`Sunset`/`Link`.
 
 ## 11. Rate Limiting
 
-Per token (or IP), read/write buckets per dataset: **300r/60w**/min (config `:rate_limits` or `BARKPARK_RATE_LIMIT_READ`/`_WRITE`). Over → `429` + `Retry-After` (§9); ticket keys per-key (§8a).
+Per token or IP, per dataset: **300r/60w**/min, media GETs **3000** apart (`:rate_limits`, `BARKPARK_RATE_LIMIT_READ`/`_WRITE`/`_DELIVERY`). Over → `429`+`Retry-After` (§9); ticket keys per-key (§8a).
