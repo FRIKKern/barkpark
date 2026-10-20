@@ -1666,7 +1666,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       only nil/false. An unknown string, or a truthy non-binary
                       (`:folder || "file"` is `:folder`), reached `icon/1` — a
                       document glyph in dev/prod, a RAISE in :test. --%>
-                <:icon><.icon name={Icons.drawable_name(pane[:icon], "file")} size={32} /></:icon>
+                <:icon><Icons.desk_icon name={pane[:icon]} fallback="file" size={32} /></:icon>
                 <button
                   :if={pane[:author_creatable] != false}
                   class="btn btn-primary btn-sm"
@@ -1702,7 +1702,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
                 <% :header -> %>
                   <.pane_section_header>
-                    <.icon name={Icons.drawable_name(item[:icon], "folder")} size={12} /> <%= item.title %>
+                    <Icons.desk_icon name={item[:icon]} fallback="folder" size={12} /> <%= item.title %>
                   </.pane_section_header>
 
                 <% :plugin_link -> %>
@@ -1742,7 +1742,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                           the neutral glyph `tab_icon/1` already uses — because a
                           link is not a document and "file" would claim it is. --%>
                     <%= if item.icon do %>
-                      <span class="pane-item-icon"><.icon name={Icons.drawable_name(item.icon, "circle")} size={16} /></span>
+                      <span class="pane-item-icon"><Icons.desk_icon name={item.icon} fallback="circle" size={16} /></span>
                     <% end %>
                     <span class="pane-item-label"><%= item.title %></span>
                     <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
@@ -1783,7 +1783,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     phx_value_pane={"#{idx}"}
                     selected={item.id == pane[:selected]}
                   >
-                    <:icon><.icon name={Icons.drawable_name(item.icon)} size={16} /></:icon>
+                    <:icon><Icons.desk_icon name={item.icon} size={16} /></:icon>
                     <%= item.title %>
                     <:trailing :if={item[:drillable]}>
                       <.icon name="chevron-right" size={14} />

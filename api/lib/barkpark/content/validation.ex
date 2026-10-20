@@ -146,7 +146,7 @@ defmodule Barkpark.Content.Validation do
     block_fields_invalid not_in_list list_too_short list_too_long
     list_not_unique number_too_small number_too_large
     string_too_short string_too_long portable_text_not_portabledoc custom
-    cross_validation
+    cross_validation unknown_desk_icon
   )a
 
   @doc "The fixed set of codes `check_findings/3` can ever emit. See the moduledoc."
@@ -286,6 +286,62 @@ defmodule Barkpark.Content.Validation do
         Barkpark.Content.CrossValidator.findings(schema, doc)
     end
   end
+
+  @doc """
+  A deskStructure document's desk items that name an icon neither Studio draws
+  (task-af038d8b0d769e82), as warning findings with code `:unknown_desk_icon`: the
+  item still shows, with no icon (`Barkpark.DeskIcons` lists the names). Any other
+  schema: none.
+  """
+  @spec desk_icon_findings(String.t() | map() | nil, map() | nil) :: [finding()]
+  def desk_icon_findings(type, content) when is_binary(type) do
+    if type == "deskStructure" and is_map(content),
+      do: content |> Map.get("items") |> unknown_desk_icons("/items"),
+      else: []
+  end
+
+  def desk_icon_findings(schema, content),
+    do: desk_icon_findings(schema_name(schema) || "", content)
+
+  defp unknown_desk_icons(items, path) when is_list(items) do
+    items
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {item, i} -> unknown_desk_icons(item, "#{path}/#{i}") end)
+  end
+
+  defp unknown_desk_icons(%{} = item, path) do
+    own =
+      case Map.get(item, "icon") do
+        icon when is_binary(icon) and icon != "" ->
+          if Barkpark.DeskIcons.known?(icon),
+            do: [],
+            else: [
+              %{
+                path: path <> "/icon",
+                message:
+                  "unknown desk icon #{inspect(icon)}: use an @sanity/icons name; the item shows without an icon",
+                code: :unknown_desk_icon,
+                params: %{icon: icon}
+              }
+            ]
+
+        _ ->
+          []
+      end
+
+    nested =
+      Enum.flat_map(item, fn
+        {key, value} when key != "icon" and (is_list(value) or is_map(value)) ->
+          unknown_desk_icons(value, "#{path}/#{key}")
+
+        _ ->
+          []
+      end)
+
+    own ++ nested
+  end
+
+  defp unknown_desk_icons(_other, _path), do: []
 
   defp schema_name(%{name: n}), do: n
   defp schema_name(%{"name" => n}), do: n
