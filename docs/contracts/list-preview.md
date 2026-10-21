@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: schema-list-preview | budget: 700tok -->
 # List preview
 
-`list_preview` sets what a desk row and a reference picker hit show (`Content.PreviewText`). `title` names the field that fills a titleless type's title column. `subtitle` and `description` are the two lines under the title; `media` is the thumbnail.
+`list_preview` sets what a desk row and a reference picker hit show (`Content.PreviewText`). `title` names the field that fills a titleless type's title column. A `title` that is a text spec instead (a list of parts, a template or `parts`) sets the row title, and the stored title shows only when the spec shows nothing: `["displayTitle", "title", {"text": "No title"}]` or `["{title} ({code})", "title"]`. `subtitle` and `description` are the two lines under the title; `media` is the thumbnail.
 
 ```json
 "list_preview": {
