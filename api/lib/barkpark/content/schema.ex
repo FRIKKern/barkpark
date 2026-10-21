@@ -1346,6 +1346,7 @@ defmodule Barkpark.Content.Schema do
             |> Map.put("fields", inner)
             |> Map.put("namedType", type)
             |> Map.put_new("title", obj.title)
+            |> maybe_put_icon(obj)
             |> maybe_put_groups(obj)
             |> maybe_put_fieldsets(obj)
 
@@ -1356,6 +1357,13 @@ defmodule Barkpark.Content.Schema do
   end
 
   defp inline_field(other, _resolved, _visited), do: other
+
+  # The object type's icon rides along (task-835fe5219585ca80), so an array
+  # item of that type draws it when the row has no media, as Sanity does.
+  defp maybe_put_icon(field, %SchemaDefinition{icon: icon}) when is_binary(icon) and icon != "",
+    do: Map.put_new(field, "icon", icon)
+
+  defp maybe_put_icon(field, _obj), do: field
 
   defp maybe_put_groups(field, %SchemaDefinition{groups: groups})
        when is_list(groups) and groups != [] do

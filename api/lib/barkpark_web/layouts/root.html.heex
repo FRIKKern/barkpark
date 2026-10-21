@@ -2030,6 +2030,7 @@
       padding: 8px 12px; text-decoration: none;
     }
     .bp-desk-search-hit .pane-doc-sub { flex-shrink: 0; }
+    .bp-desk-search-hit .pane-doc-media-icon + .pane-doc-title { flex: 1; min-width: 0; }
 
     .pane-doc-item {
       cursor: pointer;
@@ -2052,6 +2053,11 @@
       display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
     }
     .pane-doc-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* A row with no media draws its schema type's icon (task-835fe5219585ca80). */
+    .pane-doc-media-icon, .bp-array-item-media-icon {
+      align-items: center; justify-content: center; color: var(--fg-muted);
+    }
+    .bp-array-item-media-icon { display: inline-flex; }
     .pane-doc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .pane-doc-dot.published { background: var(--success); }
     .pane-doc-dot.draft { background: var(--warning); }
@@ -3757,6 +3763,7 @@
       display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
     }
     bp-reference-picker .bp-ref-hit-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    bp-reference-picker .bp-ref-hit-icon { align-items: center; justify-content: center; color: var(--fg-muted); }
     bp-reference-picker .bp-ref-hit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     bp-reference-picker .bp-ref-hit-sub {
       font-size: var(--text-xs); color: var(--fg-muted);

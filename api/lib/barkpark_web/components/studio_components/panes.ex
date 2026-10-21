@@ -527,6 +527,12 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   attr :media, :string, default: nil
   attr :media_slot, :boolean, default: false
 
+  # task-835fe5219585ca80: the schema type's icon name
+  # (`BarkparkWeb.Icons.row_icon/1`: its own, else the document icon). A row
+  # with no media draws it in the media box, as Sanity Studio does. nil, from
+  # a caller that passes none, keeps the row above.
+  attr :type_icon, :string, default: nil
+
   # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────
   # When `selectable` is true, the row renders a left-anchored checkbox
   # whose `phx-click="toggle-doc-checkbox"` event toggles inclusion in
@@ -611,8 +617,12 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <%= if @media do %>
           <span class="pane-doc-media" aria-hidden="true"><img src={@media} alt="" loading="lazy" /></span>
         <% else %>
-          <%= if @media_slot do %>
-            <span class="pane-doc-media pane-doc-media-empty" aria-hidden="true"></span>
+          <%= cond do %>
+            <% @type_icon -> %>
+              <span class="pane-doc-media pane-doc-media-icon" aria-hidden="true" data-type-icon={@type_icon}><BarkparkWeb.Icons.desk_icon name={@type_icon} size={16} /></span>
+            <% @media_slot -> %>
+              <span class="pane-doc-media pane-doc-media-empty" aria-hidden="true"></span>
+            <% true -> %>
           <% end %>
         <% end %>
         <span class="pane-doc-main">

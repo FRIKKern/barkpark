@@ -830,6 +830,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 description={rel[:description]}
                 media={rel[:media]}
                 media_slot={rel[:media_slot] == true}
+                type_icon={rel[:type_icon]}
               />
               <button
                 :if={@nav_view_more}

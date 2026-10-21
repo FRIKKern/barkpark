@@ -1651,6 +1651,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   data-hit-type={hit.type}
                   navigate={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset, focus: :doc)}
                 >
+                  <span :if={hit[:type_icon]} class="pane-doc-media pane-doc-media-icon" aria-hidden="true" data-type-icon={hit[:type_icon]}><Icons.desk_icon name={hit[:type_icon]} size={16} /></span>
                   <span class="pane-doc-title"><%= hit.title %></span>
                   <span class="pane-doc-sub"><%= hit.type_title %></span>
                 </.link>
@@ -1764,6 +1765,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     description={item[:description]}
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
+                    type_icon={item[:type_icon]}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil and Caps.admin_affordance?(@caps)}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
