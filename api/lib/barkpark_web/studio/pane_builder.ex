@@ -977,7 +977,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     media_declared? = PreviewText.media_paths(media_spec) != []
     subtitle = Map.get(preview, "subtitle")
     description = Map.get(preview, "description")
-    targets = preview_targets(docs, [subtitle, description, media_spec], dataset, opts)
+    title_spec = title_spec(preview)
+
+    targets =
+      preview_targets(docs, [subtitle, description, media_spec, title_spec], dataset, opts)
+
     deref = fn id -> Map.get(targets, id) end
 
     Enum.map(docs, fn doc ->
@@ -994,7 +998,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # product cover is `onix.thumbnail`.
         media: if(media_declared?, do: PreviewText.media(media_spec, preview_root(doc), deref)),
         media_slot: media_declared?,
-        title: row_title(doc, schema),
+        title: row_title(doc, schema, deref),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -1051,7 +1055,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # row title in `list_preview.title`; when the column is blank the row shows
   # that field's value (the same rule the write path uses to fill the column),
   # and only a document with neither falls back to the unnamed-row spelling.
-  defp row_title(doc, schema) do
+  #
+  # task-394a39576c8fb399 — `list_preview.title` may instead be a text spec
+  # (`PreviewText`): a list of parts, the first with a value
+  # (`["displayTitle", "title", {"text": "No title"}]`), a template
+  # (`"{title} ({code})"`), or `parts`. Sanity's `prepare` sets the row title
+  # this way, so the spec wins over the stored title, and the row falls back
+  # to the rule above only when the spec shows nothing.
+  defp row_title(doc, schema, deref \\ fn _ -> nil end) do
+    case title_spec(schema_list_preview(schema)) do
+      nil -> stored_row_title(doc, schema)
+      spec -> PreviewText.format(spec, preview_root(doc), deref) || stored_row_title(doc, schema)
+    end
+  end
+
+  defp stored_row_title(doc, schema) do
     case doc.title && String.trim(doc.title) do
       nil -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
       "" -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
@@ -1063,9 +1081,24 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
+  # `list_preview.title` as a text spec, or nil while it names one field (a
+  # bare field name or `{"field": name}`), which only fills a blank title.
+  defp title_spec(preview) do
+    case Map.get(preview, "title") do
+      list when is_list(list) and list != [] -> list
+      %{"field" => _} -> nil
+      %{} = spec when map_size(spec) > 0 -> spec
+      text when is_binary(text) -> if String.contains?(text, "{"), do: text
+      _ -> nil
+    end
+  end
+
   @doc """
-  The desk row's title for `doc` under `schema`: its stored title, else the
-  schema's `list_preview` title field, else `Untitled <type> · <id tail>`.
+  The desk row's title for `doc` under `schema`: the schema's `list_preview`
+  title spec when it shows text, else its stored title, else the schema's
+  `list_preview` title field, else `Untitled <type> · <id tail>`. A title spec
+  that reads through a reference shows its fallback here, since no targets
+  are loaded.
   Studio's paper header and its live row refresh use it too, so the three
   surfaces name one document the same way (task-23bff317e617928e).
   """
