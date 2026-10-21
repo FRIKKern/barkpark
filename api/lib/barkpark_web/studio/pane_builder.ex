@@ -1188,8 +1188,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # Identical priority to the Go TUI's `rowMeta` (listpreview_render_test.go
   # pins it there; pane_builder_test.exs pins it here).
   # `list_preview.subtitle` (task-f3203617ae4cf03e): a path, `ref.field` through
-  # one reference, `|date`, and parts with a fallback — `PreviewText`. The
-  # referenced documents of a whole page load in ONE scoped read.
+  # references, `|date`, and parts with a fallback — `PreviewText`. The
+  # referenced documents of a whole page load in one scoped read per depth.
   defp preview_line(_doc, nil, _deref), do: nil
   defp preview_line(doc, spec, deref), do: PreviewText.format(spec, preview_root(doc), deref)
 
@@ -1208,30 +1208,25 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     end
   end
 
-  # The documents a page of rows references through its preview specs, in ONE
-  # scoped read. The published row wins; a draft-only target still names itself.
+  # The documents a page of rows references through its preview specs: ONE
+  # scoped read per reference depth, so `parent.parent.title` costs two reads
+  # for the whole page, not one per row. The published row wins; a draft-only
+  # target still names itself.
   defp preview_targets(docs, specs, dataset, opts) do
-    ids =
-      docs
-      |> Enum.flat_map(&PreviewText.ref_ids(specs, preview_root(&1)))
-      |> Enum.uniq()
+    rows = Enum.map(docs, &{specs, preview_root(&1)})
 
-    case ids do
-      [] ->
-        %{}
+    PreviewText.targets(rows, fn ids ->
+      found =
+        Content.get_documents_by_ids(
+          ids ++ Enum.map(ids, &("drafts." <> &1)),
+          dataset,
+          scope(opts)
+        )
 
-      ids ->
-        found =
-          Content.get_documents_by_ids(
-            ids ++ Enum.map(ids, &("drafts." <> &1)),
-            dataset,
-            scope(opts)
-          )
-
-        for id <- ids, target = found[id] || found["drafts." <> id], into: %{} do
-          {id, preview_root(target)}
-        end
-    end
+      for id <- ids, target = found[id] || found["drafts." <> id], into: %{} do
+        {id, preview_root(target)}
+      end
+    end)
   end
 
   defp row_meta(doc, nil), do: manifest_description(doc)
