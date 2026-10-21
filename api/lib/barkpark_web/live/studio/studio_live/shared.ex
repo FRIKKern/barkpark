@@ -1790,6 +1790,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         panes: panes,
         editor_doc: editor_doc,
         editor_schema: new_schema,
+        # The tabs a declared desk list gives the documents it opens; nil
+        # leaves the schema's `desk.views` (task-ea2e544fec8ee6db).
+        editor_views: editor && editor[:views],
         editor_link_types:
           if(same_doc? and is_list(socket.assigns[:editor_link_types]),
             do: socket.assigns[:editor_link_types],

@@ -594,7 +594,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             )
 
           _ ->
-            editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
+            editor =
+              type_name
+              |> build_editor(schema, rest, dataset, opts, active_group)
+              |> with_node_views(node)
+
             {panes ++ [doc_pane], editor}
         end
 
@@ -727,7 +731,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
                 opts
               )
             else
-              {panes ++ [pane], build_editor(type_name, schema, rest, dataset, opts, nil)}
+              editor =
+                type_name
+                |> build_editor(schema, rest, dataset, opts, nil)
+                |> with_node_views(node)
+
+              {panes ++ [pane], editor}
             end
         end
     end
@@ -752,6 +761,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   #   * everything else resolves draft-first into the field-form editor.
   #
   # Returns the editor map or nil (no doc selected / doc not found).
+  # A document opened from a declared list that names `views` carries them, and
+  # the editor shows those tabs instead of the schema's `desk.views`
+  # (task-ea2e544fec8ee6db). A list that names none leaves the editor as is.
+  defp with_node_views(%{} = editor, %{views: views}) when is_list(views),
+    do: Map.put(editor, :views, views)
+
+  defp with_node_views(editor, _node), do: editor
+
   defp build_editor(type_name, schema, rest, dataset, opts, active_group) do
     scope_kw = scope(opts)
 

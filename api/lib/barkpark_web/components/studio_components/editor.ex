@@ -626,6 +626,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # before.
   attr :nav_view, :string, default: nil
   attr :nav_view_docs, :list, default: []
+  # The views a declared desk list gives this document; nil = the schema's.
+  attr :editor_views, :list, default: nil
   attr :scope_prefix, :string, default: ""
 
   # ── Cross-field validations (Task barkpark-cgn) ────────────────────
@@ -781,7 +783,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   documents related to this one. The row renders only for a
                   schema that declares `desk.views`, and «Felt» is always the
                   first tab so the form is one click away. --%>
-            <% doc_views = Views.views_for(@editor_schema) %>
+            <% doc_views = Views.views_for(@editor_schema, @editor_views) %>
             <div :if={doc_views != []} class="bp-view-bar" role="tablist" data-test-id="document-views">
               <button
                 type="button"

@@ -51,6 +51,7 @@ defmodule Barkpark.Structure do
   require Logger
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
+  alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.Enablement
 
   defmodule Node do
@@ -106,7 +107,12 @@ defmodule Barkpark.Structure do
       # A declared type list's `initialValues`: the content fields its "+"
       # starts a document with, as Sanity's initialValueTemplates
       # (task-dc9b751450c2c2c4). nil = an empty document, as before.
-      initial_values: nil
+      initial_values: nil,
+      # A declared list's `views`: the tabs a document opened from this list
+      # shows beside its form, as Sanity's `S.document().views([...])`
+      # (task-ea2e544fec8ee6db). Same entry shape as a schema's `desk.views`.
+      # nil = the schema's own `desk.views`.
+      views: nil
     ]
   end
 
@@ -1329,9 +1335,10 @@ defmodule Barkpark.Structure do
         visibility: :public,
         filter: filter,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        error: filter_error(type, filter, ctx),
+        error: filter_error(type, filter, ctx) || views_error(item),
         pane_title: pane_title(item),
-        initial_values: initial_values(item, type, ctx)
+        initial_values: initial_values(item, type, ctx),
+        views: views(item)
       }
     end
   end
@@ -1406,7 +1413,8 @@ defmodule Barkpark.Structure do
           if(own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}),
         pane_title: pane_title(item),
         initial_values: initial_values(item, type, ctx),
-        error: if(own == %{}, do: nil, else: filter_error(type, root, ctx))
+        views: views(item),
+        error: if(own == %{}, do: nil, else: filter_error(type, root, ctx)) || views_error(item)
       }
     end
   end
@@ -1415,6 +1423,38 @@ defmodule Barkpark.Structure do
 
   defp pane_title(%{"paneTitle" => title}) when is_binary(title) and title != "", do: title
   defp pane_title(_item), do: nil
+
+  # A declared list's `views` (task-ea2e544fec8ee6db): the documents it opens
+  # show these tabs instead of their schema's `desk.views`, as an item's
+  # `S.document().views([...])` replaces Sanity's default document node. An
+  # entry has the schema view's shape, so
+  #
+  #   {"kind": "documentTypeList", "type": "category", "views": [
+  #     {"id": "products", "title": "Products", "type": "product",
+  #      "by": "content.categories._ref"}]}
+  #
+  # opens each category with a «Products» tab that lists the products whose
+  # `categories` reference it. An empty list declares no tabs at all.
+  defp views(%{"views" => views}) when is_list(views),
+    do: Enum.filter(views, &SchemaDefinition.valid_desk_view?/1)
+
+  defp views(_item), do: nil
+
+  # A malformed entry is left out of the tabs and named on the item, so the
+  # author sees why a tab is missing.
+  defp views_error(%{"views" => views}) when is_list(views) do
+    case Enum.reject(views, &SchemaDefinition.valid_desk_view?/1) do
+      [] ->
+        nil
+
+      bad ->
+        "views entries need non-empty \"id\", \"title\", \"type\" and \"by\", " <>
+          "got #{inspect(bad)}"
+    end
+  end
+
+  defp views_error(%{"views" => other}), do: "views must be a list, got #{inspect(other)}"
+  defp views_error(_item), do: nil
 
   # `{"pageType": "landingPage"}`: content field → value. A key may also be
   # written as the list's filter path (`content.pageType`). Checked against the
