@@ -22,22 +22,27 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
 
   test "renders Sign out form when session has api_token", %{conn: conn} do
     conn = init_test_session(conn, %{"api_token" => @admin_token})
-    {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/production/studio"))
     assert html =~ "Sign out"
-    assert html =~ ~s|action="/logout"|
-    assert html =~ ~s|method="post"|
+    # The element itself, not a string match: the root stylesheet also holds
+    # the text `form[action="/logout"]` in a selector (task-74466450563fcc21).
+    assert has_element?(
+             view,
+             ~s|form[action="/logout"][method="post"] button[aria-label="Sign out"]|
+           )
   end
 
-  test "renders Sign out form even with no session (chrome always shows it)", %{conn: conn} do
-    # Shipped behavior: the Studio chrome renders the sign-out form
-    # unconditionally — the topbar no longer gates it on a live session, so
-    # the form is present regardless of whether a token was supplied.
+  test "renders no Sign out form without a session (nothing to end)", %{conn: conn} do
+    # The behaviour that replaced "chrome always shows it": studio.html.heex
+    # renders the sign-out form only for a token session (`:api_token`) or an
+    # account session (`:current_user`). A socket with neither has nothing to
+    # end. The old test matched the text `action="/logout"`, which on main at
+    # d43298a8e it found only in the root stylesheet's `form[action="/logout"]`
+    # selector, never in an element (task-74466450563fcc21).
     conn = init_test_session(conn, %{})
-    {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
-    # On main at d43298a8e this match finds only the stylesheet's
-    # `form[action="/logout"]` selector, so it reads the served page with its
-    # root assets inlined, as it did when they were inline.
-    assert BarkparkWeb.RootAssetsInline.inline(html) =~ ~s|action="/logout"|
+    {:ok, view, _html} = live(conn, scoped_studio("/d/production/studio"))
+    refute has_element?(view, ~s|form[action="/logout"]|)
+    assert has_element?(view, "#studio-theme-toggle")
   end
 
   test "POST /logout via the button form clears session", %{conn: conn} do

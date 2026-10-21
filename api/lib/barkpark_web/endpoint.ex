@@ -133,6 +133,13 @@ defmodule BarkparkWeb.Endpoint do
   # `immutable` caching (BarkparkWeb.RootAssets, task-cca3c6d48e57097e).
   plug BarkparkWeb.Plugs.RootAssets
 
+  # The `/assets` files the root layout links, under a content hash:
+  # `/assets/v/<hash>/<name>` is cached for a year as `immutable` when the
+  # hash matches the bytes on disk, and is `no-cache` otherwise. The plain
+  # names below keep `no-cache` (BarkparkWeb.StaticAssets,
+  # task-66122189b7af6ea2).
+  plug BarkparkWeb.Plugs.StaticAssets, compress: not code_reloading?
+
   plug Plug.Static,
     at: "/",
     from: :barkpark,
