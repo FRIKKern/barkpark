@@ -346,7 +346,7 @@ defmodule Barkpark.Content.PortableText do
         open_link(state, attrs)
 
       {"/", "a"} ->
-        %{state | marks: drop_last(state.marks, {:link, nil})}
+        %{state | marks: drop_last(state.marks, {:link, nil, nil})}
 
       {"", "span"} ->
         open_span(state, attrs)
@@ -409,10 +409,12 @@ defmodule Barkpark.Content.PortableText do
 
     href = decode(href || "")
 
+    extra = link_extra(attrs)
+
     mark =
       case attr(attrs, "data-pt-def") do
-        nil -> {:link, href}
-        key -> {:link_def, key, href}
+        nil -> {:link, href, extra}
+        key -> {:link_def, key, href, extra}
       end
 
     %{state | marks: state.marks ++ [mark]}
@@ -485,10 +487,38 @@ defmodule Barkpark.Content.PortableText do
     end
   end
 
-  defp drop_last(marks, {:link, _}) do
+  # Like `attr/2`, but an attribute set to "" reads as "" and only a missing
+  # one as nil: an empty `data-link-params` clears the stored parameters.
+  defp attr_present(attrs, name) do
+    case Regex.run(~r/(?:^|\s)#{name}\s*=\s*("([^"]*)"|'([^']*)')/i, attrs) do
+      [_, _, dq] -> decode(dq)
+      [_, _, "", sq] -> decode(sq)
+      _ -> nil
+    end
+  end
+
+  # The link fields the editor's link row sets beside the address
+  # (task-025d7af119d6f0b8): a file link (`data-link-kind="dam"` and
+  # `data-file-name`), the query parameters of a document link
+  # (`data-link-params`) and the new-tab switch (`data-new-tab`). A missing
+  # attribute leaves the stored field as it is.
+  defp link_extra(attrs) do
+    %{
+      kind: attr(attrs, "data-link-kind"),
+      file_name: attr_present(attrs, "data-file-name"),
+      params: attr_present(attrs, "data-link-params"),
+      new_tab:
+        case attr_present(attrs, "data-new-tab") do
+          nil -> nil
+          v -> v == "true"
+        end
+    }
+  end
+
+  defp drop_last(marks, {:link, _, _}) do
     case Enum.find_index(
            Enum.reverse(marks),
-           &(match?({:link, _}, &1) or match?({:link_def, _, _}, &1))
+           &(match?({:link, _, _}, &1) or match?({:link_def, _, _, _}, &1))
          ) do
       nil -> marks
       i -> List.delete_at(marks, length(marks) - 1 - i)
@@ -559,14 +589,20 @@ defmodule Barkpark.Content.PortableText do
         {span, j}, defs ->
           {marks, defs} =
             Enum.map_reduce(span.marks, defs, fn
-              {:link, href}, defs ->
-                new_link(key, href, defs, link_type)
+              {:link, href, extra}, defs ->
+                new_link(key, href, extra, defs, link_type)
 
-              {:link_def, k, href}, defs ->
+              {:link_def, k, href, extra}, defs ->
                 cond do
-                  Enum.any?(defs, &(&1["_key"] == k)) -> {k, defs}
-                  def = stored_defs[k] -> {k, defs ++ [edited_link_def(def, href)]}
-                  true -> new_link(key, href, defs, link_type)
+                  Enum.any?(defs, &(&1["_key"] == k)) ->
+                    {k, defs}
+
+                  def = stored_defs[k] ->
+                    extra = carried_params(extra, def, href)
+                    {k, defs ++ [def |> edited_link_def(href, extra) |> with_link_extra(extra)]}
+
+                  true ->
+                    new_link(key, href, extra, defs, link_type)
                 end
 
               {:def, k}, defs ->
@@ -603,41 +639,89 @@ defmodule Barkpark.Content.PortableText do
     {block, cur[:src]}
   end
 
-  defp new_link(key, href, defs, link_type) do
-    # A document link has no `link` form: it is a `linkAnnotation` in any value.
-    link_type = if internal_href?(href), do: "linkAnnotation", else: link_type
+  defp new_link(key, href, extra, defs, link_type) do
+    # A document link and a file link have no `link` form: each is a
+    # `linkAnnotation` in any value.
+    link_type =
+      if internal_href?(href) or dam?(extra), do: "linkAnnotation", else: link_type
 
-    case Enum.find(defs, &(link_def_href(&1) == href and &1["_type"] == link_type)) do
+    candidate = link_type |> new_link_def("", href, extra) |> with_link_extra(extra)
+    same = Map.delete(candidate, "_key")
+
+    case Enum.find(defs, &(Map.delete(&1, "_key") == same)) do
       %{"_key" => k} ->
         {k, defs}
 
       nil ->
         k = free_key(key, defs)
-        {k, defs ++ [new_link_def(link_type, k, href)]}
+        {k, defs ++ [Map.put(candidate, "_key", k)]}
     end
   end
 
-  defp new_link_def("linkAnnotation", k, href),
-    do: Map.merge(%{"_type" => "linkAnnotation", "_key" => k}, annotation_target(href))
+  defp new_link_def("linkAnnotation", k, href, extra),
+    do: Map.merge(%{"_type" => "linkAnnotation", "_key" => k}, annotation_target(href, extra))
 
-  defp new_link_def(_link, k, href), do: %{"_type" => "link", "_key" => k, "href" => href}
+  defp new_link_def(_link, k, href, _extra), do: %{"_type" => "link", "_key" => k, "href" => href}
 
-  # A stored link whose address the editor did not change is kept as stored.
-  # A changed address replaces the target and keeps the rest (`openInNewTab`).
-  defp edited_link_def(%{"_type" => "linkAnnotation"} = def, href) do
-    if link_def_href(def) == href do
+  # A stored link whose target the editor did not change is kept as stored.
+  # A changed target replaces the target fields and keeps the rest
+  # (`openInNewTab`). A file link that keeps its address but becomes an
+  # address link, or the reverse, is a changed target.
+  defp edited_link_def(%{"_type" => "linkAnnotation"} = def, href, extra) do
+    same_kind? = def["linkType"] == "dam" == dam?(extra)
+
+    if link_def_href(def) == href and same_kind? do
       def
     else
       def
       |> Map.drop(
         ~w(linkType url href email internalLink linkParams damFileUrl damFileName isExternal isMailto)
       )
-      |> Map.merge(annotation_target(href))
+      |> Map.merge(annotation_target(href, extra))
     end
   end
 
-  defp edited_link_def(%{"_type" => "link"} = def, href), do: Map.put(def, "href", href)
-  defp edited_link_def(def, _href), do: def
+  defp edited_link_def(%{"_type" => "link"} = def, href, _extra), do: Map.put(def, "href", href)
+  defp edited_link_def(def, _href, _extra), do: def
+
+  # The parameters of a list page go with its target: a link given another
+  # document drops the parameters it still carries from the old one. New
+  # parameters set with the new target stay.
+  defp carried_params(%{params: p} = extra, %{"linkParams" => p} = def, href) do
+    if link_def_href(def) == href, do: extra, else: %{extra | params: nil}
+  end
+
+  defp carried_params(extra, _def, _href), do: extra
+
+  defp dam?(%{kind: "dam"}), do: true
+  defp dam?(_extra), do: false
+
+  # The fields the link row sets beside the target (task-025d7af119d6f0b8).
+  # Only a `linkAnnotation` has them. The file name belongs to a file link and
+  # the parameters to a document link; an empty value removes the field.
+  defp with_link_extra(%{"_type" => "linkAnnotation"} = def, extra) do
+    def
+    |> put_link_field("damFileName", def["linkType"] == "dam", extra.file_name)
+    |> put_link_field("linkParams", link_kind(def) == "internal", extra.params)
+    |> then(fn d ->
+      if is_boolean(extra.new_tab), do: Map.put(d, "openInNewTab", extra.new_tab), else: d
+    end)
+  end
+
+  defp with_link_extra(def, _extra), do: def
+
+  defp put_link_field(def, _name, _applies?, nil), do: def
+  defp put_link_field(def, _name, false, _value), do: def
+  defp put_link_field(def, name, true, ""), do: Map.delete(def, name)
+  defp put_link_field(def, name, true, value), do: Map.put(def, name, value)
+
+  # A file link (the link row's File kind, `data-link-kind="dam"`) keeps its
+  # address in `damFileUrl`, the shape the twin's Sanity bodies store.
+  defp annotation_target(href, extra) do
+    if dam?(extra),
+      do: %{"linkType" => "dam", "damFileUrl" => href},
+      else: annotation_target(href)
+  end
 
   defp annotation_target("mailto:" <> email), do: %{"linkType" => "email", "email" => email}
 
@@ -880,7 +964,7 @@ defmodule Barkpark.Content.PortableText do
       %{"_type" => "linkAnnotation"} = def ->
         case link_def_href(def) do
           href when is_binary(href) ->
-            ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>)
+            ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}"#{link_extra_attrs(def)}>#{acc}</a>)
 
           nil ->
             ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
@@ -895,6 +979,29 @@ defmodule Barkpark.Content.PortableText do
   end
 
   defp wrap(_mark, acc, _defs), do: acc
+
+  # The link row's fields beside the target, as the attributes `link_extra/1`
+  # reads back (task-025d7af119d6f0b8). A field the def lacks adds nothing, so
+  # a link without them renders as before.
+  defp link_extra_attrs(def) do
+    [
+      def["linkType"] == "dam" && ~s( data-link-kind="dam"),
+      (def["linkType"] == "dam" and is_binary(def["damFileName"])) &&
+        ~s( data-file-name="#{escape(def["damFileName"])}"),
+      (link_kind(def) == "internal" and is_binary(def["linkParams"]) and def["linkParams"] != "") &&
+        ~s( data-link-params="#{escape(def["linkParams"])}"),
+      is_boolean(def["openInNewTab"]) && ~s( data-new-tab="#{def["openInNewTab"]}")
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join()
+  end
+
+  defp link_kind(def) do
+    case link_def_href(def) do
+      "#internal:" <> _ -> "internal"
+      _ -> def["linkType"]
+    end
+  end
 
   # An attribute value (the object's JSON) through Phoenix.HTML's escaper, which
   # also escapes `'`; `decode/1` reads every entity it emits back.

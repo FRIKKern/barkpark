@@ -6,7 +6,11 @@
 // across the focus hop). When the server stamps data-link-types, the link row
 // also offers Internal: a bp-reference-picker over those types, whose pick
 // links the text to "#internal:<id>" (task-088575052b459f3e); the server
-// stores that as a linkAnnotation with an internalLink reference. These are the styles, lists and decorators Sanity's
+// stores that as a linkAnnotation with an internalLink reference. The row
+// also offers Email (a mailto: address) and File (an uploaded file from the
+// media library, data-link-kind="dam" and data-file-name on the <a>), the
+// query parameters of a document link (data-link-params) and the new-tab
+// switch of an address link (data-new-tab) (task-025d7af119d6f0b8). These are the styles, lists and decorators Sanity's
 // Portable Text editor offers for a body; the server turns the HTML into
 // Portable Text (Barkpark.Content.PortableText). Emits a bubbling
 // CustomEvent("bp-change", {detail: {value}}) on every input. The
@@ -253,13 +257,31 @@ class BpRichTextEditor extends HTMLElement {
         ? '<span class="bp-rte-kinds" role="group" aria-label="' + t("Link type") + '">' +
           '<button type="button" class="bp-rte-btn bp-rte-kind" data-kind="internal" aria-pressed="true">' + t("Internal") + "</button>" +
           '<button type="button" class="bp-rte-btn bp-rte-kind" data-kind="external" aria-pressed="false">' + t("External") + "</button>" +
+          '<button type="button" class="bp-rte-btn bp-rte-kind" data-kind="email" aria-pressed="false">' + t("Email") + "</button>" +
+          '<button type="button" class="bp-rte-btn bp-rte-kind" data-kind="file" aria-pressed="false">' + t("File (DAM)") + "</button>" +
           "</span>" +
-          '<span class="bp-rte-internal"></span>'
+          '<span class="bp-rte-internal"></span>' +
+          '<span class="bp-rte-params-box">' +
+          '<input type="text" class="bp-rte-field bp-rte-params" placeholder="tags=a,b&amp;sort=name-asc" aria-label="' + t("Filters / parameters (optional)") + '" title="' + t("Filters / parameters (optional)") + '" />' +
+          "</span>"
         : "") +
       '<span class="bp-rte-external">' +
       '<input type="text" class="bp-rte-url" placeholder="https://…" aria-label="' + t("Link address") + '" />' +
       '<button type="button" class="bp-rte-btn bp-rte-set">' + t("Set") + "</button>" +
+      (linkTypes.length
+        ? '<label class="bp-rte-newtab"><input type="checkbox" class="bp-rte-newtab-box" /> ' + t("Open in new tab") + "</label>"
+        : "") +
       "</span>" +
+      (linkTypes.length
+        ? '<span class="bp-rte-email" hidden>' +
+          '<input type="email" class="bp-rte-field bp-rte-email-input" placeholder="name@example.com" aria-label="' + t("Email address") + '" />' +
+          '<button type="button" class="bp-rte-btn bp-rte-email-set">' + t("Set") + "</button>" +
+          "</span>" +
+          '<span class="bp-rte-file" hidden>' +
+          '<span class="bp-rte-file-name" data-empty="' + t("No file chosen") + '"></span>' +
+          '<button type="button" class="bp-rte-btn bp-rte-file-pick">' + t("Choose file") + "</button>" +
+          "</span>"
+        : "") +
       '<button type="button" class="bp-rte-btn bp-rte-unset">' + t("Remove") + "</button>" +
       "</span>";
     // The custom blocks the field declares (`blocks.of`), as an "Insert block"
@@ -351,6 +373,18 @@ class BpRichTextEditor extends HTMLElement {
     const externalBox = bar.querySelector(".bp-rte-external");
     const internalBox = bar.querySelector(".bp-rte-internal");
     const kindButtons = Array.from(bar.querySelectorAll(".bp-rte-kind"));
+    const paramsBox = bar.querySelector(".bp-rte-params-box");
+    const paramsInput = bar.querySelector(".bp-rte-params");
+    const newTabBox = bar.querySelector(".bp-rte-newtab-box");
+    const emailBox = bar.querySelector(".bp-rte-email");
+    const emailInput = bar.querySelector(".bp-rte-email-input");
+    const fileBox = bar.querySelector(".bp-rte-file");
+    const fileName = bar.querySelector(".bp-rte-file-name");
+    // What the author changed in this opening of the row: an untouched
+    // parameter box or new-tab switch writes nothing, so a stored value stays
+    // as it is (task-025d7af119d6f0b8).
+    let paramsTouched = false;
+    let newTabTouched = false;
 
     // The link row's own controls are not fields of the document. Their input
     // and change events stop here: reaching the editor form, they posted
@@ -367,12 +401,76 @@ class BpRichTextEditor extends HTMLElement {
       this._editAnchor = null;
     };
 
-    // Internal: a document picker over the declared types. External: the
-    // address box.
+    // Internal: a document picker over the declared types and the list
+    // page's parameters. External: the address box and the new-tab switch.
+    // Email: an address box. File: a file from the media library.
     const showKind = (kind) => {
       for (const b of kindButtons) b.setAttribute("aria-pressed", String(b.dataset.kind === kind));
       if (internalBox) internalBox.hidden = kind !== "internal";
-      externalBox.hidden = kind === "internal";
+      if (paramsBox) paramsBox.hidden = kind !== "internal";
+      externalBox.hidden = linkTypes.length ? kind !== "external" : false;
+      if (emailBox) emailBox.hidden = kind !== "email";
+      if (fileBox) fileBox.hidden = kind !== "file";
+    };
+
+    // The kind of link an <a> is: a file link carries data-link-kind="dam".
+    const kindOf = (a) => {
+      const href = a ? a.getAttribute("href") || "" : "";
+      if (!a) return "internal";
+      if (a.getAttribute("data-link-kind") === "dam") return "file";
+      if (href.startsWith("#internal:")) return "internal";
+      if (/^mailto:/i.test(href)) return "email";
+      return "external";
+    };
+
+    // A pasted list page address keeps only its query: "https://site/list?a=1"
+    // and "?a=1" both read "a=1", as Sanity's parameter input does.
+    const cleanParams = (v) => {
+      const raw = String(v || "").trim();
+      const q = raw.indexOf("?");
+      return (q >= 0 ? raw.slice(q + 1) : raw).replace(/^[?&]+/, "");
+    };
+
+    const showFile = (name) => {
+      if (!fileName) return;
+      fileName.textContent = name || fileName.getAttribute("data-empty") || "";
+      fileName.classList.toggle("bp-rte-file-empty", !name);
+    };
+
+    // The attributes beside the address that a link of `kind` carries. A null
+    // value removes the attribute. `anchor` is the link being edited, if any.
+    const extraAttrs = (kind, anchor, opts) => {
+      opts = opts || {};
+      const attrs = { "data-link-kind": null, "data-file-name": null };
+      if (kind !== "internal") attrs["data-link-params"] = null;
+      if (kind === "internal" && paramsInput) {
+        const params = cleanParams(paramsInput.value);
+        if (paramsTouched) {
+          // An emptied box on a link that had parameters clears them.
+          attrs["data-link-params"] = params || (anchor && anchor.hasAttribute("data-link-params") ? "" : null);
+        } else if (opts.retarget) {
+          // The parameters of the old document go with it.
+          attrs["data-link-params"] = null;
+        } else if (!anchor && params) {
+          attrs["data-link-params"] = params;
+        }
+      }
+      if (kind === "external" && newTabBox && (newTabTouched || !anchor)) {
+        attrs["data-new-tab"] = String(newTabBox.checked);
+      }
+      if (kind === "file") {
+        attrs["data-link-kind"] = "dam";
+        attrs["data-file-name"] = opts.fileName || null;
+      }
+      return attrs;
+    };
+
+    const setAttrs = (a, attrs) => {
+      for (const [name, value] of Object.entries(attrs || {})) {
+        if (value === undefined) continue;
+        if (value === null) a.removeAttribute(name);
+        else a.setAttribute(name, value);
+      }
     };
 
     // A fresh picker per opening, holding the link's current target.
@@ -391,7 +489,11 @@ class BpRichTextEditor extends HTMLElement {
         const value = e.detail && e.detail.value;
         if (!value) return;
         const title = picker.querySelector(".ref-selected-title");
-        apply("#internal:" + value, title ? title.textContent : "");
+        const anchor = this._editAnchor;
+        const before = anchor ? anchor.getAttribute("href") || "" : "";
+        const href = "#internal:" + value;
+        const retarget = before.startsWith("#internal:") && before !== href;
+        apply(href, title ? title.textContent : "", extraAttrs("internal", anchor, { retarget }));
       });
       internalBox.appendChild(picker);
       return picker;
@@ -412,15 +514,31 @@ class BpRichTextEditor extends HTMLElement {
       const href = a ? a.getAttribute("href") || "" : "";
       const internalId = href.startsWith("#internal:") ? href.slice("#internal:".length) : "";
       linkRow.hidden = false;
-      if (linkTypes.length && (internalId || !href)) {
-        urlInput.value = "";
-        showKind("internal");
+      paramsTouched = false;
+      newTabTouched = false;
+      if (!linkTypes.length) {
+        urlInput.value = href;
+        urlInput.focus();
+        return;
+      }
+      const kind = kindOf(a);
+      urlInput.value = kind === "external" ? href : "";
+      if (paramsInput) paramsInput.value = (kind === "internal" && a && a.getAttribute("data-link-params")) || "";
+      // A new address link opens in a new tab, Sanity's initial value; a
+      // stored one shows what it holds.
+      if (newTabBox) newTabBox.checked = a && kind === "external" ? a.getAttribute("data-new-tab") === "true" : true;
+      if (emailInput) emailInput.value = kind === "email" ? href.replace(/^mailto:/i, "") : "";
+      showFile(kind === "file" ? a.getAttribute("data-file-name") || href : "");
+      showKind(kind);
+      if (kind === "internal") {
         const picker = mountPicker(internalId);
         const focusTarget = picker && (picker.querySelector(".bp-ref-search-input") || picker.querySelector("button"));
         if (focusTarget) focusTarget.focus();
+      } else if (kind === "email") {
+        emailInput.focus();
+      } else if (kind === "file") {
+        bar.querySelector(".bp-rte-file-pick").focus();
       } else {
-        urlInput.value = href;
-        if (linkTypes.length) showKind("external");
         urlInput.focus();
       }
     });
@@ -432,6 +550,10 @@ class BpRichTextEditor extends HTMLElement {
           const picker = internalBox.querySelector("bp-reference-picker") || mountPicker("");
           const input = picker && picker.querySelector(".bp-ref-search-input");
           if (input) input.focus();
+        } else if (b.dataset.kind === "email") {
+          emailInput.focus();
+        } else if (b.dataset.kind === "file") {
+          bar.querySelector(".bp-rte-file-pick").focus();
         } else {
           urlInput.focus();
         }
@@ -447,22 +569,30 @@ class BpRichTextEditor extends HTMLElement {
 
     // An existing link takes the new target in place, so a caret inside it is
     // enough; a selection becomes a new link.
-    const apply = (href, title) => {
+    // `attrs` are the link row's fields beside the address (extraAttrs).
+    const apply = (href, title, attrs) => {
       const anchor = this._editAnchor;
       if (anchor && this._editor.contains(anchor)) {
         anchor.setAttribute("href", href);
+        setAttrs(anchor, attrs);
         this._paintTitle(anchor, title);
         close();
         this._emit();
         return;
       }
       restore();
+      const before = new Set(this._editor.querySelectorAll("a"));
       exec("createLink", href);
+      const created = Array.from(this._editor.querySelectorAll("a")).filter(
+        (a) => !before.has(a) && a.getAttribute("href") === href
+      );
+      for (const a of created) setAttrs(a, attrs);
       if (title) {
         for (const a of this._editor.querySelectorAll("a")) {
           if (a.getAttribute("href") === href && !a.hasAttribute("title")) this._paintTitle(a, title);
         }
       }
+      if (created.length && attrs) this._emit();
       close();
     };
 
@@ -473,10 +603,100 @@ class BpRichTextEditor extends HTMLElement {
         return;
       }
       // Normalize bare domains so the anchor never becomes relative.
-      apply(/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") ? href : "https://" + href, "");
+      const full = /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith("#") ? href : "https://" + href;
+      if (!linkTypes.length) {
+        apply(full, "");
+        return;
+      }
+      // An address typed as mailto: is an email link.
+      const kind = /^mailto:/i.test(full) ? "email" : "external";
+      apply(full, "", extraAttrs(kind, this._editAnchor));
+    };
+
+    // An email link: the address as mailto:, the shape Sanity stores as
+    // linkType email.
+    const applyEmail = () => {
+      const email = emailInput.value.trim().replace(/^mailto:/i, "");
+      if (email === "") {
+        close();
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        emailInput.setAttribute("aria-invalid", "true");
+        emailInput.focus();
+        return;
+      }
+      emailInput.removeAttribute("aria-invalid");
+      apply("mailto:" + email, "", extraAttrs("email", this._editAnchor));
     };
 
     press(bar.querySelector(".bp-rte-set"), applyUrl);
+
+    if (emailBox) {
+      press(bar.querySelector(".bp-rte-email-set"), applyEmail);
+      emailInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          applyEmail();
+        }
+      });
+      emailInput.addEventListener("input", () => emailInput.removeAttribute("aria-invalid"));
+    }
+
+    // A file link: the media library (bp-asset-browser) over every kind of
+    // upload; a pick links the text to the file's address and names it.
+    if (fileBox) {
+      press(bar.querySelector(".bp-rte-file-pick"), () => {
+        const ensure = window.BpAssetBrowser && window.BpAssetBrowser.ensure;
+        if (!ensure) return;
+        let mediaStrings = null;
+        try { mediaStrings = JSON.parse(this.getAttribute("data-media-strings") || "null"); } catch (_e) { mediaStrings = null; }
+        ensure().open({
+          dataset: this.getAttribute("dataset") || "production",
+          token: this.getAttribute("data-token") || "",
+          scopePrefix: this.getAttribute("scope-prefix") || "",
+          accept: "*/*",
+          strings: mediaStrings,
+          onSelect: (detail) => {
+            const url = detail && detail.url;
+            if (!url) return;
+            const info = (detail.asset && detail.asset.fileInfo) || {};
+            const name = info.originalName || detail.title || "";
+            showFile(name);
+            apply(url, "", extraAttrs("file", this._editAnchor, { fileName: name }));
+          }
+        });
+      });
+    }
+
+    // On a link already in the text, the parameter box and the new-tab switch
+    // take effect as they change; on a new link they ride with its target.
+    if (paramsInput) {
+      const commitParams = () => {
+        paramsInput.value = cleanParams(paramsInput.value);
+        const a = this._editAnchor;
+        if (!paramsTouched || !a || !this._editor.contains(a) || kindOf(a) !== "internal") return;
+        setAttrs(a, { "data-link-params": extraAttrs("internal", a)["data-link-params"] });
+        this._emit();
+      };
+      paramsInput.addEventListener("input", () => { paramsTouched = true; });
+      paramsInput.addEventListener("change", commitParams);
+      paramsInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          commitParams();
+        }
+      });
+    }
+    if (newTabBox) {
+      newTabBox.addEventListener("change", () => {
+        newTabTouched = true;
+        const a = this._editAnchor;
+        if (!a || !this._editor.contains(a) || kindOf(a) !== "external") return;
+        a.setAttribute("data-new-tab", String(newTabBox.checked));
+        this._emit();
+      });
+    }
     urlInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();

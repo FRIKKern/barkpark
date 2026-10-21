@@ -119,6 +119,8 @@ await check("a new link opens on Internal with a document picker over the declar
   assert.deepEqual(kinds.map((b) => [b.dataset.kind, b.getAttribute("aria-pressed")]), [
     ["internal", "true"],
     ["external", "false"],
+    ["email", "false"],
+    ["file", "false"],
   ]);
   const picker = el.querySelector(".bp-rte-internal bp-reference-picker");
   assert.ok(picker, "no picker in the link row");
