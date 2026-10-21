@@ -2,7 +2,7 @@
 // draws a hit's type icon when the hit has no media. Studio stamps a
 // {type => svg} map on the shell (`data-type-icons`); a hit with media keeps
 // its thumbnail, a hit with no media draws its type's icon, and a type with
-// no icon keeps the old row.
+// no icon draws the map's "*" entry, the document icon.
 //
 // Runs the TRACKED static asset api/priv/static/assets/bp-reference-picker.js
 // under jsdom.
@@ -11,7 +11,7 @@
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
-const icons = { widget: '<svg data-desk-icon="basket"></svg>' };
+const icons = { widget: '<svg data-desk-icon="basket"></svg>', "*": '<svg data-desk-icon="document"></svg>' };
 const dom = new JSDOM(
   `<!doctype html><html><body><div data-type-icons='${JSON.stringify(icons)}'></div></body></html>`,
   { url: "http://localhost/" },
@@ -57,8 +57,9 @@ try {
     assert.equal(icon.getAttribute("data-desk-icon"), "basket");
   }
 
-  assert.equal(items[3].querySelector(".bp-ref-hit-media"), null, "a type with no icon keeps its row");
-  assert.equal(items[3].classList.contains("bp-ref-hit"), false);
+  const fallback = items[3].querySelector(".bp-ref-hit-media.bp-ref-hit-icon svg");
+  assert.ok(fallback, "a type with no icon draws the document icon");
+  assert.equal(fallback.getAttribute("data-desk-icon"), "document");
 
   console.log("reference picker hit type icon: all checks passed");
 } finally {

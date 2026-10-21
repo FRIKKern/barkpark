@@ -62,7 +62,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
           # on the desk and the pane headers; the id stays in the link.
           type_title: Map.get(info, :title, d.type),
           # task-835fe5219585ca80: a hit draws its type's icon, as a desk row
-          # with no media does. nil keeps the hit as it was.
+          # with no media does: the document icon when the type has none.
           type_icon: Map.get(info, :icon),
           title: ((is_binary(d.title) and d.title != "") && d.title) || d.doc_id,
           status: d.status || ""
@@ -98,7 +98,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
   end
 
   defp info(schema),
-    do: %{title: title_or_name(schema), icon: BarkparkWeb.Icons.type_icon(Map.get(schema, :icon))}
+    do: %{title: title_or_name(schema), icon: BarkparkWeb.Icons.row_icon(Map.get(schema, :icon))}
 
   defp title_or_name(%{title: title}) when is_binary(title) and title != "", do: title
   defp title_or_name(%{name: name}), do: name

@@ -886,7 +886,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # JSON {type => word} for the client pickers (task-a3bedc86f8a6a517).
   attr :type_labels, :string, default: nil
   # JSON {type => svg} of each type's icon, for the reference picker's hits
-  # (task-835fe5219585ca80). Only types with a drawable icon are listed.
+  # (task-835fe5219585ca80). Types with a drawable icon are listed, and "*"
+  # is the document icon for every other type.
   attr :type_icons, :string, default: nil
   slot :inner_block, required: true
 

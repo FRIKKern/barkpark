@@ -584,8 +584,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       subtitle: pick(row, spec["subtitle"]),
       media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx),
       # task-835fe5219585ca80: the member type's icon (a named object type
-      # carries its schema's), drawn when the row has no media.
-      icon: BarkparkWeb.Icons.type_icon((subfield_attr(item, :raw) || %{})["icon"])
+      # carries its schema's), drawn when the row has no media; the document
+      # icon when the member has none.
+      icon: BarkparkWeb.Icons.row_icon((subfield_attr(item, :raw) || %{})["icon"])
     }
   end
 

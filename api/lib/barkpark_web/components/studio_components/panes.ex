@@ -528,8 +528,9 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   attr :media_slot, :boolean, default: false
 
   # task-835fe5219585ca80: the schema type's icon name
-  # (`BarkparkWeb.Icons.type_icon/1`). A row with no media draws it in the
-  # media box, as Sanity Studio does. nil keeps the row above.
+  # (`BarkparkWeb.Icons.row_icon/1`: its own, else the document icon). A row
+  # with no media draws it in the media box, as Sanity Studio does. nil, from
+  # a caller that passes none, keeps the row above.
   attr :type_icon, :string, default: nil
 
   # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────

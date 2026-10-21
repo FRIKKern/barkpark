@@ -6,7 +6,8 @@ defmodule BarkparkWeb.Studio.TypeIconFallbackTest do
   A row with no media now draws its type's icon on the desk list, in a
   document view's related rows, in the desk search hits, in the reference
   picker's hits (the shell's `data-type-icons` map) and on an array item. A
-  type with no icon keeps the row it had.
+  type with no icon draws the document icon, as Barkpark Studio's `TypeIcon`
+  does.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -59,7 +60,7 @@ defmodule BarkparkWeb.Studio.TypeIconFallbackTest do
         "name" => "panel",
         "title" => "Panel",
         "kind" => "object",
-        "icon" => "document",
+        "icon" => "images",
         "fields" => [title]
       },
       %{
@@ -130,9 +131,12 @@ defmodule BarkparkWeb.Studio.TypeIconFallbackTest do
       assert widget =~ "<svg"
     end
 
-    test "a type with no icon keeps its row", %{conn: conn, ws: ws, proj: proj} do
+    test "a type with no icon draws the document icon", %{conn: conn, ws: ws, proj: proj} do
       {_view, html} = studio(conn, ws, proj, "/gadget")
-      refute row(html, "gad-1") =~ "pane-doc-media"
+      gadget = row(html, "gad-1")
+
+      assert gadget =~ ~s(data-type-icon="document")
+      assert gadget =~ ~s(data-desk-icon="document")
     end
 
     test "an image wins over the icon, and the icon fills the empty slot", %{
@@ -159,7 +163,7 @@ defmodule BarkparkWeb.Studio.TypeIconFallbackTest do
 
     {:ok, gadget} = Content.resolve_schema("gadget", @dataset, scope)
     gadgets = Content.list_documents("gadget", @dataset, [perspective: :drafts] ++ scope)
-    assert [%{type_icon: nil}] = PaneBuilder.view_rows(gadgets, gadget, @dataset, scope)
+    assert [%{type_icon: "document"}] = PaneBuilder.view_rows(gadgets, gadget, @dataset, scope)
   end
 
   test "desk search hits draw their type's icon", %{conn: conn, ws: ws, proj: proj} do
@@ -180,7 +184,7 @@ defmodule BarkparkWeb.Studio.TypeIconFallbackTest do
     gadget = Enum.find(hits, &(&1 =~ "Gadget one"))
 
     assert widget =~ ~s(data-type-icon="basket")
-    refute gadget =~ "data-type-icon"
+    assert gadget =~ ~s(data-type-icon="document")
   end
 
   test "the shell gives the reference picker each type's icon", %{conn: conn, ws: ws, proj: proj} do
@@ -196,28 +200,29 @@ defmodule BarkparkWeb.Studio.TypeIconFallbackTest do
     assert icons["widget"] =~ "<svg"
     assert icons["poster"] =~ "<svg"
     refute Map.has_key?(icons, "gadget")
+    assert icons["*"] =~ ~s(data-desk-icon="document")
   end
 
   describe "array items" do
     test "a named object type's icon rides into the inlined member", %{scope: scope} do
       {:ok, board} = Content.resolve_schema("board", @dataset, scope)
       panels = Enum.find(board.fields, &(&1["name"] == "panels"))
-      assert [%{"namedType" => "panel", "icon" => "document"}] = panels["of"]
+      assert [%{"namedType" => "panel", "icon" => "images"}] = panels["of"]
     end
 
-    test "an item with no media draws its member type's icon" do
+    test "an item with no media draws its member type's icon, else the document icon" do
       item = %{
         type: "composite",
         name: "panel",
         title: "Panel",
         fields: [],
-        raw: %{"icon" => "document"}
+        raw: %{"icon" => "images"}
       }
 
-      assert %{icon: "document", media: nil} = ArrayField.item_preview(item, %{"title" => "A"})
+      assert %{icon: "images", media: nil} = ArrayField.item_preview(item, %{"title" => "A"})
 
       bare = %{type: "composite", name: "panel", title: "Panel", fields: [], raw: %{}}
-      assert %{icon: nil} = ArrayField.item_preview(bare, %{"title" => "A"})
+      assert %{icon: "document"} = ArrayField.item_preview(bare, %{"title" => "A"})
     end
   end
 

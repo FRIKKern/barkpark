@@ -874,16 +874,17 @@ defmodule BarkparkWeb.Studio.StudioLive do
         |> then(&Map.merge(plugin_words, &1))
 
       # Each type's icon as SVG, for the reference picker's hits
-      # (task-835fe5219585ca80). A type without a drawable icon is left out.
+      # (task-835fe5219585ca80). A type without a drawable icon is left out
+      # and draws the "*" entry, the document icon.
       icons =
         for schema <- schemas,
             svg = BarkparkWeb.Icons.type_icon_svg(schema.icon),
-            into: %{},
+            into: %{"*" => BarkparkWeb.Icons.type_icon_svg("document")},
             do: {schema.name, svg}
 
       assign(socket,
         type_labels: Jason.encode!(labels),
-        type_icons: if(icons == %{}, do: nil, else: Jason.encode!(icons)),
+        type_icons: Jason.encode!(icons),
         type_labels_key: key
       )
     end

@@ -437,6 +437,14 @@ defmodule BarkparkWeb.Icons do
   end
 
   @doc """
+  What a preview row with no media draws (task-835fe5219585ca80): the type's
+  own icon (`type_icon/1`), else Sanity's document icon, as Barkpark Studio's
+  `TypeIcon` does.
+  """
+  @spec row_icon(term()) :: String.t()
+  def row_icon(name), do: type_icon(name) || "document"
+
+  @doc """
   `desk_icon/1` for a schema type's icon as an SVG string, for the client
   pickers (`data-type-icons` on the Studio shell). nil when `type_icon/1` is.
   """

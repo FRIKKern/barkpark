@@ -185,8 +185,8 @@ class BpReferencePicker extends HTMLElement {
 
   // A type's icon as SVG markup: Studio stamps a {type => svg} map on the
   // shell (task-835fe5219585ca80), built server side from the schema's icon
-  // name and the Studio's own icon tables. Elsewhere, or for a type without
-  // an icon, null.
+  // name and the Studio's own icon tables. A type without an icon draws the
+  // map's "*" entry, the document icon. Outside Studio there is no map: null.
   _typeIconSvg(type) {
     if (!this._typeIconMap) {
       let map = {};
@@ -198,7 +198,8 @@ class BpReferencePicker extends HTMLElement {
       }
       this._typeIconMap = map;
     }
-    const svg = this._typeIconMap[type];
+    const own = this._typeIconMap[type];
+    const svg = typeof own === "string" && own ? own : this._typeIconMap["*"];
     return typeof svg === "string" && svg ? svg : null;
   }
 
@@ -753,7 +754,7 @@ class BpReferencePicker extends HTMLElement {
   // thumbnail, the title, then the subtitle and description lines. Returns
   // false when the hit carries none, so the row stays the bare title.
   // A hit with no media draws its type's icon in the media box, as Sanity
-  // does (task-835fe5219585ca80); a type without one keeps the old row.
+  // does (task-835fe5219585ca80): the document icon when the type has none.
   _renderHitPreview(btn, doc) {
     const p = doc.preview || {};
     const icon = p.media ? null : this._typeIconSvg(doc.type || this._refType);
