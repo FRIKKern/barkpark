@@ -36,10 +36,18 @@ defmodule BarkparkWeb.Endpoint do
   # `max_frame_size` is the websock_adapter default (10 MB), stated here on
   # purpose (owner ruling #39): it is the LiveView door's half of the
   # per-document size cap, and leaving it implicit hid the limit from review.
+  #
+  # `compress: true` accepts the browser's `permessage-deflate` offer, so the
+  # LiveView frames travel deflated. A Studio document join reply on the
+  # gyldendal-no copy is 120 to 200 KB of JSON and deflates to about a tenth
+  # (task-cca3c6d48e57097e). A browser that offers no extension gets plain
+  # frames, as before. Each compressed socket keeps one deflate and one inflate
+  # context for its lifetime.
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [
       connect_info: [:peer_data, :x_headers, session: @session_options],
-      max_frame_size: 10_000_000
+      max_frame_size: 10_000_000,
+      compress: true
     ],
     longpoll: [connect_info: [:peer_data, :x_headers, session: @session_options]]
 
