@@ -152,4 +152,59 @@ defmodule Barkpark.Content.VisibleWhenScopeTest do
       assert {:ok, _} = SchemaDefinition.parse(schema([composite, members]))
     end
   end
+
+  # task-a20f897d2dbaf824: `all` / `any` combine predicates, as cross_validations do.
+  describe "all and any" do
+    @info %{"field" => "pageType", "operator" => "eq", "value" => "info"}
+    @not_product %{"field" => "imageSource", "operator" => "neq", "value" => "product"}
+
+    test "all needs every predicate, any needs one" do
+      all = %{"name" => "image", "visibleWhen" => %{"all" => [@info, @not_product]}}
+      any = %{"name" => "image", "visibleWhen" => %{"any" => [@info, @not_product]}}
+
+      assert FieldVisibility.visible?(all, %{"pageType" => "info", "imageSource" => "upload"})
+      refute FieldVisibility.visible?(all, %{"pageType" => "info", "imageSource" => "product"})
+      refute FieldVisibility.visible?(all, %{"pageType" => "news", "imageSource" => "upload"})
+
+      assert FieldVisibility.visible?(any, %{"pageType" => "news", "imageSource" => "upload"})
+      refute FieldVisibility.visible?(any, %{"pageType" => "news", "imageSource" => "product"})
+    end
+
+    test "groups nest, and each leaf keeps its own scope" do
+      pred = %{
+        "any" => [
+          %{"all" => [@info, @url_when_kind_url]},
+          %{"field" => "pinned", "operator" => "eq", "value" => true}
+        ]
+      }
+
+      field = %{"name" => "url", "visibleWhen" => pred}
+      doc = %{"pageType" => "info", "kind" => "doc"}
+
+      assert FieldVisibility.visible?(field, doc, %{"kind" => "url"})
+      refute FieldVisibility.visible?(field, doc, %{"kind" => "doc"})
+      assert FieldVisibility.visible?(field, Map.put(doc, "pinned", true), %{"kind" => "doc"})
+    end
+
+    test "an empty group leaves the field visible" do
+      assert FieldVisibility.visible?(%{"visibleWhen" => %{"all" => []}}, %{})
+      assert FieldVisibility.visible?(%{"visibleWhen" => %{"any" => []}}, %{})
+    end
+
+    test "the schema validator checks scope leaf by leaf" do
+      top = fn vw -> schema([%{"name" => "url", "type" => "string", "visibleWhen" => vw}]) end
+
+      assert errors(top.(%{"any" => [@info, @not_product]})) == []
+      assert [msg] = errors(top.(%{"any" => [@info, @url_when_kind_url]}))
+      assert msg =~ ~s("url": visibleWhen "scope": "parent" needs)
+
+      assert {:error, {:visible_when_parent_at_top_level, "url"}} =
+               SchemaDefinition.parse(top.(%{"all" => [@info, @url_when_kind_url]}))
+
+      bad = Map.put(@url_when_kind_url, "scope", "grandparent")
+      assert [msg] = errors(schema([links(%{"all" => [@info, bad]})]))
+      assert msg =~ ~s(must be "document" or "parent", got "grandparent")
+      assert errors(schema([links(%{"any" => [@info, @url_when_kind_url]})])) == []
+    end
+  end
 end
