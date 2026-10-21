@@ -154,7 +154,7 @@ assert.match(surface, /\.bp-paper-surface \.bp-blockquote__cite::before\s*\{ con
   "canonical reader prefix and flow remain unchanged");
 
 const studioLayout = readFileSync(new URL("../../../lib/barkpark_web/layouts/root.html.heex", import.meta.url), "utf8");
-assert.match(studioLayout, /href="\/assets\/bp-media-picker\.css"/,
+assert.match(studioLayout, /href=\{BarkparkWeb\.StaticAssets\.path\("bp-media-picker\.css"\)\}/,
   "Studio loads the same media styles as the Public editor");
 assert.doesNotMatch(studioLayout, /\.bp-ab-overlay\s*\{/,
   "media styling has one shared owner rather than a duplicate Studio inline copy");
