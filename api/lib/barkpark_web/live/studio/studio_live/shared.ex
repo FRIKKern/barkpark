@@ -581,6 +581,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # and a nested image as its JSON string (Gyldendal friction 65/66). The
     # save path coerces its own copy; the buffer must see the same shape or
     # the next render walks a map where it expects a list.
+    raw_params = params
     params = Barkpark.Content.Forms.coerce_params(params, schema)
 
     # Denormalised image metadata (Gyldendal parity E1.7): a freshly picked
@@ -618,11 +619,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     )
 
     if doc && type && changed? do
+      # The save converts posted rich text against the stored blocks, so it
+      # gets the editor's HTML back (task-eba86f7ba252cb20).
       case Content.upsert_draft(
              doc,
              type,
              schema,
-             params,
+             Barkpark.Content.Forms.with_posted_rich_text(params, raw_params, schema),
              socket.assigns.dataset,
              hook_opts(socket)
            ) do

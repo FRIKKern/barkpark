@@ -369,7 +369,7 @@ defmodule Barkpark.Content.Forms do
         PortableText.from_html(posted, stored)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
-        restore_composite(field, coerced, stored)
+        restore_composite(field, coerced, stored, posted)
 
       # Rows that carry Sanity's `_key` are matched to the stored row with the
       # same key, so an untouched row keeps its stored bytes after a reorder,
@@ -378,22 +378,35 @@ defmodule Barkpark.Content.Forms do
           keyed_rows?(coerced, stored) ->
         by_key = for %{"_key" => k} = row <- stored, into: %{}, do: {k, row}
 
-        Enum.map(coerced, fn
-          %{"_key" => k} = p when is_map_key(by_key, k) ->
-            restore_untouched(array_row_field(field, p), p, Map.fetch!(by_key, k))
+        coerced
+        |> Enum.zip(posted_rows(posted, coerced))
+        |> Enum.map(fn
+          {%{"_key" => k} = p, raw} when is_map_key(by_key, k) ->
+            restore_untouched(array_row_field(field, p), raw, Map.fetch!(by_key, k))
 
-          p ->
+          {p, _raw} ->
             p
         end)
 
       field["type"] == "arrayOf" and is_list(coerced) and is_list(stored) and
           length(coerced) == length(stored) ->
         coerced
+        |> Enum.zip(posted_rows(posted, coerced))
         |> Enum.zip(stored)
-        |> Enum.map(fn {p, s} -> restore_untouched(array_row_field(field, p), p, s) end)
+        |> Enum.map(fn {{p, raw}, s} -> restore_untouched(array_row_field(field, p), raw, s) end)
 
       true ->
         coerced
+    end
+  end
+
+  # The rows as posted, beside the coerced ones, so a row is restored from what
+  # the form sent (a richText subfield's HTML, see `posted_rich_text/3`). When
+  # the post does not line up row for row, the coerced rows stand in.
+  defp posted_rows(posted, coerced) do
+    case indexed_map_to_list(posted) do
+      rows when is_list(rows) and length(rows) == length(coerced) -> rows
+      _ -> coerced
     end
   end
 
@@ -427,7 +440,7 @@ defmodule Barkpark.Content.Forms do
   defp reference_descriptor?(%{"type" => "reference"}), do: true
   defp reference_descriptor?(_), do: false
 
-  defp restore_composite(field, coerced, stored) do
+  defp restore_composite(field, coerced, stored, posted) do
     subs =
       case Map.get(field, "fields") do
         list when is_list(list) -> list
@@ -440,7 +453,7 @@ defmodule Barkpark.Content.Forms do
 
         case is_binary(name) && {Map.fetch(acc, name), Map.fetch(stored, name)} do
           {{:ok, p}, {:ok, s}} when not is_nil(s) ->
-            Map.put(acc, name, restore_untouched(sub, p, s))
+            Map.put(acc, name, restore_untouched(sub, posted_rich_text(sub, posted, p), s))
 
           # The top-level rule one level down: a subfield ABSENT from storage
           # whose post is only what its input shows for absence (an untouched
@@ -464,6 +477,19 @@ defmodule Barkpark.Content.Forms do
     # undeclared key) is absent from the post — keep it.
     Map.merge(Map.drop(stored, Map.keys(restored)), restored)
   end
+
+  # A richText subfield is restored from the HTML the editor posted, not from
+  # the blocks the composite coercion already made of it: only the HTML can be
+  # matched against the stored blocks, so an edit keeps their `_key`s
+  # (task-eba86f7ba252cb20).
+  defp posted_rich_text(%{"type" => "richText", "name" => name}, %{} = posted, coerced_sub) do
+    case Map.get(posted, name) do
+      html when is_binary(html) -> html
+      _ -> coerced_sub
+    end
+  end
+
+  defp posted_rich_text(_sub, _posted, coerced_sub), do: coerced_sub
 
   # What the Classic input showed for a stored value — the value the browser
   # posts back when the author does not touch it.
@@ -944,6 +970,55 @@ defmodule Barkpark.Content.Forms do
   end
 
   def coerce_params(params, _schema), do: params
+
+  @doc """
+  `coerced` (from `coerce_params/2`) with every richText value put back to the
+  HTML the editor posted in `raw`, at the top level and inside objects and
+  list rows (task-eba86f7ba252cb20).
+
+  `coerce_params/2` turns that HTML into Portable Text without the stored
+  blocks, so the blocks get new keys and a custom block or inline object the
+  HTML only names by `_key` is lost. The save converts the HTML against the
+  stored value instead (`restore_untouched/3`), which keeps every block the
+  edit did not change and the `_key` of the one it did.
+  """
+  @spec with_posted_rich_text(map(), map(), map() | nil) :: map()
+  def with_posted_rich_text(coerced, raw, %{fields: fields})
+      when is_map(coerced) and is_map(raw) and is_list(fields) do
+    posted_html(%{"type" => "composite", "fields" => fields}, coerced, raw)
+  end
+
+  def with_posted_rich_text(coerced, _raw, _schema), do: coerced
+
+  defp posted_html(%{"type" => "richText"}, _coerced, raw) when is_binary(raw), do: raw
+
+  defp posted_html(%{"type" => "composite", "fields" => subs}, %{} = coerced, %{} = raw)
+       when is_list(subs) do
+    Enum.reduce(subs, coerced, fn
+      %{"name" => name} = sub, acc when is_binary(name) ->
+        case {Map.fetch(acc, name), Map.fetch(raw, name)} do
+          {{:ok, c}, {:ok, r}} -> Map.put(acc, name, posted_html(sub, c, r))
+          _ -> acc
+        end
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp posted_html(%{"type" => "arrayOf"} = field, coerced, raw) when is_list(coerced) do
+    case indexed_map_to_list(raw) do
+      rows when is_list(rows) and length(rows) == length(coerced) ->
+        coerced
+        |> Enum.zip(rows)
+        |> Enum.map(fn {c, r} -> posted_html(array_row_field(field, c), c, r) end)
+
+      _ ->
+        coerced
+    end
+  end
+
+  defp posted_html(_field, coerced, _raw), do: coerced
 
   # ── Exp-P3.2 — Classic-save content (the data-loss guard) ─────────────────
   #
