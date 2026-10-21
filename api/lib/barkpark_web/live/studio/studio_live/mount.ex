@@ -252,6 +252,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       nav_view: nil,
       editor_views: nil,
       nav_view_docs: [],
+      nav_view_more: false,
+      nav_view_limit: 0,
       # ── Content preview side-pane (Goal barkpark-G1, task s3) ─────────
       # Doc-type-agnostic. Pane is rendered iff a plugin's
       # `content_renderer/3` callback contributes iodata via

@@ -129,6 +129,15 @@ defmodule BarkparkWeb.Studio.DocumentViewsTest do
     {:ok, conn: conn, ws: ws, proj: proj, series: series, empty: empty}
   end
 
+  # The titles of the view's rows, not of the desk list pane beside it.
+  defp row_titles(html) do
+    [_, list] = String.split(html, ~s(data-test-id="document-view-list"), parts: 2)
+
+    ~r/class="pane-doc-dot[^"]*"><\/span>\s*([^<]+?)\s*</
+    |> Regex.scan(list)
+    |> Enum.map(fn [_, t] -> t end)
+  end
+
   defp open!(conn, ws, proj, type, doc_id) do
     {:ok, view, html} =
       live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/#{type}/#{doc_id}")
@@ -165,8 +174,7 @@ defmodule BarkparkWeb.Studio.DocumentViewsTest do
     assert html =~ ~r{<button[^>]*tabindex="0"[^>]*data-test-id="document-view-tab"}
     assert html =~ ~r{<button[^>]*tabindex="-1"[^>]*data-test-id="document-view-form"}
 
-    titles =
-      Regex.scan(~r/class="pane-doc-title">([^<]+)</, html) |> Enum.map(fn [_, t] -> t end)
+    titles = row_titles(html)
 
     # asc by title, and the draft-only book rides along (drafts perspective).
     assert titles == ["Askeregn", "Blodspor", "Cirkel"]
@@ -174,8 +182,8 @@ defmodule BarkparkWeb.Studio.DocumentViewsTest do
     prefix = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
     assert html =~ ~s(href="#{prefix}/publication/pub-a")
     assert html =~ ~s(href="#{prefix}/publication/pub-c")
-    # The draft-only row says so.
-    assert html =~ "status-draft"
+    # The draft-only row says so, with the desk row's own draft dot.
+    assert html =~ ~r{id="view-doc-pub-c".*?pane-doc-dot draft}s
   end
 
   test "clicking the Fields tab brings the form back", %{
@@ -210,7 +218,7 @@ defmodule BarkparkWeb.Studio.DocumentViewsTest do
       |> render_click()
 
     assert html =~ ~s(data-test-id="document-view-empty")
-    refute html =~ ~s(data-test-id="document-view-row")
+    refute html =~ ~s(id="view-doc-)
   end
 
   test "a schema that declares no views renders no tab row at all", %{

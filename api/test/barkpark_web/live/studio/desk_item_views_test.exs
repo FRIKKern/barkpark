@@ -90,12 +90,19 @@ defmodule BarkparkWeb.Studio.DeskItemViewsTest do
     code = doc!(scope, "code", "code-1", "Code one", %{})
     doc!(scope, "code", "code-2", "Code two", %{})
 
-    for {id, title, ref} <- [
-          {"prod-b", "Bravo", "code-1"},
-          {"prod-a", "Alpha", "code-1"},
-          {"prod-c", "Charlie", "code-2"}
+    # `codes` is an array of references: Alpha holds code-1 among others.
+    for {id, title, ref, codes} <- [
+          {"prod-b", "Bravo", "code-1", []},
+          {"prod-a", "Alpha", "code-1", ["code-2", "code-1"]},
+          {"prod-c", "Charlie", "code-2", ["code-2"]}
         ] do
-      doc!(scope, "product", id, title, %{"code" => %{"_type" => "reference", "_ref" => ref}})
+      doc!(scope, "product", id, title, %{
+        "code" => %{"_type" => "reference", "_ref" => ref},
+        "codes" =>
+          codes
+          |> Enum.with_index()
+          |> Enum.map(fn {c, i} -> %{"_type" => "reference", "_ref" => c, "_key" => "k#{i}"} end)
+      })
     end
 
     items = [
@@ -115,6 +122,20 @@ defmodule BarkparkWeb.Studio.DeskItemViewsTest do
         ]
       },
       %{"kind" => "documentTypeList", "id" => "all-codes", "type" => "code", "title" => "All"},
+      %{
+        "kind" => "documentTypeList",
+        "id" => "array-codes",
+        "type" => "code",
+        "title" => "In product code lists",
+        "views" => [
+          %{
+            "id" => "products",
+            "title" => "Products",
+            "type" => "product",
+            "by" => "content.codes[]._ref"
+          }
+        ]
+      },
       %{
         "kind" => "documentTypeList",
         "id" => "bad-views",
@@ -176,6 +197,24 @@ defmodule BarkparkWeb.Studio.DeskItemViewsTest do
   } do
     {_view, html} = open!(conn, ws, proj, "all-codes/#{code.doc_id}")
     assert tab_ids(html) == ["schema-view"]
+  end
+
+  test "a list's view by an array of references lists the documents whose array holds it", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    code: code
+  } do
+    {view, _html} = open!(conn, ws, proj, "array-codes/#{code.doc_id}")
+
+    html =
+      view
+      |> element(~s([data-test-id="document-view-tab"][data-view-id="products"]))
+      |> render_click()
+
+    [_, list] = String.split(html, ~s(data-test-id="document-view-list"), parts: 2)
+    ids = ~r/id="view-doc-([^"]+)"/ |> Regex.scan(list) |> Enum.map(fn [_, id] -> id end)
+    assert ids == ["prod-a"]
   end
 
   test "a malformed view entry is left out and named on the desk item", %{scope: scope} do

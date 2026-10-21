@@ -597,6 +597,10 @@ defmodule Barkpark.Content.SchemaDefinition do
   # the open document, in the same grammar a desk filter uses. Every key but
   # `icon` and `orderings` is required: a view missing one would render a tab
   # that lists nothing, which reads to an editor as "there are none".
+  #
+  # A path that ends in `[]` or `[]._ref` names an ARRAY of references
+  # (`content.parentCategories[]._ref`), and the view matches an element of
+  # it. `[]` anywhere else is refused, because no read answers it.
   defp validate_desk_views(changeset) do
     case get_change(changeset, :desk) do
       %{} = desk ->
@@ -614,7 +618,9 @@ defmodule Barkpark.Content.SchemaDefinition do
                   changeset,
                   :desk,
                   "views entries need non-empty \"id\", \"title\", \"type\" and \"by\" " <>
-                    "(plus optional \"icon\" and valid \"orderings\"), got #{inspect(bad)}"
+                    "(plus optional \"icon\" and valid \"orderings\"); \"by\" may end in " <>
+                    "\"[]\" or \"[]._ref\" for an array of references and holds no other " <>
+                    "\"[]\", got #{inspect(bad)}"
                 )
             end
 
@@ -649,10 +655,24 @@ defmodule Barkpark.Content.SchemaDefinition do
         _ -> false
       end
 
-    required and orderings
+    required and orderings and valid_view_by?(Map.get(v, "by") || Map.get(v, :by))
   end
 
   defp valid_view?(_), do: false
+
+  # `[]` only as the array marker at the end: `a.b[]` or `a.b[]._ref`.
+  defp valid_view_by?(by) when is_binary(by) do
+    base =
+      cond do
+        String.ends_with?(by, "[]._ref") -> binary_part(by, 0, byte_size(by) - 7)
+        String.ends_with?(by, "[]") -> binary_part(by, 0, byte_size(by) - 2)
+        true -> by
+      end
+
+    base != "" and not String.contains?(base, ["[", "]"])
+  end
+
+  defp valid_view_by?(_), do: false
 
   defp valid_ordering?(%{} = o) do
     field = Map.get(o, "field") || Map.get(o, :field)

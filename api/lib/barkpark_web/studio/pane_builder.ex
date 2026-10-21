@@ -988,6 +988,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # as before (post/page back-compat lock). Generic by construction: PaneBuilder
   # never branches on the document type; the declaration/manifest is the switch.
 
+  @doc """
+  The desk list's rows for documents read elsewhere: a document view's related
+  list (`desk.views`) renders its rows with the same title, preview lines and
+  media as a desk list pane. `scope` is the read's tenancy keyword list.
+  """
+  def view_rows(docs, schema, dataset, scope) when is_list(scope),
+    do: doc_items(docs, schema, dataset, scope: scope)
+
   defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
     media_spec = Map.get(preview, "media")
