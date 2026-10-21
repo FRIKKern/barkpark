@@ -15,6 +15,8 @@ A path is dotted (`onix.formats.0.code`; a number picks a list item) and follows
 
 A search with `preview=1` returns the same text on each hit as `_preview` ([search-query.md](search-query.md)).
 
+A part's path can end in `|count`, the number of items in the list there, or `0` when the path holds nothing: `"{questions|count} questions"`.
+
 ## Code anchors
 
 - `api/lib/barkpark/content/preview_text.ex`

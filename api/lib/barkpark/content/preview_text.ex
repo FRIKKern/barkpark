@@ -20,7 +20,8 @@ defmodule Barkpark.Content.PreviewText do
 
     * a path, optionally ending in modifiers: `|date` shows a date or
       date-time as `dd.mm.yyyy`, the day it is in UTC; `|lower` and `|upper`
-      change the case;
+      change the case; `|count` shows the number of items in a list, and `0`
+      when the path holds nothing (`"{questions|count} questions"`);
     * a template, text with `{path}` slots (`"{name} ({role.title|lower})"`),
       shown only when every slot has a value;
     * a list of parts, the first that has a value;
@@ -227,9 +228,11 @@ defmodule Barkpark.Content.PreviewText do
     {value, _} = path |> segments() |> walk(root, deref, hops)
 
     text =
-      if "date" in mods,
-        do: day(value),
-        else: scalar(value)
+      cond do
+        "count" in mods -> count(value)
+        "date" in mods -> day(value)
+        true -> scalar(value)
+      end
 
     text
     |> blank_to_nil()
@@ -389,6 +392,11 @@ defmodule Barkpark.Content.PreviewText do
   end
 
   defp day(_), do: nil
+
+  # The number of items in a list; a missing list has none.
+  defp count(list) when is_list(list), do: list |> length() |> to_string()
+  defp count(nil), do: "0"
+  defp count(_), do: nil
 
   defp dmy(%Date{} = d), do: Calendar.strftime(d, "%d.%m.%Y")
 
