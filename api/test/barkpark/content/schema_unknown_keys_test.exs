@@ -121,6 +121,37 @@ defmodule Barkpark.Content.SchemaUnknownKeysTest do
     assert SchemaUnknownKeys.unknown(attrs) == []
   end
 
+  # task-c85d90756c6b6e97: an inlined named object type carries namedType,
+  # on a field and on an array member.
+  test "namedType on an inlined field and on an array member is a key Barkpark reads" do
+    attrs = %{
+      "name" => "page",
+      "title" => "Page",
+      "fields" => [
+        %{
+          "name" => "seo",
+          "type" => "composite",
+          "namedType" => "seoBlock",
+          "fields" => [%{"name" => "t", "type" => "string"}]
+        },
+        %{
+          "name" => "sections",
+          "type" => "array",
+          "of" => [
+            %{
+              "name" => "seoBlock",
+              "type" => "composite",
+              "namedType" => "seoBlock",
+              "fields" => [%{"name" => "t", "type" => "string"}]
+            }
+          ]
+        }
+      ]
+    }
+
+    assert SchemaUnknownKeys.unknown(attrs) == []
+  end
+
   test "a camelCase echo key names the snake_case key the changeset stores" do
     [a] = SchemaUnknownKeys.unknown(%{"name" => "p", "title" => "P", "deskGroups" => []})
     assert a.path == "/deskGroups"

@@ -34,7 +34,12 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
     "ownerScoped" => "owner_scoped"
   }
 
+  # `namedType` is stamped by Schema.inline_field/3 when a field of a named
+  # object type is inlined, served by GET /v1/schemas, and read by Forms and
+  # the Studio field handlers, so a pulled schema posted back stays quiet
+  # (task-c85d90756c6b6e97).
   @field_keys ~w(name type title description validation visibleWhen hidden readOnly group surface
+                 namedType
                  encrypted private visibility readable_by options onix fields of
                  rows layout source refType to refTypes refTypeTolerant hotspot alt valueShape
                  editor blocks ordered codelistId version issue_version languages format
