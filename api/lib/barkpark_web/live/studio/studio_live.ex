@@ -864,15 +864,28 @@ defmodule BarkparkWeb.Studio.StudioLive do
             into: %{},
             do: {type, PaneBuilder.type_word(type)}
 
+      schemas = Content.list_schemas(dataset, BarkparkWeb.ScopeHelpers.scope_opts(socket))
+
       labels =
-        dataset
-        |> Content.list_schemas(BarkparkWeb.ScopeHelpers.scope_opts(socket))
+        schemas
         |> Map.new(fn schema ->
           {schema.name, PaneBuilder.type_word(schema.name, schema.title)}
         end)
         |> then(&Map.merge(plugin_words, &1))
 
-      assign(socket, type_labels: Jason.encode!(labels), type_labels_key: key)
+      # Each type's icon as SVG, for the reference picker's hits
+      # (task-835fe5219585ca80). A type without a drawable icon is left out.
+      icons =
+        for schema <- schemas,
+            svg = BarkparkWeb.Icons.type_icon_svg(schema.icon),
+            into: %{},
+            do: {schema.name, svg}
+
+      assign(socket,
+        type_labels: Jason.encode!(labels),
+        type_icons: if(icons == %{}, do: nil, else: Jason.encode!(icons)),
+        type_labels_key: key
+      )
     end
   rescue
     _ -> socket

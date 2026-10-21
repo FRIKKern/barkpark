@@ -885,11 +885,14 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :class, :string, default: "studio-shell"
   # JSON {type => word} for the client pickers (task-a3bedc86f8a6a517).
   attr :type_labels, :string, default: nil
+  # JSON {type => svg} of each type's icon, for the reference picker's hits
+  # (task-835fe5219585ca80). Only types with a drawable icon are listed.
+  attr :type_icons, :string, default: nil
   slot :inner_block, required: true
 
   def studio_shell(assigns) do
     ~H"""
-    <div class={@class} data-type-labels={@type_labels}>
+    <div class={@class} data-type-labels={@type_labels} data-type-icons={@type_icons}>
       <%= render_slot(@inner_block) %>
     </div>
     """

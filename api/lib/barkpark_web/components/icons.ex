@@ -425,6 +425,31 @@ defmodule BarkparkWeb.Icons do
     """
   end
 
+  @doc """
+  A schema type's icon for a preview row with no media (task-835fe5219585ca80):
+  `name` when `desk_icon/1` can draw it, else nil. Sanity Studio draws the
+  type's icon in that slot; a type without one, or with a name neither set
+  carries, keeps the row as it was.
+  """
+  @spec type_icon(term()) :: String.t() | nil
+  def type_icon(name) do
+    if known_icon?(name) or Barkpark.DeskIcons.known?(name), do: name
+  end
+
+  @doc """
+  `desk_icon/1` for a schema type's icon as an SVG string, for the client
+  pickers (`data-type-icons` on the Studio shell). nil when `type_icon/1` is.
+  """
+  @spec type_icon_svg(term(), pos_integer()) :: String.t() | nil
+  def type_icon_svg(name, size \\ 16) do
+    if type_icon(name) do
+      %{name: name, size: size, fallback: "file", __changed__: nil}
+      |> desk_icon()
+      |> Phoenix.HTML.Safe.to_iodata()
+      |> IO.iodata_to_binary()
+    end
+  end
+
   attr :name, :string, required: true
   attr :size, :integer, default: 16
 

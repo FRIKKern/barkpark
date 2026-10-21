@@ -996,6 +996,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   def view_rows(docs, schema, dataset, scope) when is_list(scope),
     do: doc_items(docs, schema, dataset, scope: scope)
 
+  defp schema_icon(%{icon: icon}), do: icon
+  defp schema_icon(_), do: nil
+
   defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
     media_spec = Map.get(preview, "media")
@@ -1008,6 +1011,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       preview_targets(docs, [subtitle, description, media_spec, title_spec], dataset, opts)
 
     deref = fn id -> Map.get(targets, id) end
+    type_icon = BarkparkWeb.Icons.type_icon(schema_icon(schema))
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -1023,6 +1027,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # product cover is `onix.thumbnail`.
         media: if(media_declared?, do: PreviewText.media(media_spec, preview_root(doc), deref)),
         media_slot: media_declared?,
+        # task-835fe5219585ca80: Sanity draws the schema type's icon in a
+        # preview row with no media. nil when the type has none, and the row
+        # keeps its old look.
+        type_icon: type_icon,
         title: row_title(doc, schema, deref),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,

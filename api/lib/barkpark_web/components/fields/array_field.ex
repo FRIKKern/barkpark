@@ -540,7 +540,13 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         <span :if={@preview.media} class="bp-array-item-media" aria-hidden="true">
           <img src={@preview.media} alt="" loading="lazy" />
         </span>
-        <span :if={!@preview.media} class="bp-array-item-media bp-array-item-media-empty" aria-hidden="true"></span>
+        <span
+          :if={!@preview.media and @preview[:icon] != nil}
+          class="bp-array-item-media bp-array-item-media-icon"
+          aria-hidden="true"
+          data-type-icon={@preview[:icon]}
+        ><BarkparkWeb.Icons.desk_icon name={@preview[:icon]} size={16} /></span>
+        <span :if={!@preview.media and @preview[:icon] == nil} class="bp-array-item-media bp-array-item-media-empty" aria-hidden="true"></span>
         <span class="bp-array-item-text">
           <span class="bp-array-item-title"><%= @preview.title %></span>
           <span :if={@preview.subtitle} class="bp-array-item-subtitle"><%= @preview.subtitle %></span>
@@ -576,7 +582,10 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     %{
       title: title,
       subtitle: pick(row, spec["subtitle"]),
-      media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx)
+      media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx),
+      # task-835fe5219585ca80: the member type's icon (a named object type
+      # carries its schema's), drawn when the row has no media.
+      icon: BarkparkWeb.Icons.type_icon((subfield_attr(item, :raw) || %{})["icon"])
     }
   end
 
