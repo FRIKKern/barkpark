@@ -662,6 +662,12 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   defp valid_ordering?(_), do: false
 
+  @doc """
+  True when `view` is a well-formed `desk.views` entry. A declared desk list
+  (`deskStructure`) checks its own `views` with the same rule.
+  """
+  def valid_desk_view?(view), do: valid_view?(view)
+
   defp validate_desk_group_filters(changeset) do
     case get_change(changeset, :desk_groups) do
       groups when is_list(groups) ->

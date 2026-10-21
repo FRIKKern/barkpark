@@ -2090,6 +2090,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             nav_group={@nav_group}
             nav_view={@nav_view}
             nav_view_docs={@nav_view_docs}
+            editor_views={@editor_views}
             scope_prefix={@scope_prefix}
             content_preview_rendered={@content_preview_rendered}
             content_preview_visible={@content_preview_visible}

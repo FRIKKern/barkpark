@@ -46,9 +46,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Views do
   def select(_params, socket), do: {:noreply, socket}
 
   @doc """
-  The views declared on a schema, `[]` for a schema that declares none — which
-  is every schema today, so an editor without the declaration renders exactly
-  as before.
+  The views an open document shows. A declared desk list's `views`
+  (`desk_views`, task-ea2e544fec8ee6db) replace the schema's, as an item's
+  `S.document().views([...])` replaces Sanity's default document node; nil
+  falls back to the schema's `desk.views`.
+  """
+  def views_for(schema, desk_views)
+
+  def views_for(_schema, desk_views) when is_list(desk_views), do: desk_views
+  def views_for(schema, _desk_views), do: views_for(schema)
+
+  @doc """
+  The views declared on a schema, `[]` for a schema that declares none, so an
+  editor without the declaration renders exactly as before.
   """
   def views_for(nil), do: []
 
@@ -67,7 +77,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Views do
 
   defp find_view(socket, id) do
     socket.assigns[:editor_schema]
-    |> views_for()
+    |> views_for(socket.assigns[:editor_views])
     |> Enum.find(fn v -> (v["id"] || v[:id]) == id end)
   end
 
