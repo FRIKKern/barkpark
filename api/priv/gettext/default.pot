@@ -13026,3 +13026,33 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Remove annotation"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "File (DAM)"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Email address"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Filters / parameters (optional)"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Open in new tab"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Choose file"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "No file chosen"
+msgstr ""

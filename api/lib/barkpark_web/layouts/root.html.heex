@@ -3696,7 +3696,17 @@
     .bp-rte-external { display: inline-flex; align-items: center; gap: 4px; }
     /* The row's own Remove unlinks; the picker's would only empty the picker. */
     .bp-rte-internal .ref-selected .btn-destructive { display: none; }
-    .bp-rte-url {
+    /* Email, File, the list page's parameters and the new-tab switch
+       (task-025d7af119d6f0b8). */
+    .bp-rte-email, .bp-rte-file, .bp-rte-params-box { display: inline-flex; align-items: center; gap: 4px; }
+    .bp-rte-email[hidden], .bp-rte-file[hidden], .bp-rte-params-box[hidden] { display: none; }
+    .bp-rte-params-box { flex-basis: 100%; }
+    .bp-rte-params { width: 320px; max-width: 100%; }
+    .bp-rte-newtab { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--fg-muted); }
+    .bp-rte-file-name { font-size: var(--text-xs); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-rte-file-name.bp-rte-file-empty { color: var(--fg-muted); }
+    .bp-rte-email-input[aria-invalid="true"] { border-color: var(--destructive); }
+    .bp-rte-url, .bp-rte-field {
       width: 220px; height: 24px; padding: 0 8px;
       border: 1px solid var(--input); border-radius: 4px;
       background: var(--bg); color: var(--fg); font-size: var(--text-xs);
