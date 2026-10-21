@@ -831,7 +831,8 @@ defmodule Barkpark.Content.Query do
 
   # The documented public filter operators (docs/api-v1.md §4).
   @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is
-                       notContains nhas countEq countNeq countGt countGte countLt countLte nbetween)
+                       notContains nhas countEq countNeq countGt countGte countLt countLte nbetween
+                       neqOrMissing)
 
   # Array-length ops (task-aaf4d51bf8a51aec): Sanity's search-filter "count"
   # family. The value is an INTEGER; `parse_count/1` is the one parser the door
@@ -912,7 +913,8 @@ defmodule Barkpark.Content.Query do
   #     ever mean "no rows" on a NOT NULL column.
   @column_field_ops %{
     "title" =>
-      ~w(eq neq in nin contains notContains startsWith endsWith gt gte lt lte is has hasStrong),
+      ~w(eq neq in nin contains notContains startsWith endsWith gt gte lt lte is has hasStrong
+         neqOrMissing),
     "status" => ~w(eq neq in nin contains startsWith endsWith is),
     "doc_id" => ~w(eq neq in nin contains startsWith endsWith),
     "_id" => ~w(eq neq in nin contains startsWith endsWith),
@@ -1663,6 +1665,10 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "lt", v), do: where(query, [d], d.title < ^v)
   defp apply_field_op(query, "title", "lte", v), do: where(query, [d], d.title <= ^v)
   defp apply_field_op(query, "title", "neq", v), do: where(query, [d], d.title != ^v)
+
+  defp apply_field_op(query, "title", "neqOrMissing", v),
+    do: where(query, [d], fragment("? IS DISTINCT FROM ?", d.title, ^v))
+
   defp apply_field_op(query, "title", "is", "null"), do: where(query, [d], is_nil(d.title))
 
   defp apply_field_op(query, "title", "is", "notnull"),
@@ -1810,7 +1816,8 @@ defmodule Barkpark.Content.Query do
   # number reached Postgrex as a text parameter and the list pane, and with it
   # every document opened from it, answered 500 (task-592dee75ffef0c06).
   defp apply_field_op(query, field, op, v)
-       when op in ["eq", "neq", "gt", "gte", "lt", "lte"] and (is_boolean(v) or is_number(v)) and
+       when op in ["eq", "neq", "neqOrMissing", "gt", "gte", "lt", "lte"] and
+              (is_boolean(v) or is_number(v)) and
               field not in ["title", "status", "doc_id", "_id", "type", "_type"],
        do: apply_field_op(query, field, op, json_scalar_text(v))
 
@@ -1829,7 +1836,8 @@ defmodule Barkpark.Content.Query do
   end
 
   # `neq` uses strict SQL `<>`, so rows where the field is NULL/absent are
-  # EXCLUDED (NULL <> v is NULL → false) — matching Sanity `!=` / Strapi `$ne`.
+  # EXCLUDED (NULL <> v is NULL → false), as Strapi's `$ne`. Sanity's GROQ `!=`
+  # KEEPS them; that is `neqOrMissing` below.
   defp apply_field_op(query, field, "neq", v) do
     if nested_path?(field) do
       segs = nested_segments(field)
@@ -1842,6 +1850,20 @@ defmodule Barkpark.Content.Query do
     else
       where(query, [d], fragment("?->>? <> ?", d.content, ^field, ^v))
     end
+  end
+
+  # `neqOrMissing` (task-728fb2adbd900f8f) is Sanity's `!=`: a document whose
+  # field is absent or null counts as not equal, so `{"isHidden":
+  # {"neqOrMissing": true}}` lists every series not marked hidden (418 of 459
+  # on the twin, where `neq` listed 1). SQL `IS DISTINCT FROM` is exactly that.
+  defp apply_field_op(query, field, "neqOrMissing", v) do
+    segs = nested_segments(field)
+
+    where(
+      query,
+      [d],
+      fragment("jsonb_extract_path_text(?, VARIADIC ?) IS DISTINCT FROM ?", d.content, ^segs, ^v)
+    )
   end
 
   # `in` matches a scalar field whose value is one of the values, and an array

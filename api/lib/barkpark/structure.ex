@@ -99,7 +99,14 @@ defmodule Barkpark.Structure do
       # A `groupBy` node built with `defer_group_by: true` carries
       # `{:group_by, item, idx}` here and no children. `expand/3` builds them
       # when a pane opens the node (task-cca3c6d48e57097e).
-      deferred: nil
+      deferred: nil,
+      # A declared list's `paneTitle`: the title of the pane it opens, when
+      # that differs from its row's (task-a3e829ace0b184ea). nil = the row's.
+      pane_title: nil,
+      # A declared type list's `initialValues`: the content fields its "+"
+      # starts a document with, as Sanity's initialValueTemplates
+      # (task-dc9b751450c2c2c4). nil = an empty document, as before.
+      initial_values: nil
     ]
   end
 
@@ -1111,6 +1118,14 @@ defmodule Barkpark.Structure do
   #   {"kind":"documentTypeList","type":"publication","title":"Uten omslag",
   #      "filter":{"content.cover":{"is":"null"}},"orderings":[{"field":"title","direction":"asc"}]}
   #
+  # A documentTypeList or tree item may carry `initialValues`
+  # (`{"pageType":"landingPage"}`), the fields its "+" starts a document with.
+  #
+  # A list, documentTypeList, groupBy or tree item may also carry `paneTitle`,
+  # the title of the pane it opens, as Sanity's `S.listItem().title('Med
+  # anmeldelser').child(S.documentTypeList('product').title('Produkter med
+  # anmeldelser'))`. Without it the pane takes the row's title.
+  #
   # Read under the PUBLISHED perspective ("publish to apply"), scoped to the
   # caller's workspace. Absent → :none (the hardcoded tree). A malformed
   # document degrades to :none with a logged reason — never a blank desk.
@@ -1294,7 +1309,8 @@ defmodule Barkpark.Structure do
       title: item["title"] || "Group",
       icon: item["icon"],
       type: :list,
-      items: children
+      items: children,
+      pane_title: pane_title(item)
     }
   end
 
@@ -1313,7 +1329,9 @@ defmodule Barkpark.Structure do
         visibility: :public,
         filter: filter,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        error: filter_error(type, filter, ctx)
+        error: filter_error(type, filter, ctx),
+        pane_title: pane_title(item),
+        initial_values: initial_values(item, type, ctx)
       }
     end
   end
@@ -1361,11 +1379,20 @@ defmodule Barkpark.Structure do
   #
   #   {"kind":"tree","title":"Hierarkisk struktur","type":"category",
   #    "parent":"content.parent","orderings":[…]}
-  defp declared_item_to_node(%{"kind" => "tree"} = item, idx, _ctx) do
+  #
+  # An optional `filter` narrows the root and every level below
+  # (task-e9f14aeb3ed09953).
+  defp declared_item_to_node(%{"kind" => "tree"} = item, idx, ctx) do
     type = item["type"]
     parent = item["parent"]
 
     if is_binary(type) and type != "" and is_binary(parent) and parent != "" do
+      # task-e9f14aeb3ed09953 — the tree's own `filter` (Sanity's
+      # `pageType == "information" && !defined(parent._ref)`) narrows the root
+      # AND every level below; the level's parent clause is added on top of it.
+      own = if is_map(item["filter"]), do: item["filter"], else: %{}
+      root = Map.merge(own, %{parent => %{"is" => "null"}})
+
       %Node{
         id: item["id"] || "#{idx}-#{type}-tree",
         title: item["title"] || type,
@@ -1373,14 +1400,57 @@ defmodule Barkpark.Structure do
         type: :document_type_list,
         type_name: type,
         visibility: :public,
-        filter: %{parent => %{"is" => "null"}},
+        filter: root,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        tree: %{"parent" => parent}
+        tree:
+          if(own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}),
+        pane_title: pane_title(item),
+        initial_values: initial_values(item, type, ctx),
+        error: if(own == %{}, do: nil, else: filter_error(type, root, ctx))
       }
     end
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  defp pane_title(%{"paneTitle" => title}) when is_binary(title) and title != "", do: title
+  defp pane_title(_item), do: nil
+
+  # `{"pageType": "landingPage"}`: content field → value. A key may also be
+  # written as the list's filter path (`content.pageType`). Checked against the
+  # type's schema in the desk's own scope: only a declared top-level field, with
+  # a value of that field's kind (a select's one of its options). Any other
+  # entry is dropped with a logged reason, never written. Nothing valid left,
+  # or no `initialValues`, is no preset.
+  defp initial_values(%{"initialValues" => values} = item, type, ctx) when is_map(values) do
+    fields =
+      case Content.resolve_schema(type, ctx.dataset, ctx.scope) do
+        {:ok, %{fields: fields}} when is_list(fields) -> Map.new(fields, &{field_name(&1), &1})
+        _ -> %{}
+      end
+
+    {kept, dropped} =
+      values
+      |> Enum.map(fn {k, v} -> {is_binary(k) && String.replace_prefix(k, "content.", ""), v} end)
+      |> Enum.split_with(fn {name, v} ->
+        is_binary(name) and Content.Validation.desk_preset_fits?(Map.get(fields, name), v)
+      end)
+
+    if dropped != [] do
+      Logger.warning(
+        "deskStructure item #{inspect(item["title"] || item["id"])}: initialValues " <>
+          "#{inspect(Enum.map(dropped, &elem(&1, 0)))} do not fit #{type}'s schema and are not preset"
+      )
+    end
+
+    if kept == [], do: nil, else: Map.new(kept)
+  end
+
+  defp initial_values(_item, _type, _ctx), do: nil
+
+  defp field_name(%{name: name}), do: name
+  defp field_name(%{"name" => name}), do: name
+  defp field_name(_field), do: nil
 
   # The children of a `groupBy` node are one document read over `over`, and
   # with `overFilter` a reference test against every document of the grouped
@@ -1395,7 +1465,8 @@ defmodule Barkpark.Structure do
       icon: item["icon"],
       type: :list,
       items: [],
-      deferred: {:group_by, item, idx}
+      deferred: {:group_by, item, idx},
+      pane_title: pane_title(item)
     }
   end
 
@@ -1448,7 +1519,8 @@ defmodule Barkpark.Structure do
       title: item["title"] || "By #{over}",
       icon: item["icon"],
       type: :list,
-      items: children
+      items: children,
+      pane_title: pane_title(item)
     }
   end
 

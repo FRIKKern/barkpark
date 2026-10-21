@@ -5069,6 +5069,7 @@ msgid "Type"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1477
+#: lib/barkpark_web/studio_locale.ex:408
 #, elixir-autogen, elixir-format
 msgid "Unbind property"
 msgstr ""
@@ -13012,4 +13013,19 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex
 #, elixir-autogen, elixir-format
 msgid "Default order"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:522
+#, elixir-autogen, elixir-format
+msgid "Edit annotation"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:563
+#, elixir-autogen, elixir-format
+msgid "Internal Link"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:672
+#, elixir-autogen, elixir-format
+msgid "Remove annotation"
 msgstr ""

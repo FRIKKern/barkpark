@@ -424,6 +424,35 @@ defmodule Barkpark.Content.Mutations do
   defp delete_mutation?(%{"delete" => _}), do: true
   defp delete_mutation?(_), do: false
 
+  # task-a093bebe46ea3dbb: `createIfNotExists` + `publish` in one request on a
+  # document that is already published with no draft. The create is a no-op, so
+  # the publish finds no draft; Sanity answers the pair as a no-op, and so do we.
+  # Scoped to the batch: a publish with no draft on its own is still a 404.
+  # The ids ride in the echo-schema cache under a key no type name can take.
+  @noop_creates_key :create_if_not_exists_noops
+
+  defp note_create_if_not_exists_noop(%{"createIfNotExists" => _}, "noop", doc, cache) do
+    if DraftId.draft?(doc.doc_id),
+      do: cache,
+      else:
+        Map.update(
+          cache,
+          @noop_creates_key,
+          MapSet.new([doc.doc_id]),
+          &MapSet.put(&1, doc.doc_id)
+        )
+  end
+
+  defp note_create_if_not_exists_noop(_, _, _, cache), do: cache
+
+  defp publish_opts(%{"publish" => %{"id" => id}}, opts, cache) when is_binary(id) do
+    if MapSet.member?(Map.get(cache, @noop_creates_key, MapSet.new()), DraftId.published_id(id)),
+      do: Keyword.put(opts, :after_create_if_not_exists_noop, true),
+      else: opts
+  end
+
+  defp publish_opts(_, opts, _), do: opts
+
   defp apply_chunk([_, _ | _] = chunk, dataset, opts, caller, cache) do
     if delete_mutation?(hd(chunk)) do
       ids =
@@ -445,9 +474,10 @@ defmodule Barkpark.Content.Mutations do
 
   defp apply_each(chunk, dataset, opts, caller, cache) do
     Enum.map_reduce(chunk, cache, fn m, cache ->
-      case apply_one(m, dataset, opts) do
+      case apply_one(m, dataset, publish_opts(m, opts, cache)) do
         {:ok, doc, op} ->
           :ok = between_mutations_barrier()
+          cache = note_create_if_not_exists_noop(m, op, doc, cache)
           {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
 
           {%{
@@ -862,6 +892,8 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
+    {after_noop_create?, opts} = Keyword.pop(opts, :after_create_if_not_exists_noop, false)
+
     case Content.publish_document(id, type, dataset, opts) do
       {:ok, doc} ->
         {:ok, doc, "publish"}
@@ -877,7 +909,9 @@ defmodule Barkpark.Content.Mutations do
         # not a failure. Deliberately NOT widened to every type: for an ordinary
         # content type a publish with no draft is still a genuine 404, because
         # nothing on that path lands a patch for it.
-        if published_first_patch?(DraftId.published_id(id), type) do
+        # The one other no-op: the same request's `createIfNotExists` found the
+        # document already published (task-a093bebe46ea3dbb).
+        if published_first_patch?(DraftId.published_id(id), type) or after_noop_create? do
           case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
             {:ok, doc} -> {:ok, doc, "noop"}
             _ -> err

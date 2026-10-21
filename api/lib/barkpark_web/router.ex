@@ -2636,6 +2636,7 @@ defmodule BarkparkWeb.Router do
     get("/search/:dataset", SearchController, :search)
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
+    get("/backlinks/:dataset", QueryController, :backlinks_batch)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
     get("/locations/:dataset/:id", QueryController, :locations)
     # Related documents — shared weighted tags fused with inbound references
@@ -3707,6 +3708,7 @@ defmodule BarkparkWeb.Router do
 
     get("/v1/data/query/:dataset/:type", QueryController, :index)
     get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
+    get("/v1/data/backlinks/:dataset", QueryController, :backlinks_batch)
     get("/v1/data/backlinks/:dataset/:id", QueryController, :backlinks)
     get("/v1/data/locations/:dataset/:id", QueryController, :locations)
     get("/v1/data/related/:dataset/:id", QueryController, :related)

@@ -432,7 +432,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         node = node |> Structure.expand(dataset, scope(opts)) |> StructureCopy.localize()
 
         list_pane = %{
-          title: node.title,
+          # A declared `paneTitle` names the opened pane (task-a3e829ace0b184ea).
+          title: Map.get(node, :pane_title) || node.title,
           role: :list,
           priority: if(rest == [], do: :active, else: depth + 1),
           items: list_items(node, scope_prefix(opts)),
@@ -556,11 +557,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           list_page_preflighted(type_name, dataset, list_opts, opts)
 
         doc_pane = %{
-          title: node.title || (schema && schema.title) || type_name,
+          title:
+            Map.get(node, :pane_title) || node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
           type_title: schema && schema.title,
           author_creatable: author_creatable?(schema),
+          # The fields this list's "+" presets (task-dc9b751450c2c2c4).
+          initial_values: Map.get(node, :initial_values),
           role: :list,
           priority: :active,
           desk_groups: desk_groups,
@@ -644,6 +648,18 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # the editor; clicking a child (`[…, id, child]`) drills one level deeper.
   # A segment that is neither still opens as a document (a re-parented deep
   # link) — the #1851 never-unreachable guarantee.
+  # One tree level: the children of `pub_id`, narrowed by the tree's own filter
+  # when it declares one (task-e9f14aeb3ed09953), as the root is.
+  defp tree_level_filter(node, parent, pub_id) do
+    own =
+      case Map.get(node, :tree) do
+        %{"filter" => %{} = own} -> own
+        _ -> %{}
+      end
+
+    Map.merge(own, %{parent => %{"eq" => pub_id}})
+  end
+
   defp walk_tree([id | rest], level, panes, type_name, schema, parent, node, dataset, opts) do
     pub_id = Content.published_id(id)
 
@@ -653,7 +669,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       {doc, _is_draft, _has_pub} ->
         list_opts =
-          [perspective: :drafts, filter_map: %{parent => %{"eq" => pub_id}}] ++ scope(opts)
+          [perspective: :drafts, filter_map: tree_level_filter(node, parent, pub_id)] ++
+            scope(opts)
 
         list_opts =
           case desk_order(nil, schema, Map.get(node, :orderings)) do

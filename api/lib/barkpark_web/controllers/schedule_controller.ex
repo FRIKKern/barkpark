@@ -4,9 +4,10 @@ defmodule BarkparkWeb.ScheduleController do
 
     * `POST   /v1/data/schedules/:dataset` — `{"id", "type", "publishAt",
       "ifRevisionID"?}` schedules the draft. `ifRevisionID` pins the draft rev.
-    * `GET    /v1/data/schedules/:dataset` — `?id=&type=&status=` lists them
-      (default: pending only; `status=all` for every status) as
-      `{"result": {"schedules": [...]}}`.
+    * `GET    /v1/data/schedules/:dataset` — `?id=&type=&status=&order=&limit=&offset=`
+      lists them (default: pending only; `status=all` for every status) as
+      `{"result": {"schedules": [...], "page": {"limit", "offset", "hasMore", "nextOffset"}}}`;
+      `nextOffset` is null on the last page.
     * `DELETE /v1/data/schedules/:dataset/:schedule_id` — cancels a pending or
       paused one.
     * `POST   /v1/data/schedules/:dataset/:schedule_id/pause` — pauses a pending
@@ -42,14 +43,24 @@ defmodule BarkparkWeb.ScheduleController do
   end
 
   def index(conn, %{"dataset" => dataset} = params) do
-    rows =
-      ScheduledPublishes.list(
+    page =
+      ScheduledPublishes.list_page(
         dataset,
-        Map.take(params, ["id", "type", "status"]),
+        Map.take(params, ["id", "type", "status", "order", "limit", "offset"]),
         scope_opts(conn)
       )
 
-    json(conn, %{result: %{schedules: Enum.map(rows, &schedule_json/1)}})
+    json(conn, %{
+      result: %{
+        schedules: Enum.map(page.rows, &schedule_json/1),
+        page: %{
+          limit: page.limit,
+          offset: page.offset,
+          hasMore: page.next_offset != nil,
+          nextOffset: page.next_offset
+        }
+      }
+    })
   end
 
   def delete(conn, %{"dataset" => dataset, "schedule_id" => id}) do

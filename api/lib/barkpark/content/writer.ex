@@ -37,7 +37,7 @@ defmodule Barkpark.Content.Writer do
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Content.{PreWriteFences, PreWriteTransforms}
 
-  alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
+  alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Projection, Render, Synthesis}
 
   require Logger
 
@@ -139,7 +139,10 @@ defmodule Barkpark.Content.Writer do
     %{errors: cross_errors, warnings: cross_warnings} =
       Barkpark.Content.Validation.cross_findings(content, title, schema)
 
-    warnings = warning_findings ++ cross_warnings
+    # task-af038d8b0d769e82 — a deskStructure naming an icon neither Studio draws.
+    warnings =
+      warning_findings ++
+        cross_warnings ++ Barkpark.Content.Validation.desk_icon_findings(schema, content)
 
     case {Barkpark.Content.Validation.validate(content, title, schema), cross_errors} do
       {{:ok, content}, []} ->
@@ -296,19 +299,45 @@ defmodule Barkpark.Content.Writer do
     # every other schema violation already has, under the finding code
     # `unknown_type` (the SAME code `Validation`'s own richText block-member
     # check already uses for the analogous "unknown block _type" case).
+    # task-dc9b751450c2c2c4 — a deskStructure's presets that do not fit their
+    # list's type (warn-only; the desk leaves them out).
+    presets =
+      if type == "deskStructure" and is_map(content),
+        do:
+          Barkpark.Content.Validation.desk_preset_findings(
+            Map.get(content, "items"),
+            dataset,
+            scope
+          ),
+        else: []
+
     case Content.get_schema(type, dataset, scope) do
       {:ok, schema} ->
         dispatch_schema_outcome(
           type,
           attrs,
-          findings_for_schema(schema, title, content),
+          schema |> findings_for_schema(title, content) |> add_warnings(presets),
           enforce?
         )
 
       _ ->
-        dispatch_schema_outcome(type, attrs, unknown_type_outcome(type, dataset), enforce?)
+        {:error, errors, findings, warnings} = unknown_type_outcome(type, dataset)
+        desk = Barkpark.Content.Validation.desk_icon_findings(type, content)
+
+        dispatch_schema_outcome(
+          type,
+          attrs,
+          {:error, errors, findings, warnings ++ desk ++ presets},
+          enforce?
+        )
     end
   end
+
+  defp add_warnings(outcome, []), do: outcome
+  defp add_warnings({:ok, content, warnings}, more), do: {:ok, content, warnings ++ more}
+
+  defp add_warnings({:error, errors, findings, warnings}, more),
+    do: {:error, errors, findings, warnings ++ more}
 
   defp dispatch_schema_outcome(type, attrs, {:ok, _content, warning_findings}, _enforce?) do
     # task-292d6677b94916ef — a write with NO error-level violation used to
@@ -516,7 +545,7 @@ defmodule Barkpark.Content.Writer do
     # {:ok, attrs} | {:error, reason} — a refused dataset resolution surfaces
     # here instead of silently stamping dataset_id=NULL. The stamp stays BEFORE
     # Sheets.hydrate_sheet_embed_snapshots (it reads the stamped scope keys).
-    with :ok <- refuse_non_map_block_elements(attrs),
+    with :ok <- refuse_non_map_block_elements(attrs, opts),
          {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
          attrs =
            attrs
@@ -530,7 +559,7 @@ defmodule Barkpark.Content.Writer do
            # continuous canvas keys its diff on block id, and an id-less block
            # projects to bpId:null → spurious insert-after → duplicate-block
            # corruption on the next edit. Additive (present ids preserved), idempotent.
-           |> maybe_ensure_block_ids(),
+           |> maybe_ensure_block_ids(opts),
          # THE PLUGIN PRE-WRITE TRANSFORMS (task-aed4f02e57d3a760): the last
          # attrs step, then the checks that judge the result — the position the
          # task brief re-sync and the task kind check held when this pipe named
@@ -803,7 +832,7 @@ defmodule Barkpark.Content.Writer do
             _ ->
               attrs =
                 attrs
-                |> scaffold_or_initial_values(type, dataset)
+                |> scaffold_or_initial_values(type, dataset, opts)
                 # Doctrine (pdd-t16): a paper born through the RAW mutate/Writer
                 # path gets the same birth guarantee as upsert_paper — the
                 # forced template on an explicit empty block list, doc.title
@@ -1108,12 +1137,14 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
-  defp scaffold_or_initial_values(attrs, type, dataset)
+  defp scaffold_or_initial_values(attrs, type, dataset, opts)
        when is_binary(type) and is_binary(dataset) do
     case schema_for_create(type, dataset, attrs) do
       {:ok, %SchemaDefinition{layout: layout} = schema}
       when is_list(layout) and layout != [] ->
-        scaffold_expectation(attrs, schema, dataset)
+        if declares_blocks?(schema),
+          do: apply_initial_values(attrs, type, dataset),
+          else: scaffold_expectation(attrs, schema, dataset)
 
       _ ->
         # R2 chokepoint (id-less backfill). The earlier `maybe_ensure_block_ids`
@@ -1125,21 +1156,21 @@ defmodule Barkpark.Content.Writer do
         # stored at birth, not after the first save (task-b43256e0d9d90733).
         attrs
         |> apply_initial_values(type, dataset)
-        |> maybe_ensure_block_ids()
-        |> maybe_project_created_content(dataset)
+        |> maybe_ensure_block_ids(opts)
+        |> maybe_project_created_content(dataset, opts)
     end
   end
 
-  defp scaffold_or_initial_values(attrs, type, dataset),
-    do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset))
+  defp scaffold_or_initial_values(attrs, type, dataset, opts),
+    do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset), opts)
 
   # Project-on-create, with one difference from a patch: a `body` the caller
   # sent is kept. An importer that carries a rendered body beside blocks the
   # projection cannot render (Sanity-shaped `_type`/`children`) would otherwise
   # lose its text at birth.
-  defp maybe_project_created_content(attrs, dataset) do
+  defp maybe_project_created_content(attrs, dataset, opts) do
     given_body = attrs |> Map.get("content") |> body_given()
-    attrs = maybe_project_document_content(attrs, dataset)
+    attrs = maybe_project_document_content(attrs, dataset, opts)
 
     case given_body do
       {:ok, body} -> put_in(attrs, ["content", "body"], body)
@@ -1311,7 +1342,7 @@ defmodule Barkpark.Content.Writer do
     # refused dataset resolution errors out here, never a silent NULL stamp.
     # The stamp stays BEFORE Sheets.hydrate_sheet_embed_snapshots and the
     # body_html render path (both read the stamped scope keys).
-    with :ok <- refuse_non_map_block_elements(attrs),
+    with :ok <- refuse_non_map_block_elements(attrs, opts),
          {:ok, attrs} <- WriteScope.put_scope_attrs(attrs, opts),
          attrs =
            attrs
@@ -1322,13 +1353,13 @@ defmodule Barkpark.Content.Writer do
            # `content["blocks"]`. Fill ids BEFORE projection (projection reads block
            # ids, it never mints them) so the persisted + projected blocks all carry
            # a stable id — the canvas-diff prerequisite. Additive, idempotent.
-           |> maybe_ensure_block_ids()
+           |> maybe_ensure_block_ids(opts)
            # Project-on-write on the DOCUMENT path (Exp-P3.1): a whole-doc write that
            # carries content["blocks"] re-derives content[fieldName]/content["body"]
            # from those blocks — the same project-on-write the paper path runs.
            # Projection stays the SOLE writer of those keys; a write WITHOUT blocks
            # (legacy field-map save) skips it untouched.
-           |> maybe_project_document_content(dataset)
+           |> maybe_project_document_content(dataset, opts)
            # XSS hardening (mirror of create_after_dedup): scrub a verbatim
            # content["body_html"] on the patch/autosave path so poisoned markup
            # never persists as a draft that publish later promotes unchanged.
@@ -1870,9 +1901,12 @@ defmodule Barkpark.Content.Writer do
   # `Synthesis.scaffold/4` reads `values[region]`). A plain array FIELD — the
   # `"slug": ["a","b"]` shape that writes 200 today — is never a block list and
   # is deliberately not touched.
-  defp refuse_non_map_block_elements(attrs) do
+  defp refuse_non_map_block_elements(attrs, opts) do
     case Map.get(attrs, "content") do
       content when is_map(content) ->
+        content =
+          if declared_blocks_field?(attrs, opts), do: Map.delete(content, "blocks"), else: content
+
         Enum.reduce_while(content, :ok, fn {key, value}, :ok ->
           case validate_content_block_root(key, value) do
             :ok -> {:cont, :ok}
@@ -1898,6 +1932,68 @@ defmodule Barkpark.Content.Writer do
 
   defp validate_content_block_root(_key, _value), do: :ok
 
+  # task-380edc7a76a18cb0 — `content["blocks"]` is the PortableDoc block list
+  # (ids, projected body and preview, block-element checks) on every type
+  # EXCEPT one whose schema declares its own top-level `blocks` field as an
+  # ORDINARY array: an arrayOf/array whose members are not PortableDoc (a
+  # Sanity page builder's, say). There it is that field's value, stored as
+  # sent. Keyed on the content key alone, a `fieldTypes` doc with such a field
+  # gained an `id` per item, and a `body` and `preview` it does not declare. A
+  # `blocks` field declared as the PortableDoc or paper body (`editor:
+  # "blocks"`, a portableDocument/paper/richText member) keeps the block model,
+  # as does a type with no `blocks` field and a schemaless document. Asked only
+  # when the write carries a blocks list. The schema is resolved with the
+  # door's own `opts`, passed explicitly, the way `schema_declares_status?/3`
+  # reads it (tenant → workspace → global), so no scope or tenancy step moves.
+  defp declared_blocks_field?(attrs, opts) do
+    with %{"blocks" => blocks} when is_list(blocks) <- Map.get(attrs, "content"),
+         type when is_binary(type) <- Map.get(attrs, "type"),
+         dataset when is_binary(dataset) <- Map.get(attrs, "dataset"),
+         {:ok, schema} <- Content.resolve_schema(type, dataset, opts) do
+      declares_blocks?(schema)
+    else
+      _ -> false
+    end
+  end
+
+  defp declares_blocks?(%{fields: fields}) when is_list(fields) do
+    Enum.any?(fields, fn field ->
+      field = field_map(field)
+      field["name"] == "blocks" and ordinary_array?(field)
+    end)
+  end
+
+  defp declares_blocks?(_schema), do: false
+
+  @portable_doc_members ~w(portableDocument paper richText)
+
+  defp ordinary_array?(field) do
+    field["type"] in ["arrayOf", "array"] and not FieldVocabulary.blocks_field?(field) and
+      not Enum.any?(member_types(field["of"]), &(&1 in @portable_doc_members))
+  end
+
+  # `of` is one member (`%{"type" => …}`), a list of them, or named members
+  # (`%{name => %{"type" => …}}`).
+  defp member_types(of) when is_list(of), do: Enum.flat_map(of, &member_types/1)
+
+  defp member_types(of) when is_map(of) do
+    case field_map(of) do
+      %{"type" => type} -> [type]
+      named -> named |> Map.values() |> Enum.filter(&is_map/1) |> Enum.flat_map(&member_types/1)
+    end
+  end
+
+  defp member_types(type) when is_binary(type), do: [type]
+  defp member_types(_of), do: []
+
+  defp field_map(%{raw: raw}) when is_map(raw), do: field_map(raw)
+  defp field_map(%_{} = struct), do: struct |> Map.from_struct() |> field_map()
+
+  defp field_map(map) when is_map(map),
+    do: Map.new(map, fn {k, v} -> {if(is_atom(k), do: Atom.to_string(k), else: k), v} end)
+
+  defp field_map(_other), do: %{}
+
   # R2 chokepoint (id-less backfill). When a document write carries a
   # `content["blocks"]` LIST, route it through the canonical
   # `BlockOps.ensure_block_ids/1` so every block has a stable, unique id before
@@ -1906,22 +2002,28 @@ defmodule Barkpark.Content.Writer do
   # untouched. Additive (a present non-blank id is preserved byte-identical) and
   # idempotent (re-running over an id-bearing list writes nothing new), so this
   # never changes content beyond filling absent/blank ids on id-less blocks.
-  defp maybe_ensure_block_ids(attrs) do
+  defp maybe_ensure_block_ids(attrs, opts) do
     content = Map.get(attrs, "content")
 
     case content && Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        # Two normalizers at the SAME chokepoint: `ensure_block_ids` fills id-less
-        # blocks; `normalize_list_items` coerces legacy flat-STRING list items to
-        # the canonical inline-array shape (the obsidian list-item-crash fix). Both
-        # additive + idempotent + render-preserving, so a write of a clean
-        # (id-bearing, canonical-item) block list passes through byte-identical.
-        new_blocks = blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes()
-        Map.put(attrs, "content", Map.put(content, "blocks", new_blocks))
+        if declared_blocks_field?(attrs, opts),
+          do: attrs,
+          else: ensure_block_ids(attrs, content, blocks)
 
       _ ->
         attrs
     end
+  end
+
+  # Two normalizers at the SAME chokepoint: `ensure_block_ids` fills id-less
+  # blocks; `normalize_list_items` coerces legacy flat-STRING list items to
+  # the canonical inline-array shape (the obsidian list-item-crash fix). Both
+  # additive + idempotent + render-preserving, so a write of a clean
+  # (id-bearing, canonical-item) block list passes through byte-identical.
+  defp ensure_block_ids(attrs, content, blocks) do
+    new_blocks = blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes()
+    Map.put(attrs, "content", Map.put(content, "blocks", new_blocks))
   end
 
   # Re-project content[fieldName]/content["body"] from content["blocks"] when a
@@ -1929,24 +2031,25 @@ defmodule Barkpark.Content.Writer do
   # paper-path project-on-write to the document path). A write whose content has
   # no "blocks" key is returned untouched, so legacy field-map saves are
   # unaffected and projection remains the SOLE writer of the projected keys.
-  defp maybe_project_document_content(attrs, dataset) do
+  defp maybe_project_document_content(attrs, dataset, opts) do
     content = Map.get(attrs, "content")
 
     case content && Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
-        Map.put(
-          attrs,
-          "content",
-          Projection.project(
-            content,
-            blocks,
-            doc_render_opts(dataset, Map.get(attrs, "type"), attrs)
-          )
-        )
+        if declared_blocks_field?(attrs, opts),
+          do: attrs,
+          else: project_document_content(attrs, content, blocks, dataset)
 
       _ ->
         attrs
     end
+  end
+
+  defp project_document_content(attrs, content, blocks, dataset) do
+    projected =
+      Projection.project(content, blocks, doc_render_opts(dataset, Map.get(attrs, "type"), attrs))
+
+    Map.put(attrs, "content", projected)
   end
 
   # render_opts for the document projection paths, carrying the :preview sub-map
