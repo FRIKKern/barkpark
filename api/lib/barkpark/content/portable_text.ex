@@ -266,10 +266,10 @@ defmodule Barkpark.Content.PortableText do
 
       {{:rebuilt, %{"_type" => "block"} = block}, i}, taken ->
         case Enum.at(stored, i) do
-          %{"_type" => "block", "_key" => k} when is_binary(k) ->
+          %{"_type" => "block", "_key" => k} = old when is_binary(k) ->
             if MapSet.member?(taken, k),
               do: {block, taken},
-              else: {rekey(block, k), MapSet.put(taken, k)}
+              else: {adopt(block, old), MapSet.put(taken, k)}
 
           _ ->
             {block, taken}
@@ -281,17 +281,155 @@ defmodule Barkpark.Content.PortableText do
     |> elem(0)
   end
 
-  defp rekey(%{"_key" => old} = block, key) do
-    children =
-      Enum.map(block["children"] || [], fn
-        %{"_type" => "span", "_key" => k} = span when is_binary(k) ->
-          %{span | "_key" => String.replace_prefix(k, old, key)}
+  # An edited block read against the stored block it replaces
+  # (task-74ef03a381b961ce). It takes the stored `_key`, and each span the
+  # `_key` of the stored span it matches (`match_spans/2`), so only a span the
+  # edit added gets a new key. A matched span keeps the stored text's
+  # whitespace characters where the edit left the text as it was
+  # (`keep_whitespace/2`), the stored order of its marks when the set is the
+  # same, and any field the stored span carries beside them.
+  defp adopt(block, %{"_key" => key} = old) do
+    old_children = old["children"] || []
+    stored_spans = for %{"_type" => "span", "_key" => k} = s <- old_children, is_binary(k), do: s
+    children = block["children"] || []
+    matches = match_spans(children, stored_spans)
 
-        child ->
-          child
+    used =
+      for %{"_key" => k} <- old_children ++ children,
+          is_binary(k),
+          into: MapSet.new(),
+          do: k
+
+    {children, _used} =
+      children
+      |> Enum.with_index()
+      |> Enum.map_reduce(used, fn
+        {%{"_type" => "span"} = span, i}, used ->
+          case Map.get(matches, i) do
+            nil ->
+              k = fresh_span_key(key, i, used)
+              {%{span | "_key" => k}, MapSet.put(used, k)}
+
+            si ->
+              {keep_span(span, Enum.at(stored_spans, si)), used}
+          end
+
+        {child, _i}, used ->
+          {child, used}
       end)
 
     %{block | "_key" => key, "children" => children}
+  end
+
+  defp keep_span(span, stored) do
+    marks =
+      if Enum.sort(span["marks"]) == Enum.sort(stored["marks"] || []),
+        do: stored["marks"],
+        else: span["marks"]
+
+    Map.merge(stored, %{
+      "_type" => "span",
+      "text" => keep_whitespace(span["text"], stored["text"]),
+      "marks" => marks
+    })
+  end
+
+  defp fresh_span_key(key, n, used) do
+    k = "#{key}s#{n}"
+    if MapSet.member?(used, k), do: fresh_span_key(key, n + 1, used), else: k
+  end
+
+  # Which stored span each rebuilt span is, as `%{child index => stored span
+  # index}`. Three passes, each over the spans the earlier ones left:
+  #
+  #   1. the same text and the same marks: the span is untouched;
+  #   2. the same marks at the same place, either the same span position or
+  #      the stored span after the one the previous span matched: its text was
+  #      edited;
+  #   3. the same text: its marks were changed.
+  #
+  # A span no pass matches is new, as the parts of a split span are.
+  defp match_spans(children, stored) do
+    spans = for {%{"_type" => "span"} = s, i} <- Enum.with_index(children), do: {i, s}
+    stored = Enum.with_index(stored)
+
+    {matches, used} =
+      match_pass(spans, stored, {%{}, MapSet.new()}, fn s, o ->
+        same_text?(s, o) and same_marks?(s, o)
+      end)
+
+    {matches, used} =
+      spans
+      |> Enum.with_index()
+      |> Enum.reduce({matches, used}, fn {{i, s}, j}, {matches, used} ->
+        prev = spans |> Enum.take(j) |> Enum.reverse() |> Enum.find_value(&matches[elem(&1, 0)])
+
+        candidates = Enum.reject([prev && prev + 1, j], &is_nil/1)
+
+        pick =
+          not Map.has_key?(matches, i) &&
+            Enum.find(candidates, fn si ->
+              not MapSet.member?(used, si) and
+                match?({_, _}, Enum.at(stored, si)) and
+                same_marks?(s, stored |> Enum.at(si) |> elem(0))
+            end)
+
+        if pick, do: {Map.put(matches, i, pick), MapSet.put(used, pick)}, else: {matches, used}
+      end)
+
+    {matches, _used} = match_pass(spans, stored, {matches, used}, &same_text?/2)
+    matches
+  end
+
+  defp match_pass(spans, stored, acc, same?) do
+    Enum.reduce(spans, acc, fn {i, s}, {matches, used} = acc ->
+      found =
+        not Map.has_key?(matches, i) &&
+          Enum.find(stored, fn {o, si} -> not MapSet.member?(used, si) and same?.(s, o) end)
+
+      case found do
+        {_o, si} -> {Map.put(matches, i, si), MapSet.put(used, si)}
+        _ -> acc
+      end
+    end)
+  end
+
+  defp same_text?(s, o), do: fold_space(s["text"]) == fold_space(o["text"])
+  defp same_marks?(s, o), do: Enum.sort(s["marks"] || []) == Enum.sort(o["marks"] || [])
+
+  # A browser may write a stored space as a no-break space, or the reverse, so
+  # the two are the same character when a span is matched.
+  defp fold_space(text) when is_binary(text), do: String.replace(text, "\u00A0", " ")
+  defp fold_space(_), do: nil
+
+  # The edited text with the stored characters put back where the two agree
+  # but for a space the browser swapped: the common start and the common end.
+  # Only the part the edit changed is read from the HTML.
+  defp keep_whitespace(text, stored) when is_binary(text) and is_binary(stored) do
+    if fold_space(text) == fold_space(stored) do
+      stored
+    else
+      new = String.graphemes(text)
+      old = String.graphemes(stored)
+      head = common_length(new, old)
+      max_tail = min(length(new), length(old)) - head
+      tail = min(common_length(Enum.reverse(new), Enum.reverse(old)), max_tail)
+
+      Enum.join(
+        Enum.take(old, head) ++
+          Enum.slice(new, head, length(new) - head - tail) ++
+          Enum.take(old, -tail)
+      )
+    end
+  end
+
+  defp keep_whitespace(text, _stored), do: text
+
+  defp common_length(a, b) do
+    a
+    |> Enum.zip(b)
+    |> Enum.take_while(fn {x, y} -> fold_space(x) == fold_space(y) end)
+    |> length()
   end
 
   # Inside a custom block's `<div data-pt-block>` only nested divs are
@@ -785,13 +923,19 @@ defmodule Barkpark.Content.PortableText do
     |> Enum.reject(&(Map.get(&1, :text) == ""))
   end
 
-  defp trim_span(%{text: text} = span, :leading), do: %{span | text: String.trim_leading(text)}
-  defp trim_span(%{text: text} = span, :trailing), do: %{span | text: String.trim_trailing(text)}
+  # Only the whitespace HTML markup uses is trimmed: a no-break space or any
+  # other Unicode space at the edge of a block is text (task-74ef03a381b961ce).
+  defp trim_span(%{text: text} = span, :leading),
+    do: %{span | text: String.replace(text, ~r/\A[ \t\r\n\f]+/, "")}
+
+  defp trim_span(%{text: text} = span, :trailing),
+    do: %{span | text: String.replace(text, ~r/[ \t\r\n\f]+\z/, "")}
+
   defp trim_span(object, _side), do: object
 
   defp decode(text) do
     text
-    |> String.replace("&nbsp;", " ")
+    |> String.replace(["&nbsp;", "&#160;", "&#xA0;", "&#xa0;"], "\u00A0")
     |> String.replace("&lt;", "<")
     |> String.replace("&gt;", ">")
     |> String.replace("&quot;", "\"")
@@ -959,7 +1103,7 @@ defmodule Barkpark.Content.PortableText do
   defp wrap(key, acc, defs) when is_binary(key) do
     case defs[key] do
       %{"_type" => "link", "href" => href} when is_binary(href) ->
-        ~s(<a href="#{escape(href)}">#{acc}</a>)
+        ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>)
 
       %{"_type" => "linkAnnotation"} = def ->
         case link_def_href(def) do
