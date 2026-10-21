@@ -2182,8 +2182,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # standard/1024 and paints a scrim over live prose (D175/D187).
   defp clear_secondary_on_doc_change(socket, true), do: socket
 
-  defp clear_secondary_on_doc_change(socket, false),
-    do: assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)
+  # A view's list belongs to the document it was read for, so another
+  # document opens on its form, not on the last document's list.
+  defp clear_secondary_on_doc_change(socket, false) do
+    socket
+    |> assign(secondary_doc: nil, secondary_schema: nil, secondary_type: nil)
+    |> assign(BarkparkWeb.Studio.StudioLive.Handlers.Views.closed())
+  end
 
   @doc false
   def setup_sheet_view(socket, %{} = doc) do

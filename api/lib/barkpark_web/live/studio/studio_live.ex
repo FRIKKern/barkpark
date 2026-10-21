@@ -456,6 +456,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("select", params, socket), do: Scope.select(params, socket)
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)
+  def handle_event("view-more", _params, socket), do: Views.more(socket)
   def handle_event("select-desk", params, socket), do: Scope.select_desk(params, socket)
   def handle_event("switch-workspace", params, socket), do: Scope.switch_workspace(params, socket)
   def handle_event("switch-project", params, socket), do: Scope.switch_project(params, socket)

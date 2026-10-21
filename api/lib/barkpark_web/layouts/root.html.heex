@@ -911,11 +911,6 @@
       border-color: var(--border); font-weight: 500;
     }
     .bp-view-list { display: flex; flex-direction: column; }
-    .bp-view-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      padding: 8px 12px; text-decoration: none;
-      border-bottom: 1px solid var(--border-muted);
-    }
 
     .bp-tab-bar {
       display: flex; gap: 2px; padding: 0 0 12px 0;
@@ -4112,6 +4107,8 @@
       display: flex; align-items: center; gap: 8px;
     }
     .bp-doc-row-body:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+    /* A document view's related row links by URL: the same body as an <a>. */
+    a.bp-doc-row-body { text-decoration: none; }
     /* Blockified as a flex item of .bp-doc-row-body, so it survives the
        <div> → <span> conversion the button's phrasing-content rule forced. */
     .pane-doc-main { flex: 1; min-width: 0; }
