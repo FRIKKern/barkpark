@@ -31,22 +31,36 @@ name: windows-smoke
 # answer. An in-process PATH export that dies with the process is precisely the
 # bug class D19 named; this is the Windows mirror of that clean-shell assert.
 #
-# ADVISORY BY CONSTRUCTION. It is paths-filtered to install-cli.ps1 + this file,
+# The same existing Windows check also executes setup-windows.test.ps1 under
+# Windows PowerShell 5.1 and PowerShell 7. These fixture checks refuse incomplete
+# or stale runtimes and verify the launcher keeps the inherited dump bound.
+# They do not install dependencies, start Phoenix, or modify a database.
+#
+# ADVISORY BY CONSTRUCTION. It is paths-filtered to the installer, native setup,
+# its regression harness, runtime declarations, and this file,
 # so it can never auto-join the generated required-check set (that set is
 # derived from unfiltered jobs; check-deployyml-filters.sh scans only deploy.yml
 # — no collision), and .github/required-checks.json is deliberately left
 # untouched. Windows CI runners are minutes-expensive; there is no reason to run
-# them on a diff that cannot change installer behavior.
+# them on a diff that cannot change installer or native setup behavior.
 
 on:
   push:
     branches: [main]
     paths:
       - "scripts/install-cli.ps1"
+      - "scripts/setup-windows.ps1"
+      - "scripts/setup-windows.test.ps1"
+      - ".tool-versions"
+      - "api/mix.exs"
       - ".github/workflows/windows-smoke.yml"
   pull_request:
     paths:
       - "scripts/install-cli.ps1"
+      - "scripts/setup-windows.ps1"
+      - "scripts/setup-windows.test.ps1"
+      - ".tool-versions"
+      - "api/mix.exs"
       - ".github/workflows/windows-smoke.yml"
 
 concurrency:
@@ -59,6 +73,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+
+      - name: Native setup guards on Windows PowerShell 5.1
+        shell: powershell
+        run: ./scripts/setup-windows.test.ps1
+
+      - name: Native setup guards on PowerShell 7
+        shell: pwsh
+        run: ./scripts/setup-windows.test.ps1
 
       # Parse the installer before running it: a syntax error should name
       # itself here, not surface as a confusing mid-install failure.
