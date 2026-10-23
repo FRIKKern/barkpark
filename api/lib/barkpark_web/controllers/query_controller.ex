@@ -388,7 +388,8 @@ defmodule BarkparkWeb.QueryController do
               limit: limit,
               offset: offset,
               order: order,
-              collation: collation
+              collation: collation,
+              content_keys: content_keys(params, expand_spec, type, conn)
             ] ++ scope_opts(conn)
           )
 
@@ -2024,6 +2025,23 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_fields(_), do: nil
+
+  # The top-level content keys `project_fields/2` keeps, read in SQL alone
+  # (`Content.Query`'s `:content_keys`), or nil to read all of `content`.
+  # Render and its redaction work key by key, so the kept keys come out as
+  # they would from the whole document; `title` is read because render falls
+  # back to it. A paper promotes its blocks from other keys, and an expansion
+  # or a source map reads the documents as loaded, so those read everything.
+  defp content_keys(params, [], type, conn) when type != "paper" do
+    with fields when is_list(fields) <- parse_fields(params["fields"]),
+         false <- source_map_requested?(conn, params) do
+      Enum.uniq(["title" | Enum.map(fields, &(&1 |> String.split(".") |> hd()))])
+    else
+      _ -> nil
+    end
+  end
+
+  defp content_keys(_params, _expand_spec, _type, _conn), do: nil
 
   # Keep each rendered doc's system keys (`_id`, `_type`, `_rev`, …) plus the
   # selected content fields; drop the rest. nil/empty → no projection (pass through).

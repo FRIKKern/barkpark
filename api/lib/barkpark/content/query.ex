@@ -55,6 +55,9 @@ defmodule Barkpark.Content.Query do
                         `:created_at_desc`, `:created_at_asc`
     - `:collation`    — `nil` (default: the database collation) or one of
                         `order_collations/0`; applies to text field order terms
+    - `:content_keys` — `nil` (default: all of `content`) or the top-level
+                        content keys to read; each document's `content` then
+                        holds only those of them it has
 
   The `:drafts` perspective merges draft/published pairs at SQL level via
   `DISTINCT ON`, so `limit` and `offset` are applied after the merge.
@@ -131,12 +134,34 @@ defmodule Barkpark.Content.Query do
     offset = opts |> Keyword.get(:offset, 0) |> max(0) |> min(@max_offset)
     order = opts |> Keyword.get(:order, :updated_at_desc) |> with_collation(opts[:collation])
 
+    keys = Keyword.get(opts, :content_keys)
     base = base_query(type, dataset, filter_map, opts)
 
     case perspective do
-      :drafts -> list_with_drafts_merged(base, order, limit, offset)
-      other -> list_linear(base, other, order, limit, offset)
+      :drafts -> list_with_drafts_merged(base, order, limit, offset, keys)
+      other -> list_linear(base, other, order, limit, offset, keys)
     end
+  end
+
+  # `:content_keys` reads only the named top-level keys of `content`, from one
+  # decompressed copy of the stored value, so Postgres sends and Postgrex
+  # decodes only them. A product on the gyldendal-no catalogue holds about
+  # 6 kB of content; a page of 200 cost about 1 ms a row to read and render
+  # whatever `?fields=` kept, 0.07 ms a row for a 0.5 kB themaCode.
+  defp select_content_keys(query, nil), do: query
+
+  defp select_content_keys(query, keys) when is_list(keys) do
+    select_merge(query, [d], %{
+      content:
+        type(
+          fragment(
+            "(SELECT coalesce(jsonb_object_agg(e.key, e.value), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, jsonb_each(CASE WHEN jsonb_typeof(s.c) = 'object' THEN s.c ELSE '{}'::jsonb END) AS e WHERE e.key = ANY(?))",
+            d.content,
+            type(^keys, {:array, :string})
+          ),
+          :map
+        )
+    })
   end
 
   @doc """
@@ -748,7 +773,7 @@ defmodule Barkpark.Content.Query do
     end
   end
 
-  defp list_linear(query, perspective, order, limit, offset) do
+  defp list_linear(query, perspective, order, limit, offset, keys) do
     query
     |> apply_perspective(perspective)
     |> apply_order(order)
@@ -760,6 +785,7 @@ defmodule Barkpark.Content.Query do
     |> order_by([d], asc: d.id)
     |> limit(^limit)
     |> offset(^offset)
+    |> select_content_keys(keys)
     |> Repo.all()
   end
 
@@ -778,7 +804,7 @@ defmodule Barkpark.Content.Query do
   # picks its ids, and the same statement reads the full rows of those ids
   # alone and orders them by the same keys. One statement, so the ids and the
   # rows come from one snapshot.
-  defp list_with_drafts_merged(query, order, limit, offset) do
+  defp list_with_drafts_merged(query, order, limit, offset, keys) do
     inner =
       from(d in query,
         distinct: fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
@@ -804,6 +830,7 @@ defmodule Barkpark.Content.Query do
     from(d in Document, where: d.id in subquery(page_ids))
     |> apply_order(order)
     |> order_by([d], asc: d.id)
+    |> select_content_keys(keys)
     |> Repo.all()
   end
 
