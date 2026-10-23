@@ -35,7 +35,7 @@
   "devDependencies": {
     "@types/node": "^22",
     "@types/pg": "^8",
-    "msw": "^2.6",
+    "msw": "^3.0",
     "prettier": "^3.9",
     "tsx": "^4.23",
     "typescript": "^5.6",
