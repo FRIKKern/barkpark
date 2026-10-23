@@ -137,7 +137,7 @@ defmodule Barkpark.Plugins.Media.Assets do
     |> where([d], d.type == ^@asset_type)
     |> scope_asset_dataset(dataset, opts)
     |> scope_asset_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
-    |> where([d], fragment("?->>? ", d.content, "mediaFileId") in ^ids)
+    |> where([d], fragment("?->>'mediaFileId'", d.content) in ^ids)
     |> Repo.all()
     |> Map.new(fn doc -> {Map.get(doc.content, "mediaFileId"), doc} end)
   end
@@ -152,7 +152,7 @@ defmodule Barkpark.Plugins.Media.Assets do
     |> where([d], d.type == ^@asset_type)
     |> scope_asset_dataset(dataset, opts)
     |> scope_asset_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
-    |> where([d], fragment("?->>? = ?", d.content, "mediaFileId", ^media_file_id))
+    |> where([d], fragment("?->>'mediaFileId' = ?", d.content, ^media_file_id))
   end
 
   @doc """
