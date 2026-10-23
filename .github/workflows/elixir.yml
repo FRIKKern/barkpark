@@ -2093,7 +2093,7 @@ jobs:
       # from a tree that has since moved.
       - name: Upload the selection (what this run actually executed)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           # Partition 1 keeps the historical name, which elixir-main-red-attribution
           # reads. The selection is computed identically in every cell. The other
@@ -2327,7 +2327,7 @@ jobs:
           cat mix-test-cell/cell.txt
       - name: Upload this partition's record
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: mix-test-cell-p${{ matrix.partition }}
           path: mix-test-cell/cell.txt

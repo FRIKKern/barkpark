@@ -639,7 +639,7 @@ jobs:
 
       - name: Upload reconciled Sobelow baseline for human review
         if: always() && steps.s3.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sobelow-baseline-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}
           path: ${{ runner.temp }}/sobelow-baseline-reconcile

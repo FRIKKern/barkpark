@@ -154,7 +154,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: engine-${{ matrix.target }}
           path: ${{ runner.temp }}/${{ steps.pack.outputs.name }}.tar.gz
@@ -270,7 +270,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       # The tarballs the boot just installed are the ones the publish job ships.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: npm-${{ matrix.target }}
           path: ${{ runner.temp }}/npm/*.tgz
@@ -279,7 +279,7 @@ jobs:
 
       - name: Keep the data folder on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: engine-boot-logs-${{ matrix.target }}
           path: |
@@ -333,7 +333,7 @@ jobs:
           node scripts/engine/build-release.mjs --add-postgres "$env:RUNNER_TEMP\engine" "$env:RUNNER_TEMP\postgres"
           Get-Content "$env:RUNNER_TEMP\engine\engine.json"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: engine-win32-x64
           path: ${{ runner.temp }}/engine
@@ -402,7 +402,7 @@ jobs:
           node npm-boot-check.mjs
 
       # The tarballs this job just installed and booted are the ones the npm job ships.
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: npm-win32-x64
           path: ${{ runner.temp }}/npm/*.tgz
@@ -411,7 +411,7 @@ jobs:
 
       - name: Keep the data folder on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: engine-boot-logs-win32-x64
           path: ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
