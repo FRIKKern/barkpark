@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "recordedAt": "2026-10-15T01:40:33.711Z",
+  "compiledRevision": "ae3be838480c7910b23b9a9568c61d16c08b23a0",
+  "fixtureRevision": "a1b7e8fda0140408b137ab23d3dcd74ee8d74b9f",
+  "productionTrees": [
+    {
+      "file": "api/lib",
+      "compiled": "24420d04084e366158ed757298e7e8470a035539",
+      "fixture": "24420d04084e366158ed757298e7e8470a035539"
+    },
+    {
+      "file": "api/config",
+      "compiled": "58e53584d8a6077e1fc473618584a10d043b6ab5",
+      "fixture": "58e53584d8a6077e1fc473618584a10d043b6ab5"
+    },
+    {
+      "file": "api/priv",
+      "compiled": "4305b16bf4340e9eaa19eff5b2abf535c13e2b44",
+      "fixture": "4305b16bf4340e9eaa19eff5b2abf535c13e2b44"
+    },
+    {
+      "file": "api/mix.exs",
+      "compiled": "82d4b5d970611251ce30a3aed8f34ef67b8e9f09",
+      "fixture": "82d4b5d970611251ce30a3aed8f34ef67b8e9f09"
+    },
+    {
+      "file": "api/mix.lock",
+      "compiled": "2d6d12426687d0d332ebc78838490f293ba3c3ef",
+      "fixture": "2d6d12426687d0d332ebc78838490f293ba3c3ef"
+    }
+  ],
+  "fixtureOnlyDifference": [
+    "api/test/barkpark/media/local_write_live.exs"
+  ],
+  "barkdownHarnessRevision": "2eaec9ce3f324c03e7adfcad7267d527807a2d54",
+  "sourcePullRequest": "https://github.com/FRIKKern/barkpark/pull/23205",
+  "task": "task-c76630810db8504a",
+  "nativeElapsedMs": 153903,
+  "buildElapsedMs": 183522,
+  "tests": {
+    "ownerAndAdjacent": 63,
+    "furtherReleaseCases": 6,
+    "checkpoints": 16
+  },
+  "privateRootsRetained": true,
+  "rawProcessBytes": "Private from run305 onward; published logs use whole-log UTF-8 decoding and redaction. Earlier captured logs remain as captured.",
+  "limitations": [
+    "Not complete writer coverage or native cleanup authority",
+    "No rendition/cache/remote writer adoption or HTTP pending-delete integration",
+    "No Barkdown runtime pin/package adoption, real library, model, Mac transfer, installer, merge or deployment",
+    "New source CI and independent documentation review remain integration gates"
+  ]
+}

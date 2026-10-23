@@ -1,0 +1,4436 @@
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.1.1
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+Resolving Hex dependencies...
+Resolution completed in 0.399s
+Unchanged:
+  argon2_elixir 4.1.3
+  asn1_compiler 0.1.1
+  bandit 1.12.5
+  cbor 1.0.2
+  cloak 1.1.4
+  cloak_ecto 1.3.0
+  comeonin 5.5.1
+  corsica 2.1.3
+  cowboy 2.19.0
+  cowlib 2.20.0
+  db_connection 2.10.2
+  decimal 3.1.1
+  dns_cluster 0.2.0
+  earmark_parser 1.4.45
+  ecto 3.13.6
+  ecto_sql 3.13.5
+  elixir_make 0.9.0
+  elixlsx 0.6.0
+  eqrcode 0.2.1
+  esaml 4.6.0
+  ex_json_schema 0.11.5
+  expo 1.1.1
+  finch 0.23.0
+  gen_smtp 1.3.0
+  gettext 1.0.2
+  hpax 1.1.0
+  idna 7.1.0
+  jason 1.4.5
+  jose 1.11.12
+  mime 2.0.7
+  mint 1.10.2
+  nimble_options 1.1.1
+  nimble_pool 1.1.0
+  nimble_totp 1.0.0
+  oban 2.21.1
+  phoenix 1.8.9
+  phoenix_ecto 4.7.0
+  phoenix_html 4.3.0
+  phoenix_live_dashboard 0.8.7
+  phoenix_live_view 1.1.33
+  phoenix_pubsub 2.2.0
+  phoenix_template 1.0.4
+  plug 1.20.3
+  plug_crypto 2.2.0
+  postgrex 0.22.4
+  ranch 1.8.1
+  req 0.6.3
+  saxy 1.6.0
+  sweet_xml 0.7.5
+  swoosh 1.28.1
+  telemetry 1.4.2
+  telemetry_metrics 1.1.0
+  telemetry_metrics_prometheus_core 1.2.1
+  telemetry_poller 1.3.0
+  thousand_island 1.5.0
+  wax_ 0.7.0
+  websock 0.5.3
+  websock_adapter 0.6.0
+  x509 0.9.2
+  xlsx_reader 0.8.11
+  xml_builder 2.4.1
+All dependencies have been fetched
+==> earmark_parser
+Compiling 3 files (.erl)
+Compiling 32 files (.ex)
+Generated earmark_parser app
+==> mime
+Compiling 1 file (.ex)
+Generated mime app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> x509
+Compiling 24 files (.ex)
+     warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 371 │     <<i::unsigned-size(size)-unit(8)>> = :crypto.strong_rand_bytes(size)
+     │                        ~
+     │
+     └─ lib/x509/certificate.ex:371:24: X509.Certificate.random_serial/1
+
+Generated x509 app
+==> nimble_options
+Compiling 3 files (.ex)
+Generated nimble_options app
+==> comeonin
+Compiling 3 files (.ex)
+Generated comeonin app
+==> plug_crypto
+Compiling 5 files (.ex)
+Generated plug_crypto app
+==> hpax
+Compiling 4 files (.ex)
+Generated hpax app
+==> mint
+Compiling 1 file (.erl)
+Compiling 20 files (.ex)
+Generated mint app
+==> xml_builder
+Compiling 4 files (.ex)
+Generated xml_builder app
+==> jose
+Compiling 113 files (.erl)
+Compiling 8 files (.ex)
+Generated jose app
+==> barkpark
+===> Analyzing applications...
+===> Compiling ranch
+===> Analyzing applications...
+===> Compiling gen_smtp
+==> asn1_compiler
+Compiling 1 file (.ex)
+    warning: :asn1ct.compile/2 is undefined (module :asn1ct is not available or is yet to be defined)
+    │
+ 74 │       :asn1ct.compile(to_charlist(input), options)
+    │               ~
+    │
+    └─ lib/mix/tasks/compile.asn1.ex:74:15: Mix.Tasks.Compile.Asn1.run/1
+
+Generated asn1_compiler app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> elixir_make
+Compiling 8 files (.ex)
+    warning: unused require Logger
+    │
+  6 │   require Logger
+    │   ~
+    │
+    └─ lib/elixir_make/precompiler.ex:6:3
+
+    warning: unused require Logger
+    │
+ 16 │   require Logger
+    │   ~
+    │
+    └─ lib/mix/tasks/elixir_make.precompile.ex:16:3
+
+    warning: unused require Logger
+    │
+  4 │   require Logger
+    │   ~
+    │
+    └─ lib/elixir_make/artefact.ex:4:3
+
+Generated elixir_make app
+==> argon2_elixir
+
+Microsoft (R) Program Maintenance Utility Version 14.50.35721.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+	del /Q /F priv
+	erl -noshell -eval "io:format(\"ERTS_INCLUDE_PATH=~ts/erts-~ts/include/\", [code:root_dir(), erlang:system_info(version)])." -s init stop > Makefile.auto.win
+	nmake /                   /F Makefile.win priv\argon2_nif.dll
+
+Microsoft (R) Program Maintenance Utility Version 14.50.35721.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+	if NOT EXIST "priv" mkdir "priv"
+	cl /O2 /EHsc /I"argon2\include" /I"argon2\src" /I"c:/Users/Frikk/scoop/apps/erlang/current/erts-16.4/include/" /LD /MD /Fepriv\argon2_nif.dll argon2\src\argon2.c argon2\src\core.c argon2\src\blake2\blake2b.c argon2\src\thread.c argon2\src\encoding.c argon2\src\ref.c c_src\argon2_nif.c
+Microsoft (R) C/C++ Optimizing Compiler Version 19.50.35721 for x64
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+argon2.c
+core.c
+blake2b.c
+thread.c
+encoding.c
+ref.c
+argon2_nif.c
+Generating Code...
+Microsoft (R) Incremental Linker Version 14.50.35721.0
+Copyright (C) Microsoft Corporation.  All rights reserved.
+
+/dll
+/implib:priv\argon2_nif.lib
+/out:priv\argon2_nif.dll
+argon2.obj
+core.obj
+blake2b.obj
+thread.obj
+encoding.obj
+ref.obj
+argon2_nif.obj
+   Creating library priv\argon2_nif.lib and object priv\argon2_nif.exp
+Compiling 3 files (.ex)
+Generated argon2_elixir app
+==> barkpark
+===> Analyzing applications...
+===> Compiling cowlib
+==> saxy
+Compiling 19 files (.ex)
+Generated saxy app
+==> decimal
+Compiling 4 files (.ex)
+Generated decimal app
+==> jason
+Compiling 10 files (.ex)
+Generated jason app
+==> xlsx_reader
+Compiling 18 files (.ex)
+Generated xlsx_reader app
+==> nimble_totp
+Compiling 1 file (.ex)
+     warning: the variable "offset" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 194 │     <<_::size(offset)-binary, p::4-binary, _::binary>> = hmac
+     │               ~
+     │
+     └─ lib/nimble_totp.ex:194:15: NimbleTOTP.hmac_truncate/1
+
+Generated nimble_totp app
+==> ex_json_schema
+Compiling 40 files (.ex)
+Generated ex_json_schema app
+==> barkpark
+===> Analyzing applications...
+===> Compiling idna
+===> Analyzing applications...
+===> Compiling telemetry
+==> telemetry_metrics
+Compiling 7 files (.ex)
+     warning: unused require Logger
+     │
+ 392 │   require Logger
+     │   ~
+     │
+     └─ lib/telemetry_metrics.ex:392:3
+
+Generated telemetry_metrics app
+==> barkpark
+===> Analyzing applications...
+===> Compiling telemetry_poller
+==> telemetry_metrics_prometheus_core
+Compiling 9 files (.ex)
+warning: first..last inside match is deprecated, you must always match on the step: first..last//var or first..last//_ if you want to ignore it
+  lib/core/registry.ex:87: TelemetryMetricsPrometheus.Core.Registry.validate_distribution_buckets!/1
+
+     warning: unused require Logger
+     │
+ 148 │   require Logger
+     │   ~
+     │
+     └─ lib/core.ex:148:3
+
+Generated telemetry_metrics_prometheus_core app
+==> ecto
+Compiling 56 files (.ex)
+     warning: this clause of defp field_source!/2 is never used (or it will always fail/warn when invoked)
+     │
+ 968 │   defp field_source!(nil, field) do
+     │        ~
+     │
+     └─ lib/ecto/repo/schema.ex:968:8: Ecto.Repo.Schema.field_source!/2
+
+Generated ecto app
+==> thousand_island
+Compiling 18 files (.ex)
+Generated thousand_island app
+==> db_connection
+Compiling 18 files (.ex)
+Generated db_connection app
+==> cbor
+Compiling 5 files (.ex)
+    warning: the variable "len" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 53 │     <<value::binary-size(len), new_rest::binary>> = rest
+    │                          ~
+    │
+    └─ lib/cbor/decoder.ex:53:26: CBOR.Decoder.decode_string/2
+
+    warning: the variable "len" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 63 │         <<value::binary-size(len), new_rest::binary>> = mid_rest
+    │                              ~
+    │
+    └─ lib/cbor/decoder.ex:63:30: CBOR.Decoder.decode_string_indefinite/3
+
+     warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 150 │         <<res::unsigned-integer-size(size)-unit(8)>> = bytes
+     │                                      ~
+     │
+     └─ lib/cbor/decoder.ex:150:38: CBOR.Decoder.decode_tag/2
+
+     warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 155 │         <<res::unsigned-integer-size(size)-unit(8)>> = bytes
+     │                                      ~
+     │
+     └─ lib/cbor/decoder.ex:155:38: CBOR.Decoder.decode_tag/2
+
+Generated cbor app
+==> wax_
+Compiling 3 files (.erl)
+Compiling 25 files (.ex)
+    warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 79 │     <<r::size(size)-unit(8), s::size(size)-unit(8)>> = raw
+    │               ~
+    │
+    └─ lib/wax/utils/jws.ex:79:15: Wax.Utils.JWS.new_der_encoded_sig/1
+
+    warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 79 │     <<r::size(size)-unit(8), s::size(size)-unit(8)>> = raw
+    │                                      ~
+    │
+    └─ lib/wax/utils/jws.ex:79:38: Wax.Utils.JWS.new_der_encoded_sig/1
+
+     warning: the variable "nb_bytes_n" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 114 │     <<n_int::unsigned-big-integer-size(nb_bytes_n)-unit(8)>> = n
+     │                                        ~
+     │
+     └─ lib/wax/cose_key.ex:114:40: Wax.CoseKey.to_erlang_public_key/1
+
+     warning: the variable "nb_bytes_e" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 115 │     <<e_int::unsigned-big-integer-size(nb_bytes_e)-unit(8)>> = e
+     │                                        ~
+     │
+     └─ lib/wax/cose_key.ex:115:40: Wax.CoseKey.to_erlang_public_key/1
+
+     warning: the variable "hash_length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 189 │       attested_name_hash::binary-size(hash_length)
+     │                                       ~
+     │
+     └─ lib/wax/attestation_statement_format/tpm.ex:189:39: Wax.AttestationStatementFormat.TPM.parse_cert_info/1
+
+    warning: unused require Logger
+    │
+  2 │   require Logger
+    │   ~
+    │
+    └─ lib/wax/attestation_statement_format/apple_anonymous.ex:2:3
+
+Generated wax_ app
+==> barkpark
+===> Analyzing applications...
+===> Compiling cowboy
+===> Analyzing applications...
+===> Compiling esaml
+==> phoenix_html
+Compiling 6 files (.ex)
+Generated phoenix_html app
+==> phoenix_template
+Compiling 4 files (.ex)
+     warning: the variable "prefix_size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 505 │       <<prefix::binary-size(prefix_size), ^suffix::binary>> -> prefix
+     │                             ~
+     │
+     └─ lib/phoenix/template.ex:505:29: Phoenix.Template.unsuffix/2
+
+Generated phoenix_template app
+==> expo
+Compiling 2 files (.erl)
+Compiling 22 files (.ex)
+Generated expo app
+==> gettext
+Compiling 18 files (.ex)
+     warning: this clause in cond will never match:
+
+         not is_binary(locale)
+
+     since it has type:
+
+         dynamic(false)
+
+     where "locale" was given the types:
+
+         # type: binary()
+         # from: lib/gettext.ex:806:28
+         locale
+
+         # type: binary()
+         # from: lib/gettext.ex:806:41
+         is_binary(locale)
+
+     type warning found at:
+     │
+ 808 │       not is_binary(locale) ->
+     │                             ~
+     │
+     └─ lib/gettext.ex:808:29: Gettext.put_locale!/2
+
+     warning: Kernel.ParallelCompiler.async/1 is deprecated. Use `pmap/2` instead
+     │
+ 426 │               Kernel.ParallelCompiler.async(fn ->
+     │                                       ~
+     │
+     └─ lib/gettext/compiler.ex:426:39: Gettext.Compiler.compile_po_files/3
+
+     warning: the following clause is redundant:
+
+         defp ensure_empty_msgstr!(%Expo.Message.Plural{} = message)
+
+     it has type:
+
+         dynamic(%Expo.Message.Plural{})
+
+     previous clauses have already matched on the following types:
+
+         %Expo.Message.Singular{}
+         %Expo.Message.Plural{}
+
+     │
+ 391 │   defp ensure_empty_msgstr!(%Message.Plural{} = message) do
+     │        ~
+     │
+     └─ lib/gettext/extractor.ex:391:8: Gettext.Extractor.ensure_empty_msgstr!/1
+
+Generated gettext app
+==> phoenix_pubsub
+Compiling 12 files (.ex)
+Generated phoenix_pubsub app
+==> cloak
+Compiling 14 files (.ex)
+    warning: the variable "length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 23 │       <<tlv::binary-size(length), remainder::binary>> ->
+    │                          ~
+    │
+    └─ lib/cloak/tags/decoder.ex:23:26: Cloak.Tags.Decoder.decode/1
+
+    warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 45 │     <<_value_bytes::binary-size(size), tag::binary>> = rest
+    │                                 ~
+    │
+    └─ lib/cloak/tags/decoder.ex:45:33: Cloak.Tags.Decoder.tag/1
+
+    warning: the variable "iv_length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 62 │       %{remainder: <<iv::binary-size(iv_length), ciphertag::binary-16, ciphertext::binary>>} =
+    │                                      ~
+    │
+    └─ lib/cloak/ciphers/aes_gcm.ex:62:38: Cloak.Ciphers.AES.GCM.decrypt/2
+
+    warning: the variable "iv_length" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 84 │         remainder: <<_iv::binary-size(iv_length), _ciphertag::binary-16, _ciphertext::binary>>
+    │                                       ~
+    │
+    └─ lib/cloak/ciphers/aes_gcm.ex:84:39: Cloak.Ciphers.AES.GCM.can_decrypt?/2
+
+Generated cloak app
+==> dns_cluster
+Compiling 1 file (.ex)
+     warning: comparison between distinct types found:
+
+         net_state.started != :no
+
+     given types:
+
+         dynamic(not :no) != :no
+
+     where "net_state" was given the types:
+
+         # type: dynamic()
+         # from: lib/dns_cluster.ex:207:8
+         net_state
+
+         # type: dynamic(not false and not nil)
+         # from: lib/dns_cluster.ex:207:8
+         net_state
+
+         # type: dynamic(%{..., started: term()})
+         # from: lib/dns_cluster.ex:210:25
+         net_state.started == :no
+
+         # type: dynamic(%{..., started: not :no})
+         # from: lib/dns_cluster.ex:220:25
+         net_state.started == :no
+
+     While Elixir can compare across all types, you are comparing across types which are always disjoint, and the result is either always true or always false
+
+     type warning found at:
+     │
+ 221 │           (!release? and net_state.started != :no and net_state[:name_domain] != :longnames) ->
+     │                                            ~
+     │
+     └─ lib/dns_cluster.ex:221:44: DNSCluster.warn_on_invalid_dist/0
+
+Generated dns_cluster app
+==> plug
+Compiling 1 file (.erl)
+Compiling 42 files (.ex)
+Generated plug app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> postgrex
+Compiling 70 files (.ex)
+Compiling lib/postgrex/default_types.ex (it's taking more than 10s)
+Generated postgrex app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> phoenix_ecto
+Compiling 7 files (.ex)
+Generated phoenix_ecto app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> ecto_sql
+Compiling 25 files (.ex)
+      warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+      │
+ 1983 │       <<val::size(size)>> = value
+      │                   ~
+      │
+      └─ lib/ecto/adapters/postgres/connection.ex:1983:19: Ecto.Adapters.Postgres.Connection.bitstring_literal/1
+
+     warning: unused require Ecto.Query
+     │
+ 107 │   require Ecto.Query
+     │   ~
+     │
+     └─ lib/ecto/migrator.ex:107:3
+
+     warning: unused require Ecto.Query
+     │
+ 140 │   require Ecto.Query
+     │   ~
+     │
+     └─ lib/ecto/adapters/tds.ex:140:3
+
+     warning: unused require Logger
+     │
+ 139 │   require Logger
+     │   ~
+     │
+     └─ lib/ecto/adapters/tds.ex:139:3
+
+      warning: this clause of defp validate_index_opts!/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1724 │   defp validate_index_opts!(opts), do: opts
+      │        ~
+      │
+      └─ lib/ecto/migration.ex:1724:8: Ecto.Migration.validate_index_opts!/1
+
+      warning: this clause of defp drop_reference_if_exists_expr/3 is never used (or it will always fail/warn when invoked)
+      │
+ 1881 │     defp drop_reference_if_exists_expr(_, _, _),
+      │          ~
+      │
+      └─ lib/ecto/adapters/postgres/connection.ex:1881:10: Ecto.Adapters.Postgres.Connection.drop_reference_if_exists_expr/3
+
+Generated ecto_sql app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> oban
+Compiling 65 files (.ex)
+     warning: struct MyXQL.Error is undefined (module MyXQL.Error is not available or is yet to be defined)
+     │
+ 123 │     error in [DBConnection.ConnectionError, Postgrex.Error, MyXQL.Error] ->
+     │           ~
+     │
+     └─ lib/oban/peers/database.ex:123:11: Oban.Peers.Database.handle_info/2
+
+     warning: the following conditional expression will always succeed:
+
+         is_list(keys)
+
+     because it evaluates to:
+
+         dynamic(true)
+
+     where "keys" was given the types:
+
+         # type: dynamic(not empty_list())
+         # from: lib/oban/job.ex:711:12
+         keys == []
+
+         # type: dynamic(non_empty_list(term(), term()))
+         # from: lib/oban/job.ex:714:12
+         is_list(keys)
+
+     type warning found at:
+     │
+ 717 │       not (is_list(keys) and Enum.any?(@keyable_fields, &(&1 in fields))) ->
+     │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/oban/job.ex:717: Oban.Job.validate_keys/2
+
+     warning: struct MyXQL.Error is undefined (module MyXQL.Error is not available or is yet to be defined)
+     │
+ 158 │     error in [DBConnection.ConnectionError, Postgrex.Error, MyXQL.Error] ->
+     │           ~
+     │
+     └─ lib/oban/repo.ex:158:11: Oban.Repo.transaction/4
+
+Generated oban app
+==> eqrcode
+Compiling 10 files (.ex)
+    warning: the variable "n1" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 55 │     <<_::binary-size(n1), mask::binary-size(n2), _::binary>> = @mask0
+    │                      ~
+    │
+    └─ lib/eqrcode/encode.ex:55:22: EQRCode.Encode.encode/3
+
+    warning: the variable "n2" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+    │
+ 55 │     <<_::binary-size(n1), mask::binary-size(n2), _::binary>> = @mask0
+    │                                             ~
+    │
+    └─ lib/eqrcode/encode.ex:55:45: EQRCode.Encode.encode/3
+
+Generated eqrcode app
+==> elixlsx
+Compiling 24 files (.ex)
+     warning: using single-quoted strings to represent charlists is deprecated.
+     Use ~c"" if you indeed want a charlist or use "" instead.
+     You may run "mix format --migrate" to change all single-quoted
+     strings to use the ~c sigil and fix this warning.
+     │
+ 139 │         '~4.10.0b-~2.10.0b-~2.10.0bT~2.10.0b:~2.10.0b:~2.10.0bZ',
+     │         ~
+     │
+     └─ lib/elixlsx/util.ex:139:9
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 34 │     {'docProps/app.xml', XMLTemplates.docprops_app()}
+    │      ~
+    │
+    └─ lib/elixlsx/writer.ex:34:6
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 40 │     {'docProps/core.xml', XMLTemplates.docprops_core(timestamp)}
+    │      ~
+    │
+    └─ lib/elixlsx/writer.ex:40:6
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 56 │     {'_rels/.rels', XMLTemplates.rels_dotrels()}
+    │      ~
+    │
+    └─ lib/elixlsx/writer.ex:56:6
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 70 │       {'xl/_rels/workbook.xml.rels',
+    │        ~
+    │
+    └─ lib/elixlsx/writer.ex:70:8
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 86 │     {'xl/styles.xml', XMLTemplates.make_xl_styles(wci)}
+    │      ~
+    │
+    └─ lib/elixlsx/writer.ex:86:6
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 91 │     {'xl/workbook.xml', XMLTemplates.make_workbook_xml(data, sheetCompInfos)}
+    │      ~
+    │
+    └─ lib/elixlsx/writer.ex:91:6
+
+    warning: using single-quoted strings to represent charlists is deprecated.
+    Use ~c"" if you indeed want a charlist or use "" instead.
+    You may run "mix format --migrate" to change all single-quoted
+    strings to use the ~c sigil and fix this warning.
+    │
+ 96 │     {'xl/sharedStrings.xml',
+    │      ~
+    │
+    └─ lib/elixlsx/writer.ex:96:6
+
+     warning: using single-quoted strings to represent charlists is deprecated.
+     Use ~c"" if you indeed want a charlist or use "" instead.
+     You may run "mix format --migrate" to change all single-quoted
+     strings to use the ~c sigil and fix this warning.
+     │
+ 116 │     {'[Content_Types].xml', XMLTemplates.make_contenttypes_xml(wci)}
+     │      ~
+     │
+     └─ lib/elixlsx/writer.ex:116:6
+
+     warning: using single-quoted strings to represent charlists is deprecated.
+     Use ~c"" if you indeed want a charlist or use "" instead.
+     You may run "mix format --migrate" to change all single-quoted
+     strings to use the ~c sigil and fix this warning.
+     │
+ 426 │     '<col min="#{k}" max="#{k}"#{width_attr}#{hidden_attr}#{outline_level_attr}#{collapsed_attr} />'
+     │     ~
+     │
+     └─ lib/elixlsx/xml_templates.ex:426:5
+
+Generated elixlsx app
+==> nimble_pool
+Compiling 2 files (.ex)
+Generated nimble_pool app
+==> finch
+Compiling 23 files (.ex)
+Generated finch app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> req
+Compiling 21 files (.ex)
+Generated req app
+==> websock
+Compiling 1 file (.ex)
+Generated websock app
+==> bandit
+Compiling 54 files (.ex)
+Generated bandit app
+==> swoosh
+Compiling 62 files (.ex)
+Generated swoosh app
+==> websock_adapter
+Compiling 4 files (.ex)
+Generated websock_adapter app
+==> phoenix
+Compiling 74 files (.ex)
+Generated phoenix app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> phoenix_live_view
+Compiling 49 files (.ex)
+Generated phoenix_live_view app
+warning: "xref: [exclude: ...]" in your mix.exs file is deprecated, instead use: "elixirc_options: [no_warn_undefined: ...]"
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:243: Mix.Tasks.Compile.Elixir.xref_exclude_opts/2
+  (mix 1.20.1) lib/mix/tasks/compile.elixir.ex:142: Mix.Tasks.Compile.Elixir.run/1
+  (mix 1.20.1) lib/mix/task.ex:502: anonymous fn/3 in Mix.Task.run_task/5
+  (mix 1.20.1) lib/mix/task.compiler.ex:299: Mix.Task.Compiler.run_compiler/2
+  (mix 1.20.1) lib/mix/task.compiler.ex:287: Mix.Task.Compiler.run/4
+  (mix 1.20.1) lib/mix/tasks/compile.all.ex:75: Mix.Tasks.Compile.All.do_run/2
+
+==> phoenix_live_dashboard
+Compiling 36 files (.ex)
+Generated phoenix_live_dashboard app
+==> sweet_xml
+Compiling 2 files (.ex)
+     warning: the variable "size" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 838 │       <<_::binary - size(size), h>> <> tail when h == ?\s or h == ?\n or h == ?\r or h == ?\t ->
+     │                          ~
+     │
+     └─ lib/sweet_xml.ex:838:26: SweetXml.split_last_whitespace/2
+
+     warning: a struct for SweetXpath is expected on struct update:
+
+         %SweetXpath{xpath | namespaces: [{to_charlist(prefix), to_charlist(uri)} | xpath.namespaces]}
+
+     but got type:
+
+         dynamic()
+
+     where "xpath" was given the type:
+
+         # type: dynamic()
+         # from: lib/sweet_xml.ex:245:21
+         xpath
+
+     when defining the variable "xpath", you must also pattern match on "%SweetXpath{}"
+
+     type warning found at:
+     │
+ 246 │     %SweetXpath{xpath | namespaces: [{to_charlist(prefix), to_charlist(uri)}
+     │     ~
+     │
+     └─ lib/sweet_xml.ex:246:5: SweetXml.add_namespace/3
+
+Generated sweet_xml app
+==> corsica
+Compiling 3 files (.ex)
+Generated corsica app
+==> cloak_ecto
+Compiling 23 files (.ex)
+    warning: expected a map or struct when accessing .__cloak_cursor_fields__ in expression:
+
+        schema.__cloak_cursor_fields__
+
+    where "schema" was given the type:
+
+        # type: dynamic(atom())
+        # from: lib/cloak_ecto/migrator/cursor_stream.ex:79:8
+        function_exported?(schema, :__cloak_cursor_fields__, 0)
+
+    hint: "var.field" (without parentheses) means "var" is a map() while "var.fun()" (with parentheses) means "var" is an atom()
+
+    type warning found at:
+    │
+ 80 │       schema.__cloak_cursor_fields__
+    │              ~
+    │
+    └─ lib/cloak_ecto/migrator/cursor_stream.ex:80:14: Cloak.Ecto.Migrator.CursorStream.fields_for_cursor/2
+
+Generated cloak_ecto app
+==> barkpark
+Compiling 1106 files (.ex)
+    warning: unused require Logger
+    │
+ 34 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/api_test_runner.ex:34:3
+
+    warning: unused require Logger
+    │
+ 55 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/plugins/github/merge_events.ex:55:3
+
+    warning: unused require Logger
+    │
+ 49 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/plugins/registry.ex:49:3
+
+     warning: the variable "pos" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 558 │       <<_::binary-size(pos), 0x50, 0x4B, 0x05, 0x06, _disk::little-16, _cd_disk::little-16,
+     │                        ~
+     │
+     └─ lib/barkpark/plugins/sheets/xlsx_export.ex:558:24: Barkpark.Plugins.Sheets.XlsxExport.scan_eocd/4
+
+     warning: the variable "loc" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 581 │     match?(<<_::binary-size(loc), 0x50, 0x4B, 0x06, 0x07, _::binary>>, binary)
+     │                             ~
+     │
+     └─ lib/barkpark/plugins/sheets/xlsx_export.ex:581:29: Barkpark.Plugins.Sheets.XlsxExport.zip64_locator?/2
+
+     warning: the variable "offset" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 595 │       <<_::binary-size(offset), 0x50, 0x4B, 0x01, 0x02, _::binary-size(24), fname_len::little-16,
+     │                        ~
+     │
+     └─ lib/barkpark/plugins/sheets/xlsx_export.ex:595:24: Barkpark.Plugins.Sheets.XlsxExport.walk_cdh/4
+
+     warning: the variable "offset" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 613 │     match?(<<_::binary-size(offset), 0x50, 0x4B, 0x03, 0x04, _::binary>>, binary)
+     │                             ~
+     │
+     └─ lib/barkpark/plugins/sheets/xlsx_export.ex:613:29: Barkpark.Plugins.Sheets.XlsxExport.lfh_signature?/2
+
+    warning: unused require Logger
+    │
+ 34 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/idempotency.ex:34:3
+
+    warning: unused require Logger
+    │
+ 55 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/quiz/room.ex:55:3
+
+    warning: unused require Logger
+    │
+ 65 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/sites/build_log_scrub.ex:65:3
+
+     warning: the variable "take" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 777 │       <<data::binary-size(take), rest::binary>> = state.buf
+     │                           ~
+     │
+     └─ lib/barkpark/sites/prebuilt_artifact.ex:777:27: Barkpark.Sites.PrebuiltArtifact.parse/1
+
+     warning: the variable "take" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 798 │       <<data::binary-size(take), rest::binary>> = state.buf
+     │                           ~
+     │
+     └─ lib/barkpark/sites/prebuilt_artifact.ex:798:27: Barkpark.Sites.PrebuiltArtifact.parse/1
+
+     warning: the variable "padding" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+     │
+ 831 │       <<_pad::binary-size(padding), rest::binary>> = state.buf
+     │                           ~
+     │
+     └─ lib/barkpark/sites/prebuilt_artifact.ex:831:27: Barkpark.Sites.PrebuiltArtifact.parse/1
+
+      warning: the variable "len" is accessed inside size(...) of a bitstring but it was defined outside of the match. You must precede it with the pin operator
+      │
+ 1339 │         <<record::binary-size(len), rest::binary>> = block
+      │                               ~
+      │
+      └─ lib/barkpark/sites/prebuilt_artifact.ex:1339:31: Barkpark.Sites.PrebuiltArtifact.pax_split_record/2
+
+    warning: unused require Logger
+    │
+ 29 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark/tasks/judge.ex:29:3
+
+Compiling lib/barkpark/plugins/sheets/engine.ex (it's taking more than 10s)
+Compiling lib/barkpark/groq/parser.ex (it's taking more than 10s)
+Compiling lib/barkpark/cycle_fleet.ex (it's taking more than 10s)
+    warning: unused require Logger
+    │
+ 51 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark_web/plugs/tenant_log_metadata.ex:51:3
+
+Compiling lib/barkpark/plugins/tasks/web/board_live.ex (it's taking more than 10s)
+Compiling lib/barkpark_web/gettext.ex (it's taking more than 10s)
+Compiling lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex (it's taking more than 10s)
+Compiling lib/barkpark_web/router.ex (it's taking more than 10s)
+    warning: unused require Logger
+    │
+  4 │   require Logger
+    │   ~
+    │
+    └─ lib/barkpark_web/endpoint.ex:4:3
+
+     warning: this clause of defp life_state/1 is never used (or it will always fail/warn when invoked)
+     │
+ 861 │   defp life_state(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark_web/live/studio/chat_tool_renderer.ex:861:8: BarkparkWeb.Studio.ChatToolRenderer.life_state/1
+
+      warning: this clause of defp paper_rev/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1157 │   defp paper_rev(nil), do: 0
+      │        ~
+      │
+      └─ lib/barkpark_web/live/bulldocs_live.ex:1157:8: BarkparkWeb.BulldocsLive.paper_rev/1
+
+     warning: the following conditional expression:
+
+         paper
+
+     will always evaluate to:
+
+         dynamic(%{..., workspace_id: term()})
+
+     where "paper" was given the types:
+
+         # type: dynamic(not false and not nil)
+         # from: lib/barkpark_web/live/bulldocs_live.ex:122:5
+         paper
+
+         # type: dynamic(%{..., workspace_id: term()})
+         # from: lib/barkpark_web/live/bulldocs_live.ex:128:30
+         BarkparkWeb.StudioLocale.put_owner(
+           paper_workspace || socket.assigns[:current_workspace],
+           paper.workspace_id
+         )
+
+     type warning found at:
+     │
+ 222 │     task_ws = (paper && paper.workspace_id) || reader_scope[:workspace_id]
+     │     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark_web/live/bulldocs_live.ex:222: BarkparkWeb.BulldocsLive.mount_reader/3
+
+     warning: this clause of defp engagement_object/1 is never used (or it will always fail/warn when invoked)
+     │
+ 879 │   defp engagement_object(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark_web/live/studio/chat_tool_renderer.ex:879:8: BarkparkWeb.Studio.ChatToolRenderer.engagement_object/1
+
+      warning: this clause of defp chip_glyph/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1197 │   defp chip_glyph(_), do: "●"
+      │        ~
+      │
+      └─ lib/barkpark_web/live/studio/chat_tool_renderer.ex:1197:8: BarkparkWeb.Studio.ChatToolRenderer.chip_glyph/1
+
+      warning: this clause of defp chip_kind_label/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1201 │   defp chip_kind_label(_), do: ""
+      │        ~
+      │
+      └─ lib/barkpark_web/live/studio/chat_tool_renderer.ex:1201:8: BarkparkWeb.Studio.ChatToolRenderer.chip_kind_label/1
+
+     warning: the following conditional expression will always succeed:
+
+         p.ok
+
+     because it evaluates to:
+
+         dynamic(not false)
+
+     where "p" was given the types:
+
+         # type: dynamic(%{..., ok: term()})
+         # from: lib/barkpark_web/live/studio/sheet_grid.ex:450:12
+         p.ok == false
+
+         # type: dynamic(%{..., ok: not false})
+         # from: lib/barkpark_web/live/studio/sheet_grid.ex:450:12
+         p.ok == false
+
+     type warning found at:
+     │
+ 453 │       p.ok and socket.assigns.epoch in [nil, p.epoch] and p.rev >= socket.assigns.rev ->
+     │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark_web/live/studio/sheet_grid.ex:453: BarkparkWeb.Studio.SheetGrid.update/2
+
+     warning: the right-hand side of || (shown as ... below) will never be executed:
+
+         (paper && Map.get(paper, :title)) || slug || ...
+
+     because the left-hand side always evaluates to:
+
+         dynamic(not false and not nil)
+
+     where "paper" was given the type:
+
+         # type: dynamic()
+         # from: lib/barkpark_web/live/studio/studio_live/components.ex:687:15
+         paper
+
+     where "slug" was given the type:
+
+         # type: dynamic(not false and not nil)
+         # from: lib/barkpark_web/live/studio/studio_live/components.ex:688:10
+         slug = assigns.slug_draft || (paper && Map.get(paper, :doc_id)) || ""
+
+     type warning found at:
+     │
+ 717 │     destination_title = (paper && Map.get(paper, :title)) || slug || gettext("Paper")
+     │     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark_web/live/studio/studio_live/components.ex:717: BarkparkWeb.Studio.StudioLive.Components."paper_metadata_sidebar (overridable 1)"/1
+
+      warning: this clause of defp cell_menu_style/1 is never used (or it will always fail/warn when invoked)
+      │
+ 2901 │   defp cell_menu_style(_), do: nil
+      │        ~
+      │
+      └─ lib/barkpark_web/live/studio/sheet_grid.ex:2901:8: BarkparkWeb.Studio.SheetGrid.cell_menu_style/1
+
+      warning: this clause of defp plan_title/1 is never used (or it will always fail/warn when invoked)
+      │
+ 7238 │   defp plan_title(_), do: "Proposed plan"
+      │        ~
+      │
+      └─ lib/barkpark_web/live/studio/chat_live.ex:7238:8: BarkparkWeb.Studio.ChatLive.plan_title/1
+
+      warning: the following conditional expression:
+
+          msg.doc
+
+      will always evaluate to:
+
+          dynamic(map())
+
+      where "msg" was given the types:
+
+          # type: dynamic(%{..., doc: map(), type: binary()})
+          # from: lib/barkpark_web/live/studio/chat_live.ex:2157:65
+          %{type: "task", doc: doc} = msg
+
+          # type: dynamic(%{..., doc: map(), doc_id: term(), type: binary()})
+          # from: lib/barkpark_web/live/studio/chat_live.ex:2159:8
+          id = msg.doc_id
+
+          # type: dynamic(%{..., doc: map(), type: binary()})
+          # from: lib/barkpark_web/live/studio/chat_live.ex
+          {:document_changed, %{type: "task", doc: doc} = msg}
+
+      type warning found at:
+      │
+ 2177 │       content = (msg.doc && msg.doc.content) || %{}
+      │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark_web/live/studio/chat_live.ex:2177: BarkparkWeb.Studio.ChatLive.handle_info/2
+
+     warning: this clause of defp doc_constraints/1 is never used (or it will always fail/warn when invoked)
+     │
+ 783 │   defp doc_constraints(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:783:8: BarkparkWeb.Studio.StudioLive.Components.PaperEditor.doc_constraints/1
+
+    warning: this clause of defp initial_form_state/1 is never used (or it will always fail/warn when invoked)
+    │
+ 70 │   defp initial_form_state(nil), do: %{}
+    │        ~
+    │
+    └─ lib/barkpark_web/live/studio/api_tester_live.ex:70:8: BarkparkWeb.Studio.ApiTesterLive.initial_form_state/1
+
+     warning: the following clause is redundant:
+
+         def prune_retained(%MapSet{}, _blocks)
+
+     it has type:
+
+         %MapSet{}, dynamic()
+
+     previous clauses have already matched on the following types:
+
+         %MapSet{}, term()
+         map(), empty_list() or non_empty_list(term(), term())
+
+     │
+ 375 │   def prune_retained(%MapSet{}, _blocks), do: MapSet.new()
+     │       ~
+     │
+     └─ lib/barkpark_web/live/studio/studio_live/paper_canvas.ex:375:7: BarkparkWeb.Studio.StudioLive.PaperCanvas.prune_retained/2
+
+      warning: the following clause will never match:
+
+          false ->
+
+      it is expected to match on type:
+
+          dynamic(not nil and not boolean())
+
+      type warning found at:
+      │
+ 3884 │       false -> {:error, :invalid_build_unit_ids}
+      │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark/cycle_fleet.ex:3884: Barkpark.CycleFleet.validate_build_assignment/3
+
+      warning: the following clause will never match:
+
+          false ->
+
+      it is expected to match on type:
+
+          dynamic(
+            ({:error, :invalid_build_unit_ids} and not {:ok, empty_list() or non_empty_list(term(), term())}) or
+              {:error, :build_outcome_overlap or :build_outcomes_do_not_partition_assignment}
+          )
+
+      type warning found at:
+      │
+ 4468 │       false -> {:error, :invalid_build_outcome_unit_ids}
+      │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark/cycle_fleet.ex:4468: Barkpark.CycleFleet.validate_completed_build_result/2
+
+     warning: this clause of defp corpus_truncation/1 is never used (or it will always fail/warn when invoked)
+     │
+ 158 │   defp corpus_truncation(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark_web/live/studio/graph_view.ex:158:8: BarkparkWeb.Studio.GraphView.corpus_truncation/1
+
+      warning: the following clause will never match:
+
+          {:error, reason} ->
+
+      because it attempts to match on the result of:
+
+          IO.binwrite(io, chunk)
+
+      which has type:
+
+          dynamic(not {:error, term()})
+
+      type warning found at:
+      │
+ 1540 │         {:error, reason} -> {:write_failed, reason}
+      │         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark_web/controllers/workspace_controller.ex:1540: BarkparkWeb.WorkspaceController.write_chunk/3
+
+     warning: this clause of defp with_publish/1 is never used (or it will always fail/warn when invoked)
+     │
+ 116 │   defp with_publish(can), do: can
+     │        ~
+     │
+     └─ lib/barkpark_web/controllers/token_self_controller.ex:116:8: BarkparkWeb.TokenSelfController.with_publish/1
+
+     warning: the following clause will never match:
+
+         {:error, :invalid_role} ->
+
+     because it attempts to match on the result of:
+
+         Barkpark.Scim.replace_group_members(org, updated, member_ids(members))
+
+     which has type:
+
+         dynamic(
+           ({...} and not {term(), term()}) or atom() or bitstring() or empty_list() or float() or fun() or
+             integer() or map() or non_empty_list(term(), term()) or pid() or port() or reference() or
+             {:ok, %{added: term(), removed: term(), unmatched: term()}}
+         )
+
+     type warning found at:
+     │
+ 217 │                 {:error, :invalid_role} -> Repo.rollback(:invalid_role)
+     │                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark_web/controllers/scim_groups_controller.ex:217: BarkparkWeb.ScimGroupsController.whole_resource/3
+
+     warning: the following clause will never match:
+
+         {:error, :invalid_role} ->
+
+     because it attempts to match on the result of:
+
+         Barkpark.Scim.replace_group_members(org, updated, member_ids(params["members"]))
+
+     which has type:
+
+         dynamic(
+           ({...} and not {term(), term()}) or atom() or bitstring() or empty_list() or float() or fun() or
+             integer() or map() or non_empty_list(term(), term()) or pid() or port() or reference() or
+             {:ok, %{added: term(), removed: term(), unmatched: term()}}
+         )
+
+     type warning found at:
+     │
+ 290 │                 {:error, :invalid_role} ->
+     │                 ~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark_web/controllers/scim_groups_controller.ex:290: BarkparkWeb.ScimGroupsController.do_replace/4
+
+     warning: this clause of defp scope_audit/2 is never used (or it will always fail/warn when invoked)
+     │
+ 232 │   defp scope_audit(query, _fail_closed), do: where(query, false)
+     │        ~
+     │
+     └─ lib/barkpark_web/controllers/secret_controller.ex:232:8: BarkparkWeb.SecretController.scope_audit/2
+
+     warning: this clause of defp checklist_field?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 656 │   defp checklist_field?(_), do: false
+     │        ~
+     │
+     └─ lib/barkpark_web/components/fields/array_field.ex:656:8: BarkparkWeb.Components.Fields.ArrayField.checklist_field?/1
+
+     warning: this clause of defp error_summary/3 is never used (or it will always fail/warn when invoked)
+     │
+ 598 │   defp error_summary(nil, _doc_id, _set), do: "—"
+     │        ~
+     │
+     └─ lib/barkpark/plugins/onixedit/web/bokbasen_live.ex:598:8: Barkpark.Plugins.OnixEdit.Web.BokbasenLive.error_summary/3
+
+     warning: this clause of defp changelog_present?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 292 │   defp changelog_present?(_), do: false
+     │        ~
+     │
+     └─ lib/barkpark_web/components/studio_components/nav.ex:292:8: BarkparkWeb.StudioComponents.Nav.changelog_present?/1
+
+     warning: this clause of defp audit_label/3 is never used (or it will always fail/warn when invoked)
+     │
+ 559 │   defp audit_label(label, _email, _user_id), do: label
+     │        ~
+     │
+     └─ lib/barkpark_web/controllers/app_token_controller.ex:559:8: BarkparkWeb.AppTokenController.audit_label/3
+
+     warning: this clause of defp textarea_class/1 is never used (or it will always fail/warn when invoked)
+     │
+ 165 │   defp textarea_class(:rich), do: "bp-input bp-textarea bp-localized-rich"
+     │        ~
+     │
+     └─ lib/barkpark_web/components/fields/localized_text_field.ex:165:8: BarkparkWeb.Components.Fields.LocalizedTextField.textarea_class/1
+
+      warning: the right-hand side of || will never be executed:
+
+          String.slice(txt, st - 1, ln) || ...
+
+      because the left-hand side always evaluates to:
+
+          binary()
+
+      where "ln" was given the type:
+
+          # type: integer()
+          # from: lib/barkpark/plugins/sheets/engine.ex:3290:10
+          ln = trunc(ln)
+
+      where "st" was given the type:
+
+          # type: integer()
+          # from: lib/barkpark/plugins/sheets/engine.ex:3289:10
+          st = trunc(st)
+
+      where "txt" was given the types:
+
+          # type: binary()
+          # from: lib/barkpark/plugins/sheets/engine.ex:3286:19
+          is_binary(txt)
+
+          # type: binary()
+          # from: lib/barkpark/plugins/sheets/engine.ex:3286:34
+          txt when is_binary(txt) <- eval_text(s, ctx)
+
+      type warning found at:
+      │
+ 3291 │       if st < 1 or ln < 0, do: err(:value), else: String.slice(txt, st - 1, ln) || ""
+      │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark/plugins/sheets/engine.ex:3291: Barkpark.Plugins.Sheets.Engine.call/3
+
+     warning: this clause of defp respond_error/2 is never used (or it will always fail/warn when invoked)
+     │
+ 515 │   defp respond_error(conn, _reason), do: enveloped(conn, {:error, :storage_unavailable})
+     │        ~
+     │
+     └─ lib/barkpark/plugins/tickets/web/tickets_attachments_controller.ex:515:8: BarkparkWeb.TicketsAttachmentsController.respond_error/2
+
+      warning: incompatible types given to Map.fetch!/2:
+
+          Map.fetch!(Barkpark.Tenancy.WorkspaceBundle.Catalog.allowlist(), table)
+
+      the map:
+
+          dynamic(empty_map())
+
+      does not have all required keys:
+
+          dynamic()
+
+      therefore this function will always raise
+
+      where "table" was given the type:
+
+          # type: dynamic()
+          # from: lib/barkpark/tenancy/workspace_bundle.ex:1744:26
+          table
+
+      type warning found at:
+      │
+ 1745 │     prefix = Map.fetch!(Catalog.allowlist(), table)
+      │                  ~
+      │
+      └─ lib/barkpark/tenancy/workspace_bundle.ex:1745:18: Barkpark.Tenancy.WorkspaceBundle.tenant_scope_where/4
+
+      warning: the following clause will never match:
+
+          {:error, reason} ->
+
+      because it attempts to match on the result of:
+
+          IO.binwrite(io, rows)
+
+      which has type:
+
+          dynamic(not {:error, term()})
+
+      type warning found at:
+      │
+ 2054 │                     {:error, reason} ->
+      │                     ~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark/tenancy/workspace_bundle.ex:2054: Barkpark.Tenancy.WorkspaceBundle.run_copy_out/3
+
+     warning: the following clause will never match:
+
+         {:ok, {:scrub_fields, fields}} ->
+
+     because it attempts to match on the result of:
+
+         Map.fetch(
+           %{
+             "access_grants" => :deny,
+             "api_tokens" => :deny,
+             "audit_events" => :deny,
+             "audit_export_sinks" => :deny,
+             "authoring_exemptions" => :copy,
+             "chat_execution_events" => :deny,
+             "chat_execution_leases" => :deny,
+             "chat_runtime_usage_receipts" => :deny,
+             "content_edges" => :copy,
+             "cycle_build_plans" => :deny,
+             "cycle_correction_admissions" => :deny,
+             "cycle_correction_promotion_events" => :deny,
+             "cycle_correction_quarantines" => :deny,
+             "cycle_correction_roots" => :deny,
+             "cycle_correction_targets" => :deny,
+             "cycle_release_gate_admissions" => :deny,
+             "cycle_release_gate_captures" => :deny,
+             "cycle_release_gate_challenges" => :deny,
+             "cycle_release_gate_consumptions" => :deny,
+             "cycle_release_paper_candidates" => :deny,
+             "cycle_release_public_smokes" => :deny,
+             "cycle_waves" => :deny,
+             "data_keys" => :deny,
+             "datasets" => :copy,
+             "document_popularity" => :deny,
+             "document_view_days" => :deny,
+             "documents" => {:copy, deny_types: ["ticket"]},
+             "epic_assignment_results" => :deny,
+             "epic_assignment_runtime_attempts" => :deny,
+             "epic_assignment_tasks" => :deny,
+             "epic_assignments" => :deny,
+             "epic_benchmark_attempts" => :deny,
+             "epic_benchmark_experiments" => :deny,
+             "github_sync_conflicts" => :deny,
+             "media_files" => :copy,
+             "mutation_events" => :deny,
+             "paper_access_log" => :deny,
+             "paper_events" => :copy,
+             "plugin_doc_state" => :deny,
+             "preview_links" => :deny,
+             "preview_token_jti" => :deny,
+             "projects" => :copy,
+             "registered_chat_hosts" => :deny,
+             "revisions" => :deny,
+             "role_permissions" => :copy,
+             "roles" => :copy,
+             "scheduled_publishes" => :deny,
+             "schema_definitions" => :copy,
+             "search_intel_crystals" => :copy,
+             "search_intel_events" => :deny,
+             "search_intel_merge_patterns" => :copy,
+             "search_surface_config" => :copy,
+             "search_synonyms" => :copy,
+             "secrets" => :deny,
+             "secrets_audit" => :deny,
+             "share_links" => :deny,
+             "shares" => :deny,
+             "sync_cursors" => :deny,
+             "sync_dead_letters" => :deny,
+             "sync_push_conflicts" => :deny,
+             "sync_push_cursors" => :deny,
+             "sync_push_doc_revs" => :deny,
+             "task_edges" => :copy,
+             "token_sessions" => :deny,
+             "user_prefs" => :deny,
+             "webhook_deliveries" => :deny,
+             "webhooks" => :deny,
+             "workspace_invitations" => :deny,
+             "workspace_memberships" => :deny,
+             "workspaces" => :copy
+           },
+           table
+         )
+
+     which has type:
+
+         dynamic(
+           :error or
+             {:ok, :copy or :deny or {:copy, non_empty_list({:deny_types, non_empty_list(binary())})}}
+         )
+
+     type warning found at:
+     │
+ 849 │       {:ok, {:scrub_fields, fields}} -> {:scrub_fields, fields}
+     │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark/tenancy/workspace_bundle/catalog.ex:849: Barkpark.Tenancy.WorkspaceBundle.Catalog.dev_action/1
+
+     warning: this clause of defp resolve_dataset_id/2 is never used (or it will always fail/warn when invoked)
+     │
+ 248 │   defp resolve_dataset_id(_dataset, _opts), do: nil
+     │        ~
+     │
+     └─ lib/barkpark/media/delivery/search.ex:248:8: Barkpark.Media.Delivery.Search.resolve_dataset_id/2
+
+     warning: this clause of defp fetch_task/1 is never used (or it will always fail/warn when invoked)
+     │
+ 471 │   defp fetch_task(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark/tasks/close.ex:471:8: Barkpark.Tasks.Close.fetch_task/1
+
+      warning: this clause of defp merge_discrepancy_record/3 is never used (or it will always fail/warn when invoked)
+      │
+ 1932 │   defp merge_discrepancy_record(_content, _landed, _ts_iso), do: nil
+      │        ~
+      │
+      └─ lib/barkpark/tasks/close.ex:1932:8: Barkpark.Tasks.Close.merge_discrepancy_record/3
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.action_handlers()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.api_tests()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.checkers()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_checkers/2
+
+      warning: this clause of defp reason_phrase/2 is never used (or it will always fail/warn when invoked)
+      │
+ 1158 │   defp reason_phrase(_, _timeout), do: "the backlog scan failed"
+      │        ~
+      │
+      └─ lib/barkpark/tasks/dedup.ex:1158:8: Barkpark.Tasks.Dedup.reason_phrase/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.codelist_seeders()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.external_sync_entries()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.settings_schema()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(
+          non_empty_list(%{
+            active_when: binary(),
+            icon: binary(),
+            label: binary(),
+            order: integer(),
+            path: binary()
+          })
+        )
+        # from: lib/barkpark/plugins/tasks.ex:57
+        result = Barkpark.Plugins.Tasks.top_menu_entries()
+
+    type warning found at:
+    │
+ 57 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tasks/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tasks.ex:57: Barkpark.Plugins.Tasks.resolve_top_menu_entries/2
+
+      warning: this clause of defp code_error?/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1189 │   defp code_error?(_), do: false
+      │        ~
+      │
+      └─ lib/barkpark/tasks/dedup.ex:1189:8: Barkpark.Tasks.Dedup.code_error?/1
+
+      warning: this clause of defp type_name/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1613 │   defp type_name(%{__struct__: mod}), do: "%#{inspect(mod)}{}"
+      │        ~
+      │
+      └─ lib/barkpark/content/errors.ex:1613:8: Barkpark.Content.Errors.type_name/1
+
+      warning: this clause of defp type_name/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1620 │   defp type_name(_v), do: "term"
+      │        ~
+      │
+      └─ lib/barkpark/content/errors.ex:1620:8: Barkpark.Content.Errors.type_name/1
+
+     warning: this clause of defp send_notification/3 is never used (or it will always fail/warn when invoked)
+     │
+ 408 │   defp send_notification(port, method, params),
+     │        ~
+     │
+     └─ lib/barkpark/studio_chat/runtime/codex/session.ex:408:8: Barkpark.StudioChat.Runtime.Codex.Session.send_notification/3
+
+      warning: the right-hand side of || will never be executed:
+
+          description_source || ...
+
+      because the left-hand side always evaluates to:
+
+          binary()
+
+      where "description_source" was given the type:
+
+          # type: binary()
+          # from: lib/barkpark/portable_doc/render/compose.ex:3176:24
+          description_source = paper_links_form_text(Map.get(block, "description"))
+
+      type warning found at:
+      │
+ 3189 │       description_source: description_source || "",
+      │       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark/portable_doc/render/compose.ex:3189: Barkpark.PortableDoc.Render.Compose.paper_links_presentation/2
+
+      warning: this clause of defp cleanup_mcp/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1927 │     defp cleanup_mcp(_), do: :ok
+      │          ~
+      │
+      └─ lib/barkpark/studio_chat/provider/claude.ex:1927:10: Barkpark.StudioChat.Provider.Claude.Session.cleanup_mcp/1
+
+      warning: the following conditional expression:
+
+          is_binary(log_file)
+
+      will always evaluate to:
+
+          dynamic(true)
+
+      where "log_file" was given the type:
+
+          # type: binary()
+          # from: lib/barkpark/sites/deploy_runner.ex:3417:24
+          Barkpark.Sites.BuildLogScrub.scrub_file(log_file)
+
+      type warning found at:
+      │
+ 3419 │         if is_binary(log_file), do: BuildLogScrub.version(), else: nil
+      │         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+      │
+      └─ lib/barkpark/sites/deploy_runner.ex:3419: Barkpark.Sites.DeployRunner.scrub_recorded_log/1
+
+     warning: this clause of defp get/2 is never used (or it will always fail/warn when invoked)
+     │
+ 231 │   defp get(_, _), do: nil
+     │        ~
+     │
+     └─ lib/barkpark/portable_doc/render/panels_email.ex:231:8: Barkpark.PortableDoc.Render.PanelsEmail.get/2
+
+      warning: this clause of defp chat_plan_title/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1598 │   defp chat_plan_title(_), do: "Proposed plan"
+      │        ~
+      │
+      └─ lib/barkpark/portable_doc/render/components.ex:1598:8: Barkpark.PortableDoc.Render.Components.chat_plan_title/1
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.action_handlers()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/onixedit.ex:31
+        result = Barkpark.Plugins.OnixEdit.checkers()
+
+    type warning found at:
+    │
+ 31 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/onixedit.ex:31: Barkpark.Plugins.OnixEdit.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.api_tests()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_api_tests/2
+
+      warning: this clause of defp chat_plan_preview/1 is never used (or it will always fail/warn when invoked)
+      │
+ 1612 │   defp chat_plan_preview(_), do: ""
+      │        ~
+      │
+      └─ lib/barkpark/portable_doc/render/components.ex:1612:8: Barkpark.PortableDoc.Render.Components.chat_plan_preview/1
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/onixedit.ex:31
+        result = Barkpark.Plugins.OnixEdit.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 31 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/onixedit.ex:31: Barkpark.Plugins.OnixEdit.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.checkers()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.cli_commands()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.action_handlers()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.codelist_seeders()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.action_handlers()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.action_handlers()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.external_sync_entries()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.api_tests()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.api_tests()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.api_tests()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.checkers()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.checkers()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.checkers()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.action_handlers()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.settings_schema()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(
+          non_empty_list(
+            %{
+              args: empty_list(),
+              auth_tier: binary(),
+              batch: false,
+              default_output: binary(),
+              dry_run: false,
+              flags: empty_list(),
+              http: %{method: binary(), path_template: binary()},
+              id: binary(),
+              noun: binary(),
+              paginated: false,
+              scoped_prefix: nil,
+              summary: binary(),
+              verb: binary(),
+              writes: false
+            } or
+              %{
+                args:
+                  non_empty_list(%{name: binary(), required: true, summary: binary(), type: binary()}),
+                auth_tier: binary(),
+                batch: false,
+                default_output: binary(),
+                dry_run: false,
+                flags: empty_list(),
+                http: %{method: binary(), path_template: binary()},
+                id: binary(),
+                noun: binary(),
+                paginated: false,
+                scoped_prefix: nil,
+                summary: binary(),
+                verb: binary(),
+                writes: boolean()
+              } or
+              %{
+                args:
+                  non_empty_list(%{name: binary(), required: true, summary: binary(), type: binary()}),
+                auth_tier: binary(),
+                batch: boolean(),
+                default_output: binary(),
+                dry_run: false,
+                flags: non_empty_list(%{name: binary(), summary: binary(), type: binary()}),
+                http: %{method: binary(), path_template: binary()},
+                id: binary(),
+                noun: binary(),
+                paginated: false,
+                scoped_prefix: nil,
+                summary: binary(),
+                verb: binary(),
+                writes: true
+              }
+          )
+        )
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.cli_commands()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.action_handlers()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.codelist_seeders()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.cli_commands()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.api_tests()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/forms.ex:24
+        result = Barkpark.Plugins.Forms.top_menu_entries()
+
+    type warning found at:
+    │
+ 24 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/forms/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/forms.ex:24: Barkpark.Plugins.Forms.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.codelist_seeders()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.checkers()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.desk_items(dataset)
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.checkers()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.codelist_seeders()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.desk_items(dataset)
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.cli_commands()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.external_sync_entries()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.cli_commands()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.external_sync_entries()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(non_empty_list(%{icon: term(), items: term(), label: term(), type: :nested}))
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.desk_items(dataset)
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.api_tests()
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(non_empty_list((-> term())))
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.codelist_seeders()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.settings_schema()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.codelist_seeders()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.checkers()
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.external_sync_entries()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.desk_items(dataset)
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/bulldocs.ex:35
+        result = Barkpark.Plugins.Bulldocs.top_menu_entries()
+
+    type warning found at:
+    │
+ 35 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/bulldocs/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/bulldocs.ex:35: Barkpark.Plugins.Bulldocs.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.settings_schema()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.external_sync_entries()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.external_sync_entries()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.action_handlers()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.codelist_seeders()
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/sheets.ex:59
+        result = Barkpark.Plugins.Sheets.top_menu_entries()
+
+    type warning found at:
+    │
+ 59 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/sheets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/sheets.ex:59: Barkpark.Plugins.Sheets.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.settings_schema()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.api_tests()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.settings_schema()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(non_empty_list(%{icon: binary(), label: binary(), path: binary(), type: :link}))
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.desk_items(dataset)
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.settings_schema()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/media.ex:14
+        result = Barkpark.Plugins.Media.top_menu_entries()
+
+    type warning found at:
+    │
+ 14 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/media.ex:14: Barkpark.Plugins.Media.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.checkers()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.external_sync_entries()
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/frt.ex:45
+        result = Barkpark.Plugins.Frt.top_menu_entries()
+
+    type warning found at:
+    │
+ 45 │   use Barkpark.Plugin,
+    │   ~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/frt.ex:45: Barkpark.Plugins.Frt.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/quiz.ex:41
+        result = Barkpark.Plugins.Quiz.top_menu_entries()
+
+    type warning found at:
+    │
+ 41 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/quiz/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/quiz.ex:41: Barkpark.Plugins.Quiz.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.codelist_seeders()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.action_handlers()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.action_handlers()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.external_sync_entries()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.action_handlers()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_action_handlers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(
+          non_empty_list(
+            %{
+              group: binary(),
+              hint: binary(),
+              label: binary(),
+              masked: true,
+              name: binary(),
+              required: true,
+              type: :password
+            } or
+              %{
+                group: binary(),
+                hint: binary(),
+                label: binary(),
+                name: binary(),
+                placeholder: binary(),
+                required: true,
+                type: :string
+              } or
+              %{
+                group: binary(),
+                hint: binary(),
+                label: binary(),
+                name: binary(),
+                required: boolean(),
+                type: :string
+              }
+          )
+        )
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.settings_schema()
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.api_tests()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.api_tests()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.checkers()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.api_tests()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_api_tests/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/github.ex:70
+        result = Barkpark.Plugins.Github.top_menu_entries()
+
+    type warning found at:
+    │
+ 70 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/github/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/github.ex:70: Barkpark.Plugins.Github.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.settings_schema()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.checkers()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.cli_commands()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.checkers()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_checkers/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(
+          non_empty_list(%{
+            active_when: %Regex{source: binary(), opts: empty_list()},
+            icon: binary(),
+            label: binary(),
+            order: integer(),
+            path: binary()
+          })
+        )
+        # from: lib/barkpark/plugins/tickets.ex:55
+        result = Barkpark.Plugins.Tickets.top_menu_entries()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/tickets/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/tickets.ex:55: Barkpark.Plugins.Tickets.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.codelist_seeders()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.cli_commands()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.cli_commands()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_cli_commands/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.desk_items(dataset)
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.codelist_seeders()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.codelist_seeders()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_codelist_seeders/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.desk_items(dataset)
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.external_sync_entries()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(non_empty_list(%{icon: binary(), label: binary(), path: binary(), type: :link}))
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.desk_items(dataset)
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_desk_items/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.external_sync_entries()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_map(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: dynamic(empty_map())
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.external_sync_entries()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_external_sync_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.settings_schema()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.settings_schema()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/grip.ex:55
+        result = Barkpark.Plugins.Grip.top_menu_entries()
+
+    type warning found at:
+    │
+ 55 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/grip/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/grip.ex:55: Barkpark.Plugins.Grip.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.extract_edges(Map.get(ctx, :doc), ctx)
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_extract_edges/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/scaffy.ex:44
+        result = Barkpark.Plugins.Scaffy.top_menu_entries()
+
+    type warning found at:
+    │
+ 44 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/scaffy/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/scaffy.ex:44: Barkpark.Plugins.Scaffy.resolve_top_menu_entries/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.settings_schema()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_settings_schema/2
+
+    warning: the following conditional expression:
+
+        is_list(result)
+
+    will always evaluate to:
+
+        dynamic(true)
+
+    where "result" (context Barkpark.Plugin) was given the type:
+
+        # type: empty_list()
+        # from: lib/barkpark/plugins/pulse.ex:82
+        result = Barkpark.Plugins.Pulse.top_menu_entries()
+
+    type warning found at:
+    │
+ 82 │   use Barkpark.Plugin, manifest_path: "../../../priv/plugins/pulse/plugin.json"
+    │   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    │
+    └─ lib/barkpark/plugins/pulse.ex:82: Barkpark.Plugins.Pulse.resolve_top_menu_entries/2
+
+     warning: the following clause will never match:
+
+         {:error, reason} ->
+
+     because it attempts to match on the result of:
+
+         IO.binwrite(state.io, data)
+
+     which has type:
+
+         dynamic(not {:error, term()})
+
+     type warning found at:
+     │
+ 783 │         {:error, reason} ->
+     │         ~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark/sites/prebuilt_artifact.ex:783: Barkpark.Sites.PrebuiltArtifact.parse/1
+
+     warning: this clause of defp submission_id_of/1 is never used (or it will always fail/warn when invoked)
+     │
+ 578 │   defp submission_id_of(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark/plugins/onixedit/bokbasen/publish_worker.ex:578:8: Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker.submission_id_of/1
+
+     warning: the following conditional expression will never succeed:
+
+         state.halted
+
+     because it evaluates to:
+
+         dynamic(not true)
+
+     where "state" was given the types:
+
+         # type: dynamic(
+           %{..., buf: binary(), phase: :header} and
+             not %{..., buf: binary(), halted: true, phase: :header}
+         )
+         # from: lib/barkpark/sites/prebuilt_artifact.ex:848:13
+         state = %{state | buf: rest}
+
+         # type: dynamic(
+           %{..., buf: binary(), pax: term(), phase: :header} and
+             not %{..., buf: binary(), halted: true, phase: :header}
+         )
+         # from: lib/barkpark/sites/prebuilt_artifact.ex:851:18
+         state.pax
+
+         # type: dynamic(
+           %{..., buf: binary(), pax: false or nil, phase: :header} and
+             not %{..., buf: binary(), halted: true, phase: :header}
+         )
+         # from: lib/barkpark/sites/prebuilt_artifact.ex:851:18
+         state.pax
+
+         # type: dynamic(
+           %{..., buf: binary(), pax: false or nil, phase: :header, zero_blocks: float() or integer()} and
+             not %{..., buf: binary(), halted: true, phase: :header}
+         )
+         # from: lib/barkpark/sites/prebuilt_artifact.ex:861:43
+         state.zero_blocks + 1
+
+     type warning found at:
+     │
+ 862 │           state = %{state | zero_blocks: zero_blocks, halted: state.halted or zero_blocks >= 2}
+     │           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark/sites/prebuilt_artifact.ex:862: Barkpark.Sites.PrebuiltArtifact.parse/1
+
+      warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+          _ ->
+
+      it attempts to match on the result of:
+
+          content_of(task_doc)
+
+      which has the already matched type:
+
+          dynamic(map())
+
+      type warning found at:
+      │
+ 1274 │       _ ->
+      │         ~
+      │
+      └─ lib/barkpark/plugins/github/mirror_job.ex:1274:9: Barkpark.Plugins.Github.MirrorJob.parent_id_of/1
+
+     warning: this clause of defp walk_fields/4 is never used (or it will always fail/warn when invoked)
+     │
+ 109 │   defp walk_fields(params, _fields, _dataset, _opts), do: params
+     │        ~
+     │
+     └─ lib/barkpark/media/image_metadata.ex:109:8: Barkpark.Media.ImageMetadata.walk_fields/4
+
+     warning: this clause of defp to_string_or_nil/1 is never used (or it will always fail/warn when invoked)
+     │
+ 158 │   defp to_string_or_nil(_), do: nil
+     │        ~
+     │
+     └─ lib/barkpark/external_sync.ex:158:8: Barkpark.ExternalSync.to_string_or_nil/1
+
+     warning: this clause of defp stringify/1 is never used (or it will always fail/warn when invoked)
+     │
+ 311 │   defp stringify(other), do: other
+     │        ~
+     │
+     └─ lib/barkpark/content/validation/rules.ex:311:8: Barkpark.Content.Validation.Rules.stringify/1
+
+     warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+         error ->
+
+     it attempts to match on the result of:
+
+         do_get_schema_raw(name, dataset, opts)
+
+     which has the already matched type:
+
+         dynamic({:error, :not_found} or {:ok, not nil})
+
+     where "error" was given the type:
+
+         # type: dynamic({:error, :not_found} or {:ok, not nil})
+         # from: lib/barkpark/content/schema.ex:594:7
+         error
+
+     type warning found at:
+     │
+ 594 │       error ->
+     │             ~
+     │
+     └─ lib/barkpark/content/schema.ex:594:13: Barkpark.Content.Schema.delete_schema/3
+
+     warning: incompatible types given to Map.get/2:
+
+         Map.get(schema, :validations)
+
+     the map:
+
+         dynamic(%Barkpark.Content.SchemaDefinition{fields: term()})
+
+     does not have all required keys:
+
+         :validations
+
+     therefore this function will always return nil
+
+     where "schema" was given the types:
+
+         # type: dynamic(%Barkpark.Content.SchemaDefinition{})
+         # from: lib/barkpark/content/validation.ex:540:39
+         %Barkpark.Content.SchemaDefinition{} = schema
+
+         # type: dynamic(%Barkpark.Content.SchemaDefinition{fields: term()})
+         # from: lib/barkpark/content/validation.ex:544:26
+         schema.fields
+
+     type warning found at:
+     │
+ 545 │       "validations" => Map.get(schema, :validations) || []
+     │                            ~
+     │
+     └─ lib/barkpark/content/validation.ex:545:28: Barkpark.Content.Validation.schema_map/1
+
+     warning: this clause of defp emitted_title/2 is never used (or it will always fail/warn when invoked)
+     │
+ 196 │   defp emitted_title(column, _content), do: column
+     │        ~
+     │
+     └─ lib/barkpark/content/envelope.ex:196:8: Barkpark.Content.Envelope.emitted_title/2
+
+      warning: this clause of defp refuse_orphan_top_level_keys/1 is never used (or it will always fail/warn when invoked)
+      │
+ 2317 │   defp refuse_orphan_top_level_keys(_attrs), do: :ok
+      │        ~
+      │
+      └─ lib/barkpark/content/writer.ex:2317:8: Barkpark.Content.Writer.refuse_orphan_top_level_keys/1
+
+     warning: the right-hand side of || will never be executed:
+
+         entry.reader_behaviour || ...
+
+     because the left-hand side always evaluates to:
+
+         binary()
+
+     where "entry" was given the types:
+
+         # type: dynamic(%{
+           class: binary(),
+           error_count: integer(),
+           first_error: binary(),
+           id: binary(),
+           reader_behaviour: binary(),
+           reader_impact: binary()
+         })
+         # from: lib/barkpark/content/papers/pre_gate_register.ex:133:14
+         %{} = entry
+
+         # type: dynamic(%{
+           class: binary(),
+           error_count: integer(),
+           first_error: binary(),
+           id: binary(),
+           reader_behaviour: binary(),
+           reader_impact: binary()
+         })
+         # from: lib/barkpark/content/papers/pre_gate_register.ex:133:22
+         %{} = entry <- entry(paper_id)
+
+     type warning found at:
+     │
+ 137 │         title: entry.reader_behaviour || @label_none,
+     │         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     │
+     └─ lib/barkpark/content/papers/pre_gate_register.ex:137: Barkpark.Content.Papers.PreGateRegister.badge/2
+
+     warning: this clause of defp item_index/2 is never used (or it will always fail/warn when invoked)
+     │
+ 239 │   defp item_index(_list, {:key, _}), do: nil
+     │        ~
+     │
+     └─ lib/barkpark/content/patch_path.ex:239:8: Barkpark.Content.PatchPath.item_index/2
+
+     warning: this clause of defp bypass?/1 is never used (or it will always fail/warn when invoked)
+     │
+ 413 │   defp bypass?(_), do: false
+     │        ~
+     │
+     └─ lib/barkpark/content/dedup_wall.ex:413:8: Barkpark.Content.DedupWall.bypass?/1
+
+     warning: this clause of defp sanitize_egress_host/1 is never used (or it will always fail/warn when invoked)
+     │
+ 309 │   defp sanitize_egress_host(_), do: :skip
+     │        ~
+     │
+     └─ lib/barkpark/connectors/cloud_policy.ex:309:8: Barkpark.Connectors.CloudPolicy.sanitize_egress_host/1
+
+     warning: this clause of defp unrendered_container_paths_in/2 is never used (or it will always fail/warn when invoked)
+     │
+ 564 │   defp unrendered_container_paths_in(_block, _path), do: []
+     │        ~
+     │
+     └─ lib/barkpark/content/authoring_wall.ex:564:8: Barkpark.Content.AuthoringWall.unrendered_container_paths_in/2
+
+      warning: this clause of defp refuse_colliding_status/1 is never used (or it will always fail/warn when invoked)
+      │
+ 2379 │   defp refuse_colliding_status(_attrs), do: :ok
+      │        ~
+      │
+      └─ lib/barkpark/content/writer.ex:2379:8: Barkpark.Content.Writer.refuse_colliding_status/1
+
+     warning: this clause of defp reason_phrase/2 is never used (or it will always fail/warn when invoked)
+     │
+ 755 │   defp reason_phrase(_, _timeout), do: "the duplicate scan failed"
+     │        ~
+     │
+     └─ lib/barkpark/content/dedup_wall.ex:755:8: Barkpark.Content.DedupWall.reason_phrase/2
+
+     warning: this clause of defp redact_secret/1 is never used (or it will always fail/warn when invoked)
+     │
+ 283 │   defp redact_secret(other), do: other
+     │        ~
+     │
+     └─ lib/barkpark/api_test_runner.ex:283:8: Barkpark.ApiTestRunner.redact_secret/1
+
+    warning: the following clause cannot match because the previous clauses already matched all possible values:
+
+        window ->
+
+    it attempts to match on the result of:
+
+        idle_timeout_seconds()
+
+    which has the already matched type:
+
+        dynamic(nil)
+
+    where "window" was given the type:
+
+        # type: dynamic(nil)
+        # from: lib/barkpark/accounts/user_session.ex:92:7
+        window
+
+    type warning found at:
+    │
+ 92 │       window ->
+    │              ~
+    │
+    └─ lib/barkpark/accounts/user_session.ex:92:14: Barkpark.Accounts.UserSession.idle_expired?/2
+
+    warning: incompatible types given to DateTime.add/3:
+
+        DateTime.add(base, window, :second)
+
+    given types:
+
+        dynamic(), -dynamic(nil)-, :second
+
+    but expected one of:
+
+        #1
+        term(), integer(), :day or :hour or :minute
+
+        #2
+        (
+          %{
+            ...,
+            calendar: atom(),
+            day: term(),
+            hour: term(),
+            microsecond: {term(), term()},
+            minute: term(),
+            month: term(),
+            second: term(),
+            std_offset: term(),
+            time_zone: term(),
+            utc_offset: term(),
+            year: term()
+          },
+          integer(),
+          :microsecond or :millisecond or :nanosecond or :second or integer()
+        )
+
+    where "base" was given the type:
+
+        # type: dynamic()
+        # from: lib/barkpark/accounts/user_session.ex:93:14
+        base = last || now
+
+    where "window" was given the type:
+
+        # type: dynamic(nil)
+        # from: lib/barkpark/accounts/user_session.ex:92:7
+        window
+
+    type warning found at:
+    │
+ 94 │         DateTime.compare(now, DateTime.add(base, window, :second)) != :lt
+    │                                        ~
+    │
+    └─ lib/barkpark/accounts/user_session.ex:94:40: Barkpark.Accounts.UserSession.idle_expired?/2
+
+     warning: Image.Math.multiply/2 is undefined (module Image.Math is not available or is yet to be defined)
+     │
+ 217 │          {:ok, faded_alpha} <- Image.Math.multiply(alpha, 0.35),
+     │                                           ~
+     │
+     └─ lib/barkpark/media/image_backend/vix.ex:217:43: Barkpark.Media.ImageBackend.Vix.maybe_watermark/2
+
+Generated barkpark app
+* assembling barkpark-0.1.0 on MIX_ENV=prod
+* using config/runtime.exs to configure the release at runtime
+* creating c:/Users/Frikk/Documents/GitHub/barkdown/runtime/C109-full-current-303/releases/0.1.0/env.bat
+
+Release created at c:/Users/Frikk/Documents/GitHub/barkdown/runtime/C109-full-current-303
+
+    # To start your system
+    c:/Users/Frikk/Documents/GitHub/barkdown/runtime/C109-full-current-303/bin/barkpark start
+
+Once the release is running:
+
+    # To connect to it remotely
+    c:/Users/Frikk/Documents/GitHub/barkdown/runtime/C109-full-current-303/bin/barkpark remote
+
+    # To stop it gracefully (you may also send SIGINT/SIGTERM)
+    c:/Users/Frikk/Documents/GitHub/barkdown/runtime/C109-full-current-303/bin/barkpark stop
+
+To list all commands:
+
+    c:/Users/Frikk/Documents/GitHub/barkdown/runtime/C109-full-current-303/bin/barkpark
