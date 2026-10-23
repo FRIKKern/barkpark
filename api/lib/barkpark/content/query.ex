@@ -1135,6 +1135,7 @@ defmodule Barkpark.Content.Query do
       map
       |> resolve_reference_count_ops(type, dataset, opts)
       |> resolve_references_eq(type, dataset, opts)
+      |> resolve_reference_id_text_ops(type, dataset, opts)
 
     Enum.reduce(map, query, fn
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
@@ -1173,6 +1174,67 @@ defmodule Barkpark.Content.Query do
   end
 
   defp resolve_references_eq(map, _type, _dataset, _opts), do: map
+
+  # `contains` and `notContains` on a field THIS type's schema declares as an
+  # array of references (`arrayOf` whose members are all references, at any
+  # depth of declared object fields: `bokbasen.themaCodes`) read the
+  # references' ids, not the text of the array. Marked here, where the schema
+  # is at hand, as `{:reference_ids, text}`; the schemas are read only when
+  # such an op is asked.
+  @reference_id_text_ops ["contains", "notContains"]
+
+  defp resolve_reference_id_text_ops(map, type, dataset, opts) when is_binary(type) do
+    asked =
+      for {field, %{} = ops} <- map,
+          not Map.has_key?(@column_field_ops, field),
+          Enum.any?(@reference_id_text_ops, &is_binary(ops[&1])),
+          do: field
+
+    schema =
+      asked != [] &&
+        Enum.find(
+          Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts)),
+          &(&1.name == type)
+        )
+
+    if schema do
+      for field <- asked,
+          reference_array?(schema.fields, nested_segments(field)),
+          reduce: map do
+        acc ->
+          Map.update!(acc, field, fn ops ->
+            Map.new(ops, fn
+              {op, v} when op in @reference_id_text_ops and is_binary(v) ->
+                {op, {:reference_ids, v}}
+
+              pair ->
+                pair
+            end)
+          end)
+      end
+    else
+      map
+    end
+  end
+
+  defp resolve_reference_id_text_ops(map, _type, _dataset, _opts), do: map
+
+  defp reference_array?(fields, [name | rest]) when is_list(fields) do
+    Enum.any?(fields, fn
+      %{"name" => ^name} = f when rest == [] -> pure_reference_array?(f)
+      %{"name" => ^name, "fields" => inner} -> reference_array?(inner, rest)
+      _ -> false
+    end)
+  end
+
+  defp reference_array?(_fields, _segs), do: false
+
+  defp pure_reference_array?(%{"type" => "arrayOf", "of" => %{"type" => "reference"}}), do: true
+
+  defp pure_reference_array?(%{"type" => "arrayOf", "of" => [_ | _] = members}),
+    do: Enum.all?(members, &match?(%{"type" => "reference"}, &1))
+
+  defp pure_reference_array?(_field), do: false
 
   defp type_reference_field_names(type, dataset, opts) do
     schemas = Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts))
@@ -1580,6 +1642,10 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  # Some element of the array at the path is a reference whose id is LIKE the
+  # pattern. The field is read once, as `in` reads it.
+  @reference_id_match "EXISTS (SELECT 1 FROM (SELECT jsonb_extract_path(?, VARIADIC ?) AS v OFFSET 0) AS f, jsonb_array_elements(CASE WHEN jsonb_typeof(f.v) = 'array' THEN f.v ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' ILIKE ?)"
+
   defp apply_field_ops(query, field, ops) do
     Enum.reduce(ops, query, fn {op, value}, q ->
       apply_field_op(q, field, op, value)
@@ -1875,11 +1941,19 @@ defmodule Barkpark.Content.Query do
   # The field is read once per row: the inner `SELECT ... OFFSET 0` keeps the
   # planner from copying the extract into each use, and each copy would
   # decompress the stored `content` again.
+  #
+  # The test reads `content`, so on its own it decompressed every document of
+  # the type: `filter[bokbasen.themaCodes][in]=thema.LBB,thema.LNDC` over
+  # 18,000 products took 0.8 to 2 s warm and 6.6 s cold to keep 26. A
+  # containment test in front of it (`in_probes/2`) is one that
+  # `documents_content_path_idx` answers, so only the rows it finds are
+  # decompressed; the test above still decides.
   defp apply_field_op(query, field, "in", vs) when is_list(vs) do
     segs = nested_segments(field)
 
-    where(
-      query,
+    query
+    |> in_prefilter(in_probes(segs, vs))
+    |> where(
       [d],
       fragment(
         "EXISTS (SELECT 1 FROM (SELECT jsonb_extract_path(?, VARIADIC ?) AS v OFFSET 0) AS f WHERE CASE WHEN jsonb_typeof(f.v) = 'array' THEN EXISTS (SELECT 1 FROM jsonb_array_elements(f.v) AS e WHERE e #>> '{}' = ANY(?) OR e->>'_ref' = ANY(?)) ELSE f.v #>> '{}' = ANY(?) END)",
@@ -1908,8 +1982,38 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  # On a field the schema declares as an array of references
+  # (`resolve_reference_id_text_ops/4`), `contains` reads the references' ids:
+  # `filter[bokbasen.themaCodes][contains]=thema.LBB` keeps a product holding
+  # a reference to `thema.LBB` or `thema.LBBR`. The text of the whole array,
+  # which the clause below reads, also holds each element's `_key`, `_type`
+  # and `_weak`, so `contains=reference` matched every product.
+  #
+  # The element test reads `content`, which decompressed every product: 0.9 s
+  # warm over 18,000 to keep 42. The trigram index
+  # `documents_content_refs_trgm_idx` holds the text of every `_ref` in a
+  # document, which contains the matched id, so the ILIKE on it narrows the
+  # rows first. The index text is JSON, so a value holding a character JSON
+  # escapes (`"`, `\`, a control character) is not narrowed.
+  defp apply_field_op(query, field, "contains", {:reference_ids, v}) do
+    pattern = like_contains(v)
+
+    query
+    |> refs_text_prefilter(v, pattern)
+    |> where([d], fragment(@reference_id_match, d.content, ^nested_segments(field), ^pattern))
+  end
+
   defp apply_field_op(query, field, "contains", v),
     do: apply_ilike(query, field, like_contains(v))
+
+  # A document without the field holds no reference whose id contains the text.
+  defp apply_field_op(query, field, "notContains", {:reference_ids, v}) do
+    where(
+      query,
+      [d],
+      not fragment(@reference_id_match, d.content, ^nested_segments(field), ^like_contains(v))
+    )
+  end
 
   # `notContains` (task-aaf4d51bf8a51aec) is Sanity's `!(field match …)`: a
   # document WITHOUT the field does not contain the text, so it matches — the
@@ -2276,6 +2380,81 @@ defmodule Barkpark.Content.Query do
   # refuses loudly instead of over-returning silently.
   defp apply_field_op(_query, field, op, _value),
     do: raise(Barkpark.Content.InvalidFilterError.new(field, op))
+
+  # The rows holding a probe, looked up one probe at a time in
+  # `documents_content_path_idx`, as `Barkpark.Groq.DocumentSource` looks up
+  # long `in` lists. Never `content @> ANY(probes)` on the row: when Postgres
+  # filters rows with it instead of using the index, it decompresses
+  # `content` once per probe, and 200 ISBNs (1,200 probes) over 18,000
+  # products took 229 s instead of 0.2 s. `OFFSET 0` keeps the lookup per
+  # probe. The ids span every dataset; the rest of the query scopes them.
+  defp in_prefilter(query, []), do: query
+
+  defp in_prefilter(query, probes),
+    do:
+      where(
+        query,
+        [d],
+        fragment(
+          "? = ANY(ARRAY(SELECT x.id FROM unnest(CAST(? AS jsonb[])) AS p(probe) CROSS JOIN LATERAL (SELECT s.id FROM documents AS s WHERE s.content @> p.probe OFFSET 0) AS x))",
+          d.id,
+          type(^probes, {:array, :string})
+        )
+      )
+
+  # Containment probes for `in`, as JSON text: a document `in` keeps contains
+  # at least one of them, so they can only narrow the rows `in` tests. For
+  # each value `v`, the field may hold `v` itself, an array holding `v`, or an
+  # array holding `{"_ref": v}`. A value that parses as JSON other than a
+  # string or null (`801`, `true`, `{"a":1}`) adds the same three shapes with
+  # the parsed value, because `#>> '{}'` of a stored number or object is its
+  # JSON text. No probes, so no narrowing, when a path segment could index an
+  # array (`items.0`), which a containment probe cannot express, or when a
+  # value is not a string.
+  defp in_probes(segs, vs) do
+    if vs != [] and Enum.all?(vs, &is_binary/1) and not Enum.any?(segs, &array_index?/1) do
+      for v <- vs,
+          x <- [v | parsed_json(v)],
+          shape <- [x, [x], [%{"_ref" => x}]],
+          uniq: true,
+          do: Jason.encode!(List.foldr(segs, shape, &%{&1 => &2}))
+    else
+      []
+    end
+  end
+
+  # What `jsonb_extract_path` reads as an array position.
+  defp array_index?(seg), do: seg =~ ~r/^\s*[+-]?\d+$/
+
+  defp parsed_json(v) do
+    case Jason.decode(v) do
+      {:ok, x} when not is_binary(x) and not is_nil(x) -> [x]
+      _ -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  # The expression `documents_content_refs_trgm_idx` is built on, word for
+  # word: the `_ref` of every object at any depth (the expression of
+  # `documents_content_refs_idx`), as JSON text. A value with no run of three
+  # letters or digits gives the index no trigram to look up, so it is not
+  # narrowed either.
+  defp refs_text_prefilter(query, v, pattern) do
+    if v =~ ~r/["\\\x00-\x1f]/ or not (v =~ ~r/[[:alnum:]]{3}/u) do
+      query
+    else
+      where(
+        query,
+        [d],
+        fragment(
+          "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref')::text ILIKE ?",
+          d.content,
+          ^pattern
+        )
+      )
+    end
+  end
 
   @doc """
   Parse a `hasStrong` filter value — `"<tag>:<min_strength>"`, split at the
