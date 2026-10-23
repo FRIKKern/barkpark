@@ -10,9 +10,9 @@
     "test": "node --test --test-reporter=spec __tests__/*.test.ts"
   },
   "dependencies": {
-    "next": "16.3.8",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "next": "16.4.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
   },
   "devDependencies": {
     "@types/node": "22.15.34",
