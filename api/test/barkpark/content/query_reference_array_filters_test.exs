@@ -138,7 +138,9 @@ defmodule Barkpark.Content.QueryReferenceArrayFiltersTest do
       filter = %{"codes" => %{"in" => ["thema.LBB", "thema.LNDC"]}}
       sql = sql(ctx, filter)
 
-      assert sql =~ "CROSS JOIN LATERAL (SELECT s.id FROM documents AS s WHERE s.content @> p.probe OFFSET 0)"
+      assert sql =~
+               "CROSS JOIN LATERAL (SELECT s.id FROM documents AS s WHERE s.content @> p.probe OFFSET 0)"
+
       refute sql =~ "@> ANY"
 
       # At sandbox scale a scan is cheaper; with scans penalised the plan
@@ -191,7 +193,9 @@ defmodule Barkpark.Content.QueryReferenceArrayFiltersTest do
 
       Repo.query!("SET LOCAL enable_seqscan = off")
       plan = Repo.explain(:all, bare)
-      assert plan =~ "documents_content_refs_trgm_idx", "expected the trigram index, got:\n#{plan}"
+
+      assert plan =~ "documents_content_refs_trgm_idx",
+             "expected the trigram index, got:\n#{plan}"
     end
   end
 
