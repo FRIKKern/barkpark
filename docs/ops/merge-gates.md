@@ -377,6 +377,40 @@ this shape must record that choice and its reason where it is documented
 (`docs/contracts/canonical-impl-markers.md` is the worked example). What the rule
 forbids is advisory while read as blocking.
 
+### Barkdown editor parity
+
+`barkdown-parity.yml` has an unfiltered PR trigger. Its dispatcher runs the
+original editor/PortableDoc selection plus its workflow/helper paths. Helpers run
+from the merged checkout; explicit PR base/head SHAs keep the diff head-scoped.
+Empty diffs and explicit dispatch run the full matrix, while unknown refs or
+failed/truncated diffs fail. Public Barkdown checkout uses the standard read-only
+workflow token. A missing private-read secret cannot skip the rows.
+
+The always-running `Barkdown parity gate` requires a successful dispatcher and,
+when selected, a successful matrix job. Failed, cancelled or unknown dependencies
+fail the gate. An unrelated nonempty diff emits NOT APPLICABLE, explicitly saying
+no row ran. The matrix records both checkout commits and retains its results.
+
+The ledger holds the aggregate under S7 and its dispatcher/matrix under S6.
+The generator preserves that hold; the frozen fixture names are acknowledged.
+
+This name is **not currently required**. The watcher names it
+as PR-scoped: this workflow has no push, schedule or merge-group trigger, so its
+context is not owed on main. Revisit that classification if the triggers change.
+Branch protection and Barkdown's weekly/dispatch policy are unchanged.
+
+[Paired proof](https://github.com/FRIKKern/barkdown/pull/78) records actual20/20
+execution, two deliberate native Tab failures with aggregate red, and exact
+restoration with aggregate green. These results do not make the check required.
+Promotion still needs observed-name generation, preservation of the four-context
+floor, distinct PR path shapes and the owner's cadence/enforcement decision.
+
+<!-- doc-exec: allowlisted deps=scripts/barkdown-parity-dispatch.mjs,scripts/barkdown-parity-dispatch.test.mjs -->
+```sh
+cd "${DOC_DRIFT_REPO:-.}"
+node --test scripts/barkdown-parity-dispatch.test.mjs
+```
+
 ### The required set governs the MERGE, not main's health afterwards
 
 **These are two different properties and nothing above distinguishes them.** The
