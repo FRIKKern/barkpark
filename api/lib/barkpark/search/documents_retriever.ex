@@ -264,7 +264,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
             if(suggest?, do: :none, else: index),
             near_miss?,
             lead,
-            Keyword.get(opts, :boost)
+            Keyword.get(opts, :boost),
+            held_key(near_miss? and not suggest?, groups, index, match)
           )
           |> limit(^limit)
           |> offset(^offset)
@@ -1518,6 +1519,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   #
   #   0. the document whose id IS the query;
   #   1. the search title equal to the query (as typed or folded);
+  #   1b. on the near-miss pass only, the document that holds the words
+  #       themselves (`held_key/4`);
   #   2. the relevance score, the sum of
   #        * the full-text rank;
   #        * on the near-miss pass only, the weighted per-field similarity,
@@ -1536,7 +1539,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   #        * the weighted-tag boost, and with `boost=popularity` the view
   #          score (`boosted/2`);
   #   3. recency, then the id, so the order is total and paging is stable.
-  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost) do
+  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost, held) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token.
     positive_query =
@@ -1563,7 +1566,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
         ^(lead ++
             [
               {:desc, exact_id_key(positive_query)},
-              {:desc, exact_title_key(positive_query)},
+              {:desc, exact_title_key(positive_query)}
+            ] ++
+            held ++
+            [
               {:desc,
                boosted(
                  relevance_key(positive_query, groups, tag_terms, config, index, near_miss?),
@@ -1689,6 +1695,23 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp id_prefix_pattern(term) do
     String.replace(term, ~r/([\\%_])/, "\\\\\\1") <> "%"
+  end
+
+  # ORDER BY key #1b, the near-miss pass only. A pass widened to near misses
+  # still holds the documents that contain the words themselves, and the
+  # per-field similarity there lets a title that merely looks like the query
+  # outrank them: for "helseøkonomi" (one exact hit, so the thin-results pass
+  # widened it) "Kommuneøkonomi", "Mikroøkonomi" and 30 other look-alike titles
+  # ranked above the one book whose description says "helseøkonomi", and a
+  # caller reading the first 10 never saw it. A widened pass adds near misses
+  # after the documents that hold the words, never above them.
+  defp held_key(false, _groups, _index, _match), do: []
+
+  defp held_key(true, groups, index, match) do
+    case words_dynamic(groups, index, match) do
+      nil -> []
+      held -> [{:desc, dynamic([_d], fragment("CASE WHEN ? THEN 1 ELSE 0 END", ^held))}]
+    end
   end
 
   # ORDER BY key #0: the document whose id IS the query ranks first, so an
