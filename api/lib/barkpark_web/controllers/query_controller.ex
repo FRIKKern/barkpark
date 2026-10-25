@@ -1612,6 +1612,14 @@ defmodule BarkparkWeb.QueryController do
       match?({:error, _}, filter_map) ->
         filter_map
 
+      # The search engine reads its own filter shape; `$or` is the query
+      # route's form only (task-02d4488c460185c0).
+      is_map(filter_map) and Map.has_key?(filter_map, "$or") ->
+        {:error,
+         {:invalid_filter_clause,
+          "filter[$or] is supported on /v1/data/query, not on search; " <>
+            "repeat the filter param to AND conditions", %{field: "$or"}}}
+
       bad = invalid_filter_op(filter_map, reference_ops_allowed?(conn)) ->
         case bad do
           {:clause, message, details} -> {:error, {:invalid_filter_clause, message, details}}
@@ -1631,9 +1639,20 @@ defmodule BarkparkWeb.QueryController do
   # field is allowed. Internal/admin callers and undeclared/promoted fields pass
   # through `Envelope.field_readable?/3` unrestricted.
   defp forbidden_query_field(filter_map, order, schema, caller_context) do
-    (Map.keys(filter_map) ++ order_fields(order))
+    (filter_fields(filter_map) ++ order_fields(order))
     |> Enum.find(fn field -> not Envelope.field_readable?(schema, field, caller_context) end)
   end
+
+  # Every field a filter reads, the ones inside `$or` branches included, so a
+  # group can never filter on a field the caller cannot read.
+  defp filter_fields(%{} = filter_map) do
+    Enum.flat_map(filter_map, fn
+      {"$or", groups} when is_list(groups) -> Enum.flat_map(groups, &filter_fields/1)
+      {field, _} -> [field]
+    end)
+  end
+
+  defp filter_fields(_other), do: []
 
   defp order_fields(specs) when is_list(specs), do: Enum.flat_map(specs, &order_fields/1)
   defp order_fields({:field, field, _dir}), do: [field]
@@ -1701,11 +1720,17 @@ defmodule BarkparkWeb.QueryController do
     Enum.find_value(filter_map, fn
       # `$or`/`$and`: not fields, and this route has no boolean-group form. Checked
       # BEFORE the operator scan so the group INDEX is never reported as an operator.
+      # `$or` (task-02d4488c460185c0): a list of ordinary filter maps, each
+      # ANDed inside itself, the row matching any one. Every branch is checked
+      # here exactly as a top-level map is, and a fault names its branch.
+      {"$or", groups} ->
+        invalid_or_groups(groups, reference_ops?)
+
       {"$" <> _ = field, _value} ->
         {:clause,
-         "boolean filter groups are not supported on /v1/data/query: #{inspect(field)} " <>
-           "is read as a document field, not an operator. Repeat the filter param " <>
-           "(filter[]=a=1&filter[]=b=2) to AND conditions; there is no OR form.", %{field: field}}
+         "boolean filter group #{inspect(field)} is not supported on /v1/data/query; " <>
+           "the one group form is $or (filter[$or][0][field][op]=value). Repeat the " <>
+           "filter param (filter[]=a=1&filter[]=b=2) to AND conditions.", %{field: field}}
 
       {field, %{} = ops} ->
         cond do
@@ -1787,6 +1812,48 @@ defmodule BarkparkWeb.QueryController do
         nil
     end)
   end
+
+  @max_or_branches Content.Query.max_or_branches()
+
+  defp invalid_or_groups(groups, _reference_ops?)
+       when is_list(groups) and length(groups) > @max_or_branches do
+    {:clause,
+     "filter[$or] has #{length(groups)} branches; the limit is #{@max_or_branches}. " <>
+       "Split the query or narrow it with an ANDed filter.",
+     %{field: "$or", limit: @max_or_branches}}
+  end
+
+  defp invalid_or_groups([_ | _] = groups, reference_ops?) do
+    groups
+    |> Enum.with_index()
+    |> Enum.find_value(fn
+      {%{} = branch, i} when map_size(branch) > 0 ->
+        if Map.has_key?(branch, "$or"),
+          do: {:clause, "filter[$or][#{i}] may not hold another $or", %{field: "$or[#{i}]"}},
+          else: or_branch_fault(invalid_filter_op(branch, reference_ops?), i)
+
+      {_other, i} ->
+        {:clause, "filter[$or][#{i}] takes a filter map (field => operators), not empty",
+         %{field: "$or[#{i}]"}}
+    end)
+  end
+
+  defp invalid_or_groups(_groups, _reference_ops?) do
+    {:clause,
+     "filter[$or] takes a list of filter maps: filter[$or][0][field][op]=value&" <>
+       "filter[$or][1][field][op]=value", %{field: "$or"}}
+  end
+
+  defp or_branch_fault(nil, _i), do: nil
+
+  defp or_branch_fault({:clause, message, details}, i),
+    do: {:clause, "in filter[$or][#{i}]: " <> message, Map.put(details, :group, i)}
+
+  defp or_branch_fault({field, op}, i),
+    do:
+      {:clause,
+       "in filter[$or][#{i}]: unknown filter operator #{inspect(op)} on field #{inspect(field)}",
+       %{field: field, op: op, group: i}}
 
   # True when `ops` carries `op` with a value the op cannot bind: a list/map for
   # a scalar op (array-bracket syntax or a nested container).
@@ -2388,6 +2455,7 @@ defmodule BarkparkWeb.QueryController do
 
   defp normalize_filter_map(map) when is_map(map) do
     Enum.into(map, %{}, fn
+      {"$or", groups} -> {"$or", normalize_or_groups(groups)}
       {field, %{} = ops} -> {field, Enum.into(ops, %{}, &normalize_filter_op/1)}
       {field, value} -> {field, value}
     end)
@@ -2464,6 +2532,25 @@ defmodule BarkparkWeb.QueryController do
         "filter[field][op]=value, or a repeated filter[]=field<op>value (ANDed)",
       %{filter: inspect(other)}}}
   end
+
+  # `filter[$or][0][x][eq]=1&filter[$or][1][y][is]=null` (task-02d4488c460185c0)
+  # reaches here as `%{"0" => …, "1" => …}`: an index map, read as a list in
+  # index order. A JSON list passes through. Each branch is an ordinary filter
+  # map. Anything else is left for `invalid_filter_op/2` to name.
+  defp normalize_or_groups(%{} = indexed) do
+    if indexed != %{} and Enum.all?(Map.keys(indexed), &match?({_, ""}, Integer.parse(&1))),
+      do:
+        indexed
+        |> Enum.sort_by(fn {i, _} -> String.to_integer(i) end)
+        |> Enum.map(fn {_, branch} -> normalize_or_branch(branch) end),
+      else: indexed
+  end
+
+  defp normalize_or_groups(list) when is_list(list), do: Enum.map(list, &normalize_or_branch/1)
+  defp normalize_or_groups(other), do: other
+
+  defp normalize_or_branch(%{} = branch), do: normalize_filter_map(Map.delete(branch, "$or"))
+  defp normalize_or_branch(other), do: other
 
   # Merge one element's clauses into the accumulated filter map. See the
   # CONFLICT RULE above: differing ops on a field compose, a repeated op is a 400.

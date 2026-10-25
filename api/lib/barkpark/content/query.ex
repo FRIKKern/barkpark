@@ -1358,13 +1358,45 @@ defmodule Barkpark.Content.Query do
   """
   @spec validate_filter_map(term()) :: :ok | {:error, {term(), term()}}
   def validate_filter_map(map) when is_map(map) do
-    case Enum.find_value(map, &offending_clause/1) do
-      nil -> :ok
-      {_field, _op} = bad -> {:error, bad}
+    {groups, rest} = Map.pop(map, "$or")
+
+    with :ok <- validate_or_groups(groups) do
+      case Enum.find_value(rest, &offending_clause/1) do
+        nil -> :ok
+        {_field, _op} = bad -> {:error, bad}
+      end
     end
   end
 
   def validate_filter_map(_other), do: {:error, {nil, :not_a_map}}
+
+  # `$or` (task-02d4488c460185c0): absent, or a non-empty list of at most
+  # `@max_or_branches` non-empty filter maps with no `$or` of their own, each
+  # valid as a top-level map. Every branch is one id subquery, so the cap
+  # bounds the SQL a single request can build.
+  @max_or_branches 16
+
+  @doc "The most branches one `$or` group may hold."
+  @spec max_or_branches() :: pos_integer()
+  def max_or_branches, do: @max_or_branches
+
+  defp validate_or_groups(nil), do: :ok
+
+  defp validate_or_groups(groups) when is_list(groups) and length(groups) > @max_or_branches,
+    do: {:error, {"$or", :too_many_branches}}
+
+  defp validate_or_groups([_ | _] = groups) do
+    Enum.find_value(groups, :ok, fn
+      %{"$or" => _} -> {:error, {"$or", :nested}}
+      %{} = branch when map_size(branch) > 0 -> validate_filter_map(branch) |> or_error()
+      _ -> {:error, {"$or", :malformed}}
+    end)
+  end
+
+  defp validate_or_groups(_groups), do: {:error, {"$or", :malformed}}
+
+  defp or_error(:ok), do: nil
+  defp or_error(error), do: error
 
   @doc """
   Check a filter map for a list of `type` without reading any documents:
@@ -1380,7 +1412,11 @@ defmodule Barkpark.Content.Query do
   def check_filter(type, dataset, filter_map, opts \\ []) do
     case validate_filter_map(filter_map) do
       :ok ->
-        _ = resolve_reference_count_ops(filter_map, type, dataset, opts)
+        {groups, rest} = Map.pop(filter_map, "$or")
+
+        for map <- [rest | List.wrap(groups)],
+            do: resolve_reference_count_ops(map, type, dataset, opts)
+
         :ok
 
       {:error, {nil, :not_a_map}} ->
@@ -1420,6 +1456,9 @@ defmodule Barkpark.Content.Query do
       {:error, {field, op}} -> raise Barkpark.Content.InvalidFilterError.new(field, op)
     end
 
+    {groups, map} = Map.pop(map, "$or")
+    query = apply_or_groups(query, groups, type, dataset, opts)
+
     map =
       map
       |> resolve_reference_count_ops(type, dataset, opts)
@@ -1430,6 +1469,30 @@ defmodule Barkpark.Content.Query do
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
       {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
+  end
+
+  # `$or` (task-02d4488c460185c0): a row matches when ANY branch matches. Each
+  # branch is an ordinary filter map applied to its own id subquery of the
+  # same type and dataset, so every op keeps its one SQL arm; the outer query
+  # keeps all its scoping (workspace, owner, grants, perspective), so a group
+  # can only narrow what the caller may already read.
+  defp apply_or_groups(query, nil, _type, _dataset, _opts), do: query
+
+  defp apply_or_groups(query, groups, type, dataset, opts) do
+    condition =
+      groups
+      |> Enum.map(fn branch ->
+        Document
+        |> where([b], b.type == ^type)
+        |> scope_to_dataset(dataset, opts)
+        |> apply_filter_map(branch, type, dataset, opts)
+        |> select([b], b.id)
+      end)
+      |> Enum.reduce(dynamic(false), fn branch_ids, acc ->
+        dynamic([d], ^acc or d.id in subquery(branch_ids))
+      end)
+
+    where(query, ^condition)
   end
 
   # task-cecd2cb193365b71 — `filter[_references]=<id>` needs THIS type's own
