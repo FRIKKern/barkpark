@@ -160,7 +160,7 @@ jobs:
 
       - name: upload hermetic evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: taskboard-drive-hermetic-evidence
           path: scripts/taskboard-drive/evidence-hermetic/

@@ -191,7 +191,7 @@ jobs:
 
       - name: Upload the logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: core-without-owned-tables-${{ github.sha }}
           # The task writes present.log / absent.log / confirm_*.log under
