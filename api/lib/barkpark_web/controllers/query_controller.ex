@@ -1887,6 +1887,15 @@ defmodule BarkparkWeb.QueryController do
   defp parse_order("_createdAt:asc"), do: :created_at_asc
   defp parse_order("_createdAt:desc"), do: :created_at_desc
 
+  # `_id` (task-7432da7989196de0): the natural key for stable offset paging,
+  # as in Sanity's `order(_id asc)`. It and its column name `doc_id` sort by
+  # the `doc_id` column, never by a content key of that name.
+  defp parse_order("_id:" <> dir) when dir in ~w(asc desc),
+    do: {:field, "_id", String.to_existing_atom(dir)}
+
+  defp parse_order("doc_id:" <> dir) when dir in ~w(asc desc),
+    do: {:field, "_id", String.to_existing_atom(dir)}
+
   # View counts (task-5feac4e826cff9a5, docs/search/VIEWS.md). `popularity` is
   # the plain-word alias of `_popularity`, the decayed 30-day score.
   defp parse_order(spec) when spec in ~w(popularity:asc popularity:desc) do
@@ -1941,7 +1950,7 @@ defmodule BarkparkWeb.QueryController do
       %{
         "order" => [
           "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
-            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, _createdAt:asc|desc, " <>
+            "(dot-paths into JSONB content allowed), _id, _updatedAt or _createdAt with :asc|desc, " <>
             "or a view count: popularity, _popularity, _views7d or _views30d with :asc|desc"
         ]
       }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
