@@ -12,7 +12,7 @@ Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanit
 | `query` | GROQ text; GET query string or POST body `{"query", "params"}` |
 | `$name` | GET only: one parameter, JSON-encoded (`$slug="intro"`) |
 | `params` | POST only: object of decoded parameter values |
-| `perspective` | `published` (default for every apiVersion), `drafts` (`previewDrafts` is an alias), `raw`; other values → 400 |
+| `perspective` | `published` (default, any apiVersion), `drafts` (`previewDrafts` is an alias), `raw`; other values, or any but `raw` on v1 → 400 |
 | `returnQuery` | `false` leaves `query` out of the response |
 
 Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, a `public-read` token) gets `published` regardless. POST bills the read rate-limit bucket. A GET target over 32,753 bytes gets an empty 414; use POST.
@@ -27,7 +27,7 @@ Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax
 import {createClient} from '@sanity/client'
 
 const client = createClient({
-  projectId: 'barkpark', // any value; the client needs one to send perspective
+  projectId: 'barkpark', // any value; needed to send perspective
   dataset: 'production',
   apiHost: 'https://<host>/w/<workspace>/p/<project>',
   useProjectHostname: false,
@@ -37,7 +37,7 @@ const client = createClient({
 })
 ```
 
-`next-sanity`'s `createClient` takes the same options.
+`next-sanity`'s `createClient` takes these too.
 
 ## Sync tags
 
