@@ -191,6 +191,7 @@ defmodule BarkparkWeb.Studio.RowPressStateGuardTest do
         conn
         |> get(scoped_studio("/d/#{@dataset}/studio"))
         |> html_response(200)
+        |> BarkparkWeb.RootAssetsInline.inline()
 
       assert html =~ ~S|#studio-panes [aria-busy="true"]::after|,
              "the busy paint is not in the served sheet, so no desk press can show it"

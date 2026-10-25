@@ -178,6 +178,7 @@ import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsI
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
+import { CardKeys } from "./card-menu.js";
 // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom (`bpTaskList`).
 import { TaskList } from "./task-list-node.js";
 // article-chrome roles: the eyebrow / byline / ingress / pullquote blocks as PLAIN
@@ -349,6 +350,9 @@ import { fitBlocksToVocabulary, blocksNeedFitting, droppedNotice } from "./paste
 // a patch-block for that block (the existing prose patch path).
 import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
+// How long after compositionend ProseMirror has read the committed text (it ends the
+// composition 20 ms after the event).
+const COMPOSE_SETTLE_MS = 50;
 import { OpaqueMark } from "../opaque-mark.js";
 
 // How long a focusBlock(id) for a block that has not arrived yet stays armed.
@@ -871,6 +875,22 @@ class BpPaperCanvas extends HTMLElement {
     this._mount = document.createElement("div");
     this._mount.className = "bp-paper-editor-body";
     this.appendChild(this._mount);
+    // IME (task-39cb3d6e4709054e): where an open composition started, mapped through every
+    // transaction, so a save during a long composition leaves out only the composing run,
+    // and a committed phrase is saved at its compositionend.
+    this._compStart = null;
+    this._onCompStart = () => {
+      const sel = this._editor && this._editor.state.selection;
+      this._compStart = sel && sel.empty ? sel.from : null;
+      this._compBlockSize = sel && sel.empty ? sel.$from.parent.content.size : null;
+    };
+    this._onCompEnd = () => this._afterComposition();
+    this._mount.addEventListener("compositionstart", this._onCompStart, true);
+    this._mount.addEventListener("compositionend", this._onCompEnd, true);
+    // Leaving the page sends what is committed now, not after the debounce or the composition.
+    this._onPageHide = () => this.flushPendingChanges();
+    this._pageWindow = this.ownerDocument.defaultView;
+    this._pageWindow?.addEventListener("pagehide", this._onPageHide);
 
     // ONE Editor over the WHOLE run. Mirrors ../index.js's Editor config; the
     // KEY differences: (1) content is runToTiptap(this._blocks) — MANY top-level
@@ -1183,6 +1203,8 @@ class BpPaperCanvas extends HTMLElement {
         // ./figure-node.js.
         Figure,
         Image,
+        // A selected card's keys on a block-cards canvas (card-menu.js), ahead of all others.
+        CardKeys,
         // live-data task-list: the EDITABLE-QUERY + server-painted-ROWS atom
         // (`bpTaskList`). Registers the single node so runToTiptap's { type:"bpTaskList",
         // attrs:{query, title, config} } mounts as a widget whose ROWS paint hole
@@ -1361,6 +1383,7 @@ class BpPaperCanvas extends HTMLElement {
       // Every transaction may change what a host toolbar shows (a stored mark, a
       // block turned into a heading): bp-selection-change, one per frame at most.
       onTransaction: ({ transaction }) => {
+        if (this._compStart != null) this._compStart = transaction.mapping.map(this._compStart, -1);
         this._scheduleToolbarState();
         this._emitHistory(transaction);
       },
@@ -1416,6 +1439,14 @@ class BpPaperCanvas extends HTMLElement {
       editor: this._editor,
       host: this,
       editable: () => this._editable,
+      // Contract 1.14.0: a block-cards host gets Sanity's annotation pill, named by the
+      // annotation's schema title (Sanity's start-cased name when none: "Internal Link").
+      pill: () => this.hasAttribute("block-cards"),
+      label: (info) => {
+        const titles = (this._toolbarVocabulary() || {}).annotationTitles || {};
+        if (info.kind === "link") return titles.link || t("Link");
+        return titles.wikilink || titles.internalLink || t("Internal Link");
+      },
       resolve: (info) => (typeof this._linkPreviewSource === "function" ? this._linkPreviewSource(info) : null),
       onOpen: (detail) => {
         const ev = new CustomEvent("bp-canvas-open-link", { detail, bubbles: true, composed: true, cancelable: true });
@@ -1664,6 +1695,13 @@ class BpPaperCanvas extends HTMLElement {
       this._mount.removeEventListener("compositionend", this._composeEndEmit, true);
       this._composeEndEmit = null;
     }
+    if (this._mount && this._onCompStart) {
+      this._mount.removeEventListener("compositionstart", this._onCompStart, true);
+      this._mount.removeEventListener("compositionend", this._onCompEnd, true);
+    }
+    this._pageWindow?.removeEventListener("pagehide", this._onPageHide);
+    clearTimeout(this._compEndTimer);
+    this._compStart = null;
     if (this._handle) {
       this._handle.destroy();
       this._handle = null;
@@ -1704,9 +1742,13 @@ class BpPaperCanvas extends HTMLElement {
       node.dispatchEvent(new CustomEvent("bp-flush-node"));
     });
 
-    if (!this._debounceTimer) return false;
+    // Mid-composition, the text committed around the composing run (see _committedDoc).
+    const composing = this._compStart != null && !!this._editor.view?.composing;
+    if (!this._debounceTimer && !this._compEndTimer && !composing) return false;
     clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
+    clearTimeout(this._compEndTimer);
+    this._compEndTimer = null;
     return this._emitOps();
   }
 
@@ -1951,7 +1993,9 @@ class BpPaperCanvas extends HTMLElement {
     return Boolean(
       sourceChanged || this.querySelector(".bp-canvas-note[data-note-pending]") ||
       this._debounceTimer || this._inflightOps ||
-      this._dirtyWhileInflight
+      this._dirtyWhileInflight || this._compEndTimer ||
+      // An open composition is text the writer sees and Barkpark does not have yet.
+      (this._compStart != null && !!this._editor?.view?.composing)
     );
   }
 
@@ -2040,9 +2084,12 @@ class BpPaperCanvas extends HTMLElement {
       // picked): ProseMirror has already read the candidate text into the doc, so emitting now would
       // send the half-composed run as a patch, then the committed one as another (Barkdown row 15).
       // Hold the timer instead; compositionend re-arms it and the run lands once.
+      // Since task-39cb3d6e4709054e the text committed around it still goes: _emitOps sends the
+      // run without the composing range (or holds, when it cannot), and compositionend sends
+      // the composed text.
       if (this._editor && this._editor.view && this._editor.view.composing) {
-        this._debounceTimer = setTimeout(() => { this._debounceTimer = null; this._scheduleEmit(); }, DEBOUNCE_MS);
-        this._armComposeEndEmit();
+        this._debounceTimer = null;
+        this._emitOps();
         return;
       }
       this._debounceTimer = null;
@@ -2076,17 +2123,24 @@ class BpPaperCanvas extends HTMLElement {
   // the next dispatch is incremental even if its server echo arrives later.
   _emitOps() {
     if (!this._editor) return false;
-    // Never mid-composition (see _scheduleEmit): the doc holds the IME's candidate text.
-    if (this._editor.view && this._editor.view.composing) { this._armComposeEndEmit(); return false; }
+    // Never the half-composed run (see _scheduleEmit): mid-composition the doc holds the IME's
+    // candidate text, so the run goes without the composing range (_committedDoc), or waits
+    // for compositionend when that range cannot be told apart.
+    const composing = !!(this._editor.view && this._editor.view.composing);
+    let source = null;
+    if (composing) {
+      source = this._committedDoc();
+      if (!source) { this._armComposeEndEmit(); return false; }
+    }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
-    const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
+    const nextDoc = normalizeCanvasDoc(source ? source.toJSON() : this._editor.getJSON());
     // The fast path (task-fb938eb8be3bce48): a top-level node that is the SAME
     // ProseMirror node object it was at the last acknowledged emit is unchanged
     // since then, and when the baseline is exactly that emit's after-state its
     // block, its projection and its (empty) patch are already known. Only the
     // nodes a transaction touched are projected and diffed.
     const liveTop = [];
-    this._editor.state.doc.forEach((node) => liveTop.push(node));
+    (source || this._editor.state.doc).forEach((node) => liveTop.push(node));
     const reuse = this._emitReuse(diffBaseline);
     const reusedAt = new Map();
     const unchangedIds = new Set();
@@ -2109,6 +2163,8 @@ class BpPaperCanvas extends HTMLElement {
     // runToOps mints ids for null-id nodes. Materialize those ids in the live
     // document before another edit can diff, otherwise each cumulative diff
     // invents a different id for the same inserted paragraph.
+    // An id stamp is a transaction, and one mid-composition can break the IME: wait.
+    if (composing && this._stampMaterializedIds(stableDoc, { dryRun: true })) { this._armComposeEndEmit(); return false; }
     this._stampMaterializedIds(stableDoc);
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -2129,6 +2185,9 @@ class BpPaperCanvas extends HTMLElement {
     const aligned = (nextDoc.content || []).length === (stableDoc.content || []).length;
     const opsDoc = held.size && aligned ? { ...stableDoc, content: (stableDoc.content || []).filter((_, i) => !held.has(i)) } : stableDoc;
     const ops = this._ro(diffBaseline, opsDoc, { preserveNewIds: true, unchangedIds });
+    // Mid-composition with nothing committed to send: not "nothing to save" (bp-noop would
+    // tell the page's exit guard all is saved, with the composing run still unsent).
+    if (composing && (!ops || !ops.length)) return false;
     if (!ops || !ops.length) {
       // Nothing to save: the edits since the last batch cancelled out (typed,
       // then undone inside one debounce). Say so. The page's exit guard marked
@@ -2141,6 +2200,50 @@ class BpPaperCanvas extends HTMLElement {
     const dispatched = this._dispatchOps(ops, nextBlocks, diffBaseline);
     if (dispatched) this._rememberEmit(liveTop, nextDoc, nextBlocks, stableDoc);
     return dispatched;
+  }
+
+  // The doc to save during an IME composition: the live doc without the composing run
+  // (compositionstart's position, mapped, to the caret: plain text in one text block, and
+  // that block grown by exactly that run since compositionstart). null when the run cannot
+  // be told apart; the emit then waits for compositionend, as before.
+  _committedDoc() {
+    const { state } = this._editor;
+    if (this._compStart == null) return null;
+    const head = state.selection.head;
+    const from = Math.min(this._compStart, head);
+    const to = Math.max(this._compStart, head);
+    let $from;
+    let $to;
+    try {
+      $from = state.doc.resolve(from);
+      $to = state.doc.resolve(to);
+    } catch (_e) {
+      return null;
+    }
+    if (!$from.parent.isTextblock || $from.parent !== $to.parent) return null;
+    if ($from.parent.content.size - (to - from) !== this._compBlockSize) return null;
+    let textOnly = true;
+    state.doc.nodesBetween(from, to, (node) => { if (node.isInline && !node.isText) textOnly = false; });
+    if (!textOnly) return null;
+    return from === to ? state.doc : state.tr.delete(from, to).doc;
+  }
+
+  // A committed phrase is saved at once, not DEBOUNCE_MS later (by when a CJK writer has
+  // opened the next composition, and the debounce held again: 0 characters stored in 12.5 s
+  // of continuous typing). ProseMirror reads the committed text a moment after compositionend.
+  _afterComposition() {
+    this._compStart = null;
+    clearTimeout(this._compEndTimer);
+    this._compEndTimer = setTimeout(() => {
+      this._compEndTimer = null;
+      if (!this._editor || this._editor.isDestroyed || !this._editable || this._mode === "source") return;
+      if (this._debounceTimer) {
+        clearTimeout(this._debounceTimer);
+        this._debounceTimer = null;
+      }
+      const emitted = this._emitOps();
+      if (!emitted && !(this._editor.view && this._editor.view.composing)) this._flushPendingServerBlocks();
+    }, COMPOSE_SETTLE_MS);
   }
 
   // The fast path's memory of one emit (task-fb938eb8be3bce48): each top-level
@@ -4568,8 +4671,8 @@ class BpPaperCanvas extends HTMLElement {
   // node, including editable descendants inside section/container nodes. The
   // stable projection has the same preorder shape as the live document; text
   // nodes participate in the walk so positions cannot drift between siblings.
-  _stampMaterializedIds(stableDoc) {
-    if (!this._editor || !stableDoc) return;
+  _stampMaterializedIds(stableDoc, { dryRun = false } = {}) {
+    if (!this._editor || !stableDoc) return false;
     // Nothing to stamp unless some live node has no id, or repeats a top-level id
     // (the two cases the walk below acts on). Typing into stamped blocks has
     // neither, and flattening the whole projection per keystroke was the emit's
@@ -4588,7 +4691,7 @@ class BpPaperCanvas extends HTMLElement {
       }
       return !candidate;
     });
-    if (!candidate) return;
+    if (!candidate) return false;
     const stableNodes = [];
     const collect = (nodes) => {
       for (const node of nodes || []) {
@@ -4625,9 +4728,10 @@ class BpPaperCanvas extends HTMLElement {
         mutated = true;
       }
     });
-    if (!mutated) return;
+    if (!mutated || dryRun) return mutated;
     tr.setMeta("addToHistory", false);
     view.dispatch(tr);
+    return true;
   }
 
   // True when the editor is actively being edited and a setContent would yank the

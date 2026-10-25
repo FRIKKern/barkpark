@@ -373,8 +373,8 @@ defmodule BarkparkWeb.Studio.StyleguideLiveTest do
         |> List.flatten()
 
       assert stylesheet_links == [
-               ~s(<link rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />),
-               ~s(<link rel="stylesheet" href="/assets/bp-media-picker.css" />)
+               ~s|<link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-paper-editor-shell.css")} />|,
+               ~s|<link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-media-picker.css")} />|
              ],
              "the Studio root layout's stylesheet links are exactly the same-origin " <>
                "editor shell and media picker; an external/CDN stylesheet must not come back"

@@ -152,9 +152,94 @@ defmodule Barkpark.Content.PreviewTextTest do
                "/om-oss · other"
     end
 
-    test "a second reference on one path is not followed" do
+    test "a path follows a second reference, up to five" do
       targets = %{"a" => %{"parent" => %{"_ref" => "b"}}, "b" => %{"title" => "B"}}
-      assert PreviewText.format("parent.parent.title", %{"parent" => "a"}, &targets[&1]) == nil
+      assert PreviewText.format("parent.parent.title", %{"parent" => "a"}, &targets[&1]) == "B"
+
+      # A chain of six: the fifth target is read, the sixth reference is not.
+      chain =
+        for i <- 1..6, into: %{} do
+          {"n#{i}", %{"title" => "N#{i}", "parent" => %{"_ref" => "n#{i + 1}"}}}
+        end
+
+      root = %{"parent" => %{"_ref" => "n1"}}
+      five = Enum.join(List.duplicate("parent", 5), ".") <> ".title"
+      six = Enum.join(List.duplicate("parent", 6), ".") <> ".title"
+      assert PreviewText.format(five, root, &chain[&1]) == "N5"
+      assert PreviewText.format(six, root, &chain[&1]) == nil
+
+      # A cycle ends at the hop limit instead of looping.
+      loop = %{"x" => %{"parent" => "x", "title" => "X"}}
+      assert PreviewText.format(six, %{"parent" => "x"}, &loop[&1]) == nil
+    end
+
+    test "a breadcrumb joins the parents above the direct parent" do
+      targets = %{
+        "mid" => %{"title" => "Mid", "parent" => %{"_ref" => "top"}},
+        "top" => %{"title" => "Top"}
+      }
+
+      spec = %{"parts" => ["parent.parent.title", "parent.title"], "join" => " / "}
+
+      assert PreviewText.format(spec, %{"parent" => %{"_ref" => "mid"}}, &targets[&1]) ==
+               "Top / Mid"
+
+      assert PreviewText.format(spec, %{"parent" => %{"_ref" => "top"}}, &targets[&1]) == "Top"
+    end
+
+    test "an each item reads through a second reference" do
+      targets = %{
+        "c1" => %{"title" => "Ann", "role" => %{"_ref" => "r1"}},
+        "r1" => %{"title" => "Writer"}
+      }
+
+      spec = %{"each" => "people", "show" => "{title} ({role.title})"}
+      assert PreviewText.format(spec, %{"people" => ["c1"]}, &targets[&1]) == "Ann (Writer)"
+    end
+
+    test "ref_ids names the next depth once the first is known" do
+      targets = %{"mid" => %{"parent" => %{"_ref" => "top"}}}
+      spec = "parent.parent.title"
+      root = %{"parent" => "mid"}
+
+      assert PreviewText.ref_ids(spec, root) == ["mid"]
+      assert PreviewText.ref_ids(spec, root, &targets[&1]) == ["top"]
+
+      each = %{"each" => "people", "show" => "role.title"}
+      targets = %{"c1" => %{"role" => %{"_ref" => "r1"}}}
+      assert PreviewText.ref_ids(each, %{"people" => ["c1"]}, &targets[&1]) == ["r1"]
+    end
+
+    test "targets loads one depth per call, for every row at once" do
+      store =
+        for i <- 1..4, into: %{} do
+          {"mid#{i}", %{"title" => "Mid #{i}", "parent" => %{"_ref" => "top#{rem(i, 2)}"}}}
+        end
+        |> Map.merge(%{"top0" => %{"title" => "Top 0"}, "top1" => %{"title" => "Top 1"}})
+
+      spec = %{"parts" => ["parent.parent.title", "parent.title"], "join" => " / "}
+      rows = for i <- 1..4, do: {spec, %{"parent" => "mid#{i}"}}
+      parent = self()
+
+      found =
+        PreviewText.targets(rows, fn ids ->
+          send(parent, {:load, Enum.sort(ids)})
+          Map.take(store, ids)
+        end)
+
+      assert_received {:load, ["mid1", "mid2", "mid3", "mid4"]}
+      assert_received {:load, ["top0", "top1"]}
+      refute_received {:load, _}
+      assert PreviewText.format(spec, %{"parent" => "mid3"}, &found[&1]) == "Top 1 / Mid 3"
+
+      # A reference that loads nothing is asked for once, not once per depth.
+      assert PreviewText.targets([{spec, %{"parent" => "gone"}}], fn ids ->
+               send(parent, {:load, ids})
+               %{}
+             end) == %{}
+
+      assert_received {:load, ["gone"]}
+      refute_received {:load, _}
     end
 
     test "ref_ids names the ids a page of rows must load" do
@@ -238,6 +323,99 @@ defmodule Barkpark.Content.PreviewTextTest do
 
     assert rows["Crime"] == "Fiction"
     assert rows["Fiction"] == "Toppnivå"
+  end
+
+  test "a desk row shows the whole breadcrumb, and more rows add no reads" do
+    dataset = "#{@dataset}-crumbs"
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "shelf",
+          "title" => "Shelf",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{"name" => "parent", "title" => "Parent", "type" => "reference", "to" => ["shelf"]}
+          ],
+          "list_preview" => %{
+            "subtitle" => %{
+              "parts" => ["parent.parent.parent.title", "parent.parent.title", "parent.title"],
+              "join" => " / ",
+              "empty" => "Top level"
+            }
+          }
+        },
+        dataset
+      )
+
+    shelf = fn id, title, parent ->
+      content =
+        if parent, do: %{"parent" => %{"_ref" => parent, "_type" => "reference"}}, else: %{}
+
+      {:ok, _} =
+        Content.create_document(
+          "shelf",
+          %{"doc_id" => id, "title" => title, "content" => content},
+          dataset
+        )
+
+      {:ok, _} = Content.publish_document(id, "shelf", dataset)
+    end
+
+    shelf.("s-root", "Root", nil)
+    shelf.("s-mid", "Mid", "s-root")
+    shelf.("s-low", "Low", "s-mid")
+    for i <- 1..2, do: shelf.("s-leaf#{i}", "Leaf #{i}", "s-low")
+
+    {rows, reads_two} = count_document_reads(fn -> shelf_rows(dataset) end)
+    assert rows["Leaf 1"] == "Root / Mid / Low"
+    assert rows["Low"] == "Root / Mid"
+    assert rows["Mid"] == "Root"
+    assert rows["Root"] == "Top level"
+
+    for i <- 3..8, do: shelf.("s-leaf#{i}", "Leaf #{i}", "s-low")
+
+    {rows, reads_eight} = count_document_reads(fn -> shelf_rows(dataset) end)
+    assert rows["Leaf 8"] == "Root / Mid / Low"
+    assert reads_two > 0
+    assert reads_eight == reads_two
+  end
+
+  defp shelf_rows(dataset) do
+    {panes, _editor} = PaneBuilder.build(dataset, ["shelf"])
+    for %{type: :doc} = item <- List.last(panes).items, into: %{}, do: {item.title, item.meta}
+  end
+
+  # The Repo queries on the documents table this process runs inside `fun`.
+  defp count_document_reads(fun) do
+    test_pid = self()
+    ref = make_ref()
+    handler = {__MODULE__, ref}
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measure, meta, _config ->
+        if self() == test_pid and meta[:source] == "documents", do: send(test_pid, {ref, :read})
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, drain(ref, 0)}
+    after
+      :telemetry.detach(handler)
+    end
+  end
+
+  defp drain(ref, n) do
+    receive do
+      {^ref, :read} -> drain(ref, n + 1)
+    after
+      0 -> n
+    end
   end
 
   test "a product row shows the ONIX cover, ISBN · format and the first two contributors" do

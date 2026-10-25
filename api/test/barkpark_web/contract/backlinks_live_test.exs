@@ -245,4 +245,54 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
                })
              )
   end
+
+  # task-09a413c1d4d582d3: several ids in one request, each answered as its own read.
+  defp backlinks_many(query, token \\ "backlinks-live-token") do
+    conn = scoped_conn()
+    conn = if token, do: put_req_header(conn, "authorization", "Bearer " <> token), else: conn
+    get(conn, "/v1/data/backlinks/#{@ds}?" <> query)
+  end
+
+  test "the batch read answers each id exactly as the single read does" do
+    {:ok, _} = Content.create_document("person", %{"_id" => "other", "title" => "Other"}, @ds)
+    draft!("by-target", %{"author" => "target"})
+    draft!("by-both", %{"author" => "target", "reviewer" => "other"})
+
+    by_id =
+      backlinks_many("ids=target,other,nobody,target")
+      |> json_response(200)
+      |> get_in(["result", "byId"])
+
+    assert Map.keys(by_id) |> Enum.sort() == ["nobody", "other", "target"]
+
+    for id <- ["target", "other"] do
+      assert by_id[id] == backlinks(id), "#{id} differs from its single read"
+    end
+
+    assert by_id["target"]["count"] == 2
+    assert by_id["nobody"] == %{"backlinks" => [], "count" => 0}
+  end
+
+  test "the batch read wants 1 to 100 ids, and a token or preview" do
+    assert %{"error" => %{"code" => "validation_failed"}} =
+             backlinks_many("ids=") |> json_response(422)
+
+    assert %{"error" => %{"code" => "validation_failed"}} =
+             backlinks_many("") |> json_response(422)
+
+    many = Enum.map_join(1..101, ",", &"d#{&1}")
+
+    assert %{"error" => %{"code" => "validation_failed"}} =
+             backlinks_many("ids=" <> many) |> json_response(422)
+
+    hundred = Enum.map_join(1..100, ",", &"d#{&1}")
+
+    assert map_size(
+             backlinks_many("ids=" <> hundred)
+             |> json_response(200)
+             |> get_in(["result", "byId"])
+           ) == 100
+
+    assert backlinks_many("ids=target", nil).status == 404
+  end
 end

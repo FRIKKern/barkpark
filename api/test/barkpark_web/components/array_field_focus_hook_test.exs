@@ -55,7 +55,8 @@ defmodule BarkparkWeb.Components.ArrayFieldFocusHookTest do
 
   test "the Studio layout loads bp-array-focus.js" do
     root = File.read!("lib/barkpark_web/layouts/root.html.heex")
-    assert root =~ ~s(<script src="/assets/bp-array-focus.js"></script>)
+    # Under a content hash since task-66122189b7af6ea2 (BarkparkWeb.StaticAssets).
+    assert root =~ ~s|<script src={BarkparkWeb.StaticAssets.path("bp-array-focus.js")}></script>|
     assert File.exists?(Path.join(:code.priv_dir(:barkpark), "static/assets/bp-array-focus.js"))
   end
 end

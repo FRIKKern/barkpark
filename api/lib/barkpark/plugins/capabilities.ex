@@ -998,6 +998,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.backlinks-many",
+        "doc",
+        "backlinks-many",
+        "Inbound references of several documents in one request: --ids a,b,c (at most 100), answered per id.",
+        "GET",
+        "/v1/data/backlinks/:dataset",
+        "read",
+        flags: [flag("ids", "string", "Comma-separated document ids (1 to 100).")],
+        writes: false,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.locations",
         "doc",
         "locations",
@@ -1189,6 +1202,9 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             default: "scheduled"
+          ),
+          flag("order", "string", "asc (soonest first) | desc (latest first). At most 500 rows.",
+            default: "asc"
           )
         ],
         writes: false,

@@ -56,7 +56,7 @@ function page(readyState) {
         <input type="hidden" name="doc[date]" value="2026-10-29T14:00:00Z" data-datetime-value>
         <span id="p" phx-update="ignore"><input type="datetime-local"></span>
       </div>
-      <script src="/assets/bp-datetime-field.js" defer></script>
+      <script src="/assets/v/AAAAAAAAAAAAAAAA/bp-datetime-field.js" defer></script>
     </body></html>`,
     { runScripts: "outside-only", url: "http://localhost/", pretendToBeVisual: true }
   );

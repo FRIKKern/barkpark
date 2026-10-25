@@ -581,6 +581,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # and a nested image as its JSON string (Gyldendal friction 65/66). The
     # save path coerces its own copy; the buffer must see the same shape or
     # the next render walks a map where it expects a list.
+    raw_params = params
     params = Barkpark.Content.Forms.coerce_params(params, schema)
 
     # Denormalised image metadata (Gyldendal parity E1.7): a freshly picked
@@ -618,11 +619,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     )
 
     if doc && type && changed? do
+      # The save converts posted rich text against the stored blocks, so it
+      # gets the editor's HTML back (task-eba86f7ba252cb20).
       case Content.upsert_draft(
              doc,
              type,
              schema,
-             params,
+             Barkpark.Content.Forms.with_posted_rich_text(params, raw_params, schema),
              socket.assigns.dataset,
              hook_opts(socket)
            ) do
@@ -1790,6 +1793,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         panes: panes,
         editor_doc: editor_doc,
         editor_schema: new_schema,
+        # The tabs a declared desk list gives the documents it opens; nil
+        # leaves the schema's `desk.views` (task-ea2e544fec8ee6db).
+        editor_views: editor && editor[:views],
         editor_link_types:
           if(same_doc? and is_list(socket.assigns[:editor_link_types]),
             do: socket.assigns[:editor_link_types],
@@ -2176,8 +2182,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # standard/1024 and paints a scrim over live prose (D175/D187).
   defp clear_secondary_on_doc_change(socket, true), do: socket
 
-  defp clear_secondary_on_doc_change(socket, false),
-    do: assign(socket, secondary_doc: nil, secondary_schema: nil, secondary_type: nil)
+  # A view's list belongs to the document it was read for, so another
+  # document opens on its form, not on the last document's list.
+  defp clear_secondary_on_doc_change(socket, false) do
+    socket
+    |> assign(secondary_doc: nil, secondary_schema: nil, secondary_type: nil)
+    |> assign(BarkparkWeb.Studio.StudioLive.Handlers.Views.closed())
+  end
 
   @doc false
   def setup_sheet_view(socket, %{} = doc) do

@@ -183,6 +183,26 @@ class BpReferencePicker extends HTMLElement {
     return typeof this._typeLabelMap[type] === "string" ? this._typeLabelMap[type] : type;
   }
 
+  // A type's icon as SVG markup: Studio stamps a {type => svg} map on the
+  // shell (task-835fe5219585ca80), built server side from the schema's icon
+  // name and the Studio's own icon tables. A type without an icon draws the
+  // map's "*" entry, the document icon. Outside Studio there is no map: null.
+  _typeIconSvg(type) {
+    if (!this._typeIconMap) {
+      let map = {};
+      try {
+        const host = this.closest && this.closest("[data-type-icons]");
+        map = JSON.parse((host && host.getAttribute("data-type-icons")) || "{}") || {};
+      } catch (_e) {
+        map = {};
+      }
+      this._typeIconMap = map;
+    }
+    const own = this._typeIconMap[type];
+    const svg = typeof own === "string" && own ? own : this._typeIconMap["*"];
+    return typeof svg === "string" && svg ? svg : null;
+  }
+
   _typeWords() {
     return this._refTypes.map((type) => this._typeWord(type));
   }
@@ -733,9 +753,12 @@ class BpReferencePicker extends HTMLElement {
   // A hit whose type declares a list preview reads like its desk row: the
   // thumbnail, the title, then the subtitle and description lines. Returns
   // false when the hit carries none, so the row stays the bare title.
+  // A hit with no media draws its type's icon in the media box, as Sanity
+  // does (task-835fe5219585ca80): the document icon when the type has none.
   _renderHitPreview(btn, doc) {
-    const p = doc.preview;
-    if (!p || !(p.subtitle || p.description || p.media)) return false;
+    const p = doc.preview || {};
+    const icon = p.media ? null : this._typeIconSvg(doc.type || this._refType);
+    if (!(p.subtitle || p.description || p.media || icon)) return false;
     btn.classList.add("bp-ref-hit");
     if (p.media) {
       const media = document.createElement("span");
@@ -746,6 +769,13 @@ class BpReferencePicker extends HTMLElement {
       img.alt = "";
       img.loading = "lazy";
       media.appendChild(img);
+      btn.appendChild(media);
+    } else if (icon) {
+      const media = document.createElement("span");
+      media.className = "bp-ref-hit-media bp-ref-hit-icon";
+      media.setAttribute("aria-hidden", "true");
+      // Server-built markup from the Studio's own icon tables, never document data.
+      media.innerHTML = icon;
       btn.appendChild(media);
     }
     const main = document.createElement("span");

@@ -144,7 +144,8 @@ defmodule BarkparkWeb.Studio.Caps do
   # `ref-search` and `backlinks-refresh` above it: a UI event whose only effect
   # is a SCOPED read through `Content.list_documents/3`, filtered to the open
   # document's own id. It reads no capability the socket does not already hold
-  # to see the document it is standing on, and it writes nothing.
+  # to see the document it is standing on, and it writes nothing. `view-more`
+  # reads the next page of that same list.
   #
   # `select-sort` (task-fa57815041bead3d) picks a named sort for one desk
   # list: socket state only, then the same scoped list read the pane already
@@ -164,7 +165,7 @@ defmodule BarkparkWeb.Studio.Caps do
     toggle-content-preview toggle-diff toggle-category editor-set-mode
     width-bucket
     search ref-search validate-upload reload-remote-doc
-    select-view
+    select-view view-more
     desk-search desk-search-clear desk-list-more select-sort
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard

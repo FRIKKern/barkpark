@@ -91,7 +91,7 @@ defmodule Barkpark.Content.PortableTextBodyTest do
       assert html =~ "<em>"
 
       assert html =~
-               ~s(<a href="#internal:onix.product-66d89e9b7e29df089e915b60" data-pt-def="3fd8bd9984a5">)
+               ~s(<a href="#internal:onix.product-66d89e9b7e29df089e915b60" data-pt-def="3fd8bd9984a5" data-new-tab="true">)
 
       genser = Forms.doc_to_form(doc!("genser", bodies[@genser]), @schema)["body"]
       assert genser =~ "<h3>"

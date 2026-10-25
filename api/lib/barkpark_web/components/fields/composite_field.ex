@@ -194,6 +194,33 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # subfield and `Forms` keeps the stored value byte-identical.
   @structured_ok_subfield_types ~w(composite arrayOf codelist localizedText image)
 
+  # A richText subfield that holds Portable Text, such as the body of a
+  # page-builder item or of a custom block in the block dialog, opens in the
+  # same Classic rich-text editor as a top-level body (task-eba86f7ba252cb20).
+  # The editor edits HTML; `Content.Forms` turns the post back into blocks
+  # against the stored ones, so an untouched block keeps its stored bytes.
+  defp render_subfield_guarded(%{readonly: false} = assigns, %{type: "richText"} = sub) do
+    value = get_value(assigns.value, sub.name, nil)
+
+    if Barkpark.Content.PortableText.value?(value) and
+         not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(Map.get(sub, :raw) || %{}) do
+      input_id = input_id(assigns.path, assigns.field.name, sub.name)
+      owner_key = get_value(assigns.value, "_key", nil)
+
+      rich_text_subfield_input(%{
+        input_name: child_path(assigns.path, sub.name),
+        input_id: input_id,
+        # Keyed by the item's `_key` too: a moved item or another document
+        # remounts the ignored editor instead of keeping the old text.
+        wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
+        html: Barkpark.Content.PortableText.to_html(value),
+        label: title_for(sub)
+      })
+    else
+      render_subfield(assigns, sub)
+    end
+  end
+
   defp render_subfield_guarded(assigns, %{type: t} = sub)
        when t not in @structured_ok_subfield_types do
     case get_value(assigns.value, sub.name, nil) do
@@ -206,6 +233,20 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp render_subfield_guarded(assigns, sub), do: render_subfield(assigns, sub)
+
+  # The `bp-rich-text-editor` a top-level richText uses, bridged to a hidden
+  # input by `BarkparkFieldBridge`. It has no block dialog of its own, so a
+  # custom block inside this value shows as its box and is saved unchanged.
+  defp rich_text_subfield_input(assigns) do
+    ~H"""
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-pt-subfield={@input_name}>
+      <input type="hidden" id={"bp-rt-hidden-#{@input_id}"} name={@input_name} value={@html} phx-debounce="500" />
+      <bp-rich-text-editor value={@html} data-bridge-target={"bp-rt-hidden-#{@input_id}"}
+        data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={@label}
+      ></bp-rich-text-editor>
+    </div>
+    """
+  end
 
   defp structured_readonly(assigns) do
     ~H"""

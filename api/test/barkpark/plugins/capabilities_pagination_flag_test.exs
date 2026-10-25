@@ -558,6 +558,9 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
       {:signalled, "keyset replay: has_more + cursor, passed back as ?since="},
     "BarkparkWeb.PulseController.recent" =>
       {:signalled, "keyset: Pulse.recent/3 returns next (pass back as since) and total"},
+    "BarkparkWeb.ScheduleController.index" =>
+      {:signalled,
+       "page.hasMore + page.nextOffset beside the schedules (task-44cfe871ea0edc30); walked in scheduled_publish_test.exs"},
     "BarkparkWeb.TasksController.prime" =>
       {:top_n, "session orientation, ≤100 cards by design — not a listing to walk"},
     "BarkparkWeb.FederatedSearchController.search" =>

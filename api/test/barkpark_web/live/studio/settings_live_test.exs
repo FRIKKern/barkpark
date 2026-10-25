@@ -143,7 +143,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   #               live_session …, layout: {BarkparkWeb.Layouts, :studio}
   #   ⇒ the browser applies, in order:
   #     (a) every inline `<style>` block in root.html.heex and studio.html.heex
-  #     (b) every `<link rel="stylesheet" href="/assets/…">` those templates
+  #     (b) every `<link rel="stylesheet">` to an `/assets/…` file those templates
   #         pull, resolved under priv/static  (bp-paper-editor-shell.css,
   #         bp-media-picker.css today — read from the href, never a fixed list)
   #     (c) CSS a template embeds through a helper call: root.html.heex's
@@ -299,10 +299,21 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       |> Enum.reject(&(String.trim(&1) == ""))
     end
 
+    # A plain `href="/assets/x.css"`, or the content-hashed
+    # `href={BarkparkWeb.StaticAssets.path("x.css")}` (task-66122189b7af6ea2),
+    # read as the file `/assets/x.css` it serves.
     defp linked_stylesheets(html) do
-      ~r/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/
-      |> Regex.scan(html)
-      |> Enum.map(fn [_, href] -> href end)
+      plain =
+        ~r/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/
+        |> Regex.scan(html)
+        |> Enum.map(fn [_, href] -> href end)
+
+      hashed =
+        ~r/<link[^>]*rel="stylesheet"[^>]*href=\{BarkparkWeb\.StaticAssets\.path\("([^"]+)"\)\}/
+        |> Regex.scan(html)
+        |> Enum.map(fn [_, name] -> "/assets/" <> name end)
+
+      plain ++ hashed
     end
 
     # Every `font-family:` declaration in `css` whose selector matches `match`

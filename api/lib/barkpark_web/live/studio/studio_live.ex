@@ -456,6 +456,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("select", params, socket), do: Scope.select(params, socket)
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)
+  def handle_event("view-more", _params, socket), do: Views.more(socket)
   def handle_event("select-desk", params, socket), do: Scope.select_desk(params, socket)
   def handle_event("switch-workspace", params, socket), do: Scope.switch_workspace(params, socket)
   def handle_event("switch-project", params, socket), do: Scope.switch_project(params, socket)
@@ -863,15 +864,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
             into: %{},
             do: {type, PaneBuilder.type_word(type)}
 
+      schemas = Content.list_schemas(dataset, BarkparkWeb.ScopeHelpers.scope_opts(socket))
+
       labels =
-        dataset
-        |> Content.list_schemas(BarkparkWeb.ScopeHelpers.scope_opts(socket))
+        schemas
         |> Map.new(fn schema ->
           {schema.name, PaneBuilder.type_word(schema.name, schema.title)}
         end)
         |> then(&Map.merge(plugin_words, &1))
 
-      assign(socket, type_labels: Jason.encode!(labels), type_labels_key: key)
+      # Each type's icon as SVG, for the reference picker's hits
+      # (task-835fe5219585ca80). A type without a drawable icon is left out
+      # and draws the "*" entry, the document icon.
+      icons =
+        for schema <- schemas,
+            svg = BarkparkWeb.Icons.type_icon_svg(schema.icon),
+            into: %{"*" => BarkparkWeb.Icons.type_icon_svg("document")},
+            do: {schema.name, svg}
+
+      assign(socket,
+        type_labels: Jason.encode!(labels),
+        type_icons: Jason.encode!(icons),
+        type_labels_key: key
+      )
     end
   rescue
     _ -> socket

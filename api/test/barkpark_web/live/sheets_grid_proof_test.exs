@@ -232,7 +232,7 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     # The Studio layout ships the keyboard focus-ring rule. Text-presence
     # gate only — a Chrome contrast check is the true verification (manual,
     # noted in the PR).
-    assert html =~ ".sheet-grid-wrap:focus-visible"
+    assert BarkparkWeb.RootAssetsInline.inline(html) =~ ".sheet-grid-wrap:focus-visible"
 
     # The tab-strip's +/× controls are NOT tabs: they carry the distinct
     # `sheet-tab-action` class (de-masquerade, not role="tab") and a named

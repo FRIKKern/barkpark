@@ -102,6 +102,10 @@ defmodule BarkparkWeb.Studio.RichTextLinkTypesTest do
     assert tag =~ ~s(dataset="production")
     assert tag =~ ~s(scope-prefix=")
     assert tag =~ "data-picker-strings="
+    # A file link opens the media library with the session's token and words
+    # (task-025d7af119d6f0b8).
+    assert tag =~ "data-media-strings="
+    assert tag =~ ~r/data-token="rte-link-types-\d+"/
   end
 
   test "with no link object type the editor offers an address only" do
@@ -110,5 +114,7 @@ defmodule BarkparkWeb.Studio.RichTextLinkTypesTest do
 
     refute tag =~ "data-link-types"
     refute tag =~ "data-picker-strings"
+    refute tag =~ "data-media-strings"
+    refute tag =~ "data-token"
   end
 end

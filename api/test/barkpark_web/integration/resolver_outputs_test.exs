@@ -266,12 +266,22 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
              "no :plugins-placement plugin is enabled by default — the tier node must not render empty"
     end
 
-    test "HTML contains the nav-plugin-entry marker", %{conn: conn} = ctx do
+    test "the desk renders a nav-plugin-entry link for an operator, and none for a viewer the ops gate refuses",
+         %{conn: conn} = ctx do
+      # The element itself, not a string match. The old test matched the text
+      # `nav-plugin-entry` as a plain viewer, which on main at d43298a8e it
+      # found only in the root stylesheet's `a.pane-item.nav-plugin-entry`
+      # rule (task-74466450563fcc21): the plugin links are operator consoles,
+      # left out for a viewer the `:ops` gate would bounce
+      # (task-f859c5f7f3a0f9f5).
       if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+        {:ok, view, _html} = live(as_operator(conn), scoped_studio("/d/production/studio"))
 
-        assert html =~ "nav-plugin-entry",
-               "expected nav-plugin-entry marker (rendered when a :plugin_link desk item is present)"
+        assert has_element?(view, "a.pane-item.nav-plugin-entry[href]"),
+               "expected a nav-plugin-entry link (rendered when a :plugin_link desk item is present)"
+
+        {:ok, view, _html} = live(conn, scoped_studio("/d/production/studio"))
+        refute has_element?(view, "a.pane-item.nav-plugin-entry")
       end
     end
 

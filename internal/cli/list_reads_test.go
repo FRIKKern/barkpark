@@ -231,6 +231,7 @@ var objectReadCommands = map[string]string{
 	"codelist.show":                "values is a nested array, not the top-level row set; codelistId/name/description/issue are metadata (codelist_controller.ex)",
 	"cycle.show":                   "wave projection object; several values are arrays, none is 'the rows' (cycle_fleet_controller.ex)",
 	"data.counts":                  "`counts` is a type=>count MAP, not an array — `{}` is an honest fresh dataset (query_controller.ex)",
+	"doc.backlinks-many":           "`byId` is an id=>{backlinks,count} MAP, one entry per asked id, not a row array (query_controller.ex)",
 	"doc.get":                      "single document; envelopeRows refuses list treatment for a payload carrying _id (query_controller.ex)",
 	"doc.revision":                 "one revision object (history_controller.ex)",
 	"media.collection":             "single collection object (v1/media_collections_controller.ex)",

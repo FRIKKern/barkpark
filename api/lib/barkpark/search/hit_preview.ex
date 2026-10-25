@@ -38,14 +38,12 @@ defmodule Barkpark.Search.HitPreview do
     specs =
       documents |> Enum.map(&type_of/1) |> Enum.uniq() |> Map.new(&{&1, specs(schema_fun.(&1))})
 
-    ids =
-      documents
-      |> Enum.flat_map(fn doc ->
-        PreviewText.ref_ids(Map.values(Map.get(specs, type_of(doc), %{})), doc)
-      end)
-      |> Enum.uniq()
+    # One read per reference depth for the whole page (`PreviewText.targets/2`).
+    rows = Enum.map(documents, &{Map.values(Map.get(specs, type_of(&1), %{})), &1})
 
-    targets = targets(ids, dataset, scope_opts, schema_fun, caller_context)
+    targets =
+      PreviewText.targets(rows, &targets(&1, dataset, scope_opts, schema_fun, caller_context))
+
     deref = &Map.get(targets, &1)
 
     Enum.map(documents, fn doc ->

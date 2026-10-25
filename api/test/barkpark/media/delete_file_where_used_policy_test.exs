@@ -26,10 +26,10 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
       later refactor moves the scan inside the function, this reds — which is
       the point: `Tenancy.delete_workspace/1` would start refusing to tear down
       a workspace whose own papers reference its own blobs.
-    * The `:guard` arm ALSO deletes a referenced blob, and that is not a
-      contradiction: `:guard` is a DECLARATION that the call site consults
-      `Media.WhereUsed` itself. Both doors pass `:guard` on the `?force=true`
-      path too, so a scan inside the function would brick the honest override.
+    * The `:guard` arms: an UNFORCED `:guard` delete re-checks inside its
+      transaction and refuses a referenced blob (task-bc53aa9e49742ded: a reference
+      written after the door's own check used to slip through), and the doors'
+      `?force=true` path, which passes its witness as `:override`, still deletes.
     * The source pin covers the three cascade call sites without standing up
       three heavyweight teardown fixtures, and asserts the call-site COUNT so it
       cannot go vacuous when a site is added or removed.
@@ -97,7 +97,7 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
     end
   end
 
-  describe "both policies still delete unconditionally — the function carries no second guard" do
+  describe ":cascade deletes unconditionally; :guard re-checks unless forced" do
     test ":cascade deletes a blob a PUBLISHED document references" do
       file = media_file!()
       doc = paper_referencing!(file)
@@ -112,17 +112,32 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
       assert Media.WhereUsed.referrers(%MediaFile{path: file.path}).count >= 1
     end
 
-    test ":guard is a DECLARATION, not a scan — it deletes a referenced blob too" do
+    # task-bc53aa9e49742ded: the door's check and the delete were two steps, so a reference
+    # written between them left a dangling image. An UNFORCED :guard delete now asks
+    # again inside the delete's transaction and refuses; the doors' ?force=true path
+    # passes its witness as :override and still deletes, which is what this pin guarded.
+    test ":guard re-checks inside the transaction: an unforced delete of a referenced blob refuses" do
       file = media_file!()
       _doc = paper_referencing!(file)
 
-      assert {:ok, _} = Media.delete_file(file.id, where_used: :guard)
+      assert {:error, {:referenced, %MediaFile{}, %{count: count}}} =
+               Media.delete_file(file.id, where_used: :guard)
 
-      refute Repo.get(MediaFile, file.id),
-             "delete_file/2 grew a where-used scan of its own. That breaks the " <>
-               "doors' ?force=true override (both doors pass :guard on the forced " <>
-               "path) — the guard belongs at the call site, the option only makes " <>
-               "the decision unavoidable"
+      assert count >= 1
+      assert Repo.get(MediaFile, file.id), "refused, but the row is gone"
+    end
+
+    test ":guard with the door's forced-delete witness deletes a referenced blob (?force=true)" do
+      file = media_file!()
+      _doc = paper_referencing!(file)
+
+      assert {:ok, _} =
+               Media.delete_file(file.id,
+                 where_used: :guard,
+                 override: %{forced: true, referencedByCount: 1}
+               )
+
+      refute Repo.get(MediaFile, file.id), "the doors' ?force=true override no longer deletes"
     end
   end
 

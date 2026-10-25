@@ -13014,3 +13014,48 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Default order"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:522
+#, elixir-autogen, elixir-format
+msgid "Edit annotation"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:563
+#, elixir-autogen, elixir-format
+msgid "Internal Link"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:672
+#, elixir-autogen, elixir-format
+msgid "Remove annotation"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "File (DAM)"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Email address"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Filters / parameters (optional)"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Open in new tab"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Choose file"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "No file chosen"
+msgstr ""

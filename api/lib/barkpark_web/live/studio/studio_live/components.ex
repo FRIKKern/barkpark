@@ -1651,6 +1651,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   data-hit-type={hit.type}
                   navigate={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset, focus: :doc)}
                 >
+                  <span :if={hit[:type_icon]} class="pane-doc-media pane-doc-media-icon" aria-hidden="true" data-type-icon={hit[:type_icon]}><Icons.desk_icon name={hit[:type_icon]} size={16} /></span>
                   <span class="pane-doc-title"><%= hit.title %></span>
                   <span class="pane-doc-sub"><%= hit.type_title %></span>
                 </.link>
@@ -1666,7 +1667,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       only nil/false. An unknown string, or a truthy non-binary
                       (`:folder || "file"` is `:folder`), reached `icon/1` — a
                       document glyph in dev/prod, a RAISE in :test. --%>
-                <:icon><.icon name={Icons.drawable_name(pane[:icon], "file")} size={32} /></:icon>
+                <:icon><Icons.desk_icon name={pane[:icon]} fallback="file" size={32} /></:icon>
                 <button
                   :if={pane[:author_creatable] != false}
                   class="btn btn-primary btn-sm"
@@ -1702,7 +1703,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
                 <% :header -> %>
                   <.pane_section_header>
-                    <.icon name={Icons.drawable_name(item[:icon], "folder")} size={12} /> <%= item.title %>
+                    <Icons.desk_icon name={item[:icon]} fallback="folder" size={12} /> <%= item.title %>
                   </.pane_section_header>
 
                 <% :plugin_link -> %>
@@ -1742,7 +1743,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                           the neutral glyph `tab_icon/1` already uses — because a
                           link is not a document and "file" would claim it is. --%>
                     <%= if item.icon do %>
-                      <span class="pane-item-icon"><.icon name={Icons.drawable_name(item.icon, "circle")} size={16} /></span>
+                      <span class="pane-item-icon"><Icons.desk_icon name={item.icon} fallback="circle" size={16} /></span>
                     <% end %>
                     <span class="pane-item-label"><%= item.title %></span>
                     <span class="pane-item-chevron"><.icon name="chevron-right" size={14} /></span>
@@ -1764,6 +1765,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     description={item[:description]}
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
+                    type_icon={item[:type_icon]}
                     selected={item.id == pane[:selected]}
                     selectable={pane[:type_name] != nil and Caps.admin_affordance?(@caps)}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
@@ -1783,7 +1785,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     phx_value_pane={"#{idx}"}
                     selected={item.id == pane[:selected]}
                   >
-                    <:icon><.icon name={Icons.drawable_name(item.icon)} size={16} /></:icon>
+                    <:icon><Icons.desk_icon name={item.icon} size={16} /></:icon>
                     <%= item.title %>
                     <:trailing :if={item[:drillable]}>
                       <.icon name="chevron-right" size={14} />
@@ -2090,6 +2092,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             nav_group={@nav_group}
             nav_view={@nav_view}
             nav_view_docs={@nav_view_docs}
+            nav_view_more={@nav_view_more}
+            editor_views={@editor_views}
             scope_prefix={@scope_prefix}
             content_preview_rendered={@content_preview_rendered}
             content_preview_visible={@content_preview_visible}

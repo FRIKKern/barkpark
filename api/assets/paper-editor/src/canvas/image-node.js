@@ -22,7 +22,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { selectAtomNode, wireAtomAccessibility } from "./embed-node.js";
-import { cardMoreButton, keepSelectedCard, wireCardMenu } from "./card-menu.js";
+import { cardMoreButton, wireCardMenu } from "./card-menu.js";
 import { safeUrl } from "../safe-url.js";
 import { t } from "../i18n.js";
 
@@ -139,12 +139,6 @@ export const Image = Node.create({
       ? ["img", { src, alt: (node.attrs && node.attrs.alt) || "", loading: "lazy" }]
       : ["div", { class: "bp-canvas-image-empty" }, "No image"];
     return ["figure", mergeAttributes(HTMLAttributes, { "data-bp-type": "image", class: "bp-canvas-image" }), img];
-  },
-
-  // Typing onto a selected card keeps it (card-menu.js); the image node carries the
-  // plugin for every card (object rows too), as it is in every canvas.
-  addProseMirrorPlugins() {
-    return [keepSelectedCard()];
   },
 
   addNodeView() {

@@ -722,8 +722,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   defp rich_text_label(_field, name), do: name
 
   # With link types (task-088575052b459f3e) the editor also carries the
-  # dataset and scope its document picker searches in; without, the markup is
-  # unchanged.
+  # dataset and scope its document picker searches in, and the media library's
+  # words and token for a file link (task-025d7af119d6f0b8); without, the
+  # markup is unchanged.
   #
   # The outer div carries `BarkparkPtBlocks` (root.html.heex): it forwards the
   # editor's "open this block" and "insert a block" events to the LiveView and
@@ -749,6 +750,8 @@ defmodule BarkparkWeb.Components.FieldInputs do
           scope-prefix={if @link_types != [], do: @scope_prefix}
           data-link-types={if @link_types != [], do: Enum.join(@link_types, ",")}
           data-picker-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:reference)}
+          data-media-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:media)}
+          data-token={if @link_types != [], do: @api_token_raw}
           data-block-types={@block_types}
         ></bp-rich-text-editor>
       </div>
