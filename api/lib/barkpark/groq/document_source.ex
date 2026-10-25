@@ -296,7 +296,8 @@ defmodule Barkpark.Groq.DocumentSource do
 
         case Process.get(slot) do
           nil ->
-            docs = load_slice(state, key, [], 0, state.max_per_fetch + 1, fields)
+            read_state = system_only_state(state, fields)
+            docs = load_slice(read_state, key, [], 0, read_state.max_per_fetch + 1, fields)
             Process.put(slot, docs)
             {:ok, docs}
 
@@ -305,6 +306,25 @@ defmodule Barkpark.Groq.DocumentSource do
         end
     end
   end
+
+  # `*[...]._id` and other projections of system fields only read no stored
+  # content (task-2a7741b89420a38a): each row is a handful of columns, so the
+  # per-`*[...]` document cap, which guards memory for whole documents, gives
+  # way to the per-query load cap, and the stored-content size does not apply.
+  # 18,020 product ids then answer where the whole products are refused.
+  @system_fields ~w(_id _type _rev _createdAt _updatedAt)
+
+  defp system_only_state(state, fields) when is_list(fields) and fields != [] do
+    if Enum.all?(fields, &(&1 in @system_fields)),
+      do: %{
+        state
+        | max_per_fetch: max(state.max_per_fetch, state.max_loaded),
+          max_bytes_per_fetch: nil
+      },
+      else: state
+  end
+
+  defp system_only_state(state, _fields), do: state
 
   # Any other slice reads the rows SQL narrows to in chunks of `@scan_chunk`
   # and holds only the documents the slice needs, so the per-fetch limit on
@@ -1135,7 +1155,7 @@ defmodule Barkpark.Groq.DocumentSource do
               "*[...] | order(_id) [0...#{cap}], then [#{cap}...#{cap * 2}], or narrow " <>
               "the filter further; count(*[...]) gives the total without loading them."
 
-      bytes > state.max_bytes_per_fetch ->
+      is_integer(state.max_bytes_per_fetch) and bytes > state.max_bytes_per_fetch ->
         raise LimitError,
           message:
             "one *[...] in this query matches #{length(sized)} documents holding #{div(bytes, 1_048_576)} MiB " <>
