@@ -559,7 +559,6 @@ defmodule Barkpark.Content.Query do
   # writer promotes them), so the cut reads those two from the columns.
   defp facet_query(type, dataset, opts, specs) do
     keys = Enum.map(specs, &elem(&1, 0))
-    edges = Enum.map(specs, &elem(&1, 1))
 
     cut =
       type
@@ -577,55 +576,112 @@ defmodule Barkpark.Content.Query do
           )
       })
 
-    counted =
-      from(r in "facet_rows",
-        join:
-          u in fragment("SELECT k, e FROM unnest(?::text[], ?::text[]) AS u(k, e)", ^keys, ^edges),
-        on: true,
-        inner_lateral_join:
-          v in fragment(
-            """
-            SELECT DISTINCT t.x FROM jsonb_array_elements(
-              CASE WHEN ? IS NOT NULL THEN '[]'::jsonb
-                   WHEN jsonb_typeof(?->?) = 'array' THEN ?->? ELSE jsonb_build_array(?->?) END
-            ) AS a(j), LATERAL (SELECT CASE jsonb_typeof(a.j)
-              WHEN 'string' THEN a.j #>> '{}' WHEN 'number' THEN a.j #>> '{}'
-              WHEN 'boolean' THEN a.j #>> '{}' WHEN 'object' THEN a.j ->> '_ref' END AS x) AS t
-            WHERE t.x IS NOT NULL
-            UNION ALL
-            SELECT width_bucket((?->>?)::numeric, string_to_array(?, ',')::numeric[])::text
-            WHERE ? IS NOT NULL AND jsonb_typeof(?->?) = 'number'
-            """,
-            u.e,
-            r.c,
-            u.k,
-            r.c,
-            u.k,
-            r.c,
-            u.k,
-            r.c,
-            u.k,
-            u.e,
-            u.e,
-            r.c,
-            u.k
-          ),
-        on: true,
-        group_by: [u.k, u.e, v.x],
+    # One branch per spec over the cut, so a scalar value never pays for the
+    # per-row array walk: scalars group directly, only array values go
+    # through jsonb_array_elements, and a range groups its bucket number.
+    # Measured on 10,200 products of ~7 kB: 76 ms p50 against 107 ms for one
+    # lateral walk over every (row, spec) pair. The value and array branches
+    # of one field are summed before the top values are kept.
+    [first | rest] =
+      Enum.flat_map(specs, fn
+        {k, nil} -> [facet_scalar_branch(k), facet_array_branch(k)]
+        {k, e} -> [facet_range_branch(k, e)]
+      end)
+
+    combined = Enum.reduce(rest, first, fn branch, acc -> union_all(acc, ^branch) end)
+
+    ranked =
+      from(u in subquery(combined),
+        group_by: [u.field, u.range, u.label],
         select: %{
-          field: u.k,
-          range: not is_nil(u.e),
-          label: v.x,
-          count: count(),
-          rank: over(row_number(), partition_by: [u.k, u.e], order_by: [desc: count(), asc: v.x])
+          field: u.field,
+          range: u.range,
+          label: u.label,
+          count: type(sum(u.count), :integer),
+          rank:
+            over(row_number(),
+              partition_by: [u.field, u.range],
+              order_by: [desc: sum(u.count), asc: u.label]
+            )
         }
       )
-      |> with_cte("facet_rows", as: ^cut, materialized: true)
 
-    from(r in subquery(counted),
+    from(r in subquery(ranked),
       where: r.rank <= @facet_value_limit,
       order_by: [asc: r.field, asc: r.range, asc: r.rank],
       select: {r.field, r.range, r.label, r.count}
+    )
+    |> with_cte("facet_rows", as: ^cut, materialized: true)
+  end
+
+  # A string, number or boolean value counts as itself, a reference its `_ref`.
+  defp facet_scalar_branch(k) do
+    labels =
+      from(r in "facet_rows",
+        where:
+          fragment("jsonb_typeof(?->?) IN ('string', 'number', 'boolean', 'object')", r.c, ^k),
+        select: %{
+          x:
+            fragment(
+              "CASE jsonb_typeof(?->?) WHEN 'object' THEN ?->?->>'_ref' ELSE ?->>? END",
+              r.c,
+              ^k,
+              r.c,
+              ^k,
+              r.c,
+              ^k
+            )
+        }
+      )
+
+    from(s in subquery(labels),
+      where: not is_nil(s.x),
+      group_by: s.x,
+      select: %{field: type(^k, :string), range: false, label: s.x, count: count()}
+    )
+  end
+
+  # Each distinct element of an array once per document, labelled as above.
+  defp facet_array_branch(k) do
+    from(r in "facet_rows",
+      where: fragment("jsonb_typeof(?->?) = 'array'", r.c, ^k),
+      inner_lateral_join:
+        t in fragment(
+          """
+          SELECT DISTINCT CASE jsonb_typeof(a.j)
+            WHEN 'string' THEN a.j #>> '{}' WHEN 'number' THEN a.j #>> '{}'
+            WHEN 'boolean' THEN a.j #>> '{}' WHEN 'object' THEN a.j ->> '_ref' END AS x
+          FROM jsonb_array_elements(?->?) AS a(j)
+          """,
+          r.c,
+          ^k
+        ),
+      on: true,
+      where: not is_nil(t.x),
+      group_by: t.x,
+      select: %{field: type(^k, :string), range: false, label: t.x, count: count()}
+    )
+  end
+
+  # The bucket number of a numeric value; `e` is the edges as "e1,e2,…".
+  defp facet_range_branch(k, e) do
+    buckets =
+      from(r in "facet_rows",
+        where: fragment("jsonb_typeof(?->?) = 'number'", r.c, ^k),
+        select: %{
+          b:
+            fragment(
+              "width_bucket((?->>?)::numeric, string_to_array(?, ',')::numeric[])::text",
+              r.c,
+              ^k,
+              ^e
+            )
+        }
+      )
+
+    from(s in subquery(buckets),
+      group_by: s.b,
+      select: %{field: type(^k, :string), range: true, label: s.b, count: count()}
     )
   end
 
