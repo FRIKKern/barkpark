@@ -1475,6 +1475,26 @@ defmodule Barkpark.Content.Errors do
       status: 413
     }
 
+  # The plug names the spent budget (task-fba67efa7f61c678) and when it refills.
+  defp build({:error, :rate_limited, %{retry_after: retry_after, budget: budget}}),
+    do: %{
+      status: 429,
+      code: "rate_limited",
+      message:
+        "too many requests: this #{if budget.principal == "ip", do: "IP", else: "token"}'s #{budget.class} budget " <>
+          "(#{budget.per_minute} per minute, #{budget.scope}) is spent; " <>
+          "a request is admitted again in #{retry_after} s",
+      details: %{
+        retry_after: retry_after,
+        resets_at:
+          DateTime.utc_now()
+          |> DateTime.add(retry_after, :second)
+          |> DateTime.truncate(:second)
+          |> DateTime.to_iso8601(),
+        budget: budget
+      }
+    }
+
   defp build({:error, :rate_limited, %{retry_after: retry_after}}),
     do: %{
       status: 429,

@@ -365,7 +365,13 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
              halted: out.halted,
              retry_after: get_resp_header(out, "retry-after"),
              content_type: get_resp_header(out, "content-type"),
-             body: out.resp_body
+             # The per-case dataset and the reset instant are named in the body
+             # since task-fba67efa7f61c678; masked so the comparison is about
+             # Accept alone.
+             body:
+               out.resp_body
+               |> String.replace("accept-sweep-#{label}", "<dataset>")
+               |> String.replace(~r/"resets_at":"[^"]*"/, ~s("resets_at":"<t>"))
            }}
         end
 
