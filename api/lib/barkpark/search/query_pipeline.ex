@@ -104,6 +104,7 @@ defmodule Barkpark.Search.QueryPipeline do
        # that path no longer emits it.
        facets: Map.get(engine_meta, :facets),
        truncation: Map.get(engine_meta, :truncation),
+       collapse: Map.get(engine_meta, :collapse),
        # "all" when every word had to match, "any" when one word was enough
        # (the caller asked, or `match_any` recovery ran). nil for a browse and
        # for an engine that does not report it.
@@ -199,6 +200,8 @@ defmodule Barkpark.Search.QueryPipeline do
         # `?order=` instead of relevance (task-5ddc3e08684f0d48): `{order,
         # collation}` from QueryController.search_order/3, or nil.
         order: Keyword.get(opts, :order),
+        # `?collapse=<field>`: one hit per value (task-3bbf99d2bce8ee51).
+        collapse: Keyword.get(opts, :collapse),
         facet_fields: Keyword.get(opts, :facet_fields),
         # With a field filter, the retriever counts the words' matches without
         # the filter up to this many (`meta.text_count`), so the recovery
