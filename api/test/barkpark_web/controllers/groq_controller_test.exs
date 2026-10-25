@@ -407,6 +407,30 @@ defmodule BarkparkWeb.GroqControllerTest do
     end
   end
 
+  # task-2a7741b89420a38a: a projection of system fields only reads no stored
+  # content, so the per-*[...] document cap gives way to the per-query load cap.
+  test "*[...]._id answers past the per-*[...] cap; a content field does not", %{
+    conn: conn,
+    token: token
+  } do
+    all = conn |> get_query(token, ~s'*[_type == "book"]._id') |> json_response(200)
+    assert length(all["result"]) >= 3
+
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_documents_per_fetch: 2)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    ids = conn |> get_query(token, ~s'*[_type == "book"]._id') |> json_response(200)
+    assert Enum.sort(ids["result"]) == Enum.sort(all["result"])
+
+    projected =
+      conn |> get_query(token, ~s'*[_type == "book"]{_id, _createdAt}') |> json_response(200)
+
+    assert length(projected["result"]) == length(all["result"])
+
+    assert conn |> get_query(token, ~s'*[_type == "book"].name') |> json_response(422)
+  end
+
   test "a query that would load too much stored content is refused before loading", %{
     conn: conn,
     token: token
