@@ -488,6 +488,13 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into Content.Graph.backlinks/2 for each id, " <>
          "exactly like its single-id sibling below, so the rows are the pipeline-derived " <>
          ":current_workspace's."},
+    # QueryController.backlink_counts (task-881bbea8c99b1599) — counts the
+    # same live referrers under the same scope_opts(conn) thread.
+    {"GET", "/v1/data/backlink-counts/:dataset"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into Content.count_reference_holders/3, the " <>
+         "same scope stack list_reference_holders/3 reads for backlinks, so the counts " <>
+         "are the pipeline-derived :current_workspace's."},
     # QueryController.backlinks
     {"GET", "/v1/data/backlinks/:dataset/:id"} =>
       {:workspace_derived,

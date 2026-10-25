@@ -232,6 +232,7 @@ var objectReadCommands = map[string]string{
 	"cycle.show":                   "wave projection object; several values are arrays, none is 'the rows' (cycle_fleet_controller.ex)",
 	"data.counts":                  "`counts` is a type=>count MAP, not an array — `{}` is an honest fresh dataset (query_controller.ex)",
 	"doc.backlinks-many":           "`byId` is an id=>{backlinks,count} MAP, one entry per asked id, not a row array (query_controller.ex)",
+	"doc.backlink-counts":          "`byId` is an id=>count MAP, one entry per asked id, not a row array (query_controller.ex backlink_counts/2)",
 	"doc.get":                      "single document; envelopeRows refuses list treatment for a payload carrying _id (query_controller.ex)",
 	"doc.revision":                 "one revision object (history_controller.ex)",
 	"media.collection":             "single collection object (v1/media_collections_controller.ex)",

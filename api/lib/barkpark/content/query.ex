@@ -978,6 +978,170 @@ defmodule Barkpark.Content.Query do
     end)
   end
 
+  @ref_target "__bp_ref_target__"
+  @ref_target_draft "__bp_ref_target_draft__"
+
+  @doc """
+  How many documents reference each of `ids` through a field the schema
+  declares (task-881bbea8c99b1599): `%{id => count}`, every id present.
+
+  The same rule as `list_reference_holders/3` — row, grant and owner scope,
+  visible types, fields the caller may read, `:require_published` — widened
+  to declared reference positions inside objects and object arrays. A
+  document counts once per target, whether it holds the target through
+  several fields, a draft and a published version, or both. Projected
+  plugin edges are not counted.
+
+  Every declared position becomes a containment probe, `content @> {path:
+  id}`, for each stored shape: a bare id, `{_ref}`, an array of either, and
+  `{asset: {_ref}}` for an image or file. One probe per target id per type,
+  so the GIN `documents_content_path_idx` answers it and the cost follows the
+  number of referrers, not the size of the type. `opts[:type]` narrows to one
+  type.
+  """
+  @spec count_reference_holders([String.t()], String.t(), keyword()) :: %{
+          optional(String.t()) => non_neg_integer()
+        }
+  def count_reference_holders(ids, dataset, opts) do
+    ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+    zero = Map.new(ids, &{&1, 0})
+
+    opts
+    |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
+    |> Enum.filter(&(opts[:type] in [nil, &1.name]))
+    |> Enum.reduce(zero, fn schema, acc ->
+      case ref_probe_templates(schema, schema.fields || [], [], ctx) do
+        [] ->
+          acc
+
+        templates ->
+          schema
+          |> count_holders_of_type(ids, dataset, templates, opts)
+          |> Enum.reduce(acc, fn {id, n}, acc -> Map.update(acc, id, n, &(&1 + n)) end)
+      end
+    end)
+  end
+
+  defp count_holders_of_type(schema, ids, dataset, templates, opts) do
+    probe =
+      Enum.reduce(templates, dynamic(false), fn template, acc ->
+        dynamic(
+          [d],
+          ^acc or
+            fragment(
+              "? @> replace(replace(?, ?, to_jsonb(?::text)::text), ?, to_jsonb('drafts.' || ?::text)::text)::jsonb",
+              d.content,
+              ^template,
+              ^~s("#{@ref_target}"),
+              parent_as(:target).id,
+              ^~s("#{@ref_target_draft}"),
+              parent_as(:target).id
+            )
+        )
+      end)
+
+    holders =
+      schema.name
+      |> base_query(dataset, %{}, opts)
+      |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+      |> restrict_to_visible_types(dataset, opts)
+      |> maybe_require_published(opts)
+      |> where(
+        [d],
+        fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) != parent_as(:target).id
+      )
+      |> where(^probe)
+      |> select([d], %{doc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)})
+
+    from(t in fragment("SELECT id FROM unnest(?::text[]) AS t(id)", ^ids),
+      as: :target,
+      inner_lateral_join: h in subquery(holders),
+      on: true,
+      group_by: t.id,
+      select: {t.id, count(h.doc, :distinct)}
+    )
+    # Unnamed, so Postgres plans each run for the probes it is sent. A named
+    # statement turns generic on its sixth run, cannot see which index entries
+    # a containment value selects, and scans the type: over 18,000 products
+    # 100 ids went from 45 ms to past the 45 s pool timeout.
+    |> Repo.all(prepare: :unnamed)
+  end
+
+  # The containment JSON of every declared reference position the caller may
+  # read, as text with the target id as a placeholder. Objects (`composite`,
+  # `object`) and object arrays are walked; a position inside an array is
+  # wrapped in a one-element array, which `@>` matches against any element.
+  defp ref_probe_templates(schema, fields, path, ctx) do
+    Enum.flat_map(fields, fn
+      %{"name" => name} = field when is_binary(name) ->
+        dotted = Enum.join(Enum.map(path, &elem(&1, 0)) ++ [name], ".")
+
+        if Barkpark.Content.Envelope.field_readable?(schema, dotted, ctx),
+          do: field_probes(schema, field, path ++ [{name, false}], ctx),
+          else: []
+
+      _ ->
+        []
+    end)
+  end
+
+  defp field_probes(schema, field, path, ctx) do
+    target = @ref_target
+    draft = @ref_target_draft
+    asset = fn id -> %{"asset" => %{"_ref" => id}} end
+
+    case field["type"] do
+      "reference" ->
+        Enum.map([target, %{"_ref" => target}], &probe_json(path, &1))
+
+      t when t in ["image", "file"] ->
+        Enum.map([asset.(target), asset.(draft)], &probe_json(path, &1))
+
+      "arrayOf" ->
+        array_path = List.update_at(path, -1, fn {n, _} -> {n, true} end)
+        members = array_member_types(field)
+
+        refs =
+          if "reference" in members,
+            do: Enum.map([target, %{"_ref" => target}], &probe_json(array_path, &1)),
+            else: []
+
+        assets =
+          if Enum.any?(members, &(&1 in ["image", "file"])),
+            do: Enum.map([asset.(target), asset.(draft)], &probe_json(array_path, &1)),
+            else: []
+
+        nested =
+          case field["of"] do
+            %{"fields" => sub} when is_list(sub) ->
+              ref_probe_templates(schema, sub, array_path, ctx)
+
+            _ ->
+              []
+          end
+
+        refs ++ assets ++ nested
+
+      t when t in ["composite", "object"] ->
+        ref_probe_templates(schema, field["fields"] || [], path, ctx)
+
+      _ ->
+        []
+    end
+  end
+
+  # `[{"seo", false}, {"reviewer", false}]` and a leaf → `{"seo":{"reviewer":leaf}}`;
+  # an array step wraps what is below it in a one-element array.
+  defp probe_json(path, leaf) do
+    path
+    |> Enum.reverse()
+    |> Enum.reduce(leaf, fn
+      {name, true}, acc -> %{name => [acc]}
+      {name, false}, acc -> %{name => acc}
+    end)
+    |> Jason.encode!()
+  end
+
   # Matches a document whose array field `name` holds the target, for each
   # member kind the field allows: a bare `_ref` or id string for a reference
   # member, `{asset: {_ref}}` for an image or file member.

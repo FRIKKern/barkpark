@@ -544,6 +544,49 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  @doc """
+  How many documents reference each id, without reading them
+  (task-881bbea8c99b1599): `?ids=a,b,c` (at most #{@backlinks_batch_max}),
+  optional `?type=` for the referring type. Answers
+  `{"result": {"byId": {"a": 12, ...}, "source": "schema", "note": ...}}`.
+
+  Counts the referrers `backlinks/2` reads live, through fields the schema
+  declares (and objects inside them), under the same scope and field
+  visibility, so a referrer the caller could not read never moves a number.
+  A document counts once per id. A preview or anonymous-pinned caller counts
+  published referrers only. Projected plugin edges are NOT counted, so a
+  count can be lower than `len(backlinks)` for a target only a plugin links
+  to; `source` and `note` say so in the body. Same auth as backlinks.
+  """
+  def backlink_counts(conn, %{"dataset" => dataset} = params) do
+    if preview?(conn) or authed?(conn) do
+      with {:ok, ids} <- backlinks_batch_ids(params["ids"]) do
+        read_region(
+          :backlinks,
+          "backlink_counts/2 (dataset=#{inspect(dataset)} ids=#{length(ids)})",
+          fn ->
+            opts =
+              [
+                require_published: preview?(conn) or AnonPerspective.anon_pinned?(conn),
+                type: if(is_binary(params["type"]) and params["type"] != "", do: params["type"])
+              ] ++ scope_opts(conn)
+
+            json(conn, %{
+              result: %{
+                byId: Content.count_reference_holders(ids, dataset, opts),
+                source: "schema",
+                note: "schema-declared references only; plugin edges are not counted"
+              },
+              syncTags: Enum.map(ids, &"bp:ds:#{dataset}:backlinks:#{&1}")
+            })
+          end
+        )
+      end
+    else
+      {:error, :not_found}
+    end
+  end
+
   defp backlinks_batch_ids(raw) do
     ids =
       if(is_binary(raw), do: String.split(raw, ","), else: [])
