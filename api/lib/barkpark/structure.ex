@@ -190,7 +190,11 @@ defmodule Barkpark.Structure do
     # The `deskStructure` document is read ONCE per build: its `items` declare
     # the MAIN tier (`declared_desk/3`) and its `title` names the root, as
     # Sanity's `S.list().title('Innhold')` does (task-9eafad70d2249770).
-    desk_doc = fetch_desk_doc(dataset, opts)
+    desk_doc =
+      case Keyword.fetch(opts, :desk_doc) do
+        {:ok, doc} -> doc
+        :error -> desk_doc(dataset, opts)
+      end
 
     %Node{
       id: "root",
@@ -1147,12 +1151,24 @@ defmodule Barkpark.Structure do
 
   @desk_structure_type "deskStructure"
 
-  # The published `deskStructure` document, or nil. A read that raises degrades
-  # to the default desk with a logged reason — never a blank desk.
-  defp fetch_desk_doc(dataset, opts) do
-    scope = Keyword.take(opts, [:workspace_id])
+  @doc """
+  The default desk document id. `opts[:desk_id]` names another published
+  `deskStructure` document (task-31f9264adeb053be), so several studios on one
+  dataset can each have their own desk.
+  """
+  def default_desk_id, do: @desk_structure_type
 
-    case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
+  @doc """
+  The published `deskStructure` document (`opts[:desk_id]`, default
+  `deskStructure`), or nil. A read that raises degrades to the default desk
+  with a logged reason — never a blank desk. `build/2` takes it pre-read as
+  `opts[:desk_doc]`.
+  """
+  def desk_doc(dataset, opts) do
+    scope = Keyword.take(opts, [:workspace_id])
+    desk_id = Keyword.get(opts, :desk_id, @desk_structure_type)
+
+    case Content.get_document(desk_id, @desk_structure_type, dataset, scope) do
       {:ok, doc} -> doc
       _ -> nil
     end
