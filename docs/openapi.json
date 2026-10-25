@@ -821,6 +821,89 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/backlink-counts/{dataset}": {
+      "get": {
+        "operationId": "doc.backlink-counts.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated document ids (1 to 100).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Count referrers of this type only.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "How many documents reference each id, without reading them: --ids a,b,c (at most 100). Schema-declared references only; plugin edges are not counted.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/search": {
       "get": {
         "operationId": "media.search.scoped",
@@ -4732,6 +4815,73 @@
           "search"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/data/backlink-counts/{dataset}": {
+      "get": {
+        "operationId": "doc.backlink-counts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated document ids (1 to 100).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Count referrers of this type only.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "How many documents reference each id, without reading them: --ids a,b,c (at most 100). Schema-declared references only; plugin edges are not counted.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/plugins/bulldocs/sessions/{slug}/events": {

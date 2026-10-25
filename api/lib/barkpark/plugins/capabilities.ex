@@ -1011,6 +1011,22 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.backlink-counts",
+        "doc",
+        "backlink-counts",
+        "How many documents reference each id, without reading them: --ids a,b,c (at most 100). Schema-declared references only; plugin edges are not counted.",
+        "GET",
+        "/v1/data/backlink-counts/:dataset",
+        "read",
+        flags: [
+          flag("ids", "string", "Comma-separated document ids (1 to 100)."),
+          flag("type", "string", "Count referrers of this type only.")
+        ],
+        writes: false,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.locations",
         "doc",
         "locations",
