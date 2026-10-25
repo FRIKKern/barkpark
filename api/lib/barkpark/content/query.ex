@@ -137,9 +137,17 @@ defmodule Barkpark.Content.Query do
     keys = Keyword.get(opts, :content_keys)
     base = base_query(type, dataset, filter_map, opts)
 
-    case perspective do
-      :drafts -> list_with_drafts_merged(base, order, limit, offset, keys)
-      other -> list_linear(base, other, order, limit, offset, keys)
+    cond do
+      field = opts[:collapse] ->
+        type
+        |> collapsed_query(dataset, opts, field)
+        |> list_linear(:raw, order, limit, offset, keys)
+
+      perspective == :drafts ->
+        list_with_drafts_merged(base, order, limit, offset, keys)
+
+      true ->
+        list_linear(base, perspective, order, limit, offset, keys)
     end
   end
 
@@ -483,7 +491,10 @@ defmodule Barkpark.Content.Query do
     filter_map = Keyword.get(opts, :filter_map, %{})
     base = base_query(type, dataset, filter_map, opts)
 
-    case perspective do
+    case if(is_binary(opts[:collapse]), do: :collapse, else: perspective) do
+      :collapse ->
+        type |> collapsed_query(dataset, opts, opts[:collapse]) |> Repo.aggregate(:count)
+
       :drafts ->
         inner =
           from(d in base,
@@ -623,7 +634,12 @@ defmodule Barkpark.Content.Query do
   defp matched_query(type, dataset, opts) do
     base = base_query(type, dataset, Keyword.get(opts, :filter_map, %{}), opts)
 
-    case Keyword.get(opts, :perspective, :raw) do
+    perspective = Keyword.get(opts, :perspective, :raw)
+
+    case if(is_binary(opts[:collapse]), do: :collapse, else: perspective) do
+      :collapse ->
+        collapsed_query(type, dataset, opts, opts[:collapse])
+
       :drafts ->
         from(d in base,
           distinct: fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
@@ -636,6 +652,103 @@ defmodule Barkpark.Content.Query do
       other ->
         apply_perspective(base, other)
     end
+  end
+
+  # ── Collapse (task-3fbfafa3d1035ec2) ─────────────────────────────────────
+  #
+  # `:collapse` names a field; the matched set keeps one row per value of it,
+  # the first by the list's own order (the id breaks ties). A row with no value
+  # is its own group, so nothing without the field disappears. `title` and
+  # `status` are columns, not content keys, and are read there.
+
+  # The matched rows, one per logical document, as a plain `Document` query.
+  defp collapse_rows(type, dataset, opts) do
+    case Keyword.get(opts, :perspective, :raw) do
+      :drafts ->
+        merged = matched_query(type, dataset, Keyword.delete(opts, :collapse))
+        from(d in Document, where: d.id in subquery(select(merged, [m], m.id)))
+
+      _ ->
+        matched_query(type, dataset, Keyword.delete(opts, :collapse))
+    end
+  end
+
+  # The group representatives. `distinct` on an expression makes Ecto emit
+  # DISTINCT ON (key) and prepend the same key, with the same parameter, to the
+  # ORDER BY, so the first row of each group by `order` is the one kept.
+  defp collapsed_query(type, dataset, opts, field) do
+    order = opts |> Keyword.get(:order, :updated_at_desc) |> with_collation(opts[:collation])
+
+    reps =
+      type
+      |> collapse_rows(dataset, opts)
+      |> apply_order(order)
+      |> order_by([d], asc: d.id)
+      |> distinct(
+        [d],
+        fragment(
+          "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+          ^field,
+          d.title,
+          d.status,
+          d.content,
+          ^field,
+          d.id
+        )
+      )
+      |> select([d], d.id)
+
+    from(d in Document, where: d.id in subquery(reps))
+  end
+
+  @doc """
+  How many matched documents each of `ids` stands for under `:collapse`: its
+  group's size over the same type, scope, filter and perspective. A document
+  with no value for the field counts 1. Returns `%{id => count}`.
+  """
+  @spec collapse_counts(String.t(), String.t(), keyword(), [Ecto.UUID.t()]) :: %{
+          optional(Ecto.UUID.t()) => non_neg_integer()
+        }
+  def collapse_counts(_type, _dataset, _opts, []), do: %{}
+
+  def collapse_counts(type, dataset, opts, ids) do
+    field = Keyword.fetch!(opts, :collapse)
+
+    keyed =
+      type
+      |> collapse_rows(dataset, opts)
+      |> select([d], %{
+        key:
+          fragment(
+            "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+            ^field,
+            d.title,
+            d.status,
+            d.content,
+            ^field,
+            d.id
+          )
+      })
+
+    from(p in Document,
+      where: p.id in ^ids,
+      join: r in subquery(keyed),
+      on:
+        r.key ==
+          fragment(
+            "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+            ^field,
+            p.title,
+            p.status,
+            p.content,
+            ^field,
+            p.id
+          ),
+      group_by: p.id,
+      select: {p.id, count()}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc """
