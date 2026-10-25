@@ -36,6 +36,10 @@ defmodule BarkparkWeb.StructureController do
   with that id instead of `deskStructure`; when that document exists the
   response names it back as `desk` (task-31f9264adeb053be). An id that is not a published document id
   (or a `drafts.` id) is a 400. Without `?desk=` the response is unchanged.
+
+  A named desk whose document sets `"only": true` returns exactly its declared
+  items — no plugin items, no Plugins tier, no …Rest. Ignored on the default
+  `deskStructure` desk, which always keeps the never-hide tiers.
   """
 
   use BarkparkWeb, :controller
