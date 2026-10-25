@@ -50,6 +50,7 @@ func mediaAssetDocID(id string) (string, bool) {
 // an asset document id to its media file id. It returns tail unchanged for any
 // other command, for an id that is already a media file id, and when the
 // positionals do not bind (buildManifestRequest then reports that itself).
+// The CLI and the MCP bridge tool both run it.
 func resolveMediaDeleteID(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) []string {
 	if cmd.ID != mediaDeleteCommandID {
 		return tail
