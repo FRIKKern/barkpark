@@ -127,11 +127,15 @@ defmodule Barkpark.Search.QueryPipeline do
       # Each term's synonyms are its alternatives: the retriever matches a term
       # OR any of its synonyms, never a synonym as one more word every document
       # must hold. `terms` still lists them, as `parsedQuery` always has.
+      # Every word's synonyms and the correction in one read (Synonyms.expand_terms/4),
+      # not two reads per word.
+      {terms_of, corrected_to} = Synonyms.expand_terms(surface, scope, positive, workspace_id)
+
       alternatives =
         Map.new(positive, fn term ->
           {term,
-           surface
-           |> Synonyms.search_terms(scope, term, workspace_id)
+           terms_of
+           |> Map.get(term, [])
            |> Enum.reject(&(&1 in positive or &1 == ""))
            |> Enum.uniq()}
         end)
@@ -140,10 +144,6 @@ defmodule Barkpark.Search.QueryPipeline do
 
       # The corrected term is the canonical to_query of the FIRST positive term
       # for which an enabled synonym fired — null when nothing matched.
-      corrected_to =
-        Enum.find_value(positive, fn term ->
-          Synonyms.correction_for(surface, scope, term, workspace_id)
-        end)
 
       {Map.put(%{parsed | terms: parsed.terms ++ extra}, :alternatives, alternatives),
        corrected_to}
