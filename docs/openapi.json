@@ -449,12 +449,39 @@
             }
           },
           {
+            "description": "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Add result.total (full match count) to the response.",
             "in": "query",
             "name": "count",
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first.",
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            "in": "query",
+            "name": "facet_range",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1128,6 +1155,15 @@
             "description": "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "asc (soonest first) | desc (latest first). At most 500 rows.",
+            "in": "query",
+            "name": "order",
             "required": false,
             "schema": {
               "type": "string"
@@ -2369,6 +2405,80 @@
         "summary": "Dataset content overview: total documents, per-type published/draft counts, and recent activity.",
         "tags": [
           "dataset"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/backlinks/{dataset}": {
+      "get": {
+        "operationId": "doc.backlinks-many.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated document ids (1 to 100).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inbound references of several documents in one request: --ids a,b,c (at most 100), answered per id.",
+        "tags": [
+          "doc"
         ],
         "x-barkpark-scope": "read"
       }
@@ -5063,12 +5173,39 @@
             }
           },
           {
+            "description": "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Add result.total (full match count) to the response.",
             "in": "query",
             "name": "count",
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first.",
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            "in": "query",
+            "name": "facet_range",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -6677,6 +6814,64 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/data/backlinks/{dataset}": {
+      "get": {
+        "operationId": "doc.backlinks-many",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated document ids (1 to 100).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Inbound references of several documents in one request: --ids a,b,c (at most 100), answered per id.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/collections": {
       "get": {
         "operationId": "media.collections.scoped",
@@ -7491,6 +7686,15 @@
             "description": "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "asc (soonest first) | desc (latest first). At most 500 rows.",
+            "in": "query",
+            "name": "order",
             "required": false,
             "schema": {
               "type": "string"

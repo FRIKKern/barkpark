@@ -394,6 +394,15 @@ config :barkpark, dedup_raise_on_code_errors: true
 # (test/barkpark_web/capabilities_no_db_test.exs).
 config :barkpark, tenancy_default_scope_cache_ttl_ms: 0
 
+# OFF in test for the same reason: a schema catalog kept across requests would
+# outlive the sandbox that built it. `schema_catalog_cache_test.exs` turns it on.
+config :barkpark, schema_catalog_cache: false
+
+# OFF in test for the same reason: a connected mount must not take panes a
+# dead render built inside another test's sandbox. `connect_handoff_test.exs`
+# turns it on.
+config :barkpark, studio_connect_handoff: false
+
 # Dedup candidate-fetch EXIT SEAM (Barkpark.Dedup.ScanSeam). Compiles a
 # one-verb (`exit/1`) fault injector into the candidate fetch of BOTH dedup
 # surfaces so the `catch :exit` arm — pool-checkout death, which arrives as an

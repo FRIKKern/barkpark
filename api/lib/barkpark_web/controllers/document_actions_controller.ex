@@ -33,9 +33,9 @@ defmodule BarkparkWeb.DocumentActionsController do
   (`POST /v1/data/mutate`, etc.), and this generic dispatch path was never
   wired to run them.
 
-  `:scoped_admin` — the same workspace owner/admin role gate Studio's own
-  editor mount enforces — is "admin tier as in LiveView" from the row, not a
-  new tier invented for this route.
+  Dispatch and API-token reads retain `:scoped_admin`. The GET also admits
+  a seated personal bearer through `RequireTokenOrMemberSession`; the scoped
+  document lookup retains owner isolation and grants no dispatch authority.
   """
   use BarkparkWeb, :controller
 

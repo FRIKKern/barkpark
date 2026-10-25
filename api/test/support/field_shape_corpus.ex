@@ -191,6 +191,51 @@ defmodule Barkpark.FieldShapeCorpus do
        },
        "flag" => "true"
      }},
+    # ── absent fields with declared defaults (task-d89926b8afd3dcb9) ────────
+    # The form shows the declared default for an absent field. Saving an edit
+    # of another field must leave each of these absent: no `false` for a
+    # boolean whose default is true, no default written for a select or a
+    # number, no object of defaults for an absent composite.
+    {"boolean_absent_default_true", %{"type" => "boolean", "default" => true}, :absent},
+    {"boolean_absent_default_false", %{"type" => "boolean", "default" => false}, :absent},
+    {"select_absent_default", %{"type" => "select", "options" => ["a", "b"], "default" => "b"},
+     :absent},
+    {"number_absent_default", %{"type" => "number", "default" => 7}, :absent},
+    {"string_absent_default", %{"type" => "string", "default" => "hello"}, :absent},
+    {"comp_flags_absent",
+     %{
+       "type" => "composite",
+       "fields" => [
+         %{
+           "name" => "toggles",
+           "type" => "composite",
+           "fields" => [
+             %{"name" => "alpha", "type" => "boolean", "default" => true},
+             %{"name" => "beta", "type" => "boolean", "default" => true},
+             %{"name" => "gamma", "type" => "boolean"}
+           ]
+         },
+         %{"name" => "mode", "type" => "select", "options" => ["x", "y"], "default" => "x"},
+         %{"name" => "count", "type" => "number", "default" => 2},
+         %{"name" => "tags", "type" => "arrayOf", "of" => %{"type" => "string"}}
+       ]
+     }, :absent},
+    {"comp_flags_partial",
+     %{
+       "type" => "composite",
+       "fields" => [
+         %{"name" => "label", "type" => "string"},
+         %{
+           "name" => "toggles",
+           "type" => "composite",
+           "fields" => [
+             %{"name" => "alpha", "type" => "boolean", "default" => true},
+             %{"name" => "beta", "type" => "boolean", "default" => true}
+           ]
+         },
+         %{"name" => "on", "type" => "boolean", "default" => true}
+       ]
+     }, %{"label" => "kept"}},
     {"comp_number_string",
      %{"type" => "composite", "fields" => [%{"name" => "n", "type" => "number"}]}, %{"n" => "3"}},
     # ── a richText field edited by the block canvas (`editor: blocks`) ──────

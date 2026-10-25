@@ -46,7 +46,8 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   # as the moduledoc records. Without this directive the compiler's
   # undefined-module warning turns `mix compile --warnings-as-errors` red on
   # every image-less host, which is exactly the supported configuration.
-  @compile {:no_warn_undefined, [Image, Image.Text, Vix.Vips.Image, Vix.Vips.Operation]}
+  @compile {:no_warn_undefined,
+            [Image, Image.Text, Image.Blurhash, Vix.Vips.Image, Vix.Vips.Operation]}
 
   # Explicit pre-decode raster ceiling, mirroring Magick's `-limit memory 256MiB`
   # so BOTH backends fail closed on the same class of decompression bomb. This is
@@ -85,6 +86,102 @@ defmodule Barkpark.Media.ImageBackend.Vix do
 
   @impl true
   def avif?, do: avif_supported?()
+
+  # Sanity's asset metadata (task-fd05a9327034f89c), read from a ≤ 128 px
+  # thumbnail: node-vibrant, which Sanity uses, samples a 1/5 downscale, and
+  # neither the palette nor the blurhash needs more. EXIF and location come
+  # from the original's header, and only when asked for (`opts[:meta]`, the
+  # field's `options.metadata`).
+  @analyze_size 128
+
+  @impl true
+  def analyze(src, opts) do
+    meta = Keyword.get(opts, :meta, [])
+
+    with {:ok, image} <- Image.open(src),
+         :ok <- guard_dimensions(image),
+         {:ok, small} <- Image.thumbnail(src, @analyze_size),
+         # In memory: the thumbnail streams from a sequential load, and the
+         # pixels, the alpha check and the blurhash each read it again.
+         {:ok, small} <- Vix.Vips.Image.copy_memory(small),
+         {:ok, srgb} <- Image.to_colorspace(small, :srgb),
+         {:ok, pixels} <- Vix.Vips.Image.write_to_binary(srgb) do
+      has_alpha = Image.has_alpha?(srgb)
+
+      %{
+        has_alpha: has_alpha,
+        is_opaque: not has_alpha or opaque?(srgb),
+        blur_hash: blur_hash(srgb),
+        palette: Barkpark.Media.Palette.from_pixels(pixels, Image.bands(srgb))
+      }
+      |> maybe_put(:exif, "exif" in meta && exif(image))
+      |> maybe_put(:location, "location" in meta && location(image))
+      |> then(&{:ok, &1})
+    end
+  rescue
+    e -> {:error, {:analyze_failed, Exception.message(e)}}
+  end
+
+  # Opaque when no pixel's alpha is below full.
+  defp opaque?(image) do
+    {_rgb, alpha} = Image.split_alpha(image)
+    {lowest, _where} = Vix.Vips.Operation.min!(alpha)
+    lowest >= 255
+  end
+
+  # Sanity's blurhash uses 5 × 4 components on a landscape image (its own hashes
+  # start with "V"); the long side keeps the 5.
+  defp blur_hash(image) do
+    {x, y} = if Image.width(image) >= Image.height(image), do: {5, 4}, else: {4, 5}
+    {:ok, flat} = Image.flatten(image)
+
+    case Image.Blurhash.encode(flat, x_components: x, y_components: y) do
+      {:ok, hash} -> hash
+      _ -> nil
+    end
+  end
+
+  # Sanity's `sanity.imageExifMetadata`: the EXIF tags, PascalCase, scalars only.
+  defp exif(image) do
+    case Image.exif(image) do
+      {:ok, exif} ->
+        exif
+        |> Map.drop([:gps])
+        |> Enum.flat_map(fn
+          {:exif, %{} = inner} -> Map.to_list(inner)
+          pair -> [pair]
+        end)
+        |> Enum.filter(fn {_k, v} -> is_number(v) or (is_binary(v) and String.valid?(v)) end)
+        |> Map.new(fn {k, v} -> {Macro.camelize(to_string(k)), v} end)
+        |> Map.put("_type", "sanity.imageExifMetadata")
+
+      _ ->
+        nil
+    end
+  end
+
+  # Sanity's `geopoint` from the EXIF GPS block, when it has one.
+  defp location(image) do
+    with {:ok, %{gps: %{gps_latitude: [_, _, _] = lat, gps_longitude: [_, _, _] = lng} = gps}} <-
+           Image.exif(image) do
+      %{
+        "_type" => "geopoint",
+        "lat" => degrees(lat, gps.gps_latitude_ref in ["S", "s"]),
+        "lng" => degrees(lng, gps.gps_longitude_ref in ["W", "w"])
+      }
+      |> maybe_put("alt", is_number(Map.get(gps, :gps_altitude)) && Map.get(gps, :gps_altitude))
+    else
+      _ -> nil
+    end
+  end
+
+  defp degrees([d, m, s], negative?) do
+    value = d + m / 60 + s / 3600
+    Float.round(if(negative?, do: -value, else: value) * 1.0, 6)
+  end
+
+  defp maybe_put(map, _key, value) when value in [nil, false], do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   @doc false
   def preset_plan(spec) do

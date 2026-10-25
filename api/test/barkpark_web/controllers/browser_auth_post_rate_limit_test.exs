@@ -27,18 +27,46 @@ defmodule BarkparkWeb.BrowserAuthPostRateLimitTest do
 
   defp post_from_one_ip(path, params), do: post(scoped_conn(), path, params)
 
+  # The meter is a token bucket refilling @budget tokens a minute (one a
+  # second), not a fixed window: while a slow CI box spends over a second on the
+  # first @budget POSTs, a token comes back and the 61st is still admitted. So
+  # post until refused and bound the admitted count by the refill the elapsed
+  # time allows, instead of asserting that exactly the 61st is refused.
+  @refill_per_sec @budget / 60
+
+  defp post_until_refused(posts) do
+    started = System.monotonic_time(:millisecond)
+
+    {admitted, refused} =
+      posts
+      |> Stream.cycle()
+      |> Enum.reduce_while({0, nil}, fn {path, params}, {n, _} ->
+        conn = post_from_one_ip(path, params)
+
+        cond do
+          conn.status == 429 -> {:halt, {n, conn}}
+          n >= @budget * 2 -> {:halt, {n, nil}}
+          true -> {:cont, {n + 1, nil}}
+        end
+      end)
+
+    elapsed_s = (System.monotonic_time(:millisecond) - started) / 1000
+    {admitted, refused, @budget + ceil(elapsed_s * @refill_per_sec)}
+  end
+
   for {path, params} <- @posts do
     @path path
     @params params
 
-    test "POST #{path}: the 61st POST from one IP in a minute is refused with 429" do
-      for n <- 1..@budget do
-        conn = post_from_one_ip(@path, @params)
-        assert conn.status != 429, "POST #{@path} number #{n} was refused inside the budget"
-      end
+    test "POST #{path}: past 60 POSTs from one IP in a minute is refused with 429" do
+      {admitted, conn, allowed} = post_until_refused([{@path, @params}])
 
-      conn = post_from_one_ip(@path, @params)
-      assert conn.status == 429
+      assert admitted >= @budget, "POST #{@path} was refused after #{admitted}, inside the budget"
+      assert conn, "POST #{@path} was never refused"
+
+      assert admitted <= allowed,
+             "POST #{@path} admitted #{admitted}, more than the refill allows (#{allowed})"
+
       assert [retry_after] = get_resp_header(conn, "retry-after")
       assert String.to_integer(retry_after) > 0
       assert %{"error" => %{"code" => "rate_limited"}} = Jason.decode!(conn.resp_body)
@@ -46,12 +74,15 @@ defmodule BarkparkWeb.BrowserAuthPostRateLimitTest do
   end
 
   test "the four POSTs share one per-IP budget, so alternating routes buys no extra tries" do
-    paths = Stream.cycle(@posts) |> Enum.take(@budget)
+    {admitted, refused, allowed} = post_until_refused(@posts)
 
-    for {path, params} <- paths do
-      refute post_from_one_ip(path, params).status == 429
-    end
+    assert admitted >= @budget, "the shared budget refused after #{admitted}"
+    assert refused, "alternating the four routes was never refused"
 
+    assert admitted <= allowed,
+           "alternating routes admitted #{admitted}, more than one budget (#{allowed})"
+
+    # Right after the refusal every route is metered by the same empty bucket.
     for {path, params} <- @posts do
       assert post_from_one_ip(path, params).status == 429, "POST #{path} was not metered"
     end

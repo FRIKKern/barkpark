@@ -112,6 +112,7 @@ export const FILTER_OPS = [
   'countLt',
   'countLte',
   'nbetween',
+  'neqOrMissing',
 ] as const
 
 export type FilterOp = (typeof FILTER_OPS)[number]

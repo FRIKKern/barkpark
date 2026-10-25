@@ -49,7 +49,7 @@ defmodule Barkpark.Content.Errors do
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the delete with force to remove the schema and orphan them: `bp schema delete <name> --force`, or ?force=true over HTTP.",
     "invalid_filter" =>
-      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is, notContains, nhas, countEq, countNeq, countGt, countGte, countLt, countLte, nbetween) — check for a typo or wrong case.",
+      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is, notContains, nhas, countEq, countNeq, countGt, countGte, countLt, countLte, nbetween, neqOrMissing) — check for a typo or wrong case.",
     "forbidden_field" =>
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>
@@ -1473,6 +1473,26 @@ defmodule Barkpark.Content.Errors do
       code: "payload_too_large",
       message: "media file exceeds the maximum allowed size",
       status: 413
+    }
+
+  # The plug names the spent budget (task-fba67efa7f61c678) and when it refills.
+  defp build({:error, :rate_limited, %{retry_after: retry_after, budget: budget}}),
+    do: %{
+      status: 429,
+      code: "rate_limited",
+      message:
+        "too many requests: this #{if budget.principal == "ip", do: "IP", else: "token"}'s #{budget.class} budget " <>
+          "(#{budget.per_minute} per minute, #{budget.scope}) is spent; " <>
+          "a request is admitted again in #{retry_after} s",
+      details: %{
+        retry_after: retry_after,
+        resets_at:
+          DateTime.utc_now()
+          |> DateTime.add(retry_after, :second)
+          |> DateTime.truncate(:second)
+          |> DateTime.to_iso8601(),
+        budget: budget
+      }
     }
 
   defp build({:error, :rate_limited, %{retry_after: retry_after}}),

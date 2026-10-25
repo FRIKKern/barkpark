@@ -5,7 +5,7 @@ Every key a schema may declare when you `POST /v1/schemas/:dataset` (or `bp sche
 
 ## The schema object
 
-`name` and `title` are required. The changeset stores these keys and drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `fieldsets`, `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), `list_preview`, `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`).
+`name` and `title` are required. The changeset stores these keys and drops any other: `icon`, `visibility` (`public` | `private`), `kind` (`document` | `object`: a named type other schemas use as a field `type`), `singleton`, `owner_scoped`, `fields`, `groups` (editor tabs: `{name, title, icon}`), `fieldsets`, `desk_groups`, `desk` (`orderings`, `views`, `editor`: `freeform` | `classic`), [`list_preview`](list-preview.md), `initial_values`, `cross_validations`, `layout`, `prefill`, `actions`, `cors_origins`, `reader_writes` (`{create, patchFields}`: `Content.ReaderWrites`).
 
 A top-level `validations` list is read by `parse/2` but not cast, so it is not stored.
 
@@ -17,7 +17,8 @@ A top-level `validations` list is read by `parse/2` but not cast, so it is not s
 | `type` | Required string: a built-in type below, or the `name` of a `kind: "object"` schema in scope. |
 | `title`, `description` | Label and help text in Studio. |
 | `validation` | Rules, see [Validation](#validation). |
-| `visibleWhen` | `{field, operator, value?, scope?}`. Operators: `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`, `count_eq`, `count_neq`, `count_gt`, `count_lt`. An unknown operator means visible. `field` is a dotted path; `scope` is `document` (default) or `parent` (the enclosing object or array item; refused 422 on a top-level field). Hidden fields are still validated. |
+| `visibleWhen` | `{field, operator, value?, scope?}`. Operators: `eq`, `neq`, `in`, `empty`, `non_empty`, `starts_with`, `count_eq`, `count_neq`, `count_gt`, `count_lt`. An unknown operator means visible. `field` is a dotted path; `scope` is `document` (default) or `parent` (the enclosing object or array item; refused 422 on a top-level field of a document schema, allowed on a `kind: "object"` schema's own fields, which read the object where the type is used). `{all: [...]}` and `{any: [...]}` combine predicates and may nest, as in `cross_validations`; each predicate carries its own `scope`. Hidden fields are still validated. |
+| `hidden` | `true` hides the field in Studio whatever `visibleWhen` says. The stored value stays: a save writes only the fields the form posts, so the hidden value is kept. Only the literal `true` counts; for a condition use `visibleWhen`. Hidden fields are still validated and still returned by the API. |
 | `readOnly` | `true`, or a `visibleWhen`-shaped predicate (read-only while it holds). Enforced for non-admin API writes on top-level fields only. |
 | `group` | The schema `groups` tab this field sits on (or a composite's `groups` tab). |
 | `surface` | `body` or `sidebar`; anything else is refused. Metadata only. |
@@ -42,8 +43,8 @@ The `builtin_field_types/0` list in `Barkpark.Content.Schema`. "No value check" 
 | `slug` | Text with a Generate button. `options.source` (or `source`) names the field it derives from, default `title`. Stored as `{_type: "slug", current}` or a string. |
 | `select` | `options` is a list of values or `{value, title}` (or `label`) pairs. `layout: "radio"` draws radio buttons. The server does not check membership. |
 | `tags` | No value check. |
-| `reference` | Points at another document. Targets: `refType` (one type), `to` (list of type names or `{type}`), or `refTypes`. `refTypeTolerant: true` keeps `refType` for the picker but resolves the target as any type. Stored as `{_ref, _type: "reference"}` or a bare id. |
-| `image` | URL or `{asset: {_ref}, hotspot, crop}`. `options.hotspot: true` (or `hotspot: true`) enables the focal point and checks `hotspot`/`crop` sides are numbers 0–1. `fields` adds subfields (for example `alt`) checked like a composite's; `alt: true` shows an alt input. |
+| `reference` | Points at another document. Targets: `refType` (one type), `to` (list of type names or `{type}`), or `refTypes`. `refTypeTolerant: true` keeps `refType` for the picker but resolves the target as any type. Stored as `{_ref, _type: "reference"}` or a bare id. `options.filter` (GROQ) and `options.filterParams` narrow the picker: [reference-filter.md](reference-filter.md). |
+| `image` | URL or `{asset: {_ref}, hotspot, crop}`. `options.hotspot: true` (or `hotspot: true`) enables the focal point and checks `hotspot`/`crop` sides are numbers 0–1. `fields` adds subfields (for example `alt`) checked like a composite's; `alt: true` shows an alt input. `valueShape: "assetRef"` (or `options.valueShape`) makes a pick into an empty field write `{_type, asset: {_ref}}` instead of `{url, assetId}`. |
 | `file` | URL or `{asset: {_ref}}`. `fields` as for `image`; no hotspot. |
 | `richText` | Rich text. `editor: "blocks"` opts into the block editor; `blocks` narrows its vocabulary: `styles` (`normal`, `h1`–`h6`, `blockquote`), `lists` (`bullet`, `number`), `marks` (`strong`, `em`, `strikethrough`, `underline`, `code`), `annotations` (`link`), `of` (`image`, `divider`, `code`, `diagram`, or `{name, fields}` custom object blocks whose fields are checked, including `options.list` membership), `inline` (inline objects, [schema-v2.md](schema-v2.md)). Block writes outside the vocabulary are refused. |
 | `markdown`, `json`, `embed`, `geopoint` | No value check. |
@@ -84,21 +85,11 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Cross-field rules
 
-`cross_validations` entries: `{name, title, rule, level, fields}`. `rule` is a `visibleWhen` predicate, or `{all: [...]}` / `{any: [...]}` of them. Studio shows unsatisfied rules as a banner; API writes get the same rules as findings (code `cross_validation`, path `/<first of fields>`) through the warnings/422 door above, by `level`. A rule naming an undeclared field or an unknown operator, or with no `rule`, is skipped and logged.
+`cross_validations`: [schema-cross-validations.md](schema-cross-validations.md).
 
 ## Unknown keys
 
-On `POST /v1/schemas/:dataset`, only the field `type` is refused when unknown. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
-
-| You send | Result |
-|---|---|
-| Unknown `type` anywhere: a top-level field, a `composite`/`image`/`file` subfield, an `arrayOf.of` (one shape or list member), an `array.of` entry, a `richText` `blocks.of` object field | 422 `validation_failed`, `details.fields`: `unknown field type "strng": …` |
-| Misspelled field key (`requred: true`) | 201, stored and echoed; never read; warning at `/fields/0/requred` |
-| Misspelled rule key (`validation: {requird: true}`) | 201, stored; the rule never runs; warning at `/fields/0/validation/requird` |
-| Misspelled schema key (`singelton: true`) | 201, dropped; not echoed; warning at `/singelton` |
-| Bare `required` on a field, bad `surface`, `visibleWhen.scope`, a reserved `blocks.inline` field name | 422 `validation_failed` |
-
-Check the echo: `required?` on each field says whether an error-level `required` rule is in force.
+An unknown field `type` is refused 422; any other unknown key is stored or dropped with an advisory warning: [schema-unknown-keys.md](schema-unknown-keys.md).
 
 ## Code anchors
 

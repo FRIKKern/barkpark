@@ -146,6 +146,10 @@ defmodule Barkpark.Content do
   def count_documents(type, dataset, opts \\ []),
     do: Query.count_documents(type, dataset, opts)
 
+  @doc "Value counts and range buckets over a typed/filtered query's matched set. See `Content.Query.facet_counts/3`."
+  def facet_counts(type, dataset, opts \\ []),
+    do: Query.facet_counts(type, dataset, opts)
+
   @doc """
   Fetch a single document by `{doc_id, type, dataset}`.
 

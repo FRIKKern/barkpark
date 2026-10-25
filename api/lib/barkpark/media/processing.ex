@@ -13,6 +13,14 @@ defmodule Barkpark.Media.Processing do
       `failed`, so a client never polls a `ready` asset whose every rendition
       would 404.
 
+  Since task-fd05a9327034f89c it also reads what Sanity keeps on an image
+  asset as `metadata` — `hasAlpha`, `isOpaque`, `blurHash`, the seven-swatch
+  `palette` and, when the uploader asks (`:meta`, Sanity's `meta` upload
+  parameter, the field's `options.metadata`), `exif` and `location`
+  (`Barkpark.Media.ImageBackend.analyze/2`) — and writes it, with `dimensions`
+  and `lqip`, under the asset document's `metadata` in Sanity's shape. A site
+  reading `asset->metadata` finds what it found on Sanity.
+
   `extract/1` computes these; `asset_fields/1` turns them into the
   `mediaAsset` content the media plugin writes when it CREATES the asset
   document, so a fresh upload costs one document write. `process/1` is the
@@ -34,7 +42,8 @@ defmodule Barkpark.Media.Processing do
           width: pos_integer() | nil,
           height: pos_integer() | nil,
           lqip: String.t() | nil,
-          status: String.t()
+          status: String.t(),
+          analysis: map() | nil
         }
 
   @doc "Re-drive processing for a blob whose `mediaAsset` document exists."
@@ -55,12 +64,13 @@ defmodule Barkpark.Media.Processing do
   end
 
   @doc """
-  Read dimensions and the LQIP for `file`. Never raises: a blob that cannot be
-  read yields nil metadata, and for a renderable raster image a `failed`
-  status.
+  Read dimensions, the LQIP and Sanity's image metadata for `file`. Never
+  raises: a blob that cannot be read yields nil metadata, and for a renderable
+  raster image a `failed` status. `opts[:meta]` lists the optional metadata
+  to read as well (`"exif"`, `"location"`).
   """
-  @spec extract(%MediaFile{}) :: extracted()
-  def extract(%MediaFile{} = file) do
+  @spec extract(%MediaFile{}, keyword()) :: extracted()
+  def extract(%MediaFile{} = file, opts \\ []) do
     # ensure_local/1, not file_path/1: with an object-storage backend the
     # original may not be on this disk (post-import, or a cold cache) — the
     # blobstore fetches it once into the write-through cache before probing.
@@ -70,7 +80,8 @@ defmodule Barkpark.Media.Processing do
       {:ok, src} ->
         {width, height} = dimensions(src, file)
         {status, lqip} = lqip(src, file)
-        %{width: width, height: height, lqip: lqip, status: status}
+        analysis = if status == "ready", do: analyze(src, file, opts)
+        %{width: width, height: height, lqip: lqip, status: status, analysis: analysis}
 
       {:error, reason} ->
         Logger.warning(
@@ -78,12 +89,12 @@ defmodule Barkpark.Media.Processing do
         )
 
         status = if Renditions.renderable?(file), do: "failed", else: "ready"
-        %{width: nil, height: nil, lqip: nil, status: status}
+        %{width: nil, height: nil, lqip: nil, status: status, analysis: nil}
     end
   rescue
     e ->
       Logger.warning("Barkpark.Media.Processing.extract #{file.id}: #{Exception.message(e)}")
-      %{width: nil, height: nil, lqip: nil, status: "failed"}
+      %{width: nil, height: nil, lqip: nil, status: "failed", analysis: nil}
   end
 
   @doc """
@@ -103,6 +114,55 @@ defmodule Barkpark.Media.Processing do
         }
         |> maybe_put("lqip", extracted.lqip)
     }
+    |> maybe_put("metadata", sanity_metadata(extracted))
+  end
+
+  @doc """
+  Sanity's `sanity.imageMetadata` for `extracted`, or nil when nothing was
+  read (not an image, or a backend that cannot analyse).
+  """
+  @spec sanity_metadata(extracted()) :: map() | nil
+  def sanity_metadata(%{analysis: %{} = a, width: w, height: h} = extracted)
+      when is_integer(w) and is_integer(h) and h > 0 do
+    %{
+      "_type" => "sanity.imageMetadata",
+      "dimensions" => %{
+        "_type" => "sanity.imageDimensions",
+        "width" => w,
+        "height" => h,
+        "aspectRatio" => w / h
+      },
+      "hasAlpha" => a.has_alpha,
+      "isOpaque" => a.is_opaque
+    }
+    |> maybe_put("lqip", extracted.lqip)
+    |> maybe_put("blurHash", a[:blur_hash])
+    |> maybe_put("palette", a[:palette])
+    |> maybe_put("exif", a[:exif])
+    |> maybe_put("location", a[:location])
+  end
+
+  def sanity_metadata(_extracted), do: nil
+
+  # Only a raster image the backend can decode is analysed; any failure there
+  # leaves the metadata out and never fails the upload.
+  defp analyze(src, %MediaFile{} = file, opts) do
+    if Renditions.renderable?(file) do
+      case ImageBackend.analyze(src, meta: Keyword.get(opts, :meta, [])) do
+        {:ok, analysis} ->
+          analysis
+
+        {:error, :analyze_unsupported} ->
+          nil
+
+        {:error, reason} ->
+          Logger.warning(
+            "Barkpark.Media.Processing: metadata not read for #{file.id}: #{inspect(reason)}"
+          )
+
+          nil
+      end
+    end
   end
 
   @doc """
@@ -132,6 +192,14 @@ defmodule Barkpark.Media.Processing do
     content = doc.content || %{}
     fields = asset_fields(extracted)
     file_info = Map.merge(Map.get(content, "fileInfo", %{}), fields["fileInfo"])
+
+    # A re-drive reads no EXIF or location (nobody asked again): what the
+    # upload stored under `metadata` stays unless read anew.
+    fields =
+      case {content["metadata"], fields["metadata"]} do
+        {%{} = old, %{} = new} -> Map.put(fields, "metadata", Map.merge(old, new))
+        _ -> fields
+      end
 
     new_content =
       content

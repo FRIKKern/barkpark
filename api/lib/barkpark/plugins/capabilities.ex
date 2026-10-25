@@ -970,6 +970,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed."
+          ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
           )
@@ -990,6 +995,19 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Document id to find referrers of.")],
         writes: false,
         default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.backlinks-many",
+        "doc",
+        "backlinks-many",
+        "Inbound references of several documents in one request: --ids a,b,c (at most 100), answered per id.",
+        "GET",
+        "/v1/data/backlinks/:dataset",
+        "read",
+        flags: [flag("ids", "string", "Comma-separated document ids (1 to 100).")],
+        writes: false,
+        default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
@@ -1184,6 +1202,9 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             default: "scheduled"
+          ),
+          flag("order", "string", "asc (soonest first) | desc (latest first). At most 500 rows.",
+            default: "asc"
           )
         ],
         writes: false,
@@ -1309,8 +1330,24 @@ defmodule Barkpark.Plugins.Capabilities do
             "Inline single reference fields (depth 1): a field name or comma list."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed."
+          ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
+          ),
+          flag(
+            "facet",
+            "string",
+            "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first."
+          ),
+          flag(
+            "facet_range",
+            "string",
+            "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            repeatable: true
           )
         ],
         paginated: true,

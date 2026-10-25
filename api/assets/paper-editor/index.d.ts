@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.8.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.14.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -135,6 +135,8 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-canvas-selection": CustomEvent<CanvasSelection | null>;
   /** The toolbar state, one per animation frame when it changes; detail equals state(). */
   "bp-selection-change": CustomEvent<ToolbarState>;
+  /** 1.10.0: the history's depths changed (a new step, an undo or redo, the history cleared). Fired at once. */
+  "bp-canvas-history": CustomEvent<{ kind: "step" | "undo" | "redo" | "clear"; count: number; undo: number; redo: number }>;
   /** With format-bubble="off": Mod+K or the link card's Edit. Cancelable; detail.href is the current link or null. */
   "bp-canvas-link-request": CustomEvent<{ href: string | null }>;
   /** An edit moved or dropped a comment range; detail equals commentRanges(). One per animation frame. */
@@ -147,7 +149,7 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
 export type ToolbarMark = "strong" | "em" | "code" | "underline" | "strike" | "highlight" | "link" | "wikilink";
 export type ToolbarBlockStyle = "normal" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "blockquote";
 export type ToolbarList = "bullet" | "number";
-export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock" | "insertInline";
+export type ToolbarCommand = "toggleMark" | "setBlockStyle" | "toggleList" | "insertBlock" | "insertInline" | "undo" | "redo";
 export interface ToolbarCommandArgs {
   mark?: ToolbarMark;
   href?: string;
@@ -213,6 +215,10 @@ export interface LinkPreview {
   title?: string;
   excerpt?: string;
   href?: string;
+  /** 1.9.0, a wikilink's: replaces the card's [[target]] line ("" hides it). */
+  subtitle?: string;
+  /** 1.9.0, a wikilink's: the document's type, beside the title. */
+  badge?: string;
 }
 export type MediaUploadResult = string | { src?: string; url?: string; alt?: string };
 type MaybePromise<T> = T | Promise<T>;
@@ -279,6 +285,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   resolveConflictWithServerBlocks(blocks: PortableDocBlock[]): void;
   recoverySnapshot(): RecoverySnapshot;
   focusBlock(id: string): boolean;
+  /** 1.12.0: select the top-level image or object block card `id`, as a click on it does. */
+  selectBlock(id: string): boolean;
   focusFirstBodyBlock(): boolean;
   toggleSourceMode(): void;
   findSet(query: string, opts?: { caseSensitive?: boolean }): FindState;
@@ -304,6 +312,9 @@ export interface BpPaperCanvasElement extends HTMLElement {
   insertBlock(type: string, attrs?: { level?: number }): boolean;
   /** A declared inline object at the caret; its field editor opens first. */
   insertInline(type: string): boolean;
+  /** 1.10.0: one step of the canvas's own history, as Mod+Z / Shift+Mod+Z in it. */
+  undo(): boolean;
+  redo(): boolean;
   /** Whether the command would apply here, without applying it. */
   can(command: ToolbarCommand, args?: ToolbarCommandArgs): boolean;
   state(): ToolbarState;

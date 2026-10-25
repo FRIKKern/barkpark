@@ -268,6 +268,13 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   # ─── raw map → %Field{} conversion (mirrors SchemaDefinition.parse_field/2,
   # which is private; we deliberately avoid `Code.eval_*` per D7). ─────────
 
+  @doc """
+  The `%Field{}` the editor components render for a raw schema field map, the
+  same parse `render/2` applies. The Portable Text block dialog uses it for a
+  block type's fields (task-19392d1e6fc661e6).
+  """
+  def field_struct(%{} = raw), do: raw |> stringify() |> to_field_struct()
+
   defp to_field_struct(%{"type" => type, "name" => name} = raw) do
     base = %Field{
       name: name,
@@ -288,6 +295,37 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
               |> Map.get("fields", [])
               |> Enum.map(&to_field_struct_or_nil/1)
               |> Enum.reject(&is_nil/1)
+        }
+
+      # Several named member types (`of: [{"name": "ctaSection", ...}, ...]`,
+      # Sanity's page-builder array). Each item names its member in `_type`.
+      # Before, the list reached `stringify/1`, which takes a map only, and
+      # the whole document route answered 500 (task-592dee75ffef0c06).
+      "arrayOf" when is_map_key(raw, "of") and is_list(:erlang.map_get("of", raw)) ->
+        members =
+          raw["of"]
+          |> Enum.filter(&is_map/1)
+          |> Enum.map(&stringify/1)
+          |> Enum.flat_map(fn member ->
+            case member["name"] || member["type"] do
+              member_name when is_binary(member_name) and member_name != "" ->
+                field =
+                  member
+                  |> Map.put_new("type", member_name)
+                  |> Map.put("name", member_name)
+                  |> to_field_struct()
+
+                [{member_name, field}]
+
+              _ ->
+                []
+            end
+          end)
+
+        %Field{
+          base
+          | ordered: !!Map.get(raw, "ordered", false),
+            of_types: Map.new(members)
         }
 
       "arrayOf" ->

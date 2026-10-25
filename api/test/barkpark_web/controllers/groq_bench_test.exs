@@ -15,7 +15,7 @@ defmodule BarkparkWeb.GroqBenchTest do
   alias Barkpark.Test.GroqSyntheticProducts
 
   @moduletag :groq_bench
-  # 38 shapes, 10 runs each, twice, and several shapes take seconds on main.
+  # 39 shapes, 10 runs each, twice, and several shapes take seconds on main.
   @moduletag timeout: 1_800_000
   @moduletag ownership_timeout: 1_800_000
 
@@ -204,7 +204,9 @@ defmodule BarkparkWeb.GroqBenchTest do
     {"36 category listing filter, count()", ~s'count(*[#{@category}])', @category_params},
     {"37 category listing filter, ._id", ~s'*[#{@category}]._id', @category_params},
     {"38 category listing filter | order() {listing keys}",
-     ~s'*[#{@category}] | order(publishedAt desc, isbn asc) #{@listing}', @category_params}
+     ~s'*[#{@category}] | order(publishedAt desc, isbn asc) #{@listing}', @category_params},
+    {"39 category listing filter {listing keys}", ~s'*[#{@category}] #{@listing}',
+     @category_params}
   ]
 
   setup do

@@ -313,6 +313,9 @@ html[data-theme="dark"] .bp-paper-body {
   --bp-evidence-caption: var(--tok-evidence-caption);
   --bp-evidence-width: max(100%, min(max(var(--bp-evidence-band), 100cqw * var(--bp-evidence-fill)), var(--bp-evidence-band-max), 100cqw - 2 * var(--bp-evidence-gutter)));
   --bp-evidence-pull: calc(50% - var(--bp-evidence-width) / 2);
+  /* 1: a table is centred (papers). 0: it starts at the text's left edge, for a host whose
+     column is the text, with no evidence band (EMBED-CONTRACT, Styling). */
+  --bp-table-centre: 1;
   --bp-li-gap: 4pt;
   --bp-list-indent: 24px;
   --bp-code-size: 0.92em;
@@ -767,8 +770,10 @@ html[data-theme="dark"] .bp-paper-body {
    The title is a small uppercase label on its own line, and the tone is a 6px
    dot before it — `bp-callout--<tone>` sets only `--bp-callout-dot`. */
 .bp-paper-surface .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 18px 22px 20px; border: 1px solid var(--paper-rule); border-radius: 12px; background: transparent; color: var(--paper-ink); }
-.bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child > strong, .bp-paper-surface .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child, .bp-paper-surface .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
 .bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child { display: block; margin: 0 0 6px; }
+/* The canvas title host carries the eyebrow type, so its block line is eyebrow-tall; the <strong> inside inherits it. */
+.bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child > strong { font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
 .bp-paper-surface .bp-callout > strong:first-child::before, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child > strong::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint-line)); vertical-align: middle; }
 .bp-paper-surface .bp-callout--info    { --bp-callout-dot: var(--bp-tone-info-fg); }
 .bp-paper-surface .bp-callout--success { --bp-callout-dot: var(--bp-tone-success-fg); }
@@ -847,7 +852,7 @@ html[data-theme="dark"] .bp-paper-body {
    At 360 the band expression collapses to `100%`, so the cap becomes the column
    and a wide table returns to scrolling inside it — the doc-overflow contract is
    unchanged at every width (measured: 360/768/1280/1920, all seven fixtures). */
-.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2); transform: translateX(-50%); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
+.bp-paper-surface .bp-table { margin: var(--bp-air-table) 0 0; margin-inline: var(--bp-evidence-pull, 0px); border-collapse: collapse; width: fit-content; max-width: var(--bp-evidence-width, 100%); position: relative; left: calc(var(--bp-evidence-width, 100%) / 2 * var(--bp-table-centre, 1)); transform: translateX(calc(-50% * var(--bp-table-centre, 1))); box-sizing: border-box; display: block; overflow-x: auto; border: var(--bp-rule-hairline) solid var(--paper-chrome-border); border-radius: 10px; }
 /* A column is an authored boundary. Its table may scroll inside that slot,
    but must not borrow the page-wide evidence band and cover the next column.
    Set the tokens on the table itself so nested editor hosts cannot reset them. */

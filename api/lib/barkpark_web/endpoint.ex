@@ -36,10 +36,18 @@ defmodule BarkparkWeb.Endpoint do
   # `max_frame_size` is the websock_adapter default (10 MB), stated here on
   # purpose (owner ruling #39): it is the LiveView door's half of the
   # per-document size cap, and leaving it implicit hid the limit from review.
+  #
+  # `compress: true` accepts the browser's `permessage-deflate` offer, so the
+  # LiveView frames travel deflated. A Studio document join reply on the
+  # gyldendal-no copy is 120 to 200 KB of JSON and deflates to about a tenth
+  # (task-cca3c6d48e57097e). A browser that offers no extension gets plain
+  # frames, as before. Each compressed socket keeps one deflate and one inflate
+  # context for its lifetime.
   socket "/live", Phoenix.LiveView.Socket,
     websocket: [
       connect_info: [:peer_data, :x_headers, session: @session_options],
-      max_frame_size: 10_000_000
+      max_frame_size: 10_000_000,
+      compress: true
     ],
     longpoll: [connect_info: [:peer_data, :x_headers, session: @session_options]]
 
@@ -120,6 +128,18 @@ defmodule BarkparkWeb.Endpoint do
   # (deploy/instance-deploy.sh, sync_static_siblings) builds those siblings for
   # every `assets/*.js|css` and keeps them in step with the checkout; a file
   # without one is served as-is. Off in dev, where the files are edited live.
+  # The root layout's stylesheets and body scripts, cut out of the template
+  # at compile time and served under a content hash with a year of
+  # `immutable` caching (BarkparkWeb.RootAssets, task-cca3c6d48e57097e).
+  plug BarkparkWeb.Plugs.RootAssets
+
+  # The `/assets` files the root layout links, under a content hash:
+  # `/assets/v/<hash>/<name>` is cached for a year as `immutable` when the
+  # hash matches the bytes on disk, and is `no-cache` otherwise. The plain
+  # names below keep `no-cache` (BarkparkWeb.StaticAssets,
+  # task-66122189b7af6ea2).
+  plug BarkparkWeb.Plugs.StaticAssets, compress: not code_reloading?
+
   plug Plug.Static,
     at: "/",
     from: :barkpark,

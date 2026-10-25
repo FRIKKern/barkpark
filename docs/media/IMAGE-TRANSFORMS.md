@@ -1,11 +1,11 @@
 <!-- doc-tier: agent | canonical-for: media-image-transforms | budget: 1300tok -->
 # Image transforms
 
-Barkpark stores an uploaded image once and makes every size, crop and format on the first request for it. The result is cached on disk, so later requests read a file. Sanity's image pipeline and `next/image` work the same way.
+Barkpark stores an uploaded image once and makes every size, crop and format on its first request, cached on disk, as Sanity's pipeline and `next/image` do.
 
 ## Upload
 
-`POST /v1/media/:dataset/upload` stores the original and writes the `mediaAsset` document once, with `fileInfo.width`, `height`, a 24 px `lqip` and `bp_processing_status` (`"failed"` when libvips cannot decode it). It builds no renditions. Code: `Barkpark.Plugins.Media.after_media_upload/1`, `Barkpark.Media.Processing`.
+`POST /v1/media/:dataset/upload` stores the original and writes the `mediaAsset` document once: `fileInfo.width`, `height`, a 24 px `lqip`, `bp_processing_status` (`"failed"` when libvips cannot decode it) and Sanity's `metadata` (`dimensions`, `lqip`, `blurHash`, `hasAlpha`, `isOpaque`, `palette`; `exif`, `location` with `meta=exif,location`). No renditions. Code: `Barkpark.Plugins.Media.after_media_upload/1`, `Barkpark.Media.Processing`.
 
 ## URL
 
@@ -13,7 +13,7 @@ Barkpark stores an uploaded image once and makes every size, crop and format on 
 GET /media/files/<path>?w=800&h=450&fit=crop&fp-x=0.3&fp-y=0.4&auto=format&q=70
 ```
 
-`<path>` is the asset's `path`; `url` and `originalUrl` already carry it. The scoped form `/w/:ws/p/:proj/media/files/<path>` takes the same parameters. Without transform parameters the URL serves the original bytes, as before.
+`<path>` is the asset's `path`; `url` and `originalUrl` carry it. The scoped form `/w/:ws/p/:proj/media/files/<path>` takes the same parameters. Without them the URL serves the original bytes.
 
 Sanity CDN URLs from `@sanity/image-url` take the same parameters: [SANITY-IMAGE-URLS.md](SANITY-IMAGE-URLS.md).
 
@@ -61,7 +61,7 @@ A Sanity-shaped image value stores `crop` `{top, bottom, left, right}` and `hots
 - `w` and `h` are capped at 4096 and values above 100 round up to a multiple of 10. One asset keeps at most 100 cached transforms; a new one past that answers 429 `transform_variant_limit`, while cached ones still serve. Set them in `config :barkpark, Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).
 - Access is the original's check (`:original`). A watermark profile on the asset is applied to the transform.
 
-Errors: 400 `invalid_transform_param` (bad value, `details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
+Errors: 400 `invalid_transform_param` (`details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
 
 ## Named presets
 

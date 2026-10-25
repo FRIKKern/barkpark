@@ -69,7 +69,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # The DISPLAYED desk is the default-gated tree (charter Decisions 1/3): a
     # disabled plugin's tree and top-menu Media are absent, so panes[0] tells
     # the enablement truth. `gated` renders the root pane in EVERY case.
-    gated = dataset |> Structure.build(scope(opts)) |> StructureCopy.localize()
+    gated = dataset |> Structure.build(desk_opts(opts)) |> StructureCopy.localize()
 
     # Resolution walks gated-first. A raw nav_path whose head no longer sits at
     # the gated root (a stale pre-tiering deep link — e.g. the router's legacy
@@ -283,7 +283,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           nil ->
             ungated =
               dataset
-              |> Structure.build([gating: :none] ++ scope(opts))
+              |> Structure.build([gating: :none] ++ desk_opts(opts))
               |> StructureCopy.localize()
 
             cond do
@@ -429,8 +429,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         {panes, nil}
 
       %{type: :list} = node ->
+        node = node |> Structure.expand(dataset, scope(opts)) |> StructureCopy.localize()
+
         list_pane = %{
-          title: node.title,
+          # A declared `paneTitle` names the opened pane (task-a3e829ace0b184ea).
+          title: Map.get(node, :pane_title) || node.title,
           role: :list,
           priority: if(rest == [], do: :active, else: depth + 1),
           items: list_items(node, scope_prefix(opts)),
@@ -534,8 +537,18 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # Gyldendal parity E3.1 — the declared sort: a desk group's own
         # `orderings` win, else the schema's `desk.orderings` (Sanity's
         # `orderings`, first entry = default). Absent → today's order.
+        #
+        # task-fa57815041bead3d — a sort the author picked in the list's sort
+        # menu (one of `desk.sortOrderings`) wins over that default for this
+        # list only. Picking nothing leaves the default as it is.
+        sort_options = sort_options(schema)
+
+        active_sort =
+          find_sort(sort_options, opts |> Keyword.get(:list_sorts, %{}) |> Map.get(type_name))
+
         list_opts =
-          case desk_order(active_group, schema, Map.get(node, :orderings)) do
+          case active_sort || desk_order(active_group, schema, Map.get(node, :orderings)) do
+            %{order: order} -> Keyword.put(list_opts, :order, order)
             [] -> list_opts
             order -> Keyword.put(list_opts, :order, order)
           end
@@ -544,15 +557,20 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           list_page_preflighted(type_name, dataset, list_opts, opts)
 
         doc_pane = %{
-          title: node.title || (schema && schema.title) || type_name,
+          title:
+            Map.get(node, :pane_title) || node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
           type_title: schema && schema.title,
           author_creatable: author_creatable?(schema),
+          # The fields this list's "+" presets (task-dc9b751450c2c2c4).
+          initial_values: Map.get(node, :initial_values),
           role: :list,
           priority: :active,
           desk_groups: desk_groups,
           active_desk: active_group && Map.get(active_group, "name"),
+          sort_options: Enum.map(sort_options, &Map.take(&1, [:name, :title])),
+          active_sort: active_sort && active_sort.name,
           filter_error: filter_error,
           has_more: has_more,
           items: doc_items(docs, schema, dataset, opts),
@@ -576,7 +594,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
             )
 
           _ ->
-            editor = build_editor(type_name, schema, rest, dataset, opts, active_group)
+            editor =
+              type_name
+              |> build_editor(schema, rest, dataset, opts, active_group)
+              |> with_node_views(node)
+
             {panes ++ [doc_pane], editor}
         end
 
@@ -630,6 +652,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # the editor; clicking a child (`[…, id, child]`) drills one level deeper.
   # A segment that is neither still opens as a document (a re-parented deep
   # link) — the #1851 never-unreachable guarantee.
+  # One tree level: the children of `pub_id`, narrowed by the tree's own filter
+  # when it declares one (task-e9f14aeb3ed09953), as the root is.
+  defp tree_level_filter(node, parent, pub_id) do
+    tree = Map.get(node, :tree) || %{}
+
+    own =
+      case tree do
+        %{"filter" => %{} = own} -> own
+        _ -> %{}
+      end
+
+    # A parent held in an array of references (task-c603a1eb83c4fc01).
+    op = if tree["op"] == "has", do: "has", else: "eq"
+    Map.merge(own, %{parent => %{op => pub_id}})
+  end
+
   defp walk_tree([id | rest], level, panes, type_name, schema, parent, node, dataset, opts) do
     pub_id = Content.published_id(id)
 
@@ -639,7 +677,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
       {doc, _is_draft, _has_pub} ->
         list_opts =
-          [perspective: :drafts, filter_map: %{parent => %{"eq" => pub_id}}] ++ scope(opts)
+          [perspective: :drafts, filter_map: tree_level_filter(node, parent, pub_id)] ++
+            scope(opts)
 
         list_opts =
           case desk_order(nil, schema, Map.get(node, :orderings)) do
@@ -696,7 +735,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
                 opts
               )
             else
-              {panes ++ [pane], build_editor(type_name, schema, rest, dataset, opts, nil)}
+              editor =
+                type_name
+                |> build_editor(schema, rest, dataset, opts, nil)
+                |> with_node_views(node)
+
+              {panes ++ [pane], editor}
             end
         end
     end
@@ -721,6 +765,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   #   * everything else resolves draft-first into the field-form editor.
   #
   # Returns the editor map or nil (no doc selected / doc not found).
+  # A document opened from a declared list that names `views` carries them, and
+  # the editor shows those tabs instead of the schema's `desk.views`
+  # (task-ea2e544fec8ee6db). A list that names none leaves the editor as is.
+  defp with_node_views(%{} = editor, %{views: views}) when is_list(views),
+    do: Map.put(editor, :views, views)
+
+  defp with_node_views(editor, _node), do: editor
+
   defp build_editor(type_name, schema, rest, dataset, opts, active_group) do
     scope_kw = scope(opts)
 
@@ -896,6 +948,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # Returns the `[workspace_id: …, project_id: …]` list (or `[]` when no scope
   # was threaded), ready to append onto a Content read's opts. Nil-safe: the
   # Content query path no-ops on an empty/absent scope.
+  # The Studio builds the desk for every URL, so it defers what only an open
+  # pane shows: a `groupBy` node's children (task-cca3c6d48e57097e).
+  defp desk_opts(opts), do: [defer_group_by: true] ++ scope(opts)
+
   defp scope(opts) do
     case Keyword.get(opts, :scope) do
       kw when is_list(kw) -> kw
@@ -936,11 +992,30 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # as before (post/page back-compat lock). Generic by construction: PaneBuilder
   # never branches on the document type; the declaration/manifest is the switch.
 
+  @doc """
+  The desk list's rows for documents read elsewhere: a document view's related
+  list (`desk.views`) renders its rows with the same title, preview lines and
+  media as a desk list pane. `scope` is the read's tenancy keyword list.
+  """
+  def view_rows(docs, schema, dataset, scope) when is_list(scope),
+    do: doc_items(docs, schema, dataset, scope: scope)
+
+  defp schema_icon(%{icon: icon}), do: icon
+  defp schema_icon(_), do: nil
+
   defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
-    media_field = preview_field(Map.get(preview, "media"))
+    media_spec = Map.get(preview, "media")
+    media_declared? = PreviewText.media_paths(media_spec) != []
     subtitle = Map.get(preview, "subtitle")
-    targets = subtitle_targets(docs, subtitle, dataset, opts)
+    description = Map.get(preview, "description")
+    title_spec = title_spec(preview)
+
+    targets =
+      preview_targets(docs, [subtitle, description, media_spec, title_spec], dataset, opts)
+
+    deref = fn id -> Map.get(targets, id) end
+    type_icon = BarkparkWeb.Icons.row_icon(schema_icon(schema))
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -951,9 +1026,16 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # Gyldendal parity E3.3 — `list_preview.media` names an image field;
         # the row carries its url (nil when the document has none) and every
         # row of a media-declaring type reserves the slot so titles align.
-        media: media_field && media_url(content_value(doc, media_field)),
-        media_slot: media_field != nil,
-        title: row_title(doc, schema),
+        # task-75cb2cac1e875214: `media` is a path or a list of paths (the
+        # first that holds an image), and a URL string counts: the twin's
+        # product cover is `onix.thumbnail`.
+        media: if(media_declared?, do: PreviewText.media(media_spec, preview_root(doc), deref)),
+        media_slot: media_declared?,
+        # task-835fe5219585ca80: Sanity draws the schema type's icon in a
+        # preview row with no media, and the document icon when the type has
+        # none.
+        type_icon: type_icon,
+        title: row_title(doc, schema, deref),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -962,7 +1044,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # subtitle fallback so a row is never a bare mono id; the render picks
         # `meta || updated`. Threading updated_at only READS a field already on
         # every Document — no /v1/structure wire change.
-        meta: subtitle_meta(doc, subtitle, targets) || row_meta(doc, Map.get(preview, "meta")),
+        meta: preview_line(doc, subtitle, deref) || row_meta(doc, Map.get(preview, "meta")),
+        # A second line under the subtitle: Sanity's `description`.
+        description: preview_line(doc, description, deref),
         updated: relative_updated(doc)
       }
     end)
@@ -1008,7 +1092,21 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # row title in `list_preview.title`; when the column is blank the row shows
   # that field's value (the same rule the write path uses to fill the column),
   # and only a document with neither falls back to the unnamed-row spelling.
-  defp row_title(doc, schema) do
+  #
+  # task-394a39576c8fb399 — `list_preview.title` may instead be a text spec
+  # (`PreviewText`): a list of parts, the first with a value
+  # (`["displayTitle", "title", {"text": "No title"}]`), a template
+  # (`"{title} ({code})"`), or `parts`. Sanity's `prepare` sets the row title
+  # this way, so the spec wins over the stored title, and the row falls back
+  # to the rule above only when the spec shows nothing.
+  defp row_title(doc, schema, deref \\ fn _ -> nil end) do
+    case title_spec(schema_list_preview(schema)) do
+      nil -> stored_row_title(doc, schema)
+      spec -> PreviewText.format(spec, preview_root(doc), deref) || stored_row_title(doc, schema)
+    end
+  end
+
+  defp stored_row_title(doc, schema) do
     case doc.title && String.trim(doc.title) do
       nil -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
       "" -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
@@ -1020,9 +1118,24 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
+  # `list_preview.title` as a text spec, or nil while it names one field (a
+  # bare field name or `{"field": name}`), which only fills a blank title.
+  defp title_spec(preview) do
+    case Map.get(preview, "title") do
+      list when is_list(list) and list != [] -> list
+      %{"field" => _} -> nil
+      %{} = spec when map_size(spec) > 0 -> spec
+      text when is_binary(text) -> if String.contains?(text, "{"), do: text
+      _ -> nil
+    end
+  end
+
   @doc """
-  The desk row's title for `doc` under `schema`: its stored title, else the
-  schema's `list_preview` title field, else `Untitled <type> · <id tail>`.
+  The desk row's title for `doc` under `schema`: the schema's `list_preview`
+  title spec when it shows text, else its stored title, else the schema's
+  `list_preview` title field, else `Untitled <type> · <id tail>`. A title spec
+  that reads through a reference shows its fallback here, since no targets
+  are loaded.
   Studio's paper header and its live row refresh use it too, so the three
   surfaces name one document the same way (task-23bff317e617928e).
   """
@@ -1145,65 +1258,44 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # Identical priority to the Go TUI's `rowMeta` (listpreview_render_test.go
   # pins it there; pane_builder_test.exs pins it here).
   # `list_preview.subtitle` (task-f3203617ae4cf03e): a path, `ref.field` through
-  # one reference, `|date`, and parts with a fallback — `PreviewText`. The
-  # referenced documents of a whole page load in ONE scoped read.
-  defp subtitle_meta(_doc, nil, _targets), do: nil
+  # references, `|date`, and parts with a fallback — `PreviewText`. The
+  # referenced documents of a whole page load in one scoped read per depth.
+  defp preview_line(_doc, nil, _deref), do: nil
+  defp preview_line(doc, spec, deref), do: PreviewText.format(spec, preview_root(doc), deref)
 
-  defp subtitle_meta(doc, spec, targets) do
-    PreviewText.format(spec, fn path ->
-      case String.split(path, ".", parts: 2) do
-        [field] ->
-          content_value(doc, field)
-
-        [ref, rest] ->
-          with id when is_binary(id) <- ref_id(content_value(doc, ref)),
-               %{} = target <- Map.get(targets, id) do
-            target_value(target, rest)
-          else
-            _ -> nil
-          end
+  # The map a preview path starts from: the content, with the title column as
+  # `title` (a titled type keeps its title there, not in content).
+  defp preview_root(doc) do
+    content =
+      case Map.get(doc, :content) do
+        %{} = c -> c
+        _ -> %{}
       end
-    end)
-  end
 
-  defp subtitle_targets(docs, spec, dataset, opts) do
-    case PreviewText.refs(spec) do
-      [] ->
-        %{}
-
-      refs ->
-        ids =
-          for doc <- docs,
-              ref <- refs,
-              id = ref_id(content_value(doc, ref)),
-              is_binary(id),
-              uniq: true,
-              do: id
-
-        found =
-          Content.get_documents_by_ids(
-            ids ++ Enum.map(ids, &("drafts." <> &1)),
-            dataset,
-            scope(opts)
-          )
-
-        # The published row wins; a draft-only target still names itself.
-        Map.new(ids, fn id -> {id, found[id] || found["drafts." <> id]} end)
+    case Map.get(doc, :title) do
+      t when is_binary(t) and t != "" -> Map.put(content, "title", t)
+      _ -> content
     end
   end
 
-  defp ref_id(%{"_ref" => id}) when is_binary(id), do: Content.published_id(id)
-  defp ref_id(id) when is_binary(id) and id != "", do: Content.published_id(id)
-  defp ref_id(_), do: nil
+  # The documents a page of rows references through its preview specs: ONE
+  # scoped read per reference depth, so `parent.parent.title` costs two reads
+  # for the whole page, not one per row. The published row wins; a draft-only
+  # target still names itself.
+  defp preview_targets(docs, specs, dataset, opts) do
+    rows = Enum.map(docs, &{specs, preview_root(&1)})
 
-  defp target_value(target, "title"), do: target.title || content_value(target, "title")
+    PreviewText.targets(rows, fn ids ->
+      found =
+        Content.get_documents_by_ids(
+          ids ++ Enum.map(ids, &("drafts." <> &1)),
+          dataset,
+          scope(opts)
+        )
 
-  defp target_value(target, path) do
-    path
-    |> String.split(".")
-    |> Enum.reduce(Map.get(target, :content), fn
-      key, %{} = map -> Map.get(map, key)
-      _key, _ -> nil
+      for id <- ids, target = found[id] || found["drafts." <> id], into: %{} do
+        {id, preview_root(target)}
+      end
     end)
   end
 
@@ -1222,21 +1314,6 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> nil
     end
   end
-
-  # A list_preview spec is a content-field name or `%{"field" => f, …}`.
-  defp preview_field(field) when is_binary(field) and field != "", do: field
-
-  defp preview_field(%{} = spec),
-    do: preview_field(Map.get(spec, "field") || Map.get(spec, :field))
-
-  defp preview_field(_), do: nil
-
-  # The url off a stored image value: the E1 `image` object and the twin's
-  # denormalised composite both carry `url`; a bare string is a url already.
-  # Anything else (an asset id alone, a malformed value) renders no thumbnail.
-  defp media_url(%{"url" => url}) when is_binary(url) and url != "", do: url
-  defp media_url(url) when is_binary(url) and url != "", do: url
-  defp media_url(_), do: nil
 
   defp schema_list_preview(nil), do: %{}
 
@@ -1261,12 +1338,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
 
   defp preview_value(_doc, _spec), do: nil
 
-  defp content_value(doc, field) do
-    case Map.get(doc, :content) do
-      %{} = content -> Map.get(content, field)
-      _ -> nil
-    end
-  end
+  # A dotted `badge` / `meta` field walks into objects, the same way
+  # `subtitle` paths do (task-86b6aa7ee423ecaf).
+  defp content_value(doc, field), do: PreviewText.field_value(Map.get(doc, :content), field)
 
   # Only scalar values render; nil / "" / structured values are skipped
   # so a misdeclared field degrades to "no badge", never a crash.
@@ -1380,7 +1454,12 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         _ -> nil
       end
 
-    (group_orderings || node_orderings || schema_orderings || [])
+    ordering_specs(group_orderings || node_orderings || schema_orderings || [])
+  end
+
+  # `[%{"field" => f, "direction" => d}]` as `Content.Query` `:order` specs.
+  defp ordering_specs(orderings) do
+    orderings
     |> List.wrap()
     |> Enum.flat_map(fn
       %{} = o ->
@@ -1399,6 +1478,47 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         []
     end)
   end
+
+  @doc """
+  The named sorts a type's desk list offers in its sort menu, from the schema's
+  `desk.sortOrderings` (Sanity's `orderings`, task-fa57815041bead3d). Each is
+  `%{name: name, title: title, order: [query order spec]}`. An entry with no
+  name, no title or no usable `by` ordering is skipped, never raised on, so a
+  stored schema that predates the changeset check still renders.
+  """
+  def sort_options(nil), do: []
+
+  def sort_options(schema) do
+    case schema && (Map.get(schema, :desk) || Map.get(schema, "desk")) do
+      %{} = desk ->
+        (Map.get(desk, "sortOrderings") || Map.get(desk, :sortOrderings) || [])
+        |> List.wrap()
+        |> Enum.flat_map(&sort_option/1)
+        |> Enum.uniq_by(& &1.name)
+
+      _ ->
+        []
+    end
+  end
+
+  defp sort_option(%{} = o) do
+    name = Map.get(o, "name") || Map.get(o, :name)
+    title = Map.get(o, "title") || Map.get(o, :title) || name
+    by = Map.get(o, "by") || Map.get(o, :by)
+
+    with true <- is_binary(name) and name != "",
+         true <- is_binary(title),
+         [_ | _] = order <- ordering_specs(by) do
+      [%{name: name, title: title, order: order}]
+    else
+      _ -> []
+    end
+  end
+
+  defp sort_option(_), do: []
+
+  defp find_sort(_options, nil), do: nil
+  defp find_sort(options, name), do: Enum.find(options, &(&1.name == name))
 
   @doc """
   False when the type's desk block declares `"authorCreatable": false`: its

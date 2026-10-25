@@ -338,6 +338,94 @@ defmodule Barkpark.Content.EnvelopeTest do
     assert Enum.at(many, 1)["meta"] == %{"open" => "o"}
   end
 
+  test "render_many_by_type on a schema that restricts nothing and declares no object kids drops only ciphertext",
+       %{doc: post} do
+    enc = FieldCipher.encrypt("ssn-9", "dataset:test")
+
+    # Built in memory: the write path refuses a ciphertext it did not seal.
+    doc = %{
+      post
+      | doc_id: "env-5",
+        content: %{
+          "body" => "b",
+          "tags" => ["t", %{"_bpenc" => 1}],
+          "meta" => %{"inner" => %{"_bpenc" => 1}},
+          "ssn" => enc,
+          "undeclared" => enc,
+          "plain" => 1.5
+        }
+    }
+
+    # Kidless declarations: a scalar, an array of scalars, an array whose
+    # item shape has no kids, and an object with no declared kids.
+    plain =
+      schema_with([
+        %{"name" => "body"},
+        %{"name" => "tags", "type" => "array", "of" => [%{"type" => "string"}]},
+        %{"name" => "list", "type" => "arrayOf", "of" => %{"type" => "string"}},
+        %{"name" => "meta", "type" => "object"},
+        %{"name" => "ssn"}
+      ])
+
+    # The same with one object kid, which takes the full walk.
+    walked =
+      schema_with([
+        %{"name" => "body"},
+        %{"name" => "tags", "type" => "array", "of" => [%{"type" => "string"}]},
+        %{"name" => "meta", "type" => "object", "fields" => [%{"name" => "inner"}]},
+        %{"name" => "ssn"}
+      ])
+
+    ctx = CallerContext.anonymous()
+
+    for schema <- [plain, walked], caller <- [ctx, nil] do
+      [many] = Envelope.render_many_by_type([doc], fn _ -> schema end, caller)
+      assert many == Envelope.render(doc, schema, caller)
+    end
+
+    [env] = Envelope.render_many_by_type([doc], fn _ -> plain end, ctx)
+    refute Map.has_key?(env, "ssn")
+    refute Map.has_key?(env, "undeclared")
+    assert env["tags"] == ["t", %{"_bpenc" => 1}]
+    assert env["meta"] == %{"inner" => %{"_bpenc" => 1}}
+    assert env["_id"] == "env-5"
+
+    # The declared kid holding ciphertext is dropped by the walk.
+    [env] = Envelope.render_many_by_type([doc], fn _ -> walked end, ctx)
+    assert env["meta"] == %{}
+  end
+
+  test "drops_ciphertext? is true for a caller without admin when a field at any depth is encrypted" do
+    nested =
+      schema_with([
+        %{
+          "name" => "meta",
+          "type" => "object",
+          "fields" => [%{"name" => "pin", "encrypted" => true}]
+        }
+      ])
+
+    item =
+      schema_with([
+        %{
+          "name" => "rows",
+          "type" => "arrayOf",
+          "of" => %{"type" => "object", "fields" => [%{"name" => "pin", "encrypted" => true}]}
+        }
+      ])
+
+    top = schema_with([%{"name" => "ssn", "encrypted" => true}])
+
+    for schema <- [nested, item, top] do
+      assert Envelope.drops_ciphertext?(schema, CallerContext.anonymous())
+      assert Envelope.drops_ciphertext?(schema, nil)
+      refute Envelope.drops_ciphertext?(schema, admin())
+      refute Envelope.drops_ciphertext?(schema, :internal)
+    end
+
+    refute Envelope.drops_ciphertext?(schema_with([%{"name" => "ssn", "private" => true}]), nil)
+  end
+
   test "render_many_by_type leaves an admin unredacted", %{doc: post} do
     resolver = fn _ -> schema_with([%{"name" => "body", "private" => true}]) end
     [env] = Envelope.render_many_by_type([post], resolver, admin())
@@ -455,6 +543,50 @@ defmodule Barkpark.Content.EnvelopeTest do
     test "an envelope with no user-content keys returns nil" do
       doc = %Barkpark.Content.Document{doc_id: "env-sm-empty", type: "post"}
       assert Envelope.source_map(doc, %{}) == nil
+    end
+  end
+
+  describe "source_map/2 nested values (task-651999345821b5dd)" do
+    # An object field and an array's items are mapped too, as Sanity's source map maps
+    # every leaf: a site can mark `seo.metaTitle` or one link's title click-to-edit.
+    test "maps an object's fields and an array's items; a keyed item's source names its _key",
+         %{doc: doc} do
+      rendered =
+        doc
+        |> Envelope.render()
+        |> Map.merge(%{
+          "seo" => %{"metaTitle" => "Post 3", "_type" => "seo"},
+          "links" => [
+            %{"_key" => "l1", "_type" => "link", "title" => "Docs"},
+            %{"_key" => "l2", "_type" => "link", "title" => "Related"}
+          ],
+          "tags" => ["a", "b"]
+        })
+
+      map = Envelope.source_map(doc, rendered)
+      source = fn result -> Enum.at(map["paths"], map["mappings"][result]["source"]["path"]) end
+
+      # The whole field is still one entry, as before.
+      assert source.(~s($["seo"])) == ~s($["seo"])
+      assert source.(~s($["seo"]["metaTitle"])) == ~s($["seo"]["metaTitle"])
+      assert source.(~s($["links"][1])) == ~s{$["links"][?(@._key=="l2")]}
+      assert source.(~s($["links"][1]["title"])) == ~s{$["links"][?(@._key=="l2")]["title"]}
+      assert source.(~s($["tags"][1])) == ~s($["tags"][1])
+      assert map["mappings"][~s($["links"][0]["title"])]["source"]["document"] == 0
+      # System keys are not mapped.
+      refute Map.has_key?(map["mappings"], ~s($["seo"]["_type"]))
+      refute Map.has_key?(map["mappings"], ~s($["links"][0]["_key"]))
+    end
+
+    test "a document's nested entries stop at the cap", %{doc: doc} do
+      rendered = Map.put(Envelope.render(doc), "list", Enum.map(1..3_000, &"item #{&1}"))
+      map = Envelope.source_map(doc, rendered)
+
+      nested =
+        Enum.count(map["mappings"], fn {k, _} -> String.starts_with?(k, ~s($["list"][)) end)
+
+      assert nested == 2_000
+      assert Map.has_key?(map["mappings"], ~s($["list"]))
     end
   end
 

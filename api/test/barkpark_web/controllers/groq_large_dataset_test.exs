@@ -1460,15 +1460,72 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       refute sql =~ "#>", sql
     end
 
+    # The keys of a listing projection: content keys, a renamed key, `title`
+    # from the column, the system keys and a key no document holds.
+    @listing_keys ~s'{_id, _type, _rev, _createdAt, _updatedAt, _originalId, title, code, tags, kind, "k": kind, isbn, onix, themaCodes, publishedAt, description, missing}'
+
+    test "an exact read with a projection equals in-memory evaluation in every perspective",
+         %{token: token} do
+      for perspective <- ["published", "drafts", "raw"] do
+        extra = %{"perspective" => perspective}
+        # `defined(_id)` is not exact, so these documents are loaded and
+        # filtered in memory, as every read was before the exact read.
+        with_groq_config(max_documents_per_fetch: 20_000, max_documents_loaded: 40_000)
+
+        docs =
+          result!(token, ~s'*[_type == "product" && defined(_id)]', %{}, extra)
+
+        assert result!(token, ~s'*[_type == "product"]', %{}, extra) === docs, perspective
+        with_groq_config([])
+
+        for {q, params} <- @content_shapes,
+            tail <- [" " <> @listing_keys, ".code", ".title", ""] do
+          q = String.replace_suffix(q, "._id", tail)
+          want = docs |> in_memory(q, params) |> Jason.encode!() |> Jason.decode!()
+
+          assert result!(token, q, params, extra) === want, "#{perspective} #{q}"
+        end
+      end
+    end
+
+    test "a projection of plain keys reads only those keys of content", %{token: token} do
+      sql =
+        sql_reads(fn ->
+          result!(token, ~s'*[#{@category_filter}]{_id, isbn, "t": title}', @category_params)
+        end)
+
+      [load] = Enum.filter(sql, &(&1 =~ "-> $"))
+      assert load =~ ~s|(d.content #> '{}') AS content OFFSET 0|, load
+      refute load =~ ~r/SELECT[^$]* d\.content,/, load
+
+      # Every row SQL matches is kept: no second read of a superset.
+      {result, rows} =
+        rows_read(fn ->
+          result!(token, ~s'*[#{@category_filter}]._id', @category_params)
+        end)
+
+      assert length(result) == 672
+      assert rows == 2 * 672
+    end
+
+    # The department is `dept-small`, about 300 of the 10,500 products, so the
+    # content index is the cheap way to find them. `dept-big` matches about
+    # 98 % of the table; for it the planner may read the project's rows
+    # through a tenant index instead, which is a sound plan for such a
+    # predicate, and the test went red on that choice with unchanged SQL.
     test "the index finds the candidate rows of both", %{token: token} do
       Repo.query!("SET LOCAL enable_seqscan = off")
 
       plans =
         explain_reads("count(", fn ->
-          result!(token, ~s'count(*[#{@category_filter}])', @category_params)
+          result!(
+            token,
+            ~s'count(*[#{@category_filter}])',
+            Map.put(@category_params, "dept", "dept-small")
+          )
 
           result!(token, ~s'count(*[_type == "product" && department._ref == $d])', %{
-            "d" => "dept-big"
+            "d" => "dept-small"
           })
         end)
 

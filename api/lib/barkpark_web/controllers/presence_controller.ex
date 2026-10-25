@@ -14,7 +14,7 @@ defmodule BarkparkWeb.PresenceController do
   Editor presence over HTTP for clients that are not the LiveView Studio
   (task-32b73e85f89d4be7, Studio parity journey J07).
 
-      GET    /w/:ws/p/:proj/v1/data/presence/:dataset?sessionId=&name=&documentId=
+      GET    /w/:ws/p/:proj/v1/data/presence/:dataset?sessionId=&name=&documentId=&staleAfter=
       POST   /w/:ws/p/:proj/v1/data/presence/:dataset/focus
              {"sessionId": "…", "documentId": "…", "field": "seo.metaTitle",
               "selection": {"anchor": Point, "head": Point} | null}
@@ -88,6 +88,21 @@ defmodule BarkparkWeb.PresenceController do
   that; `leave` is the deterministic path and clients SHOULD call it whenever
   they can.
 
+  ## A client that went to sleep (`staleAfter`)
+
+  A laptop that sleeps, or a tab the browser freezes, neither leaves nor
+  closes its socket: the keepalive writes land in TCP buffers until the
+  kernel gives up on the peer, up to about 15 minutes later, and all that
+  time the room shows the sleeper as present. A client that asks for
+  `?staleAfter=<seconds>` (at least 1) promises a focus POST at least that
+  often, re-sending its current focus when nothing moved; a stream that
+  hears none for that long leaves the room and ends on its next keepalive
+  tick. The client, once awake, opens a new stream with its `sessionId` and
+  is back. A focus POST that repeats the session's focus only marks it as
+  heard: nothing in the room changes, so nothing is broadcast. Without the
+  parameter a stream never expires this way (the LiveView Studio, older
+  clients).
+
   Identity is the client's to state: the Studio parity app proxies every
   browser user through one server token, so `?name=` carries the person and
   defaults to the token's label. A signed-in editor may also come with their
@@ -113,6 +128,7 @@ defmodule BarkparkWeb.PresenceController do
          {:ok, sid} <- session_id(params["sessionId"]) do
       key = presence_key(sid)
       doc_filter = blank_to_nil(params["documentId"])
+      stale_ms = stale_after_ms(params["staleAfter"])
 
       meta = %{
         doc_id: doc_filter && DraftId.published_id(doc_filter),
@@ -144,7 +160,16 @@ defmodule BarkparkWeb.PresenceController do
         schedule_keepalive()
         # task-2bcada0faa01ebb2 — see Barkpark.Realtime.DrainSignal.
         DrainSignal.subscribe()
-        loop(conn, %{topic: topic, key: key, doc_filter: doc_filter, last: last})
+
+        loop(conn, %{
+          topic: topic,
+          key: key,
+          doc_filter: doc_filter,
+          last: last,
+          stale_ms: stale_ms,
+          heard: now_ms(),
+          focus: nil
+        })
       else
         _ -> conn
       end
@@ -229,10 +254,12 @@ defmodule BarkparkWeb.PresenceController do
         conn
 
       {:presence_focus, focus, {from, ref}} ->
-        Presence.update(self(), state.topic, state.key, &Map.merge(&1, focus))
+        # The same focus again is a `staleAfter` beat: it moves nothing.
+        if focus != state.focus,
+          do: Presence.update(self(), state.topic, state.key, &Map.merge(&1, focus))
 
         send(from, {:presence_focus_applied, ref})
-        loop(conn, state)
+        loop(conn, %{state | focus: focus, heard: now_ms()})
 
       # task-936472b77285df5b — an explicit leave. untrack/3 MUST run from
       # THIS process (the one `track/4` named in `stream/2`): the leave
@@ -262,13 +289,20 @@ defmodule BarkparkWeb.PresenceController do
       # indefinitely. A timer fired by `self()` is independent of whatever
       # else lands in this mailbox, so it keeps its own schedule regardless.
       :keepalive ->
-        case chunk(conn, ": keepalive\n\n") do
-          {:ok, conn} ->
-            schedule_keepalive()
-            loop(conn, state)
+        if stale?(state) do
+          # A client that asked for `staleAfter` and went quiet: asleep, or gone
+          # without a word. It leaves now, not when TCP gives up on it.
+          Presence.untrack(self(), state.topic, state.key)
+          conn
+        else
+          case chunk(conn, ": keepalive\n\n") do
+            {:ok, conn} ->
+              schedule_keepalive()
+              loop(conn, state)
 
-          _ ->
-            conn
+            _ ->
+              conn
+          end
         end
 
       # task-2bcada0faa01ebb2 — this slot is retiring (DeployController.
@@ -293,6 +327,21 @@ defmodule BarkparkWeb.PresenceController do
   defp schedule_keepalive, do: Process.send_after(self(), :keepalive, keepalive_ms())
 
   defp keepalive_ms, do: Application.get_env(:barkpark, :presence_keepalive_ms, @keepalive_ms)
+
+  defp stale?(%{stale_ms: nil}), do: false
+  defp stale?(%{stale_ms: ms, heard: heard}), do: now_ms() - heard > ms
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+
+  # `?staleAfter=` in whole seconds, at least 1; anything else means no expiry.
+  defp stale_after_ms(v) when is_binary(v) do
+    case Integer.parse(v) do
+      {s, ""} when s >= 1 -> s * 1_000
+      _ -> nil
+    end
+  end
+
+  defp stale_after_ms(_), do: nil
 
   # One frame per CHANGE of the visible list: a diff for another document, or
   # one that only moved `joined_at`, sends nothing.

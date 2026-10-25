@@ -14,7 +14,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.Search.{Fold, TypoPolicy}
+  alias Barkpark.Search.{Fold, SearchRefresh, TypoPolicy}
 
   # Default ranking-pool size (Barkpark Cloud P4 / Move B). The expensive
   # per-row ranking computation (`ts_rank` + `similarity`) runs only on this
@@ -127,9 +127,17 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # is NULL, so the two are the same index, and only the full one is a plain
     # GIN probe.
     index = text_index(Keyword.get(opts, :caller_context), type, Keyword.get(opts, :types))
+
+    # A schema change that made a field restricted on a large type recomputes
+    # the public vectors in batches after the write (task-9d83c3e0c3b8fabf).
+    # Until that is done, a stale vector may still hold a word the field now
+    # hides, so a non-admin text search leaves those documents out.
+    base = exclude_pending_refresh(base, Keyword.get(opts, :caller_context), browse?)
     match = match_mode(opts)
     suggest? = Keyword.get(opts, :suggest, false) == true
     groups = if browse?, do: [], else: term_groups(parsed)
+    # The ranking pool also weighs a 1-letter last word (`pool_hint/2`).
+    pool_groups = groups ++ pool_hint(parsed, groups)
 
     # A text search compares the type without its btree index. With the index,
     # Postgres reads every document of the type and runs the text match on each
@@ -232,13 +240,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
             {base, []}
 
           offset + limit <= pool and filtered? ->
-            {filtered_pool(base, match_on.(text_base, arms), pool, groups), []}
+            {filtered_pool(base, match_on.(text_base, arms), pool, pool_groups, index), []}
 
           offset + limit <= pool ->
-            {bounded_pool(base, pool, groups), []}
+            {bounded_pool(base, pool, pool_groups, index), []}
 
           true ->
-            {base, [{:desc, in_pool_key(base, pool, groups)}]}
+            {base, [{:desc, in_pool_key(base, pool, pool_groups, index)}]}
         end
 
       # An empty match ranks nothing. A recovery pass that finds no document
@@ -256,7 +264,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
             if(suggest?, do: :none, else: index),
             near_miss?,
             lead,
-            Keyword.get(opts, :boost)
+            Keyword.get(opts, :boost),
+            held_key(near_miss? and not suggest?, groups, index, match)
           )
           |> limit(^limit)
           |> offset(^offset)
@@ -379,8 +388,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   # Value counts of content fields the caller named with `?facet=`, over the
-  # filtered match set. A string field counts its value, an array field each
-  # element once per document. At most 100 values per field, biggest first.
+  # filtered match set. A string, number or boolean counts its value, a
+  # reference its `_ref`, an array each element once per document. At most
+  # 100 values per field, biggest first.
   #
   # They ride in the count's own scan (`count_and_facets/3`) as one more
   # grouping set, `(field, value)`, so a named facet costs one read of each
@@ -416,11 +426,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # never the `content` blob), then recency. A book whose name holds the query
   # therefore always reaches the ranking, however many documents mention the
   # words in a description.
-  defp bounded_pool(base, pool_size, groups) when pool_size > 0 do
-    base |> exclude(:order_by) |> where([d], d.id in subquery(pool_ids(base, pool_size, groups)))
+  defp bounded_pool(base, pool_size, groups, index) when pool_size > 0 do
+    base
+    |> exclude(:order_by)
+    |> where([d], d.id in subquery(pool_ids(base, pool_size, groups, index)))
   end
 
-  defp bounded_pool(base, _, _), do: base
+  defp bounded_pool(base, _, _, _), do: base
 
   # The pool of a filtered search. The filter reads each document's stored
   # `content`, so testing it on every match costs a decompression per match,
@@ -432,42 +444,46 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # falls back to `bounded_pool/3`.
   @filtered_pool_factor 2
 
-  defp filtered_pool(base, text_match, pool_size, groups) when pool_size > 0 do
+  defp filtered_pool(base, text_match, pool_size, groups, index) when pool_size > 0 do
     candidates =
       text_match
-      |> pool_ids(pool_size * @filtered_pool_factor, groups)
+      |> pool_ids(pool_size * @filtered_pool_factor, groups, index)
       |> Repo.all(@planned_per_call)
 
     ids =
       base
       |> exclude(:order_by)
       |> where([d], d.id in ^candidates)
-      |> pool_ids(pool_size, groups)
+      |> pool_ids(pool_size, groups, index)
       |> Repo.all(@planned_per_call)
 
     if length(ids) == pool_size,
       do: base |> exclude(:order_by) |> where([d], d.id in ^ids),
-      else: bounded_pool(base, pool_size, groups)
+      else: bounded_pool(base, pool_size, groups, index)
   end
 
-  defp filtered_pool(base, _text_match, pool_size, groups),
-    do: bounded_pool(base, pool_size, groups)
+  defp filtered_pool(base, _text_match, pool_size, groups, index),
+    do: bounded_pool(base, pool_size, groups, index)
 
   # The pool: the `pool_size` matches with the most query words at a word
   # start of the title or author, then the newest, then by id so the set is the
   # same on every request.
-  defp pool_ids(base, pool_size, groups) do
+  defp pool_ids(base, pool_size, groups, index) do
     base
     |> exclude(:order_by)
     |> order_by(
-      ^[desc: cover_key(groups), desc: dynamic([d], d.updated_at), asc: dynamic([d], d.id)]
+      ^[
+        desc: slot_rank(index, cover_key(groups)),
+        desc: dynamic([d], d.updated_at),
+        asc: dynamic([d], d.id)
+      ]
     )
     |> limit(^pool_size)
     |> select([d], d.id)
   end
 
-  defp in_pool_key(base, pool_size, groups) do
-    ids = pool_ids(base, pool_size, groups)
+  defp in_pool_key(base, pool_size, groups, index) do
+    ids = pool_ids(base, pool_size, groups, index)
     dynamic([d], d.id in subquery(ids))
   end
 
@@ -655,8 +671,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # facet sets and the total count only the rows of the first field, so they
   # count each document once, as without facets. The `(field, value)` set
   # counts documents per value of each field; `values` turns a value into the
-  # distinct texts the facet counts: the elements of an array, a string
-  # itself, nothing for any other value. `fg` is 0 on those rows only.
+  # distinct texts the facet counts: a string, number or boolean itself, a
+  # reference its `_ref`, each element of an array alike, nothing for any
+  # other value (as `Content.Query.facet_counts/3`). `fg` is 0 on those rows.
   defp count_and_facets_query(base, fields) do
     base
     |> join(
@@ -680,7 +697,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       field: fx.k,
       values:
         fragment(
-          "ARRAY(SELECT DISTINCT e.value FROM jsonb_array_elements_text(CASE jsonb_typeof(?) WHEN 'array' THEN ? WHEN 'string' THEN jsonb_build_array(?) ELSE '[]'::jsonb END) AS e(value))",
+          "ARRAY(SELECT DISTINCT t.x FROM jsonb_array_elements(CASE jsonb_typeof(?) WHEN 'array' THEN ? ELSE jsonb_build_array(?) END) AS e(j), LATERAL (SELECT CASE jsonb_typeof(e.j) WHEN 'string' THEN e.j #>> '{}' WHEN 'number' THEN e.j #>> '{}' WHEN 'boolean' THEN e.j #>> '{}' WHEN 'object' THEN e.j ->> '_ref' END AS x) AS t WHERE t.x IS NOT NULL)",
           fx.v,
           fx.v,
           fx.v
@@ -914,6 +931,19 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp text_index(_ctx, _type, _types), do: :public
 
+  # The scopes `SearchRefresh.gates/0` names, left out of a text search by
+  # anyone who reads the public index. A browse reads no vector and keeps them.
+  defp exclude_pending_refresh(base, _ctx, true), do: base
+  defp exclude_pending_refresh(base, %Barkpark.Content.CallerContext{is_admin: true}, _), do: base
+  defp exclude_pending_refresh(base, :internal, _), do: base
+
+  defp exclude_pending_refresh(base, _ctx, false) do
+    case SearchRefresh.exclude(SearchRefresh.gates()) do
+      nil -> base
+      condition -> where(base, ^condition)
+    end
+  end
+
   # The full index is two vectors: the stored `search_vector` (every content
   # string) and the names vector (the search title and the author slot, in
   # English and folded; migration 20261014150000). A query matches when either
@@ -1027,6 +1057,28 @@ defmodule Barkpark.Search.DocumentsRetriever do
         fragment("bp_search_names(?.search_names_fold, ?.title)", d, d)
       )
 
+  # task-4f3e286c6df4c320. The slot columns (search_title, search_names_fold)
+  # are filled from the UNREDACTED content, so a private field marked
+  # `search: "title"` or `"author"` (or one that fills a slot by default) is in
+  # them. For a non-admin caller (the `:public` index) the arms and rank keys
+  # that read those columns apply only to a document with no restricted field
+  # (public vector NULL), exactly like `slug_match(:public, _)`; a document with
+  # one still matches its public words through `vec_match(:public, _)`.
+  defp slot_gate(:public, dyn),
+    do: dynamic([d], fragment("?.public_search_vector IS NULL", d) and ^dyn)
+
+  defp slot_gate(_index, dyn), do: dyn
+
+  # The same gate for a numeric rank key: 0 for a restricted document.
+  defp slot_rank(:public, dyn),
+    do:
+      dynamic(
+        [d],
+        fragment("(CASE WHEN ?.public_search_vector IS NULL THEN ? ELSE 0 END)", d, ^dyn)
+      )
+
+  defp slot_rank(_index, dyn), do: dyn
+
   # ── Term groups ───────────────────────────────────────────────────────────
   #
   # One group per thing the query asks for: a word, a `word*` or a "quoted
@@ -1044,14 +1096,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp term_groups(parsed) do
     alternatives = Map.get(parsed, :alternatives, %{})
-    synonyms = alternatives |> Map.values() |> List.flatten() |> MapSet.new()
-
-    words =
-      parsed
-      |> Map.get(:terms, [])
-      |> Enum.reject(&(&1 == "" or MapSet.member?(synonyms, &1)))
-      |> Enum.uniq()
-
+    words = typed_words(parsed)
     last = List.last(words)
 
     word_groups =
@@ -1089,6 +1134,34 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp drop_short_last_word(groups, _last), do: groups
+
+  defp typed_words(parsed) do
+    synonyms =
+      parsed |> Map.get(:alternatives, %{}) |> Map.values() |> List.flatten() |> MapSet.new()
+
+    parsed
+    |> Map.get(:terms, [])
+    |> Enum.reject(&(&1 == "" or MapSet.member?(synonyms, &1)))
+    |> Enum.uniq()
+  end
+
+  # The 1-letter last word `drop_short_last_word/2` leaves out of the match still
+  # picks the ranking pool (task-7db7f8fe8b17a58e): titles with a word that starts
+  # with it come first (`cover_key/1`). Without it, "bulk item 1" over 5,000 bulk
+  # items pooled the newest 500, none of Bulk item 1000-1999, and the ranking
+  # (which already prefers a title starting with the whole query) never saw them.
+  # Not a filter: a 1-letter LIKE has no trigram to probe, and the match stays
+  # index-only.
+  defp pool_hint(_parsed, []), do: []
+
+  defp pool_hint(parsed, groups) do
+    last = parsed |> typed_words() |> List.last()
+
+    if is_binary(last) and String.length(last) < @min_prefix_chars and
+         not Enum.any?(groups, &(&1.kind == :word and &1.text == last)),
+       do: [%{kind: :word, text: last, prefix?: true, members: [last]}],
+       else: []
+  end
 
   defp drop_stop_words([_, _ | _] = groups) do
     case Enum.reject(groups, &(&1.kind == :word and &1.stop?)) do
@@ -1313,7 +1386,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
             q -> vec_match(index, q)
           end
 
-        names = names_prefix_dynamic(group)
+        names = slot_gate(index, names_prefix_dynamic(group))
         if exact, do: dynamic([d], ^names or ^exact), else: names
       end)
 
@@ -1344,7 +1417,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
         group.members
         |> Enum.filter(&(group.kind == :word and TypoPolicy.fuzzy_term?(config, &1)))
         |> Enum.map(fn member ->
-          dynamic([d], fragment("? <% ?", ^Fold.fold(member), ^search_names()))
+          slot_gate(index, dynamic([d], fragment("? <% ?", ^Fold.fold(member), ^search_names())))
         end)
         |> combine_clauses(:any)
 
@@ -1410,11 +1483,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
         pattern = like_pattern(member)
         folded = like_pattern(Fold.fold(member))
 
-        dynamic(
-          [d],
-          ^clause or ilike(^search_label(), ^pattern) or
-            like(^folded_search_label(), ^folded) or ^slug_match(index, pattern)
-        )
+        label =
+          slot_gate(
+            index,
+            dynamic(
+              [d],
+              ilike(^search_label(), ^pattern) or like(^folded_search_label(), ^folded)
+            )
+          )
+
+        dynamic([d], ^clause or ^label or ^slug_match(index, pattern))
       else
         clause
       end
@@ -1425,11 +1503,17 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # let the planner build one BitmapOr. Their thresholds are the transaction
     # settings `with_trgm_thresholds/4` sets from `typo_policy`.
     if kind == :word and TypoPolicy.fuzzy_term?(config, member) do
-      dynamic(
-        [d],
-        ^clause or fragment("? % ?", ^similar_search_label(), ^member) or
-          fragment("? <% ?", ^member, ^search_label())
-      )
+      typo =
+        slot_gate(
+          index,
+          dynamic(
+            [d],
+            fragment("? % ?", ^similar_search_label(), ^member) or
+              fragment("? <% ?", ^member, ^search_label())
+          )
+        )
+
+      dynamic([d], ^clause or ^typo)
     else
       clause
     end
@@ -1456,15 +1540,18 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # arm). This whole clause is NEGATED at `where_match/7` via
       # `not(^exclude_dyn)`. A trgm GIN answers "which rows MATCH", never the
       # complement, so the operator form would buy nothing here.
-      clause =
-        dynamic(
-          [d],
-          ^text_arm or
+      label =
+        slot_gate(
+          index,
+          dynamic(
+            [d],
             ilike(^search_label(), ^pattern) or
-            like(^folded_search_label(), ^folded) or
-            ^slug_match(index, pattern) or
-            fragment("similarity(coalesce(?, ''), ?) > ?", ^search_label(), ^term, ^threshold)
+              like(^folded_search_label(), ^folded) or
+              fragment("similarity(coalesce(?, ''), ?) > ?", ^search_label(), ^term, ^threshold)
+          )
         )
+
+      clause = dynamic([d], ^text_arm or ^label or ^slug_match(index, pattern))
 
       if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
     end)
@@ -1476,6 +1563,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   #
   #   0. the document whose id IS the query;
   #   1. the search title equal to the query (as typed or folded);
+  #   1b. on the near-miss pass only, the document that holds the words
+  #       themselves (`held_key/4`);
   #   2. the relevance score, the sum of
   #        * the full-text rank;
   #        * on the near-miss pass only, the weighted per-field similarity,
@@ -1494,7 +1583,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   #        * the weighted-tag boost, and with `boost=popularity` the view
   #          score (`boosted/2`);
   #   3. recency, then the id, so the order is total and paging is stable.
-  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost) do
+  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost, held) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token.
     positive_query =
@@ -1521,7 +1610,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
         ^(lead ++
             [
               {:desc, exact_id_key(positive_query)},
-              {:desc, exact_title_key(positive_query)},
+              {:desc, slot_rank(index, exact_title_key(positive_query))}
+            ] ++
+            held ++
+            [
               {:desc,
                boosted(
                  relevance_key(positive_query, groups, tag_terms, config, index, near_miss?),
@@ -1649,6 +1741,23 @@ defmodule Barkpark.Search.DocumentsRetriever do
     String.replace(term, ~r/([\\%_])/, "\\\\\\1") <> "%"
   end
 
+  # ORDER BY key #1b, the near-miss pass only. A pass widened to near misses
+  # still holds the documents that contain the words themselves, and the
+  # per-field similarity there lets a title that merely looks like the query
+  # outrank them: for "helseøkonomi" (one exact hit, so the thin-results pass
+  # widened it) "Kommuneøkonomi", "Mikroøkonomi" and 30 other look-alike titles
+  # ranked above the one book whose description says "helseøkonomi", and a
+  # caller reading the first 10 never saw it. A widened pass adds near misses
+  # after the documents that hold the words, never above them.
+  defp held_key(false, _groups, _index, _match), do: []
+
+  defp held_key(true, groups, index, match) do
+    case words_dynamic(groups, index, match) do
+      nil -> []
+      held -> [{:desc, dynamic([_d], fragment("CASE WHEN ? THEN 1 ELSE 0 END", ^held))}]
+    end
+  end
+
   # ORDER BY key #0: the document whose id IS the query ranks first, so an
   # exact id is never pushed off the page by text matches.
   defp exact_id_key(positive_query) do
@@ -1755,8 +1864,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
         else: dynamic([_d], fragment("0.0"))
 
     boost = tag_boost_key(tag_terms)
-    cover = cover_key(groups)
-    whole = whole_word_key(groups)
+    cover = slot_rank(index, cover_key(groups))
+    whole = slot_rank(index, whole_word_key(groups))
 
     dynamic(
       [_d],

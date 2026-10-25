@@ -24,6 +24,11 @@ defmodule BarkparkWeb.Plugs.DeliveryAccept do
   The JSON API routes do not mount this plug, so they keep refusing a header
   that cannot take JSON. That refusal renders as 406 `not_acceptable`
   (`BarkparkWeb.ErrorJSON`).
+
+  It also marks the conn as a delivery request (`conn.private[:bp_delivery]`), so
+  `BarkparkWeb.Plugs.RateLimit` bills its GETs to the `:delivery` bucket, not to
+  the JSON read bucket (task-fe397d8f5f0a2c47: one Paper with 400 media spent a
+  reader's 300/min read budget and 21 images and videos came back 429).
   """
 
   import Plug.Conn
@@ -31,6 +36,8 @@ defmodule BarkparkWeb.Plugs.DeliveryAccept do
   def init(opts), do: opts
 
   def call(conn, _opts) do
+    conn = put_private(conn, :bp_delivery, true)
+
     case get_req_header(conn, "accept") do
       [header | _] when is_binary(header) ->
         if String.trim(header) == "" or String.contains?(header, "application/json"),

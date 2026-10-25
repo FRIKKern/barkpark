@@ -117,9 +117,15 @@ defmodule Barkpark.Groq.Evaluator do
     # so the source can narrow its read per parent document.
     resolve = fn outer_expr -> eval(outer_expr, nested(scope, nil), ctx) end
 
-    ctx.source
-    |> Source.fetch(Pushdown.constraints(expr, resolve))
-    |> Enum.filter(fn doc -> eval(expr, nested(scope, doc), ctx) === true end)
+    case root?(scope) && fetch_exact(expr, :all, resolve, ctx) do
+      {:ok, docs} ->
+        docs
+
+      _ ->
+        ctx.source
+        |> Source.fetch(Pushdown.constraints(expr, resolve))
+        |> Enum.filter(fn doc -> eval(expr, nested(scope, doc), ctx) === true end)
+    end
   end
 
   def eval({:filter, base, expr}, scope, ctx) do
@@ -136,15 +142,27 @@ defmodule Barkpark.Groq.Evaluator do
     end
   end
 
+  # `->` follows Sanity's `{_ref}` and also Barkpark's own reference shape, a plain id
+  # string (post.author = "author-alan", as the studio and the seed write it), so a join
+  # over Barkpark-written content resolves instead of answering null
+  # (task-b85cf70ca346260a). A string that names no document in the source reads null,
+  # as before: `Source.get/2` is the same scoped lookup a `{_ref}` takes.
   def eval({:deref, base}, scope, ctx) do
     case eval(base, scope, ctx) do
       %{"_ref" => id} when is_binary(id) -> Source.get(ctx.source, id)
+      id when is_binary(id) and id != "" -> Source.get(ctx.source, id)
       _ -> nil
     end
   end
 
   def eval({:map, base, expr}, scope, ctx) do
-    case eval(base, scope, ctx) do
+    list =
+      case map_from_source(base, expr, scope, ctx) do
+        {:ok, docs} -> docs
+        :error -> eval(base, scope, ctx)
+      end
+
+    case list do
       list when is_list(list) -> Enum.map(list, &eval(expr, hidden(scope, &1), ctx))
       _ -> nil
     end
@@ -739,6 +757,52 @@ defmodule Barkpark.Groq.Evaluator do
       :error -> :error
     end
   end
+
+  # A `*[...]` whose filter SQL matches exactly (`Pushdown.exact/2`) is read
+  # by the source alone, and its documents are kept without testing the
+  # filter again. As for a slice, only a `*[...]` that gives the same
+  # documents in every scope qualifies, so the read happens once per query.
+  # Mapped over by a projection of plain keys (`{a, "b": c}`) or one key
+  # (`.a`), it needs only those keys of each document. The memo is skipped
+  # then, because another use of the same subquery may read other keys.
+  defp root?(scope), do: scope.value == nil and scope.parent == nil
+
+  defp fetch_exact(expr, fields, resolve, ctx) do
+    case Pushdown.exact(expr, resolve) do
+      {:ok, constraints} -> Source.fetch_exact(ctx.source, constraints, fields)
+      :error -> :error
+    end
+  end
+
+  defp map_from_source({:memo, {:filter, {:everything}, _expr} = inner}, mapped, _scope, ctx),
+    do: map_from_source(inner, mapped, %{value: nil, parent: nil, hidden: false}, ctx)
+
+  defp map_from_source({:filter, {:everything}, expr}, mapped, scope, ctx) do
+    with true <- root?(scope),
+         {:ok, fields} <- mapped_fields(mapped) do
+      fetch_exact(expr, fields, fn outer -> eval(outer, nested(scope, nil), ctx) end, ctx)
+    else
+      _ -> :error
+    end
+  end
+
+  defp map_from_source(_base, _mapped, _scope, _ctx), do: :error
+
+  # The top-level keys `mapped` reads of each element, when it reads nothing
+  # else of it.
+  defp mapped_fields({:attr, base, key}) when base in [nil, {:this}], do: {:ok, [key]}
+
+  defp mapped_fields({:projection, {:this}, {:object, attrs}}) do
+    Enum.reduce_while(attrs, {:ok, []}, fn
+      {:attr_value, _name, {:attr, base, key}}, {:ok, acc} when base in [nil, {:this}] ->
+        {:cont, {:ok, [key | acc]}}
+
+      _attr, _acc ->
+        {:halt, :error}
+    end)
+  end
+
+  defp mapped_fields(_mapped), do: :error
 
   # A slice of `*[...]` or of `*[...] | order(...)` asks the source for the
   # documents it needs instead of loading every match. An exact filter

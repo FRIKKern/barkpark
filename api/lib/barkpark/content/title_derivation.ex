@@ -39,7 +39,8 @@ defmodule Barkpark.Content.TitleDerivation do
          %{} = content <- content_of(attrs),
          nil <- title_field(schema),
          field when is_binary(field) <- preview_title_field(schema),
-         value when is_binary(value) and value != "" <- scalar(Map.get(content, field)) do
+         value when is_binary(value) and value != "" <-
+           scalar(Barkpark.Content.PreviewText.field_value(content, field)) do
       Map.put(attrs, "title", value)
     else
       _ -> attrs
@@ -83,7 +84,8 @@ defmodule Barkpark.Content.TitleDerivation do
     with nil <- title_field(schema),
          field when is_binary(field) <- preview_title_field(schema),
          %{} = content <- Map.get(doc, :content) || Map.get(doc, "content"),
-         value when is_binary(value) and value != "" <- scalar(Map.get(content, field)) do
+         value when is_binary(value) and value != "" <-
+           scalar(Barkpark.Content.PreviewText.field_value(content, field)) do
       value
     else
       _ -> nil

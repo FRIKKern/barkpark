@@ -1,7 +1,7 @@
 {
   "$comment": "GENERATED ATTRIBUTION LEDGER — do not hand-edit. One SHA-256 per artifact, keyed `<path>#<artifact name>` (NOT path alone: one file may carry two generated regions, and each owns its own slot), taken over the GENERATED REGION ONLY (the marker interior for css/html surfaces, the whole file for go/ts/elixir). design/emit.mjs --write refuses to replace a region whose digest does not match, because those bytes were never emitted and replacing them destroys hand-written work (see commit 1d928b3bf). Rewritten by `node design/emit.mjs --write`; re-bless the tree with --adopt.",
   "regions": {
-    "api/assets/paper-editor/src/styles.css#paper-editor mirror": "1a6b47ee2cd44f5952043f6be4855367b9b34eb667c397106706a49da98425fe",
+    "api/assets/paper-editor/src/styles.css#paper-editor mirror": "1fd2cebd4e7679e1330c88feca7b921971e0183c78143de2d84e4303101530a8",
     "api/assets/paper-surface/paper-surface.css#paper-surface": "ff093056b03d47fd3e91ab88fbe9380ca8ce8f927c2af5659df3443a9323a7dd",
     "api/lib/barkpark/portable_doc/render/tokens_gen.ex#Elixir render tokens": "6c183b93f342bd5b77fef615640377d81bc0ec53fb27d0879ffbe328a4f4f048",
     "api/lib/barkpark_web/controllers/error_html.ex#error page (error_html)": "273bab84282aa408b38a0bd7cedd244a37766e23df3c0d8f094ec3c1258fbd07",

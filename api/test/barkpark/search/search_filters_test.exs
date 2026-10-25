@@ -262,6 +262,49 @@ defmodule Barkpark.Search.SearchFiltersTest do
     end
   end
 
+  # task-8af256dcd8f17902: search counts what the query API's facet counts.
+  test "a facet counts booleans, numbers and references, as the query API does",
+       %{scope: scope} do
+    {:ok, _} =
+      Content.create_document(
+        "book",
+        %{
+          "doc_id" => "typed",
+          "content" => %{
+            "displayName" => "Legemiddelhåndtering typed",
+            "Pages" => 120,
+            "Author" => %{"_ref" => "ada"},
+            "Editors" => [%{"_ref" => "ada"}, %{"_ref" => "bo"}],
+            "BaseVisible" => true
+          }
+        },
+        @ds,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document("typed", "book", @ds, scope)
+
+    {_ids, _total, meta} =
+      search("legemiddelhåndtering", scope,
+        facet_fields: ["BaseVisible", "Pages", "Author", "Editors"]
+      )
+
+    f = meta.facets["fields"]
+
+    assert f["BaseVisible"] == [
+             %{"label" => "false", "count" => 2},
+             %{"label" => "true", "count" => 2}
+           ]
+
+    assert f["Pages"] == [%{"label" => "120", "count" => 1}]
+    assert f["Author"] == [%{"label" => "ada", "count" => 1}]
+
+    assert f["Editors"] == [
+             %{"label" => "ada", "count" => 1},
+             %{"label" => "bo", "count" => 1}
+           ]
+  end
+
   describe "the pool of a filtered search" do
     test "pages through every filtered match once, past the pool", %{scope: scope} do
       for n <- 1..6 do

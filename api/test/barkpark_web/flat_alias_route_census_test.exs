@@ -481,6 +481,13 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "maybe_scope_to_grants/2 calls in all three aggregates were inert — an owned-token " <>
          "grantee, narrowed on the sibling query/counts reads, read the whole Default census " <>
          "here. Pinned by flat_analytics_grant_enforcement_test.exs."},
+    # QueryController.backlinks_batch (task-09a413c1d4d582d3) — backlinks/2 per id,
+    # in one request, under the same scope_opts(conn) thread.
+    {"GET", "/v1/data/backlinks/:dataset"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into Content.Graph.backlinks/2 for each id, " <>
+         "exactly like its single-id sibling below, so the rows are the pipeline-derived " <>
+         ":current_workspace's."},
     # QueryController.backlinks
     {"GET", "/v1/data/backlinks/:dataset/:id"} =>
       {:workspace_derived,

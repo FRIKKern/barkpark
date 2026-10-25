@@ -33,9 +33,22 @@ defmodule Barkpark.Content.FieldVisibility do
   from the enclosing object or array item, Sanity's `hidden: ({parent}) => …`.
   `{"field": "kind", "operator": "eq", "value": "url", "scope": "parent"}`
   inside a `links` item is "visible when THIS link's kind is url". The schema
-  validator refuses `"parent"` on a top-level field, which has no parent.
+  validator refuses `"parent"` on a top-level field of a document schema,
+  which has no parent. A `kind: "object"` schema's own fields always sit inside
+  the object where it is used, so there `"parent"` reads that object.
   When the path traverses a list, the walk flat-maps the rest of the path
   across every row — useful for `subjects.subject.subjectCode`-style refs.
+
+  `"hidden": true` on a field hides it whatever `visibleWhen` says: the field
+  keeps its stored value, the Studio form does not draw it, and the save path
+  merges the posted fields into the stored content, so the value survives.
+
+  `{"all": [...]}` and `{"any": [...]}` combine predicates, the shape
+  `cross_validations` rules use, and may nest. Sanity's
+  `hidden: ({document}) => document.a != "x" || document.b == "y"` is
+  `{"all": [{"field": "a", "operator": "eq", "value": "x"},
+  {"field": "b", "operator": "neq", "value": "y"}]}`. Each leaf carries its own
+  `"scope"`.
 
   Field input flavours handled transparently:
 
@@ -56,14 +69,35 @@ defmodule Barkpark.Content.FieldVisibility do
   predicate reads. With no parent (a top-level field) it reads the document.
   """
   def visible?(field, doc, parent) when is_map(doc) do
-    case extract_visible_when(field) do
-      nil -> true
-      %{} = cond -> evaluate(cond, scope_root(cond, doc, parent))
-      _ -> true
+    if hidden?(field) do
+      false
+    else
+      case extract_visible_when(field) do
+        nil -> true
+        %{} = cond -> holds?(cond, doc, parent)
+        _ -> true
+      end
     end
   end
 
-  def visible?(_field, _doc, _parent), do: true
+  def visible?(field, _doc, _parent), do: not hidden?(field)
+
+  @doc """
+  `true` when the field declares `hidden: true`: Sanity's literal `hidden`, a
+  field kept in the stored document that no editor sees (task-7d4c026f3749ebee).
+  It wins over `visibleWhen`. Only the literal `true` hides; any other value,
+  including a string, leaves the field to `visibleWhen`.
+  """
+  def hidden?(field) when is_map(field) do
+    cond do
+      Map.get(field, "hidden") == true -> true
+      Map.get(field, :hidden) == true -> true
+      is_map(Map.get(field, :raw)) -> Map.get(field.raw, "hidden") == true
+      true -> false
+    end
+  end
+
+  def hidden?(_), do: false
 
   @doc "The map a predicate's path starts from: the parent for `\"scope\": \"parent\"`."
   def scope_root(cond, doc, parent) do
@@ -72,6 +106,24 @@ defmodule Barkpark.Content.FieldVisibility do
       _ -> doc
     end
   end
+
+  # `all` / `any` combine predicates, as `cross_validations` rules do. Each leaf
+  # picks its own scope, so one list can mix the document and the parent. An
+  # empty list holds, the same vacuous truth as an unknown operator.
+  defp holds?(%{"all" => preds}, doc, parent) when is_list(preds),
+    do: Enum.all?(preds, &holds?(&1, doc, parent))
+
+  defp holds?(%{all: preds}, doc, parent) when is_list(preds),
+    do: Enum.all?(preds, &holds?(&1, doc, parent))
+
+  defp holds?(%{"any" => [_ | _] = preds}, doc, parent),
+    do: Enum.any?(preds, &holds?(&1, doc, parent))
+
+  defp holds?(%{any: [_ | _] = preds}, doc, parent),
+    do: Enum.any?(preds, &holds?(&1, doc, parent))
+
+  defp holds?(%{} = cond, doc, parent), do: evaluate(cond, scope_root(cond, doc, parent))
+  defp holds?(_, _, _), do: true
 
   # Pull the visibleWhen predicate off the field regardless of shape.
   # Order of precedence:

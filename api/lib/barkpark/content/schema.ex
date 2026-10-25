@@ -94,7 +94,14 @@ defmodule Barkpark.Content.Schema do
     Barkpark.Content.WriteScope.request_memo(
       opts,
       {:list_schemas, dataset, Keyword.delete(opts, :memoize)},
-      fn -> do_list_schemas(dataset, opts) end,
+      # Across requests the catalog is kept per schema version
+      # (task-cca3c6d48e57097e): see `SchemaCatalogCache` for the version,
+      # the key and the reads it never keeps.
+      fn ->
+        Barkpark.Content.SchemaCatalogCache.fetch(dataset, opts, fn ->
+          do_list_schemas(dataset, opts)
+        end)
+      end,
       4
     )
   end
@@ -121,7 +128,7 @@ defmodule Barkpark.Content.Schema do
     |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
     |> Repo.all()
     |> Enum.uniq_by(& &1.name)
-    |> Enum.map(&inline_named_types(&1, dataset, opts))
+    |> inline_catalog(dataset, opts)
   end
 
   # THE ARITY IS THE TENANT FENCE (task-be3b3aa6da5df3a2, instance 1). `opts`
@@ -374,8 +381,19 @@ defmodule Barkpark.Content.Schema do
         _ ->
           insert_or_converge(attrs, dataset, opts)
       end
+      |> kick_search_refresh()
     end
   end
+
+  # A write on a large type leaves its search refresh to a worker
+  # (`Barkpark.Search.SearchRefresh`); queue it now rather than at the next
+  # cron minute.
+  defp kick_search_refresh({:ok, _} = result) do
+    Barkpark.Search.SearchRefresh.kick()
+    result
+  end
+
+  defp kick_search_refresh(result), do: result
 
   defp update_schema(existing, attrs, dataset, opts) do
     existing
@@ -1131,6 +1149,20 @@ defmodule Barkpark.Content.Schema do
   # The stored object type named `name`, through the scope ladder, never
   # inlined (the inliner recurses itself, with a visited set).
   defp resolve_object_type(name, dataset, opts) do
+    # Memoized like the stored rows it reads, in its own bucket: one Studio
+    # callback inlines the catalog under several opts keys, and every pass asks
+    # for the same few dozen object types. `get_schema_raw/3` keeps only its 8
+    # newest rows, which a catalog of 50+ object types evicts before reuse.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      {:resolve_object_type, name, dataset, Keyword.fetch(opts, :workspace_id),
+       Keyword.fetch(opts, :project_id)},
+      fn -> do_resolve_object_type(name, dataset, opts) end,
+      512
+    )
+  end
+
+  defp do_resolve_object_type(name, dataset, opts) do
     rungs =
       if Keyword.has_key?(opts, :workspace_id) do
         [
@@ -1161,16 +1193,105 @@ defmodule Barkpark.Content.Schema do
 
   @doc false
   def inline_named_types(%SchemaDefinition{} = schema, dataset, opts) do
-    fields = schema.fields || []
-
-    if Enum.any?(fields, &references_named_type?/1) do
-      %{schema | fields: inline_fields(fields, dataset, opts, MapSet.new([schema.name]))}
-    else
-      schema
-    end
+    [inlined] = inline_catalog([schema], dataset, opts)
+    inlined
   end
 
   def inline_named_types(other, _dataset, _opts), do: other
+
+  @doc """
+  The named object type `name` as an inlined composite field map
+  (`%{"type" => "composite", "fields" => [...], "namedType" => name}`), through
+  the same scope ladder and inliner a document schema uses. The Studio opens a
+  custom Portable Text block (a `mediaModule`, a `quote`) in a form with it
+  (task-19392d1e6fc661e6). `:error` when no object type has that name.
+  """
+  @spec object_type_field(String.t(), String.t(), keyword()) :: {:ok, map()} | :error
+  def object_type_field(name, dataset, opts \\ []) when is_binary(name) do
+    synthetic = %SchemaDefinition{
+      name: "__object__:" <> name,
+      fields: [%{"name" => name, "type" => name}]
+    }
+
+    case inline_named_types(synthetic, dataset, opts) do
+      %SchemaDefinition{fields: [%{"type" => "composite", "fields" => fields} = field]}
+      when is_list(fields) ->
+        {:ok, field}
+
+      _ ->
+        :error
+    end
+  end
+
+  # Inlining runs in two passes. The first resolves every named object type the
+  # schemas reach, transitively, ONCE each, into a map. The second inlines from
+  # that map and reads nothing. Before, each reference resolved on its own:
+  # a catalog of 116 twin schemas sharing `seo`, `themeStyling` and the section
+  # types repeated the same lookups, and one Studio document open on the
+  # gyldendal-no copy spent 268 schema and 167 dataset queries here
+  # (task-cca3c6d48e57097e). The result is the same: the same resolver, the same
+  # cycle rule (a type already on the walk stays a leaf).
+  defp inline_catalog(schemas, dataset, opts) do
+    if Enum.any?(schemas, &schema_references_named_type?/1) do
+      resolved =
+        schemas
+        |> Enum.flat_map(&named_types_in(&1.fields || []))
+        |> resolve_named_types(dataset, opts, %{})
+
+      Enum.map(schemas, fn schema ->
+        if schema_references_named_type?(schema),
+          do: %{
+            schema
+            | fields: inline_fields(schema.fields, resolved, MapSet.new([schema.name]))
+          },
+          else: schema
+      end)
+    else
+      schemas
+    end
+  end
+
+  defp schema_references_named_type?(%SchemaDefinition{fields: fields}) when is_list(fields),
+    do: Enum.any?(fields, &references_named_type?/1)
+
+  defp schema_references_named_type?(_), do: false
+
+  # Every non-builtin type name the inliner below would look up, in the same
+  # positions it walks.
+  defp named_types_in(fields) when is_list(fields), do: Enum.flat_map(fields, &named_types_in/1)
+
+  defp named_types_in(%{} = f) do
+    type = f["type"] || f[:type]
+
+    cond do
+      type == "composite" -> named_types_in(f["fields"] || [])
+      type == "arrayOf" -> named_types_in(f["of"] || %{})
+      builtin_type?(type) -> []
+      true -> [type]
+    end
+  end
+
+  defp named_types_in(_), do: []
+
+  defp resolve_named_types([], _dataset, _opts, acc), do: acc
+
+  defp resolve_named_types([name | rest], dataset, opts, acc) when is_map_key(acc, name),
+    do: resolve_named_types(rest, dataset, opts, acc)
+
+  defp resolve_named_types([name | rest], dataset, opts, acc) do
+    case resolve_object_type(name, dataset, opts) do
+      {:ok, obj} = hit ->
+        resolve_named_types(
+          named_types_in(obj.fields || []) ++ rest,
+          dataset,
+          opts,
+          Map.put(acc, name, hit)
+        )
+
+      miss ->
+        resolve_named_types(rest, dataset, opts, Map.put(acc, name, miss))
+    end
+  end
 
   defp references_named_type?(%{} = f) do
     type = f["type"] || f[:type]
@@ -1180,22 +1301,32 @@ defmodule Barkpark.Content.Schema do
       (type == "arrayOf" and references_named_type?(f["of"] || %{}))
   end
 
+  # Several member types (`of: [...]`, Sanity's page-builder array).
+  defp references_named_type?(list) when is_list(list),
+    do: Enum.any?(list, &references_named_type?/1)
+
   defp references_named_type?(_), do: false
 
-  defp inline_fields(fields, dataset, opts, visited) when is_list(fields),
-    do: Enum.map(fields, &inline_field(&1, dataset, opts, visited))
+  defp inline_fields(fields, resolved, visited) when is_list(fields),
+    do: Enum.map(fields, &inline_field(&1, resolved, visited))
 
-  defp inline_fields(other, _dataset, _opts, _visited), do: other
+  defp inline_fields(other, _resolved, _visited), do: other
 
-  defp inline_field(%{} = f, dataset, opts, visited) do
+  defp inline_field(%{} = f, resolved, visited) do
     type = f["type"] || f[:type]
 
     cond do
       type == "composite" ->
-        Map.put(f, "fields", inline_fields(f["fields"] || [], dataset, opts, visited))
+        Map.put(f, "fields", inline_fields(f["fields"] || [], resolved, visited))
+
+      # Several named member types (Sanity's page-builder array): each
+      # member is inlined like a single `of`, so the Studio can show and save
+      # an item by the fields its `_type` names (task-e24e33a2a1a4fe10).
+      type == "arrayOf" and is_list(f["of"]) ->
+        Map.put(f, "of", Enum.map(f["of"], &inline_field(&1, resolved, visited)))
 
       type == "arrayOf" ->
-        Map.put(f, "of", inline_field(f["of"] || %{}, dataset, opts, visited))
+        Map.put(f, "of", inline_field(f["of"] || %{}, resolved, visited))
 
       builtin_type?(type) ->
         f
@@ -1206,15 +1337,16 @@ defmodule Barkpark.Content.Schema do
         f
 
       true ->
-        case resolve_object_type(type, dataset, opts) do
+        case Map.get(resolved, type, :error) do
           {:ok, obj} ->
-            inner = inline_fields(obj.fields || [], dataset, opts, MapSet.put(visited, type))
+            inner = inline_fields(obj.fields || [], resolved, MapSet.put(visited, type))
 
             f
             |> Map.put("type", "composite")
             |> Map.put("fields", inner)
             |> Map.put("namedType", type)
             |> Map.put_new("title", obj.title)
+            |> maybe_put_icon(obj)
             |> maybe_put_groups(obj)
             |> maybe_put_fieldsets(obj)
 
@@ -1224,7 +1356,14 @@ defmodule Barkpark.Content.Schema do
     end
   end
 
-  defp inline_field(other, _dataset, _opts, _visited), do: other
+  defp inline_field(other, _resolved, _visited), do: other
+
+  # The object type's icon rides along (task-835fe5219585ca80), so an array
+  # item of that type draws it when the row has no media, as Sanity does.
+  defp maybe_put_icon(field, %SchemaDefinition{icon: icon}) when is_binary(icon) and icon != "",
+    do: Map.put_new(field, "icon", icon)
+
+  defp maybe_put_icon(field, _obj), do: field
 
   defp maybe_put_groups(field, %SchemaDefinition{groups: groups})
        when is_list(groups) and groups != [] do

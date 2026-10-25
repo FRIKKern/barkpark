@@ -424,6 +424,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+            link_types={Map.get(@parent_assigns, :editor_link_types) || []}
             doc_key={@doc_key}
             doc_type={@doc_type}
             document_rev={@document_rev}
@@ -488,6 +489,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             dataset={@dataset}
             scope_prefix={Map.get(@parent_assigns, :scope_prefix, "")}
             api_token_raw={Map.get(@parent_assigns, :api_token_raw, "")}
+            link_types={Map.get(@parent_assigns, :editor_link_types) || []}
             doc_key={@doc_key}
             doc_type={@doc_type}
             document_rev={@document_rev}
@@ -624,6 +626,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # before.
   attr :nav_view, :string, default: nil
   attr :nav_view_docs, :list, default: []
+  # True when the view's list holds more rows than its page shows.
+  attr :nav_view_more, :boolean, default: false
+  # The views a declared desk list gives this document; nil = the schema's.
+  attr :editor_views, :list, default: nil
   attr :scope_prefix, :string, default: ""
 
   # ── Cross-field validations (Task barkpark-cgn) ────────────────────
@@ -779,7 +785,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   documents related to this one. The row renders only for a
                   schema that declares `desk.views`, and «Felt» is always the
                   first tab so the form is one click away. --%>
-            <% doc_views = Views.views_for(@editor_schema) %>
+            <% doc_views = Views.views_for(@editor_schema, @editor_views) %>
             <div :if={doc_views != []} class="bp-view-bar" role="tablist" data-test-id="document-views">
               <button
                 type="button"
@@ -810,16 +816,30 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               <p :if={@nav_view_docs == []} class="bp-pane-notice" role="status" data-test-id="document-view-empty">
                 <%= gettext("No documents yet") %>
               </p>
-              <a
+              <%!-- The desk list's own row, linked by URL to the document. --%>
+              <BarkparkWeb.StudioComponents.Panes.pane_doc_item
                 :for={rel <- @nav_view_docs}
-                class="pane-doc-item bp-view-row"
-                data-test-id="document-view-row"
-                data-row-type={rel.type}
+                id={"view-doc-#{rel.id}"}
                 href={Paths.studio_path(@scope_prefix, [rel.type, rel.id], @dataset)}
-              >
-                <span class="pane-doc-title"><%= rel.title %></span>
-                <span :if={rel.is_draft} class="status-pill status-draft"><%= gettext("draft") %></span>
-              </a>
+                title={rel.title}
+                doc_id={rel.id}
+                status={rel[:status] || ""}
+                is_draft={rel.is_draft}
+                badge={rel[:badge]}
+                meta={rel[:meta] || rel[:updated]}
+                description={rel[:description]}
+                media={rel[:media]}
+                media_slot={rel[:media_slot] == true}
+                type_icon={rel[:type_icon]}
+              />
+              <button
+                :if={@nav_view_more}
+                type="button"
+                class="btn btn-ghost btn-sm"
+                style="margin:8px 12px;"
+                phx-click="view-more"
+                data-test-id="document-view-more"
+              ><%= gettext("Show more") %></button>
             </div>
 
             <%= if @nav_view == nil and schema_groups(@editor_schema) != [] do %>
@@ -874,8 +894,11 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     gives it a fixed name) has nothing for an author to type
                     there, so it renders no Title input and the header falls
                     back to the schema title instead (Gyldendal parity E1.5). --%>
+              <%!-- A `title` field that declares a group shows on that
+                    group's tab only, as Sanity draws it (task-515960f9b7e4f65a).
+                    A title with no group keeps showing on every tab. --%>
               <.editor_field
-                :if={title_input?(@editor_schema)}
+                :if={title_input?(@editor_schema) and title_on_tab?(@editor_schema, @nav_group)}
                 label={title_label(@editor_schema)}
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
@@ -1301,6 +1324,24 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       not (singleton?(schema) or
              is_binary(Barkpark.Content.TitleDerivation.preview_title_field(schema)))
   end
+
+  # The synthetic Title input follows the `title` field's `group` the way
+  # `visible_fields/2` filters every other field (task-515960f9b7e4f65a). The
+  # input stays when no tab is selected, when the schema has no title field,
+  # and when the title field declares no group. Sanity also accepts a list of
+  # groups, so a list matches any of its names.
+  @doc false
+  def title_on_tab?(_schema, nil), do: true
+
+  def title_on_tab?(schema, nav_group) when is_binary(nav_group) do
+    case Barkpark.Content.TitleDerivation.title_field(schema) do
+      %{"group" => group} when is_binary(group) and group != "" -> group == nav_group
+      %{"group" => [_ | _] = groups} -> nav_group in groups
+      _ -> true
+    end
+  end
+
+  def title_on_tab?(_schema, _nav_group), do: true
 
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)

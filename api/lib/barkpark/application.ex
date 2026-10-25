@@ -83,10 +83,12 @@ defmodule Barkpark.Application do
 
     # The same ownership rule for three caches that used to be created lazily
     # by their first caller and died with it (task-45913114e6d4ffbe): the DEK
-    # cache, the tenancy default-scope cache and the codelist alias cache.
+    # cache, the tenancy default-scope cache and the codelist alias cache,
+    # plus the schema catalog cache (task-cca3c6d48e57097e).
     Barkpark.Crypto.DataKeys.init_cache()
     Barkpark.Tenancy.DefaultScopeCache.init_cache()
     Barkpark.Content.Codelists.init_cache()
+    Barkpark.Content.SchemaCatalogCache.init_cache()
 
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
@@ -533,6 +535,11 @@ defmodule Barkpark.Application do
         # rebroadcast frames on it), before the Endpoint.
         Barkpark.Capability.Supervisor,
         BarkparkWeb.Presence,
+        # Studio dead render to connected mount pane handoff
+        # (task-cca3c6d48e57097e). Owns one ETS table and listens on the
+        # document-list topics, so it starts after PubSub and before the
+        # Endpoint.
+        BarkparkWeb.Studio.ConnectHandoff,
         {Task.Supervisor, name: Barkpark.TaskSupervisor},
         # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
         # could not clean up after itself (PDS-D210). The export engine's

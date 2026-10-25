@@ -104,4 +104,51 @@ defmodule Barkpark.ContentDraftsPaginationTest do
     inserted_ats = Enum.map(docs, & &1.inserted_at)
     assert inserted_ats == Enum.sort(inserted_ats, DateTime)
   end
+
+  # task-cca3c6d48e57097e: the merge sorts narrow rows and the page reads the
+  # full rows of its ids. The rows must still be whole drafts, in order.
+  test "a merged page returns the full draft row of each document" do
+    docs = Content.list_documents("post", "dp", perspective: :drafts, limit: 100)
+
+    edited = for d <- docs, Content.published_id(d.doc_id) == "dp-3", do: d
+    assert [%Document{doc_id: "drafts.dp-3", title: "Doc 3 (edited)", content: content}] = edited
+    assert is_map(content)
+  end
+
+  test "a merged page sorts by a content field and pages without gaps" do
+    for i <- 1..10 do
+      {_, _} =
+        Repo.update_all(
+          from(d in Document,
+            where: d.dataset == "dp" and d.doc_id in [^"dp-#{i}", ^"drafts.dp-#{i}"]
+          ),
+          set: [content: %{"rank" => 11 - i}]
+        )
+    end
+
+    order = [{:field, "rank", :asc}]
+
+    page = fn offset ->
+      Content.list_documents("post", "dp",
+        perspective: :drafts,
+        limit: 4,
+        offset: offset,
+        order: order
+      )
+    end
+
+    ids =
+      Enum.flat_map([0, 4, 8], &Enum.map(page.(&1), fn d -> Content.published_id(d.doc_id) end))
+
+    assert ids == Enum.map(10..1//-1, &"dp-#{&1}")
+
+    {rows, more?} =
+      Content.Query.list_documents_page("post", "dp",
+        perspective: :drafts,
+        limit: 9,
+        order: order
+      )
+
+    assert length(rows) == 9 and more?
+  end
 end

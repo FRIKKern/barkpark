@@ -87,23 +87,81 @@ defmodule Barkpark.Content.ScheduledPublishes do
   def schedule(_type, _doc_id, _dataset, _publish_at, _opts),
     do: {:error, {:schedule_invalid, "type and id are required"}}
 
+  # One page of the index: at most this many rows (also the default, so a caller
+  # that sends no `limit` reads what it always did).
+  @max_page 500
+
   @doc """
   The schedules visible in this request's workspace (and project, when the URL
   names one) for `dataset`, soonest first. Filters: `"id"` (a document id,
   draft or published spelling), `"type"`, and `"status"` (default
-  `"scheduled"`; `"all"` for every status).
+  `"scheduled"`; `"all"` for every status). `"order"` `"desc"` lists the latest
+  first. At most 500 rows; see `list_page/3` for the rest.
   """
-  def list(dataset, filters, opts) when is_binary(dataset) and is_map(filters) do
-    ScheduledPublish
-    |> Scope.scope_to_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
-    |> where([s], s.dataset == ^dataset)
-    |> filter_doc(filters["id"])
-    |> filter_type(filters["type"])
-    |> filter_status(Map.get(filters, "status", "scheduled"))
-    |> order_by([s], asc: s.publish_at, asc: s.inserted_at)
-    |> limit(500)
-    |> Repo.all()
+  def list(dataset, filters, opts) when is_binary(dataset) and is_map(filters),
+    do: list_page(dataset, filters, opts).rows
+
+  @doc """
+  One page of `list/3` (task-44cfe871ea0edc30): `"limit"` (1..500, default 500)
+  rows after skipping `"offset"` (default 0). A value that is not a positive
+  integer (a non-negative one for `offset`) reads as its default, as `order`
+  does; a `limit` over 500 reads as 500. Returns `%{rows, limit, offset,
+  next_offset}`, `next_offset` nil on the last page. Ties in `publish_at` fall
+  back to creation time, then id, so pages never repeat or skip a row.
+  """
+  def list_page(dataset, filters, opts) when is_binary(dataset) and is_map(filters) do
+    limit = page_limit(filters["limit"])
+    offset = page_offset(filters["offset"])
+
+    rows =
+      ScheduledPublish
+      |> Scope.scope_to_workspace(
+        Keyword.get(opts, :workspace_id),
+        Keyword.get(opts, :project_id)
+      )
+      |> where([s], s.dataset == ^dataset)
+      |> filter_doc(filters["id"])
+      |> filter_type(filters["type"])
+      |> filter_status(Map.get(filters, "status", "scheduled"))
+      |> order_publish(filters["order"])
+      |> limit(^(limit + 1))
+      |> offset(^offset)
+      |> Repo.all()
+
+    {rows, more} = Enum.split(rows, limit)
+
+    %{
+      rows: rows,
+      limit: limit,
+      offset: offset,
+      next_offset: if(more == [], do: nil, else: offset + limit)
+    }
   end
+
+  defp page_limit(value) do
+    case parse_int(value) do
+      n when is_integer(n) and n >= 1 -> min(n, @max_page)
+      _ -> @max_page
+    end
+  end
+
+  defp page_offset(value) do
+    case parse_int(value) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> 0
+    end
+  end
+
+  defp parse_int(n) when is_integer(n), do: n
+
+  defp parse_int(s) when is_binary(s) do
+    case Integer.parse(s) do
+      {n, ""} -> n
+      _ -> nil
+    end
+  end
+
+  defp parse_int(_), do: nil
 
   @doc """
   Cancel a pending or paused schedule. Any other status answers
@@ -416,6 +474,14 @@ defmodule Barkpark.Content.ScheduledPublishes do
     do: where(query, [s], s.type == ^type)
 
   defp filter_type(query, _), do: query
+
+  # Soonest first; `order=desc` reads the latest first, so the 500 kept are the newest
+  # (an archive with more than 500 rows listed the oldest ones only).
+  defp order_publish(query, "desc"),
+    do: order_by(query, [s], desc: s.publish_at, desc: s.inserted_at, desc: s.id)
+
+  defp order_publish(query, _),
+    do: order_by(query, [s], asc: s.publish_at, asc: s.inserted_at, asc: s.id)
 
   defp filter_status(query, "all"), do: query
 

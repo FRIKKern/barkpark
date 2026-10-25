@@ -231,7 +231,8 @@ defmodule Barkpark.Content.Envelope do
 
       :error ->
         # Indexed once per type, not once per document (`field_index/1`).
-        schema = {:indexed, schema_fun.(type) |> raw_fields() |> field_index()}
+        fields = schema_fun.(type) |> raw_fields()
+        schema = {:indexed, field_index(fields), only_ciphertext_hidden?(fields)}
         {schema, Map.put(cache, type, schema)}
     end
   end
@@ -246,9 +247,12 @@ defmodule Barkpark.Content.Envelope do
   never appears in the map" for free — no separate visibility check, no risk
   of the two decisions drifting apart.
 
-  FLAT FIELDS ONLY (scope cut, recorded on the task row): a nested
-  object/array value's OWN sub-fields are not walked — the whole value is one
-  mapping entry naming its top-level key. Provenance through `?expand=`
+  NESTED VALUES (task-651999345821b5dd): every top-level field is one mapping
+  entry naming its key, as before, AND an object or array value is walked, so
+  `$["seo"]["metaTitle"]` and `$["links"][0]["title"]` are mapped too (a keyed
+  array item's source path names its `_key`: `$["links"][?(@._key=="l1")]`).
+  System keys are not mapped, and a document stops at `@nested_cap` nested
+  entries. Before, a nested value was only ever its whole top-level field. Provenance through `?expand=`
   (a different source document), computed fields (no single source to name)
   and aggregate/derived views each need their own rule, filed separately as
   task-0e0cb2167c6fcdea rather than guessed at here.
@@ -299,14 +303,23 @@ defmodule Barkpark.Content.Envelope do
         nil
 
       keys ->
-        {mappings, table} =
-          Enum.reduce(keys, {%{}, path_table_new()}, fn key, {m_acc, table} ->
+        {mappings, table, _n} =
+          Enum.reduce(keys, {%{}, path_table_new(), 0}, fn key, {m_acc, table, n} ->
             {idx, table} = path_table_index(table, result_path(key))
 
-            {Map.put(m_acc, result_path(key), %{
-               "source" => %{"document" => 0, "path" => idx},
-               "type" => "value"
-             }), table}
+            m_acc =
+              Map.put(m_acc, result_path(key), %{
+                "source" => %{"document" => 0, "path" => idx},
+                "type" => "value"
+              })
+
+            walk_nested(
+              Map.get(rendered, key),
+              result_path(key),
+              result_path(key),
+              0,
+              {m_acc, table, n}
+            )
           end)
 
         {expand_mappings, expand_docs, _next_doc_idx, table} =
@@ -339,7 +352,7 @@ defmodule Barkpark.Content.Envelope do
   gets a `documents` entry (keeping the index correspondence intact for
   every later row) but contributes no mapping.
 
-  Flat fields only, same scope cut as `source_map/2` — see that function's
+  Nested values walked, same rule as `source_map/2` — see that function's
   doc for what is deliberately NOT covered here (computed fields, aggregate
   views — `?expand=` is now covered, via the optional third arg below).
   Returns `nil` when no row has a single visible field at all (an empty
@@ -396,14 +409,23 @@ defmodule Barkpark.Content.Envelope do
           {%{}, table, false}
 
         keys ->
-          {m, table} =
-            Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+          {m, table, _n} =
+            Enum.reduce(keys, {%{}, table, 0}, fn key, {m_acc, table, n} ->
               {idx, table} = path_table_index(table, result_path(key))
 
-              {Map.put(m_acc, row_result_path(row_idx, key), %{
-                 "source" => %{"document" => row_idx, "path" => idx},
-                 "type" => "value"
-               }), table}
+              m_acc =
+                Map.put(m_acc, row_result_path(row_idx, key), %{
+                  "source" => %{"document" => row_idx, "path" => idx},
+                  "type" => "value"
+                })
+
+              walk_nested(
+                Map.get(rendered, key),
+                row_result_path(row_idx, key),
+                result_path(key),
+                row_idx,
+                {m_acc, table, n}
+              )
             end)
 
           {m, table, true}
@@ -520,7 +542,7 @@ defmodule Barkpark.Content.Envelope do
 
   defp diff_expanded_field(_base, _exp), do: :unchanged
 
-  # An expanded sub-document's own flat-field mapping, exactly the same walk
+  # An expanded sub-document's own field mapping, exactly the same walk
   # `source_map/3` does for the root — one more level of `?expand=` nesting
   # is out of scope (same as `Expand.expand/4` itself never recursing).
   defp sub_document_source_map(
@@ -531,17 +553,83 @@ defmodule Barkpark.Content.Envelope do
        ) do
     keys = sub_doc |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort()
 
-    {mappings, table} =
-      Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+    {mappings, table, _n} =
+      Enum.reduce(keys, {%{}, table, 0}, fn key, {m_acc, table, n} ->
         {idx, table} = path_table_index(table, result_path(key))
 
-        {Map.put(m_acc, append_path(prefix, key), %{
-           "source" => %{"document" => doc_index, "path" => idx},
-           "type" => "value"
-         }), table}
+        m_acc =
+          Map.put(m_acc, append_path(prefix, key), %{
+            "source" => %{"document" => doc_index, "path" => idx},
+            "type" => "value"
+          })
+
+        walk_nested(
+          Map.get(sub_doc, key),
+          append_path(prefix, key),
+          result_path(key),
+          doc_index,
+          {m_acc, table, n}
+        )
       end)
 
     {mappings, %{"_id" => sub_id, "_type" => sub_type}, table}
+  end
+
+  # NESTED VALUES (task-651999345821b5dd): a field holding an object or an array is
+  # mapped whole AND walked, so a site can mark `seo.metaTitle` or one link's title
+  # click-to-edit as Sanity's content source map lets it (every leaf there). Result
+  # keys index arrays by position (`$["links"][0]["title"]`); the SOURCE path names a
+  # keyed item by its `_key`, as Sanity's does (`$["links"][?(@._key=="l1")]["title"]`),
+  # so it still names the item after a reorder. System keys (`_key`, `_type`, `_ref`)
+  # are not mapped. At most @nested_cap entries per document: a long rich-text body
+  # stops being walked there rather than growing the opt-in map without bound.
+  @nested_cap 2_000
+
+  defp walk_nested(%{} = map, result, source, doc_index, acc) do
+    map
+    |> Map.keys()
+    |> Enum.reject(&(not is_binary(&1) or String.starts_with?(&1, "_")))
+    |> Enum.sort()
+    |> Enum.reduce(acc, fn key, acc ->
+      map_nested(
+        Map.get(map, key),
+        append_path(result, key),
+        append_path(source, key),
+        doc_index,
+        acc
+      )
+    end)
+  end
+
+  defp walk_nested(list, result, source, doc_index, acc) when is_list(list) do
+    list
+    |> Enum.with_index()
+    |> Enum.reduce(acc, fn {item, i}, acc ->
+      segment =
+        case item do
+          %{"_key" => key} when is_binary(key) and key != "" -> "[?(@._key==#{inspect(key)})]"
+          _ -> "[#{i}]"
+        end
+
+      map_nested(item, result <> "[#{i}]", source <> segment, doc_index, acc)
+    end)
+  end
+
+  defp walk_nested(_leaf, _result, _source, _doc_index, acc), do: acc
+
+  defp map_nested(_value, _result, _source, _doc_index, {_m, _t, n} = acc) when n >= @nested_cap,
+    do: acc
+
+  defp map_nested(value, result, source, doc_index, {mappings, table, n}) do
+    {idx, table} = path_table_index(table, source)
+
+    mappings =
+      Map.put(mappings, result, %{
+        "source" => %{"document" => doc_index, "path" => idx},
+        "type" => "value"
+      })
+
+    walk_nested(value, result, source, doc_index, {mappings, table, n + 1})
   end
 
   defp result_path(key), do: "$[#{inspect(key)}]"
@@ -638,6 +726,23 @@ defmodule Barkpark.Content.Envelope do
   # explicit Content.reveal_fields/4 API) — an admin simply sees the envelope.
   defp redact_by_field_visibility(envelope, _schema, %CallerContext{is_admin: true}, _owner_id),
     do: envelope
+
+  # A schema that restricts no field at any depth, and whose fields declare
+  # no object kids at any depth, hides from this caller only what
+  # `drop_field?/5` drops by value: a top-level key holding ciphertext. The
+  # walk below would find nothing else to drop, so this clause skips it. See
+  # `only_ciphertext_hidden?/1`.
+  defp redact_by_field_visibility(
+         envelope,
+         {:indexed, _index, true},
+         %CallerContext{},
+         _owner_id
+       ),
+       do:
+         :maps.filter(
+           fn key, value -> key in @reserved or not FieldCipher.encrypted?(value) end,
+           envelope
+         )
 
   defp redact_by_field_visibility(envelope, schema, %CallerContext{} = ctx, owner_id) do
     fields = indexed_fields(schema)
@@ -977,6 +1082,48 @@ defmodule Barkpark.Content.Envelope do
   def renders_all_fields?(schema, _caller_context),
     do: not Enum.any?(raw_fields(schema), &restricted_anywhere?/1)
 
+  @doc """
+  True when `render/3` drops a stored ciphertext for `caller_context` on a
+  document of `schema`: the caller is neither internal nor an admin and a
+  field at any depth of the schema is marked `encrypted`. A filter that SQL
+  tests against the stored values would then see a value the rendered
+  document does not hold.
+  """
+  @spec drops_ciphertext?(term(), term()) :: boolean()
+  def drops_ciphertext?(_schema, :internal), do: false
+  def drops_ciphertext?(_schema, %CallerContext{is_admin: true}), do: false
+
+  def drops_ciphertext?(schema, _caller_context),
+    do: Enum.any?(raw_fields(schema), &encrypted_anywhere?/1)
+
+  defp encrypted_anywhere?(field) when is_map(field) do
+    truthy?(Map.get(field, "encrypted")) or truthy?(Map.get(field, :encrypted)) or
+      Enum.any?(nested_kids(field), &encrypted_anywhere?/1) or
+      case Map.get(field, "of") || Map.get(field, :of) do
+        %{} = of -> encrypted_anywhere?(of)
+        members when is_list(members) -> Enum.any?(members, &encrypted_anywhere?/1)
+        _ -> false
+      end
+  end
+
+  defp encrypted_anywhere?(_field), do: false
+
+  # True when, for every caller, `redact_by_field_visibility/4` drops only the
+  # top-level keys that hold ciphertext: no field at any depth is restricted,
+  # so every declared field is visible, and no field leads `redact_nested/5`
+  # to declared object kids, the only place it tests a value. An array's item
+  # shape without kids is walked but changes nothing.
+  defp only_ciphertext_hidden?(fields),
+    do: not Enum.any?(fields, &restricted_anywhere?/1) and Enum.all?(fields, &kidless?/1)
+
+  defp kidless?(field) do
+    nested_kids(field) == [] and
+      case item_field(field) do
+        nil -> true
+        item -> kidless?(item)
+      end
+  end
+
   defp restricted_anywhere?(field) when is_map(field) do
     restricted?(field) or Enum.any?(nested_kids(field), &restricted_anywhere?/1) or
       case item_field(field) do
@@ -1003,7 +1150,7 @@ defmodule Barkpark.Content.Envelope do
     {:index, by_name}
   end
 
-  defp indexed_fields({:indexed, index}), do: index
+  defp indexed_fields({:indexed, index, _only_ciphertext_hidden?}), do: index
   defp indexed_fields(schema), do: schema |> raw_fields() |> field_index()
 
   defp raw_fields(%SchemaDefinition{fields: f}) when is_list(f), do: f

@@ -76,7 +76,8 @@ defmodule BarkparkWeb.Studio.ModalFocusGuardTest do
     assert File.read!(@asset) =~ "window.BarkparkModalFocus = {"
 
     root = File.read!(Path.join(@layouts, "root.html.heex"))
-    assert root =~ ~s(<script src="/assets/bp-modal-focus.js"></script>)
+    # Under a content hash since task-66122189b7af6ea2 (BarkparkWeb.StaticAssets).
+    assert root =~ ~s|<script src={BarkparkWeb.StaticAssets.path("bp-modal-focus.js")}></script>|
     assert root =~ "Hooks.ModalFocus = window.BarkparkModalFocus;"
 
     paper = File.read!(Path.join(@layouts, "bulldocs.html.heex"))

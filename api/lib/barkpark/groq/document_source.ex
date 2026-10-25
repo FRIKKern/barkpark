@@ -274,6 +274,38 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
+  # A `*[...]` whose filter is exact is read in SQL alone, as an exact slice
+  # is, and the evaluator keeps every document without testing the filter
+  # again. The same rules as `slice/5` decide when SQL matches exactly, and
+  # the read is sized before it loads, so the per-fetch limits apply as they
+  # do to `fetch/2`. With `fields`, render sees only those keys of the stored
+  # `content`: render treats every key on its own, so each of them renders as
+  # it does in the whole document.
+  @impl true
+  def fetch_exact(state, constraints, fields) do
+    cond do
+      constraints.ids != nil or constraints.types == nil or "paper" in constraints.types ->
+        :error
+
+      not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state)) ->
+        :error
+
+      true ->
+        key = cache_key(constraints)
+        slot = {:groq_src_exact, key, fields}
+
+        case Process.get(slot) do
+          nil ->
+            docs = load_slice(state, key, [], 0, state.max_per_fetch + 1, fields)
+            Process.put(slot, docs)
+            {:ok, docs}
+
+          docs ->
+            {:ok, docs}
+        end
+    end
+  end
+
   # Any other slice reads the rows SQL narrows to in chunks of `@scan_chunk`
   # and holds only the documents the slice needs, so the per-fetch limit on
   # matches does not refuse it; the query's timeout still bounds it. Without
@@ -317,7 +349,10 @@ defmodule Barkpark.Groq.DocumentSource do
   # field the filter's equalities and checks read. When the type hides no
   # field from the caller, nothing more is asked. Otherwise each path is
   # judged by `Envelope.field_readable?/3`, which walks every segment, so a
-  # filter on another field of the same type still counts in SQL.
+  # filter on another field of the same type still counts in SQL. A type
+  # that encrypts a field is never matched in SQL for a caller whose render
+  # drops the ciphertext: SQL sees the stored value, so `defined()` and `!=`
+  # on it would match documents the evaluator does not.
   defp reads_filter_paths?(type, constraints, state, extra \\ []) do
     case Enum.uniq(filter_paths(constraints) ++ extra) do
       [] ->
@@ -326,8 +361,9 @@ defmodule Barkpark.Groq.DocumentSource do
       paths ->
         schema = schema_for(type, state)
 
-        Envelope.renders_all_fields?(schema, state.caller_context) or
-          Enum.all?(paths, &path_readable?(schema, &1, state.caller_context))
+        not Envelope.drops_ciphertext?(schema, state.caller_context) and
+          (Envelope.renders_all_fields?(schema, state.caller_context) or
+             Enum.all?(paths, &path_readable?(schema, &1, state.caller_context)))
     end
   end
 
@@ -828,7 +864,7 @@ defmodule Barkpark.Groq.DocumentSource do
   end
 
   # The exact matches from `from` up to `to`, sized before they load.
-  defp load_slice(state, {types, ids, eq, _any, checks}, keys, from, to) do
+  defp load_slice(state, {types, ids, eq, _any, checks}, keys, from, to, fields \\ :all) do
     Enum.each(types || [], &touch_type/1)
 
     ids =
@@ -849,9 +885,8 @@ defmodule Barkpark.Groq.DocumentSource do
     position = ids |> Enum.with_index() |> Map.new()
 
     rows =
-      from(d in Document, where: d.id in ^ids)
-      |> select_rendered()
-      |> Repo.all()
+      ids
+      |> load_rows(fields)
       |> Enum.sort_by(&Map.fetch!(position, &1.id))
 
     # The drafts overlay regroups the documents; each row is its own group,
@@ -866,6 +901,53 @@ defmodule Barkpark.Groq.DocumentSource do
     count_loaded!(state, length(docs))
     Enum.each(docs, &touch_type(&1["_type"]))
     docs
+  end
+
+  # The rows of `ids` as `render/2` reads them. With `fields`, `content`
+  # holds only those keys, each read in SQL from one decompressed copy of the
+  # stored value, so neither Postgres nor Postgrex sends or decodes the rest.
+  # A key the document lacks and a key that holds null both read as absent;
+  # GROQ reads them the same way. `title` is read too, since render takes it
+  # from `content` when the column is blank. Past `@max_read_fields` keys the
+  # whole `content` is read.
+  @max_read_fields 200
+  @row_fields [:id, :doc_id, :type, :title, :rev, :inserted_at, :updated_at, :owner_id] ++
+                [:dataset_id, :dataset]
+
+  defp load_rows(ids, fields) when fields == :all or length(fields) > @max_read_fields,
+    do: from(d in Document, where: d.id in ^ids) |> select_rendered() |> Repo.all()
+
+  defp load_rows(ids, fields), do: read_keys(ids, Enum.uniq(["title" | fields]))
+
+  # The SQL text interpolates only the column names in `@row_fields` and the
+  # placeholders `$2`..`$n`; the keys and ids are bound parameters.
+  # sobelow_skip ["SQL.Query"]
+  defp read_keys(ids, keys) do
+    reads =
+      keys
+      |> Enum.with_index(2)
+      |> Enum.map_join(", ", fn {_key, i} -> "c.content -> $#{i}::text" end)
+
+    columns = Enum.map_join(@row_fields, ", ", &"d.#{&1}")
+
+    %{rows: rows} =
+      Repo.query!(
+        "SELECT #{columns}, #{reads} FROM \"documents\" AS d " <>
+          "CROSS JOIN LATERAL (SELECT (d.content #> '{}') AS content OFFSET 0) c " <>
+          "WHERE d.id = ANY($1)",
+        [Enum.map(ids, &Ecto.UUID.dump!/1) | keys]
+      )
+
+    width = length(@row_fields)
+
+    Enum.map(rows, fn row ->
+      {values, read} = Enum.split(row, width)
+
+      content =
+        for {key, value} <- Enum.zip(keys, read), value != nil, into: %{}, do: {key, value}
+
+      Document |> Repo.load({@row_fields, values}) |> Map.put(:content, content)
+    end)
   end
 
   defp maybe_join_views(query, keys, perspective) do
