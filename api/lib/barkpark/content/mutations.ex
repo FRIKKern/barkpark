@@ -1198,6 +1198,10 @@ defmodule Barkpark.Content.Mutations do
 
   defp apply_one(_, _, _), do: {:error, :malformed}
 
+  @doc "Every key a mutation object may carry: its verbs (`publish` is also the direct-publish flag beside `createOrReplace`)."
+  @spec mutation_verbs() :: [String.t()]
+  def mutation_verbs, do: @mutation_verbs
+
   defp create_if_not_exists_existing(id, type, dataset, opts) do
     case Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
       {:ok, _} = found ->

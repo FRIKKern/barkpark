@@ -78,4 +78,46 @@ defmodule BarkparkWeb.MutateUnknownKeyWarningTest do
     assert Jason.decode!(resp.resp_body)["error"]["code"] == "malformed"
     assert {:error, _} = Content.get_document("drafts." <> id <> "-bad", "post", @dataset)
   end
+
+  # task-b59e4d73521e07a7 — a key INSIDE a mutation the server does not read.
+  defp unknown_mutation_key_warnings(resp) do
+    resp.resp_body
+    |> Jason.decode!()
+    |> Map.get("warnings", [])
+    |> Enum.filter(&(&1["code"] == "mutate.unknown_mutation_key"))
+  end
+
+  test "an unknown key inside a mutation is named, per mutation, and the batch still writes" do
+    id = "inner-key-#{System.unique_integer([:positive])}"
+    doc = %{"_id" => id, "_type" => "post", "title" => "T"}
+
+    resp =
+      mutate(%{
+        "mutations" => [
+          %{"createOrReplace" => doc, "pubish" => true},
+          %{"create" => Map.put(doc, "_id", id <> "-2"), "returnId" => true, "ifMatch" => "x"}
+        ]
+      })
+
+    assert resp.status == 200, resp.resp_body
+    assert [warning] = unknown_mutation_key_warnings(resp)
+    assert warning["severity"] == "advisory"
+    assert warning["message"] =~ "mutations[0]: pubish"
+    assert warning["message"] =~ "mutations[1]: ifMatch, returnId"
+    assert {:ok, _} = Content.get_document("drafts." <> id, "post", @dataset)
+  end
+
+  test "control: the verbs and the direct-publish flag carry no inner-key warning" do
+    id = "inner-known-#{System.unique_integer([:positive])}"
+    doc = %{"_id" => id, "_type" => "post", "title" => "T"}
+
+    resp = mutate(%{"mutations" => [%{"createOrReplace" => doc, "publish" => true}]})
+    assert resp.status == 200, resp.resp_body
+    assert [] = unknown_mutation_key_warnings(resp)
+
+    resp =
+      mutate(%{"mutations" => [%{"patch" => %{"id" => id, "type" => "post", "set" => %{}}}]})
+
+    assert [] = unknown_mutation_key_warnings(resp)
+  end
 end
