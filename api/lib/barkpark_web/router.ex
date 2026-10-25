@@ -2330,6 +2330,12 @@ defmodule BarkparkWeb.Router do
     # checked-in openapi.yaml. Generated from the capabilities manifest by
     # Barkpark.Api.OpenApi, so it can never drift from the routes.
     get("/openapi.json", OpenApiController, :index)
+
+    # Where an embedder (a studio on another origin) loads the paper canvas
+    # from: the bundle and its stylesheets under their content hash, so they
+    # cache as immutable (EmbedController, task-c57dd84f98c1296c). Public like
+    # the files it names.
+    get("/embed/canvas", EmbedController, :canvas)
   end
 
   # ── Anonymous account creation — its OWN, tighter bucket ────────────────
