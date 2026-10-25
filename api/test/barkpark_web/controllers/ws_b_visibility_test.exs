@@ -231,6 +231,13 @@ defmodule BarkparkWeb.WsBVisibilityTest do
       end
     end
 
+    # task-3fbfafa3d1035ec2: collapsing groups by a field's value, an oracle too.
+    test "anonymous collapse on a private field is rejected (422)", %{conn: conn} do
+      resp = get(conn, "/v1/data/query/#{@dataset}/report?collapse=salary")
+      assert resp.status == 422
+      assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
+    end
+
     test "anonymous order by a private field is rejected (422)", %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@dataset}/report?order=salary:asc")
       assert resp.status == 422

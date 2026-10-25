@@ -306,6 +306,7 @@ defmodule BarkparkWeb.QueryController do
 
     expand_spec = parse_expand(params["expand"])
     facets = parse_facet_params(params)
+    collapse = parse_collapse(params["collapse"])
 
     schema = fetch_schema(conn, type, dataset)
     caller_context = CallerContext.from_conn(conn)
@@ -377,6 +378,13 @@ defmodule BarkparkWeb.QueryController do
       field = forbidden_facet_field(facets, schema, caller_context) ->
         {:error, {:forbidden_field, field}}
 
+      # `?collapse=` groups by a field's value, an oracle like a filter.
+      collapse == :error ->
+        refuse_collapse(conn, params["collapse"])
+
+      is_binary(collapse) and not Envelope.field_readable?(schema, collapse, caller_context) ->
+        {:error, {:forbidden_field, collapse}}
+
       true ->
         # TRUNCATION SIGNAL. `list_documents_page/3` reads one row past the page
         # and reports whether it materialised, so `hasMore` is an EXACT answer
@@ -400,10 +408,14 @@ defmodule BarkparkWeb.QueryController do
               order: order,
               collation: collation,
               content_keys: content_keys(params, expand_spec, type, conn)
-            ] ++ scope_opts(conn)
+            ] ++ collapse_opts(collapse) ++ scope_opts(conn)
           )
 
         base_rendered = Envelope.render_many(docs, schema, caller_context)
+        # A collapsed set's representatives depend on the order, so the total,
+        # facets and group counts read it too.
+        read_opts =
+          [filter_map: filter_map, order: order, collation: collation] ++ collapse_opts(collapse)
 
         # Same split as `show_doc!/5` (task-0e0cb2167c6fcdea): captured
         # between Expand.expand/4 and project_fields/maybe_resolve_tasks, so
@@ -435,8 +447,9 @@ defmodule BarkparkWeb.QueryController do
             hasMore: has_more
           }
           |> maybe_put_next_offset(has_more, limit, offset)
-          |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
-          |> maybe_put_facets(conn, type, dataset, perspective, filter_map, facets)
+          |> maybe_put_total(conn, params, type, dataset, perspective, read_opts)
+          |> maybe_put_facets(conn, type, dataset, perspective, read_opts, facets)
+          |> maybe_put_collapse(conn, type, dataset, perspective, read_opts, docs)
 
         schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
         etag = list_etag(dataset, type, rendered)
@@ -1847,19 +1860,70 @@ defmodule BarkparkWeb.QueryController do
     if next > 100_000, do: inner, else: Map.put(inner, :nextOffset, next)
   end
 
-  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, filter_map) do
+  # `read_opts` is the list's filter and order, plus `collapse: field` when the
+  # list collapses, so the total counts groups.
+  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, read_opts) do
     total =
       Content.count_documents(
         type,
         dataset,
-        [perspective: perspective, filter_map: filter_map] ++ scope_opts(conn)
+        [perspective: perspective] ++ read_opts ++ scope_opts(conn)
       )
 
     Map.put(inner, :total, total)
   end
 
-  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map),
+  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _read_opts),
     do: inner
+
+  # ── Collapse (task-3fbfafa3d1035ec2) ──────────────────────────────────────
+  #
+  # `collapse=familyId` keeps one document per value of a top-level field, the
+  # first by the list's order; a document with no value stands alone. The
+  # page, `total` and the facets count groups. `result.collapse.counts` maps
+  # each listed `_id` to how many matched documents its group holds.
+  defp parse_collapse(nil), do: nil
+
+  defp parse_collapse(field) when is_binary(field) do
+    field = String.trim(field)
+    if facet_field?(field), do: field, else: :error
+  end
+
+  defp parse_collapse(_), do: :error
+
+  defp collapse_opts(field) when is_binary(field), do: [collapse: field]
+  defp collapse_opts(_), do: []
+
+  defp refuse_collapse(conn, received) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "collapse takes one top-level field name (collapse=familyId); got " <> inspect(received),
+      %{parameter: "collapse", received: inspect(received)}
+    )
+  end
+
+  defp maybe_put_collapse(inner, conn, type, dataset, perspective, read_opts, docs) do
+    case read_opts[:collapse] do
+      nil ->
+        inner
+
+      field ->
+        counts =
+          Content.collapse_counts(
+            type,
+            dataset,
+            [perspective: perspective] ++ read_opts ++ scope_opts(conn),
+            Enum.map(docs, & &1.id)
+          )
+
+        Map.put(inner, :collapse, %{
+          field: field,
+          counts: Map.new(docs, &{&1.doc_id, Map.get(counts, &1.id, 1)})
+        })
+    end
+  end
 
   # ── Facets (task-8af256dcd8f17902) ────────────────────────────────────────
   #
@@ -1999,23 +2063,22 @@ defmodule BarkparkWeb.QueryController do
          _type,
          _dataset,
          _perspective,
-         _filter_map,
+         _read_opts,
          {:ok, %{fields: [], ranges: []}}
        ),
        do: inner
 
-  defp maybe_put_facets(inner, conn, type, dataset, perspective, filter_map, {:ok, facets}) do
+  defp maybe_put_facets(inner, conn, type, dataset, perspective, read_opts, {:ok, facets}) do
     counts =
       Content.facet_counts(
         type,
         dataset,
         [
           perspective: perspective,
-          filter_map: filter_map,
           facet_fields: facets.fields,
           facet_ranges:
             Enum.map(facets.ranges, fn {f, edges} -> {f, Enum.map(edges, &elem(&1, 0))} end)
-        ] ++ scope_opts(conn)
+        ] ++ read_opts ++ scope_opts(conn)
       )
 
     fields =
