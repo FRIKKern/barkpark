@@ -23,6 +23,23 @@ defmodule BarkparkWeb.EmbedControllerTest do
     end
   end
 
+  test "names only same-origin asset paths: no host, no token, no other key", %{conn: conn} do
+    body =
+      conn
+      |> put_req_header("authorization", "Bearer some-token")
+      |> get("/v1/embed/canvas")
+      |> json_response(200)
+
+    assert Map.keys(body) |> Enum.sort() == ["script", "styles"]
+
+    for path <- [body["script"] | body["styles"]] do
+      assert is_binary(path)
+      assert String.starts_with?(path, "/assets/"), path
+      refute path =~ "://", path
+      refute path =~ ~r/token|bearer|@/i, path
+    end
+  end
+
   test "the plain bundle URL keeps working with no-cache" do
     conn = get(build_conn(), "/assets/bp-paper-editor.bundle.js")
     assert conn.status == 200
