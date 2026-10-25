@@ -411,7 +411,9 @@ export const Callout = Node.create({
           syncingOpen = false;
         } else if (hasTitle || focused) {
           titleEl.style.display = "";
-          spaceNode.textContent = " ";
+          // The title is the reader's eyebrow, on its own line, so no run-in
+          // space: under the editor's pre-wrap it would indent the body.
+          spaceNode.textContent = "";
         } else {
           titleEl.textContent = "";
           titleEl.style.display = "none";
