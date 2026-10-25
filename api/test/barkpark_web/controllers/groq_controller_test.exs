@@ -462,8 +462,8 @@ defmodule BarkparkWeb.GroqControllerTest do
   end
 
   # task-754316ae85c63a1a: gyldendal.no's draft-mode poller timed out
-  # reading every document of the dataset. `_id in path()` narrows in SQL, so
-  # it reads only the matching rows.
+  # reading every document of the dataset. `_id in path()` narrows in SQL, and
+  # with no stored field read the ordered slice is SQL's too, type or not.
   test "_id in path(\"drafts.**\") narrows in SQL", %{conn: conn, token: token, scope: scope} do
     for id <- ["b1", "b3"] do
       {:ok, _} = Content.create_document("book", %{"_id" => id, "name" => id}, @dataset, scope)
@@ -495,7 +495,11 @@ defmodule BarkparkWeb.GroqControllerTest do
       end)
 
     assert poll["result"] == newest["_updatedAt"]
-    assert Enum.any?(statements, &(&1 =~ ~s|"doc_id" ~ $|))
+    # The newest draft is one sorted, limited read, not every draft loaded.
+    assert Enum.any?(
+             statements,
+             &(&1 =~ ~r/"doc_id" ~ \$.* ORDER BY .*"updated_at" DESC.* LIMIT/)
+           )
 
     count = scoped_conn() |> get_query(token, ~s'count(*[_id in path("drafts.*")])', raw)
     assert json_response(count, 200)["result"] == 2
