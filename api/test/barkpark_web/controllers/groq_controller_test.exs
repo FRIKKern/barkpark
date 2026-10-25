@@ -431,6 +431,36 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert conn |> get_query(token, ~s'*[_type == "book"].name') |> json_response(422)
   end
 
+  # task-606142ef89bee14d: coalesce(a, b) in L pushes down as
+  # a in L || (!defined(a) && b in L), so it narrows in SQL below the cap and
+  # keeps GROQ's meaning: b is read only where a is missing or null.
+  test "coalesce(a, b) in $list narrows in SQL and keeps coalesce's meaning", %{
+    conn: conn,
+    token: token
+  } do
+    books = conn |> get_query(token, ~s'*[_type == "book"]{_id, name}') |> json_response(200)
+    [first | _] = Enum.sort_by(books["result"], & &1["_id"])
+
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_documents_per_fetch: 2)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    query = fn groq, list ->
+      conn
+      |> get_query(token, groq, %{"$l" => Jason.encode!(list)})
+      |> json_response(200)
+      |> Map.fetch!("result")
+    end
+
+    # No book has a subtitle, so coalesce falls through to name.
+    assert query.(~s'*[_type == "book" && coalesce(subtitle, name) in $l]._id', [first["name"]]) ==
+             [first["_id"]]
+
+    # Every book has a name, so _id is never consulted: nothing matches, where
+    # `name in $l || _id in $l` would match the first book.
+    assert query.(~s'*[_type == "book" && coalesce(name, _id) in $l]._id', [first["_id"]]) == []
+  end
+
   test "a query that would load too much stored content is refused before loading", %{
     conn: conn,
     token: token
