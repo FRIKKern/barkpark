@@ -1184,10 +1184,6 @@ defmodule Barkpark.Content.Mutations do
   # with a bad payload keeps the generic 400; see the note above.
   @mutation_verbs ~w(create createOrReplace createIfNotExists replace patch publish unpublish discardDraft delete deleteExactDraft)
 
-  @doc "Every key a mutation object may carry: its verbs (`publish` is also the direct-publish flag beside `createOrReplace`)."
-  @spec mutation_verbs() :: [String.t()]
-  def mutation_verbs, do: @mutation_verbs
-
   defp apply_one(mutation, _dataset, _opts) when is_map(mutation) do
     case missing_id_type(mutation) do
       {verb, missing} ->
@@ -1201,6 +1197,10 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  @doc "Every key a mutation object may carry: its verbs (`publish` is also the direct-publish flag beside `createOrReplace`)."
+  @spec mutation_verbs() :: [String.t()]
+  def mutation_verbs, do: @mutation_verbs
 
   defp create_if_not_exists_existing(id, type, dataset, opts) do
     case Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
