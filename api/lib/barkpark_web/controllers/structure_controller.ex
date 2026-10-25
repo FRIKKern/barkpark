@@ -31,6 +31,11 @@ defmodule BarkparkWeb.StructureController do
   where it is the raw filter-map object — the Go client decodes it as
   `json.RawMessage` and `DeskNode.FilterString()` normalizes both shapes.
   Absent fields are omitted, never null-padded.
+
+  `?desk=<id>` builds the tree from the published `deskStructure` document
+  with that id instead of `deskStructure`; when that document exists the
+  response names it back as `desk` (task-31f9264adeb053be). An id that is not a published document id
+  (or a `drafts.` id) is a 400. Without `?desk=` the response is unchanged.
   """
 
   use BarkparkWeb, :controller
@@ -39,8 +44,41 @@ defmodule BarkparkWeb.StructureController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
-  def show(conn, %{"dataset" => dataset}) do
-    json(conn, %{structure: node_json(Structure.build(dataset, scope_opts(conn)))})
+  # A published document id: letters, digits, `_ . -`, never `drafts.`.
+  @desk_id ~r/\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\z/
+
+  def show(conn, %{"dataset" => dataset} = params) do
+    case params["desk"] do
+      nil ->
+        json(conn, %{structure: node_json(Structure.build(dataset, scope_opts(conn)))})
+
+      desk when is_binary(desk) ->
+        if Regex.match?(@desk_id, desk) and not String.starts_with?(desk, "drafts.") do
+          opts = Keyword.put(scope_opts(conn), :desk_id, desk)
+          desk_doc = Structure.desk_doc(dataset, opts)
+          tree = node_json(Structure.build(dataset, Keyword.put(opts, :desk_doc, desk_doc)))
+
+          # Named back only when that document was read; otherwise this is
+          # the default tree and must not pass as the requested desk.
+          json(conn, if(desk_doc, do: %{structure: tree, desk: desk}, else: %{structure: tree}))
+        else
+          refuse_desk(conn, desk)
+        end
+
+      desk ->
+        refuse_desk(conn, desk)
+    end
+  end
+
+  defp refuse_desk(conn, desk) do
+    BarkparkWeb.ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "?desk= must be a published document id; received #{inspect(desk)}",
+      %{parameter: "desk", received: desk, expected: "published document id"},
+      "Send ?desk= as letters, digits, _ . - (no drafts. prefix), or leave it out for the default desk."
+    )
   end
 
   defp node_json(%Structure.Node{} = node) do

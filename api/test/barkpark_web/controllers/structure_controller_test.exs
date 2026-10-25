@@ -113,4 +113,92 @@ defmodule BarkparkWeb.StructureControllerTest do
     resp = get(conn, "/v1/structure/production")
     assert resp.status in [401, 403]
   end
+
+  describe "?desk= names another deskStructure document (task-31f9264adeb053be)" do
+    setup do
+      {:ok, _} =
+        Barkpark.Content.upsert_schema(
+          %{
+            "name" => "deskStructure",
+            "title" => "Desk",
+            "singleton" => true,
+            "visibility" => "private",
+            "fields" => [%{"name" => "items", "title" => "Items", "type" => "array"}]
+          },
+          "production"
+        )
+
+      desk!("deskStructure", "Default desk", "Posts")
+      desk!("deskStructure.pensum", "Pensum", "Pensum posts")
+      :ok
+    end
+
+    defp desk!(id, title, row) do
+      items = [%{"kind" => "documentTypeList", "type" => "post", "title" => row}]
+
+      {:ok, _} =
+        Barkpark.Content.create_document(
+          "deskStructure",
+          %{"doc_id" => id, "title" => title, "content" => %{"items" => items}},
+          "production"
+        )
+
+      {:ok, _} = Barkpark.Content.publish_document(id, "deskStructure", "production")
+    end
+
+    defp titles(resp), do: Enum.map(resp["structure"]["items"], & &1["title"])
+
+    test "builds the named published desk and names it back", %{conn: conn} do
+      resp = get(conn, "/v1/structure/production?desk=deskStructure.pensum") |> json_response(200)
+
+      assert resp["desk"] == "deskStructure.pensum"
+      assert resp["structure"]["title"] == "Pensum"
+      assert "Pensum posts" in titles(resp)
+      refute "Posts" in titles(resp)
+    end
+
+    test "without ?desk= the default desk is unchanged and not named", %{conn: conn} do
+      resp = get(conn, "/v1/structure/production") |> json_response(200)
+
+      refute Map.has_key?(resp, "desk")
+      assert resp["structure"]["title"] == "Default desk"
+      assert "Posts" in titles(resp)
+    end
+
+    test "a desk id with no published document is not named back", %{conn: conn} do
+      {:ok, _} =
+        Barkpark.Content.create_document(
+          "deskStructure",
+          %{
+            "doc_id" => "deskStructure.draftonly",
+            "title" => "Draft",
+            "content" => %{"items" => []}
+          },
+          "production"
+        )
+
+      resp =
+        get(conn, "/v1/structure/production?desk=deskStructure.draftonly") |> json_response(200)
+
+      refute Map.has_key?(resp, "desk")
+      refute resp["structure"]["title"] == "Draft"
+    end
+
+    test "a drafts. or malformed id is a 400", %{conn: conn} do
+      for desk <- ["drafts.deskStructure.pensum", "bad id", ".hidden", String.duplicate("a", 129)] do
+        resp = get(conn, "/v1/structure/production", %{"desk" => desk}) |> json_response(400)
+        assert resp["error"]["code"] == "malformed"
+      end
+
+      resp = get(conn, "/v1/structure/production?desk[]=x") |> json_response(400)
+      assert resp["error"]["code"] == "malformed"
+    end
+
+    test "the credential gate is unchanged", %{conn: _conn} do
+      resp =
+        get(Phoenix.ConnTest.build_conn(), "/v1/structure/production?desk=deskStructure.pensum")
+
+      assert resp.status in [401, 403]
+    end
+  end
 end
