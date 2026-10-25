@@ -1346,7 +1346,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "facet_range",
             "string",
-            "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, [e1,e2) … and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
             repeatable: true
           )
         ],
