@@ -71,6 +71,13 @@ type apiError struct {
 	// additive: it never touches the exit ladder and never edits serverHint,
 	// which stays the headline because the server knows most.
 	datasetRemedy string
+	// status and retryAfter ride the -o json / -o yaml envelope
+	// (task-2b8d011b6c573467): a script that waits on a 429 needs the HTTP
+	// status and how long to wait, and `rate_limited` alone gave it neither.
+	// retryAfter is the envelope's details.retry_after, else the Retry-After
+	// header, verbatim ("" when neither is present).
+	status     int
+	retryAfter string
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -596,7 +603,28 @@ func classifyErrorWithHeader(status int, body []byte, hdr http.Header) apiError 
 	if ae.requestID == "" {
 		ae.requestID = requestIDFromHeader(hdr)
 	}
+	ae.status = status
+	ae.retryAfter = retryAfterOf(ae.details, hdr)
 	return ae
+}
+
+// retryAfterOf is the wait a refusal names: details.retry_after (seconds, as
+// Errors.to_envelope sets it on a rate_limited), else the Retry-After header.
+func retryAfterOf(details json.RawMessage, hdr http.Header) string {
+	var d struct {
+		RetryAfter json.RawMessage `json:"retry_after"`
+	}
+	if len(details) > 0 && json.Unmarshal(details, &d) == nil && len(d.RetryAfter) > 0 && string(d.RetryAfter) != "null" {
+		var s string
+		if json.Unmarshal(d.RetryAfter, &s) == nil {
+			return s
+		}
+		return string(d.RetryAfter)
+	}
+	if hdr != nil {
+		return hdr.Get("Retry-After")
+	}
+	return ""
 }
 
 // classifyErrorBody decodes an error response body into an apiError with the mapped
@@ -878,7 +906,25 @@ func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string,
 // the plain command. Measured live 2026-09-16 — a bare `bp task get <twin>`
 // prints this envelope on stdout and nothing on stderr.
 func renderErrorEnvelopeRemedy(out *writer, code, msg, requestID, hint string, details json.RawMessage, remedy string) bool {
+	return renderErrorEnvelopeStatus(out, code, msg, requestID, hint, details, remedy, 0, "")
+}
+
+// renderErrorEnvelopeStatus is renderErrorEnvelopeRemedy plus the HTTP `status`
+// and `retry_after` (task-2b8d011b6c573467), for the refusals that came from a
+// response. Both are omitted when zero/empty, so every other call site keeps
+// byte-identical bytes. retry_after is a number when it parses as one.
+func renderErrorEnvelopeStatus(out *writer, code, msg, requestID, hint string, details json.RawMessage, remedy string, status int, retryAfter string) bool {
 	errObj := map[string]any{"code": code, "message": msg}
+	if status > 0 {
+		errObj["status"] = status
+	}
+	if retryAfter != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(retryAfter)); err == nil {
+			errObj["retry_after"] = n
+		} else {
+			errObj["retry_after"] = retryAfter
+		}
+	}
 	if remedy != "" {
 		errObj["bp_remedy"] = remedy
 	}
