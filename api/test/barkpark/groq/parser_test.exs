@@ -15,6 +15,31 @@ defmodule Barkpark.Groq.ParserTest do
     assert description =~ "$id"
   end
 
+  # task-8a6e47612d2987c6: the span Sanity's API reports for each query, read
+  # from ecu57yeh on 2026-10-25, so an editor underlines the same run.
+  test "a parse error spans the bad token or the unclosed construct, as on Sanity" do
+    for {query, start, stop} <- [
+          {"*[_type=='author'", 1, 17},
+          {"*[_type=='author']{name", 18, 24},
+          {"*[_type=='author'] | order(name", 26, 32},
+          {"*[_type=='author']{\n  'n': lowr(name)}", 27, 31},
+          {"*[delta::changedAny(title)]", 2, 19},
+          {"*[_id == $missing]", 9, 16},
+          {"*[_type=='author']{'x': 'abc}", 24, 29},
+          {"*[_type=='author'][0...'a']", 18, 27}
+        ] do
+      {:error, error} = Parser.parse(query)
+      assert {error.start, error.end} == {start, stop}, query
+    end
+  end
+
+  test "an undefined function is named as Sanity names it" do
+    assert {:error, %{description: ~s(Undefined function "lowr")}} = Parser.parse("lowr(1)")
+
+    assert {:error, %{description: ~s(Undefined function "changedAny" in namespace "delta")}} =
+             Parser.parse("delta::changedAny(title)")
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 

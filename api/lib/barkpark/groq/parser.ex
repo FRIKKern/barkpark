@@ -119,7 +119,7 @@ defmodule Barkpark.Groq.Parser do
     pos = skip_ws(query, 0)
 
     if at(query, pos) == ?f and at(query, pos + 1) == ?n and not ident_char?(at(query, pos + 2)) do
-      throw({:groq_parse_error, "custom functions (fn) are not supported", pos})
+      throw({:groq_parse_error, "custom functions (fn) are not supported", pos, pos + 2})
     end
 
     {node, pos, fail_pos} = parse_expr(query, pos, 0, ctx)
@@ -134,6 +134,11 @@ defmodule Barkpark.Groq.Parser do
   catch
     {:groq_parse_error, message, position} ->
       {:error, %{description: message, start: position, end: min(position + 1, byte_size(query))}}
+
+    # A span, as Sanity reports it: the bad token or the unclosed construct, so
+    # an editor underlines the whole of it (task-8a6e47612d2987c6).
+    {:groq_parse_error, message, start, stop} ->
+      {:error, %{description: message, start: start, end: stop}}
   end
 
   # ── Expressions ──────────────────────────────────────────────────────────
@@ -192,7 +197,10 @@ defmodule Barkpark.Groq.Parser do
                 {{:value, value}, pos + 1 + n}
 
               :error ->
-                throw({:groq_parse_error, "param $#{name} referenced, but not provided", pos})
+                # Sanity's span: from the `$` for the name's length.
+                throw(
+                  {:groq_parse_error, "param $#{name} referenced, but not provided", pos, pos + n}
+                )
             end
         end
 
@@ -608,15 +616,18 @@ defmodule Barkpark.Groq.Parser do
       true ->
         funcs =
           Map.get(@functions, namespace) ||
-            throw({:groq_parse_error, "undefined namespace: #{namespace}", start})
+            throw({:groq_parse_error, "undefined namespace: #{namespace}", start, open})
 
         arity =
-          Map.get(funcs, name) || throw({:groq_parse_error, "undefined function: #{name}", start})
+          Map.get(funcs, name) ||
+            throw({:groq_parse_error, undefined_function(namespace, name), start, open})
 
         check_arity!(name, arity, length(args), start)
 
         if namespace == "global" and name == "boost" and not ctx.allow_boost do
-          throw({:groq_parse_error, "unexpected boost", start})
+          throw(
+            {:groq_parse_error, "boost() function cannot be used outside score()", start, open}
+          )
         end
 
         {{:func, namespace, name, Enum.map(args, &reject_marks!(&1, start))}, p}
@@ -638,17 +649,25 @@ defmodule Barkpark.Groq.Parser do
     {:select, Enum.reverse(alts), fallback}
   end
 
+  # Sanity's wording: `Undefined function "lowr"`, and the namespace when one
+  # was written (`Undefined function "changedAny" in namespace "delta"`).
+  defp undefined_function("global", name), do: "Undefined function \"#{name}\""
+
+  defp undefined_function(namespace, name),
+    do: "Undefined function \"#{name}\" in namespace \"#{namespace}\""
+
   defp parse_args(s, open, ctx) do
     p = skip_ws(s, open + 1)
 
     if at(s, p) == ?) do
       {[], p + 1}
     else
-      collect_args(s, p, [], ctx)
+      collect_args(s, p, [], ctx, open)
     end
   end
 
-  defp collect_args(s, p, acc, ctx) do
+  # `open` is the `(`: an unclosed call is underlined from it (Sanity's span).
+  defp collect_args(s, p, acc, ctx, open) do
     {arg, p, _} = parse_expr(s, p, 0, ctx)
     p = skip_ws(s, p)
 
@@ -658,13 +677,13 @@ defmodule Barkpark.Groq.Parser do
 
         if at(s, p) == ?),
           do: {Enum.reverse([arg | acc]), p + 1},
-          else: collect_args(s, p, [arg | acc], ctx)
+          else: collect_args(s, p, [arg | acc], ctx, open)
 
       ?) ->
         {Enum.reverse([arg | acc]), p + 1}
 
       _ ->
-        throw({:groq_parse_error, "expected \")\" after the function arguments", p})
+        throw({:groq_parse_error, "expected \")\" after the function arguments", open, p + 1})
     end
   end
 
@@ -715,11 +734,11 @@ defmodule Barkpark.Groq.Parser do
     if at(s, p) == ?] do
       {{:array, []}, p + 1}
     else
-      collect_array(s, p, [], ctx)
+      collect_array(s, p, [], ctx, pos)
     end
   end
 
-  defp collect_array(s, p, acc, ctx) do
+  defp collect_array(s, p, acc, ctx, open) do
     {splat?, p} =
       if binary_part_safe(s, p, 3) == "...", do: {true, skip_ws(s, p + 3)}, else: {false, p}
 
@@ -733,21 +752,21 @@ defmodule Barkpark.Groq.Parser do
 
         if at(s, p) == ?],
           do: {{:array, Enum.reverse(acc)}, p + 1},
-          else: collect_array(s, p, acc, ctx)
+          else: collect_array(s, p, acc, ctx, open)
 
       ?] ->
         {{:array, Enum.reverse(acc)}, p + 1}
 
       _ ->
-        throw({:groq_parse_error, "expected \"]\" after the array", p})
+        throw({:groq_parse_error, "expected \"]\" after the array", open, p})
     end
   end
 
   defp parse_object(s, pos, ctx) do
-    collect_object(s, skip_ws(s, pos + 1), [], ctx)
+    collect_object(s, skip_ws(s, pos + 1), [], ctx, pos)
   end
 
-  defp collect_object(s, p, acc, ctx) do
+  defp collect_object(s, p, acc, ctx, open) do
     if at(s, p) == ?} do
       {{:object, Enum.reverse(acc)}, p + 1}
     else
@@ -755,9 +774,9 @@ defmodule Barkpark.Groq.Parser do
       p = skip_ws(s, p)
 
       case at(s, p) do
-        ?, -> collect_object(s, skip_ws(s, p + 1), [attr | acc], ctx)
+        ?, -> collect_object(s, skip_ws(s, p + 1), [attr | acc], ctx, open)
         ?} -> {{:object, Enum.reverse([attr | acc])}, p + 1}
-        _ -> throw({:groq_parse_error, "expected \"}\" after the object", p})
+        _ -> throw({:groq_parse_error, "expected \"}\" after the object", open, p + 1})
       end
     end
   end
@@ -819,7 +838,7 @@ defmodule Barkpark.Groq.Parser do
   defp read_string(s, p, q, acc, start) do
     case at(s, p) do
       nil ->
-        throw({:groq_parse_error, "unterminated string", start})
+        throw({:groq_parse_error, "unterminated string", start, p})
 
       ^q ->
         {acc |> Enum.reverse() |> Enum.map(&cp_to_binary/1) |> IO.iodata_to_binary(), p + 1}
@@ -954,19 +973,21 @@ defmodule Barkpark.Groq.Parser do
             {inclusive?, p} = if at(s, p + 2) == ?., do: {false, p + 3}, else: {true, p + 2}
             {right, p, _} = parse_expr(s, skip_ws(s, p), 0, ctx)
             p = skip_ws(s, p)
-            if at(s, p) != ?], do: throw({:groq_parse_error, "expected \"]\" after the slice", p})
+
+            if at(s, p) != ?],
+              do: throw({:groq_parse_error, "expected \"]\" after the slice", pos, p})
 
             left_value =
               const_integer(expr) ||
-                throw({:groq_parse_error, "slicing must use constant integers", pos})
+                throw({:groq_parse_error, "slicing must use constant integers", pos, p + 1})
 
             right_value =
               const_integer(right) ||
-                throw({:groq_parse_error, "slicing must use constant integers", pos})
+                throw({:groq_parse_error, "slicing must use constant integers", pos, p + 1})
 
             {:ok, {:slice, left_value, right_value, inclusive?}, p + 1}
           else
-            if at(s, p) != ?], do: throw({:groq_parse_error, "expected \"]\"", p})
+            if at(s, p) != ?], do: throw({:groq_parse_error, "expected \"]\"", pos, p})
             {:ok, {:square_bracket, reject_marks!(expr, pos)}, p + 1}
           end
         end
