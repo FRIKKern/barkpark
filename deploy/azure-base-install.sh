@@ -103,14 +103,18 @@ install_caddy_pkg() {
 # install_caddy_pkg END
 
 install_apt() {
-  log "apt: base packages (postgres, caddy prereqs, build toolchain)"
+  # brotli: the slot deploy's sync_static_siblings (instance-deploy.sh) writes the .br
+  # sibling of every assets/*.js|css only where this binary exists; without it a box
+  # serves gzip only (task-c57dd84f98c1296c).
+  log "apt: base packages (postgres, caddy prereqs, build toolchain, brotli)"
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y -qq \
     git curl unzip build-essential autoconf m4 \
     libssl-dev libncurses5-dev libncursesw5-dev \
     postgresql postgresql-contrib \
-    debian-keyring debian-archive-keyring apt-transport-https ca-certificates
+    debian-keyring debian-archive-keyring apt-transport-https ca-certificates \
+    brotli
   systemctl enable --now postgresql >/dev/null 2>&1 || log "WARN: could not enable postgresql (already running?)"
 
   # Caddy from its official apt repo (idempotent — skip if the binary is present).
