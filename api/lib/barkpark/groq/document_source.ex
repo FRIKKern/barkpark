@@ -252,26 +252,46 @@ defmodule Barkpark.Groq.DocumentSource do
     paths = for {{:path, path}, _dir} <- keys, do: path
 
     cond do
-      constraints.ids != nil or constraints.types == nil or "paper" in constraints.types ->
+      constraints.ids != nil ->
+        :error
+
+      reads_no_content?(constraints, paths) ->
+        slice_exact(state, constraints, keys, from, to)
+
+      constraints.types == nil or "paper" in constraints.types ->
         :error
 
       not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state, paths)) ->
         :error
 
       true ->
-        key = cache_key(constraints)
-        slot = {:groq_src_slice, key, keys, from, to}
-
-        case Process.get(slot) do
-          nil ->
-            docs = load_slice(state, key, keys, from, to)
-            Process.put(slot, docs)
-            {:ok, docs}
-
-          docs ->
-            {:ok, docs}
-        end
+        slice_exact(state, constraints, keys, from, to)
     end
+  end
+
+  defp slice_exact(state, constraints, keys, from, to) do
+    key = cache_key(constraints)
+    slot = {:groq_src_slice, key, keys, from, to}
+
+    case Process.get(slot) do
+      nil ->
+        docs = load_slice(state, key, keys, from, to)
+        Process.put(slot, docs)
+        {:ok, docs}
+
+      docs ->
+        {:ok, docs}
+    end
+  end
+
+  # A filter and sort that read no stored content (`_id in path()`, the
+  # timestamps, the view counts) test only columns every row has, so no
+  # schema can hide what they read and SQL keeps what the evaluator keeps
+  # across all types, papers included (task-754316ae85c63a1a: the newest
+  # draft is then one ORDER BY ... LIMIT read, not every draft loaded).
+  defp reads_no_content?(constraints, paths) do
+    paths == [] and constraints.eq == [] and constraints.any == [] and
+      constraints.checks != [] and filter_paths(constraints) == []
   end
 
   # A `*[...]` whose filter is exact is read in SQL alone, as an exact slice
