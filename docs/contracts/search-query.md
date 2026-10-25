@@ -22,6 +22,8 @@ A schema change recomputes the slots and the public vector only when it changes 
 1. Whole words through the full-text GIN index, the typed word as a word start of the title or author names (trigram index), and the document id.
 2. Only when step 1 finds nothing: the typed word as a prefix anywhere, substrings of the title and slug, and near misses of the title (`%` at the surface's `similarity_threshold`, `<%` at 0.6 or that threshold if higher).
 
+So a typed word that is also a whole word somewhere does not prefix-match other fields: `News` finds `news` but not `newsletter` in a description, where Sanity matches both. Intended: a `:*` query on the full vector cost 609 ms over 47,361 documents against 13 ms for the whole word (#23174).
+
 The search runs in one transaction that sets those trigram thresholds, `random_page_cost = 1.1` and `enable_seqscan = off` for itself only.
 
 ## Ranking
