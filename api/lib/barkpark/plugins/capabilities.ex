@@ -2407,6 +2407,16 @@ defmodule Barkpark.Plugins.Capabilities do
             default: false
           ),
           flag(
+            "order",
+            "string",
+            "Sort the match by a field instead of relevance, as on doc query: <field>:asc|desc, comma list for ties, e.g. title:asc. relevance or no order keeps the ranking. Needs --type."
+          ),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of --order by ICU Norwegian collation."
+          ),
+          flag(
             "facet",
             "string",
             "Comma-separated top-level content fields (needs --type): value counts over the " <>

@@ -253,24 +253,41 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # (task-722697f4650b2a21) used to run the ranking statement anyway, a
       # second evaluation of the whole match for an empty page.
       docs =
-        if count == 0 do
-          []
-        else
-          ranking_input
-          |> order_rank(
-            parsed,
-            groups,
-            config,
-            if(suggest?, do: :none, else: index),
-            near_miss?,
-            lead,
-            Keyword.get(opts, :boost),
-            held_key(near_miss? and not suggest?, groups, index, match)
-          )
-          |> limit(^limit)
-          |> offset(^offset)
-          |> maybe_light_select(Keyword.get(opts, :fields))
-          |> Repo.all(@planned_per_call)
+        cond do
+          count == 0 ->
+            []
+
+          # `?order=` sorts the whole match by a field instead of ranking it
+          # (task-5ddc3e08684f0d48), so no ranking pool: `offset` pages the
+          # match in that order, the id breaking ties.
+          order = Keyword.get(opts, :order) ->
+            {spec, collation} = order
+
+            base
+            |> exclude(:order_by)
+            |> Barkpark.Content.Query.apply_list_order(spec, collation)
+            |> order_by([d], asc: d.id)
+            |> limit(^limit)
+            |> offset(^offset)
+            |> maybe_light_select(Keyword.get(opts, :fields))
+            |> Repo.all(@planned_per_call)
+
+          true ->
+            ranking_input
+            |> order_rank(
+              parsed,
+              groups,
+              config,
+              if(suggest?, do: :none, else: index),
+              near_miss?,
+              lead,
+              Keyword.get(opts, :boost),
+              held_key(near_miss? and not suggest?, groups, index, match)
+            )
+            |> limit(^limit)
+            |> offset(^offset)
+            |> maybe_light_select(Keyword.get(opts, :fields))
+            |> Repo.all(@planned_per_call)
         end
 
       meta = %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}

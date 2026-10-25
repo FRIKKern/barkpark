@@ -1556,6 +1556,31 @@ defmodule BarkparkWeb.QueryController do
   end
 
   @doc """
+  The query API's `?order=` and `?collation=` for `/v1/data/search`
+  (task-5ddc3e08684f0d48), read and refused exactly as on the query route:
+  an unknown spec or collation is a 422, a field this caller may not read a
+  `forbidden_field`. Returns `{:ok, {order, collation}}` or `{:error, reason}`.
+  """
+  def search_order(conn, params, schema) do
+    order = parse_order_param(params["order"])
+    collation = parse_collation(params["collation"])
+
+    cond do
+      match?({:error, _}, order) ->
+        order_error(order)
+
+      match?({:error, _}, collation) ->
+        collation_error(collation)
+
+      field = forbidden_query_field(%{}, order, schema, CallerContext.from_conn(conn)) ->
+        {:error, {:forbidden_field, field}}
+
+      true ->
+        {:ok, {order, collation}}
+    end
+  end
+
+  @doc """
   The `?filter[...]` map of a search request (task-c7395e0d27e1121b), read and
   refused exactly as `/v1/data/query` reads and refuses it: the same three
   spellings, the same operator door, the same malformed-param and
