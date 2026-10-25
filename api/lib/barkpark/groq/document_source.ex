@@ -375,7 +375,9 @@ defmodule Barkpark.Groq.DocumentSource do
     # A view count is not a content field; no schema hides it.
     checks =
       plain
-      |> Enum.reject(&match?({:views, _column, _op, _n}, &1))
+      |> Enum.reject(
+        &(match?({:views, _column, _op, _n}, &1) or match?({:timestamp, _, _, _}, &1))
+      )
       |> Enum.map(&check_path/1)
 
     branches = for {:or, branches} <- ors, branch <- branches, do: filter_paths(branch)
@@ -583,6 +585,7 @@ defmodule Barkpark.Groq.DocumentSource do
   end
 
   defp check_reads({:views, _column, _op, _n}), do: 0
+  defp check_reads({:timestamp, _column, _op, _value}), do: 0
 
   defp check_reads({:or, branches}),
     do: Enum.sum_by(branches, &content_reads({&1.types, &1.ids, &1.eq, &1.any, &1.checks}))
@@ -1282,6 +1285,27 @@ defmodule Barkpark.Groq.DocumentSource do
     do: Views.sql_condition(column, op, n, perspective == :published)
 
   defp check_condition(check, _perspective), do: check_condition(check)
+
+  # `_createdAt op "..."`: the column rendered as the envelope renders it
+  # (`Envelope.to_iso8601/1`: microseconds, `Z`, one fixed width), compared
+  # byte for byte as GROQ compares the two strings. ASCII only, so no UTF-16
+  # adjustment is needed. A NULL column is null, which GROQ also drops.
+  @iso_format ~s(YYYY-MM-DD"T"HH24:MI:SS.US"Z")
+  for op <- ["<", "<=", ">", ">=", "=="] do
+    sql_op = if op == "==", do: "=", else: op
+
+    defp check_condition({:timestamp, column, unquote(op), value}) do
+      dynamic(
+        [d],
+        fragment(
+          unquote("to_char(?, ?) COLLATE \"C\" #{sql_op} ? COLLATE \"C\""),
+          field(d, ^column),
+          ^@iso_format,
+          type(^value, :string)
+        )
+      )
+    end
+  end
 
   defp branch_condition(branch, perspective) do
     conditions =

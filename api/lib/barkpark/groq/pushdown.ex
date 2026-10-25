@@ -41,6 +41,9 @@ defmodule Barkpark.Groq.Pushdown do
       `>`, `>=` or `==` to a number -> `checks` as `{:views, column, op, n}`,
       which the source tests against `document_popularity`
       (`Barkpark.Search.Views`)
+    * `_createdAt` or `_updatedAt` compared with `<`, `<=`, `>`, `>=` or `==`
+      to a string -> `checks` as `{:timestamp, column, op, s}`, which the
+      source tests against the column rendered as GROQ renders it
     * `count(a.b[cond]) > 0`, `>= 1`, `length(a.b[cond]) > 0` and
       `defined(a.b[cond][0])` on a content path, where `cond` is an `&&` of
       `x.y == v` and `x.y in [...]` on element fields (or `@`) with scalar
@@ -107,6 +110,7 @@ defmodule Barkpark.Groq.Pushdown do
           | {:none, [String.t()], [{[String.t()], [scalar()]}]}
           | {:range, [String.t()], String.t(), scalar()}
           | {:views, :views_7d | :views_30d | :score, String.t(), number()}
+          | {:timestamp, :inserted_at | :updated_at, String.t(), String.t()}
   @type scalar :: String.t() | number() | boolean()
   @type order_key ::
           {:path, [String.t()]}
@@ -207,6 +211,7 @@ defmodule Barkpark.Groq.Pushdown do
 
   defp check({:op, op, l, r} = node, resolve) when is_map_key(@length_ops, op) do
     with :error <- views_check(op, l, r, resolve),
+         :error <- timestamp_check(op, l, r, resolve),
          :error <- some_check(node, :exact),
          :error <- length_check(op, l, r, resolve) do
       range_check(op, l, r, resolve)
@@ -292,6 +297,36 @@ defmodule Barkpark.Groq.Pushdown do
     case {views_column(l), views_column(r)} do
       {{:ok, column}, _} -> views_n(column, op, r, resolve)
       {_, {:ok, column}} -> views_n(column, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
+  # `_createdAt > "2026-01-01"` and the like, either side, against a string
+  # (task-2a7741b89420a38a). GROQ compares the rendered ISO 8601 string, which
+  # has one fixed width (microseconds, `Z`), byte for byte; the source renders
+  # the column the same way and compares it the same way, so SQL keeps
+  # exactly the rows GROQ keeps. Any other value type is null in GROQ and is
+  # left to the evaluator.
+  @timestamp_fields %{"_createdAt" => :inserted_at, "_updatedAt" => :updated_at}
+
+  defp timestamp_check(op, l, r, resolve) do
+    case {timestamp_column(l), timestamp_column(r)} do
+      {{:ok, column}, _} -> timestamp_value(column, op, r, resolve)
+      {_, {:ok, column}} -> timestamp_value(column, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
+  defp timestamp_column(expr) do
+    case attr_path(expr) do
+      {:ok, [name]} when is_map_key(@timestamp_fields, name) -> {:ok, @timestamp_fields[name]}
+      _ -> :error
+    end
+  end
+
+  defp timestamp_value(column, op, v, resolve) do
+    case value(v, resolve) do
+      {:ok, s} when is_binary(s) -> {:ok, {:timestamp, column, op, s}}
       _ -> :error
     end
   end
