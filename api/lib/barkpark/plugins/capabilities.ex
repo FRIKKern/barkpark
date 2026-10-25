@@ -929,7 +929,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "expand",
             "string",
-            "Inline single reference fields (depth 1): a field name or comma list."
+            "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops."
           ),
           flag(
             "fields",
@@ -962,7 +962,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "expand",
             "string",
-            "Inline single reference fields (depth 1): a field name or comma list."
+            "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops."
           ),
           flag(
             "fields",
@@ -1327,7 +1327,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "expand",
             "string",
-            "Inline single reference fields (depth 1): a field name or comma list."
+            "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
           flag(

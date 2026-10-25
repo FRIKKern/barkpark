@@ -5,12 +5,132 @@ defmodule Barkpark.Content.Expand do
 
   @type spec :: :all | [String.t()]
 
+  # ── Nested paths (task-053249d91d178353) ─────────────────────────────────
+  #
+  # `expand=product.contributors` expands `product`, then `contributors` on
+  # each expanded product, and so on, at most four segments deep. Each hop is
+  # an ordinary one-hop expansion of the documents the previous hop rendered,
+  # so drafts (`published_only`), owner and grant scope and field redaction
+  # apply at every hop, and each hop is one batch read per target type.
+  # Documents resolved below the first hop are capped: past the cap the
+  # expansion THROWS `{:expand_too_large, count, cap}`, which the HTTP door
+  # turns into a 400. A path without a dot never throws.
+  @max_depth 4
+  @max_nested_docs 2_000
+
+  @doc "The most segments one `expand` path may have."
+  def max_depth, do: @max_depth
+
+  @doc "The most documents a nested expansion may resolve below the first hop."
+  def max_nested_docs, do: @max_nested_docs
+
   @spec expand([map()], spec(), String.t(), keyword()) :: [map()]
   def expand(docs, spec, dataset, opts \\ [])
   def expand([], _spec, _dataset, _opts), do: []
   def expand(docs, [], _dataset, _opts), do: docs
 
-  def expand(docs, spec, dataset, opts) do
+  def expand(docs, spec, dataset, opts) when is_list(spec) do
+    {heads, nested} = split_paths(spec)
+    docs = expand_level(docs, heads, dataset, opts)
+    {docs, _used} = expand_nested(docs, nested, dataset, opts, 0)
+    docs
+  end
+
+  def expand(docs, spec, dataset, opts), do: expand_level(docs, spec, dataset, opts)
+
+  # `["a", "a.b", "c.d.e"]` → heads `["a", "c"]`, nested `%{"a" => ["b"], "c" => ["d.e"]}`.
+  defp split_paths(spec) do
+    pairs = Enum.map(spec, &String.split(&1, ".", parts: 2))
+    heads = pairs |> Enum.map(&hd/1) |> Enum.uniq()
+
+    nested =
+      for [head, rest] <- pairs, reduce: %{} do
+        acc -> Map.update(acc, head, [rest], &(&1 ++ [rest]))
+      end
+
+    {heads, nested}
+  end
+
+  # One batch per head: every document the previous hop put at `head`, across
+  # all of `docs`, is expanded by the rest of its paths in one call, then put
+  # back in the same order. `used` counts documents resolved below hop one.
+  defp expand_nested(docs, nested, _dataset, _opts, used) when map_size(nested) == 0,
+    do: {docs, used}
+
+  defp expand_nested(docs, nested, dataset, opts, used) do
+    Enum.reduce(nested, {docs, used}, fn {head, rests}, {docs, used} ->
+      children = Enum.flat_map(docs, &expanded_at(Map.get(&1, head)))
+      used = used + length(children)
+      cap = Application.get_env(:barkpark, :expand_max_nested_docs, @max_nested_docs)
+
+      if used > cap, do: throw({:expand_too_large, used, cap})
+
+      {heads, deeper} = split_paths(rests)
+      children = expand_level(children, heads, dataset, opts)
+      {children, used} = expand_nested(children, deeper, dataset, opts, used)
+
+      {docs, []} =
+        Enum.map_reduce(docs, children, fn doc, acc ->
+          case Map.fetch(doc, head) do
+            {:ok, value} ->
+              {value, acc} = put_back(value, acc)
+              {Map.put(doc, head, value), acc}
+
+            :error ->
+              {doc, acc}
+          end
+        end)
+
+      {docs, used}
+    end)
+  end
+
+  # An expanded reference is a rendered document (it carries `_type`); an
+  # unresolved one keeps its stored `{_ref}` or id and is not walked further.
+  defp expanded_at(%{"_type" => _} = doc), do: [doc]
+  defp expanded_at(list) when is_list(list), do: Enum.filter(list, &match?(%{"_type" => _}, &1))
+  defp expanded_at(_), do: []
+
+  defp put_back(%{"_type" => _}, [doc | acc]), do: {doc, acc}
+
+  defp put_back(list, acc) when is_list(list) do
+    Enum.map_reduce(list, acc, fn
+      %{"_type" => _}, [doc | rest] -> {doc, rest}
+      el, rest -> {el, rest}
+    end)
+  end
+
+  defp put_back(value, acc), do: {value, acc}
+
+  @doc """
+  The first segment of `path` that is not a reference field this expansion can
+  walk, starting at `type`, or nil when every segment is one. A reference
+  naming several target types continues on every one of them.
+  """
+  @spec unknown_segment(String.t(), String.t(), String.t(), keyword()) :: String.t() | nil
+  def unknown_segment(type, path, dataset, opts \\ []) do
+    path
+    |> String.split(".")
+    |> Enum.reduce_while([type], fn segment, types ->
+      schemas = load_schemas(types, dataset, opts)
+
+      targets =
+        for {_type, schema} <- schemas,
+            schema != nil,
+            field <- ref_fields_for(schema, [segment]),
+            target <- List.wrap(elem(ref_target(field), 0)),
+            uniq: true,
+            do: target
+
+      if targets == [], do: {:halt, segment}, else: {:cont, targets}
+    end)
+    |> case do
+      segment when is_binary(segment) -> segment
+      _types -> nil
+    end
+  end
+
+  defp expand_level(docs, spec, dataset, opts) do
     # `published_only` (default false) hardens reference expansion for read-only
     # public shares: when true, an unresolvable PUBLISHED target is left
     # UNexpanded instead of falling back to its `drafts.` twin — so a read

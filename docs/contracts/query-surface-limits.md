@@ -3,11 +3,8 @@
 # Query surface — measured limits and the recommended architecture
 
 Owner of one fact: **what the read plane can and cannot express**, and what a
-tool author should build instead when it cannot. Everything below was
-re-measured against the live HTTP surface, not quoted from a report; the
-measurements are pinned as tests in
-`api/test/barkpark_web/controllers/query_documented_limits_test.exs`, which
-fails if any statement here stops being true.
+tool author should build instead when it cannot. Each statement is pinned by
+`api/test/barkpark_web/controllers/query_documented_limits_test.exs`.
 
 Endpoints in scope: `GET /v1/data/query/:dataset/:type` and its
 workspace-scoped twin `GET /w/:ws/p/:proj/v1/data/query/:dataset/:type`. The
@@ -57,7 +54,7 @@ that looks complete is worse than an explicit whole one. System keys (`_id`,
 `_type`, `_rev`, `_draft`, `_publishedId`, `_createdAt`, `_updatedAt`) always
 survive a projection.
 
-## 4. Expansion is one hop — over single refs AND ref arrays
+## 4. Expansion: up to four hops, over single refs AND ref arrays
 
 `?expand=author` inlines the referenced document. `?expand=tags` inlines every
 element of an `arrayOf` whose element type is `reference` — **ref arrays are
@@ -65,8 +62,10 @@ not excluded**. `?expand=true` expands every reference field on the type.
 A field's target may be named by `refType`, `to` or `refTypes`; with several
 types, the stored document's own type decides.
 
-Depth is one hop. A dotted spec (`?expand=author.employer`) names no top-level
-reference field and expands nothing; there is no `expand=a.b` grammar.
+A dotted path goes deeper: `?expand=sections.cards.product` expands each
+segment on what the one before resolved, up to 4 segments, with drafts, scope
+and redaction at every hop. A segment that is no reference there, a fifth
+segment, or over 2,000 documents below hop one is a 400.
 
 **Identity of an expanded reference.** The inlined document carries the
 identity of the row the reference resolves to, resolved **published-first**: a
