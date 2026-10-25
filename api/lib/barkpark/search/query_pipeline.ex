@@ -209,7 +209,13 @@ defmodule Barkpark.Search.QueryPipeline do
         suggest: Keyword.get(opts, :suggest, false),
         # `?boost=popularity` (task-5feac4e826cff9a5): the Postgres retriever
         # adds the document's view score to relevance. Other engines ignore it.
-        boost: Keyword.get(opts, :boost)
+        boost: Keyword.get(opts, :boost),
+        # The request memo (`WriteScope.request_memo/3`), when the caller opted in
+        # (an HTTP request's scope opts do). Every pass of this search, recovery
+        # included, then reads the dataset, the schemas and the refresh gates
+        # once: the memo keys carry the scope, so a pass reuses only an answer
+        # for the very same scope.
+        memoize: Keyword.get(opts, :memoize, false)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery
@@ -497,7 +503,8 @@ defmodule Barkpark.Search.QueryPipeline do
   defp resolve_schema(type, scope, opts) do
     schema_opts = [
       workspace_id: Keyword.get(opts, :workspace_id),
-      project_id: Keyword.get(opts, :project_id)
+      project_id: Keyword.get(opts, :project_id),
+      memoize: Keyword.get(opts, :memoize, false)
     ]
 
     case Content.get_schema(type, scope, schema_opts) do

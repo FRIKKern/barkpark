@@ -80,7 +80,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # too. A real query adds the full-text/trigram match.
     base =
       from(d in Document, as: :search_doc)
-      |> scope_to_dataset(scope, project_id, workspace_id)
+      |> scope_to_dataset(scope, project_id, workspace_id, Keyword.get(opts, :memoize, false))
       |> scope_to_workspace_or_global(workspace_id, project_id)
       # Row/ownership ACL (Phase 4, core-auth). Applied UNCONDITIONALLY: it is
       # byte-identical for non-owner_scoped types because their rows carry a
@@ -132,7 +132,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # the public vectors in batches after the write (task-9d83c3e0c3b8fabf).
     # Until that is done, a stale vector may still hold a word the field now
     # hides, so a non-admin text search leaves those documents out.
-    base = exclude_pending_refresh(base, Keyword.get(opts, :caller_context), browse?)
+    base = exclude_pending_refresh(base, Keyword.get(opts, :caller_context), browse?, opts)
     match = match_mode(opts)
     suggest? = Keyword.get(opts, :suggest, false) == true
     groups = if browse?, do: [], else: term_groups(parsed)
@@ -866,7 +866,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   defp public_type_names(scope, opts) do
     Barkpark.Content.Schema.public_type_names(scope,
       workspace_id: Keyword.get(opts, :workspace_id),
-      project_id: Keyword.get(opts, :project_id)
+      project_id: Keyword.get(opts, :project_id),
+      memoize: Keyword.get(opts, :memoize, false)
     )
   end
 
@@ -904,11 +905,11 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # NULL`), not this guard. That reliance is pinned at the door by
   # test/barkpark_web/controllers/search_scope_shared_layer_test.exs (a
   # seat-vacant search returns the shared layer and never workspace A's row).
-  defp scope_to_dataset(query, scope, project_id, workspace_id) do
+  defp scope_to_dataset(query, scope, project_id, workspace_id, memoize) do
     opts =
       if is_binary(workspace_id),
-        do: [project_id: project_id, workspace_id: workspace_id],
-        else: [project_id: project_id]
+        do: [project_id: project_id, workspace_id: workspace_id, memoize: memoize],
+        else: [project_id: project_id, memoize: memoize]
 
     case Barkpark.Content.resolve_read_dataset_id(scope, opts) do
       id when is_binary(id) -> where(query, [d], d.dataset_id == ^id)
@@ -950,12 +951,24 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   # The scopes `SearchRefresh.gates/0` names, left out of a text search by
   # anyone who reads the public index. A browse reads no vector and keeps them.
-  defp exclude_pending_refresh(base, _ctx, true), do: base
-  defp exclude_pending_refresh(base, %Barkpark.Content.CallerContext{is_admin: true}, _), do: base
-  defp exclude_pending_refresh(base, :internal, _), do: base
+  defp exclude_pending_refresh(base, _ctx, true, _opts), do: base
 
-  defp exclude_pending_refresh(base, _ctx, false) do
-    case SearchRefresh.exclude(SearchRefresh.gates()) do
+  defp exclude_pending_refresh(base, %Barkpark.Content.CallerContext{is_admin: true}, _, _opts),
+    do: base
+
+  defp exclude_pending_refresh(base, :internal, _, _opts), do: base
+
+  defp exclude_pending_refresh(base, _ctx, false, opts) do
+    # Read once per request when the caller opted into the memo: a zero-hit
+    # search's recovery passes ask again, and the gates are global (no scope).
+    gates =
+      Barkpark.Content.WriteScope.request_memo(
+        opts,
+        {:search_refresh_gates},
+        &SearchRefresh.gates/0
+      )
+
+    case SearchRefresh.exclude(gates) do
       nil -> base
       condition -> where(base, ^condition)
     end
