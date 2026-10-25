@@ -350,6 +350,16 @@ defmodule BarkparkWeb.GroqControllerTest do
 
     body = conn |> get_query(token, ~s'*[_type == "book"]') |> json_response(422)
     assert body["error"]["type"] == "queryLimitError"
+    # It names the cap and how to page, not a _type filter the query already has.
+    assert body["error"]["description"] =~ "more than 2 documents"
+    assert body["error"]["description"] =~ "[0...2], then [2...4]"
+    refute body["error"]["description"] =~ "_type filter"
+
+    # And the advice works: the slice it names is answered.
+    paged =
+      conn |> get_query(token, ~s'*[_type == "book"] | order(_id) [0...2]') |> json_response(200)
+
+    assert length(paged["result"]) <= 2
   end
 
   test "a query that would load too much stored content is refused before loading", %{
