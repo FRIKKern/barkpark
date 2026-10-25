@@ -133,13 +133,14 @@ defmodule BarkparkWeb.StructureControllerTest do
       :ok
     end
 
-    defp desk!(id, title, row) do
+    defp desk!(id, title, row, extra \\ %{}) do
       items = [%{"kind" => "documentTypeList", "type" => "post", "title" => row}]
+      content = Map.merge(%{"items" => items}, extra)
 
       {:ok, _} =
         Barkpark.Content.create_document(
           "deskStructure",
-          %{"doc_id" => id, "title" => title, "content" => %{"items" => items}},
+          %{"doc_id" => id, "title" => title, "content" => content},
           "production"
         )
 
@@ -182,6 +183,35 @@ defmodule BarkparkWeb.StructureControllerTest do
 
       refute Map.has_key?(resp, "desk")
       refute resp["structure"]["title"] == "Draft"
+    end
+
+    # The one never-hide exception (owner, 2026-10-25): `"only": true` on a
+    # NAMED desk serves exactly the declared items — no plugin items, no
+    # Plugins tier, no …Rest. The default desk ignores it.
+    test "a named desk without \"only\" keeps the appended tiers", %{conn: conn} do
+      resp = get(conn, "/v1/structure/production?desk=deskStructure.pensum") |> json_response(200)
+
+      assert "Pensum posts" in titles(resp)
+      assert length(titles(resp)) > 1
+    end
+
+    test "a named desk with \"only\": true serves only its declared items", %{conn: conn} do
+      desk!("deskStructure.pensum", "Pensum", "Pensum posts", %{"only" => true})
+      resp = get(conn, "/v1/structure/production?desk=deskStructure.pensum") |> json_response(200)
+
+      assert titles(resp) == ["Pensum posts"]
+    end
+
+    test "the default desk ignores \"only\": true", %{conn: conn} do
+      before = get(conn, "/v1/structure/production") |> json_response(200)
+      desk!("deskStructure", "Default desk", "Posts", %{"only" => true})
+      resp = get(conn, "/v1/structure/production") |> json_response(200)
+
+      assert titles(resp) == titles(before)
+      assert length(titles(resp)) > 1
+
+      explicit = get(conn, "/v1/structure/production?desk=deskStructure") |> json_response(200)
+      assert titles(explicit) == titles(before)
     end
 
     test "a drafts. or malformed id is a 400", %{conn: conn} do
