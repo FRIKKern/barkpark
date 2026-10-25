@@ -220,6 +220,18 @@ defmodule BarkparkWeb.WsBVisibilityTest do
       assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
     end
 
+    # task-02d4488c460185c0: an $or branch is no way around the field check.
+    test "anonymous $or branch on a private field is rejected (422)", %{conn: conn} do
+      resp =
+        get(
+          conn,
+          "/v1/data/query/#{@dataset}/report?filter[$or][0][name][eq]=alice&filter[$or][1][salary][eq]=99999"
+        )
+
+      assert resp.status == 422
+      assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
+    end
+
     test "anonymous order by a private field is rejected (422)", %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@dataset}/report?order=salary:asc")
       assert resp.status == 422
