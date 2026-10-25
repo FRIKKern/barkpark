@@ -71,4 +71,22 @@ defmodule Barkpark.DeskIconsTest do
     assert Validation.desk_icon_findings("deskStructure", %{"items" => [%{"icon" => "tags"}]}) ==
              []
   end
+
+  # task-e6c04c61beb4c717: six lucide icons a migrated Sanity schema uses as type
+  # icons. Plain names where they are free; every one also as `lucide:<name>`,
+  # the only spelling of lucide's tags (Sanity's own `tags` keeps its glyph).
+  @lucide ~w(megaphone layout-grid graduation-cap languages user-pen)
+
+  test "the six lucide icons a migrated schema uses are desk icons" do
+    for name <- @lucide ++ Enum.map(@lucide ++ ["tags"], &("lucide:" <> &1)) do
+      assert DeskIcons.known?(name), "#{name} is not a desk icon"
+      assert render_desk_icon(name) =~ "<svg"
+    end
+
+    refute DeskIcons.body("lucide:tags") == DeskIcons.body("tags")
+
+    assert Validation.desk_icon_findings("deskStructure", %{
+             "items" => [%{"icon" => "lucide:tags"}, %{"icon" => "graduation-cap"}]
+           }) == []
+  end
 end

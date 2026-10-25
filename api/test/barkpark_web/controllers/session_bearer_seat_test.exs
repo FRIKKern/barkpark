@@ -19,7 +19,7 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
 
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Accounts, Auth, Content}
+  alias Barkpark.{Access, Accounts, Auth, Content}
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @password "correct horse battery staple"
@@ -52,7 +52,7 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
     Accounts.confirm_provisioned_user(user)
 
-    %{ws: ws, project: project, admin_raw: admin_raw, email: email, user: user}
+    %{ws: ws, project: project, admin: admin, admin_raw: admin_raw, email: email, user: user}
   end
 
   defp json_conn(bearer) do
@@ -93,6 +93,104 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
 
   defp create_body(id),
     do: Jason.encode!(%{mutations: [%{create: %{_id: id, _type: "post", title: "hi"}}]})
+
+  defp schemas_path(ctx),
+    do: "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/schemas/#{@dataset}"
+
+  describe "scoped schema reads use the same member session as document reads" do
+    test "a seated login bearer reads the index and schema, but cannot manage schemas", ctx do
+      token = member!(ctx)
+      path = schemas_path(ctx)
+
+      assert json_response(json_conn(token) |> get(path), 200)["schemas"]
+             |> Enum.any?(&(&1["name"] == "post"))
+
+      assert json_response(json_conn(token) |> get(path <> "/post"), 200)["schema"]["name"] ==
+               "post"
+
+      assert (json_conn(token)
+              |> post(path, Jason.encode!(%{name: "forbidden", fields: []}))).status in [401, 403]
+
+      assert (json_conn(token) |> delete(path <> "/post")).status in [401, 403]
+
+      structure = "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/structure/#{@dataset}"
+      assert (json_conn(token) |> get(structure)).status in [401, 403]
+    end
+
+    test "an existing API token still reads the schema index and one schema", ctx do
+      path = schemas_path(ctx)
+
+      assert json_response(json_conn(ctx.admin_raw) |> get(path), 200)["schemas"]
+             |> Enum.any?(&(&1["name"] == "post"))
+
+      assert json_response(json_conn(ctx.admin_raw) |> get(path <> "/post"), 200)["schema"][
+               "name"
+             ] ==
+               "post"
+    end
+
+    test "a type-limited grant without a workspace seat cannot read any schema", ctx do
+      {:ok, %{token: raw}} =
+        Access.mint(ctx.admin, %{
+          grantee_email: ctx.email,
+          workspace_id: ctx.ws.id,
+          project_id: ctx.project.id,
+          dataset: @dataset,
+          type: "granted-type",
+          capabilities: ["read"]
+        })
+
+      assert {:ok, _} = Access.claim(raw, ctx.user)
+      refute TenancyAuth.member?(ctx.user, ctx.ws.id)
+      token = login!(ctx.email)
+
+      # Introspection still accepts a live login session without a workspace seat.
+      assert json_response(json_conn(token) |> get("/v1/auth/token"), 200)["kind"] == "session"
+
+      statuses =
+        for path <- [schemas_path(ctx), schemas_path(ctx) <> "/post"] do
+          (json_conn(token) |> get(path)).status
+        end
+
+      assert statuses == [403, 403]
+    end
+
+    test "missing, revoked and expired sessions cannot read schemas", ctx do
+      path = schemas_path(ctx)
+      assert (scoped_conn() |> get(path)).status in [401, 403]
+      token = member!(ctx)
+      assert (json_conn(token) |> get(path)).status == 200
+
+      cookie_only =
+        scoped_conn()
+        |> Plug.Test.init_test_session(%{"user_session" => token})
+        |> get(path)
+
+      assert cookie_only.status in [401, 403]
+      json_conn(token) |> delete("/v1/auth/logout") |> json_response(200)
+      assert (json_conn(token) |> get(path)).status == 401
+
+      expired = login!(ctx.email)
+      {_user, session} = Accounts.verify_user_session(expired)
+
+      session
+      |> Ecto.Changeset.change(expires_at: DateTime.add(DateTime.utc_now(), -60, :second))
+      |> Barkpark.Repo.update!()
+
+      assert (json_conn(expired) |> get(path)).status == 401
+    end
+
+    test "a valid session cannot read another workspace or keep a removed seat", ctx do
+      token = member!(ctx)
+      other = create_workspace!("schema-other-#{System.unique_integer([:positive])}")
+      project = create_project!(other)
+      path = "/w/#{other.slug}/p/#{project.slug}/v1/schemas/#{@dataset}"
+      assert (json_conn(token) |> get(path)).status == 403
+
+      ctx.user |> TenancyAuth.membership(ctx.ws.id) |> Barkpark.Repo.delete!()
+      assert (json_conn(token) |> get(schemas_path(ctx))).status == 403
+    end
+  end
 
   describe "GET /v1/auth/token with a login-session bearer" do
     test "answers 200 describing the session and the member's seat", ctx do

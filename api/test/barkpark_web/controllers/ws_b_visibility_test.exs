@@ -232,6 +232,17 @@ defmodule BarkparkWeb.WsBVisibilityTest do
       assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
     end
 
+    # task-8af256dcd8f17902: a facet counts a field's values, an oracle too.
+    test "anonymous facet or facet_range on a private field is rejected (422)", %{conn: conn} do
+      for q <- ["facet=name,salary", "facet_range[salary]=100,200"] do
+        resp = get(conn, "/v1/data/query/#{@dataset}/report?" <> q)
+        assert resp.status == 422
+        body = json_response(resp, 422)
+        assert body["error"]["details"]["field"] == "salary"
+        refute Map.has_key?(body, "result")
+      end
+    end
+
     test "anonymous order by a private field is rejected (422)", %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@dataset}/report?order=salary:asc")
       assert resp.status == 422

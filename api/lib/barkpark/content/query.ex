@@ -497,6 +497,147 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  @facet_value_limit 100
+
+  @doc """
+  Value counts and numeric range buckets over the set `count_documents/3`
+  counts: same type, scope, filter and perspective, no limit or offset
+  (task-8af256dcd8f17902).
+
+    - `:facet_fields` — top-level content fields. A string, number or boolean
+      counts its value, a reference its `_ref`, an array each distinct element
+      once per document. At most #{@facet_value_limit} values per field,
+      biggest first, ties by label.
+    - `:facet_ranges` — `[{field, edges}]`, edges ascending `Decimal`s. A
+      numeric value lands in `(-inf, e1)`, `[e1, e2)` … `[en, +inf)`; every
+      bucket is listed, an empty one as 0. Non-numeric values are not counted.
+
+  Returns `%{fields: %{field => [{label, count}]}, ranges: %{field => [count]}}`,
+  the range counts in bucket order (`length(edges) + 1` of them).
+  """
+  @spec facet_counts(String.t(), String.t(), keyword()) :: %{fields: map(), ranges: map()}
+  def facet_counts(type, dataset, opts \\ []) do
+    fields = Keyword.get(opts, :facet_fields, [])
+    ranges = Keyword.get(opts, :facet_ranges, [])
+
+    # One spec per facet: the field, and for a range its edges as text.
+    specs =
+      Enum.map(fields, &{&1, nil}) ++
+        Enum.map(ranges, fn {f, edges} -> {f, Enum.map_join(edges, ",", &Decimal.to_string/1)} end)
+
+    rows = if specs == [], do: [], else: Repo.all(facet_query(type, dataset, opts, specs))
+
+    %{
+      fields:
+        Map.new(fields, fn f -> {f, for({^f, false, label, n} <- rows, do: {label, n})} end),
+      ranges:
+        Map.new(ranges, fn {f, edges} ->
+          counts = for {^f, true, b, n} <- rows, into: %{}, do: {String.to_integer(b), n}
+          {f, for(i <- 0..length(edges), do: Map.get(counts, i, 0))}
+        end)
+    }
+  end
+
+  # ONE read of the matched set for every facet. Each matched row's `content`
+  # is decompressed once and cut to the faceted keys, in a MATERIALIZED CTE:
+  # every `content->key` on the stored value decompresses all of it again, and
+  # an inlined cut is evaluated once per reference. Each spec then turns the
+  # cut into labels: a value facet its distinct values, a range facet its
+  # bucket number. A query per facet kind ran the filtered match once each.
+  # `title` and `status` live in their own columns, not in `content` (the
+  # writer promotes them), so the cut reads those two from the columns.
+  defp facet_query(type, dataset, opts, specs) do
+    keys = Enum.map(specs, &elem(&1, 0))
+    edges = Enum.map(specs, &elem(&1, 1))
+
+    cut =
+      type
+      |> matched_query(dataset, opts)
+      |> select([d], %{
+        c:
+          fragment(
+            "(SELECT coalesce(jsonb_object_agg(k, s.c -> k) FILTER (WHERE jsonb_exists(s.c, k)), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, unnest(?::text[]) AS k) || jsonb_strip_nulls(jsonb_build_object('title', CASE WHEN 'title' = ANY(?) THEN ? END, 'status', CASE WHEN 'status' = ANY(?) THEN ? END))",
+            d.content,
+            type(^Enum.uniq(keys), {:array, :string}),
+            type(^keys, {:array, :string}),
+            d.title,
+            type(^keys, {:array, :string}),
+            d.status
+          )
+      })
+
+    counted =
+      from(r in "facet_rows",
+        join:
+          u in fragment("SELECT k, e FROM unnest(?::text[], ?::text[]) AS u(k, e)", ^keys, ^edges),
+        on: true,
+        inner_lateral_join:
+          v in fragment(
+            """
+            SELECT DISTINCT t.x FROM jsonb_array_elements(
+              CASE WHEN ? IS NOT NULL THEN '[]'::jsonb
+                   WHEN jsonb_typeof(?->?) = 'array' THEN ?->? ELSE jsonb_build_array(?->?) END
+            ) AS a(j), LATERAL (SELECT CASE jsonb_typeof(a.j)
+              WHEN 'string' THEN a.j #>> '{}' WHEN 'number' THEN a.j #>> '{}'
+              WHEN 'boolean' THEN a.j #>> '{}' WHEN 'object' THEN a.j ->> '_ref' END AS x) AS t
+            WHERE t.x IS NOT NULL
+            UNION ALL
+            SELECT width_bucket((?->>?)::numeric, string_to_array(?, ',')::numeric[])::text
+            WHERE ? IS NOT NULL AND jsonb_typeof(?->?) = 'number'
+            """,
+            u.e,
+            r.c,
+            u.k,
+            r.c,
+            u.k,
+            r.c,
+            u.k,
+            r.c,
+            u.k,
+            u.e,
+            u.e,
+            r.c,
+            u.k
+          ),
+        on: true,
+        group_by: [u.k, u.e, v.x],
+        select: %{
+          field: u.k,
+          range: not is_nil(u.e),
+          label: v.x,
+          count: count(),
+          rank: over(row_number(), partition_by: [u.k, u.e], order_by: [desc: count(), asc: v.x])
+        }
+      )
+      |> with_cte("facet_rows", as: ^cut, materialized: true)
+
+    from(r in subquery(counted),
+      where: r.rank <= @facet_value_limit,
+      order_by: [asc: r.field, asc: r.range, asc: r.rank],
+      select: {r.field, r.range, r.label, r.count}
+    )
+  end
+
+  # The rows `count_documents/3` counts. Under `:drafts` one row per logical
+  # document, the draft when there is one, as the merged list reads it.
+  defp matched_query(type, dataset, opts) do
+    base = base_query(type, dataset, Keyword.get(opts, :filter_map, %{}), opts)
+
+    case Keyword.get(opts, :perspective, :raw) do
+      :drafts ->
+        from(d in base,
+          distinct: fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
+          order_by: [
+            fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
+            fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+          ]
+        )
+
+      other ->
+        apply_perspective(base, other)
+    end
+  end
+
   @doc """
   Every stored row (draft and published — no perspective overlay) of `type`
   whose `field` is a JSON array holding `target_id`, in EITHER reference shape:

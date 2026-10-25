@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const testMediaFileID = "6f1c2a9e-4b7d-4c1e-9a55-0d3e2f1b7c88"
@@ -138,5 +140,41 @@ func TestMediaDeleteWithAMediaFileIDIsUnchanged(t *testing.T) {
 	}
 	if strings.Contains(stderr, "note:") {
 		t.Errorf("unexpected note on stderr: %q", stderr)
+	}
+}
+
+// The MCP media delete tool takes the same ids as the CLI
+// (task-a0fcebddfe95deea): the upload's asset id, in both spellings, deletes
+// the media file, and a media file id goes straight through.
+func TestMCPMediaDeleteAcceptsTheUploadAssetID(t *testing.T) {
+	for _, id := range []string{"asset-" + testMediaFileID, "drafts.asset-" + testMediaFileID, testMediaFileID} {
+		t.Run(id, func(t *testing.T) {
+			srv := &mediaServer{assetReadable: true}
+			ts := httptest.NewServer(srv)
+			t.Cleanup(ts.Close)
+			m, _ := mediaDeleteManifest()
+			ctx := manifest.Context{Server: ts.URL, Token: "tok", Dataset: "production"}
+			cs := newBridgeSession(t, globals{yes: true}, ctx, m)
+			res, err := cs.CallTool(context.Background(), &mcp.CallToolParams{
+				Name:      "bp_media_delete",
+				Arguments: map[string]any{"id": id},
+			})
+			if err != nil {
+				t.Fatalf("CallTool bp_media_delete: %v", err)
+			}
+			if res.IsError {
+				t.Fatalf("bp_media_delete %s failed: %s", id, mcpContentText(res))
+			}
+			if len(srv.deletes) != 1 || srv.deletes[0] != testMediaFileID {
+				t.Fatalf("deletes = %q, want exactly the media file id %s", srv.deletes, testMediaFileID)
+			}
+			wantReads := 1
+			if id == testMediaFileID {
+				wantReads = 0
+			}
+			if len(srv.reads) != wantReads {
+				t.Fatalf("asset document reads = %q, want %d", srv.reads, wantReads)
+			}
+		})
 	}
 }

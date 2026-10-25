@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -153,6 +154,11 @@ func registerOneBridgeTool(srv *mcp.Server, g globals, ctx manifest.Context, m *
 			return mcpArgError(err), nil
 		}
 		tail := buildCommandTail(cmd, args)
+		// The asset id `media upload` returns resolves to its media file here
+		// too, as it does for `bp media delete` (task-a0fcebddfe95deea). stdout
+		// is the JSON-RPC stream, so the CLI's stderr note is dropped; the
+		// delete's own body names the file it removed.
+		tail = resolveMediaDeleteID(newWriter(io.Discard, io.Discard), g, ctx, m, cmd, tail)
 		// Bridge tools inherit the manifest's agent-default view generically
 		// (agentViewGlobals, run.go): a command declaring
 		// views.default_for_agents gets ?view= with zero per-tool code here —
