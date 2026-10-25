@@ -1337,6 +1337,17 @@ defmodule Barkpark.Plugins.Capabilities do
           ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
+          ),
+          flag(
+            "facet",
+            "string",
+            "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first."
+          ),
+          flag(
+            "facet_range",
+            "string",
+            "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            repeatable: true
           )
         ],
         paginated: true,
