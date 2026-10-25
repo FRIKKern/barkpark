@@ -362,6 +362,51 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert length(paged["result"]) <= 2
   end
 
+  # task-2a7741b89420a38a: a _createdAt comparison is answered in SQL, so it
+  # narrows the read before the cap instead of loading every document of the
+  # type, and it keeps exactly the documents GROQ's string comparison keeps.
+  test "a _createdAt comparison narrows in SQL and matches GROQ's string comparison", %{
+    conn: conn,
+    token: token
+  } do
+    all =
+      conn
+      |> get_query(token, ~s'*[_type == "book"] | order(_createdAt asc) {_id, _createdAt}')
+      |> json_response(200)
+
+    stamps = Enum.map(all["result"], & &1["_createdAt"])
+
+    assert length(stamps) >= 3 and
+             Enum.all?(stamps, &(&1 =~ ~r/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/))
+
+    newest = List.last(stamps)
+
+    expected = fn op ->
+      all["result"]
+      |> Enum.filter(&apply(Kernel, op, [&1["_createdAt"], newest]))
+      |> Enum.map(& &1["_id"])
+      |> Enum.sort()
+    end
+
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_documents_per_fetch: 2)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    # The whole type is over the cap, so only the pushed-down filter can answer.
+    assert conn |> get_query(token, ~s'*[_type == "book"]') |> json_response(422)
+
+    for {groq, op} <- [{">=", :>=}, {"==", :==}, {">", :>}] do
+      body =
+        conn
+        |> get_query(token, ~s'*[_type == "book" && _createdAt #{groq} $t]{_id}', %{
+          "$t" => Jason.encode!(newest)
+        })
+        |> json_response(200)
+
+      assert body["result"] |> Enum.map(& &1["_id"]) |> Enum.sort() == expected.(op), groq
+    end
+  end
+
   test "a query that would load too much stored content is refused before loading", %{
     conn: conn,
     token: token
