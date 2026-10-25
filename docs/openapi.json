@@ -431,7 +431,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -5164,7 +5164,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -9594,7 +9594,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -13558,7 +13558,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,

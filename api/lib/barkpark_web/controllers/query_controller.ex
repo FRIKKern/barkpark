@@ -194,6 +194,8 @@ defmodule BarkparkWeb.QueryController do
       )
 
       {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  catch
+    :throw, {:expand_too_large, count, cap} -> expand_too_large(conn, count, cap)
   end
 
   # The caller-facing sentence. Where the write twin's message warns that the
@@ -1044,6 +1046,8 @@ defmodule BarkparkWeb.QueryController do
       )
 
       {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  catch
+    :throw, {:expand_too_large, count, cap} -> expand_too_large(conn, count, cap)
   end
 
   defp show_doc!(conn, dataset, type, doc_id, params) do
@@ -2360,11 +2364,66 @@ defmodule BarkparkWeb.QueryController do
         StrictReadParams.refuse_expand(conn, raw, nil, expandable)
 
       fields when is_list(fields) ->
-        case Enum.uniq(fields) -- expandable do
-          [] -> nil
+        # A nested path (`product.contributors`, task-053249d91d178353) is
+        # judged by its first segment here, like a plain field, then walked.
+        heads = Enum.map(fields, &(&1 |> String.split(".") |> hd()))
+
+        case Enum.uniq(heads) -- expandable do
+          [] -> nested_expand_refusal(conn, raw, fields, type, dataset)
           unknown -> StrictReadParams.refuse_expand(conn, raw, unknown, expandable)
         end
     end
+  end
+
+  defp nested_expand_refusal(conn, raw, fields, type, dataset) do
+    max = Expand.max_depth()
+
+    cond do
+      deep = Enum.find(fields, &(length(String.split(&1, ".")) > max)) ->
+        ErrorResponse.emit_custom(
+          conn,
+          400,
+          "malformed",
+          "?expand= path #{inspect(deep)} has more than #{max} segments; expand at most " <>
+            "#{max} references deep",
+          %{parameter: "expand", received: raw, path: deep, max_depth: max}
+        )
+
+      bad =
+          Enum.find_value(fields, fn path ->
+            String.contains?(path, ".") &&
+                case Expand.unknown_segment(type, path, dataset, scope_opts(conn)) do
+                  nil -> nil
+                  segment -> {path, segment}
+                end
+          end) ->
+        {path, segment} = bad
+
+        ErrorResponse.emit_custom(
+          conn,
+          400,
+          "malformed",
+          "?expand= path #{inspect(path)}: #{inspect(segment)} is not a reference field " <>
+            "on the type the path reaches there",
+          %{parameter: "expand", received: raw, path: path, unknown: segment}
+        )
+
+      true ->
+        nil
+    end
+  end
+
+  # `Expand.expand/4` throws past its cap on documents resolved below the
+  # first hop of a nested path; the 400 names the cap.
+  defp expand_too_large(conn, count, cap) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "?expand= would resolve #{count} documents below the first hop, over the cap of " <>
+        "#{cap}; ask for fewer rows (limit) or a shorter path",
+      %{parameter: "expand", resolved: count, max_nested_documents: cap}
+    )
   end
 
   # `?fields=title,slug` — projection. Returns the requested content field names, or
