@@ -13,6 +13,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.Http.IfNoneMatch
   alias BarkparkWeb.ReadPerspective
   alias BarkparkWeb.StrictReadParams
@@ -193,6 +194,8 @@ defmodule BarkparkWeb.QueryController do
       )
 
       {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  catch
+    :throw, {:expand_too_large, count, cap} -> expand_too_large(conn, count, cap)
   end
 
   # The caller-facing sentence. Where the write twin's message warns that the
@@ -304,6 +307,8 @@ defmodule BarkparkWeb.QueryController do
       |> with_id_prefix(params["id_prefix"])
 
     expand_spec = parse_expand(params["expand"])
+    facets = parse_facet_params(params)
+    collapse = parse_collapse(params["collapse"])
 
     schema = fetch_schema(conn, type, dataset)
     caller_context = CallerContext.from_conn(conn)
@@ -367,6 +372,21 @@ defmodule BarkparkWeb.QueryController do
       field = forbidden_query_field(filter_map, order, schema, caller_context) ->
         {:error, {:forbidden_field, field}}
 
+      # A malformed `?facet=` / `?facet_range[…]=` is a 400 naming the parameter.
+      match?({:error, _, _, _}, facets) ->
+        refuse_facets(conn, facets)
+
+      # A facet counts a field's values, so it is an oracle like a filter.
+      field = forbidden_facet_field(facets, schema, caller_context) ->
+        {:error, {:forbidden_field, field}}
+
+      # `?collapse=` groups by a field's value, an oracle like a filter.
+      collapse == :error ->
+        refuse_collapse(conn, params["collapse"])
+
+      is_binary(collapse) and not Envelope.field_readable?(schema, collapse, caller_context) ->
+        {:error, {:forbidden_field, collapse}}
+
       true ->
         # TRUNCATION SIGNAL. `list_documents_page/3` reads one row past the page
         # and reports whether it materialised, so `hasMore` is an EXACT answer
@@ -390,10 +410,14 @@ defmodule BarkparkWeb.QueryController do
               order: order,
               collation: collation,
               content_keys: content_keys(params, expand_spec, type, conn)
-            ] ++ scope_opts(conn)
+            ] ++ collapse_opts(collapse) ++ scope_opts(conn)
           )
 
         base_rendered = Envelope.render_many(docs, schema, caller_context)
+        # A collapsed set's representatives depend on the order, so the total,
+        # facets and group counts read it too.
+        read_opts =
+          [filter_map: filter_map, order: order, collation: collation] ++ collapse_opts(collapse)
 
         # Same split as `show_doc!/5` (task-0e0cb2167c6fcdea): captured
         # between Expand.expand/4 and project_fields/maybe_resolve_tasks, so
@@ -425,7 +449,9 @@ defmodule BarkparkWeb.QueryController do
             hasMore: has_more
           }
           |> maybe_put_next_offset(has_more, limit, offset)
-          |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
+          |> maybe_put_total(conn, params, type, dataset, perspective, read_opts)
+          |> maybe_put_facets(conn, type, dataset, perspective, read_opts, facets)
+          |> maybe_put_collapse(conn, type, dataset, perspective, read_opts, docs)
 
         schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
         etag = list_etag(dataset, type, rendered)
@@ -508,6 +534,49 @@ defmodule BarkparkWeb.QueryController do
 
             json(conn, %{
               result: %{byId: by_id},
+              syncTags: Enum.map(ids, &"bp:ds:#{dataset}:backlinks:#{&1}")
+            })
+          end
+        )
+      end
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  How many documents reference each id, without reading them
+  (task-881bbea8c99b1599): `?ids=a,b,c` (at most #{@backlinks_batch_max}),
+  optional `?type=` for the referring type. Answers
+  `{"result": {"byId": {"a": 12, ...}, "source": "schema", "note": ...}}`.
+
+  Counts the referrers `backlinks/2` reads live, through fields the schema
+  declares (and objects inside them), under the same scope and field
+  visibility, so a referrer the caller could not read never moves a number.
+  A document counts once per id. A preview or anonymous-pinned caller counts
+  published referrers only. Projected plugin edges are NOT counted, so a
+  count can be lower than `len(backlinks)` for a target only a plugin links
+  to; `source` and `note` say so in the body. Same auth as backlinks.
+  """
+  def backlink_counts(conn, %{"dataset" => dataset} = params) do
+    if preview?(conn) or authed?(conn) do
+      with {:ok, ids} <- backlinks_batch_ids(params["ids"]) do
+        read_region(
+          :backlinks,
+          "backlink_counts/2 (dataset=#{inspect(dataset)} ids=#{length(ids)})",
+          fn ->
+            opts =
+              [
+                require_published: preview?(conn) or AnonPerspective.anon_pinned?(conn),
+                type: if(is_binary(params["type"]) and params["type"] != "", do: params["type"])
+              ] ++ scope_opts(conn)
+
+            json(conn, %{
+              result: %{
+                byId: Content.count_reference_holders(ids, dataset, opts),
+                source: "schema",
+                note: "schema-declared references only; plugin edges are not counted"
+              },
               syncTags: Enum.map(ids, &"bp:ds:#{dataset}:backlinks:#{&1}")
             })
           end
@@ -1020,6 +1089,8 @@ defmodule BarkparkWeb.QueryController do
       )
 
       {:error, {:connection_unavailable, :read, read_fault_message(e)}}
+  catch
+    :throw, {:expand_too_large, count, cap} -> expand_too_large(conn, count, cap)
   end
 
   defp show_doc!(conn, dataset, type, doc_id, params) do
@@ -1545,6 +1616,31 @@ defmodule BarkparkWeb.QueryController do
   end
 
   @doc """
+  The query API's `?order=` and `?collation=` for `/v1/data/search`
+  (task-5ddc3e08684f0d48), read and refused exactly as on the query route:
+  an unknown spec or collation is a 422, a field this caller may not read a
+  `forbidden_field`. Returns `{:ok, {order, collation}}` or `{:error, reason}`.
+  """
+  def search_order(conn, params, schema) do
+    order = parse_order_param(params["order"])
+    collation = parse_collation(params["collation"])
+
+    cond do
+      match?({:error, _}, order) ->
+        order_error(order)
+
+      match?({:error, _}, collation) ->
+        collation_error(collation)
+
+      field = forbidden_query_field(%{}, order, schema, CallerContext.from_conn(conn)) ->
+        {:error, {:forbidden_field, field}}
+
+      true ->
+        {:ok, {order, collation}}
+    end
+  end
+
+  @doc """
   The `?filter[...]` map of a search request (task-c7395e0d27e1121b), read and
   refused exactly as `/v1/data/query` reads and refuses it: the same three
   spellings, the same operator door, the same malformed-param and
@@ -1562,6 +1658,14 @@ defmodule BarkparkWeb.QueryController do
 
       match?({:error, _}, filter_map) ->
         filter_map
+
+      # The search engine reads its own filter shape; `$or` is the query
+      # route's form only (task-02d4488c460185c0).
+      is_map(filter_map) and Map.has_key?(filter_map, "$or") ->
+        {:error,
+         {:invalid_filter_clause,
+          "filter[$or] is supported on /v1/data/query, not on search; " <>
+            "repeat the filter param to AND conditions", %{field: "$or"}}}
 
       bad = invalid_filter_op(filter_map, reference_ops_allowed?(conn)) ->
         case bad do
@@ -1582,9 +1686,20 @@ defmodule BarkparkWeb.QueryController do
   # field is allowed. Internal/admin callers and undeclared/promoted fields pass
   # through `Envelope.field_readable?/3` unrestricted.
   defp forbidden_query_field(filter_map, order, schema, caller_context) do
-    (Map.keys(filter_map) ++ order_fields(order))
+    (filter_fields(filter_map) ++ order_fields(order))
     |> Enum.find(fn field -> not Envelope.field_readable?(schema, field, caller_context) end)
   end
+
+  # Every field a filter reads, the ones inside `$or` branches included, so a
+  # group can never filter on a field the caller cannot read.
+  defp filter_fields(%{} = filter_map) do
+    Enum.flat_map(filter_map, fn
+      {"$or", groups} when is_list(groups) -> Enum.flat_map(groups, &filter_fields/1)
+      {field, _} -> [field]
+    end)
+  end
+
+  defp filter_fields(_other), do: []
 
   defp order_fields(specs) when is_list(specs), do: Enum.flat_map(specs, &order_fields/1)
   defp order_fields({:field, field, _dir}), do: [field]
@@ -1652,11 +1767,17 @@ defmodule BarkparkWeb.QueryController do
     Enum.find_value(filter_map, fn
       # `$or`/`$and`: not fields, and this route has no boolean-group form. Checked
       # BEFORE the operator scan so the group INDEX is never reported as an operator.
+      # `$or` (task-02d4488c460185c0): a list of ordinary filter maps, each
+      # ANDed inside itself, the row matching any one. Every branch is checked
+      # here exactly as a top-level map is, and a fault names its branch.
+      {"$or", groups} ->
+        invalid_or_groups(groups, reference_ops?)
+
       {"$" <> _ = field, _value} ->
         {:clause,
-         "boolean filter groups are not supported on /v1/data/query: #{inspect(field)} " <>
-           "is read as a document field, not an operator. Repeat the filter param " <>
-           "(filter[]=a=1&filter[]=b=2) to AND conditions; there is no OR form.", %{field: field}}
+         "boolean filter group #{inspect(field)} is not supported on /v1/data/query; " <>
+           "the one group form is $or (filter[$or][0][field][op]=value). Repeat the " <>
+           "filter param (filter[]=a=1&filter[]=b=2) to AND conditions.", %{field: field}}
 
       {field, %{} = ops} ->
         cond do
@@ -1738,6 +1859,48 @@ defmodule BarkparkWeb.QueryController do
         nil
     end)
   end
+
+  @max_or_branches Content.Query.max_or_branches()
+
+  defp invalid_or_groups(groups, _reference_ops?)
+       when is_list(groups) and length(groups) > @max_or_branches do
+    {:clause,
+     "filter[$or] has #{length(groups)} branches; the limit is #{@max_or_branches}. " <>
+       "Split the query or narrow it with an ANDed filter.",
+     %{field: "$or", limit: @max_or_branches}}
+  end
+
+  defp invalid_or_groups([_ | _] = groups, reference_ops?) do
+    groups
+    |> Enum.with_index()
+    |> Enum.find_value(fn
+      {%{} = branch, i} when map_size(branch) > 0 ->
+        if Map.has_key?(branch, "$or"),
+          do: {:clause, "filter[$or][#{i}] may not hold another $or", %{field: "$or[#{i}]"}},
+          else: or_branch_fault(invalid_filter_op(branch, reference_ops?), i)
+
+      {_other, i} ->
+        {:clause, "filter[$or][#{i}] takes a filter map (field => operators), not empty",
+         %{field: "$or[#{i}]"}}
+    end)
+  end
+
+  defp invalid_or_groups(_groups, _reference_ops?) do
+    {:clause,
+     "filter[$or] takes a list of filter maps: filter[$or][0][field][op]=value&" <>
+       "filter[$or][1][field][op]=value", %{field: "$or"}}
+  end
+
+  defp or_branch_fault(nil, _i), do: nil
+
+  defp or_branch_fault({:clause, message, details}, i),
+    do: {:clause, "in filter[$or][#{i}]: " <> message, Map.put(details, :group, i)}
+
+  defp or_branch_fault({field, op}, i),
+    do:
+      {:clause,
+       "in filter[$or][#{i}]: unknown filter operator #{inspect(op)} on field #{inspect(field)}",
+       %{field: field, op: op, group: i}}
 
   # True when `ops` carries `op` with a value the op cannot bind: a list/map for
   # a scalar op (array-bracket syntax or a nested container).
@@ -1836,19 +1999,246 @@ defmodule BarkparkWeb.QueryController do
     if next > 100_000, do: inner, else: Map.put(inner, :nextOffset, next)
   end
 
-  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, filter_map) do
+  # `read_opts` is the list's filter and order, plus `collapse: field` when the
+  # list collapses, so the total counts groups.
+  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, read_opts) do
     total =
       Content.count_documents(
         type,
         dataset,
-        [perspective: perspective, filter_map: filter_map] ++ scope_opts(conn)
+        [perspective: perspective] ++ read_opts ++ scope_opts(conn)
       )
 
     Map.put(inner, :total, total)
   end
 
-  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map),
+  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _read_opts),
     do: inner
+
+  # ── Collapse (task-3fbfafa3d1035ec2) ──────────────────────────────────────
+  #
+  # `collapse=familyId` keeps one document per value of a top-level field, the
+  # first by the list's order; a document with no value stands alone. The
+  # page, `total` and the facets count groups. `result.collapse.counts` maps
+  # each listed `_id` to how many matched documents its group holds.
+  defp parse_collapse(nil), do: nil
+
+  defp parse_collapse(field) when is_binary(field) do
+    field = String.trim(field)
+    if facet_field?(field), do: field, else: :error
+  end
+
+  defp parse_collapse(_), do: :error
+
+  defp collapse_opts(field) when is_binary(field), do: [collapse: field]
+  defp collapse_opts(_), do: []
+
+  defp refuse_collapse(conn, received) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "collapse takes one top-level field name (collapse=familyId); got " <> inspect(received),
+      %{parameter: "collapse", received: inspect(received)}
+    )
+  end
+
+  defp maybe_put_collapse(inner, conn, type, dataset, perspective, read_opts, docs) do
+    case read_opts[:collapse] do
+      nil ->
+        inner
+
+      field ->
+        counts =
+          Content.collapse_counts(
+            type,
+            dataset,
+            [perspective: perspective] ++ read_opts ++ scope_opts(conn),
+            Enum.map(docs, & &1.id)
+          )
+
+        Map.put(inner, :collapse, %{
+          field: field,
+          counts: Map.new(docs, &{&1.doc_id, Map.get(counts, &1.id, 1)})
+        })
+    end
+  end
+
+  # ── Facets (task-8af256dcd8f17902) ────────────────────────────────────────
+  #
+  #   * `facet=a,b` (or repeated `facet[]=`) — value counts of up to
+  #     #{@max_facet_fields} top-level fields over the filtered set, the same
+  #     spelling search takes. `facets.fields.<f>` is `[{label, count}]`.
+  #   * `facet_range[price]=100,200,500` (or `facet_range=price:100,200,500`,
+  #     repeatable, the CLI's spelling) — numeric buckets for up to
+  #     #{@max_range_fields} fields, 1–#{@max_range_edges} ascending edges.
+  #     `facets.ranges.<f>` is `[{from, to, count}]`, open ends null.
+  #
+  # Both count the set `?count=true` totals, in one extra round of SQL.
+  @max_facet_fields 10
+  @max_range_fields 5
+  @max_range_edges 20
+  @facet_field_re ~r/^[A-Za-z_][A-Za-z0-9_]*$/
+  @facet_edge_re ~r/^-?\d+(\.\d+)?$/
+
+  defp parse_facet_params(params) do
+    with {:ok, fields} <- parse_facet_fields(params["facet"]),
+         {:ok, ranges} <- parse_facet_ranges(params["facet_range"]) do
+      {:ok, %{fields: fields, ranges: ranges}}
+    end
+  end
+
+  defp parse_facet_fields(nil), do: {:ok, []}
+
+  defp parse_facet_fields(value) do
+    fields =
+      value
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        v when is_binary(v) -> v |> String.split(",") |> Enum.map(&String.trim/1)
+        _ -> [:invalid]
+      end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    if length(fields) <= @max_facet_fields and Enum.all?(fields, &facet_field?/1),
+      do: {:ok, fields},
+      else:
+        {:error, "facet",
+         "facet takes up to #{@max_facet_fields} top-level field names, comma separated " <>
+           "(facet=format,language)", value}
+  end
+
+  defp parse_facet_ranges(nil), do: {:ok, []}
+
+  defp parse_facet_ranges(value) when is_map(value) and map_size(value) <= @max_range_fields do
+    value
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn {field, raw}, {:ok, acc} ->
+      case facet_edges(raw) do
+        {:ok, edges} when is_binary(field) ->
+          if facet_field?(field),
+            do: {:cont, {:ok, acc ++ [{field, edges}]}},
+            else: {:halt, range_error(value)}
+
+        _ ->
+          {:halt, range_error(value)}
+      end
+    end)
+  end
+
+  # The flat spelling the CLI sends: `facet_range=price:100,200` (repeatable).
+  defp parse_facet_ranges(value) when is_binary(value) or is_list(value) do
+    pairs =
+      value
+      |> List.wrap()
+      |> Enum.map(fn
+        v when is_binary(v) -> String.split(v, ":", parts: 2)
+        _ -> []
+      end)
+
+    if Enum.all?(pairs, &match?([_, _], &1)) and
+         length(Enum.uniq_by(pairs, &hd/1)) == length(pairs),
+       do: parse_facet_ranges(Map.new(pairs, fn [f, e] -> {String.trim(f), e} end), value),
+       else: range_error(value)
+  end
+
+  defp parse_facet_ranges(value), do: range_error(value)
+
+  defp parse_facet_ranges(map, original) do
+    case parse_facet_ranges(map) do
+      {:error, _, _, _} -> range_error(original)
+      ok -> ok
+    end
+  end
+
+  defp range_error(value),
+    do:
+      {:error, "facet_range",
+       "facet_range[field]=e1,e2,… (or facet_range=field:e1,e2,…) takes up to " <>
+         "#{@max_range_fields} fields, each with 1–#{@max_range_edges} ascending numbers " <>
+         "(facet_range[price]=100,200,500)", value}
+
+  defp facet_edges(raw) when is_binary(raw) do
+    parts = raw |> String.split(",") |> Enum.map(&String.trim/1)
+
+    with true <- length(parts) in 1..@max_range_edges,
+         true <- Enum.all?(parts, &Regex.match?(@facet_edge_re, &1)),
+         decimals = Enum.map(parts, &Decimal.new/1),
+         true <-
+           decimals
+           |> Enum.chunk_every(2, 1, :discard)
+           |> Enum.all?(fn [a, b] -> Decimal.lt?(a, b) end) do
+      {:ok, Enum.zip(decimals, Enum.map(parts, &edge_number/1))}
+    else
+      _ -> :error
+    end
+  end
+
+  defp facet_edges(_raw), do: :error
+
+  defp edge_number(text),
+    do: if(String.contains?(text, "."), do: String.to_float(text), else: String.to_integer(text))
+
+  defp facet_field?(field), do: is_binary(field) and Regex.match?(@facet_field_re, field)
+
+  defp refuse_facets(conn, {:error, parameter, message, received}) do
+    ErrorResponse.emit_custom(conn, 400, "malformed", message <> "; got " <> inspect(received), %{
+      parameter: parameter,
+      received: inspect(received)
+    })
+  end
+
+  defp forbidden_facet_field({:ok, %{fields: fields, ranges: ranges}}, schema, caller_context) do
+    Enum.find(
+      fields ++ Enum.map(ranges, &elem(&1, 0)),
+      &(not Envelope.field_readable?(schema, &1, caller_context))
+    )
+  end
+
+  defp maybe_put_facets(
+         inner,
+         _conn,
+         _type,
+         _dataset,
+         _perspective,
+         _read_opts,
+         {:ok, %{fields: [], ranges: []}}
+       ),
+       do: inner
+
+  defp maybe_put_facets(inner, conn, type, dataset, perspective, read_opts, {:ok, facets}) do
+    counts =
+      Content.facet_counts(
+        type,
+        dataset,
+        [
+          perspective: perspective,
+          facet_fields: facets.fields,
+          facet_ranges:
+            Enum.map(facets.ranges, fn {f, edges} -> {f, Enum.map(edges, &elem(&1, 0))} end)
+        ] ++ read_opts ++ scope_opts(conn)
+      )
+
+    fields =
+      Map.new(counts.fields, fn {f, buckets} ->
+        {f, Enum.map(buckets, fn {label, n} -> %{label: label, count: n} end)}
+      end)
+
+    ranges =
+      Map.new(facets.ranges, fn {f, edges} ->
+        bounds = Enum.map(edges, &elem(&1, 1))
+        froms = [nil | bounds]
+        tos = bounds ++ [nil]
+
+        {f,
+         [froms, tos, counts.ranges[f]]
+         |> Enum.zip()
+         |> Enum.map(fn {from, to, n} -> %{from: from, to: to, count: n} end)}
+      end)
+
+    Map.put(inner, :facets, %{fields: fields, ranges: ranges})
+  end
 
   # Comma-separated specs → multi-field sort (`title:asc,price:desc` sorts by title,
   # then price as a tiebreak). A single spec stays a single parsed value (back-compat).
@@ -1886,6 +2276,15 @@ defmodule BarkparkWeb.QueryController do
   defp parse_order("_updatedAt:desc"), do: :updated_at_desc
   defp parse_order("_createdAt:asc"), do: :created_at_asc
   defp parse_order("_createdAt:desc"), do: :created_at_desc
+
+  # `_id` (task-7432da7989196de0): the natural key for stable offset paging,
+  # as in Sanity's `order(_id asc)`. It and its column name `doc_id` sort by
+  # the `doc_id` column, never by a content key of that name.
+  defp parse_order("_id:" <> dir) when dir in ~w(asc desc),
+    do: {:field, "_id", String.to_existing_atom(dir)}
+
+  defp parse_order("doc_id:" <> dir) when dir in ~w(asc desc),
+    do: {:field, "_id", String.to_existing_atom(dir)}
 
   # View counts (task-5feac4e826cff9a5, docs/search/VIEWS.md). `popularity` is
   # the plain-word alias of `_popularity`, the decayed 30-day score.
@@ -1941,7 +2340,7 @@ defmodule BarkparkWeb.QueryController do
       %{
         "order" => [
           "unrecognised order spec #{inspect(spec)}; expected <field>[.<path>]:asc|desc " <>
-            "(dot-paths into JSONB content allowed), _updatedAt:asc|desc, _createdAt:asc|desc, " <>
+            "(dot-paths into JSONB content allowed), _id, _updatedAt or _createdAt with :asc|desc, " <>
             "or a view count: popularity, _popularity, _views7d or _views30d with :asc|desc"
         ]
       }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
@@ -2008,11 +2407,66 @@ defmodule BarkparkWeb.QueryController do
         StrictReadParams.refuse_expand(conn, raw, nil, expandable)
 
       fields when is_list(fields) ->
-        case Enum.uniq(fields) -- expandable do
-          [] -> nil
+        # A nested path (`product.contributors`, task-053249d91d178353) is
+        # judged by its first segment here, like a plain field, then walked.
+        heads = Enum.map(fields, &(&1 |> String.split(".") |> hd()))
+
+        case Enum.uniq(heads) -- expandable do
+          [] -> nested_expand_refusal(conn, raw, fields, type, dataset)
           unknown -> StrictReadParams.refuse_expand(conn, raw, unknown, expandable)
         end
     end
+  end
+
+  defp nested_expand_refusal(conn, raw, fields, type, dataset) do
+    max = Expand.max_depth()
+
+    cond do
+      deep = Enum.find(fields, &(length(String.split(&1, ".")) > max)) ->
+        ErrorResponse.emit_custom(
+          conn,
+          400,
+          "malformed",
+          "?expand= path #{inspect(deep)} has more than #{max} segments; expand at most " <>
+            "#{max} references deep",
+          %{parameter: "expand", received: raw, path: deep, max_depth: max}
+        )
+
+      bad =
+          Enum.find_value(fields, fn path ->
+            String.contains?(path, ".") &&
+                case Expand.unknown_segment(type, path, dataset, scope_opts(conn)) do
+                  nil -> nil
+                  segment -> {path, segment}
+                end
+          end) ->
+        {path, segment} = bad
+
+        ErrorResponse.emit_custom(
+          conn,
+          400,
+          "malformed",
+          "?expand= path #{inspect(path)}: #{inspect(segment)} is not a reference field " <>
+            "on the type the path reaches there",
+          %{parameter: "expand", received: raw, path: path, unknown: segment}
+        )
+
+      true ->
+        nil
+    end
+  end
+
+  # `Expand.expand/4` throws past its cap on documents resolved below the
+  # first hop of a nested path; the 400 names the cap.
+  defp expand_too_large(conn, count, cap) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "?expand= would resolve #{count} documents below the first hop, over the cap of " <>
+        "#{cap}; ask for fewer rows (limit) or a shorter path",
+      %{parameter: "expand", resolved: count, max_nested_documents: cap}
+    )
   end
 
   # `?fields=title,slug` — projection. Returns the requested content field names, or
@@ -2103,6 +2557,7 @@ defmodule BarkparkWeb.QueryController do
 
   defp normalize_filter_map(map) when is_map(map) do
     Enum.into(map, %{}, fn
+      {"$or", groups} -> {"$or", normalize_or_groups(groups)}
       {field, %{} = ops} -> {field, Enum.into(ops, %{}, &normalize_filter_op/1)}
       {field, value} -> {field, value}
     end)
@@ -2179,6 +2634,25 @@ defmodule BarkparkWeb.QueryController do
         "filter[field][op]=value, or a repeated filter[]=field<op>value (ANDed)",
       %{filter: inspect(other)}}}
   end
+
+  # `filter[$or][0][x][eq]=1&filter[$or][1][y][is]=null` (task-02d4488c460185c0)
+  # reaches here as `%{"0" => …, "1" => …}`: an index map, read as a list in
+  # index order. A JSON list passes through. Each branch is an ordinary filter
+  # map. Anything else is left for `invalid_filter_op/2` to name.
+  defp normalize_or_groups(%{} = indexed) do
+    if indexed != %{} and Enum.all?(Map.keys(indexed), &match?({_, ""}, Integer.parse(&1))),
+      do:
+        indexed
+        |> Enum.sort_by(fn {i, _} -> String.to_integer(i) end)
+        |> Enum.map(fn {_, branch} -> normalize_or_branch(branch) end),
+      else: indexed
+  end
+
+  defp normalize_or_groups(list) when is_list(list), do: Enum.map(list, &normalize_or_branch/1)
+  defp normalize_or_groups(other), do: other
+
+  defp normalize_or_branch(%{} = branch), do: normalize_filter_map(Map.delete(branch, "$or"))
+  defp normalize_or_branch(other), do: other
 
   # Merge one element's clauses into the accumulated filter map. See the
   # CONFLICT RULE above: differing ops on a field compose, a repeated op is a 400.

@@ -422,6 +422,11 @@ defmodule BarkparkCloud.Registry.Barkpark do
     #     never the secret — distinct custody from `admin_token_encrypted`, so it
     #     IS serialized in barkpark_json. Written only through `fleet_changeset/2`.
     field :fleet_token_id, :string
+
+    # "Sign in with Barkpark Cloud" for an external Studio: the callback URLs a
+    # sign-in may return to (exact match). Written only through
+    # `Registry.add_studio_callback/2` / `remove_studio_callback/2`.
+    field :studio_callback_urls, {:array, :string}, default: []
     belongs_to :fleet_parent, __MODULE__, foreign_key: :fleet_parent_id, type: :binary_id
     field :fleet_role, :string
 

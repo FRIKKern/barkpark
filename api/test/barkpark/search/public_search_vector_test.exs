@@ -197,4 +197,47 @@ defmodule Barkpark.Search.PublicSearchVectorTest do
     assert Barkpark.Search.PublicIndex.census(type: "memo") == []
     assert {[], 0, _} = search(scope, "quixotical", CallerContext.anonymous())
   end
+
+  # task-4f3e286c6df4c320: a private field can fill a search slot (`search:
+  # "author"` / `"title"`), and the slot columns (search_title, search_names_fold)
+  # are built from the unredacted content. The names and title arms read them
+  # outside the public vector, so they must not match for a non-admin caller.
+  for {slot, field} <- [{"author", "writer"}, {"title", "codename"}] do
+    test "a private search: #{slot} field is not matched by an anonymous search" do
+      scope = scope!()
+
+      schema!(scope, [
+        %{"name" => "displayName", "type" => "string"},
+        %{
+          "name" => unquote(field),
+          "type" => "string",
+          "private" => true,
+          "search" => unquote(slot)
+        }
+      ])
+
+      doc!(scope, "m1", %{"displayName" => "Open memo", unquote(field) => "Zanzibarius Qwerty"})
+
+      for q <- ["zanzibarius", "zanzib", "zanzibarus"] do
+        {anon_hits, anon_count, _} = search(scope, q, CallerContext.anonymous())
+        assert anon_hits == [] and anon_count == 0, "anonymous #{q}"
+        {reader_hits, reader_count, _} = search(scope, q, @reader)
+        assert reader_hits == [] and reader_count == 0, "reader #{q}"
+      end
+
+      # With a public word beside it, the private word must count for exactly
+      # as much as a word no field holds (the any-word recovery pass may still
+      # find "open"): the answer cannot tell the two apart.
+      for ctx <- [CallerContext.anonymous(), @reader] do
+        {_, with_private, _} = search(scope, "open zanzibarius", ctx)
+        {_, with_nonsense, _} = search(scope, "open qxvbtrmz", ctx)
+        assert with_private == with_nonsense
+      end
+
+      assert {[_], 1, _} = search(scope, "zanzibarius", @admin)
+      assert {[_], 1, _} = search(scope, "zanzib", @admin)
+      # The public words still find the document for anyone.
+      assert {[_], 1, _} = search(scope, "open", CallerContext.anonymous())
+    end
+  end
 end

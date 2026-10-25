@@ -38,6 +38,10 @@ func runBarkparks(out *writer, args []string) int {
 	if len(args) > 0 && args[0] == "adopt" {
 		return runBarkparksAdopt(out, args[1:])
 	}
+	// "studio-origin" is the name the owner first asked for; both reach the same verb.
+	if len(args) > 0 && (args[0] == "studio-callback" || args[0] == "studio-origin") {
+		return runBarkparksStudioCallback(out, args[1:])
+	}
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printBarkparksHelp(out)
@@ -513,6 +517,7 @@ USAGE
   bp barkparks [--all | --kind local|cloud] [-o json|yaml]
   bp barkparks adopt --url https://<box> --host <public-ip> --name <name>
                      [--slug <slug>] (--token-file <path> | --token-from-config)
+  bp barkparks studio-callback ls|add|rm <instance> [<callback-url>]
 
 WHAT IT SHOWS
   with a saved Cloud session, bare bp barkparks queries the current team's
@@ -532,6 +537,13 @@ ADOPT
   labelled "barkpark cloud admin", stores that one, and arms self-update the way
   it does for boxes it provisioned. Your token is never stored and never rides
   argv. A box without /v1/tokens/elevated is refused: update it first.
+
+STUDIO-CALLBACK
+  the "Sign in with Barkpark Cloud" allowlist for a Studio deployed apart from
+  its instance (e.g. barkpark-studio on Vercel). A sign-in may only return to a
+  callback URL listed here, matched exactly: https://<studio>/auth/cloud/callback.
+  ls needs team membership; add and rm need team admin. <instance> is an id,
+  slug or name.
 
 RELATED
   bp register ssh root@<host> --name <name>   add a self-hosted Barkpark

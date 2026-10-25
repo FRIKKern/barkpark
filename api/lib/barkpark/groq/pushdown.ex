@@ -41,6 +41,11 @@ defmodule Barkpark.Groq.Pushdown do
       `>`, `>=` or `==` to a number -> `checks` as `{:views, column, op, n}`,
       which the source tests against `document_popularity`
       (`Barkpark.Search.Views`)
+    * `_createdAt` or `_updatedAt` compared with `<`, `<=`, `>`, `>=` or `==`
+      to a string -> `checks` as `{:timestamp, column, op, s}`, which the
+      source tests against the column rendered as GROQ renders it
+    * `_id in path("...")` -> `checks` as `{:id_path, pattern}`, which the
+      source matches against the id GROQ sees
     * `count(a.b[cond]) > 0`, `>= 1`, `length(a.b[cond]) > 0` and
       `defined(a.b[cond][0])` on a content path, where `cond` is an `&&` of
       `x.y == v` and `x.y in [...]` on element fields (or `@`) with scalar
@@ -107,6 +112,8 @@ defmodule Barkpark.Groq.Pushdown do
           | {:none, [String.t()], [{[String.t()], [scalar()]}]}
           | {:range, [String.t()], String.t(), scalar()}
           | {:views, :views_7d | :views_30d | :score, String.t(), number()}
+          | {:timestamp, :inserted_at | :updated_at, String.t(), String.t()}
+          | {:id_path, String.t()}
   @type scalar :: String.t() | number() | boolean()
   @type order_key ::
           {:path, [String.t()]}
@@ -207,6 +214,7 @@ defmodule Barkpark.Groq.Pushdown do
 
   defp check({:op, op, l, r} = node, resolve) when is_map_key(@length_ops, op) do
     with :error <- views_check(op, l, r, resolve),
+         :error <- timestamp_check(op, l, r, resolve),
          :error <- some_check(node, :exact),
          :error <- length_check(op, l, r, resolve) do
       range_check(op, l, r, resolve)
@@ -247,7 +255,9 @@ defmodule Barkpark.Groq.Pushdown do
   # scalar leaves the conjunct to the other shapes. `"x" in a.b` is true when
   # `a.b` is an array holding `"x"`; a string there is not searched.
   defp check({:op, "in", l, r}, resolve) do
-    with :error <- in_check(l, r, resolve), do: member_check(l, r, resolve)
+    with :error <- id_path_check(l, r, resolve),
+         :error <- in_check(l, r, resolve),
+         do: member_check(l, r, resolve)
   end
 
   defp check({:group, inner}, resolve), do: check(inner, resolve)
@@ -292,6 +302,49 @@ defmodule Barkpark.Groq.Pushdown do
     case {views_column(l), views_column(r)} do
       {{:ok, column}, _} -> views_n(column, op, r, resolve)
       {_, {:ok, column}} -> views_n(column, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
+  # `_createdAt > "2026-01-01"` and the like, either side, against a string
+  # (task-2a7741b89420a38a). GROQ compares the rendered ISO 8601 string, which
+  # has one fixed width (microseconds, `Z`), byte for byte; the source renders
+  # the column the same way and compares it the same way, so SQL keeps
+  # exactly the rows GROQ keeps. Any other value type is null in GROQ and is
+  # left to the evaluator.
+  # `_id in path("drafts.**")` (task-754316ae85c63a1a): a glob over the id
+  # GROQ sees, which the source matches in SQL with the evaluator's pattern.
+  defp id_path_check(l, {:func, "global", "path", [arg]}, resolve) do
+    with {:ok, ["_id"]} <- attr_path(l),
+         {:ok, pattern} when is_binary(pattern) <- value(arg, resolve) do
+      {:ok, {:id_path, pattern}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp id_path_check(_l, _r, _resolve), do: :error
+
+  @timestamp_fields %{"_createdAt" => :inserted_at, "_updatedAt" => :updated_at}
+
+  defp timestamp_check(op, l, r, resolve) do
+    case {timestamp_column(l), timestamp_column(r)} do
+      {{:ok, column}, _} -> timestamp_value(column, op, r, resolve)
+      {_, {:ok, column}} -> timestamp_value(column, Map.fetch!(@length_ops, op), l, resolve)
+      _ -> :error
+    end
+  end
+
+  defp timestamp_column(expr) do
+    case attr_path(expr) do
+      {:ok, [name]} when is_map_key(@timestamp_fields, name) -> {:ok, @timestamp_fields[name]}
+      _ -> :error
+    end
+  end
+
+  defp timestamp_value(column, op, v, resolve) do
+    case value(v, resolve) do
+      {:ok, s} when is_binary(s) -> {:ok, {:timestamp, column, op, s}}
       _ -> :error
     end
   end
@@ -562,7 +615,23 @@ defmodule Barkpark.Groq.Pushdown do
 
   defp conjuncts({:and, l, r}), do: conjuncts(l) ++ conjuncts(r)
   defp conjuncts({:group, inner}), do: conjuncts(inner)
+
+  # `coalesce(a, b) in L` (task-606142ef89bee14d) is
+  # `a in L || (!defined(a) && b in L)`: coalesce answers its first argument
+  # that is not null, and `defined()` is false exactly for null or missing.
+  # The rewrite is exact, so the `||`, `in` and `defined` shapes below push it
+  # down as they push down the spelled-out form.
+  defp conjuncts({:op, "in", {:func, "global", "coalesce", [_ | _] = args}, r}),
+    do: [coalesce_in(args, r)]
+
   defp conjuncts(other), do: [other]
+
+  defp coalesce_in([a], r), do: {:op, "in", a, r}
+
+  defp coalesce_in([a | rest], r),
+    do:
+      {:or, {:op, "in", a, r},
+       {:and, {:not, {:func, "global", "defined", [a]}}, coalesce_in(rest, r)}}
 
   defp apply_conjunct(node, acc, resolve) do
     with :error <- check(node, resolve),

@@ -127,11 +127,15 @@ defmodule Barkpark.Search.QueryPipeline do
       # Each term's synonyms are its alternatives: the retriever matches a term
       # OR any of its synonyms, never a synonym as one more word every document
       # must hold. `terms` still lists them, as `parsedQuery` always has.
+      # Every word's synonyms and the correction in one read (Synonyms.expand_terms/4),
+      # not two reads per word.
+      {terms_of, corrected_to} = Synonyms.expand_terms(surface, scope, positive, workspace_id)
+
       alternatives =
         Map.new(positive, fn term ->
           {term,
-           surface
-           |> Synonyms.search_terms(scope, term, workspace_id)
+           terms_of
+           |> Map.get(term, [])
            |> Enum.reject(&(&1 in positive or &1 == ""))
            |> Enum.uniq()}
         end)
@@ -140,10 +144,6 @@ defmodule Barkpark.Search.QueryPipeline do
 
       # The corrected term is the canonical to_query of the FIRST positive term
       # for which an enabled synonym fired — null when nothing matched.
-      corrected_to =
-        Enum.find_value(positive, fn term ->
-          Synonyms.correction_for(surface, scope, term, workspace_id)
-        end)
 
       {Map.put(%{parsed | terms: parsed.terms ++ extra}, :alternatives, alternatives),
        corrected_to}
@@ -196,6 +196,9 @@ defmodule Barkpark.Search.QueryPipeline do
         # every recovery pass keeps them.
         match: Keyword.get(opts, :match, :all),
         filter_map: Keyword.get(opts, :filter_map),
+        # `?order=` instead of relevance (task-5ddc3e08684f0d48): `{order,
+        # collation}` from QueryController.search_order/3, or nil.
+        order: Keyword.get(opts, :order),
         facet_fields: Keyword.get(opts, :facet_fields),
         # With a field filter, the retriever counts the words' matches without
         # the filter up to this many (`meta.text_count`), so the recovery
@@ -206,7 +209,13 @@ defmodule Barkpark.Search.QueryPipeline do
         suggest: Keyword.get(opts, :suggest, false),
         # `?boost=popularity` (task-5feac4e826cff9a5): the Postgres retriever
         # adds the document's view score to relevance. Other engines ignore it.
-        boost: Keyword.get(opts, :boost)
+        boost: Keyword.get(opts, :boost),
+        # The request memo (`WriteScope.request_memo/3`), when the caller opted in
+        # (an HTTP request's scope opts do). Every pass of this search, recovery
+        # included, then reads the dataset, the schemas and the refresh gates
+        # once: the memo keys carry the scope, so a pass reuses only an answer
+        # for the very same scope.
+        memoize: Keyword.get(opts, :memoize, false)
       ]
 
     # Engine dispatch lives here (not the controller) so highlights + recovery
@@ -494,7 +503,8 @@ defmodule Barkpark.Search.QueryPipeline do
   defp resolve_schema(type, scope, opts) do
     schema_opts = [
       workspace_id: Keyword.get(opts, :workspace_id),
-      project_id: Keyword.get(opts, :project_id)
+      project_id: Keyword.get(opts, :project_id),
+      memoize: Keyword.get(opts, :memoize, false)
     ]
 
     case Content.get_schema(type, scope, schema_opts) do

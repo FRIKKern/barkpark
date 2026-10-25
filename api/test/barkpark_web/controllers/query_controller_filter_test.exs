@@ -102,21 +102,28 @@ defmodule BarkparkWeb.QueryControllerFilterTest do
     end
   end
 
-  describe "invalid_filter_op/1 — boolean groups ($or) name the real problem" do
-    test "$or is refused as an unsupported GROUP, never with its index as an operator" do
-      # Gyldendal: `filter[$or][0][title][eq]=x` reported `unknown filter
-      # operator "0" on field "$or"` — the caller was told to fix an operator
-      # that was never one.
-      assert {:clause, message, details} =
-               invalid(%{"$or" => %{"0" => %{"title" => %{"eq" => "x"}}}})
-
-      assert details == %{field: "$or"}
-      assert message =~ "boolean filter groups are not supported"
-      refute message =~ ~s(operator "0")
+  describe "invalid_filter_op/1 — boolean groups: $or is accepted, others name the real problem" do
+    test "a well-formed $or group passes the door (task-02d4488c460185c0)" do
+      assert invalid(%{"$or" => [%{"title" => %{"eq" => "x"}}, %{"status" => %{"is" => "null"}}]}) ==
+               nil
     end
 
-    test "$and is refused the same way, whatever its value shape" do
-      assert {:clause, _msg, %{field: "$and"}} = invalid(%{"$and" => ["a=1"]})
+    test "a malformed $or names the group or the branch, never an index as an operator" do
+      assert {:clause, msg, %{field: "$or"}} = invalid(%{"$or" => "title=x"})
+      assert msg =~ "list of filter maps"
+      assert {:clause, _, %{field: "$or[1]"}} = invalid(%{"$or" => [%{"a" => "1"}, %{}]})
+
+      assert {:clause, msg, %{field: "title", op: "bogus", group: 0}} =
+               invalid(%{"$or" => [%{"title" => %{"bogus" => "x"}}]})
+
+      assert msg =~ "in filter[$or][0]"
+      assert {:clause, _, %{field: "$or[0]"}} = invalid(%{"$or" => [%{"$or" => []}]})
+    end
+
+    test "$and is refused as a group, whatever its value shape" do
+      assert {:clause, msg, %{field: "$and"}} = invalid(%{"$and" => ["a=1"]})
+      assert msg =~ "the one group form is $or"
+      refute msg =~ ~s(operator "0")
     end
   end
 

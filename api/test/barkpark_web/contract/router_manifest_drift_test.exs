@@ -117,6 +117,12 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     # human removes a member with `bp cloud members`, never against the box.
     {"POST", "/v1/auth/cloud-users/deprovision"} =>
       "Cloud's member-removal door (ruling #26) — the control plane calls it, not a CLI verb",
+    # ── External Studio sign-in, server half ("Sign in with Barkpark Cloud") ──
+    # A Studio's own server trades the single-use exchange ticket the browser
+    # brought back from Cloud for a login session; it needs the PKCE verifier
+    # that only that server holds. `bp login` signs in through Cloud already.
+    {"POST", "/v1/auth/login-tickets/exchange"} =>
+      "external Studio's server-side ticket exchange — needs the Studio's PKCE verifier, not a CLI verb",
     # ── Deploy-flip SSE retire hook (task-2bcada0faa01ebb2) ─────────────────
     # deploy/instance-deploy.sh POSTs here, on the RETIRING slot's own port
     # (never through Caddy), right after a blue/green Caddy flip lands — so

@@ -19,6 +19,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /dashboard           —         SPA shell — deep-link/refresh lands the HTML
       GET     /new                 —         deploy-button landing (?template=<slug>) → SPA shell
       GET     /activate            —         bp-login device-approve page → SPA shell
+      GET     /studio-signin       —         external Studio sign-in entry → SPA shell
       POST    /v1/auth/login       —         email+password → {token, team_id} | {two_factor_required, challenge_token}
       POST    /v1/auth/two-factor-challenge — challenge_token + code/recovery_code → {token, team_id} (429 carries retry_after)
       POST    /v1/auth/device/start   —      {client_name, team_id?} → {device_code, user_code, verification_uri, ...}
@@ -75,6 +76,10 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/adopt admin    attach an already-running box: proof of admin control, Cloud mints + stores its own `barkpark cloud admin` token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket; seats the caller at their TEAM role, ruling #26)
       POST    /v1/auth/studio-signin        user   instance-initiated Studio entry by public host → {url}
+      POST    /v1/auth/studio-handoff       user   external Studio sign-in: {instance, return_to (allowlisted), state, code_challenge} → {url: return_to?ticket&state}
+      GET     /v1/barkparks/:id/studio-callbacks user   the instance's Studio sign-in callback allowlist
+      POST    /v1/barkparks/:id/studio-callbacks admin  add a Studio callback URL {url}
+      DELETE  /v1/barkparks/:id/studio-callbacks admin  remove a Studio callback URL {url}
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
       POST    /v1/push/device-tokens user  register this device's APNs/FCM push token (push-relay spike D15; idempotent upsert)
@@ -783,6 +788,12 @@ defmodule BarkparkCloud.Web.Router do
   ## inspect → Approve/Deny flow against POST /v1/auth/device/* (owned by S1).
   ## Served by the same shell as "/"; the JSON API is entirely under /v1/*.
   get("/activate", do: send_dashboard(conn))
+
+  ## "Sign in with Barkpark Cloud" for an external Studio — the browser entry.
+  ## `/studio-signin?instance=<id>&return_to=<callback>&state=<s>&code_challenge=<c>`
+  ## lands the SPA shell; app.js parks the query, signs the editor in if needed,
+  ## and POSTs it to `/v1/auth/studio-handoff`, which decides everything.
+  get("/studio-signin", do: send_dashboard(conn))
 
   ## Stripe Checkout returns the customer to the SPA root with a ?checkout=
   ## success|cancel flag (see Billing.StripeGateway / #282) — no dedicated route
@@ -4257,6 +4268,248 @@ defmodule BarkparkCloud.Web.Router do
       end
     end
   end
+
+  # ── "Sign in with Barkpark Cloud" for an EXTERNAL Studio ──────────────
+  #
+  # A Studio deployed apart from its instance (barkpark-studio on Vercel, say)
+  # sends the editor to `GET /studio-signin?instance=&return_to=&state=&
+  # code_challenge=` (the SPA shell, below). The SPA parks those, puts the
+  # editor through the normal Cloud login if needed, then POSTs them here.
+  #
+  # THE GATES, IN ORDER: a live Cloud session (401); well-formed state and PKCE
+  # challenge (422); the instance resolved by id and a MEMBERSHIP ROW on its own
+  # team — the studio-signin rule, so an editor arriving with no team context
+  # is judged by the team that owns the box, not the one the console is pinned
+  # to (404, no existence oracle); `return_to` EXACTLY on that instance's
+  # callback allowlist (403 — nothing is redirected anywhere a team admin did
+  # not name); then the suspended / not_live / custody refusals studio-link has.
+  #
+  # The instance mints an EXCHANGE ticket (audience = the callback's origin,
+  # PKCE challenge from the Studio), which only the Studio's server can redeem,
+  # and only at `POST /v1/auth/login-tickets/exchange`. The answer is the URL
+  # to navigate to: `return_to?ticket=…&state=…`. The ticket and that URL are
+  # never audited or logged.
+  @studio_state_format ~r/\A[A-Za-z0-9._~-]{16,256}\z/
+  @pkce_challenge_format ~r/\A[A-Za-z0-9_-]{43}\z/
+
+  post "/v1/auth/studio-handoff" do
+    conn = Auth.require_user(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      user = conn.assigns.current_user
+      p = conn.body_params
+      return_to = p["return_to"]
+      state = p["state"]
+      challenge = p["code_challenge"]
+
+      cond do
+        not (is_binary(state) and Regex.match?(@studio_state_format, state)) ->
+          json(conn, 422, %{
+            error: "invalid_state",
+            detail: "state must be 16-256 URL-safe characters"
+          })
+
+        not (is_binary(challenge) and Regex.match?(@pkce_challenge_format, challenge)) ->
+          json(conn, 422, %{
+            error: "invalid_code_challenge",
+            detail: "code_challenge must be a base64url SHA-256 (PKCE S256) challenge"
+          })
+
+        not is_binary(return_to) ->
+          json(conn, 422, %{error: "invalid_return_to", detail: "return_to is required"})
+
+        true ->
+          with %Barkpark{} = bp <- Registry.get_barkpark(p["instance"]),
+               %Team{} = team <- Accounts.get_team(bp.team_id),
+               %{role: role} <- Accounts.get_membership(team, user.id) do
+            if Registry.studio_callback_allowed?(bp, return_to) do
+              studio_handoff(conn, team, bp, user, role, return_to, state, challenge)
+            else
+              json(conn, 403, %{
+                error: "return_to_not_allowed",
+                detail:
+                  "This Studio address is not on the instance's sign-in allowlist. A team " <>
+                    "admin adds it with `bp barkparks studio-callback add`."
+              })
+            end
+          else
+            _ -> json(conn, 404, %{error: "not_found"})
+          end
+      end
+    end
+  end
+
+  defp studio_handoff(conn, team, bp, user, role, return_to, state, challenge) do
+    audience = Registry.studio_callback_origin(return_to)
+
+    case Registry.mint_studio_exchange_ticket(bp, user.email, role, audience, challenge) do
+      {:ok, ticket} ->
+        audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
+          name: bp.name,
+          entry: "studio-handoff",
+          audience: audience
+        })
+
+        json(conn, 200, %{url: return_to <> "?" <> URI.encode_query(ticket: ticket, state: state)})
+
+      {:error, :suspended} ->
+        conn = audit_suspended_refusal(conn, team, bp, "studio-handoff")
+
+        json(conn, 409, %{
+          error: "suspended",
+          detail:
+            "This instance is suspended. Studio access is closed until the " <>
+              "suspension is cleared."
+        })
+
+      {:error, :not_live} ->
+        json(conn, 409, %{error: "not_live"})
+
+      {:error, :no_admin_token} ->
+        json(conn, 404, %{
+          error: "no_admin_token",
+          detail:
+            "No admin token is stored for this instance yet. It is captured at " <>
+              "provision time — a pre-existing instance may need a re-provision."
+        })
+
+      {:error, :decrypt_failed} ->
+        json(conn, 500, %{error: "decrypt_failed"})
+
+      {:error, :instance_outdated} ->
+        json(conn, 409, %{
+          error: "instance_outdated",
+          detail: "This instance's Barkpark predates Studio sign-in. Update it, then try again."
+        })
+
+      {:error, :instance_error} ->
+        json(conn, 502, %{error: "instance_unreachable"})
+    end
+  end
+
+  # GET /v1/barkparks/:id/studio-callbacks → 200 {studio_callbacks: [...]} —
+  # the instance's Studio sign-in allowlist (any team member may read it).
+  get "/v1/barkparks/:id/studio-callbacks" do
+    conn = Auth.require_user(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            json(conn, 200, %{studio_callbacks: bp.studio_callback_urls || []})
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  # POST / DELETE /v1/barkparks/:id/studio-callbacks {url} → 200
+  # {studio_callbacks: [...]} — a TEAM ADMIN adds or removes a Studio callback
+  # URL. Adding one lets a Studio at that address sign team members in, so it is
+  # an admin act, and audited (`barkpark.studio_callback_added` / `_removed`).
+  post "/v1/barkparks/:id/studio-callbacks" do
+    conn = Auth.require_current_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            url = conn.body_params["url"]
+
+            case Registry.add_studio_callback(bp, url) do
+              {:ok, updated} ->
+                if updated.studio_callback_urls != bp.studio_callback_urls do
+                  audit_studio_callback(conn, team, bp, url, :added)
+                end
+
+                json(conn, 200, %{studio_callbacks: updated.studio_callback_urls})
+
+              error ->
+                studio_callback_refusal(conn, error)
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  delete "/v1/barkparks/:id/studio-callbacks" do
+    conn = Auth.require_current_team_admin(conn)
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        team = conn.assigns.current_team
+
+        case Registry.get_barkpark(conn.path_params["id"]) do
+          %Barkpark{team_id: tid} = bp when tid == team.id ->
+            url = conn.body_params["url"]
+
+            case Registry.remove_studio_callback(bp, url) do
+              {:ok, updated} ->
+                if updated.studio_callback_urls != bp.studio_callback_urls do
+                  audit_studio_callback(conn, team, bp, url, :removed)
+                end
+
+                json(conn, 200, %{studio_callbacks: updated.studio_callback_urls})
+
+              error ->
+                studio_callback_refusal(conn, error)
+            end
+
+          _ ->
+            json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
+  defp audit_studio_callback(conn, team, bp, url, :added) do
+    meta = %{name: bp.name, url: String.trim(url)}
+    audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_callback_added", meta)
+  end
+
+  defp audit_studio_callback(conn, team, bp, url, :removed) do
+    meta = %{name: bp.name, url: String.trim(url)}
+    audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_callback_removed", meta)
+  end
+
+  defp studio_callback_refusal(conn, {:error, :limit_reached}),
+    do:
+      json(conn, 422, %{
+        error: "limit_reached",
+        detail: "At most 20 Studio callbacks per instance."
+      })
+
+  defp studio_callback_refusal(conn, {:error, reason}) when is_binary(reason),
+    do: json(conn, 422, %{error: "invalid_url", detail: "The Studio callback " <> reason <> "."})
+
+  defp studio_callback_refusal(conn, {:error, %Ecto.Changeset{} = cs}),
+    do: json(conn, 422, %{error: "invalid", details: errors(cs)})
 
   # POST /v1/barkparks/:id/app-token → 200 {token, workspace_id, permissions,
   # expires_at} — the member-reachable app-token exchange (mobile charter D4).

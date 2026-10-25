@@ -1,12 +1,10 @@
 <!-- doc-tier: agent | canonical-for: rate-limit-budgets | budget: 900tok -->
 # Rate-limit budgets and principal classes
 
-`BarkparkWeb.Plugs.RateLimit` meters every `/v1/*` write/read pair against one
-process-global token bucket per key (`Barkpark.RateLimiter`). It runs BEFORE
-the pipeline's own credential plug (cheapest-first), so it resolves a
-principal itself rather than reading `conn.assigns`. Full mechanics and the
-cost rationale live in the module's own `@moduledoc`; this card owns the
-budget numbers and WHO gets which one.
+`BarkparkWeb.Plugs.RateLimit` meters every `/v1/*` read/write against one
+token bucket per key (`Barkpark.RateLimiter`). It runs BEFORE the credential
+plug, so it resolves a principal itself. Mechanics live in its `@moduledoc`;
+this card owns the budget numbers and WHO gets which one.
 
 ## Principal classes
 
@@ -26,11 +24,16 @@ abuse ceiling means it regardless of who is asking.
 
 ## Why `:session` and `:owned` are wider (task-2c31de0cf6597d32 + follow-up)
 
-Barkpark Studio proxies many editors through one server and egress IP, so
-N editors shared ONE 60/min write bucket — one person typing for ~15s could
-429 everyone. `:session` gives each editor's login its own bucket; `:owned`
+Studio proxies many editors through one server and egress IP, so N editors
+shared ONE 60/min write bucket and one typist could 429 everyone. `:session` gives each editor's login its own bucket; `:owned`
 does the same for a Bearer whose `owner_user_id` names one human.
 `:verified`/`:anonymous` are untouched — a shared/service Bearer with no owner stays at 60/min.
+
+## A 429, and a background writer
+
+A 429's `details.budget` names the spent bucket (`class`, `per_minute`,
+`scope`, `principal`) and `details.resets_at`. Buckets are per token × class
+× dataset: a background writer with its own token never spends an editor's.
 
 ## Tuning
 

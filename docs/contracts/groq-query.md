@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: groq-query-api | budget: 1500tok -->
 # GROQ query API
 
-Barkpark answers GROQ queries on the URL scheme of Sanity's HTTP query API, so a site built on `@sanity/client` or `next-sanity` can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/` (parser, evaluator, document source), `BarkparkWeb.GroqController`.
+Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/` (parser, evaluator, document source), `BarkparkWeb.GroqController`.
 
 ## Endpoint
 
@@ -12,14 +12,14 @@ Barkpark answers GROQ queries on the URL scheme of Sanity's HTTP query API, so a
 | `query` | GROQ text; GET query string or POST body `{"query", "params"}` |
 | `$name` | GET only: one parameter, JSON-encoded (`$slug="intro"`) |
 | `params` | POST only: object of decoded parameter values |
-| `perspective` | `published` (default for every apiVersion), `drafts` (`previewDrafts` is an alias), `raw`; other values → 400 |
+| `perspective` | `published` (default, any apiVersion), `drafts` (`previewDrafts` is an alias), `raw`; other values → 400 |
 | `returnQuery` | `false` leaves `query` out of the response |
 
-Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, a `public-read` token) gets `published` whatever it asks for. POST is billed to the read rate-limit bucket. A GET target over 32,753 bytes gets an empty 414; use POST.
+Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, a `public-read` token) gets `published` regardless. POST bills the read bucket. A GET target over 32,753 bytes gets an empty 414; use POST.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` is the regular read's: stored in the `documents.title` column, where `title == "x"` is matched. A document without a title has no `title` key. `drafts` overlays a draft on its published twin, sets `_id` to the published id and adds `_originalId`; `raw` returns `drafts.<id>` rows as stored.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` comes from the `documents.title` column (`title == "x"` matches it); no title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows as stored.
 
-Errors keep Barkpark's envelope and add Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
+Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
 
 ## Client configuration
 
@@ -27,7 +27,7 @@ Errors keep Barkpark's envelope and add Sanity's `description` and `type`: a syn
 import {createClient} from '@sanity/client'
 
 const client = createClient({
-  projectId: 'barkpark', // any value; the client needs one to send perspective
+  projectId: 'barkpark', // any value; needed to send perspective
   dataset: 'production',
   apiHost: 'https://<host>/w/<workspace>/p/<project>',
   useProjectHostname: false,
@@ -37,7 +37,7 @@ const client = createClient({
 })
 ```
 
-`next-sanity`'s `createClient` takes the same options.
+`next-sanity`'s `createClient` takes these too.
 
 ## Sync tags
 
@@ -59,8 +59,10 @@ Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, 
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic; `->` also follows plain id strings) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`. Sanity's GROQ test suite runs in CI (`api/test/barkpark/groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` selectors or custom `fn` declarations.
+Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic; `->` also follows plain id strings) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`api/test/barkpark/groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` or custom `fn`.
 
-Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, `documents::`, `delta::`, `user::`; release and version perspectives; `resultSourceMap`; the Live Content API (`/data/live/events`). Barkpark defaults to `published` for every API version; Sanity defaults to `raw` before 2025-02-19, so a client on an older version that relies on drafts must ask for `perspective: 'raw'`.
+Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; release and version perspectives; `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark always to `published`: an older client that needs drafts asks for `perspective: 'raw'`.
+
+`score()` weighs as groq-js (a term adds by its count in the field; `boost` adds). Sanity's hosted one favours rarer terms and shorter fields; multi-clause ranks can differ.
 
 Checking a site's queries: `tooling/groq/compare.mjs` runs a query corpus through groq-js and through this endpoint over the same documents and reports the differences (dev only).

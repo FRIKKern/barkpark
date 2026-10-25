@@ -220,6 +220,36 @@ defmodule BarkparkWeb.WsBVisibilityTest do
       assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
     end
 
+    # task-02d4488c460185c0: an $or branch is no way around the field check.
+    test "anonymous $or branch on a private field is rejected (422)", %{conn: conn} do
+      resp =
+        get(
+          conn,
+          "/v1/data/query/#{@dataset}/report?filter[$or][0][name][eq]=alice&filter[$or][1][salary][eq]=99999"
+        )
+
+      assert resp.status == 422
+      assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
+    end
+
+    # task-8af256dcd8f17902: a facet counts a field's values, an oracle too.
+    test "anonymous facet or facet_range on a private field is rejected (422)", %{conn: conn} do
+      for q <- ["facet=name,salary", "facet_range[salary]=100,200"] do
+        resp = get(conn, "/v1/data/query/#{@dataset}/report?" <> q)
+        assert resp.status == 422
+        body = json_response(resp, 422)
+        assert body["error"]["details"]["field"] == "salary"
+        refute Map.has_key?(body, "result")
+      end
+    end
+
+    # task-3fbfafa3d1035ec2: collapsing groups by a field's value, an oracle too.
+    test "anonymous collapse on a private field is rejected (422)", %{conn: conn} do
+      resp = get(conn, "/v1/data/query/#{@dataset}/report?collapse=salary")
+      assert resp.status == 422
+      assert json_response(resp, 422)["error"]["details"]["field"] == "salary"
+    end
+
     test "anonymous order by a private field is rejected (422)", %{conn: conn} do
       resp = get(conn, "/v1/data/query/#{@dataset}/report?order=salary:asc")
       assert resp.status == 422

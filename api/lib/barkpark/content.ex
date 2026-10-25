@@ -146,6 +146,18 @@ defmodule Barkpark.Content do
   def count_documents(type, dataset, opts \\ []),
     do: Query.count_documents(type, dataset, opts)
 
+  @doc "Referrer counts per target id. See `Content.Query.count_reference_holders/3`."
+  def count_reference_holders(ids, dataset, opts),
+    do: Query.count_reference_holders(ids, dataset, opts)
+
+  @doc "Group sizes of collapsed rows. See `Content.Query.collapse_counts/4`."
+  def collapse_counts(type, dataset, opts, ids),
+    do: Query.collapse_counts(type, dataset, opts, ids)
+
+  @doc "Value counts and range buckets over a typed/filtered query's matched set. See `Content.Query.facet_counts/3`."
+  def facet_counts(type, dataset, opts \\ []),
+    do: Query.facet_counts(type, dataset, opts)
+
   @doc """
   Fetch a single document by `{doc_id, type, dataset}`.
 

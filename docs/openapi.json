@@ -431,7 +431,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -464,6 +464,33 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first.",
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One document per value of a top-level field, the first by --order; a document with no value stands alone (collapse=familyId). result.collapse.counts gives each listed _id its group size, and total and facets count groups.",
+            "in": "query",
+            "name": "collapse",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            "in": "query",
+            "name": "facet_range",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -792,6 +819,89 @@
           "cycle"
         ],
         "x-barkpark-scope": "write"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/backlink-counts/{dataset}": {
+      "get": {
+        "operationId": "doc.backlink-counts.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated document ids (1 to 100).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Count referrers of this type only.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "How many documents reference each id, without reading them: --ids a,b,c (at most 100). Schema-declared references only; plugin edges are not counted.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/search": {
@@ -4707,6 +4817,73 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/data/backlink-counts/{dataset}": {
+      "get": {
+        "operationId": "doc.backlink-counts",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated document ids (1 to 100).",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Count referrers of this type only.",
+            "in": "query",
+            "name": "type",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "How many documents reference each id, without reading them: --ids a,b,c (at most 100). Schema-declared references only; plugin edges are not counted.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/plugins/bulldocs/sessions/{slug}/events": {
       "post": {
         "operationId": "session.log",
@@ -5137,7 +5314,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -5170,6 +5347,33 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first.",
+            "in": "query",
+            "name": "facet",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "One document per value of a top-level field, the first by --order; a document with no value stands alone (collapse=familyId). result.collapse.counts gives each listed _id its group size, and total and facets count groups.",
+            "in": "query",
+            "name": "collapse",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            "in": "query",
+            "name": "facet_range",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -9540,7 +9744,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -13504,7 +13708,7 @@
             }
           },
           {
-            "description": "Inline single reference fields (depth 1): a field name or comma list.",
+            "description": "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops.",
             "in": "query",
             "name": "expand",
             "required": false,
@@ -18958,6 +19162,24 @@
             }
           },
           {
+            "description": "Sort the match by a field instead of relevance, as on doc query: <field>:asc|desc, comma list for ties, e.g. title:asc. relevance or no order keeps the ranking. Needs --type.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "nb | nn: sort the text terms of --order by ICU Norwegian collation.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Comma-separated top-level content fields (needs --type): value counts over the filtered match in facets.fields.",
             "in": "query",
             "name": "facet",
@@ -20339,6 +20561,24 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Sort the match by a field instead of relevance, as on doc query: <field>:asc|desc, comma list for ties, e.g. title:asc. relevance or no order keeps the ranking. Needs --type.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "nb | nn: sort the text terms of --order by ICU Norwegian collation.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {

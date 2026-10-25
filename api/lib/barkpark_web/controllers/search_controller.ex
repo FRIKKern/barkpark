@@ -289,12 +289,17 @@ defmodule BarkparkWeb.SearchController do
   #     `QueryController.search_filter_map/3`, applied inside the search so
   #     they run before the limit, the count and the facets
   #     (task-c7395e0d27e1121b).
+  #   * `order=<field>:asc|desc` — the query API's order grammar (and its
+  #     `collation`) instead of relevance; `relevance` or no order keeps the
+  #     ranking (task-5ddc3e08684f0d48). A private field is a 403
+  #     `forbidden_field`, as it is for a filter.
   #   * `facet=a,b` (or repeated `facet[]=`) — value counts of up to
   #     #{@max_facet_fields} top-level content fields over the filtered match,
   #     in `facets.fields`. A field this caller may not read is a 403
   #     `forbidden_field`, as it is for a filter.
   #
-  # `filter` and `facet` need `type`: a field name means something on one type.
+  # `filter`, `facet` and `order` need `type`: a field name means something on
+  # one type.
   @max_facet_fields 10
 
   defp search_terms_opts(conn, dataset, params) do
@@ -302,8 +307,16 @@ defmodule BarkparkWeb.SearchController do
          {:ok, suggest} <- parse_suggest(conn, params["suggest"]),
          {:ok, facet_fields} <- parse_facets(conn, params["facet"]),
          {:ok, filter_map, facet_fields} <-
-           search_filters(conn, dataset, params, facet_fields) do
-      {:ok, [match: match, suggest: suggest, filter_map: filter_map, facet_fields: facet_fields]}
+           search_filters(conn, dataset, params, facet_fields),
+         {:ok, order} <- search_order(conn, dataset, params) do
+      {:ok,
+       [
+         match: match,
+         suggest: suggest,
+         filter_map: filter_map,
+         facet_fields: facet_fields,
+         order: order
+       ]}
     end
   end
 
@@ -399,6 +412,34 @@ defmodule BarkparkWeb.SearchController do
         with {:ok, filter_map} <- filter_map(conn, params, schema, filter?),
              :ok <- readable_facets(conn, facet_fields, schema, caller_context) do
           {:ok, filter_map, facet_fields}
+        end
+    end
+  end
+
+  defp search_order(_conn, _dataset, %{"order" => order}) when order in [nil, "", "relevance"],
+    do: {:ok, nil}
+
+  defp search_order(_conn, _dataset, params) when not is_map_key(params, "order"),
+    do: {:ok, nil}
+
+  defp search_order(conn, dataset, params) do
+    case bin(params["type"]) do
+      nil ->
+        {:error,
+         ErrorResponse.emit_custom(
+           conn,
+           400,
+           "malformed",
+           "order needs type: a field name means something on one type",
+           %{parameter: "type", received: nil}
+         )}
+
+      type ->
+        schema = schema_resolver(conn, dataset).(type)
+
+        case BarkparkWeb.QueryController.search_order(conn, params, schema) do
+          {:ok, order} -> {:ok, order}
+          {:error, reason} -> {:error, error_json(conn, {:error, reason})}
         end
     end
   end

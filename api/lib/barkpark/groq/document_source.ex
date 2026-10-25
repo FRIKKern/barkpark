@@ -252,26 +252,46 @@ defmodule Barkpark.Groq.DocumentSource do
     paths = for {{:path, path}, _dir} <- keys, do: path
 
     cond do
-      constraints.ids != nil or constraints.types == nil or "paper" in constraints.types ->
+      constraints.ids != nil ->
+        :error
+
+      reads_no_content?(constraints, paths) ->
+        slice_exact(state, constraints, keys, from, to)
+
+      constraints.types == nil or "paper" in constraints.types ->
         :error
 
       not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state, paths)) ->
         :error
 
       true ->
-        key = cache_key(constraints)
-        slot = {:groq_src_slice, key, keys, from, to}
-
-        case Process.get(slot) do
-          nil ->
-            docs = load_slice(state, key, keys, from, to)
-            Process.put(slot, docs)
-            {:ok, docs}
-
-          docs ->
-            {:ok, docs}
-        end
+        slice_exact(state, constraints, keys, from, to)
     end
+  end
+
+  defp slice_exact(state, constraints, keys, from, to) do
+    key = cache_key(constraints)
+    slot = {:groq_src_slice, key, keys, from, to}
+
+    case Process.get(slot) do
+      nil ->
+        docs = load_slice(state, key, keys, from, to)
+        Process.put(slot, docs)
+        {:ok, docs}
+
+      docs ->
+        {:ok, docs}
+    end
+  end
+
+  # A filter and sort that read no stored content (`_id in path()`, the
+  # timestamps, the view counts) test only columns every row has, so no
+  # schema can hide what they read and SQL keeps what the evaluator keeps
+  # across all types, papers included (task-754316ae85c63a1a: the newest
+  # draft is then one ORDER BY ... LIMIT read, not every draft loaded).
+  defp reads_no_content?(constraints, paths) do
+    paths == [] and constraints.eq == [] and constraints.any == [] and
+      constraints.checks != [] and filter_paths(constraints) == []
   end
 
   # A `*[...]` whose filter is exact is read in SQL alone, as an exact slice
@@ -296,7 +316,8 @@ defmodule Barkpark.Groq.DocumentSource do
 
         case Process.get(slot) do
           nil ->
-            docs = load_slice(state, key, [], 0, state.max_per_fetch + 1, fields)
+            read_state = system_only_state(state, fields)
+            docs = load_slice(read_state, key, [], 0, read_state.max_per_fetch + 1, fields)
             Process.put(slot, docs)
             {:ok, docs}
 
@@ -305,6 +326,25 @@ defmodule Barkpark.Groq.DocumentSource do
         end
     end
   end
+
+  # `*[...]._id` and other projections of system fields only read no stored
+  # content (task-2a7741b89420a38a): each row is a handful of columns, so the
+  # per-`*[...]` document cap, which guards memory for whole documents, gives
+  # way to the per-query load cap, and the stored-content size does not apply.
+  # 18,020 product ids then answer where the whole products are refused.
+  @system_fields ~w(_id _type _rev _createdAt _updatedAt)
+
+  defp system_only_state(state, fields) when is_list(fields) and fields != [] do
+    if Enum.all?(fields, &(&1 in @system_fields)),
+      do: %{
+        state
+        | max_per_fetch: max(state.max_per_fetch, state.max_loaded),
+          max_bytes_per_fetch: nil
+      },
+      else: state
+  end
+
+  defp system_only_state(state, _fields), do: state
 
   # Any other slice reads the rows SQL narrows to in chunks of `@scan_chunk`
   # and holds only the documents the slice needs, so the per-fetch limit on
@@ -375,7 +415,10 @@ defmodule Barkpark.Groq.DocumentSource do
     # A view count is not a content field; no schema hides it.
     checks =
       plain
-      |> Enum.reject(&match?({:views, _column, _op, _n}, &1))
+      |> Enum.reject(
+        &(match?({:views, _column, _op, _n}, &1) or match?({:timestamp, _, _, _}, &1) or
+            match?({:id_path, _}, &1))
+      )
       |> Enum.map(&check_path/1)
 
     branches = for {:or, branches} <- ors, branch <- branches, do: filter_paths(branch)
@@ -583,6 +626,8 @@ defmodule Barkpark.Groq.DocumentSource do
   end
 
   defp check_reads({:views, _column, _op, _n}), do: 0
+  defp check_reads({:timestamp, _column, _op, _value}), do: 0
+  defp check_reads({:id_path, _pattern}), do: 0
 
   defp check_reads({:or, branches}),
     do: Enum.sum_by(branches, &content_reads({&1.types, &1.ids, &1.eq, &1.any, &1.checks}))
@@ -1121,12 +1166,18 @@ defmodule Barkpark.Groq.DocumentSource do
 
     cond do
       length(sized) > state.max_per_fetch ->
+        cap = state.max_per_fetch
+
+        # task-2a7741b89420a38a: the old text asked for a _type filter even when
+        # the query had one and the type alone holds more than the cap.
         raise LimitError,
           message:
-            "one *[...] in this query matches more than #{state.max_per_fetch} documents. " <>
-              "Narrow it with a _type filter or an equality on a field."
+            "one *[...] in this query matches more than #{cap} documents, the most one " <>
+              "*[...] may load at once. Page through them with a slice, for example " <>
+              "*[...] | order(_id) [0...#{cap}], then [#{cap}...#{cap * 2}], or narrow " <>
+              "the filter further; count(*[...]) gives the total without loading them."
 
-      bytes > state.max_bytes_per_fetch ->
+      is_integer(state.max_bytes_per_fetch) and bytes > state.max_bytes_per_fetch ->
         raise LimitError,
           message:
             "one *[...] in this query matches #{length(sized)} documents holding #{div(bytes, 1_048_576)} MiB " <>
@@ -1275,7 +1326,51 @@ defmodule Barkpark.Groq.DocumentSource do
   defp check_condition({:views, column, op, n}, perspective),
     do: Views.sql_condition(column, op, n, perspective == :published)
 
+  defp check_condition({:id_path, pattern}, perspective) do
+    regex = id_path_regex(pattern)
+    dynamic(fragment("? ~ ?", ^id_expr(perspective), ^regex))
+  end
+
   defp check_condition(check, _perspective), do: check_condition(check)
+
+  # The evaluator's `path_regex/1` (PCRE, no dotall) as a Postgres ARE that
+  # matches the same ids: `**` stops at a newline as PCRE's `.` does, and
+  # `\n?$` is PCRE's `$`, which also matches before a final newline. A
+  # literal escapes every ASCII character that is not a letter or digit;
+  # ARE reads `\k` as `k` for those.
+  defp id_path_regex(pattern) do
+    body =
+      pattern
+      |> String.split(".")
+      |> Enum.map_join("\\.", fn
+        "*" -> "[^.]+"
+        "**" -> "[^\n]*"
+        part -> String.replace(part, ~r/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]/, "\\\\\\0")
+      end)
+
+    "^" <> body <> "\n?$"
+  end
+
+  # `_createdAt op "..."`: the column rendered as the envelope renders it
+  # (`Envelope.to_iso8601/1`: microseconds, `Z`, one fixed width), compared
+  # byte for byte as GROQ compares the two strings. ASCII only, so no UTF-16
+  # adjustment is needed. A NULL column is null, which GROQ also drops.
+  @iso_format ~s(YYYY-MM-DD"T"HH24:MI:SS.US"Z")
+  for op <- ["<", "<=", ">", ">=", "=="] do
+    sql_op = if op == "==", do: "=", else: op
+
+    defp check_condition({:timestamp, column, unquote(op), value}) do
+      dynamic(
+        [d],
+        fragment(
+          unquote("to_char(?, ?) COLLATE \"C\" #{sql_op} ? COLLATE \"C\""),
+          field(d, ^column),
+          ^@iso_format,
+          type(^value, :string)
+        )
+      )
+    end
+  end
 
   defp branch_condition(branch, perspective) do
     conditions =

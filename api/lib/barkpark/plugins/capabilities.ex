@@ -929,7 +929,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "expand",
             "string",
-            "Inline single reference fields (depth 1): a field name or comma list."
+            "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops."
           ),
           flag(
             "fields",
@@ -962,7 +962,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "expand",
             "string",
-            "Inline single reference fields (depth 1): a field name or comma list."
+            "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops."
           ),
           flag(
             "fields",
@@ -1006,6 +1006,22 @@ defmodule Barkpark.Plugins.Capabilities do
         "/v1/data/backlinks/:dataset",
         "read",
         flags: [flag("ids", "string", "Comma-separated document ids (1 to 100).")],
+        writes: false,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.backlink-counts",
+        "doc",
+        "backlink-counts",
+        "How many documents reference each id, without reading them: --ids a,b,c (at most 100). Schema-declared references only; plugin edges are not counted.",
+        "GET",
+        "/v1/data/backlink-counts/:dataset",
+        "read",
+        flags: [
+          flag("ids", "string", "Comma-separated document ids (1 to 100)."),
+          flag("type", "string", "Count referrers of this type only.")
+        ],
         writes: false,
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -1327,7 +1343,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "expand",
             "string",
-            "Inline single reference fields (depth 1): a field name or comma list."
+            "Inline reference fields: a field name or comma list. A dotted path such as sections.cards expands up to 4 hops."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
           flag(
@@ -1337,6 +1353,22 @@ defmodule Barkpark.Plugins.Capabilities do
           ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
+          ),
+          flag(
+            "facet",
+            "string",
+            "Value counts over the filtered set (not the page) in result.facets.fields: up to 10 top-level fields, comma list (facet=format,language). A string, number or boolean counts its value, a reference its _ref, an array each element once per document; 100 values per field, biggest first."
+          ),
+          flag(
+            "collapse",
+            "string",
+            "One document per value of a top-level field, the first by --order; a document with no value stands alone (collapse=familyId). result.collapse.counts gives each listed _id its group size, and total and facets count groups."
+          ),
+          flag(
+            "facet_range",
+            "string",
+            "Numeric buckets over the filtered set in result.facets.ranges: field:e1,e2,… with 1–20 ascending edges (facet_range=price:100,200,500; HTTP also takes facet_range[price]=100,200,500). Buckets run below e1, from each edge to the next, and from the last edge up; empty ones count 0. Repeatable, up to 5 fields.",
+            repeatable: true
           )
         ],
         paginated: true,
@@ -2394,6 +2426,16 @@ defmodule Barkpark.Plugins.Capabilities do
             "Type-ahead fast path: the same match and best hits and an exact count, without " <>
               "facets or recovery passes.",
             default: false
+          ),
+          flag(
+            "order",
+            "string",
+            "Sort the match by a field instead of relevance, as on doc query: <field>:asc|desc, comma list for ties, e.g. title:asc. relevance or no order keeps the ranking. Needs --type."
+          ),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of --order by ICU Norwegian collation."
           ),
           flag(
             "facet",

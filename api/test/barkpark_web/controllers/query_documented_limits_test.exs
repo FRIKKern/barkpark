@@ -16,8 +16,8 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
     * no deref in sort                      — HOLDS (same reason)
     * no subfield projection                — HOLDS (a dotted `?fields=` keeps the
                                               WHOLE parent object)
-    * expand is depth-1 single-ref only     — depth-1 HOLDS; "single-ref only"
-                                              DOES NOT HOLD (ref ARRAYS expand)
+    * expand is depth-1 single-ref only     — DOES NOT HOLD: ref ARRAYS expand, and
+                                              a dotted path walks up to 4 hops
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -224,22 +224,20 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
       assert [%{"_id" => "tg1", "title" => "Fiction"}] = doc["tags"]
     end
 
-    test "HOLDS for depth: expansion is one hop — the inlined doc's own refs stay ids", %{
-      conn: conn,
-      raw: raw
-    } do
-      # `author` has no reference fields of its own, so depth is measured on the
-      # SHAPE of the expand spec instead: a dotted `expand=author.employer` names
-      # no top-level reference field. It used to answer 200 and expand NOTHING;
-      # since owner ruling #53 (2026-10-03) it is a 400 naming the path, so a
-      # caller asking for a second hop is told it does not exist.
+    test "DOES NOT HOLD for depth: a dotted path walks references, and names a segment that is none",
+         %{conn: conn, raw: raw} do
+      # Since task-053249d91d178353 `expand=a.b` expands `b` on each expanded
+      # `a`, up to four segments (expand_hops_test.exs). `author` has no
+      # reference fields of its own, so `author.employer` is a 400 naming the
+      # segment that is not one, never a silent 200 with nothing expanded.
       err =
         query(conn, raw, "expand=author.employer&filter[title]=Beta&perspective=published")
         |> json_response(400)
         |> Map.fetch!("error")
 
       assert err["details"]["parameter"] == "expand"
-      assert err["details"]["unknown"] == ["author.employer"]
+      assert err["details"]["path"] == "author.employer"
+      assert err["details"]["unknown"] == "employer"
 
       body =
         query(conn, raw, "expand=author&filter[title]=Beta&perspective=published")

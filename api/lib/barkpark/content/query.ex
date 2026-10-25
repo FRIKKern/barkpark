@@ -137,9 +137,17 @@ defmodule Barkpark.Content.Query do
     keys = Keyword.get(opts, :content_keys)
     base = base_query(type, dataset, filter_map, opts)
 
-    case perspective do
-      :drafts -> list_with_drafts_merged(base, order, limit, offset, keys)
-      other -> list_linear(base, other, order, limit, offset, keys)
+    cond do
+      field = opts[:collapse] ->
+        type
+        |> collapsed_query(dataset, opts, field)
+        |> list_linear(:raw, order, limit, offset, keys)
+
+      perspective == :drafts ->
+        list_with_drafts_merged(base, order, limit, offset, keys)
+
+      true ->
+        list_linear(base, perspective, order, limit, offset, keys)
     end
   end
 
@@ -483,7 +491,10 @@ defmodule Barkpark.Content.Query do
     filter_map = Keyword.get(opts, :filter_map, %{})
     base = base_query(type, dataset, filter_map, opts)
 
-    case perspective do
+    case if(is_binary(opts[:collapse]), do: :collapse, else: perspective) do
+      :collapse ->
+        type |> collapsed_query(dataset, opts, opts[:collapse]) |> Repo.aggregate(:count)
+
       :drafts ->
         inner =
           from(d in base,
@@ -495,6 +506,305 @@ defmodule Barkpark.Content.Query do
       other ->
         base |> apply_perspective(other) |> Repo.aggregate(:count)
     end
+  end
+
+  @facet_value_limit 100
+
+  @doc """
+  Value counts and numeric range buckets over the set `count_documents/3`
+  counts: same type, scope, filter and perspective, no limit or offset
+  (task-8af256dcd8f17902).
+
+    - `:facet_fields` — top-level content fields. A string, number or boolean
+      counts its value, a reference its `_ref`, an array each distinct element
+      once per document. At most #{@facet_value_limit} values per field,
+      biggest first, ties by label.
+    - `:facet_ranges` — `[{field, edges}]`, edges ascending `Decimal`s. A
+      numeric value lands in `(-inf, e1)`, `[e1, e2)` … `[en, +inf)`; every
+      bucket is listed, an empty one as 0. Non-numeric values are not counted.
+
+  Returns `%{fields: %{field => [{label, count}]}, ranges: %{field => [count]}}`,
+  the range counts in bucket order (`length(edges) + 1` of them).
+  """
+  @spec facet_counts(String.t(), String.t(), keyword()) :: %{fields: map(), ranges: map()}
+  def facet_counts(type, dataset, opts \\ []) do
+    fields = Keyword.get(opts, :facet_fields, [])
+    ranges = Keyword.get(opts, :facet_ranges, [])
+
+    # One spec per facet: the field, and for a range its edges as text.
+    specs =
+      Enum.map(fields, &{&1, nil}) ++
+        Enum.map(ranges, fn {f, edges} -> {f, Enum.map_join(edges, ",", &Decimal.to_string/1)} end)
+
+    rows = if specs == [], do: [], else: Repo.all(facet_query(type, dataset, opts, specs))
+
+    %{
+      fields:
+        Map.new(fields, fn f -> {f, for({^f, false, label, n} <- rows, do: {label, n})} end),
+      ranges:
+        Map.new(ranges, fn {f, edges} ->
+          counts = for {^f, true, b, n} <- rows, into: %{}, do: {String.to_integer(b), n}
+          {f, for(i <- 0..length(edges), do: Map.get(counts, i, 0))}
+        end)
+    }
+  end
+
+  # ONE read of the matched set for every facet. Each matched row's `content`
+  # is decompressed once and cut to the faceted keys, in a MATERIALIZED CTE:
+  # every `content->key` on the stored value decompresses all of it again, and
+  # an inlined cut is evaluated once per reference. Each spec then turns the
+  # cut into labels: a value facet its distinct values, a range facet its
+  # bucket number. A query per facet kind ran the filtered match once each.
+  # `title` and `status` live in their own columns, not in `content` (the
+  # writer promotes them), so the cut reads those two from the columns.
+  defp facet_query(type, dataset, opts, specs) do
+    keys = Enum.map(specs, &elem(&1, 0))
+
+    cut =
+      type
+      |> matched_query(dataset, opts)
+      |> select([d], %{
+        c:
+          fragment(
+            "(SELECT coalesce(jsonb_object_agg(k, s.c -> k) FILTER (WHERE jsonb_exists(s.c, k)), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, unnest(?::text[]) AS k) || jsonb_strip_nulls(jsonb_build_object('title', CASE WHEN 'title' = ANY(?) THEN ? END, 'status', CASE WHEN 'status' = ANY(?) THEN ? END))",
+            d.content,
+            type(^Enum.uniq(keys), {:array, :string}),
+            type(^keys, {:array, :string}),
+            d.title,
+            type(^keys, {:array, :string}),
+            d.status
+          )
+      })
+
+    # One branch per spec over the cut, so a scalar value never pays for the
+    # per-row array walk: scalars group directly, only array values go
+    # through jsonb_array_elements, and a range groups its bucket number.
+    # Measured on 10,200 products of ~7 kB: 76 ms p50 against 107 ms for one
+    # lateral walk over every (row, spec) pair. The value and array branches
+    # of one field are summed before the top values are kept.
+    [first | rest] =
+      Enum.flat_map(specs, fn
+        {k, nil} -> [facet_scalar_branch(k), facet_array_branch(k)]
+        {k, e} -> [facet_range_branch(k, e)]
+      end)
+
+    combined = Enum.reduce(rest, first, fn branch, acc -> union_all(acc, ^branch) end)
+
+    ranked =
+      from(u in subquery(combined),
+        group_by: [u.field, u.range, u.label],
+        select: %{
+          field: u.field,
+          range: u.range,
+          label: u.label,
+          count: type(sum(u.count), :integer),
+          rank:
+            over(row_number(),
+              partition_by: [u.field, u.range],
+              order_by: [desc: sum(u.count), asc: u.label]
+            )
+        }
+      )
+
+    from(r in subquery(ranked),
+      where: r.rank <= @facet_value_limit,
+      order_by: [asc: r.field, asc: r.range, asc: r.rank],
+      select: {r.field, r.range, r.label, r.count}
+    )
+    |> with_cte("facet_rows", as: ^cut, materialized: true)
+  end
+
+  # A string, number or boolean value counts as itself, a reference its `_ref`.
+  defp facet_scalar_branch(k) do
+    labels =
+      from(r in "facet_rows",
+        where:
+          fragment("jsonb_typeof(?->?) IN ('string', 'number', 'boolean', 'object')", r.c, ^k),
+        select: %{
+          x:
+            fragment(
+              "CASE jsonb_typeof(?->?) WHEN 'object' THEN ?->?->>'_ref' ELSE ?->>? END",
+              r.c,
+              ^k,
+              r.c,
+              ^k,
+              r.c,
+              ^k
+            )
+        }
+      )
+
+    from(s in subquery(labels),
+      where: not is_nil(s.x),
+      group_by: s.x,
+      select: %{field: type(^k, :string), range: false, label: s.x, count: count()}
+    )
+  end
+
+  # Each distinct element of an array once per document, labelled as above.
+  defp facet_array_branch(k) do
+    from(r in "facet_rows",
+      where: fragment("jsonb_typeof(?->?) = 'array'", r.c, ^k),
+      inner_lateral_join:
+        t in fragment(
+          """
+          SELECT DISTINCT CASE jsonb_typeof(a.j)
+            WHEN 'string' THEN a.j #>> '{}' WHEN 'number' THEN a.j #>> '{}'
+            WHEN 'boolean' THEN a.j #>> '{}' WHEN 'object' THEN a.j ->> '_ref' END AS x
+          FROM jsonb_array_elements(?->?) AS a(j)
+          """,
+          r.c,
+          ^k
+        ),
+      on: true,
+      where: not is_nil(t.x),
+      group_by: t.x,
+      select: %{field: type(^k, :string), range: false, label: t.x, count: count()}
+    )
+  end
+
+  # The bucket number of a numeric value; `e` is the edges as "e1,e2,…".
+  defp facet_range_branch(k, e) do
+    buckets =
+      from(r in "facet_rows",
+        where: fragment("jsonb_typeof(?->?) = 'number'", r.c, ^k),
+        select: %{
+          b:
+            fragment(
+              "width_bucket((?->>?)::numeric, string_to_array(?, ',')::numeric[])::text",
+              r.c,
+              ^k,
+              ^e
+            )
+        }
+      )
+
+    from(s in subquery(buckets),
+      group_by: s.b,
+      select: %{field: type(^k, :string), range: true, label: s.b, count: count()}
+    )
+  end
+
+  # The rows `count_documents/3` counts. Under `:drafts` one row per logical
+  # document, the draft when there is one, as the merged list reads it.
+  defp matched_query(type, dataset, opts) do
+    base = base_query(type, dataset, Keyword.get(opts, :filter_map, %{}), opts)
+
+    perspective = Keyword.get(opts, :perspective, :raw)
+
+    case if(is_binary(opts[:collapse]), do: :collapse, else: perspective) do
+      :collapse ->
+        collapsed_query(type, dataset, opts, opts[:collapse])
+
+      :drafts ->
+        from(d in base,
+          distinct: fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
+          order_by: [
+            fragment("regexp_replace(?, '^drafts\\.', '') COLLATE \"C\"", d.doc_id),
+            fragment("CASE WHEN ? LIKE 'drafts.%' THEN 0 ELSE 1 END", d.doc_id)
+          ]
+        )
+
+      other ->
+        apply_perspective(base, other)
+    end
+  end
+
+  # ── Collapse (task-3fbfafa3d1035ec2) ─────────────────────────────────────
+  #
+  # `:collapse` names a field; the matched set keeps one row per value of it,
+  # the first by the list's own order (the id breaks ties). A row with no value
+  # is its own group, so nothing without the field disappears. `title` and
+  # `status` are columns, not content keys, and are read there.
+
+  # The matched rows, one per logical document, as a plain `Document` query.
+  defp collapse_rows(type, dataset, opts) do
+    case Keyword.get(opts, :perspective, :raw) do
+      :drafts ->
+        merged = matched_query(type, dataset, Keyword.delete(opts, :collapse))
+        from(d in Document, where: d.id in subquery(select(merged, [m], m.id)))
+
+      _ ->
+        matched_query(type, dataset, Keyword.delete(opts, :collapse))
+    end
+  end
+
+  # The group representatives. `distinct` on an expression makes Ecto emit
+  # DISTINCT ON (key) and prepend the same key, with the same parameter, to the
+  # ORDER BY, so the first row of each group by `order` is the one kept.
+  defp collapsed_query(type, dataset, opts, field) do
+    order = opts |> Keyword.get(:order, :updated_at_desc) |> with_collation(opts[:collation])
+
+    reps =
+      type
+      |> collapse_rows(dataset, opts)
+      |> apply_order(order)
+      |> order_by([d], asc: d.id)
+      |> distinct(
+        [d],
+        fragment(
+          "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+          ^field,
+          d.title,
+          d.status,
+          d.content,
+          ^field,
+          d.id
+        )
+      )
+      |> select([d], d.id)
+
+    from(d in Document, where: d.id in subquery(reps))
+  end
+
+  @doc """
+  How many matched documents each of `ids` stands for under `:collapse`: its
+  group's size over the same type, scope, filter and perspective. A document
+  with no value for the field counts 1. Returns `%{id => count}`.
+  """
+  @spec collapse_counts(String.t(), String.t(), keyword(), [Ecto.UUID.t()]) :: %{
+          optional(Ecto.UUID.t()) => non_neg_integer()
+        }
+  def collapse_counts(_type, _dataset, _opts, []), do: %{}
+
+  def collapse_counts(type, dataset, opts, ids) do
+    field = Keyword.fetch!(opts, :collapse)
+
+    keyed =
+      type
+      |> collapse_rows(dataset, opts)
+      |> select([d], %{
+        key:
+          fragment(
+            "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+            ^field,
+            d.title,
+            d.status,
+            d.content,
+            ^field,
+            d.id
+          )
+      })
+
+    from(p in Document,
+      where: p.id in ^ids,
+      join: r in subquery(keyed),
+      on:
+        r.key ==
+          fragment(
+            "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+            ^field,
+            p.title,
+            p.status,
+            p.content,
+            ^field,
+            p.id
+          ),
+      group_by: p.id,
+      select: {p.id, count()}
+    )
+    |> Repo.all()
+    |> Map.new()
   end
 
   @doc """
@@ -666,6 +976,170 @@ defmodule Barkpark.Content.Query do
       |> select_merge(^%{via_field: via_field})
       |> Repo.all()
     end)
+  end
+
+  @ref_target "__bp_ref_target__"
+  @ref_target_draft "__bp_ref_target_draft__"
+
+  @doc """
+  How many documents reference each of `ids` through a field the schema
+  declares (task-881bbea8c99b1599): `%{id => count}`, every id present.
+
+  The same rule as `list_reference_holders/3` — row, grant and owner scope,
+  visible types, fields the caller may read, `:require_published` — widened
+  to declared reference positions inside objects and object arrays. A
+  document counts once per target, whether it holds the target through
+  several fields, a draft and a published version, or both. Projected
+  plugin edges are not counted.
+
+  Every declared position becomes a containment probe, `content @> {path:
+  id}`, for each stored shape: a bare id, `{_ref}`, an array of either, and
+  `{asset: {_ref}}` for an image or file. One probe per target id per type,
+  so the GIN `documents_content_path_idx` answers it and the cost follows the
+  number of referrers, not the size of the type. `opts[:type]` narrows to one
+  type.
+  """
+  @spec count_reference_holders([String.t()], String.t(), keyword()) :: %{
+          optional(String.t()) => non_neg_integer()
+        }
+  def count_reference_holders(ids, dataset, opts) do
+    ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+    zero = Map.new(ids, &{&1, 0})
+
+    opts
+    |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
+    |> Enum.filter(&(opts[:type] in [nil, &1.name]))
+    |> Enum.reduce(zero, fn schema, acc ->
+      case ref_probe_templates(schema, schema.fields || [], [], ctx) do
+        [] ->
+          acc
+
+        templates ->
+          schema
+          |> count_holders_of_type(ids, dataset, templates, opts)
+          |> Enum.reduce(acc, fn {id, n}, acc -> Map.update(acc, id, n, &(&1 + n)) end)
+      end
+    end)
+  end
+
+  defp count_holders_of_type(schema, ids, dataset, templates, opts) do
+    probe =
+      Enum.reduce(templates, dynamic(false), fn template, acc ->
+        dynamic(
+          [d],
+          ^acc or
+            fragment(
+              "? @> replace(replace(?, ?, to_jsonb(?::text)::text), ?, to_jsonb('drafts.' || ?::text)::text)::jsonb",
+              d.content,
+              ^template,
+              ^~s("#{@ref_target}"),
+              parent_as(:target).id,
+              ^~s("#{@ref_target_draft}"),
+              parent_as(:target).id
+            )
+        )
+      end)
+
+    holders =
+      schema.name
+      |> base_query(dataset, %{}, opts)
+      |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+      |> restrict_to_visible_types(dataset, opts)
+      |> maybe_require_published(opts)
+      |> where(
+        [d],
+        fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id) != parent_as(:target).id
+      )
+      |> where(^probe)
+      |> select([d], %{doc: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id)})
+
+    from(t in fragment("SELECT id FROM unnest(?::text[]) AS t(id)", ^ids),
+      as: :target,
+      inner_lateral_join: h in subquery(holders),
+      on: true,
+      group_by: t.id,
+      select: {t.id, count(h.doc, :distinct)}
+    )
+    # Unnamed, so Postgres plans each run for the probes it is sent. A named
+    # statement turns generic on its sixth run, cannot see which index entries
+    # a containment value selects, and scans the type: over 18,000 products
+    # 100 ids went from 45 ms to past the 45 s pool timeout.
+    |> Repo.all(prepare: :unnamed)
+  end
+
+  # The containment JSON of every declared reference position the caller may
+  # read, as text with the target id as a placeholder. Objects (`composite`,
+  # `object`) and object arrays are walked; a position inside an array is
+  # wrapped in a one-element array, which `@>` matches against any element.
+  defp ref_probe_templates(schema, fields, path, ctx) do
+    Enum.flat_map(fields, fn
+      %{"name" => name} = field when is_binary(name) ->
+        dotted = Enum.join(Enum.map(path, &elem(&1, 0)) ++ [name], ".")
+
+        if Barkpark.Content.Envelope.field_readable?(schema, dotted, ctx),
+          do: field_probes(schema, field, path ++ [{name, false}], ctx),
+          else: []
+
+      _ ->
+        []
+    end)
+  end
+
+  defp field_probes(schema, field, path, ctx) do
+    target = @ref_target
+    draft = @ref_target_draft
+    asset = fn id -> %{"asset" => %{"_ref" => id}} end
+
+    case field["type"] do
+      "reference" ->
+        Enum.map([target, %{"_ref" => target}], &probe_json(path, &1))
+
+      t when t in ["image", "file"] ->
+        Enum.map([asset.(target), asset.(draft)], &probe_json(path, &1))
+
+      "arrayOf" ->
+        array_path = List.update_at(path, -1, fn {n, _} -> {n, true} end)
+        members = array_member_types(field)
+
+        refs =
+          if "reference" in members,
+            do: Enum.map([target, %{"_ref" => target}], &probe_json(array_path, &1)),
+            else: []
+
+        assets =
+          if Enum.any?(members, &(&1 in ["image", "file"])),
+            do: Enum.map([asset.(target), asset.(draft)], &probe_json(array_path, &1)),
+            else: []
+
+        nested =
+          case field["of"] do
+            %{"fields" => sub} when is_list(sub) ->
+              ref_probe_templates(schema, sub, array_path, ctx)
+
+            _ ->
+              []
+          end
+
+        refs ++ assets ++ nested
+
+      t when t in ["composite", "object"] ->
+        ref_probe_templates(schema, field["fields"] || [], path, ctx)
+
+      _ ->
+        []
+    end
+  end
+
+  # `[{"seo", false}, {"reviewer", false}]` and a leaf → `{"seo":{"reviewer":leaf}}`;
+  # an array step wraps what is below it in a one-element array.
+  defp probe_json(path, leaf) do
+    path
+    |> Enum.reverse()
+    |> Enum.reduce(leaf, fn
+      {name, true}, acc -> %{name => [acc]}
+      {name, false}, acc -> %{name => acc}
+    end)
+    |> Jason.encode!()
   end
 
   # Matches a document whose array field `name` holds the target, for each
@@ -848,6 +1322,14 @@ defmodule Barkpark.Content.Query do
   defp content_order?({:field, field, _dir}), do: field not in ["title", "status"]
   defp content_order?({:field, field, _dir, _collation}), do: field not in ["title", "status"]
   defp content_order?(_), do: false
+
+  @doc """
+  Orders `query` by a parsed `?order=` spec and `?collation=`, exactly as a
+  list read orders (task-5ddc3e08684f0d48: search sorted by a field). The
+  caller adds its own tiebreak.
+  """
+  def apply_list_order(query, order, collation),
+    do: apply_order(query, with_collation(order, collation))
 
   defp apply_perspective(query, :published) do
     prefix = DraftId.drafts_prefix() <> "%"
@@ -1096,13 +1578,45 @@ defmodule Barkpark.Content.Query do
   """
   @spec validate_filter_map(term()) :: :ok | {:error, {term(), term()}}
   def validate_filter_map(map) when is_map(map) do
-    case Enum.find_value(map, &offending_clause/1) do
-      nil -> :ok
-      {_field, _op} = bad -> {:error, bad}
+    {groups, rest} = Map.pop(map, "$or")
+
+    with :ok <- validate_or_groups(groups) do
+      case Enum.find_value(rest, &offending_clause/1) do
+        nil -> :ok
+        {_field, _op} = bad -> {:error, bad}
+      end
     end
   end
 
   def validate_filter_map(_other), do: {:error, {nil, :not_a_map}}
+
+  # `$or` (task-02d4488c460185c0): absent, or a non-empty list of at most
+  # `@max_or_branches` non-empty filter maps with no `$or` of their own, each
+  # valid as a top-level map. Every branch is one id subquery, so the cap
+  # bounds the SQL a single request can build.
+  @max_or_branches 16
+
+  @doc "The most branches one `$or` group may hold."
+  @spec max_or_branches() :: pos_integer()
+  def max_or_branches, do: @max_or_branches
+
+  defp validate_or_groups(nil), do: :ok
+
+  defp validate_or_groups(groups) when is_list(groups) and length(groups) > @max_or_branches,
+    do: {:error, {"$or", :too_many_branches}}
+
+  defp validate_or_groups([_ | _] = groups) do
+    Enum.find_value(groups, :ok, fn
+      %{"$or" => _} -> {:error, {"$or", :nested}}
+      %{} = branch when map_size(branch) > 0 -> validate_filter_map(branch) |> or_error()
+      _ -> {:error, {"$or", :malformed}}
+    end)
+  end
+
+  defp validate_or_groups(_groups), do: {:error, {"$or", :malformed}}
+
+  defp or_error(:ok), do: nil
+  defp or_error(error), do: error
 
   @doc """
   Check a filter map for a list of `type` without reading any documents:
@@ -1118,7 +1632,11 @@ defmodule Barkpark.Content.Query do
   def check_filter(type, dataset, filter_map, opts \\ []) do
     case validate_filter_map(filter_map) do
       :ok ->
-        _ = resolve_reference_count_ops(filter_map, type, dataset, opts)
+        {groups, rest} = Map.pop(filter_map, "$or")
+
+        for map <- [rest | List.wrap(groups)],
+            do: resolve_reference_count_ops(map, type, dataset, opts)
+
         :ok
 
       {:error, {nil, :not_a_map}} ->
@@ -1158,6 +1676,9 @@ defmodule Barkpark.Content.Query do
       {:error, {field, op}} -> raise Barkpark.Content.InvalidFilterError.new(field, op)
     end
 
+    {groups, map} = Map.pop(map, "$or")
+    query = apply_or_groups(query, groups, type, dataset, opts)
+
     map =
       map
       |> resolve_reference_count_ops(type, dataset, opts)
@@ -1168,6 +1689,30 @@ defmodule Barkpark.Content.Query do
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
       {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
+  end
+
+  # `$or` (task-02d4488c460185c0): a row matches when ANY branch matches. Each
+  # branch is an ordinary filter map applied to its own id subquery of the
+  # same type and dataset, so every op keeps its one SQL arm; the outer query
+  # keeps all its scoping (workspace, owner, grants, perspective), so a group
+  # can only narrow what the caller may already read.
+  defp apply_or_groups(query, nil, _type, _dataset, _opts), do: query
+
+  defp apply_or_groups(query, groups, type, dataset, opts) do
+    condition =
+      groups
+      |> Enum.map(fn branch ->
+        Document
+        |> where([b], b.type == ^type)
+        |> scope_to_dataset(dataset, opts)
+        |> apply_filter_map(branch, type, dataset, opts)
+        |> select([b], b.id)
+      end)
+      |> Enum.reduce(dynamic(false), fn branch_ids, acc ->
+        dynamic([d], ^acc or d.id in subquery(branch_ids))
+      end)
+
+    where(query, ^condition)
   end
 
   # task-cecd2cb193365b71 — `filter[_references]=<id>` needs THIS type's own
@@ -2673,6 +3218,8 @@ defmodule Barkpark.Content.Query do
   defp with_collation(specs, collation) when is_list(specs),
     do: Enum.map(specs, &with_collation(&1, collation))
 
+  # An id is an identifier, not language: no collation (task-7432da7989196de0).
+  defp with_collation({:field, "_id", _dir} = spec, _collation), do: spec
   defp with_collation({:field, field, dir}, collation), do: {:field, field, dir, collation}
   defp with_collation(other, _collation), do: other
 
@@ -2698,6 +3245,9 @@ defmodule Barkpark.Content.Query do
   # Content-field ordering: `title`/`status` are promoted columns (mirroring the
   # filter ops above); every other field sorts by its JSONB value. `field` rides
   # as a bound parameter in the fragment, so it is injection-safe.
+  # `_id` sorts by the `doc_id` column (task-7432da7989196de0): the stable key
+  # a caller pages by, as in Sanity's `order(_id asc)`.
+  defp apply_order(q, {:field, "_id", dir}), do: order_by(q, [d], [{^dir, d.doc_id}])
   defp apply_order(q, {:field, "title", dir}), do: order_by(q, [d], [{^dir, d.title}])
   defp apply_order(q, {:field, "status", dir}), do: order_by(q, [d], [{^dir, d.status}])
 

@@ -15,6 +15,62 @@ defmodule Barkpark.Groq.ParserTest do
     assert description =~ "$id"
   end
 
+  # task-8a6e47612d2987c6: the span Sanity's API reports for each query, read
+  # from ecu57yeh on 2026-10-25, so an editor underlines the same run.
+  test "a parse error spans the bad token or the unclosed construct, as on Sanity" do
+    for {query, start, stop} <- [
+          {"*[_type=='author'", 1, 17},
+          {"*[_type=='author']{name", 18, 24},
+          {"*[_type=='author'] | order(name", 26, 32},
+          {"*[_type=='author']{\n  'n': lowr(name)}", 27, 31},
+          {"*[delta::changedAny(title)]", 2, 19},
+          {"*[_id == $missing]", 9, 16},
+          {"*[_type=='author']{'x': 'abc}", 24, 29},
+          {"*[_type=='author'][0...'a']", 18, 27}
+        ] do
+      {:error, error} = Parser.parse(query)
+      assert {error.start, error.end} == {start, stop}, query
+    end
+  end
+
+  test "an undefined function is named as Sanity names it" do
+    assert {:error, %{description: ~s(Undefined function "lowr")}} = Parser.parse("lowr(1)")
+
+    assert {:error, %{description: ~s(Undefined function "changedAny" in namespace "delta")}} =
+             Parser.parse("delta::changedAny(title)")
+  end
+
+  # task-13790b478beeee4d: the reference shape Sanity's documents::get reads.
+  test "documents::get reads a global document reference in this project and dataset" do
+    docs = [%{"_id" => "alan", "_type" => "author", "name" => "Alan Turing"}]
+
+    eval = fn q ->
+      {:ok, tree} = Parser.parse(q)
+
+      {:ok, value} =
+        Evaluator.evaluate(tree,
+          source: MemorySource.new(docs),
+          project_id: "site",
+          dataset: "prod"
+        )
+
+      value
+    end
+
+    assert eval.(~s|documents::get({"_ref": "dataset:site.prod:alan"}).name|) == "Alan Turing"
+
+    for ref <- [
+          "dataset:site.other:alan",
+          "dataset:elsewhere.prod:alan",
+          "dataset:site.prod:nope",
+          "alan"
+        ] do
+      assert eval.(~s|documents::get({"_ref": "#{ref}"})|) == nil, ref
+    end
+
+    assert eval.(~s|documents::get("alan")|) == nil
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 
@@ -435,6 +491,10 @@ defmodule Barkpark.Groq.ParserTest do
             {~s|2.5 < n|, {:range, ["n"], ">", 2.5}},
             {~s|d <= "2026-01-01"|, {:range, ["d"], "<=", "2026-01-01"}},
             {~s|b > false|, {:range, ["b"], ">", false}},
+            {~s|_updatedAt > "2026"|, {:timestamp, :updated_at, ">", "2026"}},
+            {~s|"2026-01-01" < _createdAt|, {:timestamp, :inserted_at, ">", "2026-01-01"}},
+            {~s|_createdAt == "2026-10-25T12:00:00.000000Z"|,
+             {:timestamp, :inserted_at, "==", "2026-10-25T12:00:00.000000Z"}},
             {~s|!defined(a)|, {:not, {:defined, ["a"], nil}}},
             {~s|!(a == 1)|, {:ne, ["a"], 1}},
             {~s|!(a in [1, "x"])|, {:not, {:in, ["a"], [1, "x"]}}},
@@ -459,7 +519,8 @@ defmodule Barkpark.Groq.ParserTest do
             ~s|a > b|,
             ~s|lower(a) > "x"|,
             ~s|a[0] > 1|,
-            ~s|_updatedAt > "2026"|,
+            ~s|_createdAt > 1|,
+            ~s|_updatedAt > null|,
             ~s|!(a > 1)|,
             ~s|!defined(a[0])|,
             ~s|!(lower(a) == "x")|,

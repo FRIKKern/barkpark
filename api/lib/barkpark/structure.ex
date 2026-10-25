@@ -44,6 +44,11 @@ defmodule Barkpark.Structure do
       the type is orphaned (schema force-deleted). Counts include drafts — the
       tree never silently hides a doc type, it only organizes it.
 
+  The one exception: a NAMED desk (`opts[:desk_id]` other than `deskStructure`)
+  whose document sets `"only": true` serves exactly its declared items — no
+  plugin MAIN items, no Plugins tier, no …Rest. The default desk ignores the
+  flag. Display only: hidden types stay reachable by direct URL.
+
   Per-workspace enablement/placement resolves through
   `Barkpark.Plugins.Enablement.effective/1`.
   """
@@ -190,7 +195,11 @@ defmodule Barkpark.Structure do
     # The `deskStructure` document is read ONCE per build: its `items` declare
     # the MAIN tier (`declared_desk/3`) and its `title` names the root, as
     # Sanity's `S.list().title('Innhold')` does (task-9eafad70d2249770).
-    desk_doc = fetch_desk_doc(dataset, opts)
+    desk_doc =
+      case Keyword.fetch(opts, :desk_doc) do
+        {:ok, doc} -> doc
+        :error -> desk_doc(dataset, opts)
+      end
 
     %Node{
       id: "root",
@@ -270,13 +279,16 @@ defmodule Barkpark.Structure do
     # `build_settings_group/3` read the SAME unowned, uncurated schema set and
     # partition it by the `singleton` flag ALONE, so they are kept adjacent
     # here on purpose (one catch-all immediately followed by the other).
+    declared = declared_desk(schemas, dataset, opts)
+
     host_main =
-      case declared_desk(schemas, dataset, opts) do
+      case declared do
         # Gyldendal parity E3.2 — a `deskStructure` document declares the MAIN
         # tier: order, dividers, nested lists, filtered type lists and pinned
         # singletons. It replaces the curated + generic + settings host groups
         # ONLY; plugin tiers and the …Rest census below are untouched, so a type
-        # the declaration forgot still surfaces (the never-hide invariant).
+        # the declaration forgot still surfaces (the never-hide invariant) —
+        # unless a named desk opts out with `"only": true` (`desk_only?/2`).
         # ONE group: the declaration's own dividers are explicit nodes, so
         # `maybe_join/2` must not interleave positional dividers between them.
         {:ok, declared} ->
@@ -290,6 +302,32 @@ defmodule Barkpark.Structure do
             ]
       end
 
+    # The ONE exception to the never-hide invariant (owner, 2026-10-25): a
+    # NAMED desk (`?desk=<id>` other than `deskStructure`) whose document sets
+    # `"only": true` serves exactly its declared items — no plugin MAIN items,
+    # no Plugins tier, no …Rest census. A studio that is not the general
+    # Barkpark studio (Pensum) must not list every other type in the dataset.
+    # The default desk ignores the flag, so every existing studio keeps the
+    # never-hide behaviour. DISPLAY only, like `hidden_types`: resolution
+    # (`gating: :none`) never honours it, and the hidden types' own lists and
+    # documents stay reachable by direct URL.
+    if desk_only?(declared, opts) do
+      maybe_join(host_main)
+    else
+      append_tiers(host_main, schemas, dataset, opts, enablement, owned_map, hidden_types)
+    end
+  end
+
+  defp desk_only?({:ok, _}, opts) do
+    Keyword.get(opts, :gating, :enabled) != :none and
+      Keyword.get(opts, :desk_id, default_desk_id()) != default_desk_id() and
+      match?(%{content: %{"only" => true}}, Keyword.get(opts, :desk_doc))
+  end
+
+  defp desk_only?(:none, _opts), do: false
+
+  # The Plugins and …Rest tiers appended after MAIN (charter Decisions 1/6/7).
+  defp append_tiers(host_main, schemas, dataset, opts, enablement, owned_map, hidden_types) do
     # ── Placement-driven host groups: books follow OnixEdit, media follows
     # the media plugin. Each returns {main_placed_nodes, plugins_placed_nodes}. ──
     {books_main, books_plugins} =
@@ -1147,12 +1185,24 @@ defmodule Barkpark.Structure do
 
   @desk_structure_type "deskStructure"
 
-  # The published `deskStructure` document, or nil. A read that raises degrades
-  # to the default desk with a logged reason — never a blank desk.
-  defp fetch_desk_doc(dataset, opts) do
-    scope = Keyword.take(opts, [:workspace_id])
+  @doc """
+  The default desk document id. `opts[:desk_id]` names another published
+  `deskStructure` document (task-31f9264adeb053be), so several studios on one
+  dataset can each have their own desk.
+  """
+  def default_desk_id, do: @desk_structure_type
 
-    case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
+  @doc """
+  The published `deskStructure` document (`opts[:desk_id]`, default
+  `deskStructure`), or nil. A read that raises degrades to the default desk
+  with a logged reason — never a blank desk. `build/2` takes it pre-read as
+  `opts[:desk_doc]`.
+  """
+  def desk_doc(dataset, opts) do
+    scope = Keyword.take(opts, [:workspace_id])
+    desk_id = Keyword.get(opts, :desk_id, @desk_structure_type)
+
+    case Content.get_document(desk_id, @desk_structure_type, dataset, scope) do
       {:ok, doc} -> doc
       _ -> nil
     end

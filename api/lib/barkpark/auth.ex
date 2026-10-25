@@ -162,36 +162,37 @@ defmodule Barkpark.Auth do
   grants a Default-workspace OWNER, minting one requires the bearer to hold the
   `admin` permission (the control plane's stored per-instance admin token) —
   a read-only token minting a user ticket would be privilege escalation.
+
+  An EXCHANGE ticket (`purpose: "exchange"`, "Sign in with Barkpark Cloud" for an
+  external Studio) is a user-shaped ticket that only
+  `consume_exchange_ticket/3` accepts — never `GET /login/ticket/:t`. It must
+  carry `audience` (the Studio origin) and `code_challenge` (PKCE S256); a
+  malformed one is `{:error, :invalid_exchange}`, and an unknown `purpose` is
+  refused the same way rather than minted as a browser ticket.
   """
-  @spec mint_login_ticket(binary(), keyword()) :: {:ok, binary()} | {:error, :unauthorized}
+  @spec mint_login_ticket(binary(), keyword()) ::
+          {:ok, binary()} | {:error, :unauthorized | :invalid_exchange}
   def mint_login_ticket(raw_api_token, opts \\ [])
 
   def mint_login_ticket(raw_api_token, opts) when is_binary(raw_api_token) do
     user_email = presence(opts[:user_email])
     user_role = ticket_role(presence(opts[:user_role]))
+    purpose = presence(opts[:purpose])
 
     case verify_token(raw_api_token) do
       {:ok, token} ->
-        if user_email != nil and not has_permission?(token, "admin") do
-          {:error, :unauthorized}
-        else
-          raw_ticket =
-            "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+        cond do
+          user_email != nil and not has_permission?(token, "admin") ->
+            {:error, :unauthorized}
 
-          now = DateTime.utc_now()
+          purpose == "exchange" and user_email == nil ->
+            {:error, :invalid_exchange}
 
-          attrs = %{
-            ticket_hash: hash_ticket(raw_ticket),
-            api_token: raw_api_token,
-            user_email: user_email,
-            user_role: user_email && user_role,
-            expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
-          }
+          purpose not in [nil, "browser", "exchange"] ->
+            {:error, :invalid_exchange}
 
-          case %LoginTicket{} |> LoginTicket.changeset(attrs) |> Repo.insert() do
-            {:ok, _ticket} -> {:ok, raw_ticket}
-            {:error, _changeset} -> {:error, :unauthorized}
-          end
+          true ->
+            insert_login_ticket(raw_api_token, user_email, user_role, purpose, opts)
         end
 
       {:error, :unauthorized} ->
@@ -200,6 +201,29 @@ defmodule Barkpark.Auth do
   end
 
   def mint_login_ticket(_, _), do: {:error, :unauthorized}
+
+  defp insert_login_ticket(raw_api_token, user_email, user_role, purpose, opts) do
+    exchange? = purpose == "exchange"
+    raw_ticket = "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+    now = DateTime.utc_now()
+
+    attrs = %{
+      ticket_hash: hash_ticket(raw_ticket),
+      api_token: raw_api_token,
+      user_email: user_email,
+      user_role: user_email && user_role,
+      purpose: if(exchange?, do: "exchange"),
+      audience: if(exchange?, do: presence(opts[:audience])),
+      code_challenge: if(exchange?, do: presence(opts[:code_challenge])),
+      expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
+    }
+
+    case %LoginTicket{} |> LoginTicket.changeset(attrs) |> Repo.insert() do
+      {:ok, _ticket} -> {:ok, raw_ticket}
+      {:error, _changeset} when exchange? -> {:error, :invalid_exchange}
+      {:error, _changeset} -> {:error, :unauthorized}
+    end
+  end
 
   # Owner ruling #26: the role a user-shaped ticket seats its consumer at. A
   # recognised Cloud team role passes through; any other PRESENT value is read
@@ -263,7 +287,9 @@ defmodule Barkpark.Auth do
     # would get `nil` back.
     query =
       from t in LoginTicket,
-        where: t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now,
+        where:
+          t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now and
+            is_nil(t.purpose),
         select: {t.api_token, t.user_email, t.user_role}
 
     case Repo.delete_all(query) do
@@ -282,6 +308,54 @@ defmodule Barkpark.Auth do
   end
 
   def consume_login_ticket(_), do: {:error, :invalid}
+
+  @doc """
+  Atomically consume an EXCHANGE ticket ("Sign in with Barkpark Cloud" for an
+  external Studio) — the server-to-server twin of `consume_login_ticket/1`.
+
+  Same single-use DELETE ... RETURNING claim, restricted to
+  `purpose = 'exchange'`, so a browser ticket is never exchangeable and (the
+  other half, in `consume_login_ticket/1`) an exchange ticket never opens a
+  browser session. The bindings are checked AFTER the claim: a ticket presented
+  with the wrong `audience` or a `code_verifier` that does not answer its S256
+  challenge is BURNED, not left for a second guess. Every failure kind is the
+  same `{:error, :invalid}`.
+
+  Returns `{:ok, {user_email, user_role}}`.
+  """
+  @spec consume_exchange_ticket(term(), term(), term()) ::
+          {:ok, {binary(), binary() | nil}} | {:error, :invalid}
+  def consume_exchange_ticket(raw_ticket, audience, code_verifier)
+      when is_binary(raw_ticket) and is_binary(audience) and is_binary(code_verifier) do
+    hash = hash_ticket(raw_ticket)
+    now = DateTime.utc_now()
+
+    query =
+      from t in LoginTicket,
+        where:
+          t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now and
+            t.purpose == "exchange",
+        select: {t.user_email, t.user_role, t.audience, t.code_challenge}
+
+    case Repo.delete_all(query) do
+      {1, [{email, role, bound_audience, challenge}]}
+      when is_binary(email) and is_binary(bound_audience) and is_binary(challenge) ->
+        if Plug.Crypto.secure_compare(bound_audience, audience) and
+             Plug.Crypto.secure_compare(challenge, pkce_s256(code_verifier)) do
+          {:ok, {email, role}}
+        else
+          {:error, :invalid}
+        end
+
+      _ ->
+        {:error, :invalid}
+    end
+  end
+
+  def consume_exchange_ticket(_, _, _), do: {:error, :invalid}
+
+  defp pkce_s256(verifier),
+    do: Base.url_encode64(:crypto.hash(:sha256, verifier), padding: false)
 
   @doc """
   Delete expired or spent login tickets. Returns the count removed.

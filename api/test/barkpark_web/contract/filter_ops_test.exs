@@ -742,19 +742,19 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
       assert error["message"] =~ "<tag>:<min_strength>"
     end
 
-    test "$or is refused as an unsupported GROUP, never with its index as the operator",
+    test "$and is refused as an unsupported GROUP, never with its index as the operator",
          %{conn: conn} do
-      # Before: `unknown filter operator "0" on field "$or"` — "0" was never an
-      # operator; the caller wrote a boolean group this route has no form for.
+      # `$or` is the one group form since task-02d4488c460185c0; `$and` is not
+      # one (repeat the filter param to AND). Its index is never an operator.
       error =
         conn
-        |> get("/v1/data/query/fops_http/post?filter%5B%24or%5D%5B0%5D%5Btitle%5D%5Beq%5D=Alpha")
+        |> get("/v1/data/query/fops_http/post?filter%5B%24and%5D%5B0%5D%5Btitle%5D%5Beq%5D=Alpha")
         |> json_response(400)
         |> Map.fetch!("error")
 
       assert error["code"] == "invalid_filter"
-      assert error["details"] == %{"field" => "$or"}
-      assert error["message"] =~ "boolean filter groups are not supported"
+      assert error["details"] == %{"field" => "$and"}
+      assert error["message"] =~ "the one group form is $or"
       refute error["message"] =~ ~s(operator "0")
     end
 

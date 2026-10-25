@@ -35,7 +35,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
       `%Barkpark{team_id: tid}` against `conn.assigns.current_team` inline
       (`when tid == team.id`), the fail-closed scope-clamp the wave standardized.
 
-  THE 31-ROUTE DISPOSITION TABLE (path, verb → signal). Re-derived on
+  THE 34-ROUTE DISPOSITION TABLE (path, verb → signal). Re-derived on
   origin/main; offenders == []. Line numbers are NOT pinned (they drift) — the
   test reads them fresh every run; the table is the human-readable ledger.
 
@@ -46,6 +46,9 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
     | post   | /v1/barkparks/:id/verify                                    | resolve_team_barkpark   |
     | get    | /v1/barkparks/:id/credentials                              | inline tid == team.id   |
     | post   | /v1/barkparks/:id/studio-link                              | inline tid == team.id   |
+    | get    | /v1/barkparks/:id/studio-callbacks                         | inline tid == team.id   |
+    | post   | /v1/barkparks/:id/studio-callbacks                         | inline tid == team.id   |
+    | delete | /v1/barkparks/:id/studio-callbacks                         | inline tid == team.id   |
     | post   | /v1/barkparks/:id/app-token                                | inline tid == team.id   |
     | delete | /v1/barkparks/:id/app-token                                | inline tid == team.id   |
     | post   | /v1/barkparks/:id/push-relay                               | inline tid == team.id   |
@@ -73,7 +76,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
     | get    | /v1/barkparks/:id/usage/history                            | resolve_team_barkpark   |
     | get    | /v1/barkparks/:id/domain-status                            | resolve_team_barkpark   |
 
-    Tally: inline tid==team.id 16 · resolve_team_barkpark 5 · proxy_instance_webhook 9 · recent_events_for_team 1 = 31.
+    Tally: inline tid==team.id 19 · resolve_team_barkpark 5 · proxy_instance_webhook 9 · recent_events_for_team 1 = 34.
     (PDF-D94 added the agent-key pair — both pattern-match the resolved row's team_id inline, fail-closed 404 cross-team.)
 
   CANDOR — what this proves and what it does NOT (D57 marginal value).
@@ -133,7 +136,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
 
   # Pinned population, re-derived on origin/main. A new barkparks/:id route moves
   # this and must be ruled on here.
-  @expected_route_count 31
+  @expected_route_count 34
 
   defp source, do: File.read!(@router_source)
 
@@ -196,7 +199,7 @@ defmodule BarkparkCloud.Web.BarkparksIdOwnershipCensusTest do
       |> Enum.frequencies()
 
     assert tally == %{
-             "inline tid == team.id" => 16,
+             "inline tid == team.id" => 19,
              "resolve_team_barkpark" => 5,
              "proxy_instance_webhook" => 9,
              "recent_events_for_team" => 1
