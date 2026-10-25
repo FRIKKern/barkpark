@@ -124,7 +124,7 @@ keyed on the resolved output shape, never the verb:
 
 | `-o` shape | stdout | stderr |
 |---|---|---|
-| `json` / `yaml` | the `{ok:false, error:{code,message,details,hint,request_id}}` envelope — **exactly one document** | silent |
+| `json` / `yaml` | the `{ok:false, error:{code,message,status,retry_after,details,hint,request_id}}` envelope — **exactly one document** | silent |
 | `table` / `minimal` | *(empty)* | human line, `details`, hint, `  code: <code>`; `request_id` on `-v` |
 
 This holds for EVERY refusal, the publish-wall rows included — even the two

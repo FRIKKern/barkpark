@@ -3323,7 +3323,7 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 // stops after one line should get the fact. Centralised so every error path
 // (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
-	if renderErrorEnvelopeRemedy(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details, ae.datasetRemedy) {
+	if renderErrorEnvelopeStatus(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details, ae.datasetRemedy, ae.status, ae.retryAfter) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
@@ -4180,6 +4180,13 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 	// population" — was the one mode that lost the server's own statement of
 	// what it left out (dataset_ambiguous.go).
 	var twins []datasetTwin
+	// A full page with no lookahead row leaves its boundary unverified, but it
+	// is a FALSE alarm when the next page comes back empty: then the list
+	// ended exactly on the page edge and there was no row to anchor
+	// (task-2b8d011b6c573467: `bp media ls --all` warned at offset 1300 while
+	// returning every row). So the warning waits for the next page and is
+	// printed only when that page has rows. -1 = nothing pending.
+	pendingUnverified := -1
 	for {
 		pageURL := withOffsetLimit(baseURL, offset, pageSize+1)
 		status, respBody, err := doRequest(cmd.HTTP.Method, pageURL, headers, nil)
@@ -4216,6 +4223,12 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 		}
 		if key == "" {
 			key = k
+		}
+		if pendingUnverified >= 0 {
+			if len(rows) > 0 {
+				out.userErr("pagination boundary at offset %d is unverified: the server returned %d rows for a limit of %d, so --all has no lookahead row to anchor the next page against", pendingUnverified, pageSize, pageSize+1)
+			}
+			pendingUnverified = -1
 		}
 		twins = mergeDatasetTwins(twins, datasetTwinsFromPage(unwrapResult(respBody)))
 		// Split the lookahead off the page. It anchors the NEXT request and is
@@ -4303,8 +4316,9 @@ func paginatedAllWalk(out *writer, cmd manifest.Command, baseURL string, headers
 			// row to anchor the next page against and this one boundary cannot
 			// be checked. Say so on stderr — an unverified boundary that
 			// announces itself is the whole difference between this walk and the
-			// one that dropped a row in silence.
-			out.userErr("pagination boundary at offset %d is unverified: the server returned %d rows for a limit of %d, so --all has no lookahead row to anchor the next page against", offset+pageSize, len(rows), pageSize+1)
+			// one that dropped a row in silence — once the next page shows there
+			// were rows past it (pendingUnverified above).
+			pendingUnverified = offset + pageSize
 		}
 		anchor = lookahead
 		offset += pageSize
