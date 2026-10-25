@@ -1388,7 +1388,9 @@ defmodule Barkpark.Structure do
   #    "parent":"content.parent","orderings":[…]}
   #
   # An optional `filter` narrows the root and every level below
-  # (task-e9f14aeb3ed09953).
+  # (task-e9f14aeb3ed09953). `"parentOp": "has"` reads the parent from an
+  # array of references (task-c603a1eb83c4fc01); a groupBy takes `"op": "has"`
+  # for the same.
   defp declared_item_to_node(%{"kind" => "tree"} = item, idx, ctx) do
     type = item["type"]
     parent = item["parent"]
@@ -1398,7 +1400,14 @@ defmodule Barkpark.Structure do
       # `pageType == "information" && !defined(parent._ref)`) narrows the root
       # AND every level below; the level's parent clause is added on top of it.
       own = if is_map(item["filter"]), do: item["filter"], else: %{}
-      root = Map.merge(own, %{parent => %{"is" => "null"}})
+      array? = item["parentOp"] == "has"
+
+      # task-c603a1eb83c4fc01 — `"parentOp": "has"`: the parents are an ARRAY
+      # of references (Sanity's `$parentId in parentCategories[]._ref`). A root
+      # holds none (missing or empty: countEq 0), and a document with several
+      # parents shows under each.
+      root_clause = if array?, do: %{"countEq" => 0}, else: %{"is" => "null"}
+      root = Map.merge(own, %{parent => root_clause})
 
       %Node{
         id: item["id"] || "#{idx}-#{type}-tree",
@@ -1409,17 +1418,23 @@ defmodule Barkpark.Structure do
         visibility: :public,
         filter: root,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        tree:
-          if(own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}),
+        tree: tree_spec(parent, own, array?),
         pane_title: pane_title(item),
         initial_values: initial_values(item, type, ctx),
         views: views(item),
-        error: if(own == %{}, do: nil, else: filter_error(type, root, ctx)) || views_error(item)
+        error:
+          if(own == %{} and not array?, do: nil, else: filter_error(type, root, ctx)) ||
+            views_error(item)
       }
     end
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  defp tree_spec(parent, own, array?) do
+    spec = if own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}
+    if array?, do: Map.put(spec, "op", "has"), else: spec
+  end
 
   defp pane_title(%{"paneTitle" => title}) when is_binary(title) and title != "", do: title
   defp pane_title(_item), do: nil
@@ -1549,7 +1564,7 @@ defmodule Barkpark.Structure do
           type: :document_type_list,
           type_name: type,
           visibility: :public,
-          filter: %{by => %{"eq" => key}},
+          filter: %{by => %{group_by_op(item) => key}},
           orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
         }
       end)
@@ -1563,6 +1578,12 @@ defmodule Barkpark.Structure do
       pane_title: pane_title(item)
     }
   end
+
+  # task-c603a1eb83c4fc01 — `"op": "has"` groups over a reference held in an
+  # ARRAY (Sanity's `$id in departments[]._ref`): a document under each of the
+  # groups it names. The default `eq` reads one value, as before.
+  defp group_by_op(%{"op" => "has"}), do: "has"
+  defp group_by_op(_item), do: "eq"
 
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)

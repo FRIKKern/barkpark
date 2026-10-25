@@ -655,13 +655,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # One tree level: the children of `pub_id`, narrowed by the tree's own filter
   # when it declares one (task-e9f14aeb3ed09953), as the root is.
   defp tree_level_filter(node, parent, pub_id) do
+    tree = Map.get(node, :tree) || %{}
+
     own =
-      case Map.get(node, :tree) do
+      case tree do
         %{"filter" => %{} = own} -> own
         _ -> %{}
       end
 
-    Map.merge(own, %{parent => %{"eq" => pub_id}})
+    # A parent held in an array of references (task-c603a1eb83c4fc01).
+    op = if tree["op"] == "has", do: "has", else: "eq"
+    Map.merge(own, %{parent => %{op => pub_id}})
   end
 
   defp walk_tree([id | rest], level, panes, type_name, schema, parent, node, dataset, opts) do
