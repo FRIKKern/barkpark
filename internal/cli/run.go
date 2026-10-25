@@ -770,6 +770,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 			opts.pageSize = taskWalkPageSize
 			out.errf("bp: %s", taskScanClientSideNotice(taskScan))
 		}
+		if opts.pageSize == 0 {
+			opts.pageSize = walkPageSizeFor(cmd)
+		}
 		return runPaginatedAll(out, cmd, req.url, req.headers, opts)
 	}
 
@@ -4111,6 +4114,29 @@ type paginatedAllOpts struct {
 }
 
 const defaultWalkPageSize = 100
+
+// queryRouteMaxLimit is GET /v1/data/query's own clamp on limit
+// (query_controller.ex: parse_int(params["limit"], 100) |> min(1000)).
+const queryRouteMaxLimit = 1000
+
+// queryRouteCommands are the commands that read GET /v1/data/query (the
+// manifest declares no max limit, so the clamp is keyed on the command, as
+// unknownTypeCommands is).
+var queryRouteCommands = map[string]bool{"doc.ls": true, "doc.query": true}
+
+// walkPageSizeFor picks the --all window for a command that set none. `bp doc
+// ls|query --all` walked the query route in 100-row pages: 181 round-trips for
+// 18,020 products, 42 s where an --offset loop at limit 1000 took 8.4 s
+// (task-7a470da4ca568e74). The query route takes a 1000-row page, so its walk
+// uses the clamp minus one, for the same reason taskWalkPageSize does: the +1
+// lookahead row then lands ON the clamp and every boundary stays anchored.
+// Every other command keeps defaultWalkPageSize.
+func walkPageSizeFor(cmd manifest.Command) int {
+	if queryRouteCommands[cmd.ID] {
+		return queryRouteMaxLimit - 1
+	}
+	return defaultWalkPageSize
+}
 
 func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers map[string]string, opts paginatedAllOpts) int {
 	if opts.pageSize <= 0 {
