@@ -388,8 +388,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   # Value counts of content fields the caller named with `?facet=`, over the
-  # filtered match set. A string field counts its value, an array field each
-  # element once per document. At most 100 values per field, biggest first.
+  # filtered match set. A string, number or boolean counts its value, a
+  # reference its `_ref`, an array each element once per document. At most
+  # 100 values per field, biggest first.
   #
   # They ride in the count's own scan (`count_and_facets/3`) as one more
   # grouping set, `(field, value)`, so a named facet costs one read of each
@@ -664,8 +665,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # facet sets and the total count only the rows of the first field, so they
   # count each document once, as without facets. The `(field, value)` set
   # counts documents per value of each field; `values` turns a value into the
-  # distinct texts the facet counts: the elements of an array, a string
-  # itself, nothing for any other value. `fg` is 0 on those rows only.
+  # distinct texts the facet counts: a string, number or boolean itself, a
+  # reference its `_ref`, each element of an array alike, nothing for any
+  # other value (as `Content.Query.facet_counts/3`). `fg` is 0 on those rows.
   defp count_and_facets_query(base, fields) do
     base
     |> join(
@@ -689,7 +691,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
       field: fx.k,
       values:
         fragment(
-          "ARRAY(SELECT DISTINCT e.value FROM jsonb_array_elements_text(CASE jsonb_typeof(?) WHEN 'array' THEN ? WHEN 'string' THEN jsonb_build_array(?) ELSE '[]'::jsonb END) AS e(value))",
+          "ARRAY(SELECT DISTINCT t.x FROM jsonb_array_elements(CASE jsonb_typeof(?) WHEN 'array' THEN ? ELSE jsonb_build_array(?) END) AS e(j), LATERAL (SELECT CASE jsonb_typeof(e.j) WHEN 'string' THEN e.j #>> '{}' WHEN 'number' THEN e.j #>> '{}' WHEN 'boolean' THEN e.j #>> '{}' WHEN 'object' THEN e.j ->> '_ref' END AS x) AS t WHERE t.x IS NOT NULL)",
           fx.v,
           fx.v,
           fx.v
