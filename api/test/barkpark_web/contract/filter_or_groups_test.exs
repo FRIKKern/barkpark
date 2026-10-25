@@ -94,6 +94,59 @@ defmodule BarkparkWeb.Contract.FilterOrGroupsTest do
     assert e["details"]["field"] == "$and"
   end
 
+  test "a group holds at most 16 branches; the 400 names the limit", %{conn: conn} do
+    branches = fn n ->
+      Enum.map_join(0..(n - 1), "&", &"filter[$or][#{&1}][born][eq]=#{1900 + &1}-01-01")
+    end
+
+    assert ids(conn, branches.(16)) == []
+
+    e = error(conn, branches.(17))
+    assert e["code"] == "invalid_filter"
+    assert e["details"]["field"] == "$or"
+    assert e["message"] =~ "the limit is 16"
+
+    too_many = %{"$or" => for(y <- 1..17, do: %{"born" => %{"eq" => "#{y}"}})}
+    assert {:error, {"$or", :too_many_branches}} = Content.Query.validate_filter_map(too_many)
+  end
+
+  test "a group reads only the route's dataset: twins in another dataset never match",
+       %{conn: conn} do
+    other = "or-groups-other"
+
+    Content.upsert_schema(
+      %{"name" => "person", "title" => "Person", "visibility" => "public", "fields" => []},
+      other
+    )
+
+    for {id, content} <- [
+          {"or-b-a", %{"born" => "0001-01-01", "died" => "1990-05-05", "isVisible" => true}},
+          {"or-b-b", %{"born" => "1950-01-01", "died" => "0001-01-01", "isVisible" => false}}
+        ] do
+      {:ok, _} =
+        Content.create_document(
+          "person",
+          Map.merge(%{"_id" => id, "title" => "Or " <> id}, content),
+          other
+        )
+
+      {:ok, _} = Content.publish_document(id, "person", other)
+    end
+
+    q = "filter[$or][0][born][eq]=0001-01-01&filter[$or][1][died][eq]=0001-01-01&order=_id:asc"
+    assert ids(conn, q) == ["or-a", "or-b"]
+
+    # The twins are there and match under their own dataset.
+    other_ids =
+      conn
+      |> get("/v1/data/query/#{other}/person?perspective=published&" <> q)
+      |> json_response(200)
+      |> get_in(["result", "documents"])
+      |> Enum.map(& &1["_id"])
+
+    assert other_ids == ["or-b-a", "or-b-b"]
+  end
+
   test "a declared desk list can filter with an $or group" do
     {:ok, _} =
       Content.upsert_schema(

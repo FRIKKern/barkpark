@@ -350,6 +350,115 @@ defmodule BarkparkWeb.GroqControllerTest do
 
     body = conn |> get_query(token, ~s'*[_type == "book"]') |> json_response(422)
     assert body["error"]["type"] == "queryLimitError"
+    # It names the cap and how to page, not a _type filter the query already has.
+    assert body["error"]["description"] =~ "more than 2 documents"
+    assert body["error"]["description"] =~ "[0...2], then [2...4]"
+    refute body["error"]["description"] =~ "_type filter"
+
+    # And the advice works: the slice it names is answered.
+    paged =
+      conn |> get_query(token, ~s'*[_type == "book"] | order(_id) [0...2]') |> json_response(200)
+
+    assert length(paged["result"]) <= 2
+  end
+
+  # task-2a7741b89420a38a: a _createdAt comparison is answered in SQL, so it
+  # narrows the read before the cap instead of loading every document of the
+  # type, and it keeps exactly the documents GROQ's string comparison keeps.
+  test "a _createdAt comparison narrows in SQL and matches GROQ's string comparison", %{
+    conn: conn,
+    token: token
+  } do
+    all =
+      conn
+      |> get_query(token, ~s'*[_type == "book"] | order(_createdAt asc) {_id, _createdAt}')
+      |> json_response(200)
+
+    stamps = Enum.map(all["result"], & &1["_createdAt"])
+
+    assert length(stamps) >= 3 and
+             Enum.all?(stamps, &(&1 =~ ~r/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/))
+
+    newest = List.last(stamps)
+
+    expected = fn op ->
+      all["result"]
+      |> Enum.filter(&apply(Kernel, op, [&1["_createdAt"], newest]))
+      |> Enum.map(& &1["_id"])
+      |> Enum.sort()
+    end
+
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_documents_per_fetch: 2)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    # The whole type is over the cap, so only the pushed-down filter can answer.
+    assert conn |> get_query(token, ~s'*[_type == "book"]') |> json_response(422)
+
+    for {groq, op} <- [{">=", :>=}, {"==", :==}, {">", :>}] do
+      body =
+        conn
+        |> get_query(token, ~s'*[_type == "book" && _createdAt #{groq} $t]{_id}', %{
+          "$t" => Jason.encode!(newest)
+        })
+        |> json_response(200)
+
+      assert body["result"] |> Enum.map(& &1["_id"]) |> Enum.sort() == expected.(op), groq
+    end
+  end
+
+  # task-2a7741b89420a38a: a projection of system fields only reads no stored
+  # content, so the per-*[...] document cap gives way to the per-query load cap.
+  test "*[...]._id answers past the per-*[...] cap; a content field does not", %{
+    conn: conn,
+    token: token
+  } do
+    all = conn |> get_query(token, ~s'*[_type == "book"]._id') |> json_response(200)
+    assert length(all["result"]) >= 3
+
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_documents_per_fetch: 2)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    ids = conn |> get_query(token, ~s'*[_type == "book"]._id') |> json_response(200)
+    assert Enum.sort(ids["result"]) == Enum.sort(all["result"])
+
+    projected =
+      conn |> get_query(token, ~s'*[_type == "book"]{_id, _createdAt}') |> json_response(200)
+
+    assert length(projected["result"]) == length(all["result"])
+
+    assert conn |> get_query(token, ~s'*[_type == "book"].name') |> json_response(422)
+  end
+
+  # task-606142ef89bee14d: coalesce(a, b) in L pushes down as
+  # a in L || (!defined(a) && b in L), so it narrows in SQL below the cap and
+  # keeps GROQ's meaning: b is read only where a is missing or null.
+  test "coalesce(a, b) in $list narrows in SQL and keeps coalesce's meaning", %{
+    conn: conn,
+    token: token
+  } do
+    books = conn |> get_query(token, ~s'*[_type == "book"]{_id, name}') |> json_response(200)
+    [first | _] = Enum.sort_by(books["result"], & &1["_id"])
+
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_documents_per_fetch: 2)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    query = fn groq, list ->
+      conn
+      |> get_query(token, groq, %{"$l" => Jason.encode!(list)})
+      |> json_response(200)
+      |> Map.fetch!("result")
+    end
+
+    # No book has a subtitle, so coalesce falls through to name.
+    assert query.(~s'*[_type == "book" && coalesce(subtitle, name) in $l]._id', [first["name"]]) ==
+             [first["_id"]]
+
+    # Every book has a name, so _id is never consulted: nothing matches, where
+    # `name in $l || _id in $l` would match the first book.
+    assert query.(~s'*[_type == "book" && coalesce(name, _id) in $l]._id', [first["_id"]]) == []
   end
 
   test "a query that would load too much stored content is refused before loading", %{

@@ -51,7 +51,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact match: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | `eq` `neq` `in` `nin` `nbetween` (`A,B`) `has` `nhas` `hasStrong` (`tag:min`) `contains` `notContains` `startsWith` `endsWith` `gt` `gte` `lt` `lte` `is` (`null`/`notnull`) `count{Eq,Neq,Gt,Gte,Lt,Lte}` `neqOrMissing`. `neq`/`nin`/`nbetween` drop NULL; `neqOrMissing` keeps it (`!=`). `filter[_references]=<id>`: refs `id` |
-| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each parses as `filter=`; clauses **AND** (OR: `filter[$or][i][f][op]`, any branch); ops on one field compose; **same field+op twice → 400** (use `in`); **an unparseable element → 400** |
+| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each parses as `filter=`; clauses **AND** (OR: `filter[$or][i][f][op]`, any branch, ≤16); ops on one field compose; **same field+op twice → 400** (use `in`); **an unparseable element → 400** |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs, §5a) |
 
 **Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page — so **never infer truncation from `count == limit`**; `nextOffset` when more.
@@ -133,7 +133,7 @@ First frame: `event: welcome`.
 
 ## 8. Schema endpoints [admin]
 
-Flat `/v1/schemas/*` needs global `admin`. Scoped `P` reads: any workspace member; writes: role `owner`/`admin`. Below, `P` = `/w/:workspace_slug/p/:project_slug`; a schema object is `{name,title,icon,visibility,fields:[...]}`.
+Flat: global `admin`. Scoped reads: member API token or seated login bearer; no grant/share-only sessions. Writes: `owner`/`admin`. `P=/w/:workspace_slug/p/:project_slug`; schema: `{name,title,icon,visibility,fields:[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`

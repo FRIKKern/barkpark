@@ -13,6 +13,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
+  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.Http.IfNoneMatch
   alias BarkparkWeb.ReadPerspective
   alias BarkparkWeb.StrictReadParams
@@ -304,6 +305,8 @@ defmodule BarkparkWeb.QueryController do
       |> with_id_prefix(params["id_prefix"])
 
     expand_spec = parse_expand(params["expand"])
+    facets = parse_facet_params(params)
+    collapse = parse_collapse(params["collapse"])
 
     schema = fetch_schema(conn, type, dataset)
     caller_context = CallerContext.from_conn(conn)
@@ -367,6 +370,21 @@ defmodule BarkparkWeb.QueryController do
       field = forbidden_query_field(filter_map, order, schema, caller_context) ->
         {:error, {:forbidden_field, field}}
 
+      # A malformed `?facet=` / `?facet_range[…]=` is a 400 naming the parameter.
+      match?({:error, _, _, _}, facets) ->
+        refuse_facets(conn, facets)
+
+      # A facet counts a field's values, so it is an oracle like a filter.
+      field = forbidden_facet_field(facets, schema, caller_context) ->
+        {:error, {:forbidden_field, field}}
+
+      # `?collapse=` groups by a field's value, an oracle like a filter.
+      collapse == :error ->
+        refuse_collapse(conn, params["collapse"])
+
+      is_binary(collapse) and not Envelope.field_readable?(schema, collapse, caller_context) ->
+        {:error, {:forbidden_field, collapse}}
+
       true ->
         # TRUNCATION SIGNAL. `list_documents_page/3` reads one row past the page
         # and reports whether it materialised, so `hasMore` is an EXACT answer
@@ -390,10 +408,14 @@ defmodule BarkparkWeb.QueryController do
               order: order,
               collation: collation,
               content_keys: content_keys(params, expand_spec, type, conn)
-            ] ++ scope_opts(conn)
+            ] ++ collapse_opts(collapse) ++ scope_opts(conn)
           )
 
         base_rendered = Envelope.render_many(docs, schema, caller_context)
+        # A collapsed set's representatives depend on the order, so the total,
+        # facets and group counts read it too.
+        read_opts =
+          [filter_map: filter_map, order: order, collation: collation] ++ collapse_opts(collapse)
 
         # Same split as `show_doc!/5` (task-0e0cb2167c6fcdea): captured
         # between Expand.expand/4 and project_fields/maybe_resolve_tasks, so
@@ -425,7 +447,9 @@ defmodule BarkparkWeb.QueryController do
             hasMore: has_more
           }
           |> maybe_put_next_offset(has_more, limit, offset)
-          |> maybe_put_total(conn, params, type, dataset, perspective, filter_map)
+          |> maybe_put_total(conn, params, type, dataset, perspective, read_opts)
+          |> maybe_put_facets(conn, type, dataset, perspective, read_opts, facets)
+          |> maybe_put_collapse(conn, type, dataset, perspective, read_opts, docs)
 
         schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
         etag = list_etag(dataset, type, rendered)
@@ -1764,6 +1788,16 @@ defmodule BarkparkWeb.QueryController do
     end)
   end
 
+  @max_or_branches Content.Query.max_or_branches()
+
+  defp invalid_or_groups(groups, _reference_ops?)
+       when is_list(groups) and length(groups) > @max_or_branches do
+    {:clause,
+     "filter[$or] has #{length(groups)} branches; the limit is #{@max_or_branches}. " <>
+       "Split the query or narrow it with an ANDed filter.",
+     %{field: "$or", limit: @max_or_branches}}
+  end
+
   defp invalid_or_groups([_ | _] = groups, reference_ops?) do
     groups
     |> Enum.with_index()
@@ -1893,19 +1927,246 @@ defmodule BarkparkWeb.QueryController do
     if next > 100_000, do: inner, else: Map.put(inner, :nextOffset, next)
   end
 
-  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, filter_map) do
+  # `read_opts` is the list's filter and order, plus `collapse: field` when the
+  # list collapses, so the total counts groups.
+  defp maybe_put_total(inner, conn, %{"count" => "true"}, type, dataset, perspective, read_opts) do
     total =
       Content.count_documents(
         type,
         dataset,
-        [perspective: perspective, filter_map: filter_map] ++ scope_opts(conn)
+        [perspective: perspective] ++ read_opts ++ scope_opts(conn)
       )
 
     Map.put(inner, :total, total)
   end
 
-  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _filter_map),
+  defp maybe_put_total(inner, _conn, _params, _type, _dataset, _perspective, _read_opts),
     do: inner
+
+  # ── Collapse (task-3fbfafa3d1035ec2) ──────────────────────────────────────
+  #
+  # `collapse=familyId` keeps one document per value of a top-level field, the
+  # first by the list's order; a document with no value stands alone. The
+  # page, `total` and the facets count groups. `result.collapse.counts` maps
+  # each listed `_id` to how many matched documents its group holds.
+  defp parse_collapse(nil), do: nil
+
+  defp parse_collapse(field) when is_binary(field) do
+    field = String.trim(field)
+    if facet_field?(field), do: field, else: :error
+  end
+
+  defp parse_collapse(_), do: :error
+
+  defp collapse_opts(field) when is_binary(field), do: [collapse: field]
+  defp collapse_opts(_), do: []
+
+  defp refuse_collapse(conn, received) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "collapse takes one top-level field name (collapse=familyId); got " <> inspect(received),
+      %{parameter: "collapse", received: inspect(received)}
+    )
+  end
+
+  defp maybe_put_collapse(inner, conn, type, dataset, perspective, read_opts, docs) do
+    case read_opts[:collapse] do
+      nil ->
+        inner
+
+      field ->
+        counts =
+          Content.collapse_counts(
+            type,
+            dataset,
+            [perspective: perspective] ++ read_opts ++ scope_opts(conn),
+            Enum.map(docs, & &1.id)
+          )
+
+        Map.put(inner, :collapse, %{
+          field: field,
+          counts: Map.new(docs, &{&1.doc_id, Map.get(counts, &1.id, 1)})
+        })
+    end
+  end
+
+  # ── Facets (task-8af256dcd8f17902) ────────────────────────────────────────
+  #
+  #   * `facet=a,b` (or repeated `facet[]=`) — value counts of up to
+  #     #{@max_facet_fields} top-level fields over the filtered set, the same
+  #     spelling search takes. `facets.fields.<f>` is `[{label, count}]`.
+  #   * `facet_range[price]=100,200,500` (or `facet_range=price:100,200,500`,
+  #     repeatable, the CLI's spelling) — numeric buckets for up to
+  #     #{@max_range_fields} fields, 1–#{@max_range_edges} ascending edges.
+  #     `facets.ranges.<f>` is `[{from, to, count}]`, open ends null.
+  #
+  # Both count the set `?count=true` totals, in one extra round of SQL.
+  @max_facet_fields 10
+  @max_range_fields 5
+  @max_range_edges 20
+  @facet_field_re ~r/^[A-Za-z_][A-Za-z0-9_]*$/
+  @facet_edge_re ~r/^-?\d+(\.\d+)?$/
+
+  defp parse_facet_params(params) do
+    with {:ok, fields} <- parse_facet_fields(params["facet"]),
+         {:ok, ranges} <- parse_facet_ranges(params["facet_range"]) do
+      {:ok, %{fields: fields, ranges: ranges}}
+    end
+  end
+
+  defp parse_facet_fields(nil), do: {:ok, []}
+
+  defp parse_facet_fields(value) do
+    fields =
+      value
+      |> List.wrap()
+      |> Enum.flat_map(fn
+        v when is_binary(v) -> v |> String.split(",") |> Enum.map(&String.trim/1)
+        _ -> [:invalid]
+      end)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    if length(fields) <= @max_facet_fields and Enum.all?(fields, &facet_field?/1),
+      do: {:ok, fields},
+      else:
+        {:error, "facet",
+         "facet takes up to #{@max_facet_fields} top-level field names, comma separated " <>
+           "(facet=format,language)", value}
+  end
+
+  defp parse_facet_ranges(nil), do: {:ok, []}
+
+  defp parse_facet_ranges(value) when is_map(value) and map_size(value) <= @max_range_fields do
+    value
+    |> Enum.sort()
+    |> Enum.reduce_while({:ok, []}, fn {field, raw}, {:ok, acc} ->
+      case facet_edges(raw) do
+        {:ok, edges} when is_binary(field) ->
+          if facet_field?(field),
+            do: {:cont, {:ok, acc ++ [{field, edges}]}},
+            else: {:halt, range_error(value)}
+
+        _ ->
+          {:halt, range_error(value)}
+      end
+    end)
+  end
+
+  # The flat spelling the CLI sends: `facet_range=price:100,200` (repeatable).
+  defp parse_facet_ranges(value) when is_binary(value) or is_list(value) do
+    pairs =
+      value
+      |> List.wrap()
+      |> Enum.map(fn
+        v when is_binary(v) -> String.split(v, ":", parts: 2)
+        _ -> []
+      end)
+
+    if Enum.all?(pairs, &match?([_, _], &1)) and
+         length(Enum.uniq_by(pairs, &hd/1)) == length(pairs),
+       do: parse_facet_ranges(Map.new(pairs, fn [f, e] -> {String.trim(f), e} end), value),
+       else: range_error(value)
+  end
+
+  defp parse_facet_ranges(value), do: range_error(value)
+
+  defp parse_facet_ranges(map, original) do
+    case parse_facet_ranges(map) do
+      {:error, _, _, _} -> range_error(original)
+      ok -> ok
+    end
+  end
+
+  defp range_error(value),
+    do:
+      {:error, "facet_range",
+       "facet_range[field]=e1,e2,… (or facet_range=field:e1,e2,…) takes up to " <>
+         "#{@max_range_fields} fields, each with 1–#{@max_range_edges} ascending numbers " <>
+         "(facet_range[price]=100,200,500)", value}
+
+  defp facet_edges(raw) when is_binary(raw) do
+    parts = raw |> String.split(",") |> Enum.map(&String.trim/1)
+
+    with true <- length(parts) in 1..@max_range_edges,
+         true <- Enum.all?(parts, &Regex.match?(@facet_edge_re, &1)),
+         decimals = Enum.map(parts, &Decimal.new/1),
+         true <-
+           decimals
+           |> Enum.chunk_every(2, 1, :discard)
+           |> Enum.all?(fn [a, b] -> Decimal.lt?(a, b) end) do
+      {:ok, Enum.zip(decimals, Enum.map(parts, &edge_number/1))}
+    else
+      _ -> :error
+    end
+  end
+
+  defp facet_edges(_raw), do: :error
+
+  defp edge_number(text),
+    do: if(String.contains?(text, "."), do: String.to_float(text), else: String.to_integer(text))
+
+  defp facet_field?(field), do: is_binary(field) and Regex.match?(@facet_field_re, field)
+
+  defp refuse_facets(conn, {:error, parameter, message, received}) do
+    ErrorResponse.emit_custom(conn, 400, "malformed", message <> "; got " <> inspect(received), %{
+      parameter: parameter,
+      received: inspect(received)
+    })
+  end
+
+  defp forbidden_facet_field({:ok, %{fields: fields, ranges: ranges}}, schema, caller_context) do
+    Enum.find(
+      fields ++ Enum.map(ranges, &elem(&1, 0)),
+      &(not Envelope.field_readable?(schema, &1, caller_context))
+    )
+  end
+
+  defp maybe_put_facets(
+         inner,
+         _conn,
+         _type,
+         _dataset,
+         _perspective,
+         _read_opts,
+         {:ok, %{fields: [], ranges: []}}
+       ),
+       do: inner
+
+  defp maybe_put_facets(inner, conn, type, dataset, perspective, read_opts, {:ok, facets}) do
+    counts =
+      Content.facet_counts(
+        type,
+        dataset,
+        [
+          perspective: perspective,
+          facet_fields: facets.fields,
+          facet_ranges:
+            Enum.map(facets.ranges, fn {f, edges} -> {f, Enum.map(edges, &elem(&1, 0))} end)
+        ] ++ read_opts ++ scope_opts(conn)
+      )
+
+    fields =
+      Map.new(counts.fields, fn {f, buckets} ->
+        {f, Enum.map(buckets, fn {label, n} -> %{label: label, count: n} end)}
+      end)
+
+    ranges =
+      Map.new(facets.ranges, fn {f, edges} ->
+        bounds = Enum.map(edges, &elem(&1, 1))
+        froms = [nil | bounds]
+        tos = bounds ++ [nil]
+
+        {f,
+         [froms, tos, counts.ranges[f]]
+         |> Enum.zip()
+         |> Enum.map(fn {from, to, n} -> %{from: from, to: to, count: n} end)}
+      end)
+
+    Map.put(inner, :facets, %{fields: fields, ranges: ranges})
+  end
 
   # Comma-separated specs → multi-field sort (`title:asc,price:desc` sorts by title,
   # then price as a tiebreak). A single spec stays a single parsed value (back-compat).
