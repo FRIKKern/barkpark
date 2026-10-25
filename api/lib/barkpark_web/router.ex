@@ -1524,6 +1524,12 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.RequireTokenOrLoginSession)
   end
 
+  # Schema reads: a login session must have a workspace seat, not only a grant
+  # or share admission. ResolveWorkspace has already assigned :member_user.
+  pipeline :require_token_or_member_login_session do
+    plug(BarkparkWeb.Plugs.RequireTokenOrLoginSession, member_only: true)
+  end
+
   # The bearer describes itself — permissions, tier, dataset, workspace, seat
   # (task-bc2541aca8541ff1). /me needs a session; this needs only the bearer.
   # task-a89ef18ee88ba6a0: the bearer may also be a LOGIN session (the token
@@ -3924,10 +3930,11 @@ defmodule BarkparkWeb.Router do
   end
 
   # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
-  # membership at :read). An editing Studio on a member token needs the schema
-  # to render a form (task-23c4ac86976c46a9); writes below stay admin.
+  # membership at :read). An editing Studio needs the schema with its API token
+  # or account-session bearer (task-b21d1b647d448142), without a shared service
+  # credential. The schema write and Structure admin gates below are unchanged.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through([:scoped_api, :require_token])
+    pipe_through([:scoped_api, :require_token_or_member_login_session])
 
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
