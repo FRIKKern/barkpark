@@ -139,6 +139,83 @@ defmodule Barkpark.Search.Synonyms do
   end
 
   @doc """
+  `search_terms/4` and `correction_for/4` for every word of a query, in ONE read.
+
+  The pipeline asked both per word, two round trips each ("post 12": four), before
+  the documents query: on a busy box each is milliseconds. Same rows, same rules:
+  a word's terms are itself, its normalized form and what its enabled synonyms
+  give; the correction is that of the first word one fires for, the first row by
+  `(from_query, to_query)` as `correction_for/4` takes it.
+  """
+  @spec expand_terms(String.t(), String.t(), [String.t()], binary() | nil) ::
+          {%{String.t() => [String.t()]}, String.t() | nil}
+  def expand_terms(surface, scope, terms, workspace_id \\ nil)
+      when is_binary(surface) and is_binary(scope) and is_list(terms) do
+    keyed =
+      for t <- terms, is_binary(t), do: {t, String.trim(t), Sanitizer.normalize(String.trim(t))}
+
+    normals = keyed |> Enum.map(&elem(&1, 2)) |> Enum.reject(&(&1 == "")) |> Enum.uniq()
+
+    rows =
+      if normals == [] do
+        []
+      else
+        from(s in Synonym,
+          where:
+            s.surface == ^surface and s.scope == ^scope and s.enabled == true and
+              (s.from_query in ^normals or
+                 (s.kind == "alt_correction" and s.to_query in ^normals)),
+          order_by: [asc: s.from_query, asc: s.to_query]
+        )
+        |> scope_to_workspace(workspace_id)
+        |> Repo.all()
+      end
+
+    fires = fn n ->
+      Enum.filter(
+        rows,
+        &(&1.from_query == n or (&1.kind == "alt_correction" and &1.to_query == n))
+      )
+    end
+
+    expanded =
+      Map.new(keyed, fn {term, raw, n} ->
+        list =
+          if raw == "" do
+            []
+          else
+            n
+            |> fires.()
+            |> Enum.reduce([raw, n], fn
+              %Synonym{kind: "alt_correction"} = row, acc -> [row.from_query, row.to_query | acc]
+              row, acc -> [row.to_query | acc]
+            end)
+            |> Enum.map(&String.trim/1)
+            |> Enum.reject(&(&1 == ""))
+            |> Enum.uniq()
+          end
+
+        {term, list}
+      end)
+
+    corrected =
+      Enum.find_value(keyed, fn {_term, _raw, n} ->
+        case n != "" and List.first(fires.(n)) do
+          %Synonym{kind: "alt_correction", to_query: ^n, from_query: from_q} ->
+            if from_q in [nil, "", n], do: nil, else: from_q
+
+          %Synonym{to_query: to_q} ->
+            if to_q in [nil, "", n], do: nil, else: to_q
+
+          _ ->
+            nil
+        end
+      end)
+
+    {expanded, corrected}
+  end
+
+  @doc """
   The canonical corrected spelling for a raw query, or `nil` when no enabled
   synonym fires for it.
 
