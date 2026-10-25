@@ -382,6 +382,10 @@ function textGeometry(root) {
   for (const control of root.querySelectorAll("input, textarea")) {
     const style = getComputedStyle(control);
     if (!isVisible(control) || !control.value) continue;
+    // A control whose own ink is transparent paints no glyphs: a sibling layer
+    // carrying the same text does (the canvas code block's highlight), and that
+    // layer is already measured above. Counting both doubles every line.
+    if (style.color === "transparent" || style.color.split(" ").join("").endsWith(",0)")) continue;
     const cr = control.getBoundingClientRect();
     const lineHeight = parseFloat(style.lineHeight) || parseFloat(style.fontSize) || 16;
     control.value.split("\\n").forEach((value, index) => append(cr.top + index * lineHeight, value));
