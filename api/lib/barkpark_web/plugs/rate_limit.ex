@@ -243,8 +243,8 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # negotiation to the NEW `:browser` class — it is a property of that class,
   # not of refusal in general. `rate_limit_browser_shadow_test.exs` pins that
   # `Accept` has NO influence on a `:read`/`:write` refusal.
-  defp limited(conn, _class, _key, per_minute),
-    do: json_refuse(conn, retry_after_seconds(per_minute))
+  defp limited(conn, class, key, per_minute),
+    do: json_refuse(conn, retry_after_seconds(per_minute), budget(class, key, per_minute))
 
   # Content-negotiated refusal — REACHABLE ONLY FROM THE `:browser` CLASS, and
   # only once a human has set `:browser_enforce`. A browser asking for HTML gets
@@ -281,8 +281,13 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # `call/2` did on main for a `:read`/`:write` 429: the `retry-after` header,
   # the `Errors.to_envelope` status, and the `%{error: …}` JSON body. It reads
   # nothing off the request, so no `Accept` value can change its output.
-  defp json_refuse(conn, retry_after) do
-    env = Errors.to_envelope({:error, :rate_limited, %{retry_after: retry_after}}, conn)
+  defp json_refuse(conn, retry_after, budget \\ nil) do
+    details =
+      if budget,
+        do: %{retry_after: retry_after, budget: budget},
+        else: %{retry_after: retry_after}
+
+    env = Errors.to_envelope({:error, :rate_limited, details}, conn)
 
     conn
     |> put_resp_header("retry-after", Integer.to_string(retry_after))
@@ -639,6 +644,21 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     _ -> resolve(raw, rest)
   catch
     :exit, _ -> resolve(raw, rest)
+  end
+
+  # Which budget ran out (task-fba67efa7f61c678): a caller sharing a token with
+  # a background writer got 429 on single edits and could not tell which bucket
+  # was spent. Named by its class, size, dataset scope and the kind of principal
+  # it is keyed on (a token, or the client's IP), never by an id or an address.
+  defp budget(class, key, per_minute) do
+    principal = if String.starts_with?(key, "ip:"), do: "ip", else: "token"
+
+    %{
+      class: to_string(class),
+      per_minute: per_minute,
+      scope: key |> String.split(":") |> List.last(),
+      principal: principal
+    }
   end
 
   defp retry_after_seconds(per_minute) when is_integer(per_minute) and per_minute > 0 do
