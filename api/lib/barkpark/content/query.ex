@@ -544,6 +544,8 @@ defmodule Barkpark.Content.Query do
   # an inlined cut is evaluated once per reference. Each spec then turns the
   # cut into labels: a value facet its distinct values, a range facet its
   # bucket number. A query per facet kind ran the filtered match once each.
+  # `title` and `status` live in their own columns, not in `content` (the
+  # writer promotes them), so the cut reads those two from the columns.
   defp facet_query(type, dataset, opts, specs) do
     keys = Enum.map(specs, &elem(&1, 0))
     edges = Enum.map(specs, &elem(&1, 1))
@@ -554,9 +556,13 @@ defmodule Barkpark.Content.Query do
       |> select([d], %{
         c:
           fragment(
-            "(SELECT coalesce(jsonb_object_agg(k, s.c -> k) FILTER (WHERE jsonb_exists(s.c, k)), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, unnest(?::text[]) AS k)",
+            "(SELECT coalesce(jsonb_object_agg(k, s.c -> k) FILTER (WHERE jsonb_exists(s.c, k)), '{}'::jsonb) FROM (SELECT ? #> '{}' AS c OFFSET 0) AS s, unnest(?::text[]) AS k) || jsonb_strip_nulls(jsonb_build_object('title', CASE WHEN 'title' = ANY(?) THEN ? END, 'status', CASE WHEN 'status' = ANY(?) THEN ? END))",
             d.content,
-            type(^Enum.uniq(keys), {:array, :string})
+            type(^Enum.uniq(keys), {:array, :string}),
+            type(^keys, {:array, :string}),
+            d.title,
+            type(^keys, {:array, :string}),
+            d.status
           )
       })
 
