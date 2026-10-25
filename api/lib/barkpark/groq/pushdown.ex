@@ -597,7 +597,23 @@ defmodule Barkpark.Groq.Pushdown do
 
   defp conjuncts({:and, l, r}), do: conjuncts(l) ++ conjuncts(r)
   defp conjuncts({:group, inner}), do: conjuncts(inner)
+
+  # `coalesce(a, b) in L` (task-606142ef89bee14d) is
+  # `a in L || (!defined(a) && b in L)`: coalesce answers its first argument
+  # that is not null, and `defined()` is false exactly for null or missing.
+  # The rewrite is exact, so the `||`, `in` and `defined` shapes below push it
+  # down as they push down the spelled-out form.
+  defp conjuncts({:op, "in", {:func, "global", "coalesce", [_ | _] = args}, r}),
+    do: [coalesce_in(args, r)]
+
   defp conjuncts(other), do: [other]
+
+  defp coalesce_in([a], r), do: {:op, "in", a, r}
+
+  defp coalesce_in([a | rest], r),
+    do:
+      {:or, {:op, "in", a, r},
+       {:and, {:not, {:func, "global", "defined", [a]}}, coalesce_in(rest, r)}}
 
   defp apply_conjunct(node, acc, resolve) do
     with :error <- check(node, resolve),
