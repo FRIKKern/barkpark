@@ -670,6 +670,22 @@ defmodule Barkpark.Groq.Evaluator do
     end
   end
 
+  # Sanity's `documents::get(ref)` reads the document a global document
+  # reference names: an object whose `_ref` is `dataset:<project>.<dataset>:<id>`
+  # (task-13790b478beeee4d). It reads like `->` does, so perspective, scope and
+  # redaction apply. Only this query's own project and dataset resolve here;
+  # another dataset, another project, a bare id or any other value is null.
+  defp func("documents", "get", [arg], scope, ctx) do
+    with %{"_ref" => "dataset:" <> location} <- eval(arg, scope, ctx),
+         [place, id] when id != "" <- String.split(location, ":", parts: 2),
+         [project, dataset] <- String.split(place, ".", parts: 2),
+         true <- project == ctx.project_id and dataset == ctx.dataset do
+      Source.get(ctx.source, id)
+    else
+      _ -> nil
+    end
+  end
+
   defp func("releases", "all", [], _scope, ctx) do
     ctx.source
     |> Source.fetch(%{Pushdown.empty() | types: ["system.release"]})

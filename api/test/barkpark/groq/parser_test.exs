@@ -40,6 +40,37 @@ defmodule Barkpark.Groq.ParserTest do
              Parser.parse("delta::changedAny(title)")
   end
 
+  # task-13790b478beeee4d: the reference shape Sanity's documents::get reads.
+  test "documents::get reads a global document reference in this project and dataset" do
+    docs = [%{"_id" => "alan", "_type" => "author", "name" => "Alan Turing"}]
+
+    eval = fn q ->
+      {:ok, tree} = Parser.parse(q)
+
+      {:ok, value} =
+        Evaluator.evaluate(tree,
+          source: MemorySource.new(docs),
+          project_id: "site",
+          dataset: "prod"
+        )
+
+      value
+    end
+
+    assert eval.(~s|documents::get({"_ref": "dataset:site.prod:alan"}).name|) == "Alan Turing"
+
+    for ref <- [
+          "dataset:site.other:alan",
+          "dataset:elsewhere.prod:alan",
+          "dataset:site.prod:nope",
+          "alan"
+        ] do
+      assert eval.(~s|documents::get({"_ref": "#{ref}"})|) == nil, ref
+    end
+
+    assert eval.(~s|documents::get("alan")|) == nil
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 
