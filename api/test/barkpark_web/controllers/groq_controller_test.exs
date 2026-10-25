@@ -461,6 +461,50 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert query.(~s'*[_type == "book" && coalesce(name, _id) in $l]._id', [first["_id"]]) == []
   end
 
+  # task-754316ae85c63a1a: gyldendal.no's draft-mode poller timed out
+  # reading every document of the dataset. `_id in path()` narrows in SQL, so
+  # it reads only the matching rows.
+  test "_id in path(\"drafts.**\") narrows in SQL", %{conn: conn, token: token, scope: scope} do
+    for id <- ["b1", "b3"] do
+      {:ok, _} = Content.create_document("book", %{"_id" => id, "name" => id}, @dataset, scope)
+    end
+
+    raw = %{"perspective" => "raw"}
+
+    drafts =
+      conn
+      |> get_query(
+        token,
+        ~s'*[_id in path("drafts.**")] | order(_updatedAt desc){_id, _updatedAt}',
+        raw
+      )
+      |> json_response(200)
+
+    assert drafts["result"] |> Enum.map(& &1["_id"]) |> Enum.sort() == ["drafts.b1", "drafts.b3"]
+    [newest | _] = drafts["result"]
+
+    {poll, statements} =
+      sql_statements(fn ->
+        scoped_conn()
+        |> get_query(
+          token,
+          ~s'*[_id in path("drafts.**")] | order(_updatedAt desc)[0]._updatedAt',
+          raw
+        )
+        |> json_response(200)
+      end)
+
+    assert poll["result"] == newest["_updatedAt"]
+    assert Enum.any?(statements, &(&1 =~ ~s|"doc_id" ~ $|))
+
+    count = scoped_conn() |> get_query(token, ~s'count(*[_id in path("drafts.*")])', raw)
+    assert json_response(count, 200)["result"] == 2
+
+    assert scoped_conn()
+           |> get_query(token, ~s'count(*[_id in path("*")])', raw)
+           |> json_response(200)
+  end
+
   test "a query that would load too much stored content is refused before loading", %{
     conn: conn,
     token: token
