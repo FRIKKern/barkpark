@@ -139,6 +139,13 @@ defmodule BarkparkWeb.Contract.QueryFacetsTest do
     assert flat["facets"] == bracket["facets"]
   end
 
+  # The writer keeps `title` and `status` in columns, not in `content`.
+  test "title and status facets read their columns", %{conn: conn} do
+    f = result(conn, "facet=title,status&filter[format][eq]=pocket")["facets"]["fields"]
+    assert buckets(f["title"]) == %{"Fa fa-1" => 1, "Fa fa-2" => 1}
+    assert buckets(f["status"]) == %{"published" => 2}
+  end
+
   test "no facet parameter, no facets key", %{conn: conn} do
     refute Map.has_key?(result(conn, "limit=2"), "facets")
   end
