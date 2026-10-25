@@ -1121,10 +1121,16 @@ defmodule Barkpark.Groq.DocumentSource do
 
     cond do
       length(sized) > state.max_per_fetch ->
+        cap = state.max_per_fetch
+
+        # task-2a7741b89420a38a: the old text asked for a _type filter even when
+        # the query had one and the type alone holds more than the cap.
         raise LimitError,
           message:
-            "one *[...] in this query matches more than #{state.max_per_fetch} documents. " <>
-              "Narrow it with a _type filter or an equality on a field."
+            "one *[...] in this query matches more than #{cap} documents, the most one " <>
+              "*[...] may load at once. Page through them with a slice, for example " <>
+              "*[...] | order(_id) [0...#{cap}], then [#{cap}...#{cap * 2}], or narrow " <>
+              "the filter further; count(*[...]) gives the total without loading them."
 
       bytes > state.max_bytes_per_fetch ->
         raise LimitError,
