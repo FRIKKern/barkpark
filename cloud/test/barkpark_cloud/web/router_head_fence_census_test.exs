@@ -316,10 +316,17 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `side_effecting_get?/1` clause. It is user-or-PAT gated like its
   # `/v1/sites/:id/*` siblings, so `total` and `session` each rise by exactly
   # one; machine and public are untouched.
-  @baseline_total 76
-  @baseline_session 55
+  # 2026-10-25: 78 / 56 / 9 / 13. TWO ROUTES WERE ADDED (task-74c3c0ab88eb4f53,
+  # Sign in with Barkpark Cloud for an external Studio). `GET
+  # /v1/barkparks/:id/studio-callbacks` reads the instance's callback allowlist
+  # off the team-scoped row — no write, no mint, no upstream call — so session
+  # rises by one. `GET /studio-signin` serves the SPA shell (send_dashboard/1,
+  # like /activate) — a static file, nothing burned — so public rises by one.
+  # Neither owes a `side_effecting_get?/1` clause.
+  @baseline_total 78
+  @baseline_session 56
   @baseline_machine 9
-  @baseline_public 12
+  @baseline_public 13
 
   # THE FENCE. Every `side_effecting_get?/1` clause, as {path_segments, verdict}.
   # The catch-all is excluded (it is the default, not a ruling).

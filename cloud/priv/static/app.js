@@ -20838,6 +20838,90 @@
     });
   }
 
+  // ----------------------- "Sign in with Barkpark Cloud" for an EXTERNAL Studio
+  // A Studio deployed apart from its instance sends the editor to
+  //   /studio-signin?instance=<id>&return_to=<callback>&state=<s>&code_challenge=<c>
+  // init() parks those four (sessionStorage, this tab only) and scrubs the
+  // path; logged out, the login card says what signing in will do; the first
+  // authed render() POSTs them to /v1/auth/studio-handoff. The SERVER decides
+  // everything — membership on the instance's team, return_to EXACTLY on that
+  // instance's callback allowlist — and answers the one URL to go to. Nothing
+  // here trusts return_to: the console only ever navigates to the server's url.
+  var STUDIO_HANDOFF_KEY = "bpcloud.studioHandoff";
+  var STUDIO_HANDOFF_FIELDS = ["instance", "return_to", "state", "code_challenge"];
+  // Pure: the parked handoff a /studio-signin landing carries, or null.
+  function studioHandoffFromLocation(pathname, search) {
+    if (pathClean(pathname) !== "/studio-signin") return null;
+    var q;
+    try { q = new URLSearchParams(search || ""); } catch (e) { return null; }
+    var h = {};
+    for (var i = 0; i < STUDIO_HANDOFF_FIELDS.length; i++) {
+      var v = q.get(STUDIO_HANDOFF_FIELDS[i]);
+      if (!v) return null;
+      h[STUDIO_HANDOFF_FIELDS[i]] = v;
+    }
+    return h;
+  }
+  function parkedStudioHandoff() {
+    try {
+      var h = JSON.parse(sessionStorage.getItem(STUDIO_HANDOFF_KEY) || "null");
+      return h && typeof h.return_to === "string" ? h : null;
+    } catch (e) { return null; }
+  }
+  function parkStudioHandoff(h) {
+    try { sessionStorage.setItem(STUDIO_HANDOFF_KEY, JSON.stringify(h)); } catch (e) {}
+  }
+  function clearParkedStudioHandoff() {
+    try { sessionStorage.removeItem(STUDIO_HANDOFF_KEY); } catch (e) {}
+  }
+  // Boot: a /studio-signin landing is parked and the address bar goes back to
+  // "/" (the state and challenge are not for the history list), then the
+  // normal boot runs — through login/OAuth if needed.
+  function captureStudioHandoff() {
+    if (pathClean(location.pathname) !== "/studio-signin") return;
+    var h = studioHandoffFromLocation(location.pathname, location.search);
+    if (h) parkStudioHandoff(h);
+    if (typeof history !== "undefined" && history.replaceState) history.replaceState(null, "", "/");
+  }
+  // PURE: what a POST /v1/auth/studio-handoff answer MEANS — {go: url} only on
+  // a 200 with a string url, a toast for everything else (fails closed).
+  function studioHandoffOutcome(r, host) {
+    r = r || {};
+    var data = r.data || {};
+    var slug = data.error;
+    if (slug && typeof slug === "object") slug = slug.code;
+    var where = host ? String(host) : "this Studio";
+    if (r.status === 200 && typeof data.url === "string" && data.url) {
+      return { go: data.url };
+    }
+    if (slug === "return_to_not_allowed") {
+      return { toast: { title: "Studio not on the sign-in list", body: where + " isn't allowed to sign in with this instance. Ask a team admin to add it." } };
+    }
+    if (slug === "not_found") {
+      return { toast: { title: "No access", body: "Your account isn't on the team that runs " + where + "'s Barkpark." } };
+    }
+    if (slug === "instance_outdated") {
+      return { toast: { title: "Instance needs an update", body: friendly(data, "Update the instance, then sign in again.") } };
+    }
+    if (slug === "invalid_state" || slug === "invalid_code_challenge" || slug === "invalid_return_to") {
+      return { toast: { title: "Broken sign-in link", body: "Start again from " + where + "." } };
+    }
+    return studioSigninOutcome(r, host);
+  }
+  function resumeStudioHandoff(h) {
+    clearParkedStudioHandoff();
+    var host = studioLoginHost(h && h.return_to);
+    return api("POST", "/v1/auth/studio-handoff", h).then(function (r) {
+      var outcome = studioHandoffOutcome(r, host);
+      if (outcome.go) {
+        location.replace(outcome.go);
+        return outcome;
+      }
+      toast({ kind: "error", title: outcome.toast.title, body: outcome.toast.body });
+      return outcome;
+    });
+  }
+
   // =========================================================== LAUNCH
   // Does this subscription entitle the team to launch? Mirrors the server's
   // Billing.entitled?/1 (billing.ex) case-for-case:
@@ -23597,7 +23681,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 2 of the 61 declared verbs have no entry here: they render
+    // 2 of the 63 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -23635,6 +23719,8 @@
     "barkpark.retry_requested": "requested a retry",
     "barkpark.verify_requested": "requested a verification",
     "barkpark.studio_link_minted": "minted a Studio sign-in link",
+    "barkpark.studio_callback_added": "allowed a Studio to sign in with a Barkpark",
+    "barkpark.studio_callback_removed": "removed a Studio from a Barkpark's sign-in list",
     "barkpark.app_token_minted": "minted an app token on a Barkpark",
     "barkpark.app_token_revoked": "revoked an app token on a Barkpark",
     "barkpark.site_url_set": "set a Barkpark's site URL",
@@ -29962,6 +30048,8 @@
         } else if (parkedStudioLogin()) {
           showAuthStudioBanner(parkedStudioLogin());
         }
+        // An external Studio's /studio-signin landing (parked by init()).
+        if (parkedStudioHandoff()) showAuthStudioBanner(parkedStudioHandoff().return_to);
         // A device-login deep link (/activate?code=…) landed while logged out:
         // park the code, scrub ?code= from the address bar (it's a bearer-
         // approvable secret), and banner what signing in will do. The first
@@ -30016,6 +30104,9 @@
       }
       resumeStudioLogin(pendingStudioLogin);
     }
+    // An external Studio's sign-in (parked by init(), possibly through login).
+    var pendingHandoff = parkedStudioHandoff();
+    if (pendingHandoff) resumeStudioHandoff(pendingHandoff);
 
     var preInviteView = parseHash().view;
     if (parkedInviteToken() && preInviteView !== "invite" &&
@@ -30540,6 +30631,9 @@
     // not hold the screen (which is one of the ways it would start looking like
     // a sign-in failure). It scrubs the token synchronously before its own hop,
     // so the two boot readers cannot see each other's parameters.
+    // An external Studio's /studio-signin landing: park it before anything paints.
+    captureStudioHandoff();
+
     bootEmailConfirm();
 
     // The ONLY call-site edit in this file: an OAuth landing is resolved (code
@@ -31437,6 +31531,9 @@
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioSigninOutcome: studioSigninOutcome, resumeStudioLogin: resumeStudioLogin,
+      // External Studio sign-in (/studio-signin → POST /v1/auth/studio-handoff).
+      studioHandoffFromLocation: studioHandoffFromLocation, studioHandoffOutcome: studioHandoffOutcome,
+      resumeStudioHandoff: resumeStudioHandoff,
       // bp-login-ux W3 — shared two-factor challenge card (decision 39): the two
       // pure classifiers (login-response kind + challenge outcome), the card
       // markup, the error copy, and the mount seam (driven with a stubbed fetch,

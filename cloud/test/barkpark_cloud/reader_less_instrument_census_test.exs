@@ -2025,6 +2025,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       "the box IP the provision worker ECHOED BACK (registry.ex:2081). registry.ex:2809 is explicit that it is stamped only when the worker echoed the ip it was told to configure, so the column is a CONSISTENCY check between two halves of a provision, not an address anyone is meant to dial.",
     "session_token_id" =>
       "the parentage of a derived token: accounts.ex:1572 scopes the sweep by it rather than by user_id + context, so revoking one browser session takes its own \"sse\" children and nobody else's. The client holds the token; the row id is the server's bookkeeping.",
+    "studio_callback_urls" =>
+      "the external-Studio sign-in allowlist (task-74c3c0ab88eb4f53): Registry.studio_callback_allowed?/2 reads it at POST /v1/auth/studio-handoff and its own route echoes it (GET/POST/DELETE /v1/barkparks/:id/studio-callbacks); the CLI decodes that envelope as `studio_callbacks`, so no reader names the column itself.",
     "support_box_cap" =>
       "the operator-set ceiling on a team's CP-provisioned support boxes (owner ruling #37), read only by Registry.support_box_cap/1 inside provision_support_capped/2 under the team row lock. Its one wire appearance is the operator route's own echo (PUT /v1/operator/teams/:id/support-cap); a team sees the cap only as the `cap` on a support_cap_reached refusal, which is the moment it matters.",
     "trial_ends_at" =>

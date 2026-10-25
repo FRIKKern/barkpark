@@ -1111,6 +1111,17 @@ const PIN = [
   { key: "ARG|studioSigninOutcome|friendly|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
   { key: "FN|studioSigninOutcome|f61ae203", verdict: "AUTHORED", copy: "Couldn't open Studio" },
   { key: "ARG|studioSigninOutcome|faultCopy|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
+  // ── studioHandoffOutcome — an EXTERNAL Studio's sign-in (POST /v1/auth/studio-handoff).
+  // Every AUTHORED arm keys on a slug that route emits: return_to_not_allowed (403),
+  // not_found (404), instance_outdated (409), invalid_state / invalid_code_challenge /
+  // invalid_return_to (422). Everything else falls through to studioSigninOutcome.
+  { key: "FN|studioHandoffOutcome|9a89f38d", verdict: "AUTHORED", copy: "Studio not on the sign-in list" },
+  { key: "FN|studioHandoffOutcome|09d509ec", verdict: "AUTHORED", copy: "isn't allowed to sign in with this instance. Ask a team admin to add it." },
+  { key: "FN|studioHandoffOutcome|81c11551", verdict: "AUTHORED", copy: "Your account isn't on the team that runs" },
+  { key: "FN|studioHandoffOutcome|7558c7b9", verdict: "AUTHORED", copy: "Instance needs an update" },
+  { key: "ARG|studioHandoffOutcome|friendly|c87042c1", verdict: "DELEGATED", copy: "Update the instance, then sign in again." },
+  { key: "FN|studioHandoffOutcome|596400c5", verdict: "AUTHORED", copy: "Broken sign-in link" },
+  { key: "FN|studioHandoffOutcome|413299c6", verdict: "AUTHORED", copy: "Start again from" },
   { key: "ARG|submitLaunchFlow|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderLaunchPlan|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderBilling|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },

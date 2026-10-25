@@ -161,6 +161,12 @@ puts a **Log in with Barkpark Cloud** button on `/login`: it deep-links to
 origin against the signed-in user's own fleet and rides the existing
 studio-link mint back to `/login/ticket/:t` — the href carries no secret
 and authorization stays on the cloud route. Unset → no button.
+An external Studio (barkpark-studio) signs in the same way server-side: Cloud's
+`/studio-signin` checks team membership and an exact callback allowlist
+(`bp barkparks studio-callback add`), the box mints a `purpose: "exchange"`
+ticket (audience + PKCE S256), and the Studio's server trades it at
+`POST /v1/auth/login-tickets/exchange` for a login session. Neither door takes
+the other's ticket; only the Default workspace is ever seated.
 
 ### Org-wide required MFA (opt-in overlay)
 

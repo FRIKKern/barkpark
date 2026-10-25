@@ -2123,7 +2123,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `exit_signal`, `oom_killed`, `restart_counter`). `unit` and `result` ride
   # existing names and move the SITE register instead. MEASURED by the PIN
   # CO-EDIT arm ("407 -> 416").
-  @go_tag_pinned 416
+  # 416 -> 417 (task-74c3c0ab88eb4f53, Sign in with Barkpark Cloud for an
+  # external Studio): the new internal/cloudclient/studio_callbacks.go decodes
+  # `StudioCallbacks.Callbacks`: ONE new NAME (`studio_callbacks`). MEASURED by
+  # the PIN CO-EDIT arm ("416 -> 417").
+  @go_tag_pinned 417
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2643,7 +2647,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
+  @cloudclient_sources ~w(adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
@@ -3566,6 +3570,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
      "dr-w24-s4 KNOWN OPEN, and the arm found it on its own first run against this tree. The ARMING verdict (armed | unarmed | NULL = not measured) does reach a wire — `operator_fleet_json/1` (router.ex:10377) emits it on the operator arming roster — but NOT the fleet row every `bp cloud` reader decodes, and `grep -rn apply_arming internal/` is EMPTY, so no Go struct decodes it from either route. `operator_fleet_json/1` is not a censused pair, so no arm in this file can say that second half; this row is where it is written down."},
     {"barkpark_json/6", "apply_arming_checked_at",
      "dr-w24-s4 KNOWN OPEN — the freshness stamp of apply_arming, same custody and same measurement as its twin above. Without it an `unarmed` verdict cannot be told from one taken a month ago, which is the whole reason the column exists beside the verdict."},
+    {"barkpark_json/6", "studio_callback_urls",
+     "RULED — the external-Studio sign-in allowlist (task-74c3c0ab88eb4f53) has its own route, GET /v1/barkparks/:id/studio-callbacks, decoded by cloudclient.StudioCallbacks; the fleet row does not need it on every poll."},
     {"barkpark_json/6", "updated_at",
      "RULED — deliberately off the wire: it moves on every hourly status poll, so a renderer diffing it would report 'something changed' about a box nothing happened to. `inserted_at` IS emitted, under its wire name created_at."},
     {"site_deployment_json/3", "build_sha256",
@@ -3719,8 +3725,11 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 118 -> 119 (task-92b443a2c78a914f, a failed self-update's phase + tail): `barkparks` gains `update_last_failure`.
   # `@schema_unserialized_floor` does NOT move: `barkpark_json/6` emits it in
   # the same commit. MEASURED by the SCHEMA-SIDE arm ("119 schema column(s)").
-  @schema_field_floor 119
-  @schema_unserialized_floor 32
+  # 119 -> 120 and 32 -> 33 (task-74c3c0ab88eb4f53): `barkparks` gains
+  # `studio_callback_urls`, allowlisted off `barkpark_json/6` (its own route
+  # reads it). MEASURED by the SCHEMA-SIDE and SERIALIZER-SIDE arms.
+  @schema_field_floor 120
+  @schema_unserialized_floor 33
 
   # THE MIS-PAIR TRIPWIRE. Name-guessing a serializer is a live hazard:
   # `delivery_json/1` (router.ex:9809) is the NOTIFICATIONS delivery serializer,

@@ -58,18 +58,86 @@ defmodule BarkparkWeb.LoginTicketController do
   # consuming it JIT-provisions that account and mints a user_session.
   # Auth.mint_login_ticket gates it on the bearer holding `admin` — a lesser
   # token gets the same generic unauthorized.
+  #
+  # `purpose: "exchange"` (+ `audience`, `code_challenge`) mints a ticket for the
+  # server-to-server `exchange/2` below instead of the browser door. The answer
+  # echoes `purpose`, so a control plane can tell a box that honoured it from an
+  # older one that ignored the field and minted a browser ticket.
   defp do_mint(conn, raw_token, params) do
     case Barkpark.Auth.mint_login_ticket(raw_token,
            user_email: params["email"],
-           user_role: params["role"]
+           user_role: params["role"],
+           purpose: params["purpose"],
+           audience: params["audience"],
+           code_challenge: params["code_challenge"]
          ) do
       {:ok, ticket} ->
+        purpose = if params["purpose"] == "exchange", do: "exchange", else: "browser"
+
         conn
         |> put_status(:created)
-        |> json(%{ticket: ticket, expires_in: Barkpark.Auth.login_ticket_ttl_seconds()})
+        |> json(%{
+          ticket: ticket,
+          expires_in: Barkpark.Auth.login_ticket_ttl_seconds(),
+          purpose: purpose
+        })
+
+      {:error, :invalid_exchange} ->
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          422,
+          "invalid_exchange",
+          "an exchange ticket needs email, audience (the Studio origin) and a PKCE S256 code_challenge"
+        )
 
       {:error, :unauthorized} ->
         unauthorized(conn)
+    end
+  end
+
+  @doc """
+  `POST /v1/auth/login-tickets/exchange` — "Sign in with Barkpark Cloud" for an
+  external Studio, the server-to-server half.
+
+  Body `{ticket, audience, code_verifier}`. No bearer: the single-use 60 s
+  ticket is the credential, and it only redeems for the Studio origin it was
+  minted for (`audience`) and for the server that holds the PKCE verifier. The
+  answer is the same login session `POST /v1/auth/login` mints — `201 {token,
+  user: {id, email}}` — for the Barkpark Cloud account the control plane named.
+
+  Seating is the browser handoff's, nothing more: the Default workspace only
+  (`Barkpark.Auth.CloudSeat`). Any other workspace must already seat the user.
+
+  Every failure (unknown, used, expired, browser-purpose, wrong audience, wrong
+  verifier, missing field) is the same `401 invalid_ticket`.
+  """
+  def exchange(conn, params) do
+    conn = put_resp_header(conn, "cache-control", "no-store")
+
+    with ticket when is_binary(ticket) <- params["ticket"],
+         audience when is_binary(audience) <- params["audience"],
+         verifier when is_binary(verifier) <- params["code_verifier"],
+         {:ok, {email, role}} <- Barkpark.Auth.consume_exchange_ticket(ticket, audience, verifier) do
+      user = Barkpark.Sso.find_or_create_user(email)
+      Barkpark.Auth.CloudSeat.ensure_default_membership(user, role)
+
+      {:ok, token} =
+        Barkpark.Accounts.create_user_session_token(
+          user,
+          BarkparkWeb.SessionIssuer.actor_opts(conn)
+        )
+
+      conn
+      |> put_status(:created)
+      |> json(%{token: token, user: %{id: user.id, email: user.email}})
+    else
+      _ ->
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          401,
+          "invalid_ticket",
+          "this sign-in ticket is invalid, already used or expired"
+        )
     end
   end
 

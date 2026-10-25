@@ -88,7 +88,8 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
   @declared_floor 50
   @produced_floor 35
   @webhook_layer_size 6
-  @lifecycle_layer_size 10
+  # 10 -> 12: barkpark.studio_callback_added / _removed (task-74c3c0ab88eb4f53).
+  @lifecycle_layer_size 12
   @account_security_layer_size 2
 
   # Declared verbs with NO producer anywhere in cloud/lib. Named one by one,

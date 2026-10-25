@@ -2354,6 +2354,10 @@ defmodule BarkparkWeb.Router do
     pipe_through(:user_auth)
 
     post("/login", AuthController, :login)
+    # "Sign in with Barkpark Cloud" for an external Studio: the Studio's server
+    # trades a single-use exchange ticket (+ audience + PKCE verifier) for a
+    # login session. No bearer: the ticket is the credential.
+    post("/login-tickets/exchange", LoginTicketController, :exchange)
     post("/verify-email", AuthController, :verify_email)
     post("/request-reset", AuthController, :request_reset)
     post("/reset", AuthController, :reset)
