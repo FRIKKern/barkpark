@@ -28,7 +28,8 @@ defmodule Barkpark.Content.Search do
         :facets,
         :truncation,
         :engine_used,
-        :match
+        :match,
+        :collapse
       ])
 
     {result.hits, result.total, meta}
