@@ -2673,6 +2673,8 @@ defmodule Barkpark.Content.Query do
   defp with_collation(specs, collation) when is_list(specs),
     do: Enum.map(specs, &with_collation(&1, collation))
 
+  # An id is an identifier, not language: no collation (task-7432da7989196de0).
+  defp with_collation({:field, "_id", _dir} = spec, _collation), do: spec
   defp with_collation({:field, field, dir}, collation), do: {:field, field, dir, collation}
   defp with_collation(other, _collation), do: other
 
@@ -2698,6 +2700,9 @@ defmodule Barkpark.Content.Query do
   # Content-field ordering: `title`/`status` are promoted columns (mirroring the
   # filter ops above); every other field sorts by its JSONB value. `field` rides
   # as a bound parameter in the fragment, so it is injection-safe.
+  # `_id` sorts by the `doc_id` column (task-7432da7989196de0): the stable key
+  # a caller pages by, as in Sanity's `order(_id asc)`.
+  defp apply_order(q, {:field, "_id", dir}), do: order_by(q, [d], [{^dir, d.doc_id}])
   defp apply_order(q, {:field, "title", dir}), do: order_by(q, [d], [{^dir, d.title}])
   defp apply_order(q, {:field, "status", dir}), do: order_by(q, [d], [{^dir, d.status}])
 
