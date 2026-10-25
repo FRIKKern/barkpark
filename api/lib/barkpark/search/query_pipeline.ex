@@ -196,6 +196,9 @@ defmodule Barkpark.Search.QueryPipeline do
         # every recovery pass keeps them.
         match: Keyword.get(opts, :match, :all),
         filter_map: Keyword.get(opts, :filter_map),
+        # `?order=` instead of relevance (task-5ddc3e08684f0d48): `{order,
+        # collation}` from QueryController.search_order/3, or nil.
+        order: Keyword.get(opts, :order),
         facet_fields: Keyword.get(opts, :facet_fields),
         # With a field filter, the retriever counts the words' matches without
         # the filter up to this many (`meta.text_count`), so the recovery

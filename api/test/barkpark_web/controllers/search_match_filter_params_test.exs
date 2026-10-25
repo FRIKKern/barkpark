@@ -21,7 +21,8 @@ defmodule BarkparkWeb.SearchMatchFilterParamsTest do
           "fields" => [
             %{"name" => "displayName", "type" => "string"},
             %{"name" => "Format", "type" => "string"},
-            %{"name" => "Language", "type" => "arrayOf", "of" => %{"type" => "string"}}
+            %{"name" => "Language", "type" => "arrayOf", "of" => %{"type" => "string"}},
+            %{"name" => "Secret", "type" => "string", "private" => true}
           ]
         },
         @ds
@@ -113,5 +114,54 @@ defmodule BarkparkWeb.SearchMatchFilterParamsTest do
   test "an unknown filter operator is refused as on the query route", %{conn: conn} do
     resp = conn |> search(q: "norsk", filter: %{"Format" => %{"bogus" => "x"}})
     assert resp.status == 400
+  end
+
+  # task-5ddc3e08684f0d48: order= sorts the whole match by a field instead of
+  # ranking it, with the query API's grammar.
+  describe "order" do
+    test "order=<field>:<dir> sorts the match, pages through it, and relevance is the default",
+         %{conn: conn} do
+      ids = fn params ->
+        conn
+        |> search(params)
+        |> json_response(200)
+        |> Map.fetch!("documents")
+        |> Enum.map(& &1["_id"])
+      end
+
+      assert ids.(q: "norsk", order: "displayName:asc") == ["m3", "m1", "m2"]
+      assert ids.(q: "norsk", order: "displayName:desc") == ["m2", "m1", "m3"]
+      assert ids.(q: "norsk", order: "displayName:desc", limit: 1, offset: 1) == ["m1"]
+
+      assert ids.(q: "norsk", order: "Format:asc,displayName:desc") == ["m2", "m1", "m3"]
+      assert ids.(q: "norsk", order: "relevance") == ids.(q: "norsk")
+    end
+
+    test "the count and facets are those of the unsorted match", %{conn: conn} do
+      body =
+        conn
+        |> search(q: "norsk", order: "displayName:asc", facet: "Format")
+        |> json_response(200)
+
+      assert body["count"] == 3
+      assert Enum.map(body["facets"]["fields"]["Format"], & &1["count"]) |> Enum.sum() == 3
+    end
+
+    test "a bad order is refused, and order needs type", %{conn: conn} do
+      assert conn |> search(q: "norsk", order: "displayName:sideways") |> json_response(422)
+
+      body =
+        conn
+        |> get("/v1/data/search/#{@ds}", q: "norsk", order: "displayName:asc")
+        |> json_response(400)
+
+      assert body["error"]["message"] =~ "order needs type"
+    end
+
+    test "ordering by a field the caller may not read is forbidden_field", %{conn: conn} do
+      body = conn |> search(q: "norsk", order: "Secret:asc") |> json_response(422)
+      assert body["error"]["code"] == "forbidden_field"
+      assert body["error"]["details"]["field"] == "Secret"
+    end
   end
 end

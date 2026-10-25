@@ -1103,6 +1103,14 @@ defmodule Barkpark.Content.Query do
   defp content_order?({:field, field, _dir, _collation}), do: field not in ["title", "status"]
   defp content_order?(_), do: false
 
+  @doc """
+  Orders `query` by a parsed `?order=` spec and `?collation=`, exactly as a
+  list read orders (task-5ddc3e08684f0d48: search sorted by a field). The
+  caller adds its own tiebreak.
+  """
+  def apply_list_order(query, order, collation),
+    do: apply_order(query, with_collation(order, collation))
+
   defp apply_perspective(query, :published) do
     prefix = DraftId.drafts_prefix() <> "%"
     where(query, [d], not like(d.doc_id, ^prefix))

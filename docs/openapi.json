@@ -19012,6 +19012,24 @@
             }
           },
           {
+            "description": "Sort the match by a field instead of relevance, as on doc query: <field>:asc|desc, comma list for ties, e.g. title:asc. relevance or no order keeps the ranking. Needs --type.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "nb | nn: sort the text terms of --order by ICU Norwegian collation.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Comma-separated top-level content fields (needs --type): value counts over the filtered match in facets.fields.",
             "in": "query",
             "name": "facet",
@@ -20393,6 +20411,24 @@
             "required": false,
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "description": "Sort the match by a field instead of relevance, as on doc query: <field>:asc|desc, comma list for ties, e.g. title:asc. relevance or no order keeps the ranking. Needs --type.",
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "nb | nn: sort the text terms of --order by ICU Norwegian collation.",
+            "in": "query",
+            "name": "collation",
+            "required": false,
+            "schema": {
+              "type": "string"
             }
           },
           {
