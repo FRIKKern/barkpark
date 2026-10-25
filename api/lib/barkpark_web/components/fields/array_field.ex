@@ -31,7 +31,12 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   use Phoenix.Component
   use Gettext, backend: BarkparkWeb.Gettext
 
-  alias BarkparkWeb.Components.Fields.{CodelistField, CompositeField, LocalizedTextField}
+  alias BarkparkWeb.Components.Fields.{
+    CodelistField,
+    CompositeField,
+    LocalizedTextField,
+    ObjectForm
+  }
 
   attr :field, :map, required: true
   attr :value, :list, default: []
@@ -62,47 +67,101 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :target, :any, default: nil
 
   # Several named member types (`field.of_types`, Sanity's page-builder
-  # array): each row is shown by the member its `_type` names, read-only.
-  # The row editor posts plain `doc[f][i][sub]` inputs with no `_type` or
-  # `_key`, and the save path coerces rows against one `of` shape, so an
-  # editable typed row could not save back what it showed. With no inputs
-  # the whole-form autosave never posts the field, and `Forms` keeps the
-  # stored list byte-identical (task-592dee75ffef0c06).
+  # array, such as `page.landingPageSections`). Each row opens in the form of
+  # the member its `_type` names (`ObjectForm`), with `_type` and `_key` as
+  # hidden inputs beside the fields. Rows move up and down, are removed, and
+  # "Add item" asks which member to add (task-e24e33a2a1a4fe10). A row whose
+  # `_type` names no declared member shows its JSON and is saved unchanged.
   def array_field(%{field: %{of_types: %{} = types}} = assigns) when map_size(types) > 0 do
+    path = assigns[:path] || ""
+
     assigns =
       assigns
       |> Map.put_new(:value, [])
-      |> Map.put_new(:path, "")
+      |> Map.put_new(:errors, %{})
+      |> Map.put_new(:warnings, %{})
+      |> Map.put_new(:on_change, nil)
+      |> Map.put_new(:on_reorder, "array_op")
+      |> Map.put_new(:plugin_name, "core")
+      |> Map.put_new(:readonly, false)
+      |> Map.put_new(:target, nil)
+      |> Map.put(:path, path)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, CompositeField.description_for(assigns.field))
-      |> Map.put(
-        :rows,
-        typed_rows(assigns.field, types, assigns[:value] || [], assigns[:path] || "")
-      )
+      |> Map.put(:ordered?, true)
+      |> Map.put(:rows, typed_rows(assigns.field, types, assigns[:value] || [], path))
+      |> Map.put(:members, member_choices(assigns.field, types))
+      |> Map.put(:dom_id, "bp-array-" <> sanitize_id("#{assigns.field.name}#{path}"))
 
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf" data-typed-array
-              id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}")}
-              data-field-name={@field.name}>
+              id={@dom_id} data-field-name={@field.name}>
       <legend class="bp-field-title"><%= @title %></legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
       <ol class="bp-array-rows">
         <li :for={row <- @rows} class="bp-array-row bp-array-row-item" data-row-index={row.idx}
-            data-member-type={row.type}>
+            data-member-type={row.type} data-row-key={row.key}>
           <div class="bp-array-row-body">
             <.item_row
               item={row.member}
               idx={row.idx}
               preview={row.preview}
-              open={false}
+              open={row.fresh? or row_findings?(assigns, row.idx)}
               row_id={row.row_id}
-              body={typed_row_body(%{json: row.json})}
+              body={
+                ObjectForm.object_form(%{
+                  member: row.member,
+                  value: row.value,
+                  path: row.path,
+                  errors: row_subfield_errors(@errors, row.idx),
+                  warnings: row_subfield_errors(@warnings, row.idx),
+                  on_change: @on_change,
+                  on_reorder: @on_reorder,
+                  target: @target,
+                  plugin_name: @plugin_name,
+                  readonly: @readonly,
+                  dataset: assigns[:dataset] || "production",
+                  scope_prefix: assigns[:scope_prefix] || "",
+                  api_token_raw: assigns[:api_token_raw] || "",
+                  root: assigns[:root]
+                })
+              }
             />
           </div>
+          <div class="bp-array-row-actions">
+            <button type="button" class="bp-array-btn bp-array-btn-up" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="move_up" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-index={row.idx}
+              disabled={@readonly or row.idx == 0} aria-label={gettext("Move up")}>▲</button>
+            <button type="button" class="bp-array-btn bp-array-btn-down" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="move_down" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-index={row.idx}
+              disabled={@readonly or row.idx == length(@rows) - 1} aria-label={gettext("Move down")}>▼</button>
+            <button type="button" class="bp-array-btn bp-array-btn-remove" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="remove_row" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-index={row.idx}
+              disabled={@readonly} aria-label={gettext("Remove row")}>×</button>
+          </div>
+          <%= for err <- row_errors(@errors, row.idx) do %>
+            <span class="error" data-error-for-row={row.idx}><%= err %></span>
+          <% end %>
+          <%= for warn <- row_errors(@warnings, row.idx) do %>
+            <span class="warning" role="note" data-warning-for-row={row.idx}><%= warn %></span>
+          <% end %>
         </li>
       </ol>
       <p :if={@rows == []} class="bp-field-description"><%= gettext("No items") %></p>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — this list holds several item types, which this editor cannot edit yet; saved unchanged") %></span>
+      <details :if={!@readonly} class="bp-array-add-menu" data-add-member-menu>
+        <summary class="bp-array-btn bp-array-btn-add">+ <%= gettext("Add item") %></summary>
+        <ul class="bp-array-add-members" role="list">
+          <li :for={m <- @members}>
+            <button type="button" class="bp-array-add-member" phx-click={@on_reorder}
+              phx-target={@target} phx-value-action="add_row" phx-value-field={@field.name}
+              phx-value-path={@path} phx-value-member={m.name}
+              data-member={m.name}><%= m.title %></button>
+          </li>
+        </ul>
+      </details>
     </fieldset>
     """
   end
@@ -358,7 +417,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               dataset: assigns[:dataset] || "production",
               scope_prefix: assigns[:scope_prefix] || "",
               api_token_raw: assigns[:api_token_raw] || "",
-              root: assigns[:root]
+              root: assigns[:root],
+              on_reorder: assigns[:on_reorder] || "array_op",
+              target: assigns[:target]
             })
         })
 
@@ -446,7 +507,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         reference_row(%{
           ref_filter: ref_filter,
           ref_filter_params: ref_filter_params,
-          wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
+          wrap_id: reference_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
           row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
           row_label: row_label(assigns, idx),
@@ -479,7 +540,13 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         <span :if={@preview.media} class="bp-array-item-media" aria-hidden="true">
           <img src={@preview.media} alt="" loading="lazy" />
         </span>
-        <span :if={!@preview.media} class="bp-array-item-media bp-array-item-media-empty" aria-hidden="true"></span>
+        <span
+          :if={!@preview.media and @preview[:icon] != nil}
+          class="bp-array-item-media bp-array-item-media-icon"
+          aria-hidden="true"
+          data-type-icon={@preview[:icon]}
+        ><BarkparkWeb.Icons.desk_icon name={@preview[:icon]} size={16} /></span>
+        <span :if={!@preview.media and @preview[:icon] == nil} class="bp-array-item-media bp-array-item-media-empty" aria-hidden="true"></span>
         <span class="bp-array-item-text">
           <span class="bp-array-item-title"><%= @preview.title %></span>
           <span :if={@preview.subtitle} class="bp-array-item-subtitle"><%= @preview.subtitle %></span>
@@ -515,7 +582,11 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     %{
       title: title,
       subtitle: pick(row, spec["subtitle"]),
-      media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx)
+      media: media_url(pick(row, spec["media"]) || first_image(row, subs), ctx),
+      # task-835fe5219585ca80: the member type's icon (a named object type
+      # carries its schema's), drawn when the row has no media; the document
+      # icon when the member has none.
+      icon: BarkparkWeb.Icons.row_icon((subfield_attr(item, :raw) || %{})["icon"])
     }
   end
 
@@ -657,6 +728,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     "bp-aref-#{field.name}-#{idx}-#{:erlang.phash2({row_path, row_value})}"
   end
 
+  # A reference row's id hashes the id the picker shows, not the stored
+  # shape: a new row holds nil until the form posts its hidden input's "", and
+  # a pick may come back as {_ref, _type}. Hashing the raw value changed the
+  # id on those saves, LiveView swapped the ignored wrapper, and a search the
+  # editor was typing in the new row was lost (task-03b2805eda66cef7).
+  defp reference_row_id(field, row_path, row_value, idx),
+    do:
+      ref_row_id(field, row_path, BarkparkWeb.Components.FieldInputs.reference_id(row_value), idx)
+
   # refType lives on the RAW field map (a v1 leaf key parse/2 preserves
   # verbatim); parsed %Field{} carries it under .raw, plain maps directly.
   # Several target types (Sanity `to: [...]`) ride comma-joined — the same
@@ -765,26 +845,60 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     value
     |> Enum.with_index()
     |> Enum.map(fn {row, idx} ->
-      type = if is_map(row), do: row["_type"], else: nil
+      row_map = if is_map(row), do: row, else: %{}
+      type = row_map["_type"]
       member = Map.get(types, type) || %{type: type, name: type || "item", title: nil}
-      preview = item_preview(member, row)
+      preview = item_preview(member, row_map)
+      row_path = "#{path}[#{idx}]"
 
       %{
         idx: idx,
         type: type,
+        key: row_map["_key"],
         member: member,
-        preview: %{preview | title: typed_title(member, row, preview.title)},
-        row_id: "bp-item-" <> sanitize_id("#{field.name}#{path}[#{idx}]"),
-        json: Jason.encode!(row, pretty: true)
+        value: row_map,
+        path: row_path,
+        preview: %{preview | title: typed_title(member, row_map, preview.title)},
+        row_id: "bp-item-" <> sanitize_id("#{field.name}#{row_path}"),
+        fresh?: fresh_row?(member, row_map)
       }
     end)
   end
 
   defp typed_rows(_field, _types, _value, _path), do: []
 
-  # A named member (`{"name": "ctaSection", "type": "ctaSection"}`) carries no
-  # subfields here, so `item_preview/2` falls back to the member's own name.
-  # Prefer the row's first text value, then show which member it is.
+  # A just-added item holds only `_type`, `_key` and its declared defaults: it
+  # opens, so the editor can fill it in at once.
+  defp fresh_row?(member, row) do
+    defaults =
+      Barkpark.Content.Forms.declared_defaults((subfield_attr(member, :raw) || %{})["fields"])
+
+    Enum.all?(row, fn {k, v} ->
+      k in ["_type", "_key"] or Map.get(defaults, k) == v or v in [nil, "", [], %{}]
+    end)
+  end
+
+  # The members "Add item" offers, in declaration order, named by their title.
+  defp member_choices(field, types) do
+    order =
+      case subfield_attr(field, :raw) do
+        %{"of" => list} when is_list(list) ->
+          for %{} = m <- list, n = m["name"] || m["type"], is_binary(n), do: n
+
+        _ ->
+          Map.keys(types)
+      end
+
+    for name <- Enum.uniq(order), member = Map.get(types, name), member != nil do
+      %{name: name, title: title_for(member) |> blank_to(name)}
+    end
+  end
+
+  defp blank_to("", fallback), do: fallback
+  defp blank_to(nil, fallback), do: fallback
+  defp blank_to(v, _fallback), do: v
+
+  # The row's own text names it, then which member it is: "Nye bøker (Produktkort)".
   defp typed_title(member, row, fallback) do
     label = title_for(member)
 
@@ -801,14 +915,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
     cond do
       is_binary(text) and label not in [nil, ""] -> "#{text} (#{label})"
       is_binary(text) -> text
+      label not in [nil, ""] -> label
       true -> fallback
     end
-  end
-
-  defp typed_row_body(assigns) do
-    ~H"""
-    <pre class="bp-input" data-structured-value style="margin:0;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @json %></pre>
-    """
   end
 
   # The arrayOf parser stores the element shape on `field.of` (a `%Field{}`).

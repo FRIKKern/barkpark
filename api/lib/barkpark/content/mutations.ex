@@ -187,7 +187,9 @@ defmodule Barkpark.Content.Mutations do
     warnings = Barkpark.Content.Warnings.snapshot()
 
     try do
-      do_apply_mutations(mutations, dataset, opts)
+      mutations
+      |> do_apply_mutations(dataset, opts)
+      |> again_if_draft_forked_under(mutations, dataset, opts, warnings)
     rescue
       e in Ecto.StaleEntryError ->
         require Logger
@@ -205,8 +207,75 @@ defmodule Barkpark.Content.Mutations do
         rescue
           Ecto.StaleEntryError -> {:error, :rev_mismatch}
         end
+
+      # task-bb3d759d9354bae9 — Postgres broke a lock cycle with a concurrent
+      # writer (40P01) or refused a serialization (40001) and rolled the batch
+      # back. Nothing was written and nothing was refused on its merits, so the
+      # batch runs once more, as for a stale row; a second loss answers the typed
+      # `rev_mismatch` (409) instead of 500 "unknown error (Postgrex.Error)".
+      e in Postgrex.Error ->
+        if lost_to_concurrent_writer?(e) do
+          require Logger
+
+          Logger.warning(
+            "[Mutations] #{e.postgres.code} under a concurrent writer; retrying the batch once"
+          )
+
+          Barkpark.Content.Warnings.restore(warnings)
+          Process.sleep(5 + :rand.uniform(20))
+
+          try do
+            do_apply_mutations(mutations, dataset, opts)
+          rescue
+            e in Postgrex.Error ->
+              if lost_to_concurrent_writer?(e),
+                do: {:error, :rev_mismatch},
+                else: reraise(e, __STACKTRACE__)
+          end
+        else
+          reraise(e, __STACKTRACE__)
+        end
     end
   end
+
+  defp lost_to_concurrent_writer?(%Postgrex.Error{postgres: %{code: code}}),
+    do: code in [:deadlock_detected, :serialization_failure]
+
+  defp lost_to_concurrent_writer?(_), do: false
+
+  # task-128cda41162676e3 — a patch on a published document with no draft forks
+  # `drafts.<id>` without the block-ops lock, so a field or block op that forked
+  # the same draft a moment earlier wins the INSERT and this batch gets its row in
+  # the unique index: a changeset error the controller can only answer as 422
+  # `invalid_op`. (The op side of the same race is block_ops.ex's to answer.) The
+  # document moved under the batch, so it runs ONCE more, as for a stale row
+  # above: the re-read finds the draft, so a patch fenced on the published rev is
+  # refused with the draft's rev (412 `precondition_failed`, `details.actual`),
+  # and an unfenced patch lands on the draft. Taking the block-ops lock here
+  # instead would order it after locks a multi-document batch already holds.
+  defp again_if_draft_forked_under(
+         {:error, %Ecto.Changeset{errors: errors}} = lost,
+         mutations,
+         dataset,
+         opts,
+         warnings
+       ) do
+    with {_, meta} <- Keyword.get(errors, :doc_id),
+         :unique <- Keyword.get(meta, :constraint) do
+      require Logger
+
+      Logger.warning(
+        "[Mutations] a concurrent writer forked the draft first; retrying the batch once"
+      )
+
+      Barkpark.Content.Warnings.restore(warnings)
+      do_apply_mutations(mutations, dataset, opts)
+    else
+      _ -> lost
+    end
+  end
+
+  defp again_if_draft_forked_under(result, _mutations, _dataset, _opts, _warnings), do: result
 
   defp do_apply_mutations(mutations, dataset, opts) do
     dry_run? = Keyword.get(opts, :dry_run, false) == true
@@ -355,6 +424,35 @@ defmodule Barkpark.Content.Mutations do
   defp delete_mutation?(%{"delete" => _}), do: true
   defp delete_mutation?(_), do: false
 
+  # task-a093bebe46ea3dbb: `createIfNotExists` + `publish` in one request on a
+  # document that is already published with no draft. The create is a no-op, so
+  # the publish finds no draft; Sanity answers the pair as a no-op, and so do we.
+  # Scoped to the batch: a publish with no draft on its own is still a 404.
+  # The ids ride in the echo-schema cache under a key no type name can take.
+  @noop_creates_key :create_if_not_exists_noops
+
+  defp note_create_if_not_exists_noop(%{"createIfNotExists" => _}, "noop", doc, cache) do
+    if DraftId.draft?(doc.doc_id),
+      do: cache,
+      else:
+        Map.update(
+          cache,
+          @noop_creates_key,
+          MapSet.new([doc.doc_id]),
+          &MapSet.put(&1, doc.doc_id)
+        )
+  end
+
+  defp note_create_if_not_exists_noop(_, _, _, cache), do: cache
+
+  defp publish_opts(%{"publish" => %{"id" => id}}, opts, cache) when is_binary(id) do
+    if MapSet.member?(Map.get(cache, @noop_creates_key, MapSet.new()), DraftId.published_id(id)),
+      do: Keyword.put(opts, :after_create_if_not_exists_noop, true),
+      else: opts
+  end
+
+  defp publish_opts(_, opts, _), do: opts
+
   defp apply_chunk([_, _ | _] = chunk, dataset, opts, caller, cache) do
     if delete_mutation?(hd(chunk)) do
       ids =
@@ -376,9 +474,10 @@ defmodule Barkpark.Content.Mutations do
 
   defp apply_each(chunk, dataset, opts, caller, cache) do
     Enum.map_reduce(chunk, cache, fn m, cache ->
-      case apply_one(m, dataset, opts) do
+      case apply_one(m, dataset, publish_opts(m, opts, cache)) do
         {:ok, doc, op} ->
           :ok = between_mutations_barrier()
+          cache = note_create_if_not_exists_noop(m, op, doc, cache)
           {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
 
           {%{
@@ -670,7 +769,10 @@ defmodule Barkpark.Content.Mutations do
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
              :ok <-
                ensure_read_only_unchanged(type, nil, incoming_content(attrs), id, dataset, opts),
-             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
+             # exclusive: a create racing this one may land between the read above and
+             # the write; it is a 409 then, never an update over it (task-b6f9ff71d96c42aa).
+             {:ok, doc} <-
+               Content.create_document(type, attrs, dataset, Keyword.put(opts, :exclusive, true)) do
           warn_create_over_published("create", type, id, dataset, opts, doc)
           {:ok, doc, "create"}
         end
@@ -790,6 +892,8 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
+    {after_noop_create?, opts} = Keyword.pop(opts, :after_create_if_not_exists_noop, false)
+
     case Content.publish_document(id, type, dataset, opts) do
       {:ok, doc} ->
         {:ok, doc, "publish"}
@@ -805,7 +909,9 @@ defmodule Barkpark.Content.Mutations do
         # not a failure. Deliberately NOT widened to every type: for an ordinary
         # content type a publish with no draft is still a genuine 404, because
         # nothing on that path lands a patch for it.
-        if published_first_patch?(DraftId.published_id(id), type) do
+        # The one other no-op: the same request's `createIfNotExists` found the
+        # document already published (task-a093bebe46ea3dbb).
+        if published_first_patch?(DraftId.published_id(id), type) or after_noop_create? do
           case Content.get_document(DraftId.published_id(id), type, dataset, opts) do
             {:ok, doc} -> {:ok, doc, "noop"}
             _ -> err
@@ -964,7 +1070,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
          :ok <- lock_patch_target(id, dataset, opts),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)),
+         {:ok, fence_rev} <- patch_fence(existing, patch, dataset, opts),
          protected = patch_protected_keys(patch, type, dataset, opts),
          {:ok, applied} <- apply_patch_ops(existing.content || %{}, patch, protected) do
       set_fields = Map.get(patch, "set", %{})
@@ -999,7 +1105,7 @@ defmodule Barkpark.Content.Mutations do
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
-             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
+             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, fence_rev)),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
@@ -1014,7 +1120,7 @@ defmodule Barkpark.Content.Mutations do
     with :ok <- Writer.refuse_bare_id(fields, :patch),
          :ok <- lock_patch_target(id, dataset, opts),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)),
+         {:ok, fence_rev} <- patch_fence(existing, patch, dataset, opts),
          prior = existing.content || %{},
          {:ok, applied} <-
            apply_patch_ops(
@@ -1042,7 +1148,7 @@ defmodule Barkpark.Content.Mutations do
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
-             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
+             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, fence_rev)),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
@@ -2121,6 +2227,78 @@ defmodule Barkpark.Content.Mutations do
     do: Keyword.put(opts, :if_rev, expected)
 
   defp with_if_rev(opts, _expected), do: opts
+
+  # A patch's revision fence (task-61e9a7d8a8b51192). `ifRevisionID` alone is the whole
+  # document's: any write since, to any field, refuses it (412). `"fence": "fields"` on the
+  # patch narrows a stale `ifRevisionID` to the fields the patch touches: when each of them
+  # reads the same at `ifRevisionID` (its revision snapshot) as now, the patch applies and its
+  # write is fenced on the current rev. Five editors on one post (studio task-86f75846c256e3b4)
+  # sent 133 field patches back in five minutes, stale only because others wrote other fields
+  # or the body; each cost a read, a rebase and a resend. The block-ops door has the same
+  # opt-in for blocks (`fence: "blocks"`). Without it, when a touched field did change, or
+  # when no snapshot of `ifRevisionID` exists: the 412 as before. Returns the rev to fence on.
+  defp patch_fence(existing, patch, dataset, opts) do
+    expected = if_rev(patch)
+
+    case ensure_rev(existing, expected) do
+      :ok ->
+        {:ok, expected}
+
+      {:error, {:rev_mismatch, _}} = mismatch ->
+        if patch["fence"] == "fields" and
+             fields_unchanged_since?(existing, patch, expected, dataset, opts),
+           do: {:ok, existing.rev},
+           else: mismatch
+    end
+  end
+
+  defp fields_unchanged_since?(%{rev: rev} = existing, patch, expected, dataset, opts)
+       when is_binary(rev) do
+    # The snapshot is read with the caller's own opts: the owner rule on history applies.
+    with {:ok, %{doc_id: snap_id, content: %{} = snap} = revision} <-
+           Content.get_revision_by_rev(expected, dataset, opts),
+         true <- DraftId.published_id(snap_id) == DraftId.published_id(existing.doc_id) do
+      now = existing.content || %{}
+
+      patch_fields(patch, now)
+      |> Enum.all?(fn
+        "title" ->
+          Map.get(snap, "title") == Map.get(now, "title") and revision.title == existing.title
+
+        field ->
+          Map.get(snap, field) == Map.get(now, field)
+      end)
+    else
+      _ -> false
+    end
+  end
+
+  defp fields_unchanged_since?(_existing, _patch, _expected, _dataset, _opts), do: false
+
+  # The top-level fields a patch reads or writes: the keys of set/setIfMissing/inc/dec/
+  # append/prepend, the paths it unsets or inserts at (their first segment), and on a
+  # document with a block list, `blocks` too (a bound field writes through it).
+  defp patch_fields(patch, content) do
+    keyed =
+      ~w(set setIfMissing inc dec append prepend)
+      |> Enum.flat_map(fn op -> if is_map(patch[op]), do: Map.keys(patch[op]), else: [] end)
+
+    unset = list_or_empty(patch["unset"])
+
+    insert =
+      case patch["insert"] do
+        %{} = ins -> Enum.filter([ins["before"], ins["after"], ins["replace"]], &is_binary/1)
+        _ -> []
+      end
+
+    blocks = if Map.has_key?(content, "blocks"), do: ["blocks"], else: []
+
+    (keyed ++ unset ++ insert)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&(&1 |> String.split(~r/[.\[]/, parts: 2) |> hd()))
+    |> Kernel.++(blocks)
+    |> Enum.uniq()
+  end
 
   defp ensure_rev(_doc, nil), do: :ok
   defp ensure_rev(_doc, ""), do: :ok

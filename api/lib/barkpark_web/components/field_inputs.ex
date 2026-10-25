@@ -77,6 +77,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :scope_prefix, :string, default: ""
   attr :id_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document types an internal link in a Portable Text body may point at
+  # (`Shared.internal_link_types/3`). Empty: the link row takes an address only.
+  attr :link_types, :list, default: []
 
   # An OPTIONAL select whose stored value matches NO option must NOT drag its
   # first option into autosave. A native <select> always form-serializes SOME
@@ -277,7 +280,15 @@ defmodule BarkparkWeb.Components.FieldInputs do
     # A stored JSON `true` (what the API, SDK and `bp seed` write) is checked
     # too — reading only the string "true" rendered it UNCHECKED, so the
     # hidden "false" posted and an edit of ANY other field flipped it to false.
-    checked = Map.get(assigns.editor_form, name, "") in [true, "true"]
+    # A field ABSENT from storage shows its declared `default`, as Sanity's
+    # `initialValue` does, and the save keeps it absent while the switch still
+    # shows that default (task-d89926b8afd3dcb9).
+    checked =
+      case Map.get(assigns.editor_form, name, "") do
+        v when v in ["", nil] -> Barkpark.Content.Forms.boolean_default(assigns.field)
+        v -> v in [true, "true"]
+      end
+
     assigns = assign(assigns, n: name, c: checked)
 
     ~H"""
@@ -710,11 +721,40 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp rich_text_label(_field, name), do: name
 
+  # With link types (task-088575052b459f3e) the editor also carries the
+  # dataset and scope its document picker searches in, and the media library's
+  # words and token for a file link (task-025d7af119d6f0b8); without, the
+  # markup is unchanged.
+  #
+  # The outer div carries `BarkparkPtBlocks` (root.html.heex): it forwards the
+  # editor's "open this block" and "insert a block" events to the LiveView and
+  # hands the answers back, while the inner wrapper stays `phx-update="ignore"`
+  # so a re-render never resets what the author is typing
+  # (task-19392d1e6fc661e6). `data-block-types` lists the custom blocks the
+  # field's `blocks.of` declares, for the toolbar's "Insert block" menu.
   defp rich_text_editor(assigns) do
+    assigns =
+      assign(assigns,
+        block_types:
+          assigns.field
+          |> BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks.insertable_types()
+          |> Jason.encode!()
+      )
+
     ~H"""
-    <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
-      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}></bp-rich-text-editor>
+    <div id={"bp-pt-host-" <> doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-hook="BarkparkPtBlocks" data-field={@n}>
+      <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+        <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+        <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}
+          dataset={if @link_types != [], do: @dataset}
+          scope-prefix={if @link_types != [], do: @scope_prefix}
+          data-link-types={if @link_types != [], do: Enum.join(@link_types, ",")}
+          data-picker-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:reference)}
+          data-media-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:media)}
+          data-token={if @link_types != [], do: @api_token_raw}
+          data-block-types={@block_types}
+        ></bp-rich-text-editor>
+      </div>
     </div>
     """
   end

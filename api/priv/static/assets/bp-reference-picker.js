@@ -183,6 +183,26 @@ class BpReferencePicker extends HTMLElement {
     return typeof this._typeLabelMap[type] === "string" ? this._typeLabelMap[type] : type;
   }
 
+  // A type's icon as SVG markup: Studio stamps a {type => svg} map on the
+  // shell (task-835fe5219585ca80), built server side from the schema's icon
+  // name and the Studio's own icon tables. A type without an icon draws the
+  // map's "*" entry, the document icon. Outside Studio there is no map: null.
+  _typeIconSvg(type) {
+    if (!this._typeIconMap) {
+      let map = {};
+      try {
+        const host = this.closest && this.closest("[data-type-icons]");
+        map = JSON.parse((host && host.getAttribute("data-type-icons")) || "{}") || {};
+      } catch (_e) {
+        map = {};
+      }
+      this._typeIconMap = map;
+    }
+    const own = this._typeIconMap[type];
+    const svg = typeof own === "string" && own ? own : this._typeIconMap["*"];
+    return typeof svg === "string" && svg ? svg : null;
+  }
+
   _typeWords() {
     return this._refTypes.map((type) => this._typeWord(type));
   }
@@ -222,7 +242,15 @@ class BpReferencePicker extends HTMLElement {
     // after it (the Paper canvas field node view).
     const fieldLabel = this.getAttribute("data-field-label");
     if (fieldLabel) input.setAttribute("aria-label", fieldLabel);
-    input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
+    // The search box is not a field of the document. Its input and change
+    // events stop here: bubbling to the editor form, each keystroke posted
+    // phx-change="autosave" and wrote a draft (task-32d983d47299e137). Only a
+    // pick or a Remove changes the value, through bp-change.
+    input.addEventListener("input", (e) => {
+      e.stopPropagation();
+      this._onSearchInput(e.target.value);
+    });
+    input.addEventListener("change", (e) => e.stopPropagation());
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
@@ -677,20 +705,14 @@ class BpReferencePicker extends HTMLElement {
       btn.type = "button";
       btn.className = "bp-ref-dropdown-item";
       btn.setAttribute("role", "option");
-      if (!this._renderHitPreview(btn, doc)) btn.textContent = doc.title || doc.id;
+      if (!this._renderHitPreview(btn, doc)) this._renderHitTitle(btn, doc);
       if (this._refTypes.length > 1 && doc.type) {
         // Sanity shows the hit's type when a reference may point at several.
-        const type = document.createElement("span");
-        type.className = "bp-ref-suggest-meta bp-ref-hit-type";
-        type.textContent = this._typeWord(doc.type);
-        btn.appendChild(type);
+        this._appendHitMeta(btn, "bp-ref-suggest-meta bp-ref-hit-type", this._typeWord(doc.type));
       }
       if (doc.draft) {
         // Sanity-style draft indicator on unpublished candidates.
-        const badge = document.createElement("span");
-        badge.className = "bp-ref-suggest-meta";
-        badge.textContent = this._t("draft", "draft");
-        btn.appendChild(badge);
+        this._appendHitMeta(btn, "bp-ref-suggest-meta", this._t("draft", "draft"));
       }
       btn.addEventListener("mousedown", (e) => e.preventDefault());
       btn.addEventListener("click", () => this._select(doc));
@@ -704,12 +726,39 @@ class BpReferencePicker extends HTMLElement {
     );
   }
 
+  // A hit with no list preview: the title in the same column a preview's
+  // title sits in, so a type word or draft badge after it stands apart at the
+  // row's end (task-522073bdad4a7ad2: main drew "RettsdataVirksomhet").
+  _renderHitTitle(btn, doc) {
+    const main = document.createElement("span");
+    main.className = "bp-ref-hit-main";
+    const title = document.createElement("span");
+    title.className = "bp-ref-hit-title";
+    title.textContent = doc.title || doc.id;
+    main.appendChild(title);
+    btn.appendChild(main);
+  }
+
+  // A trailing word on a hit row (its type, a draft badge). The space before
+  // it does not render inside the flex row; it keeps the row's text and its
+  // accessible name as separate words.
+  _appendHitMeta(btn, className, text) {
+    const span = document.createElement("span");
+    span.className = className;
+    span.textContent = text;
+    btn.appendChild(document.createTextNode(" "));
+    btn.appendChild(span);
+  }
+
   // A hit whose type declares a list preview reads like its desk row: the
   // thumbnail, the title, then the subtitle and description lines. Returns
   // false when the hit carries none, so the row stays the bare title.
+  // A hit with no media draws its type's icon in the media box, as Sanity
+  // does (task-835fe5219585ca80): the document icon when the type has none.
   _renderHitPreview(btn, doc) {
-    const p = doc.preview;
-    if (!p || !(p.subtitle || p.description || p.media)) return false;
+    const p = doc.preview || {};
+    const icon = p.media ? null : this._typeIconSvg(doc.type || this._refType);
+    if (!(p.subtitle || p.description || p.media || icon)) return false;
     btn.classList.add("bp-ref-hit");
     if (p.media) {
       const media = document.createElement("span");
@@ -720,6 +769,13 @@ class BpReferencePicker extends HTMLElement {
       img.alt = "";
       img.loading = "lazy";
       media.appendChild(img);
+      btn.appendChild(media);
+    } else if (icon) {
+      const media = document.createElement("span");
+      media.className = "bp-ref-hit-media bp-ref-hit-icon";
+      media.setAttribute("aria-hidden", "true");
+      // Server-built markup from the Studio's own icon tables, never document data.
+      media.innerHTML = icon;
       btn.appendChild(media);
     }
     const main = document.createElement("span");

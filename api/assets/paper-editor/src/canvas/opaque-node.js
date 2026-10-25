@@ -22,8 +22,9 @@
 // (`div[data-bp-opaque]`) so it never contends with another node's parse rule.
 
 import { Node, mergeAttributes } from "@tiptap/core";
-import { readerPaintClass } from "./embed-node.js";
-import { objectBlockFor, objectBlockValue } from "./inline-object.js";
+import { readerPaintClass, selectAtomNode } from "./embed-node.js";
+import { canEditObjectBlock, editObjectBlockAt, objectBlockFor, objectBlockValue } from "./inline-object.js";
+import { cardMoreButton, wireCardMenu } from "./card-menu.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -96,7 +97,7 @@ export const Opaque = Node.create({
   // A read-only chip node-view (NO edit surface). The whole block rides on bpBlock;
   // PM never reads/writes inside this view.
   addNodeView() {
-    return ({ node, editor, view }) => {
+    return ({ node, editor, view, getPos }) => {
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || block.type || "block";
       if (bpType === "note") return readonlyNoteView(node, editor);
@@ -112,6 +113,38 @@ export const Opaque = Node.create({
       paintChip(dom, chip, bpType, block, view && view.dom);
       dom.appendChild(chip);
 
+      // A declared object block's card (contract 1.12.0, shown on a canvas with
+      // `block-cards`), as Sanity's block object: a "…" whose menu offers Edit (the
+      // block's own dialog, as the block handle's Edit) and Remove, and a click that
+      // selects it. CSS shows the button only on an object row of such a canvas.
+      const more = cardMoreButton("bp-canvas-object-more");
+      dom.appendChild(more);
+      const host = () => dom.closest("bp-paper-canvas");
+      const at = () => (typeof getPos === "function" ? getPos() : null);
+      const closeMenu = wireCardMenu(more, {
+        dom,
+        menuClass: "bp-canvas-object-menu",
+        items: () => {
+          const pos = at();
+          const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+          const h = host();
+          return cur && h ? [...(canEditObjectBlock(h, cur) ? ["edit"] : []), "remove"] : [];
+        },
+        onPick: (action) => {
+          const pos = at();
+          const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+          if (!cur || cur.type.name !== BP_OPAQUE_NODE_NAME) return;
+          if (action === "edit") editObjectBlockAt(host(), editor, pos);
+          else editor.chain().command(({ tr }) => (tr.delete(pos, pos + cur.nodeSize), true)).focus().run();
+        },
+        top: (r) => r.bottom + 4,
+        enabled: () => editor.isEditable && dom.classList.contains("bp-canvas-object-row"),
+      });
+      dom.addEventListener("click", (e) => {
+        if (!editor.isEditable || !dom.closest("bp-paper-canvas[block-cards]") || e.target.closest("button")) return;
+        if (dom.classList.contains("bp-canvas-object-row")) selectAtomNode(editor, getPos);
+      });
+
       return {
         dom,
         update: (updated) => {
@@ -124,6 +157,7 @@ export const Opaque = Node.create({
         },
         stopEvent: () => true,
         ignoreMutation: () => true,
+        destroy: () => closeMenu(false),
       };
     };
   },
@@ -135,6 +169,9 @@ export const Opaque = Node.create({
 // each its own element a host can style (.bp-canvas-object-row, [data-object-type]).
 // The chip's text stays "Callout · warning" (the separator is in the text, not
 // shown), so its name and text read the same.
+// Sanity's DocumentIcon, a block object's media when its preview has none.
+const DOCUMENT_ICON = '<svg class="bp-canvas-object-doc" width="25" height="25" viewBox="0 0 25 25" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"><path d="M11.5 4.5V9.5H6.5"/><path d="M18.5 20.5H6.5V9.5L11.5 4.5H18.5V20.5Z"/></svg>';
+
 function paintChip(dom, chip, bpType, block, el) {
   const host = el && typeof el.closest === "function" ? el.closest("bp-paper-canvas") : null;
   const vocab = host && typeof host.inlineObjectVocabulary === "function" ? host.inlineObjectVocabulary() : null;
@@ -154,8 +191,11 @@ function paintChip(dom, chip, bpType, block, el) {
     if (text != null) s.textContent = text;
     return s;
   };
-  const icon = span("bp-canvas-object-icon");
+  // The icon in a tile: a card (block-cards) shows the tile with Sanity's DocumentIcon,
+  // a plain row its own small glyph.
+  const icon = span("bp-canvas-object-media");
   icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = '<span class="bp-canvas-object-icon" aria-hidden="true"></span>' + DOCUMENT_ICON;
   const text = span("bp-canvas-object-text");
   text.appendChild(span("bp-canvas-object-title", kind.title));
   if (value !== "") {

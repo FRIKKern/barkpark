@@ -295,6 +295,7 @@ defmodule BarkparkWeb.QueryController do
     limit = parse_int(params["limit"], 100) |> min(1000) |> max(1)
     offset = parse_int(params["offset"], 0) |> max(0) |> min(100_000)
     order = parse_order_param(params["order"])
+    collation = parse_collation(params["collation"])
 
     filter_map =
       params
@@ -336,6 +337,12 @@ defmodule BarkparkWeb.QueryController do
       # envelope (no new error code) naming the bad spec and the grammar.
       match?({:error, _}, order) ->
         order_error(order)
+
+      # An unknown ?collation= is refused by name, like an unknown order spec:
+      # answering in the database collation would be a different order than
+      # the one asked for.
+      match?({:error, _}, collation) ->
+        collation_error(collation)
 
       # Fail CLOSED on an unknown filter operator. Otherwise it falls through
       # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
@@ -380,7 +387,9 @@ defmodule BarkparkWeb.QueryController do
               filter_map: filter_map,
               limit: limit,
               offset: offset,
-              order: order
+              order: order,
+              collation: collation,
+              content_keys: content_keys(params, expand_spec, type, conn)
             ] ++ scope_opts(conn)
           )
 
@@ -465,6 +474,75 @@ defmodule BarkparkWeb.QueryController do
     else
       {:error, :not_found}
     end
+  end
+
+  # Ids one batch read takes (task-09a413c1d4d582d3).
+  @backlinks_batch_max 100
+
+  @doc """
+  `backlinks/2` for several documents in one request (task-09a413c1d4d582d3):
+  `?ids=a,b,c` (at most #{@backlinks_batch_max}) answers
+  `{"result": {"byId": {"a": {"backlinks": [...], "count": n}, ...}}}`. Each id
+  goes through the same `Content.Graph.backlinks/2` and redaction as a single
+  read, so an id the caller cannot read answers an empty list, as it does there.
+  A studio that read one id per selected document (a bulk unpublish of 300) spent
+  300 requests of its token's budget; this is one. Same auth: preview or a token,
+  otherwise 404.
+  """
+  def backlinks_batch(conn, %{"dataset" => dataset} = params) do
+    if preview?(conn) or authed?(conn) do
+      with {:ok, ids} <- backlinks_batch_ids(params["ids"]) do
+        read_region(
+          :backlinks,
+          "backlinks_batch/2 (dataset=#{inspect(dataset)} ids=#{length(ids)})",
+          fn ->
+            opts = [dataset: dataset] ++ scope_opts(conn)
+
+            by_id =
+              Map.new(ids, fn id ->
+                backlinks =
+                  id |> Content.Graph.backlinks(opts) |> redact_backlink_content(dataset, opts)
+
+                {id, %{backlinks: backlinks, count: length(backlinks)}}
+              end)
+
+            json(conn, %{
+              result: %{byId: by_id},
+              syncTags: Enum.map(ids, &"bp:ds:#{dataset}:backlinks:#{&1}")
+            })
+          end
+        )
+      end
+    else
+      {:error, :not_found}
+    end
+  end
+
+  defp backlinks_batch_ids(raw) do
+    ids =
+      if(is_binary(raw), do: String.split(raw, ","), else: [])
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    cond do
+      ids == [] ->
+        backlinks_batch_error("give the document ids as ?ids=a,b,c")
+
+      length(ids) > @backlinks_batch_max ->
+        backlinks_batch_error(
+          "at most #{@backlinks_batch_max} ids per request; got #{length(ids)}"
+        )
+
+      true ->
+        {:ok, ids}
+    end
+  end
+
+  defp backlinks_batch_error(message) do
+    {:error,
+     {:validation_failed, "query parameter ids", %{"ids" => [message]},
+      "Send 1 to #{@backlinks_batch_max} comma-separated document ids, or read one id at /v1/data/backlinks/:dataset/:id."}}
   end
 
   @doc """
@@ -1869,6 +1947,28 @@ defmodule BarkparkWeb.QueryController do
       }, "Fix the order parameter to one of the accepted forms listed above, then resend."}}
   end
 
+  # `?collation=` (task-4973be61eff3bbe5): absent or blank keeps the database
+  # collation; any other value must be one Content.Query compiles a clause for.
+  defp parse_collation(nil), do: nil
+  defp parse_collation(""), do: nil
+
+  defp parse_collation(value) do
+    if value in Content.Query.order_collations(),
+      do: value,
+      else: {:error, {:invalid_collation, value}}
+  end
+
+  defp collation_error({:error, {:invalid_collation, value}}) do
+    {:error,
+     {:validation_failed, "query parameter collation",
+      %{
+        "collation" => [
+          "unrecognised collation #{inspect(value)}; expected one of " <>
+            Enum.join(Content.Query.order_collations(), ", ")
+        ]
+      }, "Omit collation for the database order, or send one of the accepted values."}}
+  end
+
   defp parse_expand(nil), do: []
   defp parse_expand(""), do: []
   defp parse_expand("false"), do: []
@@ -1925,6 +2025,23 @@ defmodule BarkparkWeb.QueryController do
   end
 
   defp parse_fields(_), do: nil
+
+  # The top-level content keys `project_fields/2` keeps, read in SQL alone
+  # (`Content.Query`'s `:content_keys`), or nil to read all of `content`.
+  # Render and its redaction work key by key, so the kept keys come out as
+  # they would from the whole document; `title` is read because render falls
+  # back to it. A paper promotes its blocks from other keys, and an expansion
+  # or a source map reads the documents as loaded, so those read everything.
+  defp content_keys(params, [], type, conn) when type != "paper" do
+    with fields when is_list(fields) <- parse_fields(params["fields"]),
+         false <- source_map_requested?(conn, params) do
+      Enum.uniq(["title" | Enum.map(fields, &(&1 |> String.split(".") |> hd()))])
+    else
+      _ -> nil
+    end
+  end
+
+  defp content_keys(_params, _expand_spec, _type, _conn), do: nil
 
   # Keep each rendered doc's system keys (`_id`, `_type`, `_rev`, …) plus the
   # selected content fields; drop the rest. nil/empty → no projection (pass through).

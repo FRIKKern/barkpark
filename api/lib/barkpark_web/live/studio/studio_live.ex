@@ -33,7 +33,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   alias Barkpark.Content.CallerContext
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.Caps
-  alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
+  alias BarkparkWeb.Studio.StudioLive.{DocActions, Mount, Path, Shared}
 
   alias BarkparkWeb.Studio.StudioLive.Handlers.{
     AccessPanel,
@@ -48,6 +48,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     History,
     ItemShare,
     Lifecycle,
+    ObjectBlocks,
     Media,
     Paper,
     Refs,
@@ -455,6 +456,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("select", params, socket), do: Scope.select(params, socket)
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
   def handle_event("select-view", params, socket), do: Views.select(params, socket)
+  def handle_event("view-more", _params, socket), do: Views.more(socket)
   def handle_event("select-desk", params, socket), do: Scope.select_desk(params, socket)
   def handle_event("switch-workspace", params, socket), do: Scope.switch_workspace(params, socket)
   def handle_event("switch-project", params, socket), do: Scope.switch_project(params, socket)
@@ -477,6 +479,25 @@ defmodule BarkparkWeb.Studio.StudioLive do
     {:noreply,
      socket
      |> assign(:desk_list_limits, Map.put(limits, type, next))
+     |> Shared.rebuild_panes()}
+  end
+
+  # The desk list's sort menu (task-fa57815041bead3d): remember the named sort
+  # picked for THAT type on this socket, as Sanity keeps a list's sort per
+  # pane, and rebuild the panes. An empty or unknown name is the default
+  # order; PaneBuilder ignores a name the schema does not declare.
+  def handle_event("select-sort", %{"type" => type} = params, socket) when is_binary(type) do
+    sorts = socket.assigns[:desk_list_sorts] || %{}
+
+    sorts =
+      case params["sort"] do
+        name when is_binary(name) and name != "" -> Map.put(sorts, type, name)
+        _ -> Map.delete(sorts, type)
+      end
+
+    {:noreply,
+     socket
+     |> assign(:desk_list_sorts, sorts)
      |> Shared.rebuild_panes()}
   end
 
@@ -515,6 +536,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   def handle_event("array_op", params, socket), do: Fields.array_op(params, socket)
 
+  # The Classic rich-text editor's block dialog (task-19392d1e6fc661e6).
+  def handle_event("pt-block-open", params, socket), do: ObjectBlocks.open(params, socket)
+  def handle_event("pt-block-insert", params, socket), do: ObjectBlocks.insert(params, socket)
+
+  def handle_event("object-dialog-change", params, socket),
+    do: ObjectBlocks.change(params, socket)
+
+  def handle_event("object-dialog-array-op", params, socket),
+    do: ObjectBlocks.array_op(params, socket)
+
+  def handle_event("object-dialog-save", params, socket), do: ObjectBlocks.save(params, socket)
+  def handle_event("object-dialog-close", _params, socket), do: ObjectBlocks.close(socket)
+
   def handle_event("open-image-picker", params, socket),
     do: Media.open_image_picker(params, socket)
 
@@ -541,22 +575,46 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("preview-profile", params, socket), do: History.preview_profile(params, socket)
   def handle_event("save-profile", params, socket), do: History.save_profile(params, socket)
 
-  def handle_event("delete-doc", _params, socket), do: Delete.delete_doc(socket)
+  def handle_event("delete-doc", _params, socket) do
+    if DocActions.action_offered?(socket, "delete-doc"),
+      do: Delete.delete_doc(socket),
+      else: {:noreply, socket}
+  end
+
   def handle_event("close-delete", _params, socket), do: Delete.close_delete(socket)
-  def handle_event("confirm-delete", params, socket), do: Delete.confirm_delete(params, socket)
+
+  def handle_event("confirm-delete", params, socket) do
+    if DocActions.action_offered?(socket, "delete-doc"),
+      do: Delete.confirm_delete(params, socket),
+      else: {:noreply, socket}
+  end
 
   def handle_event("discard-draft", _params, socket), do: Discard.discard_draft(socket)
   def handle_event("close-discard", _params, socket), do: Discard.close_discard(socket)
   def handle_event("confirm-discard", _params, socket), do: Discard.confirm_discard(socket)
 
   def handle_event("publish", _params, socket), do: Doc.publish(socket)
-  def handle_event("unpublish", _params, socket), do: Doc.unpublish(socket)
+
+  def handle_event("unpublish", _params, socket) do
+    if DocActions.action_offered?(socket, "unpublish"),
+      do: Doc.unpublish(socket),
+      else: {:noreply, socket}
+  end
 
   def handle_event("close-unpublish-guard", _params, socket),
     do: Doc.close_unpublish_guard(socket)
 
-  def handle_event("confirm-unpublish", params, socket), do: Doc.confirm_unpublish(params, socket)
-  def handle_event("duplicate-doc", _params, socket), do: Doc.duplicate_doc(socket)
+  def handle_event("confirm-unpublish", params, socket) do
+    if DocActions.action_offered?(socket, "unpublish"),
+      do: Doc.confirm_unpublish(params, socket),
+      else: {:noreply, socket}
+  end
+
+  def handle_event("duplicate-doc", _params, socket) do
+    if DocActions.action_offered?(socket, "duplicate-doc"),
+      do: Doc.duplicate_doc(socket),
+      else: {:noreply, socket}
+  end
 
   def handle_event("shares-open", params, socket), do: Shares.shares_open(params, socket)
   def handle_event("shares-close", _params, socket), do: Shares.shares_close(socket)
@@ -806,15 +864,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
             into: %{},
             do: {type, PaneBuilder.type_word(type)}
 
+      schemas = Content.list_schemas(dataset, BarkparkWeb.ScopeHelpers.scope_opts(socket))
+
       labels =
-        dataset
-        |> Content.list_schemas(BarkparkWeb.ScopeHelpers.scope_opts(socket))
+        schemas
         |> Map.new(fn schema ->
           {schema.name, PaneBuilder.type_word(schema.name, schema.title)}
         end)
         |> then(&Map.merge(plugin_words, &1))
 
-      assign(socket, type_labels: Jason.encode!(labels), type_labels_key: key)
+      # Each type's icon as SVG, for the reference picker's hits
+      # (task-835fe5219585ca80). A type without a drawable icon is left out
+      # and draws the "*" entry, the document icon.
+      icons =
+        for schema <- schemas,
+            svg = BarkparkWeb.Icons.type_icon_svg(schema.icon),
+            into: %{"*" => BarkparkWeb.Icons.type_icon_svg("document")},
+            do: {schema.name, svg}
+
+      assign(socket,
+        type_labels: Jason.encode!(labels),
+        type_icons: Jason.encode!(icons),
+        type_labels_key: key
+      )
     end
   rescue
     _ -> socket

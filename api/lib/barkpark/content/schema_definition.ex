@@ -57,8 +57,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     field :list_preview, :map, default: %{}
     # Gyldendal parity E3 — the schema-level DESK block. `orderings` is a list of
     # %{"field" => name, "direction" => "asc" | "desc"} the desk list applies
-    # (Sanity's `orderings`); the first entry is the default sort. Empty map ==
-    # no declaration, the list keeps today's order.
+    # that together make the list's default sort. `sortOrderings` holds named
+    # sorts the list's sort menu offers without changing that default. Empty
+    # map == no declaration, the list keeps today's order.
     field :desk, :map, default: %{}
     field :initial_values, :map, default: %{}
     field :cross_validations, {:array, :map}, default: []
@@ -127,6 +128,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
+    |> validate_desk_sort_orderings()
     |> validate_desk_editor()
     |> validate_reader_writes()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
@@ -282,12 +284,16 @@ defmodule Barkpark.Content.SchemaDefinition do
   end
 
   # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (default) or
-  # "parent". A top-level field has no parent, so "parent" there is refused with
-  # its path instead of silently reading the document root.
+  # "parent". A document schema's top-level field has no parent, so "parent"
+  # there is refused with its path instead of silently reading the document
+  # root. A `kind: "object"` schema's top-level fields have one.
   defp validate_visible_when_scopes(changeset) do
     case get_change(changeset, :fields) do
       fields when is_list(fields) ->
-        Enum.reduce(visible_when_scope_problems(fields, [], false), changeset, fn msg, cs ->
+        # A named object type's own fields sit inside the object where it is used.
+        nested? = get_field(changeset, :kind) == "object"
+
+        Enum.reduce(visible_when_scope_problems(fields, [], nested?), changeset, fn msg, cs ->
           add_error(cs, :fields, msg)
         end)
 
@@ -338,6 +344,15 @@ defmodule Barkpark.Content.SchemaDefinition do
   def visible_when_scope_problems(_fields, _prefix, _nested?), do: []
 
   defp scope_problem(%{} = pred, path, nested?) do
+    case group_of(pred) do
+      preds when is_list(preds) -> Enum.flat_map(preds, &scope_problem(&1, path, nested?))
+      nil -> leaf_scope_problem(pred, path, nested?)
+    end
+  end
+
+  defp scope_problem(_, _, _), do: []
+
+  defp leaf_scope_problem(pred, path, nested?) do
     path = String.trim_trailing(path, ".")
 
     case Map.get(pred, "scope", Map.get(pred, :scope)) do
@@ -361,7 +376,10 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp scope_problem(_, _, _), do: []
+  # The predicate list of an `all` / `any` group, or nil for a single predicate.
+  defp group_of(pred) do
+    Enum.find_value([pred["all"], pred[:all], pred["any"], pred[:any]], &if(is_list(&1), do: &1))
+  end
 
   # `fget/2` falls back to `String.to_existing_atom/1`, which raises when no
   # module has interned the atom yet; read the predicate by its string key and
@@ -486,6 +504,56 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
+  # `desk.sortOrderings` (task-fa57815041bead3d) — Sanity's `orderings`: named
+  # sorts the desk list's sort menu offers. Choosing none keeps the list's
+  # default order, so declaring them never changes how a list opens. Each entry
+  # is %{"name" => id, "title" => label, "by" => [ordering, …]}, where an
+  # ordering has the `desk.orderings` entry shape.
+  #
+  #   "desk": {"sortOrderings": [{"name": "manual", "title": "Manual order",
+  #                               "by": [{"field": "orderRank", "direction": "asc"}]}]}
+  defp validate_desk_sort_orderings(changeset) do
+    case get_change(changeset, :desk) do
+      %{} = desk ->
+        case Map.get(desk, "sortOrderings") || Map.get(desk, :sortOrderings) do
+          nil ->
+            changeset
+
+          list when is_list(list) ->
+            case Enum.find(list, &(not valid_sort_ordering?(&1))) do
+              nil ->
+                changeset
+
+              bad ->
+                add_error(
+                  changeset,
+                  :desk,
+                  "sortOrderings entries need a non-empty \"name\" and \"title\" and a " <>
+                    "non-empty \"by\" list of %{\"field\" => name, \"direction\" => \"asc\" | \"desc\"}, " <>
+                    "got #{inspect(bad)}"
+                )
+            end
+
+          other ->
+            add_error(changeset, :desk, "sortOrderings must be a list, got #{inspect(other)}")
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  defp valid_sort_ordering?(%{} = o) do
+    name = Map.get(o, "name") || Map.get(o, :name)
+    title = Map.get(o, "title") || Map.get(o, :title)
+    by = Map.get(o, "by") || Map.get(o, :by)
+
+    is_binary(name) and name != "" and is_binary(title) and title != "" and is_list(by) and
+      by != [] and Enum.all?(by, &valid_ordering?/1)
+  end
+
+  defp valid_sort_ordering?(_), do: false
+
   # `desk.editor` — the editor a type's documents open in: "freeform" (the
   # block editor) or "classic" (the schema form, also the default when absent).
   # The toggle still switches either way (task-d80fe8cbfdc9cbcc).
@@ -529,6 +597,10 @@ defmodule Barkpark.Content.SchemaDefinition do
   # the open document, in the same grammar a desk filter uses. Every key but
   # `icon` and `orderings` is required: a view missing one would render a tab
   # that lists nothing, which reads to an editor as "there are none".
+  #
+  # A path that ends in `[]` or `[]._ref` names an ARRAY of references
+  # (`content.parentCategories[]._ref`), and the view matches an element of
+  # it. `[]` anywhere else is refused, because no read answers it.
   defp validate_desk_views(changeset) do
     case get_change(changeset, :desk) do
       %{} = desk ->
@@ -546,7 +618,9 @@ defmodule Barkpark.Content.SchemaDefinition do
                   changeset,
                   :desk,
                   "views entries need non-empty \"id\", \"title\", \"type\" and \"by\" " <>
-                    "(plus optional \"icon\" and valid \"orderings\"), got #{inspect(bad)}"
+                    "(plus optional \"icon\" and valid \"orderings\"); \"by\" may end in " <>
+                    "\"[]\" or \"[]._ref\" for an array of references and holds no other " <>
+                    "\"[]\", got #{inspect(bad)}"
                 )
             end
 
@@ -581,10 +655,24 @@ defmodule Barkpark.Content.SchemaDefinition do
         _ -> false
       end
 
-    required and orderings
+    required and orderings and valid_view_by?(Map.get(v, "by") || Map.get(v, :by))
   end
 
   defp valid_view?(_), do: false
+
+  # `[]` only as the array marker at the end: `a.b[]` or `a.b[]._ref`.
+  defp valid_view_by?(by) when is_binary(by) do
+    base =
+      cond do
+        String.ends_with?(by, "[]._ref") -> binary_part(by, 0, byte_size(by) - 7)
+        String.ends_with?(by, "[]") -> binary_part(by, 0, byte_size(by) - 2)
+        true -> by
+      end
+
+    base != "" and not String.contains?(base, ["[", "]"])
+  end
+
+  defp valid_view_by?(_), do: false
 
   defp valid_ordering?(%{} = o) do
     field = Map.get(o, "field") || Map.get(o, :field)
@@ -593,6 +681,12 @@ defmodule Barkpark.Content.SchemaDefinition do
   end
 
   defp valid_ordering?(_), do: false
+
+  @doc """
+  True when `view` is a well-formed `desk.views` entry. A declared desk list
+  (`deskStructure`) checks its own `views` with the same rule.
+  """
+  def valid_desk_view?(view), do: valid_view?(view)
 
   defp validate_desk_group_filters(changeset) do
     case get_change(changeset, :desk_groups) do
@@ -767,7 +861,8 @@ defmodule Barkpark.Content.SchemaDefinition do
     schema_str = stringify(schema)
 
     with {:ok, fields_raw} <- fetch_fields(schema_str),
-         {:ok, parsed_fields} <- parse_fields(fields_raw, plugin),
+         {:ok, parsed_fields} <-
+           parse_fields(fields_raw, plugin, Map.get(schema_str, "kind") == "object"),
          {:ok, validations} <- parse_validations(Map.get(schema_str, "validations", [])) do
       version = if Enum.any?(parsed_fields, &v2_shape?/1), do: 2, else: 1
 
@@ -986,9 +1081,9 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   # `nested?` is true for every field inside a composite, an image/file's
   # subfields or an array item: only those have a parent a `visibleWhen` with
-  # `"scope": "parent"` can read (task-9905a69475b1ff3b).
-  defp parse_fields(fields, plugin, nested? \\ false)
-
+  # `"scope": "parent"` can read (task-9905a69475b1ff3b). A `kind: "object"`
+  # schema's top-level fields are nested too: they sit inside the object
+  # wherever the type is used (task-a20f897d2dbaf824).
   defp parse_fields(fields, plugin, nested?) when is_list(fields) do
     fields
     |> Enum.reduce_while({:ok, []}, fn raw_field, {:ok, acc} ->
@@ -1037,10 +1132,28 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (the default — the
   # path walks from the document root) or "parent" (the enclosing object or
-  # array item). A top-level field has no parent, so "parent" there is an error
-  # rather than a silent fallback.
+  # array item). A document schema's top-level field has no parent, so "parent"
+  # there is an error rather than a silent fallback. `all` / `any` groups are
+  # checked leaf by leaf.
   @visible_when_scopes ~w(document parent)
   defp validate_visible_when_scope(%{} = pred, name, nested?) do
+    case group_of(pred) do
+      preds when is_list(preds) ->
+        Enum.find_value(preds, :ok, fn p ->
+          case validate_visible_when_scope(p, name, nested?) do
+            :ok -> nil
+            err -> err
+          end
+        end)
+
+      nil ->
+        validate_leaf_scope(pred, name, nested?)
+    end
+  end
+
+  defp validate_visible_when_scope(_, _, _), do: :ok
+
+  defp validate_leaf_scope(pred, name, nested?) do
     case Map.get(pred, "scope", Map.get(pred, :scope)) do
       nil -> :ok
       "parent" when not nested? -> {:error, {:visible_when_parent_at_top_level, name}}
@@ -1048,8 +1161,6 @@ defmodule Barkpark.Content.SchemaDefinition do
       scope -> {:error, {:visible_when_scope_invalid, name, scope}}
     end
   end
-
-  defp validate_visible_when_scope(_, _, _), do: :ok
 
   # sidebar-test classification (pd-doctrine t7, rule 4). Absent ⇒ nil
   # (unclassified — byte-compatible with every legacy schema). Only the two

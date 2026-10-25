@@ -1533,6 +1533,15 @@ if config_env() == :prod do
           Integer.to_string(Keyword.get(base_rate_limits, :write_per_minute, 60))
       )
     )
+    # Media delivery GETs (/media/files, /media/renditions and mirrors) — their own
+    # bucket, apart from the JSON read bucket (task-fe397d8f5f0a2c47).
+    |> Keyword.put(
+      :delivery_per_minute,
+      String.to_integer(
+        System.get_env("BARKPARK_RATE_LIMIT_DELIVERY") ||
+          Integer.to_string(Keyword.get(base_rate_limits, :delivery_per_minute, 3_000))
+      )
+    )
     # Browser class (charter D2/D4 Gate A) — SHADOW-FIRST. `_BROWSER` is the
     # budget, `_BROWSER_ENABLED=false` is the kill switch, and
     # `_BROWSER_ENFORCE=true` is the explicit human promotion to refusing. With

@@ -970,6 +970,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "Return only these content fields (projection): a comma list. System fields (_id, _type, …) always included."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed."
+          ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
           )
@@ -990,6 +995,19 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Document id to find referrers of.")],
         writes: false,
         default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.backlinks-many",
+        "doc",
+        "backlinks-many",
+        "Inbound references of several documents in one request: --ids a,b,c (at most 100), answered per id.",
+        "GET",
+        "/v1/data/backlinks/:dataset",
+        "read",
+        flags: [flag("ids", "string", "Comma-separated document ids (1 to 100).")],
+        writes: false,
+        default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
@@ -1184,6 +1202,9 @@ defmodule Barkpark.Plugins.Capabilities do
             "string",
             "scheduled | paused | published | cancelled | refused | failed | missed | all.",
             default: "scheduled"
+          ),
+          flag("order", "string", "asc (soonest first) | desc (latest first). At most 500 rows.",
+            default: "asc"
           )
         ],
         writes: false,
@@ -1309,6 +1330,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "Inline single reference fields (depth 1): a field name or comma list."
           ),
           flag("order", "string", "Sort: <field>:asc|desc (e.g. title:asc, _updatedAt:desc)."),
+          flag(
+            "collation",
+            "string",
+            "nb | nn: sort the text terms of order by ICU Norwegian collation (Æ, Ø, Å after Z). Blank is none; any other value is a 422 validation_failed."
+          ),
           flag("count", "bool", "Add result.total (full match count) to the response.",
             default: false
           )

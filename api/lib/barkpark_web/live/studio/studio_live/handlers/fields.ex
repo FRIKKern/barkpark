@@ -34,7 +34,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   @create_retry_window_ms 30_000
 
   def new_document(%{"type" => type} = params, socket) do
-    case retry_of_recent_create(socket, type) do
+    preset = pane_preset(params, socket)
+
+    case retry_of_recent_create(socket, type, preset) do
       {:ok, %{path: path}} ->
         # [plus-press-retry-coalesce] THE SECOND PRESS OF "+". spd-w18 measured
         # the "+" navigating in 6.4s on one build and NEVER within 20s across
@@ -84,9 +86,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> focus_new_doc(List.last(path))}
 
       :none ->
-        create_new_document(type, pane_prefix(params, socket), socket)
+        create_new_document(type, pane_prefix(params, socket), preset, socket)
     end
   end
+
+  # A declared desk list's `initialValues` (task-dc9b751450c2c2c4): its "+"
+  # starts the document with those fields set, so a page made from
+  # «Landingssider» is a landing page and shows in that list at once. Read from
+  # the pressed pane, never from the client.
+  defp pane_preset(%{"pane" => pane}, socket) when is_binary(pane) do
+    with {idx, ""} when idx >= 0 <- Integer.parse(pane),
+         %{initial_values: %{} = preset} <- Enum.at(socket.assigns[:panes] || [], idx) do
+      preset
+    else
+      _ -> %{}
+    end
+  end
+
+  defp pane_preset(_params, _socket), do: %{}
 
   # The pressed pane's own address, the prefix `Handlers.Scope.select/2` uses
   # for a row click (#35b). `nav_path ++ [id]` appended the new id after the
@@ -105,7 +122,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
   defp pane_prefix(_params, socket), do: socket.assigns.nav_path
 
-  defp create_new_document(type, prefix, socket) do
+  defp create_new_document(type, prefix, preset, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
     # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
@@ -115,7 +132,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     # collision odds. See [doc-id-collision-overwrite] in content/writer.ex.
     case Content.create_document(
            type,
-           new_document_attrs(type),
+           type |> new_document_attrs() |> Map.update!("content", &Map.merge(&1, preset)),
            socket.assigns.dataset,
            Shared.hook_opts(socket)
          ) do
@@ -128,6 +145,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> assign(
            recent_create: %{
              type: type,
+             preset: preset,
              doc_id: doc.doc_id,
              rev: doc.rev,
              path: new_path,
@@ -161,9 +179,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # both differ per type (a paper is born with a template and NO stored title,
   # a task with a seeded content map) while `rev` moves on any write of any
   # type — one predicate, no per-type list to fall out of date.
-  defp retry_of_recent_create(socket, type) do
+  # A press in a list with other presets is a different "+", never a retry.
+  defp retry_of_recent_create(socket, type, preset) do
     with %{type: ^type, doc_id: doc_id, rev: rev} = marker <-
            socket.assigns[:recent_create],
+         true <- Map.get(marker, :preset, %{}) == preset,
          true <- System.monotonic_time(:millisecond) - marker.at <= @create_retry_window_ms,
          {:ok, %{rev: ^rev}} <-
            Content.get_document(doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
@@ -300,6 +320,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     |> Barkpark.Tenancy.slugify()
   end
 
+  # A change from an input with no name is not a field edit. LiveView posts the
+  # whole form for it with `_target` "undefined": typing in a reference
+  # picker's search box did that once per keystroke, and each post wrote a
+  # draft of an untouched document (task-32d983d47299e137).
+  def autosave(%{"_target" => ["undefined"]}, socket), do: {:noreply, socket}
+
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
@@ -370,6 +396,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # explicit save, remote reload, navigation (`Lifecycle.finish_handle_params`)
   # — so a touched path can never leak onto the NEXT document opened.
   defp fold_dot_paths(params, socket) do
+    params = BarkparkWeb.Studio.StudioLive.Path.unmangle_params(params)
     touched = touched_paths(socket)
     base_form = base_form(socket)
 
@@ -559,7 +586,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
 
       new_list =
         case action do
-          "add_row" -> ArrayField.add_row(current, StudioLive.empty_for_of(field))
+          "add_row" -> add_row(current, field, params["member"], keyed_parent?(form, key_path))
           "remove_row" -> ArrayField.remove_row(current, idx)
           "move_up" -> ArrayField.move_up(current, idx)
           "move_down" -> ArrayField.move_down(current, idx)
@@ -569,6 +596,74 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
       new_form = StudioLive.put_value_at(form, key_path, new_list)
       {:noreply, mark_dirty(Shared.do_autosave(socket, new_form, :array_op))}
     end
+  end
+
+  @doc false
+  # A new row. In a several-member array (`of` is a list) it is the member the
+  # editor chose, with `_type` and a fresh `_key`; with no chosen member,
+  # nothing is added. In a single-`of` array whose rows carry Sanity's `_key`
+  # (and `_type`), the new row gets them too, so the list keeps one shape
+  # (task-e24e33a2a1a4fe10).
+  #
+  # `keyed_parent?` says the list sits inside an object that carries a `_key`
+  # (a page-builder item, a custom block): Sanity's shape, where every object
+  # in an array has a `_key`. A first row of an empty list there gets one too.
+  def add_row(current, field, member, keyed_parent? \\ false)
+
+  def add_row(current, %{"of" => members} = field, member, _keyed_parent?)
+      when is_list(members) do
+    case BarkparkWeb.Studio.StudioLive.Path.empty_for_of(field, member) do
+      %{} = row -> ArrayField.add_row(current, row)
+      _ -> current
+    end
+  end
+
+  def add_row(current, field, _member, keyed_parent?) do
+    row = StudioLive.empty_for_of(field)
+
+    keyed? =
+      if current == [],
+        do: keyed_parent?,
+        else: Enum.all?(current, &match?(%{"_key" => _}, &1))
+
+    row =
+      if is_map(row) and keyed? do
+        row
+        |> Map.put("_key", BarkparkWeb.Studio.StudioLive.Path.new_key())
+        |> maybe_put_type(field, current)
+      else
+        row
+      end
+
+    ArrayField.add_row(current, row)
+  end
+
+  defp maybe_put_type(row, %{"of" => %{"namedType" => t}}, current) when is_binary(t) do
+    if Enum.all?(current, &match?(%{"_type" => _}, &1)), do: Map.put(row, "_type", t), else: row
+  end
+
+  defp maybe_put_type(row, _field, _current), do: row
+
+  @doc false
+  # True when an object on the way to the list at `path` carries a `_key`.
+  def keyed_parent?(value, path) do
+    path
+    |> Enum.drop(-1)
+    |> Enum.reduce_while({value, false}, fn seg, {v, _} ->
+      next =
+        cond do
+          is_integer(seg) and is_list(v) -> Enum.at(v, seg)
+          is_binary(seg) and is_map(v) -> Map.get(v, seg)
+          true -> nil
+        end
+
+      cond do
+        is_map(next) and is_map_key(next, "_key") -> {:halt, {next, true}}
+        is_nil(next) -> {:halt, {nil, false}}
+        true -> {:cont, {next, false}}
+      end
+    end)
+    |> elem(1)
   end
 
   # A user-driven form edit leaves the browser buffer ahead of the last remote

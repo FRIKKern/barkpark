@@ -7,7 +7,7 @@ What `GET …/v1/data/search/:dataset?q=` matches, how it ranks, and the paramet
 
 - Every word must match (`match=all`, the default). `match=any` asks for one word. When `all` finds nothing, the pipeline widens typos under `all`, then runs `any`, and says so: `recovery: "match_any"`, `match: "any"`. The response field `match` names the rule that served the hits.
 - A synonym is an alternative to its word, never one more required word.
-- The last word is the word being typed. With 2 or more letters it also matches as a prefix. A last word of 1 letter after other words is left out of the match and counts only in the ranking.
+- The last word is the word being typed. With 2 or more letters it also matches as a prefix. A last word of 1 letter after other words is left out of the match (no trigram to probe); it picks the ranking pool, so titles with a word starting with it rank first.
 - An English stop word ("i", "the") is dropped when other words remain.
 - Norwegian fold: each word also matches every spelling the fold maps to it (`knausgard`, `knausgaard` and `knausgård` find each other; `nesbo` finds `Nesbø`), in every field.
 

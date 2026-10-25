@@ -27,6 +27,65 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
   data corruption. See barkpark-i2d4.
   """
 
+  @doc """
+  Undo what `Plug.Conn.Query.decode/1` does to an input name that has a dotted
+  segment AND ends in a bracket, such as `doc[sections][3].resources[0]` (a
+  reference row inside an array row). Plug reads it as the key
+  `"3].resources[0"` under `doc` → `sections`. Left there, that map took the
+  place of the whole list: the save never seeded the field from the buffer and
+  stored `sections` as a map (task-e24e33a2a1a4fe10). Each such key goes back
+  to its flat name (`"doc[sections][3].resources[0]"`), the shape every other
+  dotted name already arrives in. LiveView's `_unused_` bookkeeping names are
+  dropped. A post without such keys comes back unchanged.
+  """
+  def unmangle_params(%{} = params) do
+    Enum.reduce(params, params, fn
+      {root, %{} = tree}, acc when root in ["doc"] ->
+        {clean, flat} = split_mangled(tree, root)
+
+        if flat == %{} do
+          acc
+        else
+          acc = if clean == %{}, do: Map.delete(acc, root), else: Map.put(acc, root, clean)
+          Map.merge(acc, flat)
+        end
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  def unmangle_params(other), do: other
+
+  defp split_mangled(map, prefix) do
+    Enum.reduce(map, {%{}, %{}}, fn {k, v}, {clean, flat} ->
+      name = prefix <> "[" <> to_string(k) <> "]"
+
+      cond do
+        is_binary(k) and String.contains?(k, ["]", "[", "."]) ->
+          {clean, Map.merge(flat, flatten_value(name, v))}
+
+        is_map(v) and map_size(v) > 0 ->
+          {inner, inner_flat} = split_mangled(v, name)
+          clean = if inner == %{}, do: clean, else: Map.put(clean, k, inner)
+          {clean, Map.merge(flat, inner_flat)}
+
+        true ->
+          {Map.put(clean, k, v), flat}
+      end
+    end)
+  end
+
+  defp flatten_value(name, %{} = v) when map_size(v) > 0 do
+    Enum.reduce(v, %{}, fn {k, inner}, acc ->
+      Map.merge(acc, flatten_value(name <> "[" <> to_string(k) <> "]", inner))
+    end)
+  end
+
+  defp flatten_value(name, v) do
+    if String.contains?(name, "_unused_"), do: %{}, else: %{name => v}
+  end
+
   @doc false
   def parse_path("doc[" <> rest), do: parse_brackets(rest, [])
   def parse_path(""), do: []
@@ -101,6 +160,71 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
 
   def field_at(_, []), do: nil
   def field_at(_, _), do: nil
+
+  @doc """
+  `field_at/2` that also reads the form value along the path, so it can step
+  into an `arrayOf` whose `of` is a list of named members (Sanity's
+  page-builder array): the row index picks the row, and the row's `_type`
+  picks the member (task-e24e33a2a1a4fe10). Without a typed array on the path
+  it answers what `field_at/2` answers.
+  """
+  def field_at(fields, path, form) when is_list(fields) and is_list(path) do
+    case path do
+      [head | rest] when is_binary(head) ->
+        case Enum.find(fields, fn f -> Map.get(f, "name") == head end) do
+          nil -> nil
+          f -> descend_valued(f, rest, map_get(form, head))
+        end
+
+      [head | rest] when is_integer(head) ->
+        field_at(fields, rest, form)
+
+      _ ->
+        nil
+    end
+  end
+
+  def field_at(_, _, _), do: nil
+
+  defp descend_valued(field, [], _value), do: field
+
+  defp descend_valued(%{"type" => "arrayOf", "of" => members}, [idx | rest], value)
+       when is_list(members) and is_integer(idx) do
+    row = if is_list(value), do: Enum.at(value, idx)
+
+    case Barkpark.Content.Forms.member_for(members, row_type(row)) do
+      nil -> nil
+      member -> descend_valued(member, rest, row)
+    end
+  end
+
+  defp descend_valued(%{"type" => "arrayOf", "of" => of}, [idx | rest], value)
+       when is_map(of) and is_integer(idx) do
+    row = if is_list(value), do: Enum.at(value, idx)
+    descend_valued(of, rest, row)
+  end
+
+  defp descend_valued(field, [idx | rest], value) when is_integer(idx),
+    do: descend_valued(field, rest, value)
+
+  defp descend_valued(%{"type" => "composite", "fields" => subs}, [head | rest], value)
+       when is_list(subs) do
+    case Enum.find(subs, fn s -> Map.get(s, "name") == head end) do
+      nil -> nil
+      s -> descend_valued(s, rest, map_get(value, head))
+    end
+  end
+
+  defp descend_valued(%{"type" => "arrayOf", "of" => of}, path, value) when is_map(of),
+    do: descend_valued(of, path, value)
+
+  defp descend_valued(_, _, _), do: nil
+
+  defp map_get(%{} = m, k), do: Map.get(m, k)
+  defp map_get(_, _), do: nil
+
+  defp row_type(%{"_type" => t}) when is_binary(t), do: t
+  defp row_type(_), do: nil
 
   defp descend_field(field, []), do: field
 
@@ -227,6 +351,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Path do
   def empty_for_of(%{"of" => %{"type" => "localizedText"}}), do: %{}
   def empty_for_of(%{"of" => %{"type" => _}}), do: nil
   def empty_for_of(_), do: nil
+
+  # A new item of a several-member array: Sanity's shape, `_type` naming the
+  # member and a fresh `_key`, plus each subfield's declared `default`.
+  def empty_for_of(%{"of" => members}, member_name)
+      when is_list(members) and is_binary(member_name) do
+    case Barkpark.Content.Forms.member_for(members, member_name) do
+      nil ->
+        nil
+
+      member ->
+        member
+        |> Map.get("fields", [])
+        |> seed_defaults()
+        |> Map.put("_type", member_name)
+        |> Map.put("_key", new_key())
+    end
+  end
+
+  def empty_for_of(field, _member), do: empty_for_of(field)
+
+  # Sanity's array item key: 12 lowercase hex characters.
+  @doc false
+  def new_key, do: :crypto.strong_rand_bytes(6) |> Base.encode16(case: :lower)
+
+  @doc "See `Barkpark.Content.Forms.declared_defaults/1`."
+  defdelegate seed_defaults(fields), to: Barkpark.Content.Forms, as: :declared_defaults
 
   defp empty_for_type("composite"), do: %{}
   defp empty_for_type("arrayOf"), do: []

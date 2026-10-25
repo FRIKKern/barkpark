@@ -2637,10 +2637,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
         {:error, reason} ->
           Broadcast.clear_deferred_broadcasts()
           Writer.clear_deferred_after_save()
-          {:error, reason}
+          {:error, draft_forked_under(reason, doc_id, type, dataset, opts)}
       end
     end
   end
+
+  # task-128cda41162676e3 — the mutate door forks `drafts.<id>` without this lock, so a
+  # batch that read the published row can lose the draft INSERT to a mutate (the studio's
+  # field save and its body batch go at once after a reconnect). The document moved under
+  # the fence: answer as any stale `ifRev` is answered, with the draft's rev, not the
+  # changeset error the controller can only call a 422 `invalid_op`.
+  defp draft_forked_under(
+         %Ecto.Changeset{errors: errors} = changeset,
+         doc_id,
+         type,
+         dataset,
+         opts
+       ) do
+    with {_, meta} <- Keyword.get(errors, :doc_id),
+         :unique <- Keyword.get(meta, :constraint),
+         draft_id = DraftId.draft_id(DraftId.published_id(doc_id)),
+         {:ok, %Document{rev: actual}} <- Content.get_document(draft_id, type, dataset, opts) do
+      {:rev_mismatch, %{expected: Keyword.get(opts, :if_rev), actual: actual}}
+    else
+      _ -> changeset
+    end
+  end
+
+  defp draft_forked_under(reason, _doc_id, _type, _dataset, _opts), do: reason
 
   defp finish_document_ops_after_save(nil), do: :ok
 
@@ -3301,7 +3325,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
        when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
-         :ok <- check_document_if_rev(doc, Keyword.get(opts, :if_rev)),
+         {:ok, opts} <- field_ops_fence(doc, field, ops, dataset, opts),
          {:ok, field_def} <- field_definition(type, dataset, field, opts),
          blocks = field_blocks(Map.get(doc.content || %{}, field)),
          {:ok, new_blocks} <- Patch.apply_patches(blocks, ops),
@@ -3347,6 +3371,68 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, _reason} = err -> err
     end
   end
+
+  # The rev fence of a field batch. `fence: :blocks` (the caller's opt-in, `"fence":
+  # "blocks"` on the route) narrows a stale `ifRev` to the blocks the batch depends on:
+  # when every block it patches, replaces, removes or moves, and every anchor it inserts
+  # or moves after, reads the same at `ifRev` (its revision snapshot) as now, the batch
+  # applies to the current field and the write is fenced on the current rev. Ops are
+  # id-keyed, so another writer's blocks and every other field stay as they are.
+  # Five editors on one document (studio task-86f75846c256e3b4): two writing in
+  # different paragraphs, with three more writing other fields, failed most batches on
+  # a stale document rev and fell back to asking. Without the opt-in, or when a block
+  # the batch depends on did change, or no snapshot of `ifRev` exists: the 412 as before.
+  defp field_ops_fence(doc, field, ops, dataset, opts) do
+    if_rev = Keyword.get(opts, :if_rev)
+
+    case check_document_if_rev(doc, if_rev) do
+      :ok ->
+        {:ok, opts}
+
+      {:error, {:rev_mismatch, _}} = mismatch ->
+        if Keyword.get(opts, :fence) == :blocks and
+             blocks_unchanged_since?(doc, field, ops, if_rev, dataset, opts),
+           do: {:ok, Keyword.put(opts, :if_rev, doc.rev)},
+           else: mismatch
+    end
+  end
+
+  defp blocks_unchanged_since?(doc, field, ops, if_rev, dataset, opts) do
+    # The snapshot is read with the caller's own opts: the owner rule on history applies.
+    with {:ok, %{doc_id: snap_id, content: %{} = snap}} <-
+           Content.get_revision_by_rev(if_rev, dataset, opts),
+         true <- DraftId.published_id(snap_id) == DraftId.published_id(doc.doc_id) do
+      before = field_blocks(Map.get(snap, field))
+      now = field_blocks(Map.get(doc.content || %{}, field))
+      Enum.all?(dependent_block_ids(ops), &(find_block(before, &1) == find_block(now, &1)))
+    else
+      _ -> false
+    end
+  end
+
+  # Every block id a batch reads: the targets of patch/replace/remove/move, the anchors
+  # of insert-after and move-block, and the ids it appends or inserts (which must still
+  # be free).
+  defp dependent_block_ids(ops) do
+    ops
+    |> Enum.flat_map(fn op ->
+      [op["id"], op["afterId"], op["after"], op["block"] && Map.get(op["block"], "id")]
+    end)
+    |> Enum.filter(&is_binary/1)
+    |> Enum.uniq()
+  end
+
+  defp find_block(blocks, id) when is_list(blocks) do
+    Enum.find_value(blocks, fn b ->
+      cond do
+        not is_map(b) -> nil
+        Map.get(b, "id") == id -> b
+        true -> find_block(Map.get(b, "children") || Map.get(b, "blocks") || [], id)
+      end
+    end)
+  end
+
+  defp find_block(_blocks, _id), do: nil
 
   # The subset of `new_blocks` the vocabulary check actually needs to look at
   # (task-bbd13e5a46240cc1): the blocks `ops` inserted or modified, per

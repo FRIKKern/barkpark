@@ -144,7 +144,12 @@ defmodule BarkparkWeb.Studio.Caps do
   # `ref-search` and `backlinks-refresh` above it: a UI event whose only effect
   # is a SCOPED read through `Content.list_documents/3`, filtered to the open
   # document's own id. It reads no capability the socket does not already hold
-  # to see the document it is standing on, and it writes nothing.
+  # to see the document it is standing on, and it writes nothing. `view-more`
+  # reads the next page of that same list.
+  #
+  # `select-sort` (task-fa57815041bead3d) picks a named sort for one desk
+  # list: socket state only, then the same scoped list read the pane already
+  # makes. It writes nothing.
   #
   # `desk-search` / `desk-search-clear` (Gyldendal parity E8) sit beside
   # `search` and `ref-search` below for the same reason: the only effect is a
@@ -160,11 +165,11 @@ defmodule BarkparkWeb.Studio.Caps do
     toggle-content-preview toggle-diff toggle-category editor-set-mode
     width-bucket
     search ref-search validate-upload reload-remote-doc
-    select-view
-    desk-search desk-search-clear desk-list-more
+    select-view view-more
+    desk-search desk-search-clear desk-list-more select-sort
     open-image-picker close-image-picker open-ref-picker close-ref-picker
     show-history close-history close-delete close-discard
-    close-unpublish-guard close-confirm-modal
+    close-unpublish-guard close-confirm-modal object-dialog-close
     open-secondary-picker close-secondary-picker secondary-search
     select-secondary close-secondary view-graph node-clicked
     sidebar-toggle-panel sidebar-toggle-section
@@ -217,6 +222,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-unbind-property paper-delete-block paper-move-block
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
+    pt-block-open pt-block-insert object-dialog-change object-dialog-array-op object-dialog-save
     sidebar-description-change sidebar-label-add
     paper-save-master paper-insert-master paper-detach-master paper-pin-master
   )

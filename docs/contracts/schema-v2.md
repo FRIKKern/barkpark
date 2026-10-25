@@ -5,7 +5,7 @@ Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constra
 
 ## Four v2 field types
 
-All four appear only in plugin-authored schemas. The eight legacy seed schemas use only v1 primitives and round-trip unchanged via the permanent `flat_mode` branch.
+The eight legacy seed schemas use only v1 primitives and round-trip unchanged via the permanent `flat_mode` branch.
 
 ### `composite` — nested object with named subfields
 
@@ -13,7 +13,7 @@ All four appear only in plugin-authored schemas. The eight legacy seed schemas u
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
-Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ `array_missing_of`), or `of: [{name, ...}, ...]` — several NAMED types, each item discriminated by its own `_type` key (task-b3ebbd3ab1575e2a; `Field.of_types`, excl. `of`; unnamed/duplicate ⇒ `array_of_type_missing_name` / `_names_not_unique`). `ordered: true` → up/down reorder in the LiveView field component (single-shape only); `ordered: false` → unordered set.
+Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ `array_missing_of`), or `of: [{name, ...}, ...]` — several NAMED types, each item discriminated by its own `_type` key (task-b3ebbd3ab1575e2a; `Field.of_types`, excl. `of`; unnamed/duplicate ⇒ `array_of_type_missing_name` / `_names_not_unique`). `ordered: true` → up/down reorder in the LiveView field component; `ordered: false` → unordered set. Studio edits a named-type item in its member's form; Add asks which member.
 
 **Empty rows do not publish** (ruling #47): a scalar or reference list holding `null`, a blank string or a ref without `_ref` refuses publish: 422 `validation_failed`, `details.<field>` names the row. Drafts keep it.
 
@@ -23,7 +23,7 @@ Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ 
 
 ### `localizedText` — multi-language string with fallback chain
 
-Language slots are `languages` (e.g. `["nob", "eng"]`; an unknown or empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]`; callers supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order.
+Language slots are `languages` (e.g. `["nob", "eng"]`; unknown or empty is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]`, typically `["nob", "eng", "first-non-empty"]`; `"first-non-empty"` walks the remaining slots in order.
 
 ## Decisions (locked)
 
@@ -38,11 +38,11 @@ Language slots are `languages` (e.g. `["nob", "eng"]`; an unknown or empty set i
 - **`flat_mode` branch** — `flat?/1` returns `true`: original v1 validator, byte-for-byte. Legacy schemas stay here forever.
 - **v2 branch** — `flat?/1` returns `false`: schema declares any of `composite | arrayOf | codelist | localizedText`, an `image` with `fields` or `options.hotspot`, OR any non-empty `validations: [...]`.
 
-It is not a deprecation gate: legacy schemas are never forced onto v2.
+Not a deprecation gate.
 
 ## Phase 0 / Phase 1+ boundary
 
-Phase 0 shipped the four v2 types, the recursive validator, the codelist registry, the LiveView field components and the rule evaluator (`Barkpark.Content.Validation.Rules`, `Evaluator`); the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
+Phase 0 shipped the v2 types, validator, codelist registry, field components and rule evaluator (`Barkpark.Content.Validation.Rules`, `Evaluator`); the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
 
 **Phase 1+:** `docs/decisions/deferred.md`, plus error envelope v2 (`Accept-Version: 2`).
 
@@ -52,7 +52,7 @@ References are stored as `{"_ref": id, "_type": "reference"}` (ruling #42), slug
 
 An `image` is a URL or `{asset: {_ref}, hotspot: {x,y,height,width}, crop: {top,bottom,left,right}}`, sides 0–1 (legacy `url`/`assetId` read). It may declare `fields` (e.g. `alt`), kept on the image and checked like a composite's.
 
-A block-editor `richText` declares its vocabulary under `blocks` (`FieldVocabulary`); a `blocks.of` entry `{name, fields}` is a custom object block whose fields are checked the same way. `blocks.inline` entries `{name, fields}` are inline objects, stored in prose as `{type: name, …fields}`; others: `inline_type_undeclared`.
+A block-editor `richText` declares its vocabulary under `blocks` (`FieldVocabulary`); a `blocks.of` entry `{name, fields}` is a custom object block whose fields are checked the same way. On a Classic `richText`, `blocks.of` names Insert block's types; the Portable Text finding is block-editor only. `blocks.inline` entries `{name, fields}` are inline objects, stored in prose as `{type: name, …fields}`; others: `inline_type_undeclared`.
 
 ## `required` lives under `validation`
 

@@ -45,6 +45,10 @@ GET /w/:ws/p/:proj/files/<projectId>/<dataset>/<sha1>.<ext>[/<vanity>]
 - Files imported without it: `PATCH /w/:ws/p/:proj/v1/media/:dataset/:id` with `{"sourceId": "image-..."}`. `null` clears it.
 - A `sourceId` is 1 to 200 characters of letters, digits, `.`, `_`, `:` and `-`, unique per dataset. A malformed or taken id answers 422. Assets carry `sourceId`.
 
+## Asset documents for Studio uploads
+
+A Studio save of an image value whose `asset._ref` is an `image-<sha1>-<w>x<h>-<ext>` id with no document creates a published `sanityImageAsset` document with that id, so GROQ `asset->url` and `asset->metadata.dimensions` resolve. It runs only when the workspace has a `sanityImageAsset` schema in the dataset, the editor may write, and a file in that workspace and dataset maps to the id. An existing document is never changed. Code: `Barkpark.Media.SanityImageAssetDoc`.
+
 ## Why a stored id
 
 Sanity's sha1 is the hash of the bytes uploaded to Sanity. On one production import of 155 files and 1,136 images, read on 2026-10-13, every file kept those bytes. Only 72 images kept Sanity's byte size, and 3 of 30 sampled kept its sha1, because the importer downloaded them from Sanity's CDN, which re-encodes. 17 came back capped at 8192 px. The sha1 lookup also needs the stored hash: run `bin/barkpark eval 'Barkpark.Release.backfill_media_sha1()'` for rows uploaded before the column existed.

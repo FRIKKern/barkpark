@@ -41,7 +41,10 @@ defmodule Barkpark.Content.PortableText do
   box removes the block. A Sanity `linkAnnotation` shows as a link to its
   target (`#internal:<id>` for a document link) and keeps every field until its
   address is changed. A new link in a value whose links are `linkAnnotation`s
-  is one too (task-5fe67fc396077304).
+  is one too (task-5fe67fc396077304). A link to `#internal:<id>`, which the
+  editor's document picker writes, is a `linkAnnotation` with `linkType`
+  internal and an `internalLink` reference in any value
+  (task-088575052b459f3e).
 
   Keys are derived from position (`"b0"`, `"b0s1"`, `"b0m0"`), so converting
   the same HTML twice gives the same blocks. That is what lets an untouched
@@ -145,7 +148,7 @@ defmodule Barkpark.Content.PortableText do
       keep_empty: stored != [],
       objects: stored_objects,
       stored_blocks: stored_blocks,
-      link_type: link_dialect(stored)
+      link_type: link_dialect(stored, html)
     }
 
     stored_defs =
@@ -179,15 +182,18 @@ defmodule Barkpark.Content.PortableText do
   # The mark definition type a new link gets. A value whose stored links are
   # Sanity `linkAnnotation`s (the gyldendal.no twin) gets one too, so the site
   # that renders that type renders the new link; any other value gets `link`.
-  defp link_dialect(stored) do
+  # So does a value whose edit links to a document (`#internal:<id>`): that
+  # link is a `linkAnnotation`, and its neighbours follow it.
+  defp link_dialect(stored, html) do
     annotation? =
-      Enum.any?(stored, fn
-        %{"markDefs" => defs} when is_list(defs) ->
-          Enum.any?(defs, &match?(%{"_type" => "linkAnnotation"}, &1))
+      String.contains?(html, ~s(href="#internal:)) or
+        Enum.any?(stored, fn
+          %{"markDefs" => defs} when is_list(defs) ->
+            Enum.any?(defs, &match?(%{"_type" => "linkAnnotation"}, &1))
 
-        _ ->
-          false
-      end)
+          _ ->
+            false
+        end)
 
     if annotation?, do: "linkAnnotation", else: "link"
   end
@@ -260,10 +266,10 @@ defmodule Barkpark.Content.PortableText do
 
       {{:rebuilt, %{"_type" => "block"} = block}, i}, taken ->
         case Enum.at(stored, i) do
-          %{"_type" => "block", "_key" => k} when is_binary(k) ->
+          %{"_type" => "block", "_key" => k} = old when is_binary(k) ->
             if MapSet.member?(taken, k),
               do: {block, taken},
-              else: {rekey(block, k), MapSet.put(taken, k)}
+              else: {adopt(block, old), MapSet.put(taken, k)}
 
           _ ->
             {block, taken}
@@ -275,17 +281,155 @@ defmodule Barkpark.Content.PortableText do
     |> elem(0)
   end
 
-  defp rekey(%{"_key" => old} = block, key) do
-    children =
-      Enum.map(block["children"] || [], fn
-        %{"_type" => "span", "_key" => k} = span when is_binary(k) ->
-          %{span | "_key" => String.replace_prefix(k, old, key)}
+  # An edited block read against the stored block it replaces
+  # (task-74ef03a381b961ce). It takes the stored `_key`, and each span the
+  # `_key` of the stored span it matches (`match_spans/2`), so only a span the
+  # edit added gets a new key. A matched span keeps the stored text's
+  # whitespace characters where the edit left the text as it was
+  # (`keep_whitespace/2`), the stored order of its marks when the set is the
+  # same, and any field the stored span carries beside them.
+  defp adopt(block, %{"_key" => key} = old) do
+    old_children = old["children"] || []
+    stored_spans = for %{"_type" => "span", "_key" => k} = s <- old_children, is_binary(k), do: s
+    children = block["children"] || []
+    matches = match_spans(children, stored_spans)
 
-        child ->
-          child
+    used =
+      for %{"_key" => k} <- old_children ++ children,
+          is_binary(k),
+          into: MapSet.new(),
+          do: k
+
+    {children, _used} =
+      children
+      |> Enum.with_index()
+      |> Enum.map_reduce(used, fn
+        {%{"_type" => "span"} = span, i}, used ->
+          case Map.get(matches, i) do
+            nil ->
+              k = fresh_span_key(key, i, used)
+              {%{span | "_key" => k}, MapSet.put(used, k)}
+
+            si ->
+              {keep_span(span, Enum.at(stored_spans, si)), used}
+          end
+
+        {child, _i}, used ->
+          {child, used}
       end)
 
     %{block | "_key" => key, "children" => children}
+  end
+
+  defp keep_span(span, stored) do
+    marks =
+      if Enum.sort(span["marks"]) == Enum.sort(stored["marks"] || []),
+        do: stored["marks"],
+        else: span["marks"]
+
+    Map.merge(stored, %{
+      "_type" => "span",
+      "text" => keep_whitespace(span["text"], stored["text"]),
+      "marks" => marks
+    })
+  end
+
+  defp fresh_span_key(key, n, used) do
+    k = "#{key}s#{n}"
+    if MapSet.member?(used, k), do: fresh_span_key(key, n + 1, used), else: k
+  end
+
+  # Which stored span each rebuilt span is, as `%{child index => stored span
+  # index}`. Three passes, each over the spans the earlier ones left:
+  #
+  #   1. the same text and the same marks: the span is untouched;
+  #   2. the same marks at the same place, either the same span position or
+  #      the stored span after the one the previous span matched: its text was
+  #      edited;
+  #   3. the same text: its marks were changed.
+  #
+  # A span no pass matches is new, as the parts of a split span are.
+  defp match_spans(children, stored) do
+    spans = for {%{"_type" => "span"} = s, i} <- Enum.with_index(children), do: {i, s}
+    stored = Enum.with_index(stored)
+
+    {matches, used} =
+      match_pass(spans, stored, {%{}, MapSet.new()}, fn s, o ->
+        same_text?(s, o) and same_marks?(s, o)
+      end)
+
+    {matches, used} =
+      spans
+      |> Enum.with_index()
+      |> Enum.reduce({matches, used}, fn {{i, s}, j}, {matches, used} ->
+        prev = spans |> Enum.take(j) |> Enum.reverse() |> Enum.find_value(&matches[elem(&1, 0)])
+
+        candidates = Enum.reject([prev && prev + 1, j], &is_nil/1)
+
+        pick =
+          not Map.has_key?(matches, i) &&
+            Enum.find(candidates, fn si ->
+              not MapSet.member?(used, si) and
+                match?({_, _}, Enum.at(stored, si)) and
+                same_marks?(s, stored |> Enum.at(si) |> elem(0))
+            end)
+
+        if pick, do: {Map.put(matches, i, pick), MapSet.put(used, pick)}, else: {matches, used}
+      end)
+
+    {matches, _used} = match_pass(spans, stored, {matches, used}, &same_text?/2)
+    matches
+  end
+
+  defp match_pass(spans, stored, acc, same?) do
+    Enum.reduce(spans, acc, fn {i, s}, {matches, used} = acc ->
+      found =
+        not Map.has_key?(matches, i) &&
+          Enum.find(stored, fn {o, si} -> not MapSet.member?(used, si) and same?.(s, o) end)
+
+      case found do
+        {_o, si} -> {Map.put(matches, i, si), MapSet.put(used, si)}
+        _ -> acc
+      end
+    end)
+  end
+
+  defp same_text?(s, o), do: fold_space(s["text"]) == fold_space(o["text"])
+  defp same_marks?(s, o), do: Enum.sort(s["marks"] || []) == Enum.sort(o["marks"] || [])
+
+  # A browser may write a stored space as a no-break space, or the reverse, so
+  # the two are the same character when a span is matched.
+  defp fold_space(text) when is_binary(text), do: String.replace(text, "\u00A0", " ")
+  defp fold_space(_), do: nil
+
+  # The edited text with the stored characters put back where the two agree
+  # but for a space the browser swapped: the common start and the common end.
+  # Only the part the edit changed is read from the HTML.
+  defp keep_whitespace(text, stored) when is_binary(text) and is_binary(stored) do
+    if fold_space(text) == fold_space(stored) do
+      stored
+    else
+      new = String.graphemes(text)
+      old = String.graphemes(stored)
+      head = common_length(new, old)
+      max_tail = min(length(new), length(old)) - head
+      tail = min(common_length(Enum.reverse(new), Enum.reverse(old)), max_tail)
+
+      Enum.join(
+        Enum.take(old, head) ++
+          Enum.slice(new, head, length(new) - head - tail) ++
+          Enum.take(old, -tail)
+      )
+    end
+  end
+
+  defp keep_whitespace(text, _stored), do: text
+
+  defp common_length(a, b) do
+    a
+    |> Enum.zip(b)
+    |> Enum.take_while(fn {x, y} -> fold_space(x) == fold_space(y) end)
+    |> length()
   end
 
   # Inside a custom block's `<div data-pt-block>` only nested divs are
@@ -340,7 +484,7 @@ defmodule Barkpark.Content.PortableText do
         open_link(state, attrs)
 
       {"/", "a"} ->
-        %{state | marks: drop_last(state.marks, {:link, nil})}
+        %{state | marks: drop_last(state.marks, {:link, nil, nil})}
 
       {"", "span"} ->
         open_span(state, attrs)
@@ -403,10 +547,12 @@ defmodule Barkpark.Content.PortableText do
 
     href = decode(href || "")
 
+    extra = link_extra(attrs)
+
     mark =
       case attr(attrs, "data-pt-def") do
-        nil -> {:link, href}
-        key -> {:link_def, key, href}
+        nil -> {:link, href, extra}
+        key -> {:link_def, key, href, extra}
       end
 
     %{state | marks: state.marks ++ [mark]}
@@ -479,10 +625,38 @@ defmodule Barkpark.Content.PortableText do
     end
   end
 
-  defp drop_last(marks, {:link, _}) do
+  # Like `attr/2`, but an attribute set to "" reads as "" and only a missing
+  # one as nil: an empty `data-link-params` clears the stored parameters.
+  defp attr_present(attrs, name) do
+    case Regex.run(~r/(?:^|\s)#{name}\s*=\s*("([^"]*)"|'([^']*)')/i, attrs) do
+      [_, _, dq] -> decode(dq)
+      [_, _, "", sq] -> decode(sq)
+      _ -> nil
+    end
+  end
+
+  # The link fields the editor's link row sets beside the address
+  # (task-025d7af119d6f0b8): a file link (`data-link-kind="dam"` and
+  # `data-file-name`), the query parameters of a document link
+  # (`data-link-params`) and the new-tab switch (`data-new-tab`). A missing
+  # attribute leaves the stored field as it is.
+  defp link_extra(attrs) do
+    %{
+      kind: attr(attrs, "data-link-kind"),
+      file_name: attr_present(attrs, "data-file-name"),
+      params: attr_present(attrs, "data-link-params"),
+      new_tab:
+        case attr_present(attrs, "data-new-tab") do
+          nil -> nil
+          v -> v == "true"
+        end
+    }
+  end
+
+  defp drop_last(marks, {:link, _, _}) do
     case Enum.find_index(
            Enum.reverse(marks),
-           &(match?({:link, _}, &1) or match?({:link_def, _, _}, &1))
+           &(match?({:link, _, _}, &1) or match?({:link_def, _, _, _}, &1))
          ) do
       nil -> marks
       i -> List.delete_at(marks, length(marks) - 1 - i)
@@ -553,14 +727,20 @@ defmodule Barkpark.Content.PortableText do
         {span, j}, defs ->
           {marks, defs} =
             Enum.map_reduce(span.marks, defs, fn
-              {:link, href}, defs ->
-                new_link(key, href, defs, link_type)
+              {:link, href, extra}, defs ->
+                new_link(key, href, extra, defs, link_type)
 
-              {:link_def, k, href}, defs ->
+              {:link_def, k, href, extra}, defs ->
                 cond do
-                  Enum.any?(defs, &(&1["_key"] == k)) -> {k, defs}
-                  def = stored_defs[k] -> {k, defs ++ [edited_link_def(def, href)]}
-                  true -> new_link(key, href, defs, link_type)
+                  Enum.any?(defs, &(&1["_key"] == k)) ->
+                    {k, defs}
+
+                  def = stored_defs[k] ->
+                    extra = carried_params(extra, def, href)
+                    {k, defs ++ [def |> edited_link_def(href, extra) |> with_link_extra(extra)]}
+
+                  true ->
+                    new_link(key, href, extra, defs, link_type)
                 end
 
               {:def, k}, defs ->
@@ -597,41 +777,106 @@ defmodule Barkpark.Content.PortableText do
     {block, cur[:src]}
   end
 
-  defp new_link(key, href, defs, link_type) do
-    case Enum.find(defs, &(link_def_href(&1) == href and &1["_type"] == link_type)) do
+  defp new_link(key, href, extra, defs, link_type) do
+    # A document link and a file link have no `link` form: each is a
+    # `linkAnnotation` in any value.
+    link_type =
+      if internal_href?(href) or dam?(extra), do: "linkAnnotation", else: link_type
+
+    candidate = link_type |> new_link_def("", href, extra) |> with_link_extra(extra)
+    same = Map.delete(candidate, "_key")
+
+    case Enum.find(defs, &(Map.delete(&1, "_key") == same)) do
       %{"_key" => k} ->
         {k, defs}
 
       nil ->
         k = free_key(key, defs)
-        {k, defs ++ [new_link_def(link_type, k, href)]}
+        {k, defs ++ [Map.put(candidate, "_key", k)]}
     end
   end
 
-  defp new_link_def("linkAnnotation", k, href),
-    do: Map.merge(%{"_type" => "linkAnnotation", "_key" => k}, annotation_target(href))
+  defp new_link_def("linkAnnotation", k, href, extra),
+    do: Map.merge(%{"_type" => "linkAnnotation", "_key" => k}, annotation_target(href, extra))
 
-  defp new_link_def(_link, k, href), do: %{"_type" => "link", "_key" => k, "href" => href}
+  defp new_link_def(_link, k, href, _extra), do: %{"_type" => "link", "_key" => k, "href" => href}
 
-  # A stored link whose address the editor did not change is kept as stored.
-  # A changed address replaces the target and keeps the rest (`openInNewTab`).
-  defp edited_link_def(%{"_type" => "linkAnnotation"} = def, href) do
-    if link_def_href(def) == href do
+  # A stored link whose target the editor did not change is kept as stored.
+  # A changed target replaces the target fields and keeps the rest
+  # (`openInNewTab`). A file link that keeps its address but becomes an
+  # address link, or the reverse, is a changed target.
+  defp edited_link_def(%{"_type" => "linkAnnotation"} = def, href, extra) do
+    same_kind? = def["linkType"] == "dam" == dam?(extra)
+
+    if link_def_href(def) == href and same_kind? do
       def
     else
       def
       |> Map.drop(
-        ~w(linkType url href email internalLink damFileUrl damFileName isExternal isMailto)
+        ~w(linkType url href email internalLink linkParams damFileUrl damFileName isExternal isMailto)
       )
-      |> Map.merge(annotation_target(href))
+      |> Map.merge(annotation_target(href, extra))
     end
   end
 
-  defp edited_link_def(%{"_type" => "link"} = def, href), do: Map.put(def, "href", href)
-  defp edited_link_def(def, _href), do: def
+  defp edited_link_def(%{"_type" => "link"} = def, href, _extra), do: Map.put(def, "href", href)
+  defp edited_link_def(def, _href, _extra), do: def
+
+  # The parameters of a list page go with its target: a link given another
+  # document drops the parameters it still carries from the old one. New
+  # parameters set with the new target stay.
+  defp carried_params(%{params: p} = extra, %{"linkParams" => p} = def, href) do
+    if link_def_href(def) == href, do: extra, else: %{extra | params: nil}
+  end
+
+  defp carried_params(extra, _def, _href), do: extra
+
+  defp dam?(%{kind: "dam"}), do: true
+  defp dam?(_extra), do: false
+
+  # The fields the link row sets beside the target (task-025d7af119d6f0b8).
+  # Only a `linkAnnotation` has them. The file name belongs to a file link and
+  # the parameters to a document link; an empty value removes the field.
+  defp with_link_extra(%{"_type" => "linkAnnotation"} = def, extra) do
+    def
+    |> put_link_field("damFileName", def["linkType"] == "dam", extra.file_name)
+    |> put_link_field("linkParams", link_kind(def) == "internal", extra.params)
+    |> then(fn d ->
+      if is_boolean(extra.new_tab), do: Map.put(d, "openInNewTab", extra.new_tab), else: d
+    end)
+  end
+
+  defp with_link_extra(def, _extra), do: def
+
+  defp put_link_field(def, _name, _applies?, nil), do: def
+  defp put_link_field(def, _name, false, _value), do: def
+  defp put_link_field(def, name, true, ""), do: Map.delete(def, name)
+  defp put_link_field(def, name, true, value), do: Map.put(def, name, value)
+
+  # A file link (the link row's File kind, `data-link-kind="dam"`) keeps its
+  # address in `damFileUrl`, the shape the twin's Sanity bodies store.
+  defp annotation_target(href, extra) do
+    if dam?(extra),
+      do: %{"linkType" => "dam", "damFileUrl" => href},
+      else: annotation_target(href)
+  end
 
   defp annotation_target("mailto:" <> email), do: %{"linkType" => "email", "email" => email}
+
+  # A link to a document (the editor's `#internal:<id>`, chosen with the link
+  # row's document picker) is the shape the twin's Sanity bodies store and its
+  # site renders: `linkType: internal` and an `internalLink` reference
+  # (task-088575052b459f3e).
+  defp annotation_target("#internal:" <> id = href) do
+    if internal_href?(href),
+      do: %{"linkType" => "internal", "internalLink" => %{"_type" => "reference", "_ref" => id}},
+      else: %{"linkType" => "external", "url" => href}
+  end
+
   defp annotation_target(href), do: %{"linkType" => "external", "url" => href}
+
+  defp internal_href?("#internal:" <> id), do: Regex.match?(~r/\A[^\s"'<>]+\z/, id)
+  defp internal_href?(_href), do: false
 
   # The address a link mark definition shows in the editor. A Sanity
   # `linkAnnotation` keeps its target in one of four fields by `linkType`; an
@@ -678,13 +923,19 @@ defmodule Barkpark.Content.PortableText do
     |> Enum.reject(&(Map.get(&1, :text) == ""))
   end
 
-  defp trim_span(%{text: text} = span, :leading), do: %{span | text: String.trim_leading(text)}
-  defp trim_span(%{text: text} = span, :trailing), do: %{span | text: String.trim_trailing(text)}
+  # Only the whitespace HTML markup uses is trimmed: a no-break space or any
+  # other Unicode space at the edge of a block is text (task-74ef03a381b961ce).
+  defp trim_span(%{text: text} = span, :leading),
+    do: %{span | text: String.replace(text, ~r/\A[ \t\r\n\f]+/, "")}
+
+  defp trim_span(%{text: text} = span, :trailing),
+    do: %{span | text: String.replace(text, ~r/[ \t\r\n\f]+\z/, "")}
+
   defp trim_span(object, _side), do: object
 
   defp decode(text) do
     text
-    |> String.replace("&nbsp;", " ")
+    |> String.replace(["&nbsp;", "&#160;", "&#xA0;", "&#xa0;"], "\u00A0")
     |> String.replace("&lt;", "<")
     |> String.replace("&gt;", ">")
     |> String.replace("&quot;", "\"")
@@ -852,12 +1103,12 @@ defmodule Barkpark.Content.PortableText do
   defp wrap(key, acc, defs) when is_binary(key) do
     case defs[key] do
       %{"_type" => "link", "href" => href} when is_binary(href) ->
-        ~s(<a href="#{escape(href)}">#{acc}</a>)
+        ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>)
 
       %{"_type" => "linkAnnotation"} = def ->
         case link_def_href(def) do
           href when is_binary(href) ->
-            ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}">#{acc}</a>)
+            ~s(<a href="#{escape(href)}" data-pt-def="#{escape(key)}"#{link_extra_attrs(def)}>#{acc}</a>)
 
           nil ->
             ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
@@ -872,6 +1123,29 @@ defmodule Barkpark.Content.PortableText do
   end
 
   defp wrap(_mark, acc, _defs), do: acc
+
+  # The link row's fields beside the target, as the attributes `link_extra/1`
+  # reads back (task-025d7af119d6f0b8). A field the def lacks adds nothing, so
+  # a link without them renders as before.
+  defp link_extra_attrs(def) do
+    [
+      def["linkType"] == "dam" && ~s( data-link-kind="dam"),
+      (def["linkType"] == "dam" and is_binary(def["damFileName"])) &&
+        ~s( data-file-name="#{escape(def["damFileName"])}"),
+      (link_kind(def) == "internal" and is_binary(def["linkParams"]) and def["linkParams"] != "") &&
+        ~s( data-link-params="#{escape(def["linkParams"])}"),
+      is_boolean(def["openInNewTab"]) && ~s( data-new-tab="#{def["openInNewTab"]}")
+    ]
+    |> Enum.filter(&is_binary/1)
+    |> Enum.join()
+  end
+
+  defp link_kind(def) do
+    case link_def_href(def) do
+      "#internal:" <> _ -> "internal"
+      _ -> def["linkType"]
+    end
+  end
 
   # An attribute value (the object's JSON) through Phoenix.HTML's escaper, which
   # also escapes `'`; `decode/1` reads every entity it emits back.

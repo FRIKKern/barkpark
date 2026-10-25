@@ -167,6 +167,9 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     ".bp-paper-context-menu" => :body_portal,
     # canvas/link-preview.js appends the shared hover card to document.body.
     ".bp-link-preview" => :body_portal,
+    # canvas/link-preview.js's pill (contract 1.14.0, a block-cards host): appended to
+    # document.body by `_buildPill/0`, removed by `destroy/0`; never inside the panel.
+    ".bp-link-pill" => :body_portal,
     ".bp-ab-overlay" => :body_portal,
     ".bp-bulk-action-bar" => :layout_sibling,
     ".image-picker-overlay" => :layout_sibling,
@@ -209,6 +212,13 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # object field dialog and `document.body.append(el)`s it before it is shown
     # (task-85fee859cf3bfef6); `close/1` removes it. Never inside the panel.
     ".bp-inline-object-dialog" => :body_portal,
+    # canvas/inline-object.js `InlineObjectBar._build/0` builds the selected
+    # atom's Edit/Remove bar and `document.body.appendChild(el)`s it before it is
+    # shown (task-8c509718bc320d1d); `destroy/0` removes it. Never inside the panel.
+    ".bp-inline-object-bar" => :body_portal,
+    # canvas/link-preview.js `_buildPill/0` (contract 1.14.0, a block-cards host) builds
+    # Sanity's annotation pill and appends it to document.body; `destroy/0` removes it.
+    ".bp-link-pill" => :body_portal,
     # The canvas owns this notice and appends it to itself. Its viewport/caret
     # coordinates rely on the same panel containing-block ban as the toolbar;
     # it is not a body portal. Scroll/resize dismiss it before its anchor moves.

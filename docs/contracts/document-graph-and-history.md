@@ -7,7 +7,7 @@ All routes here are **[token]**; anonymous callers get `404`, never an empty `20
 
 ## Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
-Live schema-declared refs (draft and published) plus projected plugin edges: `{result:{backlinks:[<docs>],count:N}}`, one card per source. Accepts bare ids and `{_ref:id}`. Target, source and field access apply to both paths. `via_field` names a readable matching field. Public graph readers remain published-only.
+Live schema-declared refs (draft + published) + projected plugin edges → `{result:{backlinks:[<docs>],count:N}}`, one card per source; bare ids or `{_ref:id}`. Target/source/field access applies to both; `via_field` is a readable matching field. Public graph: published-only. Many: `/backlinks/:dataset?ids=a,b` (≤100) → `result.byId.<id>`, each as its own read.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`.
 
@@ -17,10 +17,10 @@ Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts
 
 ## History [token]
 
-`GET /v1/data/history/:dataset/:type/:doc_id` (`?limit=` default 50, ≤200; `?offset=` floor 0, uncapped; non-integer → 400 `malformed`) → `{revisions:[{id,action,rev,timestamp}], count, limit, offset, has_more, next_offset}` (`next_offset`: the next `?offset=`, or `nil`). The order key is TOTAL (`{inserted_at, id}`), so a page boundary cannot skip or duplicate a row; `has_more` is one row fetched past the page, never a second COUNT.
+`GET /v1/data/history/:dataset/:type/:doc_id` (`?limit=` default 50, ≤200; `?offset=` floor 0, uncapped; non-integer → 400 `malformed`) → `{revisions:[{id,action,rev,timestamp}], count, limit, offset, has_more, next_offset}` (`next_offset`: next `?offset=` or `nil`). Order key is total (`{inserted_at, id}`): pages never skip or repeat a row; `has_more` is one row past the page, not a COUNT.
 
 `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
 
-Retention: revisions are kept indefinitely (`Barkpark.Content.Revisions`). Deleted content copied into `mutation_events.document` and media `webhook_deliveries.payload_snapshot` is redacted after 90 days, rows kept; off until `BARKPARK_DELETED_PAYLOAD_RETENTION=on`. Census: `mix barkpark.deleted_payload_retention`. Policy: `Barkpark.Content.DeletedPayloadRetention`.
+Retention: revisions are kept forever (`Barkpark.Content.Revisions`). Deleted content copied into `mutation_events.document` and media `webhook_deliveries.payload_snapshot` is redacted after 90 days, rows kept; off until `BARKPARK_DELETED_PAYLOAD_RETENTION=on`. Census: `mix barkpark.deleted_payload_retention`. Policy: `Barkpark.Content.DeletedPayloadRetention`.
 
-Migrations that touch `revisions`/`documents`: [migration-safety](migration-safety.md).
+Migrations touching `revisions`/`documents`: [migration-safety](migration-safety.md).

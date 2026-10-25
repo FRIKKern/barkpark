@@ -911,11 +911,6 @@
       border-color: var(--border); font-weight: 500;
     }
     .bp-view-list { display: flex; flex-direction: column; }
-    .bp-view-row {
-      display: flex; align-items: center; justify-content: space-between; gap: 8px;
-      padding: 8px 12px; text-decoration: none;
-      border-bottom: 1px solid var(--border-muted);
-    }
 
     .bp-tab-bar {
       display: flex; gap: 2px; padding: 0 0 12px 0;
@@ -1868,6 +1863,21 @@
       border-color: var(--primary);
     }
 
+    /* The desk list's sort menu (task-fa57815041bead3d). */
+    .bp-desk-sort {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-bottom: 1px solid var(--border-muted);
+      font-size: var(--text-2xs); color: var(--fg-muted);
+    }
+    .bp-desk-sort-select {
+      min-width: 0; flex: 1 1 auto; max-width: 100%;
+      padding: 2px 6px; border-radius: 6px;
+      border: 1px solid var(--border-muted);
+      background: transparent; color: var(--fg);
+      font-size: var(--text-2xs);
+    }
+    .bp-desk-sort-select:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+
     /* Pane-level honest state: a STORED filter (a desk chip, a plugin or
        structure filter) the query builder refused, so the list below is empty
        because nothing was queried — not because the type has no documents.
@@ -2020,6 +2030,7 @@
       padding: 8px 12px; text-decoration: none;
     }
     .bp-desk-search-hit .pane-doc-sub { flex-shrink: 0; }
+    .bp-desk-search-hit .pane-doc-media-icon + .pane-doc-title { flex: 1; min-width: 0; }
 
     .pane-doc-item {
       cursor: pointer;
@@ -2042,6 +2053,11 @@
       display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
     }
     .pane-doc-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* A row with no media draws its schema type's icon (task-835fe5219585ca80). */
+    .pane-doc-media-icon, .bp-array-item-media-icon {
+      align-items: center; justify-content: center; color: var(--fg-muted);
+    }
+    .bp-array-item-media-icon { display: inline-flex; }
     .pane-doc-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
     .pane-doc-dot.published { background: var(--success); }
     .pane-doc-dot.draft { background: var(--warning); }
@@ -3671,7 +3687,27 @@
     .bp-rte-btn:hover { background: var(--bg-accent); color: var(--fg); }
     .bp-rte-linkrow { display: inline-flex; align-items: center; gap: 4px; margin-left: 6px; }
     .bp-rte-linkrow[hidden] { display: none; }
-    .bp-rte-url {
+    /* With Internal / External (task-088575052b459f3e) the row takes its own
+       line: the document picker needs the width. */
+    .bp-rte-linkrow-kinds { flex-basis: 100%; flex-wrap: wrap; margin-left: 0; padding: 4px 0 2px; }
+    .bp-rte-kinds { display: inline-flex; gap: 2px; }
+    .bp-rte-kind[aria-pressed="true"] { background: var(--bg-accent); color: var(--fg); border-color: var(--input); }
+    .bp-rte-internal { flex: 1 1 320px; min-width: 0; }
+    .bp-rte-internal[hidden], .bp-rte-external[hidden] { display: none; }
+    .bp-rte-external { display: inline-flex; align-items: center; gap: 4px; }
+    /* The row's own Remove unlinks; the picker's would only empty the picker. */
+    .bp-rte-internal .ref-selected .btn-destructive { display: none; }
+    /* Email, File, the list page's parameters and the new-tab switch
+       (task-025d7af119d6f0b8). */
+    .bp-rte-email, .bp-rte-file, .bp-rte-params-box { display: inline-flex; align-items: center; gap: 4px; }
+    .bp-rte-email[hidden], .bp-rte-file[hidden], .bp-rte-params-box[hidden] { display: none; }
+    .bp-rte-params-box { flex-basis: 100%; }
+    .bp-rte-params { width: 320px; }
+    .bp-rte-newtab { display: inline-flex; align-items: center; gap: 4px; font-size: var(--text-xs); color: var(--fg-muted); }
+    .bp-rte-file-name { font-size: var(--text-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .bp-rte-file-name.bp-rte-file-empty { color: var(--fg-muted); }
+    .bp-rte-email-input[aria-invalid="true"] { border-color: var(--destructive); }
+    .bp-rte-url, .bp-rte-field {
       width: 220px; height: 24px; padding: 0 8px;
       border: 1px solid var(--input); border-radius: 4px;
       background: var(--bg); color: var(--fg); font-size: var(--text-xs);
@@ -3690,6 +3726,16 @@
       user-select: none;
     }
     .bp-rte-body .bp-pt-block strong { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-xs); }
+    /* A block box opens its fields on click or Enter (task-19392d1e6fc661e6). */
+    .bp-rte-body .bp-pt-block[data-pt-decorated] { cursor: pointer; }
+    .bp-rte-body .bp-pt-block[data-pt-decorated]:hover { border-color: var(--primary); color: var(--fg); }
+    .bp-rte-body .bp-pt-block[data-pt-decorated]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+    .bp-rte-body .bp-pt-pending { opacity: 0.6; }
+    .bp-rte-insert {
+      height: 24px; padding: 0 6px;
+      border: 1px solid var(--input); border-radius: 4px;
+      background: var(--bg); color: var(--fg); font-size: var(--text-xs);
+    }
     bp-reference-picker { display: block; }
     bp-reference-picker .bp-ref-search-input { width: 100%; }
     bp-reference-picker .bp-ref-dropdown {
@@ -3700,8 +3746,11 @@
       box-shadow: 0 8px 24px hsl(var(--bp-shadow-hsl) / 0.12);
       padding: 6px 0;
     }
+    /* Every hit is a flex row (task-522073bdad4a7ad2): the title column grows
+       and a type word or draft badge sits apart at the end. */
     bp-reference-picker .bp-ref-dropdown-item {
-      display: block; width: 100%; padding: 8px 12px; border: none; background: transparent;
+      display: flex; align-items: center; gap: 10px;
+      width: 100%; padding: 8px 12px; border: none; background: transparent;
       text-align: left; cursor: pointer; color: var(--fg); font-size: var(--text-sm);
       border-bottom: 1px solid var(--border-muted);
     }
@@ -3714,6 +3763,7 @@
       display: inline-flex; background: var(--bg-muted); border: 1px solid var(--border);
     }
     bp-reference-picker .bp-ref-hit-media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    bp-reference-picker .bp-ref-hit-icon { align-items: center; justify-content: center; color: var(--fg-muted); }
     bp-reference-picker .bp-ref-hit-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
     bp-reference-picker .bp-ref-hit-sub {
       font-size: var(--text-xs); color: var(--fg-muted);
@@ -4025,6 +4075,18 @@
       border-color: var(--primary); border-style: solid;
     }
 
+    /* "Add item" of a several-member array: a menu of the member types. */
+    .bp-array-add-menu > summary { list-style: none; display: inline-flex; align-items: center; cursor: pointer; }
+    .bp-array-add-menu > summary::-webkit-details-marker { display: none; }
+    .bp-array-add-members {
+      display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none;
+    }
+    .bp-array-add-member {
+      height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm);
+      background: var(--bg); color: var(--fg); font-size: var(--text-sm); cursor: pointer;
+    }
+    .bp-array-add-member:hover { background: var(--bg-accent); border-color: var(--primary); }
+
     /* LocalizedText rows */
     .bp-localized-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
     .bp-localized-warning {
@@ -4052,6 +4114,8 @@
       display: flex; align-items: center; gap: 8px;
     }
     .bp-doc-row-body:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+    /* A document view's related row links by URL: the same body as an <a>. */
+    a.bp-doc-row-body { text-decoration: none; }
     /* Blockified as a flex item of .bp-doc-row-body, so it survives the
        <div> → <span> conversion the button's phrasing-content rule forced. */
     .pane-doc-main { flex: 1; min-width: 0; }
@@ -4180,6 +4244,15 @@
     }
     .modal-header h3 { margin: 0; font-size: var(--text-base); font-weight: 600; }
     .modal-body { padding: 16px 20px 20px; overflow-y: auto; }
+    /* The Portable Text block dialog: wider than a picker, the fields scroll
+       and Cancel and Save stay in view (task-19392d1e6fc661e6). */
+    .bp-object-dialog { width: min(720px, 100%); max-height: min(88vh, 900px); }
+    .bp-object-dialog > form { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
+    .bp-object-dialog-body { flex: 1 1 auto; min-height: 0; }
+    .bp-object-dialog-actions {
+      display: flex; justify-content: flex-end; gap: 8px;
+      padding: 12px 20px; border-top: 1px solid var(--border-muted);
+    }
 
     /* Schema-action confirm modal (spd-w5f). `components/confirm_modal.ex`
        carried this whole surface in a `style="…"` attribute: `position: fixed;
@@ -4642,8 +4715,8 @@
         can load the same bytes. The <style> is split around the <link> rather
         than the link being hoisted, so every rule keeps its exact cascade
         position relative to the halves above and below. --%>
-  <link rel="stylesheet" href="/assets/bp-paper-editor-shell.css" />
-  <link rel="stylesheet" href="/assets/bp-media-picker.css" />
+  <link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-paper-editor-shell.css")} />
+  <link rel="stylesheet" href={BarkparkWeb.StaticAssets.path("bp-media-picker.css")} />
   <style>
 
     /* ── Studio sheet grid editor (Sheets M2) ─────────────────────────────
@@ -5256,22 +5329,22 @@
     aria-atomic="true"
     data-test-id="press-answer"
   ></div>
-  <script src="/assets/bp-rich-text-editor.js" defer></script>
-  <script src="/assets/bp-search-intel.js" defer></script>
-  <script src="/assets/bp-asset-explorer.js" defer></script>
-  <script src="/assets/bp-asset-browser.js" defer></script>
-  <script src="/assets/bp-media-picker.js" defer></script>
-  <script src="/assets/bp-reference-picker.js" defer></script>
-  <script src="/assets/bp-document-preview.js" defer></script>
-  <script src="/assets/bp-overflow-menu.js" defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-rich-text-editor.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-search-intel.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-asset-explorer.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-asset-browser.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-media-picker.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-reference-picker.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-document-preview.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-overflow-menu.js")} defer></script>
   <%!-- Studio already ships the .bp-paper-surface editor CSS inline (above), so
         opt OUT of the WC's self-injecting standalone stylesheet to avoid doubled
         / page-globalized rules. Embedders (web) leave this unset. Runs before the
         deferred bundle below. --%>
   <script nonce={assigns[:csp_nonce]}>window.BP_PAPER_EDITOR_NO_INJECT = true;</script>
-  <script src="/assets/bp-paper-editor.bundle.js" defer></script>
-  <script src="/assets/phoenix.js"></script>
-  <script src="/assets/phoenix_live_view.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-paper-editor.bundle.js")} defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("phoenix.js")}></script>
+  <script src={BarkparkWeb.StaticAssets.path("phoenix_live_view.js")}></script>
   <%!-- Non-defer ON PURPOSE (unlike the bp-* Web Components above): it must
         define window.BarkparkSheetGrid BEFORE the inline script below
         registers it as a LiveView hook and connects the LiveSocket.
@@ -5284,10 +5357,10 @@
         (no blocking scripts in head) intact. --%>
   <%!-- The shared modal-dialog focus manager (Hooks.ModalFocus): NON-DEFER so
         window.BarkparkModalFocus exists when the hook map below is built. --%>
-  <script src="/assets/bp-modal-focus.js"></script>
-  <script src="/assets/bp-sheet-formula.js"></script>
-  <script src="/assets/bp-sheet-pointing.js"></script>
-  <script src="/assets/bp-sheet-grid.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-modal-focus.js")}></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-sheet-formula.js")}></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-sheet-pointing.js")}></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-sheet-grid.js")}></script>
   <%!-- Blast-radius graph pane (Goal ges/graph-edge-seam, Phase 5). The
         renderer is a SELF-CONTAINED vanilla Canvas2D file — ZERO npm, ZERO
         network-fetched libraries (Cytoscape is fully gutted; the old
@@ -5441,7 +5514,7 @@
       window.addEventListener("phx:page-loading-stop", applyDismiss);
     })();
   </script>
-  <script src="/assets/bp-graph.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-graph.js")}></script>
   <%!-- tmux console hook (Studio /studio/tmux). TINY — only defines the hook;
         the heavy xterm.js (~290KB) is lazy-loaded from /assets/xterm.bundle.js
         the first time the hook mounts, so non-tmux pages never fetch it
@@ -5450,7 +5523,7 @@
         (Re-added after a stale-branch merge dropped this line — see
         docs / the tmux console; without it the hook never registers → black
         terminal.) --%>
-  <script src="/assets/bp-tmux-terminal.js?v=2"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-tmux-terminal.js")}></script>
   <%!-- Mermaid engine for `diagram` blocks in Studio surfaces (Claude chat
         transcript). `defer` per Golden Rule #4 (never blocking in <head>);
         startOnLoad:false — the PaperMermaid hook runs it manually so it works
@@ -5459,41 +5532,41 @@
   <%!-- Hook + evergreen theming for the engine above. Non-defer so
         window.BarkparkPaperMermaid exists before the LiveSocket Hooks
         registration below. --%>
-  <script src="/assets/bp-paper-mermaid.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-paper-mermaid.js")}></script>
   <%!-- Composer paste/drop image attachments for the Studio Claude chat
         (charter D25). Non-defer so window.BarkparkChatComposer exists before the
         Hooks registration + LiveSocket connect below. --%>
-  <script src="/assets/bp-chat-composer.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-chat-composer.js")}></script>
   <%!-- The Studio Claude chat's turn clock: the elapsed label and the busy
         row's park word tick in the BROWSER off a server stamp, so a running
         turn costs no per-second LiveView diff per viewer. Non-defer so the
         globals exist before the Hooks registration + LiveSocket connect below
         — and here at the BOTTOM of <body>, never in <head>. --%>
-  <script src="/assets/bp-chat-turn-clock.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-chat-turn-clock.js")}></script>
   <%!-- The Studio Claude chat's keyboard navigation: Cmd/Ctrl+1..9 jumps to the
         Nth sidebar session and Cmd/Ctrl+K opens the session palette, both
         landing on the SAME push_patch the sidebar click uses. Non-defer so the
         globals exist before the Hooks registration + LiveSocket connect below
         — and here at the BOTTOM of <body>, never in <head> (Golden Rule 4). --%>
-  <script src="/assets/bp-chat-palette.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-chat-palette.js")}></script>
   <%!-- The paper block editor's LiveView hooks. Non-defer for the same reason
         as the bp-* globals above: `window.BarkparkPaperEditorHooks` must exist
         before the inline script below folds it into Hooks and connects the
         LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). --%>
-  <script src="/assets/bp-paper-editor-hooks.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-paper-editor-hooks.js")}></script>
   <%!-- Array fields keep keyboard focus on the row a button acted on
         (task-278c7992ed05a30b): a document-level listener, no phx-hook
         (array fields stay a pure round-trip, Decision 13). Bottom of
         <body>, never <head> (Golden Rule #4). --%>
-  <script src="/assets/bp-array-focus.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-array-focus.js")}></script>
   <%!-- Arrow keys for the editor's group tab bar (task-9bf415c3d78b42d6), the
         same document-level listener shape. Bottom of <body> (Golden Rule #4). --%>
-  <script src="/assets/bp-tab-keys.js"></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-tab-keys.js")}></script>
   <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
         nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
         delegates to `window.BarkparkDatetimeFieldHook` and waits until this
         script has run when it mounts first (task-cf45242ef3477fba). --%>
-  <script src="/assets/bp-datetime-field.js" defer></script>
+  <script src={BarkparkWeb.StaticAssets.path("bp-datetime-field.js")} defer></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -6708,6 +6781,42 @@
     // subfields always show); `updated()` re-applies the choice after every
     // LiveView patch so an autosave never snaps the author back to tab one.
     // Every subfield stays in the DOM, so the form serialises the whole object.
+    // BarkparkPtBlocks — the Classic rich-text editor's custom Portable Text
+    // blocks (task-19392d1e6fc661e6). Mounted on the div around the ignored
+    // editor wrapper. A click on a block box (`bp-pt-block-open`) asks the
+    // server to open that block's fields in the block dialog; "Insert block"
+    // (`bp-pt-block-insert`) asks it for a new block at the caret. The server
+    // answers `bp:pt-block-ready` (put the new block's box where the
+    // placeholder is) and `bp:pt-block-update` (redraw a saved block's box).
+    Hooks.BarkparkPtBlocks = {
+      mounted() {
+        const field = this.el.dataset.field;
+        const editor = () => this.el.querySelector("bp-rich-text-editor");
+        this._onOpen = (e) => {
+          const d = e.detail || {};
+          this.pushEvent("pt-block-open", { field, key: d.key, html: d.html });
+        };
+        this._onInsert = (e) => {
+          const d = e.detail || {};
+          this.pushEvent("pt-block-insert", { field, type: d.type, pending: d.pending, html: d.html });
+        };
+        this.el.addEventListener("bp-pt-block-open", this._onOpen);
+        this.el.addEventListener("bp-pt-block-insert", this._onInsert);
+        this.handleEvent("bp:pt-block-ready", (p) => {
+          const ed = editor();
+          if (p.field === field && ed && ed.ptBlockReady) ed.ptBlockReady(p.pending, p.key, p.html);
+        });
+        this.handleEvent("bp:pt-block-update", (p) => {
+          const ed = editor();
+          if (p.field === field && ed && ed.ptBlockUpdate) ed.ptBlockUpdate(p.key, p.html);
+        });
+      },
+      destroyed() {
+        this.el.removeEventListener("bp-pt-block-open", this._onOpen);
+        this.el.removeEventListener("bp-pt-block-insert", this._onInsert);
+      },
+    };
+
     Hooks.BarkparkFieldGroups = {
       mounted() {
         this.active = this.el.dataset.defaultGroup || null;
@@ -6754,7 +6863,7 @@
     // bp-deferred-hook:start
     Hooks.BarkparkDatetimeField = (() => {
       const GLOBAL = "BarkparkDatetimeFieldHook";
-      const SCRIPT = 'script[src^="/assets/bp-datetime-field.js"]';
+      const SCRIPT = 'script[src$="/bp-datetime-field.js"]';
       let waiting = null;
       const whenReady = (cb) => {
         if (window[GLOBAL]) return cb();

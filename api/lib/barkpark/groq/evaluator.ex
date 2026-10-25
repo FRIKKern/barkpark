@@ -142,9 +142,15 @@ defmodule Barkpark.Groq.Evaluator do
     end
   end
 
+  # `->` follows Sanity's `{_ref}` and also Barkpark's own reference shape, a plain id
+  # string (post.author = "author-alan", as the studio and the seed write it), so a join
+  # over Barkpark-written content resolves instead of answering null
+  # (task-b85cf70ca346260a). A string that names no document in the source reads null,
+  # as before: `Source.get/2` is the same scoped lookup a `{_ref}` takes.
   def eval({:deref, base}, scope, ctx) do
     case eval(base, scope, ctx) do
       %{"_ref" => id} when is_binary(id) -> Source.get(ctx.source, id)
+      id when is_binary(id) and id != "" -> Source.get(ctx.source, id)
       _ -> nil
     end
   end

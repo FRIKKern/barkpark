@@ -9,8 +9,9 @@ defmodule Barkpark.Content.PreviewText do
   A path is a dotted walk from the document: `isbn`, `onix.productFormatTitle`,
   `onix.formats.0.code` (a number picks a list item). When the walk meets a
   reference (`{"_ref": id}` or a bare id string with path left to walk), it
-  follows it once: `author.name`, `onix.contributors.0.contributor.title`. A
-  second reference on the same path is not followed and reads as nothing.
+  follows it: `author.name`, `onix.contributors.0.contributor.title`. A path
+  follows up to five references, so `parent.parent.title` reads a grandparent;
+  a reference past the fifth reads as nothing, which also ends a cycle.
 
   ## Text specs (`subtitle`, `description`)
 
@@ -20,7 +21,8 @@ defmodule Barkpark.Content.PreviewText do
 
     * a path, optionally ending in modifiers: `|date` shows a date or
       date-time as `dd.mm.yyyy`, the day it is in UTC; `|lower` and `|upper`
-      change the case;
+      change the case; `|count` shows the number of items in a list, and `0`
+      when the path holds nothing (`"{questions|count} questions"`);
     * a template, text with `{path}` slots (`"{name} ({role.title|lower})"`),
       shown only when every slot has a value;
     * a list of parts, the first that has a value;
@@ -42,8 +44,9 @@ defmodule Barkpark.Content.PreviewText do
   `media` is a path or a list of paths, the first that holds an image: a URL
   string (`onix.thumbnail`), or an image value with a `url`.
 
-  Pure: the caller loads the referenced documents. `ref_ids/2` names the ids a
-  page of rows needs, and `deref` hands each one back as a map.
+  Pure: the caller loads the referenced documents. `targets/2` loads every
+  document a page of rows reads through, one read per reference depth, and
+  `deref` hands each one back as a map.
   """
 
   alias Barkpark.Content.FieldVisibility
@@ -51,30 +54,63 @@ defmodule Barkpark.Content.PreviewText do
   @type spec :: String.t() | list() | %{optional(String.t()) => term()}
   @type deref :: (String.t() -> map() | nil)
 
+  # The most references one path follows (a five-level category breadcrumb).
+  @max_hops 5
+
   @doc """
   The reference ids `specs` follow on `root` (a document's content, `title`
-  included), so a page of rows can load every target in one read.
+  included) that `deref` does not yet hand back. A walk that meets a target
+  `deref` knows goes on inside it, so asking again after loading the ids
+  names the next depth's references.
   """
-  @spec ref_ids(spec() | [spec()] | nil, map()) :: [String.t()]
-  def ref_ids(specs, root) when is_map(root) do
+  @spec ref_ids(spec() | [spec()] | nil, map(), deref()) :: [String.t()]
+  def ref_ids(specs, root, deref \\ fn _ -> nil end)
+
+  def ref_ids(specs, root, deref) when is_map(root) do
     specs
     |> List.wrap()
-    |> Enum.flat_map(&spec_ids(&1, root))
+    |> Enum.flat_map(&spec_ids(&1, root, deref))
     |> Enum.uniq()
   end
 
-  def ref_ids(_specs, _root), do: []
+  def ref_ids(_specs, _root, _deref), do: []
+
+  @doc """
+  Every document a page of rows reads through, as `%{id => map}`. `rows` is a
+  list of `{specs, root}`. `load` takes a list of ids and returns the found
+  ones as `%{id => map}`. It runs once per reference depth with all the ids of
+  that depth, so a page costs at most #{@max_hops} reads, however many rows it
+  holds.
+  """
+  @spec targets([{spec() | [spec()] | nil, map()}], ([String.t()] -> map())) :: map()
+  def targets(rows, load) when is_list(rows) do
+    Enum.reduce_while(1..@max_hops, {%{}, MapSet.new()}, fn _depth, {found, asked} ->
+      deref = &Map.get(found, &1)
+
+      ids =
+        rows
+        |> Enum.flat_map(fn {specs, root} -> ref_ids(specs, root, deref) end)
+        |> Enum.uniq()
+        |> Enum.reject(&MapSet.member?(asked, &1))
+
+      case ids do
+        [] -> {:halt, {found, asked}}
+        ids -> {:cont, {Map.merge(found, load.(ids)), MapSet.union(asked, MapSet.new(ids))}}
+      end
+    end)
+    |> elem(0)
+  end
 
   @doc "The text for a document, or nil. `deref` returns a referenced document's fields."
   @spec format(spec() | nil, map(), deref()) :: String.t() | nil
   def format(%{"parts" => parts} = spec, root, deref) when is_list(parts) do
-    case parts |> Enum.map(&part(&1, root, deref, 1)) |> Enum.reject(&is_nil/1) do
+    case parts |> Enum.map(&part(&1, root, deref, @max_hops)) |> Enum.reject(&is_nil/1) do
       [] -> blank_to_nil(Map.get(spec, "empty"))
       shown -> Enum.join(shown, Map.get(spec, "join") || " · ")
     end
   end
 
-  def format(spec, root, deref) when is_map(root), do: part(spec, root, deref, 1)
+  def format(spec, root, deref) when is_map(root), do: part(spec, root, deref, @max_hops)
   def format(_spec, _root, _deref), do: nil
 
   @doc "The image URL `spec` finds on a document, or nil."
@@ -94,9 +130,26 @@ defmodule Barkpark.Content.PreviewText do
   def media_paths(list) when is_list(list), do: Enum.flat_map(list, &media_paths/1)
   def media_paths(_), do: []
 
-  @doc "The value at `path` on `root`, following one reference through `deref`."
+  @doc "The value at `path` on `root`, following references through `deref`."
   @spec value(String.t(), map(), deref()) :: term()
-  def value(path, root, deref), do: path |> segments() |> walk(root, deref, 1) |> elem(0)
+  def value(path, root, deref), do: path |> segments() |> walk(root, deref, @max_hops) |> elem(0)
+
+  @doc """
+  The value at `path` inside `content`, without following any reference
+  (task-86b6aa7ee423ecaf). A key that matches `path` as written wins, so a
+  field whose name holds a dot still reads; otherwise the dotted walk goes
+  into objects and list items: `slug.current`, `onix.productFormatTitle`.
+  For the `list_preview` keys that name one field (`title`, `badge`, `meta`).
+  """
+  @spec field_value(map() | nil, String.t()) :: term()
+  def field_value(%{} = content, path) when is_binary(path) do
+    case Map.fetch(content, path) do
+      {:ok, value} -> value
+      :error -> value(path, content, fn _ -> nil end)
+    end
+  end
+
+  def field_value(_content, _path), do: nil
 
   @doc """
   An image URL from a stored value: a URL string, or a map with `url` (the
@@ -123,7 +176,7 @@ defmodule Barkpark.Content.PreviewText do
   defp part(alternatives, root, deref, hops) when is_list(alternatives),
     do: Enum.find_value(alternatives, &part(&1, root, deref, hops))
 
-  defp part(%{"each" => path} = spec, root, deref, _hops) when is_binary(path) do
+  defp part(%{"each" => path} = spec, root, deref, hops) when is_binary(path) do
     items =
       case path |> segments() |> walk(root, deref, 0) do
         {list, _} when is_list(list) -> list
@@ -135,7 +188,7 @@ defmodule Barkpark.Content.PreviewText do
 
     shown =
       items
-      |> Enum.map(&item_text(show, &1, deref))
+      |> Enum.map(&item_text(show, &1, deref, hops))
       |> Enum.reject(&is_nil/1)
       |> then(fn texts -> if max, do: Enum.take(texts, max), else: texts end)
 
@@ -180,17 +233,20 @@ defmodule Barkpark.Content.PreviewText do
 
   defp part(_spec, _root, _deref, _hops), do: nil
 
-  # An item that is itself a reference reads its target.
-  defp item_text(show, item, deref) do
+  # An item that is itself a reference reads its target, which costs a hop.
+  defp item_text(show, item, deref, hops) do
     case ref_id(item) do
-      id when is_binary(id) ->
+      id when is_binary(id) and hops > 0 ->
         case deref.(id) do
-          %{} = target -> part(show, target, deref, 0)
+          %{} = target -> part(show, target, deref, hops - 1)
           _ -> nil
         end
 
+      id when is_binary(id) ->
+        nil
+
       nil ->
-        if is_map(item), do: part(show, item, deref, 1), else: nil
+        if is_map(item), do: part(show, item, deref, hops), else: nil
     end
   end
 
@@ -210,9 +266,11 @@ defmodule Barkpark.Content.PreviewText do
     {value, _} = path |> segments() |> walk(root, deref, hops)
 
     text =
-      if "date" in mods,
-        do: day(value),
-        else: scalar(value)
+      cond do
+        "count" in mods -> count(value)
+        "date" in mods -> day(value)
+        true -> scalar(value)
+      end
 
     text
     |> blank_to_nil()
@@ -275,15 +333,19 @@ defmodule Barkpark.Content.PreviewText do
   defp published(id), do: id
 
   # ── which ids a spec follows ───────────────────────────────────────────
+  #
+  # The same walk as `walk/4`, but it collects the first reference `deref`
+  # cannot answer on each path instead of reading a value.
 
-  defp spec_ids(%{"parts" => parts}, root) when is_list(parts),
-    do: Enum.flat_map(parts, &part_ids(&1, root))
+  defp spec_ids(%{"parts" => parts}, root, deref) when is_list(parts),
+    do: Enum.flat_map(parts, &part_ids(&1, root, deref, @max_hops))
 
-  defp spec_ids(spec, root), do: part_ids(spec, root)
+  defp spec_ids(spec, root, deref), do: part_ids(spec, root, deref, @max_hops)
 
-  defp part_ids(list, root) when is_list(list), do: Enum.flat_map(list, &part_ids(&1, root))
+  defp part_ids(list, root, deref, hops) when is_list(list),
+    do: Enum.flat_map(list, &part_ids(&1, root, deref, hops))
 
-  defp part_ids(%{"each" => path} = spec, root) when is_binary(path) do
+  defp part_ids(%{"each" => path} = spec, root, deref, hops) when is_binary(path) do
     items =
       case path |> segments() |> walk(root, fn _ -> nil end, 0) do
         {list, _} when is_list(list) -> list
@@ -294,29 +356,50 @@ defmodule Barkpark.Content.PreviewText do
 
     Enum.flat_map(items, fn item ->
       case ref_id(item) do
-        id when is_binary(id) -> [id]
-        nil when is_map(item) -> part_ids_at(show, item)
-        nil -> []
+        id when is_binary(id) and hops > 0 ->
+          case deref.(id) do
+            %{} = target -> part_ids_at(show, target, deref, hops - 1)
+            _ -> [id]
+          end
+
+        id when is_binary(id) ->
+          []
+
+        nil when is_map(item) ->
+          part_ids_at(show, item, deref, hops)
+
+        nil ->
+          []
       end
     end)
   end
 
-  defp part_ids(%{"parts" => parts}, root) when is_list(parts), do: part_ids(parts, root)
-  defp part_ids(%{"when" => _, "show" => show}, root), do: part_ids(show, root)
-  defp part_ids(%{"path" => path}, root) when is_binary(path), do: part_ids_at(path, root)
-  defp part_ids(%{"field" => field}, root), do: part_ids(field, root)
-  defp part_ids(text, root) when is_binary(text), do: part_ids_at(text, root)
-  defp part_ids(_, _root), do: []
+  defp part_ids(%{"parts" => parts}, root, deref, hops) when is_list(parts),
+    do: part_ids(parts, root, deref, hops)
 
-  defp part_ids_at(show, root) when is_list(show), do: Enum.flat_map(show, &part_ids_at(&1, root))
+  defp part_ids(%{"when" => _, "show" => show}, root, deref, hops),
+    do: part_ids(show, root, deref, hops)
 
-  defp part_ids_at(text, root) when is_binary(text) do
+  defp part_ids(%{"path" => path}, root, deref, hops) when is_binary(path),
+    do: part_ids_at(path, root, deref, hops)
+
+  defp part_ids(%{"field" => field}, root, deref, hops), do: part_ids(field, root, deref, hops)
+
+  defp part_ids(text, root, deref, hops) when is_binary(text),
+    do: part_ids_at(text, root, deref, hops)
+
+  defp part_ids(_, _root, _deref, _hops), do: []
+
+  defp part_ids_at(show, root, deref, hops) when is_list(show),
+    do: Enum.flat_map(show, &part_ids_at(&1, root, deref, hops))
+
+  defp part_ids_at(text, root, deref, hops) when is_binary(text) do
     text
     |> slot_paths()
-    |> Enum.flat_map(&path_ids(&1, root, 1))
+    |> Enum.flat_map(&(&1 |> segments() |> collect(root, deref, hops)))
   end
 
-  defp part_ids_at(_, _root), do: []
+  defp part_ids_at(_, _root, _deref, _hops), do: []
 
   defp slot_paths(text) do
     raw =
@@ -327,25 +410,30 @@ defmodule Barkpark.Content.PreviewText do
     Enum.map(raw, &(&1 |> String.split("|") |> hd() |> String.trim()))
   end
 
-  # The first reference the walk would follow, if any.
-  defp path_ids(path, root, hops), do: path |> segments() |> collect(root, hops)
+  defp collect([], _value, _deref, _hops), do: []
 
-  defp collect([], _value, _hops), do: []
-
-  defp collect([key | rest], value, hops) do
+  defp collect([key | rest] = segs, value, deref, hops) do
     case {ref_id(value), value} do
-      {id, _} when is_binary(id) and hops > 0 -> [id]
-      {id, _} when is_binary(id) -> []
-      {nil, %{} = map} -> collect(rest, Map.get(map, key), hops)
-      {nil, list} when is_list(list) -> list_collect(key, rest, list, hops)
-      _ -> []
-    end
-  end
+      {id, _} when is_binary(id) and hops > 0 ->
+        case deref.(id) do
+          %{} = target -> collect(segs, target, deref, hops - 1)
+          _ -> [id]
+        end
 
-  defp list_collect(key, rest, list, hops) do
-    case Integer.parse(key) do
-      {i, ""} when i >= 0 -> collect(rest, Enum.at(list, i), hops)
-      _ -> []
+      {id, _} when is_binary(id) ->
+        []
+
+      {nil, %{} = map} ->
+        collect(rest, Map.get(map, key), deref, hops)
+
+      {nil, list} when is_list(list) ->
+        case Integer.parse(key) do
+          {i, ""} when i >= 0 -> collect(rest, Enum.at(list, i), deref, hops)
+          _ -> []
+        end
+
+      _ ->
+        []
     end
   end
 
@@ -372,6 +460,11 @@ defmodule Barkpark.Content.PreviewText do
   end
 
   defp day(_), do: nil
+
+  # The number of items in a list; a missing list has none.
+  defp count(list) when is_list(list), do: list |> length() |> to_string()
+  defp count(nil), do: "0"
+  defp count(_), do: nil
 
   defp dmy(%Date{} = d), do: Calendar.strftime(d, "%d.%m.%Y")
 

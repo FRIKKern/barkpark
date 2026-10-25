@@ -501,11 +501,17 @@ defmodule BarkparkWeb.StudioComponents.Panes do
                     (e.g. presence dots). Rendered inside the
                     `.pane-doc-title` div, right after the title text.
   """
-  attr :phx_click, :string, required: true
-  attr :phx_value_pane, :string, required: true
-  attr :phx_value_id, :string, required: true
+  attr :phx_click, :string, default: nil
+  attr :phx_value_pane, :string, default: nil
+  attr :phx_value_id, :string, default: nil
   attr :title, :string, required: true
   attr :doc_id, :string, required: true
+
+  # A row that opens a document by URL instead of a pane event: a document
+  # view's related list (`desk.views`) links each row to the document it
+  # names. The body is then an `<a href>` with the same children, so the row
+  # reads the same as a desk list row. nil keeps the `<button>` body.
+  attr :href, :string, default: nil
   attr :status, :string, required: true
   attr :is_draft, :boolean, default: false
   attr :selected, :boolean, default: false
@@ -520,6 +526,12 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # Both absent → no media markup at all (the legacy row, byte-identical).
   attr :media, :string, default: nil
   attr :media_slot, :boolean, default: false
+
+  # task-835fe5219585ca80: the schema type's icon name
+  # (`BarkparkWeb.Icons.row_icon/1`: its own, else the document icon). A row
+  # with no media draws it in the media box, as Sanity Studio does. nil, from
+  # a caller that passes none, keeps the row above.
+  attr :type_icon, :string, default: nil
 
   # ── Bulk-publish multi-select (Task barkpark-3yq) ─────────────────────
   # When `selectable` is true, the row renders a left-anchored checkbox
@@ -569,22 +581,48 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           </span>
         </button>
       <% end %>
-      <button
-        type="button"
-        class="bp-doc-row-body"
-        title={@doc_id}
-        aria-label={@aria_label}
-        data-press-name={@title}
-        aria-current={@selected && "true"}
-        phx-click={@phx_click}
-        phx-value-pane={@phx_value_pane}
-        phx-value-id={@phx_value_id}
-      >
+      <%= if @href do %>
+        <a
+          href={@href}
+          class="bp-doc-row-body"
+          title={@doc_id}
+          aria-label={@aria_label}
+          data-press-name={@title}
+          aria-current={@selected && "true"}
+        >
+          <.doc_row_parts {assigns} />
+        </a>
+      <% else %>
+        <button
+          type="button"
+          class="bp-doc-row-body"
+          title={@doc_id}
+          aria-label={@aria_label}
+          data-press-name={@title}
+          aria-current={@selected && "true"}
+          phx-click={@phx_click}
+          phx-value-pane={@phx_value_pane}
+          phx-value-id={@phx_value_id}
+        >
+          <.doc_row_parts {assigns} />
+        </button>
+      <% end %>
+    </div>
+    """
+  end
+
+  # The children of a doc row's body, shared by its `<button>` and `<a>` forms.
+  defp doc_row_parts(assigns) do
+    ~H"""
         <%= if @media do %>
           <span class="pane-doc-media" aria-hidden="true"><img src={@media} alt="" loading="lazy" /></span>
         <% else %>
-          <%= if @media_slot do %>
-            <span class="pane-doc-media pane-doc-media-empty" aria-hidden="true"></span>
+          <%= cond do %>
+            <% @type_icon -> %>
+              <span class="pane-doc-media pane-doc-media-icon" aria-hidden="true" data-type-icon={@type_icon}><BarkparkWeb.Icons.desk_icon name={@type_icon} size={16} /></span>
+            <% @media_slot -> %>
+              <span class="pane-doc-media pane-doc-media-empty" aria-hidden="true"></span>
+            <% true -> %>
           <% end %>
         <% end %>
         <span class="pane-doc-main">
@@ -612,8 +650,6 @@ defmodule BarkparkWeb.StudioComponents.Panes do
             <path d="m9 18 6-6-6-6"/>
           </svg>
         </span>
-      </button>
-    </div>
     """
   end
 

@@ -51,6 +51,7 @@ defmodule Barkpark.Structure do
   require Logger
   alias Barkpark.Content
   alias Barkpark.Content.Analytics
+  alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Plugins.Enablement
 
   defmodule Node do
@@ -99,7 +100,19 @@ defmodule Barkpark.Structure do
       # A `groupBy` node built with `defer_group_by: true` carries
       # `{:group_by, item, idx}` here and no children. `expand/3` builds them
       # when a pane opens the node (task-cca3c6d48e57097e).
-      deferred: nil
+      deferred: nil,
+      # A declared list's `paneTitle`: the title of the pane it opens, when
+      # that differs from its row's (task-a3e829ace0b184ea). nil = the row's.
+      pane_title: nil,
+      # A declared type list's `initialValues`: the content fields its "+"
+      # starts a document with, as Sanity's initialValueTemplates
+      # (task-dc9b751450c2c2c4). nil = an empty document, as before.
+      initial_values: nil,
+      # A declared list's `views`: the tabs a document opened from this list
+      # shows beside its form, as Sanity's `S.document().views([...])`
+      # (task-ea2e544fec8ee6db). Same entry shape as a schema's `desk.views`.
+      # nil = the schema's own `desk.views`.
+      views: nil
     ]
   end
 
@@ -1111,6 +1124,14 @@ defmodule Barkpark.Structure do
   #   {"kind":"documentTypeList","type":"publication","title":"Uten omslag",
   #      "filter":{"content.cover":{"is":"null"}},"orderings":[{"field":"title","direction":"asc"}]}
   #
+  # A documentTypeList or tree item may carry `initialValues`
+  # (`{"pageType":"landingPage"}`), the fields its "+" starts a document with.
+  #
+  # A list, documentTypeList, groupBy or tree item may also carry `paneTitle`,
+  # the title of the pane it opens, as Sanity's `S.listItem().title('Med
+  # anmeldelser').child(S.documentTypeList('product').title('Produkter med
+  # anmeldelser'))`. Without it the pane takes the row's title.
+  #
   # Read under the PUBLISHED perspective ("publish to apply"), scoped to the
   # caller's workspace. Absent → :none (the hardcoded tree). A malformed
   # document degrades to :none with a logged reason — never a blank desk.
@@ -1294,7 +1315,8 @@ defmodule Barkpark.Structure do
       title: item["title"] || "Group",
       icon: item["icon"],
       type: :list,
-      items: children
+      items: children,
+      pane_title: pane_title(item)
     }
   end
 
@@ -1313,7 +1335,10 @@ defmodule Barkpark.Structure do
         visibility: :public,
         filter: filter,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        error: filter_error(type, filter, ctx)
+        error: filter_error(type, filter, ctx) || views_error(item),
+        pane_title: pane_title(item),
+        initial_values: initial_values(item, type, ctx),
+        views: views(item)
       }
     end
   end
@@ -1361,11 +1386,29 @@ defmodule Barkpark.Structure do
   #
   #   {"kind":"tree","title":"Hierarkisk struktur","type":"category",
   #    "parent":"content.parent","orderings":[…]}
-  defp declared_item_to_node(%{"kind" => "tree"} = item, idx, _ctx) do
+  #
+  # An optional `filter` narrows the root and every level below
+  # (task-e9f14aeb3ed09953). `"parentOp": "has"` reads the parent from an
+  # array of references (task-c603a1eb83c4fc01); a groupBy takes `"op": "has"`
+  # for the same.
+  defp declared_item_to_node(%{"kind" => "tree"} = item, idx, ctx) do
     type = item["type"]
     parent = item["parent"]
 
     if is_binary(type) and type != "" and is_binary(parent) and parent != "" do
+      # task-e9f14aeb3ed09953 — the tree's own `filter` (Sanity's
+      # `pageType == "information" && !defined(parent._ref)`) narrows the root
+      # AND every level below; the level's parent clause is added on top of it.
+      own = if is_map(item["filter"]), do: item["filter"], else: %{}
+      array? = item["parentOp"] == "has"
+
+      # task-c603a1eb83c4fc01 — `"parentOp": "has"`: the parents are an ARRAY
+      # of references (Sanity's `$parentId in parentCategories[]._ref`). A root
+      # holds none (missing or empty: countEq 0), and a document with several
+      # parents shows under each.
+      root_clause = if array?, do: %{"countEq" => 0}, else: %{"is" => "null"}
+      root = Map.merge(own, %{parent => root_clause})
+
       %Node{
         id: item["id"] || "#{idx}-#{type}-tree",
         title: item["title"] || type,
@@ -1373,14 +1416,96 @@ defmodule Barkpark.Structure do
         type: :document_type_list,
         type_name: type,
         visibility: :public,
-        filter: %{parent => %{"is" => "null"}},
+        filter: root,
         orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil),
-        tree: %{"parent" => parent}
+        tree: tree_spec(parent, own, array?),
+        pane_title: pane_title(item),
+        initial_values: initial_values(item, type, ctx),
+        views: views(item),
+        error:
+          if(own == %{} and not array?, do: nil, else: filter_error(type, root, ctx)) ||
+            views_error(item)
       }
     end
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  defp tree_spec(parent, own, array?) do
+    spec = if own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}
+    if array?, do: Map.put(spec, "op", "has"), else: spec
+  end
+
+  defp pane_title(%{"paneTitle" => title}) when is_binary(title) and title != "", do: title
+  defp pane_title(_item), do: nil
+
+  # A declared list's `views` (task-ea2e544fec8ee6db): the documents it opens
+  # show these tabs instead of their schema's `desk.views`, as an item's
+  # `S.document().views([...])` replaces Sanity's default document node. An
+  # entry has the schema view's shape, so
+  #
+  #   {"kind": "documentTypeList", "type": "category", "views": [
+  #     {"id": "products", "title": "Products", "type": "product",
+  #      "by": "content.categories._ref"}]}
+  #
+  # opens each category with a «Products» tab that lists the products whose
+  # `categories` reference it. An empty list declares no tabs at all.
+  defp views(%{"views" => views}) when is_list(views),
+    do: Enum.filter(views, &SchemaDefinition.valid_desk_view?/1)
+
+  defp views(_item), do: nil
+
+  # A malformed entry is left out of the tabs and named on the item, so the
+  # author sees why a tab is missing.
+  defp views_error(%{"views" => views}) when is_list(views) do
+    case Enum.reject(views, &SchemaDefinition.valid_desk_view?/1) do
+      [] ->
+        nil
+
+      bad ->
+        "views entries need non-empty \"id\", \"title\", \"type\" and \"by\", " <>
+          "got #{inspect(bad)}"
+    end
+  end
+
+  defp views_error(%{"views" => other}), do: "views must be a list, got #{inspect(other)}"
+  defp views_error(_item), do: nil
+
+  # `{"pageType": "landingPage"}`: content field → value. A key may also be
+  # written as the list's filter path (`content.pageType`). Checked against the
+  # type's schema in the desk's own scope: only a declared top-level field, with
+  # a value of that field's kind (a select's one of its options). Any other
+  # entry is dropped with a logged reason, never written. Nothing valid left,
+  # or no `initialValues`, is no preset.
+  defp initial_values(%{"initialValues" => values} = item, type, ctx) when is_map(values) do
+    fields =
+      case Content.resolve_schema(type, ctx.dataset, ctx.scope) do
+        {:ok, %{fields: fields}} when is_list(fields) -> Map.new(fields, &{field_name(&1), &1})
+        _ -> %{}
+      end
+
+    {kept, dropped} =
+      values
+      |> Enum.map(fn {k, v} -> {is_binary(k) && String.replace_prefix(k, "content.", ""), v} end)
+      |> Enum.split_with(fn {name, v} ->
+        is_binary(name) and Content.Validation.desk_preset_fits?(Map.get(fields, name), v)
+      end)
+
+    if dropped != [] do
+      Logger.warning(
+        "deskStructure item #{inspect(item["title"] || item["id"])}: initialValues " <>
+          "#{inspect(Enum.map(dropped, &elem(&1, 0)))} do not fit #{type}'s schema and are not preset"
+      )
+    end
+
+    if kept == [], do: nil, else: Map.new(kept)
+  end
+
+  defp initial_values(_item, _type, _ctx), do: nil
+
+  defp field_name(%{name: name}), do: name
+  defp field_name(%{"name" => name}), do: name
+  defp field_name(_field), do: nil
 
   # The children of a `groupBy` node are one document read over `over`, and
   # with `overFilter` a reference test against every document of the grouped
@@ -1395,7 +1520,8 @@ defmodule Barkpark.Structure do
       icon: item["icon"],
       type: :list,
       items: [],
-      deferred: {:group_by, item, idx}
+      deferred: {:group_by, item, idx},
+      pane_title: pane_title(item)
     }
   end
 
@@ -1438,7 +1564,7 @@ defmodule Barkpark.Structure do
           type: :document_type_list,
           type_name: type,
           visibility: :public,
-          filter: %{by => %{"eq" => key}},
+          filter: %{by => %{group_by_op(item) => key}},
           orderings: if(is_list(item["orderings"]), do: item["orderings"], else: nil)
         }
       end)
@@ -1448,9 +1574,16 @@ defmodule Barkpark.Structure do
       title: item["title"] || "By #{over}",
       icon: item["icon"],
       type: :list,
-      items: children
+      items: children,
+      pane_title: pane_title(item)
     }
   end
+
+  # task-c603a1eb83c4fc01 — `"op": "has"` groups over a reference held in an
+  # ARRAY (Sanity's `$id in departments[]._ref`): a document under each of the
+  # groups it names. The default `eq` reads one value, as before.
+  defp group_by_op(%{"op" => "has"}), do: "has"
+  defp group_by_op(_item), do: "eq"
 
   @doc """
   Parse a `field=value` filter string (used by `Structure.Node.filter`)

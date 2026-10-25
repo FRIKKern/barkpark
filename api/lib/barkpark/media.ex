@@ -66,6 +66,9 @@ defmodule Barkpark.Media do
     * `:asset_metadata` — `mediaAsset` metadata (`metadata_fields/0` keys,
       string-keyed) for the media plugin to write in the same create as the
       asset document, instead of a follow-up patch. Ignored for a dedupe hit.
+    * `:meta` — the optional image metadata to read at upload besides the
+      default set, as Sanity's `meta` upload parameter names it: `"exif"`,
+      `"location"` (task-fd05a9327034f89c). Ignored for a dedupe hit.
     * `:dedupe` — when `true`, bytes whose SHA-1 already belongs to a file in
       the same dataset and workspace return `{:existing, file}` and store
       nothing (task-b6e57c37f6928344). Off by default: a caller that owns its
@@ -174,7 +177,8 @@ defmodule Barkpark.Media do
             temp_path,
             mime_type,
             dataset,
-            Keyword.get(opts, :asset_metadata, %{})
+            Keyword.get(opts, :asset_metadata, %{}),
+            Keyword.get(opts, :meta, [])
           )
       end
     else
@@ -344,7 +348,7 @@ defmodule Barkpark.Media do
     |> Repo.update()
   end
 
-  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata) do
+  defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset, asset_metadata, meta) do
     # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
     # (see Blobstore.receipt/3). The row's `size` stays the SOURCE size (what the
     # client uploaded); the receipt is not persisted here, it is the seam that
@@ -356,7 +360,8 @@ defmodule Barkpark.Media do
           Map.put(attrs, :path, relative_path),
           relative_path,
           dataset,
-          asset_metadata
+          asset_metadata,
+          meta
         )
 
       {:error, _reason} ->
@@ -373,7 +378,7 @@ defmodule Barkpark.Media do
     end
   end
 
-  defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata) do
+  defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata, meta) do
     %MediaFile{}
     |> MediaFile.changeset(attrs)
     |> Repo.insert()
@@ -383,7 +388,8 @@ defmodule Barkpark.Media do
           Barkpark.Plugins.Registry.run_after_media_upload(%{
             media_file: file,
             dataset: dataset,
-            asset_metadata: asset_metadata
+            asset_metadata: asset_metadata,
+            meta: meta
           })
 
         ok
@@ -877,7 +883,7 @@ defmodule Barkpark.Media do
                        get_file(request["mediaId"], Keyword.drop(opts, [:where_used, :override])) do
                   snapshots = Assets.pending_delete_snapshot(file)
 
-                  case delete_row_with_asset_doc(file) do
+                  case delete_row_with_asset_doc(file, false) do
                     {:ok, _deleted} -> {:ok, snapshots}
                     error -> error
                   end
@@ -930,12 +936,14 @@ defmodule Barkpark.Media do
       operation, so a reference is not a reason to stop. `Tenancy` workspace
       teardown and `Plugins.Tickets.Attachments` are `:cascade`.
 
-  This option is a DECLARATION, not a second guard: `delete_file/2` behaves
-  identically for both values and deliberately runs no scan of its own, because
-  the cascade callers must keep deleting unconditionally and the doors need the
-  referrer census to build their own 409 envelope. What it buys is that the
-  decision is UNAVOIDABLE and greppable — `git grep "where_used:" api` lists
-  every media-delete policy in the tree.
+  What it buys is that the decision is UNAVOIDABLE and greppable — `git grep
+  "where_used:" api` lists every media-delete policy in the tree. `:cascade` runs no
+  scan: those callers must keep deleting unconditionally. An UNFORCED `:guard` delete
+  (no `:override`) asks `WhereUsed` once more INSIDE the delete's transaction, under a
+  lock on the file row, and answers `{:error, {:referenced, file, census}}` (a 409 at
+  both doors) when a reference landed after the door's own check
+  (task-bc53aa9e49742ded): the check and the delete are one step. The doors'
+  `?force=true` path passes its witness as `:override`, and deletes as before.
 
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); the
   about-to-delete read is scoped through `get_file/2` so a delete in workspace B
@@ -1013,7 +1021,7 @@ defmodule Barkpark.Media do
     # FIRST statement in the function, BEFORE the row is even read: a caller
     # that omitted the decision must learn so on every id, including one that
     # does not exist, and must NOT get a delete out of the raise.
-    _policy = where_used_policy!(opts)
+    policy = where_used_policy!(opts)
 
     # THE OVERRIDE WITNESS (task-303e3b171435d767). `:override` is the where-used
     # census the DOOR already computed — `WhereUsed.witness_forced_delete/2`
@@ -1027,6 +1035,15 @@ defmodule Barkpark.Media do
     # asset doc being gone by then. This function only carries the value.
     override = Keyword.get(opts, :override)
 
+    # THE CHECK AND THE DELETE ARE ONE TRANSACTION (task-bc53aa9e49742ded). A `:guard`
+    # door asked `WhereUsed` before calling, but a reference written between that
+    # answer and this delete slipped through and left a dangling image. So an
+    # unforced `:guard` delete asks again INSIDE the transaction, under a lock on the
+    # file row, and refuses with the same census (`{:referenced, file, census}`, a 409
+    # at both doors). `:cascade` and a forced delete (the door passed `override`)
+    # mean a reference is not a reason to stop, so they do not ask.
+    recheck? = policy == :guard and is_nil(override)
+
     case get_file(id, Keyword.drop(opts, [:where_used, :override])) do
       {:ok, file} ->
         # Resolve the webhook payload BEFORE deleting so the DB delete is the
@@ -1034,7 +1051,7 @@ defmodule Barkpark.Media do
         # pointing at a live blob) and no phantom media.deleted fires.
         doc = asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
 
-        case delete_row_with_asset_doc(file) do
+        case delete_row_with_asset_doc(file, recheck?) do
           {:ok, deleted} ->
             # The FOUR irreversible non-DB effects — CDN edge purge, the
             # `media.deleted` webhook, the on-disk `File.rm`, and the rendition
@@ -1071,6 +1088,11 @@ defmodule Barkpark.Media do
           {:error, {:asset_doc, reason}} ->
             {:error, {:asset_doc_delete_failed, reason}}
 
+          # Referenced after all: a reference landed after the door's check. Nothing
+          # was deleted; the door answers the same 409 census as its own check.
+          {:error, {:referenced, census}} ->
+            {:error, {:referenced, file, census}}
+
           # An in-transaction hook rolled back a nested transaction and swallowed
           # the reason, so DBConnection aborted the connection under us and our
           # own `conclude` threw `:rollback`. Nothing half-committed — but it
@@ -1090,7 +1112,7 @@ defmodule Barkpark.Media do
   # A default would pick a side for a caller who never thought about it, and
   # BOTH sides are wrong to default to: `:cascade` re-opens the silent-erasure
   # door PR #15557 closed at the two HTTP doors, and `:guard` would quietly
-  # promise a scan this function deliberately does not run. So the only honest
+  # promise a door-side check nobody ran. So the only honest
   # default is none — the caller states the policy or the call raises.
   #
   # It raises rather than returning `{:error, _}` on purpose: an omitted policy
@@ -1154,9 +1176,11 @@ defmodule Barkpark.Media do
   # slot nothing would ever flush: the row deleted, `mutation_events` committed,
   # and the dispatch never happened — not even a `webhook_fanout phase=selected`
   # line to count it by.
-  defp delete_row_with_asset_doc(%MediaFile{} = file) do
+  defp delete_row_with_asset_doc(%MediaFile{} = file, recheck?) do
     Barkpark.Content.Broadcast.with_deferred_queue(fn ->
       Repo.transaction(fn ->
+        if recheck?, do: recheck_unreferenced!(file)
+
         case Repo.delete(file, stale_error_field: :id) do
           {:ok, deleted} ->
             case delete_asset_doc(file) do
@@ -1186,6 +1210,17 @@ defmodule Barkpark.Media do
         end
       end)
     end)
+  end
+
+  # Inside the delete's transaction: lock the file row (a second delete of it waits
+  # here), then ask `WhereUsed` again. Referenced → roll back with the census.
+  defp recheck_unreferenced!(%MediaFile{id: id} = file) do
+    _ = Repo.one(from(f in MediaFile, where: f.id == ^id, lock: "FOR UPDATE", select: f.id))
+
+    case Barkpark.Media.WhereUsed.referrers(file) do
+      %{count: 0} -> :ok
+      census -> Repo.rollback({:referenced, census})
+    end
   end
 
   # Remove the blob's companion `mediaAsset` document(s) inside the caller's

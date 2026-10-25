@@ -46,6 +46,11 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # The document root a `visibleWhen` with the default "document" scope reads;
   # nil reads this object's own value, as before (task-9905a69475b1ff3b).
   attr :root, :map, default: nil
+  # The `phx-click` event and target of the buttons of an `arrayOf` inside
+  # this object. The document form keeps "array_op"; the Portable Text block
+  # dialog routes them to its own buffer (task-19392d1e6fc661e6).
+  attr :on_reorder, :string, default: "array_op"
+  attr :target, :any, default: nil
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -64,6 +69,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:scope_prefix, "")
       |> Map.put_new(:api_token_raw, "")
       |> Map.put_new(:root, nil)
+      |> Map.put_new(:on_reorder, "array_op")
+      |> Map.put_new(:target, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -78,6 +85,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            on_reorder={@on_reorder} target={@target}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -87,6 +95,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            on_reorder={@on_reorder} target={@target}
           />
         </details>
       <% true -> %>
@@ -97,6 +106,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
             dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
+            on_reorder={@on_reorder} target={@target}
           />
         </fieldset>
     <% end %>
@@ -129,6 +139,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # The document root a `visibleWhen` with the default "document" scope reads;
   # nil reads this object's own value, as before (task-9905a69475b1ff3b).
   attr :root, :map, default: nil
+  attr :on_reorder, :string, default: "array_op"
+  attr :target, :any, default: nil
 
   defp composite_body(assigns) do
     ~H"""
@@ -182,6 +194,33 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # subfield and `Forms` keeps the stored value byte-identical.
   @structured_ok_subfield_types ~w(composite arrayOf codelist localizedText image)
 
+  # A richText subfield that holds Portable Text, such as the body of a
+  # page-builder item or of a custom block in the block dialog, opens in the
+  # same Classic rich-text editor as a top-level body (task-eba86f7ba252cb20).
+  # The editor edits HTML; `Content.Forms` turns the post back into blocks
+  # against the stored ones, so an untouched block keeps its stored bytes.
+  defp render_subfield_guarded(%{readonly: false} = assigns, %{type: "richText"} = sub) do
+    value = get_value(assigns.value, sub.name, nil)
+
+    if Barkpark.Content.PortableText.value?(value) and
+         not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(Map.get(sub, :raw) || %{}) do
+      input_id = input_id(assigns.path, assigns.field.name, sub.name)
+      owner_key = get_value(assigns.value, "_key", nil)
+
+      rich_text_subfield_input(%{
+        input_name: child_path(assigns.path, sub.name),
+        input_id: input_id,
+        # Keyed by the item's `_key` too: a moved item or another document
+        # remounts the ignored editor instead of keeping the old text.
+        wrap_id: "bp-rt-sub-#{input_id}-#{:erlang.phash2(owner_key)}",
+        html: Barkpark.Content.PortableText.to_html(value),
+        label: title_for(sub)
+      })
+    else
+      render_subfield(assigns, sub)
+    end
+  end
+
   defp render_subfield_guarded(assigns, %{type: t} = sub)
        when t not in @structured_ok_subfield_types do
     case get_value(assigns.value, sub.name, nil) do
@@ -194,6 +233,20 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   end
 
   defp render_subfield_guarded(assigns, sub), do: render_subfield(assigns, sub)
+
+  # The `bp-rich-text-editor` a top-level richText uses, bridged to a hidden
+  # input by `BarkparkFieldBridge`. It has no block dialog of its own, so a
+  # custom block inside this value shows as its box and is saved unchanged.
+  defp rich_text_subfield_input(assigns) do
+    ~H"""
+    <div id={@wrap_id} phx-update="ignore" phx-hook="BarkparkFieldBridge" data-pt-subfield={@input_name}>
+      <input type="hidden" id={"bp-rt-hidden-#{@input_id}"} name={@input_name} value={@html} phx-debounce="500" />
+      <bp-rich-text-editor value={@html} data-bridge-target={"bp-rt-hidden-#{@input_id}"}
+        data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={@label}
+      ></bp-rich-text-editor>
+    </div>
+    """
+  end
 
   defp structured_readonly(assigns) do
     ~H"""
@@ -218,7 +271,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
-      root: Map.get(assigns, :root)
+      root: Map.get(assigns, :root),
+      on_reorder: Map.get(assigns, :on_reorder) || "array_op",
+      target: Map.get(assigns, :target)
     }
 
     composite_field(sub_assigns)
@@ -237,7 +292,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
       api_token_raw: Map.get(assigns, :api_token_raw) || "",
-      root: Map.get(assigns, :root)
+      root: Map.get(assigns, :root),
+      on_reorder: Map.get(assigns, :on_reorder) || "array_op",
+      target: Map.get(assigns, :target)
     }
 
     ArrayField.array_field(sub_assigns)
@@ -435,7 +492,14 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   # does (FieldInputs) — the bare `.bp-input` checkbox stretched to a 32px
   # box, the "giant checkmark" of the twin's feature card (Gyldendal E1.5).
   defp leaf_input(%{field: %{type: "boolean"}} = assigns) do
-    assigns = Map.put(assigns, :checked, truthy?(assigns.value))
+    # An absent subfield shows its declared `default`; the save keeps it
+    # absent while the switch still shows that default (task-d89926b8afd3dcb9).
+    checked =
+      if assigns.value in ["", nil],
+        do: Barkpark.Content.Forms.boolean_default(Map.get(assigns.field, :raw) || %{}),
+        else: truthy?(assigns.value)
+
+    assigns = Map.put(assigns, :checked, checked)
 
     ~H"""
     <label class="form-switch bp-input-checkbox">

@@ -136,6 +136,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
     match = match_mode(opts)
     suggest? = Keyword.get(opts, :suggest, false) == true
     groups = if browse?, do: [], else: term_groups(parsed)
+    # The ranking pool also weighs a 1-letter last word (`pool_hint/2`).
+    pool_groups = groups ++ pool_hint(parsed, groups)
 
     # A text search compares the type without its btree index. With the index,
     # Postgres reads every document of the type and runs the text match on each
@@ -238,13 +240,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
             {base, []}
 
           offset + limit <= pool and filtered? ->
-            {filtered_pool(base, match_on.(text_base, arms), pool, groups), []}
+            {filtered_pool(base, match_on.(text_base, arms), pool, pool_groups), []}
 
           offset + limit <= pool ->
-            {bounded_pool(base, pool, groups), []}
+            {bounded_pool(base, pool, pool_groups), []}
 
           true ->
-            {base, [{:desc, in_pool_key(base, pool, groups)}]}
+            {base, [{:desc, in_pool_key(base, pool, pool_groups)}]}
         end
 
       # An empty match ranks nothing. A recovery pass that finds no document
@@ -262,7 +264,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
             if(suggest?, do: :none, else: index),
             near_miss?,
             lead,
-            Keyword.get(opts, :boost)
+            Keyword.get(opts, :boost),
+            held_key(near_miss? and not suggest?, groups, index, match)
           )
           |> limit(^limit)
           |> offset(^offset)
@@ -1063,14 +1066,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp term_groups(parsed) do
     alternatives = Map.get(parsed, :alternatives, %{})
-    synonyms = alternatives |> Map.values() |> List.flatten() |> MapSet.new()
-
-    words =
-      parsed
-      |> Map.get(:terms, [])
-      |> Enum.reject(&(&1 == "" or MapSet.member?(synonyms, &1)))
-      |> Enum.uniq()
-
+    words = typed_words(parsed)
     last = List.last(words)
 
     word_groups =
@@ -1108,6 +1104,34 @@ defmodule Barkpark.Search.DocumentsRetriever do
   end
 
   defp drop_short_last_word(groups, _last), do: groups
+
+  defp typed_words(parsed) do
+    synonyms =
+      parsed |> Map.get(:alternatives, %{}) |> Map.values() |> List.flatten() |> MapSet.new()
+
+    parsed
+    |> Map.get(:terms, [])
+    |> Enum.reject(&(&1 == "" or MapSet.member?(synonyms, &1)))
+    |> Enum.uniq()
+  end
+
+  # The 1-letter last word `drop_short_last_word/2` leaves out of the match still
+  # picks the ranking pool (task-7db7f8fe8b17a58e): titles with a word that starts
+  # with it come first (`cover_key/1`). Without it, "bulk item 1" over 5,000 bulk
+  # items pooled the newest 500, none of Bulk item 1000-1999, and the ranking
+  # (which already prefers a title starting with the whole query) never saw them.
+  # Not a filter: a 1-letter LIKE has no trigram to probe, and the match stays
+  # index-only.
+  defp pool_hint(_parsed, []), do: []
+
+  defp pool_hint(parsed, groups) do
+    last = parsed |> typed_words() |> List.last()
+
+    if is_binary(last) and String.length(last) < @min_prefix_chars and
+         not Enum.any?(groups, &(&1.kind == :word and &1.text == last)),
+       do: [%{kind: :word, text: last, prefix?: true, members: [last]}],
+       else: []
+  end
 
   defp drop_stop_words([_, _ | _] = groups) do
     case Enum.reject(groups, &(&1.kind == :word and &1.stop?)) do
@@ -1495,6 +1519,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   #
   #   0. the document whose id IS the query;
   #   1. the search title equal to the query (as typed or folded);
+  #   1b. on the near-miss pass only, the document that holds the words
+  #       themselves (`held_key/4`);
   #   2. the relevance score, the sum of
   #        * the full-text rank;
   #        * on the near-miss pass only, the weighted per-field similarity,
@@ -1513,7 +1539,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
   #        * the weighted-tag boost, and with `boost=popularity` the view
   #          score (`boosted/2`);
   #   3. recency, then the id, so the order is total and paging is stable.
-  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost) do
+  defp order_rank(queryable, parsed, groups, config, index, near_miss?, lead, boost, held) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token.
     positive_query =
@@ -1540,7 +1566,10 @@ defmodule Barkpark.Search.DocumentsRetriever do
         ^(lead ++
             [
               {:desc, exact_id_key(positive_query)},
-              {:desc, exact_title_key(positive_query)},
+              {:desc, exact_title_key(positive_query)}
+            ] ++
+            held ++
+            [
               {:desc,
                boosted(
                  relevance_key(positive_query, groups, tag_terms, config, index, near_miss?),
@@ -1666,6 +1695,23 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp id_prefix_pattern(term) do
     String.replace(term, ~r/([\\%_])/, "\\\\\\1") <> "%"
+  end
+
+  # ORDER BY key #1b, the near-miss pass only. A pass widened to near misses
+  # still holds the documents that contain the words themselves, and the
+  # per-field similarity there lets a title that merely looks like the query
+  # outrank them: for "helseøkonomi" (one exact hit, so the thin-results pass
+  # widened it) "Kommuneøkonomi", "Mikroøkonomi" and 30 other look-alike titles
+  # ranked above the one book whose description says "helseøkonomi", and a
+  # caller reading the first 10 never saw it. A widened pass adds near misses
+  # after the documents that hold the words, never above them.
+  defp held_key(false, _groups, _index, _match), do: []
+
+  defp held_key(true, groups, index, match) do
+    case words_dynamic(groups, index, match) do
+      nil -> []
+      held -> [{:desc, dynamic([_d], fragment("CASE WHEN ? THEN 1 ELSE 0 END", ^held))}]
+    end
   end
 
   # ORDER BY key #0: the document whose id IS the query ranks first, so an

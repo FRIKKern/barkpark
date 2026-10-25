@@ -2,7 +2,31 @@ defmodule BarkparkWeb.Layouts do
   use BarkparkWeb, :html
   import Plug.CSRFProtection, only: [get_csrf_token: 0]
 
-  embed_templates "layouts/*"
+  # Every layout but `root` compiles straight from its file. `root` compiles
+  # from `BarkparkWeb.RootAssets.root_source/0`: the same template with its
+  # inline stylesheets and body scripts cut out into cached files
+  # (task-cca3c6d48e57097e). The guard below fails the compile when a layout
+  # file is added and not listed here.
+  embed_templates "layouts/{app,bulldocs,quiz,sheets,studio,swatch}*"
+
+  @layout_files Path.wildcard(Path.join(__DIR__, "layouts/*.html.heex"))
+  for file <- @layout_files, do: @external_resource(file)
+
+  for file <- @layout_files,
+      name = file |> Path.basename(".html.heex") |> String.to_atom(),
+      name != :root,
+      not Module.defines?(__MODULE__, {name, 1}) do
+    raise CompileError,
+      description: "BarkparkWeb.Layouts: #{file} is not compiled; list it in embed_templates"
+  end
+
+  require BarkparkWeb.RootAssets.Compiler
+
+  @doc false
+  def root(var!(assigns)) do
+    _ = var!(assigns)
+    BarkparkWeb.RootAssets.Compiler.compile_root()
+  end
 
   @doc """
   The value for the `<html data-bp-theme=…>` attribute (ts-w4e), given the

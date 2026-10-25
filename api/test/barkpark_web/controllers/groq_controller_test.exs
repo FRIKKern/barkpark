@@ -253,6 +253,42 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert is_binary(error["description"])
     assert is_integer(error["start"]) and is_integer(error["end"])
     assert error["query"] == "*[_type == "
+    # A query's hint, not `malformed`'s JSON-body one (task-b85cf70ca346260a).
+    assert error["hint"] =~ "GROQ query"
+    refute error["hint"] =~ "Content-Type"
+  end
+
+  # Barkpark writes a reference as the plain id string (post.author = "author-alan"):
+  # `->` follows it as it follows `{_ref}`, single or in an array, and a string that
+  # names no document reads null (task-b85cf70ca346260a).
+  test "-> follows a plain id string as well as {_ref}", %{conn: conn, token: token, scope: scope} do
+    publish!(
+      "book",
+      %{
+        "_id" => "b4",
+        "name" => "Fourth",
+        "year" => 2020,
+        "author" => "bo",
+        "genres" => ["poetry", "nope"],
+        "note" => "no-such-doc"
+      },
+      scope
+    )
+
+    body =
+      conn
+      |> get_query(
+        token,
+        ~s'*[_id == "b4"][0]{"by": author->name, "genres": genres[]->name, "note": note->name, "ref": *[_id == "b1"][0].author->name}'
+      )
+      |> json_response(200)
+
+    assert body["result"] == %{
+             "by" => "Bo",
+             "genres" => ["Poetry", nil],
+             "note" => nil,
+             "ref" => "Ada"
+           }
   end
 
   test "a parameter the query uses but the request lacks is a 400", %{conn: conn, token: token} do

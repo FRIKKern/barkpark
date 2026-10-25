@@ -168,18 +168,21 @@ defmodule BarkparkWeb.Studio.StudioLiveTaskEditorTest do
   test "a Studio save preserves dependencies and claim byte-identically", %{conn: conn} do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/task/tsk1"))
 
-    # lifecycle_status renders on the Work tab; dependencies/claim live on
-    # the System tab — so this save also proves CROSS-TAB preservation
-    # (fields whose inputs are not rendered survive the merge-save).
+    # The title renders on the Brief tab only (its `group`, as Sanity draws
+    # it, task-515960f9b7e4f65a); lifecycle_status renders on the Work tab;
+    # dependencies/claim live on the System tab. Two saves on two tabs prove
+    # CROSS-TAB preservation: fields whose inputs are not rendered, the title
+    # among them, survive the merge-save.
+    select_tab(view, "brief")
+
+    view
+    |> form("#editor-form", %{"doc" => %{"title" => "Wire the bridge v2"}})
+    |> render_submit()
+
     select_tab(view, "work")
 
     view
-    |> form("#editor-form", %{
-      "doc" => %{
-        "title" => "Wire the bridge v2",
-        "lifecycle_status" => "in_progress"
-      }
-    })
+    |> form("#editor-form", %{"doc" => %{"lifecycle_status" => "in_progress"}})
     |> render_submit()
 
     {:ok, saved} = Content.get_document("drafts.tsk1", "task", @dataset)

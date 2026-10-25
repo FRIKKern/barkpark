@@ -91,7 +91,13 @@ defmodule Barkpark.PubSubSingletons do
   # in as many words: the fleet wire "can never run a per-flip DB query". The
   # census asserts that claim against the module's own source rather than
   # trusting this comment.
-  @no_repo [Barkpark.StudioChat.FleetHub]
+  #
+  # BarkparkWeb.Studio.ConnectHandoff — subscribes to the document-list topics
+  # of every workspace a Studio dead render read, and only counts the
+  # announcements in its own ETS table. The schema version read in `build/4`
+  # runs in the CALLER's process (the dead render or the LiveView), never in
+  # this GenServer's callbacks.
+  @no_repo [Barkpark.StudioChat.FleetHub, BarkparkWeb.Studio.ConnectHandoff]
 
   @doc "Singletons that reach `Repo`; `drain!/1` quiesces exactly these."
   @spec drained() :: [module()]
