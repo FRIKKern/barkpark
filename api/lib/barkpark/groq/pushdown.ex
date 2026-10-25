@@ -44,6 +44,8 @@ defmodule Barkpark.Groq.Pushdown do
     * `_createdAt` or `_updatedAt` compared with `<`, `<=`, `>`, `>=` or `==`
       to a string -> `checks` as `{:timestamp, column, op, s}`, which the
       source tests against the column rendered as GROQ renders it
+    * `_id in path("...")` -> `checks` as `{:id_path, pattern}`, which the
+      source matches against the id GROQ sees
     * `count(a.b[cond]) > 0`, `>= 1`, `length(a.b[cond]) > 0` and
       `defined(a.b[cond][0])` on a content path, where `cond` is an `&&` of
       `x.y == v` and `x.y in [...]` on element fields (or `@`) with scalar
@@ -111,6 +113,7 @@ defmodule Barkpark.Groq.Pushdown do
           | {:range, [String.t()], String.t(), scalar()}
           | {:views, :views_7d | :views_30d | :score, String.t(), number()}
           | {:timestamp, :inserted_at | :updated_at, String.t(), String.t()}
+          | {:id_path, String.t()}
   @type scalar :: String.t() | number() | boolean()
   @type order_key ::
           {:path, [String.t()]}
@@ -252,7 +255,9 @@ defmodule Barkpark.Groq.Pushdown do
   # scalar leaves the conjunct to the other shapes. `"x" in a.b` is true when
   # `a.b` is an array holding `"x"`; a string there is not searched.
   defp check({:op, "in", l, r}, resolve) do
-    with :error <- in_check(l, r, resolve), do: member_check(l, r, resolve)
+    with :error <- id_path_check(l, r, resolve),
+         :error <- in_check(l, r, resolve),
+         do: member_check(l, r, resolve)
   end
 
   defp check({:group, inner}, resolve), do: check(inner, resolve)
@@ -307,6 +312,19 @@ defmodule Barkpark.Groq.Pushdown do
   # the column the same way and compares it the same way, so SQL keeps
   # exactly the rows GROQ keeps. Any other value type is null in GROQ and is
   # left to the evaluator.
+  # `_id in path("drafts.**")` (task-754316ae85c63a1a): a glob over the id
+  # GROQ sees, which the source matches in SQL with the evaluator's pattern.
+  defp id_path_check(l, {:func, "global", "path", [arg]}, resolve) do
+    with {:ok, ["_id"]} <- attr_path(l),
+         {:ok, pattern} when is_binary(pattern) <- value(arg, resolve) do
+      {:ok, {:id_path, pattern}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp id_path_check(_l, _r, _resolve), do: :error
+
   @timestamp_fields %{"_createdAt" => :inserted_at, "_updatedAt" => :updated_at}
 
   defp timestamp_check(op, l, r, resolve) do

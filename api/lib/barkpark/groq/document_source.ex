@@ -396,7 +396,8 @@ defmodule Barkpark.Groq.DocumentSource do
     checks =
       plain
       |> Enum.reject(
-        &(match?({:views, _column, _op, _n}, &1) or match?({:timestamp, _, _, _}, &1))
+        &(match?({:views, _column, _op, _n}, &1) or match?({:timestamp, _, _, _}, &1) or
+            match?({:id_path, _}, &1))
       )
       |> Enum.map(&check_path/1)
 
@@ -606,6 +607,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp check_reads({:views, _column, _op, _n}), do: 0
   defp check_reads({:timestamp, _column, _op, _value}), do: 0
+  defp check_reads({:id_path, _pattern}), do: 0
 
   defp check_reads({:or, branches}),
     do: Enum.sum_by(branches, &content_reads({&1.types, &1.ids, &1.eq, &1.any, &1.checks}))
@@ -1304,7 +1306,30 @@ defmodule Barkpark.Groq.DocumentSource do
   defp check_condition({:views, column, op, n}, perspective),
     do: Views.sql_condition(column, op, n, perspective == :published)
 
+  defp check_condition({:id_path, pattern}, perspective) do
+    regex = id_path_regex(pattern)
+    dynamic(fragment("? ~ ?", ^id_expr(perspective), ^regex))
+  end
+
   defp check_condition(check, _perspective), do: check_condition(check)
+
+  # The evaluator's `path_regex/1` (PCRE, no dotall) as a Postgres ARE that
+  # matches the same ids: `**` stops at a newline as PCRE's `.` does, and
+  # `\n?$` is PCRE's `$`, which also matches before a final newline. A
+  # literal escapes every ASCII character that is not a letter or digit;
+  # ARE reads `\k` as `k` for those.
+  defp id_path_regex(pattern) do
+    body =
+      pattern
+      |> String.split(".")
+      |> Enum.map_join("\\.", fn
+        "*" -> "[^.]+"
+        "**" -> "[^\n]*"
+        part -> String.replace(part, ~r/[\x00-\x2f\x3a-\x40\x5b-\x60\x7b-\x7f]/, "\\\\\\0")
+      end)
+
+    "^" <> body <> "\n?$"
+  end
 
   # `_createdAt op "..."`: the column rendered as the envelope renders it
   # (`Envelope.to_iso8601/1`: microseconds, `Z`, one fixed width), compared
