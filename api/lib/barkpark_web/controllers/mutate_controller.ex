@@ -22,6 +22,7 @@ defmodule BarkparkWeb.MutateController do
       # a prior request on a reused test process can never leak entries in.
       Warnings.reset()
       warn_unknown_keys(conn.body_params)
+      warn_unknown_mutation_keys(mutations)
 
       case reader_checked(conn, mutations, dataset, opts) do
         {:ok, {tx_id, results}} ->
@@ -113,6 +114,34 @@ defmodule BarkparkWeb.MutateController do
   end
 
   defp warn_unknown_keys(_), do: :ok
+
+  # The same for a key INSIDE a mutation (task-b59e4d73521e07a7). A batch of
+  # `{"createOrReplace": doc, "publish": true}` sent to a server that did not
+  # yet read `publish` wrote 1,100 drafts and answered success: the flag was
+  # dropped without a trace. A mutation's keys are its verbs (`publish` is
+  # also the flag); anything else is named here, per mutation, and the batch
+  # still applies, as for the top-level keys.
+  defp warn_unknown_mutation_keys(mutations) when is_list(mutations) do
+    known = Barkpark.Content.Mutations.mutation_verbs()
+
+    unknown =
+      for {%{} = mutation, i} <- Enum.with_index(mutations),
+          keys = mutation |> Map.keys() |> Enum.reject(&(&1 in known)) |> Enum.sort(),
+          keys != [],
+          do: "mutations[#{i}]: #{Enum.join(keys, ", ")}"
+
+    if unknown != [] do
+      Warnings.put(
+        "mutate.unknown_mutation_key",
+        "ignored unknown key(s) inside a mutation: #{Enum.join(unknown, "; ")} — " <>
+          "a mutation reads only #{Enum.join(known, ", ")}"
+      )
+    end
+
+    :ok
+  end
+
+  defp warn_unknown_mutation_keys(_mutations), do: :ok
 
   # Tenancy scope opts come from BarkparkWeb.ScopeHelpers.scope_opts/1, the
   # shared seam over the conn assigns set by ResolveWorkspace / ResolveProject
