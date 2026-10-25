@@ -35,6 +35,15 @@ defmodule Barkpark.Auth.LoginTicket do
     # Owner ruling #26: the Cloud team role the handoff carries ("owner" |
     # "admin" | "member"). NULL = a pre-ruling ticket (older control plane).
     field :user_role, :string
+    # "Sign in with Barkpark Cloud" for an external Studio. nil = a BROWSER
+    # ticket (`GET /login/ticket/:t`); "exchange" = a ticket only the
+    # server-to-server `POST /v1/auth/login-tickets/exchange` accepts, and only
+    # when it names this `audience` (the Studio origin) and answers this PKCE
+    # S256 `code_challenge` with its `code_verifier`. Neither door takes the
+    # other's ticket.
+    field :purpose, :string
+    field :audience, :string
+    field :code_challenge, :string
     field :expires_at, :utc_datetime_usec
     field :used_at, :utc_datetime_usec
 
@@ -62,10 +71,39 @@ defmodule Barkpark.Auth.LoginTicket do
   """
   def changeset(ticket, attrs) do
     ticket
-    |> cast(attrs, [:ticket_hash, :api_token, :user_email, :user_role, :expires_at, :used_at])
+    |> cast(attrs, [
+      :ticket_hash,
+      :api_token,
+      :user_email,
+      :user_role,
+      :purpose,
+      :audience,
+      :code_challenge,
+      :expires_at,
+      :used_at
+    ])
     |> validate_required([:ticket_hash, :api_token, :expires_at])
     |> validate_inclusion(:user_role, ~w(owner admin member))
+    |> validate_inclusion(:purpose, ["exchange"])
+    |> validate_exchange()
     |> validate_format(:user_email, @email_format, message: "must have the @ sign and no spaces")
     |> unique_constraint(:ticket_hash)
+  end
+
+  # An exchange ticket is always USER-shaped (it signs a person in, never drops
+  # the admin bearer anywhere) and always carries both bindings: an exchange
+  # ticket without an audience or a challenge would be redeemable by whoever
+  # holds it, which is exactly what the bindings exist to prevent.
+  defp validate_exchange(changeset) do
+    if get_field(changeset, :purpose) == "exchange" do
+      changeset
+      |> validate_required([:user_email, :audience, :code_challenge])
+      |> validate_format(:audience, ~r{\Ahttps?://[^/?#\s@]+\z}, message: "must be an origin")
+      |> validate_format(:code_challenge, ~r/\A[A-Za-z0-9_-]{43}\z/,
+        message: "must be a base64url S256 challenge"
+      )
+    else
+      changeset
+    end
   end
 end

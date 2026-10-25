@@ -1171,6 +1171,10 @@ defmodule PDS.Census do
     {:post, "/v1/auth/cloud-users/deprovision", "BarkparkWeb.CloudUserController", :deprovision, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
+    # External Studio sign-in (task-74c3c0ab88eb4f53): the receipt is the login
+    # session itself ({token, user}) — the Studio's server reads it back as a bearer.
+    {:post, "/v1/auth/login-tickets/exchange", "BarkparkWeb.LoginTicketController", :exchange,
+     :status_only_receipt},
     {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login, :status_only_receipt},
     {:post, "/v1/auth/mfa/enroll", "BarkparkWeb.AuthController", :mfa_enroll, :status_only_receipt},
     {:post, "/v1/auth/register", "BarkparkWeb.AuthController", :register, :status_only_receipt},

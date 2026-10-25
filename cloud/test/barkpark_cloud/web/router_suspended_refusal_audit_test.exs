@@ -67,14 +67,16 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
     {~r/^\s*bp\.suspended( and [^-]*)? ->\s*$/,
      "a `cond` leg on the row's boolean (verify / self-update / rollback / instance-API :mutate)"},
     {~r/^\s*\{:error, :suspended\} ->\s*$/,
-     "a `case` leg on a Registry `{:error, :suspended}` (studio-link / studio-signin / app-token / push-relay / site-url)"},
+     "a `case` leg on a Registry `{:error, :suspended}` (studio-link / studio-signin / studio-handoff / app-token / push-relay / site-url)"},
     {~r/^\s*%Barkpark\{team_id: tid, suspended: true\} = bp when tid == team\.id ->\s*$/,
      "a `case` leg matching the suspended row itself (credentials / bootstrap)"}
   ]
 
   # Equality, not a floor: a NEW suspended refusal that forgets the trace reds
   # here, and so does a deleted one (which would mean a refusal was loosened).
-  @refusal_site_count 11
+  # 11 -> 12: POST /v1/auth/studio-handoff (task-74c3c0ab88eb4f53) refuses a
+  # suspended box and traces it with `audit_suspended_refusal/4`.
+  @refusal_site_count 12
 
   ## Fixtures
 

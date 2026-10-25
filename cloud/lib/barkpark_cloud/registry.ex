@@ -4944,6 +4944,180 @@ defmodule BarkparkCloud.Registry do
 
   def mint_studio_link(_, _, _), do: {:error, :not_live}
 
+  ## ── "Sign in with Barkpark Cloud" for an external Studio ──────────────
+
+  @studio_callback_max 20
+  @studio_callback_max_bytes 512
+  @loopback_hosts ["localhost", "127.0.0.1", "[::1]", "::1"]
+
+  @doc """
+  Check a Studio callback URL before it may join an instance's allowlist.
+
+  An absolute `https://` URL (plain `http://` only for a loopback host, so a
+  developer's local Studio can be allowed), with a host and a path, and no
+  userinfo, query or fragment — the sign-in appends `?ticket=…&state=…` to it
+  verbatim. Returns `{:ok, trimmed}` or `{:error, reason}`.
+  """
+  @spec validate_studio_callback(term()) :: {:ok, String.t()} | {:error, String.t()}
+  def validate_studio_callback(url) when is_binary(url) do
+    url = String.trim(url)
+    uri = URI.parse(url)
+
+    cond do
+      url == "" or byte_size(url) > @studio_callback_max_bytes ->
+        {:error, "must be a URL of at most #{@studio_callback_max_bytes} bytes"}
+
+      String.match?(url, ~r/[\s\\]/) ->
+        {:error, "must not contain spaces or backslashes"}
+
+      uri.scheme not in ["https", "http"] or uri.host in [nil, ""] ->
+        {:error, "must be an absolute https:// URL"}
+
+      uri.scheme == "http" and uri.host not in @loopback_hosts ->
+        {:error, "must use https:// (plain http:// is allowed only for localhost)"}
+
+      uri.userinfo != nil or uri.query != nil or uri.fragment != nil ->
+        {:error, "must not carry userinfo, a query or a fragment"}
+
+      uri.path in [nil, "", "/"] ->
+        {:error,
+         "must name the Studio's callback path, e.g. https://studio.example.com/auth/cloud/callback"}
+
+      true ->
+        {:ok, url}
+    end
+  end
+
+  def validate_studio_callback(_), do: {:error, "must be a URL"}
+
+  @doc "The origin (`scheme://host[:port]`) a callback URL belongs to — the exchange ticket's audience."
+  @spec studio_callback_origin(String.t()) :: String.t()
+  def studio_callback_origin(url) do
+    %URI{scheme: scheme, host: host, port: port} = URI.parse(url)
+    default = URI.default_port(scheme)
+    if port in [nil, default], do: "#{scheme}://#{host}", else: "#{scheme}://#{host}:#{port}"
+  end
+
+  @doc "Is `url` on this instance's Studio callback allowlist? Exact string match."
+  @spec studio_callback_allowed?(Barkpark.t(), term()) :: boolean()
+  def studio_callback_allowed?(%Barkpark{studio_callback_urls: urls}, url)
+      when is_binary(url) and is_list(urls),
+      do: url in urls
+
+  def studio_callback_allowed?(_, _), do: false
+
+  @doc "Add a Studio callback URL to an instance's allowlist (idempotent)."
+  @spec add_studio_callback(Barkpark.t(), term()) ::
+          {:ok, Barkpark.t()} | {:error, String.t() | :limit_reached}
+  def add_studio_callback(%Barkpark{} = bp, url) do
+    with {:ok, url} <- validate_studio_callback(url) do
+      urls = bp.studio_callback_urls || []
+
+      cond do
+        url in urls -> {:ok, bp}
+        length(urls) >= @studio_callback_max -> {:error, :limit_reached}
+        true -> bp |> Ecto.Changeset.change(studio_callback_urls: urls ++ [url]) |> Repo.update()
+      end
+    end
+  end
+
+  @doc "Remove a Studio callback URL from an instance's allowlist (idempotent)."
+  @spec remove_studio_callback(Barkpark.t(), term()) :: {:ok, Barkpark.t()}
+  def remove_studio_callback(%Barkpark{} = bp, url) when is_binary(url) do
+    url = String.trim(url)
+    urls = bp.studio_callback_urls || []
+
+    if url in urls,
+      do: bp |> Ecto.Changeset.change(studio_callback_urls: urls -- [url]) |> Repo.update(),
+      else: {:ok, bp}
+  end
+
+  def remove_studio_callback(%Barkpark{} = bp, _), do: {:ok, bp}
+
+  @doc """
+  Mint an EXCHANGE login ticket for an external Studio ("Sign in with Barkpark
+  Cloud") — `mint_studio_link/3`'s server-to-server sibling.
+
+  Same custody: the stored admin token calls the instance's
+  `POST /v1/auth/login-tickets` server-side and never leaves this function. The
+  ticket is email-bound (signs in AS this Cloud account, seated at `role` in
+  the Default workspace only) and marked `purpose: "exchange"` with
+  `audience` (the Studio origin) and the Studio's PKCE S256 `code_challenge`:
+  only the Studio's own server, holding the verifier, can redeem it, and only
+  at `POST /v1/auth/login-tickets/exchange` — never at `/login/ticket/:t`.
+
+  Returns the bare ticket. An instance that predates exchange tickets ignores
+  `purpose` and mints a BROWSER ticket; its answer does not echo
+  `purpose: "exchange"`, so that is `{:error, :instance_outdated}` — a browser
+  ticket is never handed to an external Studio.
+  """
+  @spec mint_studio_exchange_ticket(
+          Barkpark.t(),
+          String.t(),
+          String.t() | nil,
+          String.t(),
+          String.t()
+        ) ::
+          {:ok, String.t()}
+          | {:error,
+             :suspended
+             | :not_live
+             | :no_admin_token
+             | :decrypt_failed
+             | :instance_error
+             | :instance_outdated}
+  def mint_studio_exchange_ticket(%Barkpark{suspended: true}, _email, _role, _aud, _challenge),
+    do: {:error, :suspended}
+
+  def mint_studio_exchange_ticket(%Barkpark{url: url} = bp, email, role, audience, challenge)
+      when is_binary(url) and url != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        request = %{
+          method: :post,
+          url: String.trim_trailing(url, "/") <> "/v1/auth/login-tickets",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body:
+            Jason.encode!(%{
+              email: email,
+              role: ticket_role(role),
+              purpose: "exchange",
+              audience: audience,
+              code_challenge: challenge
+            })
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 201, body: body}} ->
+            case Jason.decode(body) do
+              {:ok, %{"ticket" => t, "purpose" => "exchange"}} when is_binary(t) and t != "" ->
+                {:ok, t}
+
+              {:ok, %{"ticket" => t}} when is_binary(t) and t != "" ->
+                {:error, :instance_outdated}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def mint_studio_exchange_ticket(_, _, _, _, _), do: {:error, :not_live}
+
   # The team role a user-shaped ticket carries (ruling #26). Fail closed: no
   # role, or one outside the three built-ins, is a member.
   defp ticket_role(role) when role in ["owner", "admin", "member"], do: role

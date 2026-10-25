@@ -39,6 +39,8 @@
     { "verb": "barkpark.retry_requested", "label": "requested a retry" },
     { "verb": "barkpark.verify_requested", "label": "requested a verification" },
     { "verb": "barkpark.studio_link_minted", "label": "minted a Studio sign-in link" },
+    { "verb": "barkpark.studio_callback_added", "label": "allowed a Studio to sign in with a Barkpark" },
+    { "verb": "barkpark.studio_callback_removed", "label": "removed a Studio from a Barkpark's sign-in list" },
     { "verb": "barkpark.app_token_minted", "label": "minted an app token on a Barkpark" },
     { "verb": "barkpark.app_token_revoked", "label": "revoked an app token on a Barkpark" },
     { "verb": "barkpark.site_url_set", "label": "set a Barkpark's site URL" },
