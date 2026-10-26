@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: groq-query-api | budget: 1500tok -->
 # GROQ query API
 
-Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/` (parser, evaluator, document source), `BarkparkWeb.GroqController`.
+Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/`, `BarkparkWeb.GroqController`.
 
 ## Endpoint
 
@@ -15,11 +15,11 @@ Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanit
 | `perspective` | `published` (default, any apiVersion), `drafts` (`previewDrafts` is an alias), `raw`; other values → 400 |
 | `returnQuery` | `false` leaves `query` out of the response |
 
-Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, a `public-read` token) gets `published` regardless. POST bills the read bucket. A GET target over 32,753 bytes gets an empty 414; use POST.
+Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, `public-read`) gets `published`. POST bills the read bucket. A GET target over 32,753 bytes gets an empty 414; use POST.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` comes from the `documents.title` column (`title == "x"` matches it); no title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows as stored.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content fields at the top level, redacted per field visibility. `title` comes from the `documents.title` column (`title == "x"` matches it); no title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows as stored.
 
-Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
+Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`; no free slot is 503 with `type: "queryBusyError"` and `Retry-After`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
 
 ## Client configuration
 
@@ -45,7 +45,7 @@ const client = createClient({
 
 ## Evaluation and limits
 
-Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch reading only `^` that is false for the parent is skipped. GIN indexes over `content` and its `_ref` values serve them; the evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has none but these, apart from `references()`, `title` and `$x in field[].value`, and the caller sees every field it tests; any other is counted in chunks, limited only by wall time. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries read in rounds, one SQL read per `->` level and subquery shape. A subquery not reading `^` runs once per query.
+Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch reading only `^` that is false for the parent is skipped. The evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has only these, except `references()` and `title`, and the caller sees every field it tests; any other is counted in chunks. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries read in rounds, one SQL read per `->` level and subquery shape. A subquery not reading `^` runs once per query.
 
 | Limit | Default | Config key (`config :barkpark, Barkpark.Groq`) |
 |---|---|---|
@@ -56,6 +56,8 @@ Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, 
 | Stored content one `*[...]` loads | 32 MiB | `:max_bytes_per_fetch` |
 | Documents one query loads | 25 000 | `:max_documents_loaded` |
 | Encoded result | 10 MiB | `:max_result_bytes` |
+| Queries at once | ½ RAM ÷ heap, ≤ 2 per CPU | `:max_concurrent` |
+| Slot wait, then 503 | 5 s | `:queue_ms` |
 
 ## Moving from Sanity
 
