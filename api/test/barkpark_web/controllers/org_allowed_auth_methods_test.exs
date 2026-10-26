@@ -24,7 +24,7 @@ defmodule BarkparkWeb.OrgAllowedAuthMethodsTest do
   defmodule MockIdP do
     @behaviour Barkpark.Sso.Oidc.HTTP
     @impl true
-    def post_form(_url, _params), do: {:ok, %{"id_token" => fx(:id_token)}}
+    def post_form(_url, _params, _headers), do: {:ok, %{"id_token" => fx(:id_token)}}
     @impl true
     def get_json(_url), do: {:ok, %{"keys" => [fx(:jwk)]}}
     defp fx(k), do: Application.get_env(:barkpark, :oidc_test)[k]

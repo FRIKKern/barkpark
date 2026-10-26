@@ -84,11 +84,13 @@ defmodule Barkpark.Application do
     # The same ownership rule for three caches that used to be created lazily
     # by their first caller and died with it (task-45913114e6d4ffbe): the DEK
     # cache, the tenancy default-scope cache and the codelist alias cache,
-    # plus the schema catalog cache (task-cca3c6d48e57097e).
+    # plus the schema catalog cache (task-cca3c6d48e57097e) and the OIDC
+    # discovery and JWKS cache.
     Barkpark.Crypto.DataKeys.init_cache()
     Barkpark.Tenancy.DefaultScopeCache.init_cache()
     Barkpark.Content.Codelists.init_cache()
     Barkpark.Content.SchemaCatalogCache.init_cache()
+    Barkpark.Sso.Oidc.init_cache()
 
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
@@ -160,8 +162,7 @@ defmodule Barkpark.Application do
     # (opt-out via BARKPARK_SELF_UPDATE_CHECK=off). Read-only: the Checker
     # only polls the upstream repo for newer release tags — it never mutates
     # the instance. Spliced next to sync_children, before the Endpoint.
-    self_update_children =
-      if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
+    self_update_children = self_update_children()
 
     # C083: a managed instance refuses seed and one-shot boots outright. Their
     # raw Repo writes never reach a door, and the serving tree's coordinator
@@ -203,6 +204,14 @@ defmodule Barkpark.Application do
       {:ok, _pid} = ok ->
         Barkpark.Telemetry.Handlers.attach()
 
+        # Off unless BARKPARK_RETIRE_SSE_ON_SIGTERM=1. The trap runs before the
+        # VM's default SIGTERM stop, which still follows.
+        if Application.get_env(:barkpark, :retire_sse_on_sigterm, false) do
+          System.trap_signal(:sigterm, :retire_sse, fn ->
+            Barkpark.Realtime.DrainSignal.retire_and_await()
+          end)
+        end
+
         # Plugin discovery + schema/checker/seeder registration now runs
         # synchronously in Barkpark.SchemaBootstrap (a child positioned
         # before the Oban child above), so it has completed by the time the
@@ -220,6 +229,9 @@ defmodule Barkpark.Application do
         # that IS serving on the same box.
         if boot_mode() != :one_shot do
           Barkpark.Sharing.refresh()
+
+          # Off unless BARKPARK_BOOTSTRAP_OWNER_EMAIL is set and no user exists.
+          bootstrap_owner()
 
           # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
           # this is a no-op (active?/0 is false) and nothing is logged. When
@@ -273,6 +285,13 @@ defmodule Barkpark.Application do
                 "(expected one of #{inspect(@boot_modes)})"
     end
   end
+
+  @doc false
+  # The update Checker is the only in-app caller of the GitHub API for
+  # self-update. BARKPARK_SELF_UPDATE_CHECK=off leaves it out of the tree.
+  @spec self_update_children() :: [module()]
+  def self_update_children,
+    do: if(Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: [])
 
   @doc """
   Build the top-level child spec list, tiered for blast-radius isolation.
@@ -735,6 +754,13 @@ defmodule Barkpark.Application do
   # Fresh-install guard: warn (don't crash) when pg_trgm is absent, since the
   # default Postgres search engine degrades fuzzy/typo recovery without it.
   @spec check_pg_trgm() :: :ok
+  defp bootstrap_owner do
+    Barkpark.Accounts.BootstrapOwner.run()
+  rescue
+    # Never take boot down: an unmigrated DB leaves the owner for the next boot.
+    error -> Logger.warning("[BootstrapOwner] skipped: #{inspect(error)}")
+  end
+
   defp check_pg_trgm do
     case Barkpark.Repo.query("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", []) do
       {:ok, %{num_rows: rows}} when rows > 0 ->

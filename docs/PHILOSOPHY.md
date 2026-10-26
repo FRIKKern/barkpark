@@ -89,7 +89,7 @@ one login across them. It helps fund development. The
 [control plane](../cloud/README.md) is also open source and can be self-hosted.
 You can run an instance without Cloud and sign in to it directly.
 
-Barkpark is MIT licensed. You can read the code, modify it, and operate your own
+Barkpark is Apache-2.0 licensed. You can read the code, modify it, and operate your own
 system. Ownership also means choosing who maintains it, protects access, and
 keeps backups. You can do that work yourself or pay someone you trust. The choice
 should stay yours.

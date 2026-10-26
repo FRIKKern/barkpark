@@ -124,8 +124,12 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   def on_mount(:require_org_mfa, _params, session, socket) do
-    case user_from_session(session) do
-      %Barkpark.Accounts.User{} = user ->
+    case user_session_from_session(session) do
+      # A session born from the IdP's MFA (`idp_mfa`) stands in for a factor.
+      {_user, %{idp_mfa: true}} ->
+        {:cont, socket}
+
+      {%Barkpark.Accounts.User{} = user, _session} ->
         if BarkparkWeb.SessionIssuer.org_mfa_enrolment_blocked?(user) do
           {:halt,
            socket
@@ -201,10 +205,17 @@ defmodule BarkparkWeb.LiveAuth do
   # minted by /login/account or an SSO callback) to its User — the principal
   # LiveScope's membership gate accepts. nil when absent/invalid.
   defp user_from_session(session) do
+    case user_session_from_session(session) do
+      {user, _session} -> user
+      nil -> nil
+    end
+  end
+
+  defp user_session_from_session(session) do
     case session["user_session"] do
       raw when is_binary(raw) and raw != "" ->
         case Barkpark.Accounts.verify_user_session(String.trim(raw)) do
-          {%Barkpark.Accounts.User{} = user, _} -> user
+          {%Barkpark.Accounts.User{}, _} = found -> found
           _ -> nil
         end
 

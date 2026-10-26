@@ -69,7 +69,6 @@ defmodule Barkpark.Receipts.SentinelOkReturnerLensTest do
     "lib/barkpark/sync/push_cursor.ex:bootstrap_if_absent/3",
     "lib/barkpark/sync/push_cursor.ex:put/4",
     "lib/barkpark/sync/push_doc_rev.ex:put/5",
-    "lib/barkpark/tasks/edges.ex:remove_dep/3",
     "lib/barkpark/tenancy.ex:delete_workspace_audit_sinks/1"
   ]
 

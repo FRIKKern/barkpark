@@ -187,6 +187,39 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
     end
   end
 
+  describe ":always_allowed_origins (BARKPARK_ALWAYS_ALLOWED_ORIGINS)" do
+    setup do
+      put_schema("ds_always", "post", [])
+      on_exit(fn -> Application.delete_env(:barkpark, :always_allowed_origins) end)
+      :ok
+    end
+
+    defp acao_for(path, origin) do
+      build_conn(:get, path)
+      |> put_req_header("origin", origin)
+      |> call_plug()
+      |> send_resp(200, "ok")
+      |> get_resp_header("access-control-allow-origin")
+    end
+
+    test "unset, the built-in list is allowed on dataset and no-dataset routes" do
+      for origin <- ["https://www.barkpark.cloud", "https://x.vercel.app"],
+          path <- ["/v1/data/query/ds_always/post", "/v1/meta"] do
+        assert acao_for(path, origin) == [origin]
+      end
+    end
+
+    test "set, it replaces the built-in list" do
+      Application.put_env(:barkpark, :always_allowed_origins, ["https://pensum.example.no"])
+
+      for path <- ["/v1/data/query/ds_always/post", "/v1/meta"] do
+        assert acao_for(path, "https://www.barkpark.cloud") == []
+        assert acao_for(path, "https://x.vercel.app") == []
+        assert acao_for(path, "https://pensum.example.no") == ["https://pensum.example.no"]
+      end
+    end
+  end
+
   describe "path-based tenancy prefix (/w/:ws/p/:project/…)" do
     # The /w/:ws/p/:project prefix shifts every positional path index; the plug
     # strips it before matching, so BOTH shapes must resolve the same dataset.

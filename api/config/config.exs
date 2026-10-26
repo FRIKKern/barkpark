@@ -422,10 +422,18 @@ config :barkpark, Oban,
        # window in mutation_events.document / webhook_deliveries.payload_snapshot.
        # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
        {"30 4 * * *", Barkpark.Content.Workers.DeletedPayloadSweeper},
+       # task-44cfe871ea0edc30 — purges cancelled schedules past the window.
+       # A no-op tick (it logs the would-delete count) unless
+       # `:cancelled_schedule_retention, enabled:` (below) is on.
+       {"45 4 * * *", Barkpark.Content.Workers.CancelledScheduleSweeper},
        # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation, Mondays
        # 03:00 UTC (the slot of the never-installed systemd timer it replaces).
        # A no-op tick unless `:public_read_rotation, enabled:` (below) is on.
        {"0 3 * * 1", Barkpark.Auth.PublicReadRotationWorker},
+       # task-ae4b82ef79867237 — API token expiry warnings at 14, 7 and 1 days
+       # ahead, daily. A no-op tick unless `:token_expiry_warnings, enabled:`
+       # (below) is on.
+       {"0 8 * * *", Barkpark.Auth.TokenExpiryWarningWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -555,12 +563,27 @@ config :barkpark, :paper_access_log_ttl_days, 90
 # Barkpark.Content.DeletedPayloadRetention.
 config :barkpark, :deleted_payload_retention, enabled: false, days: 90
 
+# task-44cfe871ea0edc30 — cancelled schedules (`scheduled_publishes` rows with
+# status `cancelled`) older than `days` are deleted; no other status is.
+# SHIPS DISABLED — the owner turns it on with
+# BARKPARK_CANCELLED_SCHEDULE_RETENTION=on (window:
+# BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS, see runtime.exs) after reading the
+# `mix barkpark.cancelled_schedules` census. Policy:
+# Barkpark.Content.CancelledScheduleRetention.
+config :barkpark, :cancelled_schedule_retention, enabled: false, days: 30
+
 # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation
 # (Barkpark.Auth.PublicReadRotationWorker). SHIPS DISABLED: switched on it mints
 # a new token every Monday and purges the previous one after 8 days, so every
 # consumer must be reached by the token file or VERCEL_DEPLOY_HOOK first. An
 # operator turns it on with BARKPARK_PUBLIC_READ_ROTATION=on (runtime.exs).
 config :barkpark, :public_read_rotation, enabled: false
+
+# task-ae4b82ef79867237 — API token expiry warnings
+# (Barkpark.Auth.TokenExpiryWarningWorker). SHIPS DISABLED so an existing
+# install does not start mailing: an operator turns it on with
+# BARKPARK_TOKEN_EXPIRY_WARNINGS=on (runtime.exs).
+config :barkpark, :token_expiry_warnings, enabled: false
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`

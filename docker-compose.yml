@@ -84,17 +84,31 @@ services:
       - BARKPARK_PLUGINS
       # Platform operators, DB statement wall, indx state (census 2026-09-03:
       # all four read in api/config/runtime.exs, none had a passthrough line)
+      # First owner on a fresh install (Accounts.BootstrapOwner)
+      - BARKPARK_BOOTSTRAP_OWNER_EMAIL
       - BARKPARK_DB_STATEMENT_TIMEOUT
       - BARKPARK_INDX_STATE_DIR
+      - BARKPARK_OPERATOR_FAIL_CLOSED
       - BARKPARK_OPERATOR_EMAILS
       - BARKPARK_OPERATOR_TOKEN_IDS
+      # Strict OIDC ID token checks for every connection (read in api/config/runtime.exs)
+      - BARKPARK_OIDC_STRICT_VALIDATION
+      # Sign-in policy on token paste and the Cloud handoff; Cloud handoff
+      # switch (both read in api/config/runtime.exs)
+      - BARKPARK_SIGN_IN_POLICY_ALL_ROUTES
+      - BARKPARK_CLOUD_HANDOFF
       # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
       - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
       # Deleted-payload retention, off unless set (owner ruling #33; read in api/config/runtime.exs)
       - BARKPARK_DELETED_PAYLOAD_RETENTION
       - BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS
+      # Cancelled-schedule purge, off unless set (task-44cfe871ea0edc30; read in api/config/runtime.exs)
+      - BARKPARK_CANCELLED_SCHEDULE_RETENTION
+      - BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS
       # Weekly public-read token rotation, off unless set (task-eaaf13ab768f34f6; read in api/config/runtime.exs)
       - BARKPARK_PUBLIC_READ_ROTATION
+      # API token expiry mails at 14, 7 and 1 days, off unless set (task-ae4b82ef79867237; read in api/config/runtime.exs)
+      - BARKPARK_TOKEN_EXPIRY_WARNINGS
       # Per-dataset schema ENFORCEMENT opt-in (comma-separated slugs or `all`; #16147,
       # read in api/config/runtime.exs). Unset = advise-only, the default.
       - BARKPARK_SCHEMA_ENFORCE_DATASETS
@@ -106,6 +120,9 @@ services:
       - BARKPARK_CANONICAL_SHAPE_WRITES
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
+      # Unset = the Barkpark Cloud list (barkpark.cloud, www, *.vercel.app). Set,
+      # this CSV replaces it in check_origin and DatasetCors.
+      - BARKPARK_ALWAYS_ALLOWED_ORIGINS
       - BARKPARK_DEPLOYMENT_DIGEST
       - BARKPARK_EXTRA_ORIGINS
       - BARKPARK_GIT_SHA
@@ -122,9 +139,13 @@ services:
       - BARKPARK_RATE_LIMIT_READ
       - BARKPARK_RATE_LIMIT_TOKENS
       - BARKPARK_RATE_LIMIT_WRITE
+      - BARKPARK_RETIRE_SSE_ON_SIGTERM
+      - BARKPARK_SCIM_DOCUMENTATION_URI
       - BARKPARK_SEED_ADMIN_TOKEN
       - BARKPARK_TRUSTED_PROXIES
       - DATABASE_SOCKET_DIR
+      - DATABASE_SSL
+      - DATABASE_SSL_CA_FILE
       - DEFAULT_CORS_ORIGINS
       - DNS_CLUSTER_QUERY
       - ECTO_IPV6
@@ -234,7 +255,13 @@ services:
       - BARKPARK_SITE_DEPLOY_CD
       - BARKPARK_SITE_TEMPLATE_DIR
       - VERCEL_DEPLOY_HOOK
-      # Self-update / upstream
+      # Self-update / upstream. A pinned image should set
+      # BARKPARK_SELF_UPDATE_CHECK=off and leave BARKPARK_SELF_UPDATE_APPLY unset.
+      # CHECK=off keeps the update Checker out of the tree, and the Checker is
+      # the only in-app caller of api.github.com for updates. APPLY is off
+      # unless it is "1"; off, the Runner refuses every trigger and runs no
+      # command. BARKPARK_SELF_UPDATE_CD and the BARKPARK_UPSTREAM_* vars have
+      # no effect when both are off.
       - BARKPARK_SELF_UPDATE_APPLY
       - BARKPARK_SELF_UPDATE_CD
       - BARKPARK_SELF_UPDATE_CHECK

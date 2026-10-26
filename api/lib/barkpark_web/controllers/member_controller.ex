@@ -263,7 +263,8 @@ defmodule BarkparkWeb.MemberController do
              token_id,
              conn.assigns[:api_token] || conn.assigns[:current_user]
            ),
-         {:ok, token} <- Auth.revoke_token(token_id) do
+         {:ok, token} <-
+           Auth.revoke_token(token_id, conn.assigns[:api_token] || conn.assigns[:current_user]) do
       json(conn, %{revoked: %{id: token.id, label: token.label, revoked_at: token.revoked_at}})
     else
       false ->
@@ -294,9 +295,10 @@ defmodule BarkparkWeb.MemberController do
   that holds a seat here and put the old one on a grace clock.
 
   Body/query: `grace_seconds` (default #{Auth.rotation_default_grace()}; `0`
-  revokes the old token now; max #{Auth.rotation_max_grace()}). Nothing else
-  is read — the successor copies the old token, so no permission or scope can
-  be requested.
+  revokes the old token now; max #{Auth.rotation_max_grace()}) and
+  `expires_in_days` (optional; the successor expires that many days from now
+  instead of at the old token's expiry). Nothing else is read — the successor
+  copies the old token, so no permission or scope can be requested.
 
   Same gate as `revoke_token/2`: the `:scoped_admin` pipeline, then the token
   must hold a seat in THIS workspace (404 otherwise). `Auth.rotate_token/3`
@@ -307,12 +309,14 @@ defmodule BarkparkWeb.MemberController do
   def rotate_token(conn, %{"id" => token_id} = params) do
     with %{id: ws_id, slug: ws_slug} <- conn.assigns[:current_workspace],
          {:ok, grace} <- fetch_grace(params),
+         {:ok, expires_in_days} <- fetch_expires_in_days(params),
          true <- Members.token_member?(ws_id, token_id),
          {:ok, {raw, successor, old}} <-
            Auth.rotate_token(token_id, conn.assigns.api_token,
              grace_seconds: grace,
              workspace_id: ws_id,
-             force: Map.get(params, "force") in [true, "true", "1"]
+             force: Map.get(params, "force") in [true, "true", "1"],
+             expires_in_days: expires_in_days
            ) do
       conn
       |> put_status(:created)
@@ -342,6 +346,16 @@ defmodule BarkparkWeb.MemberController do
           "give ONE of grace_seconds (integer), grace (90s / 30m / 24h / 7d) or now=true; " <>
             "the grace must be from 0 to #{Auth.rotation_max_grace()} seconds"
         )
+
+      {:error, :invalid_expiry} ->
+        unprocessable(conn, "expires_in_days must be a positive whole number of days")
+
+      {:error, {:expiry_exceeds_max, _, _} = reason} ->
+        ErrorResponse.emit_fields(conn, :unprocessable_entity, %{
+          code: "unprocessable",
+          message: Auth.TokenExpiry.message(reason),
+          details: Auth.TokenExpiry.details(reason)
+        })
 
       {:error, :not_rotatable} ->
         conflict(conn, "conflict", "token is revoked, expired, or not an api token")
@@ -414,6 +428,27 @@ defmodule BarkparkWeb.MemberController do
       [{"grace", n}] when is_integer(n) -> {:ok, n}
       [{"now", v}] when v in [true, "true", "1"] -> {:ok, 0}
       _ -> {:error, :invalid_grace}
+    end
+  end
+
+  # Absent means "keep the old expiry"; a JSON integer or a decimal string is a
+  # day count, and anything else is refused rather than ignored.
+  defp fetch_expires_in_days(params) do
+    case Map.get(params, "expires_in_days") do
+      v when v in [nil, ""] ->
+        {:ok, nil}
+
+      n when is_integer(n) ->
+        {:ok, n}
+
+      s when is_binary(s) ->
+        case Integer.parse(s) do
+          {n, ""} -> {:ok, n}
+          _ -> {:error, :invalid_expiry}
+        end
+
+      _ ->
+        {:error, :invalid_expiry}
     end
   end
 

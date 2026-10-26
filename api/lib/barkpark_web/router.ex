@@ -2522,6 +2522,13 @@ defmodule BarkparkWeb.Router do
     get("/status.json", StatusController, :show_json)
   end
 
+  # Container platform probes. No pipeline: no token lookup, no rate limit, so
+  # /livez never touches the database. Contract: docs/setup/SELF-HOST.md.
+  scope "/", BarkparkWeb do
+    get("/livez", StatusController, :live)
+    get("/readyz", StatusController, :ready)
+  end
+
   # Incident management — admin only.
   scope "/v1/status", BarkparkWeb do
     pipe_through([:api, :require_admin, :require_platform_operator])
@@ -3272,6 +3279,22 @@ defmodule BarkparkWeb.Router do
     post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
   end
 
+  # Organizations and their OIDC sign-in, set up without a server shell
+  # (task-25386fa77a664587). Instance-operator tier, like OrgAdminLive.
+  scope "/v1/admin/orgs", BarkparkWeb do
+    pipe_through([:api, :require_admin, :require_platform_operator])
+
+    post("/", OrgSsoController, :create)
+    put("/:org_slug/workspaces/:workspace_slug", OrgSsoController, :attach_workspace)
+    put("/:org_slug/auth-methods", OrgSsoController, :set_auth_methods)
+    post("/:org_slug/oidc", OrgSsoController, :create_oidc)
+    patch("/:org_slug/oidc", OrgSsoController, :update_oidc)
+    put("/:org_slug/oidc/client-secret", OrgSsoController, :rotate_secret)
+    delete("/:org_slug/oidc", OrgSsoController, :delete_oidc)
+    post("/:org_slug/domains", OrgSsoController, :add_domain)
+    post("/:org_slug/domains/:domain/verify", OrgSsoController, :verify_domain)
+  end
+
   # C083 trusted hold endpoint (Barkdown seal-admission contract): operator-gated,
   # owned by WriteAdmission.Holder. RefuseWhileHeld exempts this path so status
   # and reopen answer while held.
@@ -3998,12 +4021,16 @@ defmodule BarkparkWeb.Router do
   # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
   # membership at :read). An editing Studio needs the schema with its API token
   # or account-session bearer (task-b21d1b647d448142), without a shared service
-  # credential. The schema write and Structure admin gates below are unchanged.
+  # credential. The desk tree is read the same way: it names the same types and
+  # counts their documents, which a member token can already query
+  # (task-472c206eeff80777). PublicRead still refuses a public-read token here.
+  # The schema write gate below is unchanged.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token_or_member_login_session])
 
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
+    get("/v1/structure/:dataset", StructureController, :show)
   end
 
   # Personal members may inspect actions; API tokens retain the existing
@@ -4036,7 +4063,6 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
-    get("/v1/structure/:dataset", StructureController, :show)
     post("/v1/schemas/:dataset", SchemaController, :upsert)
     delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end
@@ -4117,6 +4143,9 @@ defmodule BarkparkWeb.Router do
     # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
     # `bp workspace set-locale <locale>` lands here.
     patch("/v1/workspace/locale", WorkspaceLocaleController, :update)
+    # Workspace time zone (task-ecaaa898e346dc73): a list preview's `|date`
+    # day. `bp workspace set-time-zone Europe/Oslo` lands here.
+    patch("/v1/workspace/time-zone", WorkspaceLocaleController, :update_time_zone)
 
     # Token inventory + revocation. `GET` answers "which credentials reach this
     # workspace"; `DELETE` kills one, gated on that token actually holding a

@@ -43,6 +43,12 @@ defmodule Barkpark.Auth.ApiToken do
     field :last_used_at, :utc_datetime_usec
     field :created_by, :string
 
+    # The last expiry warning step sent for this `expires_at`, in days ahead
+    # (14, 7 or 1). NULL = none sent. Written only by
+    # `Barkpark.Auth.TokenExpiryWarningWorker`; rotation sets 0 on the retiring
+    # token so its grace window does not warn.
+    field :expiry_warned_days, :integer
+
     # P5 scoped-share EDIT tokens: the one "ws/project/dataset" this token may
     # write, NULL for every normal token. The OPAQUE `share-edit-*` permission +
     # NO membership row keep the token inert everywhere except a live :edit-share

@@ -17,6 +17,7 @@ defmodule BarkparkWeb.SessionController do
   use BarkparkWeb, :controller
 
   alias Barkpark.Accounts.NotificationWithhold
+  alias BarkparkWeb.SessionIssuer
 
   @default_return_to "/studio"
 
@@ -58,6 +59,7 @@ defmodule BarkparkWeb.SessionController do
     trimmed = String.trim(raw_token)
 
     with {:ok, api_token} <- Barkpark.Auth.verify_token(trimmed),
+         nil <- SessionIssuer.policy_refusal(conn, token_owner(api_token), "api_token"),
          {:ok, session_id} <- Barkpark.Auth.create_token_session(trimmed, api_token) do
       conn
       |> configure_session(renew: true)
@@ -65,6 +67,9 @@ defmodule BarkparkWeb.SessionController do
       |> put_flash(:info, gettext("Signed in."))
       |> redirect(to: return_to)
     else
+      %Plug.Conn{} = refused ->
+        refused
+
       _ ->
         conn
         |> put_flash(:error, gettext("Invalid API token."))
@@ -77,6 +82,9 @@ defmodule BarkparkWeb.SessionController do
     |> put_flash(:error, gettext("Token is required."))
     |> render(:new, new_assigns(@default_return_to))
   end
+
+  defp token_owner(%{owner_user_id: id}) when is_binary(id), do: Barkpark.Accounts.get_user(id)
+  defp token_owner(_api_token), do: nil
 
   # Every render of :new carries the same assign set — error re-renders must
   # not lose the cloud button or the host line.
@@ -136,28 +144,32 @@ defmodule BarkparkWeb.SessionController do
         user = Barkpark.Sso.find_or_create_user(email)
         Barkpark.Auth.CloudSeat.ensure_default_membership(user, role)
 
-        {:ok, token} =
-          Barkpark.Accounts.create_user_session_token(
-            user,
-            BarkparkWeb.SessionIssuer.actor_opts(conn)
-          )
+        if refused = SessionIssuer.policy_refusal(conn, user, "cloud") do
+          refused
+        else
+          {:ok, token} =
+            Barkpark.Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
 
-        conn
-        |> configure_session(renew: true)
-        |> put_session("user_session", token)
-        |> put_flash(:info, gettext("Signed in."))
-        |> redirect(to: @default_return_to)
+          conn
+          |> configure_session(renew: true)
+          |> put_session("user_session", token)
+          |> put_flash(:info, gettext("Signed in."))
+          |> redirect(to: @default_return_to)
+        end
 
       {:ok, raw_api_token} when is_binary(raw_api_token) ->
-        case Barkpark.Auth.verify_token(raw_api_token) do
-          {:ok, api_token} ->
-            {:ok, session_id} = Barkpark.Auth.create_token_session(raw_api_token, api_token)
+        with {:ok, api_token} <- Barkpark.Auth.verify_token(raw_api_token),
+             nil <- SessionIssuer.policy_refusal(conn, token_owner(api_token), "api_token") do
+          {:ok, session_id} = Barkpark.Auth.create_token_session(raw_api_token, api_token)
 
-            conn
-            |> configure_session(renew: true)
-            |> put_session("api_token_session", session_id)
-            |> put_flash(:info, gettext("Signed in."))
-            |> redirect(to: @default_return_to)
+          conn
+          |> configure_session(renew: true)
+          |> put_session("api_token_session", session_id)
+          |> put_flash(:info, gettext("Signed in."))
+          |> redirect(to: @default_return_to)
+        else
+          %Plug.Conn{} = refused ->
+            refused
 
           {:error, :unauthorized} ->
             conn

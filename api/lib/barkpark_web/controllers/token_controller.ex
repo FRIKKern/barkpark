@@ -65,6 +65,8 @@ defmodule BarkparkWeb.TokenController do
 
       case Auth.create_token(raw, label, dataset, perms, ws_id, mint_opts) do
         {:ok, token} ->
+          Auth.audit_token_minted(token, conn.assigns[:api_token])
+
           # RECEIPT LAW (pds w40): BOTH branches of `Auth.create_token/5`
           # (auth.ex:302-320 → `Repo.insert/1`, or `insert_token_with_membership/3`
           # at auth.ex:434-445 whose transaction returns the inserted struct)

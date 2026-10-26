@@ -189,17 +189,17 @@ defmodule Barkpark.TasksEdgesTest do
       {:ok, _} = Tasks.add_dep(child.id, parent.id)
       {:ok, _} = Tasks.add_dep(child.id, other_parent.id)
 
-      assert :ok = Tasks.remove_dep(child.id, parent.id, :blocks)
+      assert {:ok, 1} = Tasks.remove_dep(child.id, parent.id, :blocks)
 
       remaining_ids = Tasks.dependencies(child.id) |> Enum.map(& &1.id)
       assert remaining_ids == [other_parent.id]
     end
 
-    test "removing an edge that doesn't exist is a no-op (still :ok)", %{scope: scope} do
+    test "removing an edge that does not exist removes nothing", %{scope: scope} do
       a = mk_task!("rem-ghost-a", scope)
       b = mk_task!("rem-ghost-b", scope)
 
-      assert :ok = Tasks.remove_dep(a.id, b.id, :blocks)
+      assert {:ok, 0} = Tasks.remove_dep(a.id, b.id, :blocks)
     end
 
     test "remove_dep is kind-specific — the other kind survives", %{scope: scope} do
@@ -209,7 +209,7 @@ defmodule Barkpark.TasksEdgesTest do
       {:ok, _} = Tasks.add_dep(child.id, parent.id, :blocks)
       {:ok, _} = Tasks.add_dep(child.id, parent.id, :"discovered-from")
 
-      :ok = Tasks.remove_dep(child.id, parent.id, :blocks)
+      {:ok, 1} = Tasks.remove_dep(child.id, parent.id, :blocks)
 
       kinds =
         Tasks.edges(child.id, direction: :outbound)

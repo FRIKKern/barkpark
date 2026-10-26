@@ -239,11 +239,14 @@ defmodule Barkpark.Tasks do
     do: Fence.add_dep(child_id, parent_id, kind, caller_token_id)
 
   @doc """
-  Remove the `(child_id, parent_id, kind)` edge.
-  See `Barkpark.Tasks.Edges.remove_dep/3`.
+  Remove the `(child, parent, kind)` edge; `{:ok, removed}` counts the rows
+  deleted. Routes through `Barkpark.Tasks.Fence.remove_dep/4`, which fences an
+  `in_progress` dependent exactly as `add_dep/4` does.
   """
-  @spec remove_dep(binary(), binary(), atom() | String.t()) :: :ok
-  defdelegate remove_dep(child_id, parent_id, kind), to: Edges
+  @spec remove_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
+          {:ok, non_neg_integer()}
+  def remove_dep(child, parent, kind \\ :blocks, caller_token_id \\ nil),
+    do: Fence.remove_dep(child, parent, kind, caller_token_id)
 
   @doc """
   The documents `task_id` depends on — the blockers.

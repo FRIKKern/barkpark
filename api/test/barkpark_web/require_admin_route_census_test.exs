@@ -330,6 +330,30 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
          "a permit. So there is deliberately NO tenant re-derivation to name here: " <>
          "confining it to the caller's own workspace would BE the defect. RULING row 1."},
 
+    # ── /v1/admin/orgs — SSO set-up without a shell (task-25386fa77a664587) ──
+    # An organization spans workspaces and its identity connection decides who
+    # signs in to all of them, so these are instance-operator primitives, the
+    # same tier as OrgAdminLive.
+    {:post, "/v1/admin/orgs"} =>
+      {:instance_global, @operator_guard, "Operator: creates an organization."},
+    {:put, "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug"} =>
+      {:instance_global, @operator_guard, "Operator: attaches a workspace to an organization."},
+    {:put, "/v1/admin/orgs/:org_slug/auth-methods"} =>
+      {:instance_global, @operator_guard,
+       "Operator: sets an organization's allowed sign-in methods."},
+    {:post, "/v1/admin/orgs/:org_slug/oidc"} =>
+      {:instance_global, @operator_guard, "Operator: creates an organization's OIDC connection."},
+    {:patch, "/v1/admin/orgs/:org_slug/oidc"} =>
+      {:instance_global, @operator_guard, "Operator: updates an organization's OIDC connection."},
+    {:put, "/v1/admin/orgs/:org_slug/oidc/client-secret"} =>
+      {:instance_global, @operator_guard, "Operator: rotates an OIDC client secret."},
+    {:delete, "/v1/admin/orgs/:org_slug/oidc"} =>
+      {:instance_global, @operator_guard, "Operator: deletes an organization's OIDC connection."},
+    {:post, "/v1/admin/orgs/:org_slug/domains"} =>
+      {:instance_global, @operator_guard, "Operator: claims an SSO routing domain."},
+    {:post, "/v1/admin/orgs/:org_slug/domains/:domain/verify"} =>
+      {:instance_global, @operator_guard, "Operator: verifies an SSO routing domain."},
+
     # ── /v1/instance — operator reads moved onto :require_admin by #14793 ──
     # (task-d7ac954aa57aa522). The census merged the same hour without them,
     # so "every gated route carries a verdict" has been red on main since.
