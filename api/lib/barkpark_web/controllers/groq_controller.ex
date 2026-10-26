@@ -46,13 +46,14 @@ defmodule BarkparkWeb.GroqController do
           perspective: resolve_perspective(conn, params),
           scope_opts: scope_opts(conn),
           identity: identity(conn),
-          project_id: conn.path_params["project_slug"]
+          project_id: conn.path_params["project_slug"],
+          source_map: source_map_mode(params)
         )
 
       case result do
-        {:ok, %{result_json: result_json, sync_tags: tags}} ->
+        {:ok, %{result_json: result_json, sync_tags: tags} = out} ->
           ms = div(System.monotonic_time(:microsecond) - t0, 1000)
-          respond(conn, params, query, result_json, tags, ms)
+          respond(conn, params, query, result_json, tags, ms, out[:source_map])
 
         {:error, {:parse, error}} ->
           parse_error(conn, query, error)
@@ -267,18 +268,42 @@ defmodule BarkparkWeb.GroqController do
     end
   end
 
-  defp respond(conn, params, query, result_json, tags, ms) do
+  defp respond(conn, params, query, result_json, tags, ms, source_map) do
     return_query? = params["returnQuery"] not in ["false", false]
 
     result = Jason.Fragment.new(result_json)
 
     # Literal maps, so the /v1/data envelope convention can read them
     # (response_envelope_convention_test.exs): `result` plus Sanity's
-    # `query`, `ms` and `syncTags`.
-    if return_query? do
-      json(conn, %{query: query, result: result, ms: ms, syncTags: tags})
-    else
-      json(conn, %{result: result, ms: ms, syncTags: tags})
+    # `query`, `ms` and `syncTags`, and `resultSourceMap` when asked.
+    cond do
+      source_map && return_query? ->
+        json(conn, %{
+          query: query,
+          result: result,
+          ms: ms,
+          syncTags: tags,
+          resultSourceMap: source_map
+        })
+
+      source_map ->
+        json(conn, %{result: result, ms: ms, syncTags: tags, resultSourceMap: source_map})
+
+      return_query? ->
+        json(conn, %{query: query, result: result, ms: ms, syncTags: tags})
+
+      true ->
+        json(conn, %{result: result, ms: ms, syncTags: tags})
+    end
+  end
+
+  # `resultSourceMap=true` or `withKeyArraySelector` (task-640e8371b8e468ce),
+  # in the query string or a POST body; anything else asks for no map.
+  defp source_map_mode(params) do
+    case params["resultSourceMap"] do
+      v when v in ["true", true] -> :plain
+      "withKeyArraySelector" -> :keyed
+      _ -> nil
     end
   end
 
