@@ -58,15 +58,15 @@ defmodule BarkparkWeb.MutateController do
     end
   end
 
+  def mutate(conn, _params) do
+    respond_with_error(conn, :malformed)
+  end
+
   # The Sanity-shaped route (`/v<apiVersion>/data/mutate`, which carries
   # `api_version`) writes exactly the ids it names, as Sanity does
   # (`Content.Mutations`' exact-id section). `/v1` keeps its semantics.
   defp exact_ids(%Plug.Conn{path_params: %{"api_version" => _}}), do: [exact_ids: true]
   defp exact_ids(_conn), do: []
-
-  def mutate(conn, _params) do
-    respond_with_error(conn, :malformed)
-  end
 
   # A READ seat reached here through RequireWritePermission's reader arm: the
   # whole batch must be writes its schemas open to readers, checked before
