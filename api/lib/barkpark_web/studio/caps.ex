@@ -198,7 +198,8 @@ defmodule BarkparkWeb.Studio.Caps do
   # Publish-side writes (task-348a4fbe24feede6): they change what readers see,
   # so on top of `:write` the seat must not be draft-only (`contributor`).
   # Same gate, one more question; see `gate/3`.
-  @publish_events ~w(publish unpublish confirm-unpublish paper-publish)
+  # `paper-save-master` publishes the new master on save (task-a6307f0d04cf513d).
+  @publish_events ~w(publish unpublish confirm-unpublish paper-publish paper-save-master)
 
   @admin_events ~w(
     shares-open shares-add shares-remove
@@ -224,7 +225,7 @@ defmodule BarkparkWeb.Studio.Caps do
     access-revoke
     pt-block-open pt-block-insert object-dialog-change object-dialog-array-op object-dialog-save
     sidebar-description-change sidebar-label-add
-    paper-save-master paper-insert-master paper-detach-master paper-pin-master
+    paper-insert-master paper-detach-master paper-pin-master
   )
 
   @doc """
