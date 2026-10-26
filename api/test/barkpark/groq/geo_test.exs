@@ -44,13 +44,15 @@ defmodule Barkpark.Groq.GeoTest do
     assert q("geo::distance(geo::latLng(90, 0), geo::latLng(-90, 0))") == 20_037_508.342789244
     assert q("geo::distance(geo::latLng(0, 0), geo::latLng(0, 0))") == 0
 
-    # Sanity answers ...688; this lands two ulps off (1e-10 m).
+    # Off-axis answers can sit an ulp or two from Sanity's, and the libm
+    # trig differs between macOS and Linux, so these match to a micrometre.
     assert_in_delta q("geo::distance(geo::latLng(59.91, 10.75), geo::latLng(60.39, 5.32))"),
                     305_476.8338102688,
                     1.0e-6
 
-    assert q("geo::distance(geo::latLng(59.91, 10.75), geo::latLng(-33.86, 151.2))") ==
-             15_966_242.858284688
+    assert_in_delta q("geo::distance(geo::latLng(59.91, 10.75), geo::latLng(-33.86, 151.2))"),
+                    15_966_242.858284688,
+                    1.0e-6
   end
 
   test "geo::distance takes geopoint objects and GeoJSON Points" do
