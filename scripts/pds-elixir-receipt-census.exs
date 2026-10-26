@@ -1297,6 +1297,9 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
+    # task-c6cbf346a07ff01e: the dated (Sanity) twin of the mutate door above, the same
+    # action and the same receipt; only Sanity's exact-id semantics differ.
+    {:post, "/w/:workspace_slug/p/:project_slug/v:api_version/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/presence/:dataset/focus", "BarkparkWeb.PresenceController", :focus, :status_only_receipt},
     # task-936472b77285df5b — leave's own answer (`%{left: true, sessionId: sid}`)
     # is built from the REQUEST's own sessionId echoed back plus a bare literal,
