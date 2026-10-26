@@ -15,6 +15,13 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
   THE FIX. `Content.collect_corpus_documents/3` — ONE bounded `DISTINCT ON`
   read per ACL class (at most two: owner-scoped and not).
 
+  THE MEMORY BOUND (task-6e1007bdd39036c5). One read of the whole corpus
+  held every document at once: gyl's 18,022 products took ~3.2 GB and the
+  OOM killer stopped the service 88 times. A rebuild now reads each class's
+  ids (`collect_corpus_slugs/3`, no `content`) and then one page of
+  documents at a time by id, rebuilding each page before reading the next.
+  No read re-sorts the corpus, and the projector never holds more than a page.
+
   Both arms below drive the REAL `Content` against a REAL corpus. The CONTROL
   is not a story about the old code: `WalkOnlyContent` is a content seam that
   exports `collect_all_documents/3` and NOT `collect_corpus_documents/3`, so
@@ -43,9 +50,13 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
 
   # Counts docs only; performs no writes, so the only reads a rebuild issues
   # are the collection reads (plus the constant per-type schema/hydrate reads).
+  # Reports each batch's size to the test process when one is listening.
   defmodule FakeProjectorOk do
     @moduledoc false
-    def rebuild_scope(_scope, docs, _opts), do: {:ok, %{added: length(docs), deleted: 0}}
+    def rebuild_scope(_scope, docs, _opts) do
+      if pid = Process.whereis(:bounded_collect_batches), do: send(pid, {:batch, length(docs)})
+      {:ok, %{added: length(docs), deleted: 0}}
+    end
   end
 
   # Captures the documents the collector handed the projector and projects the
@@ -141,6 +152,23 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
     :counters.get(counter, 1)
   end
 
+  defp drain_batches(acc \\ []) do
+    receive do
+      {:batch, n} -> drain_batches([n | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  # A paged rebuild projects once per page; the walk once.
+  defp drain_edges(calls \\ 0, acc \\ []) do
+    receive do
+      {:edges, edges} -> drain_edges(calls + 1, acc ++ edges)
+    after
+      0 -> {calls, acc}
+    end
+  end
+
   defp rebuild(args) do
     perform_job(
       ProjectorWorker,
@@ -158,48 +186,30 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
     )
   end
 
-  describe "c0 — checkout cost is bounded by the ACL classes, not by the corpus" do
-    test "the bounded read holds its count as the corpus grows; the page walk does not" do
-      # One page's worth is 5 (page_size above). Seed past it, twice.
+  describe "c0 — a rebuild holds one page, and no read re-sorts the corpus" do
+    test "every projector batch fits the page; the page walk hands over the whole corpus" do
+      Process.register(self(), :bounded_collect_batches)
+
       publish!("author", "auth-1")
-      seed_articles!(1..8)
+      seed_articles!(1..16)
 
-      small_bounded = count_queries(fn -> assert :ok = rebuild(%{}) end)
+      queries = count_queries(fn -> assert :ok = rebuild(%{}) end)
+      paged = drain_batches()
 
-      small_walk =
-        count_queries(fn -> assert :ok = rebuild(%{"content" => inspect(WalkOnlyContent)}) end)
+      assert :ok = rebuild(%{"content" => inspect(WalkOnlyContent)})
+      walk = drain_batches()
 
-      # Double the corpus. Same types, same schemas, same page size.
-      seed_articles!(9..16)
-
-      large_bounded = count_queries(fn -> assert :ok = rebuild(%{}) end)
-
-      large_walk =
-        count_queries(fn -> assert :ok = rebuild(%{"content" => inspect(WalkOnlyContent)}) end)
-
-      # The numbers themselves are the criterion's evidence; print them on
-      # demand rather than making a reader re-derive them from a diff.
       if System.get_env("BOUNDED_COLLECT_COUNTS") do
-        IO.puts(
-          "\ncorpus 9 docs:  bounded=#{small_bounded} walk=#{small_walk}" <>
-            "\ncorpus 17 docs: bounded=#{large_bounded} walk=#{large_walk}"
-        )
+        IO.puts("\nbatches paged=#{inspect(paged)} walk=#{inspect(walk)} queries=#{queries}")
       end
 
-      # The CONTROL first: unless the old walk's count actually grows, this
-      # test measures nothing and its green arm is vacuous.
-      assert large_walk > small_walk,
-             "CONTROL FAILED: the OFFSET page walk did not get more expensive when the " <>
-               "corpus doubled (#{small_walk} -> #{large_walk}) — the counter is not " <>
-               "measuring the collection, so the bounded arm below proves nothing"
+      # The CONTROL: the whole-corpus collector hands every doc over at once,
+      # so the page bound below is a finding, not a fixture artefact.
+      assert walk == [17], "CONTROL FAILED: the walk handed over #{inspect(walk)}"
 
-      assert large_bounded == small_bounded,
-             "the bounded read must cost the SAME number of checkouts at 17 docs as at 9 " <>
-               "(#{small_bounded} -> #{large_bounded}); a growing count means the rebuild " <>
-               "is still paging"
-
-      assert large_bounded < large_walk,
-             "bounded=#{large_bounded} walk=#{large_walk}"
+      assert Enum.sum(paged) == 17, "the pages must cover the corpus: #{inspect(paged)}"
+      assert Enum.all?(paged, &(&1 <= 5)), "a batch exceeded page_size 5: #{inspect(paged)}"
+      assert length(paged) == 4, "17 docs at page_size 5 is four pages: #{inspect(paged)}"
     end
   end
 
@@ -230,29 +240,25 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerBoundedCollectTest do
           @dataset
         )
 
-      bounded_q =
-        count_queries(fn -> assert :ok = rebuild(%{"projector" => inspect(CaptureProjector)}) end)
+      assert :ok = rebuild(%{"projector" => inspect(CaptureProjector)})
 
-      assert_received {:edges, bounded_edges}
+      {bounded_calls, bounded_edges} = drain_edges()
 
-      walk_q =
-        count_queries(fn ->
-          assert :ok =
-                   rebuild(%{
-                     "projector" => inspect(CaptureProjector),
-                     "content" => inspect(WalkOnlyContent)
-                   })
-        end)
+      assert :ok =
+               rebuild(%{
+                 "projector" => inspect(CaptureProjector),
+                 "content" => inspect(WalkOnlyContent)
+               })
 
-      assert_received {:edges, walk_edges}
+      {walk_calls, walk_edges} = drain_edges()
 
       # PRECONDITION, not decoration: the equality below is only a FINDING if
       # the two arms really ran DIFFERENT collectors. If both took the page
       # walk (say a future change makes `corpus_collector?/1` always false),
       # the term-equality is trivially true and this test measures nothing.
-      assert bounded_q < walk_q,
-             "the two arms ran the same collector (bounded=#{bounded_q} walk=#{walk_q}) — " <>
-               "the edge comparison below would be vacuous"
+      assert bounded_calls > 1 and walk_calls == 1,
+             "the two arms ran the same collector (paged calls=#{bounded_calls}, " <>
+               "walk calls=#{walk_calls}) — the edge comparison below would be vacuous"
 
       sort = &Enum.sort_by(&1, fn e -> {e[:from_id], e[:to_id], e[:kind]} end)
 
