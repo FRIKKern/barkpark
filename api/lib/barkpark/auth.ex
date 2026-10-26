@@ -2,6 +2,7 @@ defmodule Barkpark.Auth do
   @moduledoc "Context for API token authentication."
 
   import Ecto.Query
+  alias Barkpark.Accounts.User
   alias Barkpark.Audit
   alias Barkpark.Repo
   alias Barkpark.Auth.ApiToken
@@ -464,12 +465,17 @@ defmodule Barkpark.Auth do
   @doc """
   Revoke an API token — sets `revoked_at` to now so `verify_token/1` rejects
   it without a DB delete. Accepts an `ApiToken` struct or a token id. Idempotent
-  on an already-revoked token (re-stamps `revoked_at`). The revocation primitive
-  — no HTTP route is wired yet.
+  on an already-revoked token (re-stamps `revoked_at`).
+
+  `actor` is the principal that asked for the revoke (an `%ApiToken{}` or a
+  `%User{}`); the `token_revoked` audit row names it. `nil` records
+  `actor_type: "system"`, which is right for sweeps and retire jobs.
   """
-  @spec revoke_token(ApiToken.t() | binary()) ::
+  @spec revoke_token(ApiToken.t() | binary(), ApiToken.t() | User.t() | nil) ::
           {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def revoke_token(%ApiToken{} = token) do
+  def revoke_token(token, actor \\ nil)
+
+  def revoke_token(%ApiToken{} = token, actor) do
     token
     |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
     |> Repo.update()
@@ -478,16 +484,17 @@ defmodule Barkpark.Auth do
         # A revoke is a standing-credential lifecycle event — audit it. `subject`
         # is the token id; `owner_user_id` distinguishes a user PAT from a
         # machine/share token for the audit reader.
-        Audit.emit(%{
-          category: "token",
-          action: "token_revoked",
-          subject: revoked.id,
-          actor_type: "system",
-          metadata: %{
-            "owner_user_id" => revoked.owner_user_id,
-            "share_scope" => revoked.share_scope
-          }
-        })
+        Audit.emit(
+          Map.merge(audit_actor(actor), %{
+            category: "token",
+            action: "token_revoked",
+            subject: revoked.id,
+            metadata: %{
+              "owner_user_id" => revoked.owner_user_id,
+              "share_scope" => revoked.share_scope
+            }
+          })
+        )
 
         broadcast_socket_teardown(revoked)
 
@@ -498,7 +505,7 @@ defmodule Barkpark.Auth do
     end
   end
 
-  def revoke_token(token_id) when is_binary(token_id) do
+  def revoke_token(token_id, actor) when is_binary(token_id) do
     # Guard the UUID cast: the id column is :binary_id, so a non-UUID token_id
     # (e.g. from `DELETE /v1/shares/tokens/garbage`) would raise
     # Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that struct to 400;
@@ -511,10 +518,16 @@ defmodule Barkpark.Auth do
       uuid ->
         case Repo.get(ApiToken, uuid) do
           nil -> {:error, :not_found}
-          token -> revoke_token(token)
+          token -> revoke_token(token, actor)
         end
     end
   end
+
+  # The audit actor fields for a token lifecycle row. A token or a user names
+  # itself; no actor is the instance acting on its own (a sweep or a job).
+  defp audit_actor(%ApiToken{id: id}), do: %{actor_type: "api_token", actor_id: id}
+  defp audit_actor(%User{id: id}), do: %{actor_type: "user", actor_id: id}
+  defp audit_actor(_), do: %{actor_type: "system"}
 
   # Revocation has to reach ALREADY-OPEN sockets, not just the next HTTP
   # request. `verify_token/1`'s WHERE clause is re-run per request, so the HTTP
@@ -910,7 +923,10 @@ defmodule Barkpark.Auth do
              {:ok, successor} <- insert_successor(old, raw, forced_cloud?),
              :ok <- copy_seats(seats, successor.id),
              retire_at = retire_at(old, now, grace),
-             {:ok, old} <- old |> Ecto.Changeset.change(expires_at: retire_at) |> Repo.update(),
+             {:ok, old} <-
+               old
+               |> Ecto.Changeset.change(expires_at: retire_at, expiry_warned_days: 0)
+               |> Repo.update(),
              {:ok, _job} <- enqueue_retire(old.id, retire_at),
              {:ok, _event} <-
                audit_rotation(old, successor, actor, workspace_id, retire_at, forced_cloud?) do
@@ -1608,7 +1624,7 @@ defmodule Barkpark.Auth do
 
       Repo.transaction(fn ->
         with {:ok, token} <- create_token(raw, label, dataset, perms, workspace_id, mint_opts),
-             {:ok, _event} <- audit_delegated_mint(token, actor) do
+             {:ok, _event} <- audit_token_minted(token, actor) do
           token
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -1645,20 +1661,28 @@ defmodule Barkpark.Auth do
     end
   end
 
-  defp audit_delegated_mint(%ApiToken{} = token, %ApiToken{} = actor) do
-    Audit.emit(%{
-      category: "token",
-      action: "token_minted",
-      subject: token.id,
-      actor_type: "api_token",
-      actor_id: actor.id,
-      workspace_id: token.workspace_id,
-      metadata: %{
-        "label" => token.label,
-        "permissions" => token.permissions,
-        "expires_at" => token.expires_at && DateTime.to_iso8601(token.expires_at)
-      }
-    })
+  @doc """
+  Write the `token_minted` audit row for `token`, naming `actor` (an
+  `%ApiToken{}`, a `%User{}`, or `nil` for the instance itself). Ids, label,
+  permissions and expiry only, never the secret. The delegated, read, chat and
+  fleet-support mints call this.
+  """
+  @spec audit_token_minted(ApiToken.t(), ApiToken.t() | User.t() | nil) ::
+          {:ok, term()} | {:error, term()}
+  def audit_token_minted(%ApiToken{} = token, actor) do
+    Audit.emit(
+      Map.merge(audit_actor(actor), %{
+        category: "token",
+        action: "token_minted",
+        subject: token.id,
+        workspace_id: token.workspace_id,
+        metadata: %{
+          "label" => token.label,
+          "permissions" => token.permissions,
+          "expires_at" => token.expires_at && DateTime.to_iso8601(token.expires_at)
+        }
+      })
+    )
   end
 
   # ── Connectors: the per-install chat token (D36/D48) ───────────────────────
@@ -1709,21 +1733,31 @@ defmodule Barkpark.Auth do
   Fail-closed on a missing workspace: a `chat` token with a NULL `workspace_id`
   is precisely the tenant-less operator credential this whole wave exists to
   delete, so it is an error, never a Default-workspace fallback.
+
+  `actor` (an `%ApiToken{}`, a `%User{}` or `nil`) is named on the
+  `token_minted` audit row.
   """
-  @spec create_chat_token(String.t(), String.t(), binary()) ::
+  @spec create_chat_token(String.t(), String.t(), binary(), ApiToken.t() | User.t() | nil) ::
           {:ok, binary(), ApiToken.t()} | {:error, :workspace_required | term()}
-  def create_chat_token(label, dataset, workspace_id)
+  def create_chat_token(label, dataset, workspace_id, actor \\ nil)
+
+  def create_chat_token(label, dataset, workspace_id, actor)
       when is_binary(label) and is_binary(dataset) and is_binary(workspace_id) and
              workspace_id != "" do
     raw = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
 
     case create_token(raw, label, dataset, @chat_permissions, workspace_id) do
-      {:ok, %ApiToken{} = token} -> {:ok, raw, token}
-      {:error, reason} -> {:error, reason}
+      {:ok, %ApiToken{} = token} ->
+        audit_token_minted(token, actor)
+        {:ok, raw, token}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
-  def create_chat_token(_label, _dataset, _workspace_id), do: {:error, :workspace_required}
+  def create_chat_token(_label, _dataset, _workspace_id, _actor),
+    do: {:error, :workspace_required}
 
   @doc """
   Every LIVE (non-revoked) api_token in `workspace_id` carrying `label` — the

@@ -676,6 +676,12 @@ if System.get_env("BARKPARK_PUBLIC_READ_ROTATION") in ~w(1 true yes on) do
   config :barkpark, :public_read_rotation, enabled: true
 end
 
+# API token expiry warnings (task-ae4b82ef79867237). Off unless switched on
+# here; see config.exs.
+if System.get_env("BARKPARK_TOKEN_EXPIRY_WARNINGS") in ~w(1 true yes on) do
+  config :barkpark, :token_expiry_warnings, enabled: true
+end
+
 # Deleted-payload retention (owner ruling #33). Off unless switched on here;
 # the window keeps config.exs's 90 days unless overridden. Same
 # positive-int-or-warn shape as the access-log window above.

@@ -107,6 +107,8 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
         case Auth.create_token(raw, label, "production", @support_permissions, workspace_id) do
           {:ok, token} ->
+            Auth.audit_token_minted(token, conn.assigns[:api_token])
+
             conn
             |> put_status(:created)
             |> json(%{token: raw, token_id: token.id, name: name})
@@ -148,7 +150,7 @@ defmodule BarkparkWeb.FleetSupportTokenController do
         # Hand the RESOLVED row to the primitive (its `%ApiToken{}` arm), not the
         # raw id — a re-lookup by id would reopen the unscoped resolution this
         # guard exists to close.
-        case Auth.revoke_token(target) do
+        case Auth.revoke_token(target, conn.assigns[:api_token]) do
           {:ok, revoked} ->
             json(conn, %{token_id: revoked.id, revoked: true})
 

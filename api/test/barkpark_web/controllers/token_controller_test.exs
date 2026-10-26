@@ -142,6 +142,19 @@ defmodule BarkparkWeb.TokenControllerTest do
   end
 
   describe "scoped-admin gate" do
+    test "a mint writes a token_minted audit row naming the admin token", %{
+      conn: conn,
+      admin_raw: raw
+    } do
+      {:ok, admin} = Auth.verify_token(raw)
+      body = conn |> mint(raw, %{"label" => "audited"}) |> json_response(201)
+
+      ev =
+        Barkpark.Repo.get_by!(Barkpark.Audit.Event, action: "token_minted", subject: body["id"])
+
+      assert {ev.actor_type, ev.actor_id} == {"api_token", admin.id}
+    end
+
     test "a member of the workspace (global admin perms) → 403", %{conn: conn, member_raw: raw} do
       resp = mint(conn, raw, %{"label" => "x", "permissions" => ["public-read"]})
       assert resp.status == 403
