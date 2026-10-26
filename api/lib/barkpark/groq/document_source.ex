@@ -1965,11 +1965,16 @@ defmodule Barkpark.Groq.DocumentSource do
   # Every readable declared position that may hold a bare id, as
   # `{type, [{name, array?}]}`: a reference field, an array of references,
   # inside objects and object arrays. `types` nil means every type.
+  # The scope's schemas come from ONE read (scope_schemas/1), not one lookup
+  # per type: a typeless references() over a 30-type dataset would otherwise
+  # cost 30 round trips. A type the scope read does not hold (none should)
+  # falls back to schema_for/2.
   defp ref_positions(state, types) do
-    types = types || all_type_names(state)
+    by_name = scope_schemas(state)
+    types = types || Map.keys(by_name)
 
     for type <- types,
-        schema = schema_for(type, state),
+        schema = Map.get(by_name, type) || schema_for(type, state),
         schema != nil,
         path <- ref_paths(schema, schema.fields || [], [], state.caller_context),
         do: {type, path}
@@ -2023,15 +2028,18 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
-  defp all_type_names(state) do
-    case Process.get({:groq_src_type_names, state.dataset}) do
+  # Every schema in this source's scope, by name, read once per query.
+  defp scope_schemas(state) do
+    case Process.get({:groq_src_scope_schemas, state.dataset}) do
       nil ->
-        names = state.dataset |> Barkpark.Content.list_schemas(state.opts) |> Enum.map(& &1.name)
-        Process.put({:groq_src_type_names, state.dataset}, names)
-        names
+        by_name =
+          state.dataset |> Barkpark.Content.list_schemas(state.opts) |> Map.new(&{&1.name, &1})
 
-      names ->
-        names
+        Process.put({:groq_src_scope_schemas, state.dataset}, by_name)
+        by_name
+
+      by_name ->
+        by_name
     end
   end
 

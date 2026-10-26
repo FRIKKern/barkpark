@@ -75,7 +75,7 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
     # A read-only member token: not an admin, so `hidden` is redacted for it.
     token = "groq-compat-#{System.unique_integer([:positive])}"
     {:ok, _} = Auth.create_token(token, "compat", @dataset, ["read"], ws.id)
-    {:ok, token: token}
+    {:ok, token: token, scope: scope}
   end
 
   defp q(conn, token, query) do
@@ -135,5 +135,59 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
     assert q(conn, t, ~s|*[_id == "p4"][0].hidden._ref|) == nil
     refute "p4" in q(conn, t, ~s|*[_type == "post" && references("alan")]._id|)
     assert q(conn, t, ~s|*[_type == "post" && hidden._ref == "alan"]._id|) == []
+  end
+
+  # run-perf on #24083: a typeless references() read each type's schema on
+  # its own, one round trip per type. The scope's schemas are now one read, so
+  # adding types adds no statements.
+  test "a typeless references() reads the scope's schemas once, whatever the type count",
+       %{conn: conn, token: t, scope: scope} do
+    query = ~s|count(*[references("alan")])|
+    before = count_queries(fn -> q(conn, t, query) end)
+
+    for i <- 1..6 do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "extra#{i}",
+            "title" => "Extra #{i}",
+            "visibility" => "public",
+            "fields" => [%{"name" => "who", "type" => "reference", "refType" => "author"}]
+          },
+          @dataset,
+          scope
+        )
+    end
+
+    assert count_queries(fn -> q(conn, t, query) end) == before
+  end
+
+  defp count_queries(fun) do
+    ref = make_ref()
+    parent = self()
+    handler = "groq-compat-count-#{inspect(ref)}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _, _, _, _ -> send(parent, {ref, :q}) end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+
+    drain(ref, 0)
+  end
+
+  defp drain(ref, n) do
+    receive do
+      {^ref, :q} -> drain(ref, n + 1)
+    after
+      0 -> n
+    end
   end
 end
