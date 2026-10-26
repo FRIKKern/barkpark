@@ -8,6 +8,8 @@ defmodule Barkpark.Search.HitPreview do
 
   Each hit gains `_preview: %{"subtitle" => …, "description" => …, "media" => …}`
   (keys without a value are left out; a type with no declaration gets none).
+  A media alternative that picks an icon by a stored value gives `"icon"`, the
+  icon's name, in place of `"media"`.
   The hit is the caller's rendered envelope, so a field the caller may not read
   is already gone. The referenced documents a preview reads through load in one
   scoped read and are rendered for the same caller, so they lose the same
@@ -61,14 +63,21 @@ defmodule Barkpark.Search.HitPreview do
 
   defp preview(spec, doc, deref) do
     for {key, s} <- spec,
-        value = text(key, s, doc, deref),
+        {out, value} = text(key, s, doc, deref),
         is_binary(value),
         into: %{},
-        do: {key, value}
+        do: {out, value}
   end
 
-  defp text("media", spec, doc, deref), do: PreviewText.media(spec, doc, deref)
-  defp text(_key, spec, doc, deref), do: PreviewText.format(spec, doc, deref)
+  defp text("media", spec, doc, deref) do
+    case PreviewText.media_item(spec, doc, deref) do
+      {:icon, name} -> {"icon", name}
+      {:url, url} -> {"media", url}
+      nil -> {"media", nil}
+    end
+  end
+
+  defp text(key, spec, doc, deref), do: {key, PreviewText.format(spec, doc, deref)}
 
   defp specs(%{list_preview: %{} = lp}), do: Map.take(lp, @keys) |> reject_nil()
   defp specs(%{"list_preview" => %{} = lp}), do: Map.take(lp, @keys) |> reject_nil()

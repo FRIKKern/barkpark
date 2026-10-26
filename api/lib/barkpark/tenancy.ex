@@ -853,6 +853,65 @@ defmodule Barkpark.Tenancy do
 
   defp do_set_workspace_locale(_workspace_or_id, _locale), do: {:error, :not_found}
 
+  # ── Workspace time zone (task-ecaaa898e346dc73) ────────────────────────────
+  #
+  # The IANA zone a workspace's editors read dates in (`"Europe/Oslo"`), under
+  # `settings["time_zone"]`. A list preview's `|date` shows a date-time as the
+  # day it is in this zone, as Sanity does for an editor in that zone. Unset,
+  # each browser uses its own zone. Barkpark has no time zone database, so the
+  # server checks the name's shape only and the browser converts.
+
+  @time_zone_shape ~r/\A(?:UTC|[A-Z][A-Za-z_-]*(?:\/[A-Za-z0-9_+-]+){1,2})\z/
+
+  @doc "True for a string shaped like an IANA zone name (`UTC`, `Europe/Oslo`)."
+  @spec time_zone_name?(term()) :: boolean()
+  def time_zone_name?(zone) when is_binary(zone), do: Regex.match?(@time_zone_shape, zone)
+  def time_zone_name?(_), do: false
+
+  @doc "A workspace's time zone from its `settings` bag, or nil when none is set."
+  @spec workspace_time_zone(Workspace.t() | nil) :: String.t() | nil
+  def workspace_time_zone(%Workspace{settings: %{"time_zone" => zone}}) do
+    if time_zone_name?(zone), do: zone
+  end
+
+  def workspace_time_zone(_), do: nil
+
+  @doc """
+  Persist a workspace's time zone into its `settings` bag; nil clears it.
+  Rejects a name not shaped like an IANA zone with `{:error, :invalid_time_zone}`.
+  """
+  @spec set_workspace_time_zone(Workspace.t() | binary(), String.t() | nil) ::
+          {:ok, Workspace.t()}
+          | {:error, :invalid_time_zone | :not_found | Ecto.Changeset.t()}
+  def set_workspace_time_zone(workspace_or_id, zone) when is_nil(zone) or is_binary(zone) do
+    if is_nil(zone) or time_zone_name?(zone),
+      do: do_set_workspace_time_zone(workspace_or_id, zone),
+      else: {:error, :invalid_time_zone}
+  end
+
+  def set_workspace_time_zone(_workspace_or_id, _zone), do: {:error, :invalid_time_zone}
+
+  defp do_set_workspace_time_zone(%Workspace{} = workspace, zone) do
+    settings =
+      if zone,
+        do: Map.put(workspace.settings || %{}, "time_zone", zone),
+        else: Map.delete(workspace.settings || %{}, "time_zone")
+
+    workspace
+    |> Workspace.changeset(%{slug: workspace.slug, name: workspace.name, settings: settings})
+    |> Repo.update()
+    |> bust_default_scope()
+  end
+
+  defp do_set_workspace_time_zone(id, zone) when is_binary(id) do
+    case get_workspace_by_id(id) do
+      nil -> {:error, :not_found}
+      %Workspace{} = workspace -> do_set_workspace_time_zone(workspace, zone)
+    end
+  end
+
+  defp do_set_workspace_time_zone(_workspace_or_id, _zone), do: {:error, :not_found}
+
   # ── Workspace plugin enablement (ssp-w1-plugin-enablement) ────────────────
   #
   # The per-workspace SURFACING overrides for plugins live in the same
