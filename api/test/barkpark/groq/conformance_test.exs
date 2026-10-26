@@ -17,7 +17,7 @@ defmodule Barkpark.Groq.ConformanceTest do
   @external_resource @fixture
 
   # Pass count measured when the floor was last raised; see the moduledoc.
-  @floor 7_156
+  @floor 7_731
   @now ~U[2026-01-01 00:00:00.000Z]
 
   test "the evaluator passes the GROQ conformance suite at or above the pinned floor" do
