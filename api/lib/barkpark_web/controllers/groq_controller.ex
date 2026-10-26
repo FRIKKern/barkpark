@@ -34,6 +34,7 @@ defmodule BarkparkWeb.GroqController do
 
   def read(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
+    params = unstack_perspective(params)
 
     with :ok <- known_dataset(dataset, conn),
          {:ok, query} <- query_text(params),
@@ -138,6 +139,47 @@ defmodule BarkparkWeb.GroqController do
           {:error, _} -> {:halt, {:error, {:bad_param, name}}}
         end
     end)
+  end
+
+  # A perspective stack (task-acbe59f8b19baaf2): `@sanity/client` sends
+  # `perspective: ['rX', 'drafts']` as `perspective=rX,drafts`, and the studio's
+  # Presentation and next-sanity pass the stack the editor picked. Barkpark has
+  # no releases yet, so a release id adds nothing, as Sanity answers an unknown
+  # release: the stack reads as `drafts` when it holds `drafts` (or
+  # `previewDrafts`), else `published`. `raw` cannot be stacked, as on Sanity;
+  # such a stack, an empty member or an id with other characters is left as
+  # sent and refused below. A lone unknown value (no comma) is refused too,
+  # where Sanity reads it as a release: that refusal is what catches a typo
+  # such as `drafst` (`ReadPerspective`).
+  @release_id ~r/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/
+
+  defp unstack_perspective(%{"perspective" => value} = params) when is_binary(value) do
+    if String.contains?(value, ","),
+      do: unstack(params, value, String.split(value, ",")),
+      else: params
+  end
+
+  defp unstack_perspective(%{"perspective" => [_ | _] = list} = params) do
+    if Enum.all?(list, &is_binary/1),
+      do: unstack(params, Enum.join(list, ","), list),
+      else: params
+  end
+
+  defp unstack_perspective(params), do: params
+
+  defp unstack(params, value, members) do
+    members = Enum.map(members, &String.trim/1)
+
+    cond do
+      "raw" in members or not Enum.all?(members, &Regex.match?(@release_id, &1)) ->
+        Map.put(params, "perspective", value)
+
+      Enum.any?(members, &(&1 in ["drafts", "previewDrafts"])) ->
+        Map.put(params, "perspective", "drafts")
+
+      true ->
+        Map.put(params, "perspective", "published")
+    end
   end
 
   defp perspective_ok(params) do
