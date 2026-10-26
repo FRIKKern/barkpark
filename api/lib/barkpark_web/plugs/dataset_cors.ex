@@ -24,6 +24,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
   # allow_headers list at origin/main:api/lib/barkpark_web/endpoint.ex.
   # Preserving the Corsica set prevents preflight regressions for existing
   # browser-based SDK/Studio flows that rely on `accept`, `if-match`, etc.
+  # `x-sanity-project-id`: @sanity/client sends it on every request when it
+  # has a projectId and `useProjectHostname: false` (pointed at Barkpark), so
+  # without it every browser read fails preflight. Barkpark ignores its value.
   @allow_headers_list ~w(
     authorization
     content-type
@@ -35,6 +38,7 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     idempotency-key
     x-barkpark-api-version
     last-event-id
+    x-sanity-project-id
   )
   @allow_headers Enum.join(@allow_headers_list, ", ")
 

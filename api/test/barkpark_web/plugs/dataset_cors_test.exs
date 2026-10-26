@@ -96,7 +96,7 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
 
       for h <- ~w(authorization content-type x-requested-with x-barkpark-preview-token
                   accept if-match if-none-match idempotency-key x-barkpark-api-version
-                  last-event-id) do
+                  last-event-id x-sanity-project-id) do
         assert allow_headers =~ h
       end
 
@@ -208,6 +208,25 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
       # Both shapes reflect the dataset's allowed origin identically.
       assert get_resp_header(flat, "access-control-allow-origin") == ["https://both.example"]
       assert get_resp_header(prefixed, "access-control-allow-origin") == ["https://both.example"]
+    end
+
+    # @sanity/client pointed at Barkpark (useProjectHostname: false) sends
+    # X-Sanity-Project-ID on every GROQ read; the preflight must allow it.
+    # The GROQ path resolves no dataset here, so an always-allowed origin.
+    test "a @sanity/client GROQ preflight allows authorization and x-sanity-project-id" do
+      conn =
+        build_conn(:options, "/w/acme/p/site/v2025-02-19/data/query/ds_sanity")
+        |> put_req_header("origin", "https://barkpark.cloud")
+        |> put_req_header("access-control-request-method", "GET")
+        |> put_req_header("access-control-request-headers", "authorization,x-sanity-project-id")
+        |> call_plug()
+
+      assert conn.status == 204
+      assert get_resp_header(conn, "access-control-allow-origin") == ["https://barkpark.cloud"]
+      [allow_headers] = get_resp_header(conn, "access-control-allow-headers")
+      allowed = allow_headers |> String.split(",") |> Enum.map(&String.trim/1)
+      assert "authorization" in allowed
+      assert "x-sanity-project-id" in allowed
     end
 
     test "prefixed path with a mismatched origin still fails closed (no ACAO)" do
