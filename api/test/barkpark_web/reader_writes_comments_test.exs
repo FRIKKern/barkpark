@@ -154,6 +154,41 @@ defmodule BarkparkWeb.ReaderWritesCommentsTest do
     |> assert_refused()
   end
 
+  # task-6e14a9d3a1a815ab: a read seat's create over an EXISTING id minted a
+  # draft of someone else's comment, and its publish replaced the comment.
+  test "NEGATIVE: a viewer cannot create over another viewer's comment", %{
+    viewer1: v1,
+    viewer2: v2
+  } do
+    id = new_id()
+    assert json_response(add_comment(v1, id, "mine"), 200)
+
+    assert_refused(add_comment(v2, id, "taken over"))
+    assert published(id).content["message"] == "mine"
+
+    for kind <- ["create", "createIfNotExists"] do
+      conn =
+        mutate(v2, [
+          %{kind => %{"_id" => id, "_type" => @comment, "message" => "x", "state" => "open"}}
+        ])
+
+      assert_refused(conn)
+    end
+
+    # A draft-only id is taken too.
+    draft_id = new_id()
+
+    assert json_response(
+             mutate(v1, [
+               %{"create" => %{"_id" => draft_id, "_type" => @comment, "message" => "d"}}
+             ]),
+             200
+           )
+
+    assert_refused(add_comment(v2, draft_id, "taken over"))
+    assert published(id).content["message"] == "mine"
+  end
+
   test "the creator may edit its own comment body", %{viewer1: v1} do
     id = new_id()
     assert json_response(add_comment(v1, id, "draft one"), 200)
