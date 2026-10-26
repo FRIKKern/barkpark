@@ -55,7 +55,7 @@ defmodule BarkparkWeb.GroqSourceMapTest do
 
     token = "csm-#{System.unique_integer([:positive])}"
     {:ok, _} = Auth.create_token(token, "csm", @dataset, ["read", "write"], ws.id)
-    %{token: token}
+    %{token: token, scope: scope}
   end
 
   defp fetch(token, query, extra \\ %{}) do
@@ -156,5 +156,89 @@ defmodule BarkparkWeb.GroqSourceMapTest do
     assert with_map["result"] == without["result"]
     assert with_map["result"]["title"] == "First draft"
     assert resolved(with_map) == %{"$['title']" => {"drafts.p1", "$['title']"}}
+  end
+
+  describe "private fields" do
+    setup %{scope: scope} do
+      for {type, fields} <- [
+            {"member",
+             [
+               %{"name" => "name", "type" => "string"},
+               %{"name" => "email", "type" => "string", "private" => true}
+             ]},
+            {"note",
+             [
+               %{"name" => "title", "type" => "string"},
+               %{"name" => "secret", "type" => "string", "private" => true},
+               %{"name" => "owner", "type" => "reference", "refType" => "member"}
+             ]}
+          ] do
+        {:ok, _} =
+          Content.upsert_schema(
+            %{"name" => type, "title" => type, "visibility" => "public", "fields" => fields},
+            @dataset,
+            scope
+          )
+      end
+
+      for {type, id, content} <- [
+            {"member", "m1", %{"name" => "Mia", "email" => "mia@example.com"}},
+            {"note", "n1", %{"title" => "Note", "secret" => "s3cret", "owner" => "m1"}}
+          ] do
+        {:ok, _} =
+          Content.create_document(type, %{"doc_id" => id, "content" => content}, @dataset, scope)
+
+        {:ok, _} = Content.publish_document(id, type, @dataset, scope)
+      end
+
+      reader = "csm-read-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(reader, "csm read", @dataset, ["read"], scope[:workspace_id])
+      admin = "csm-admin-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(admin, "csm admin", @dataset, ["read", "admin"], scope[:workspace_id])
+
+      %{reader: reader, admin: admin}
+    end
+
+    @private_queries [
+      ~s|*[_id == "n1"][0]{title, secret, owner->{name, email}}|,
+      ~s|*[_id == "n1"][0]{..., "who": owner->}|,
+      ~s|*[_id == "n1"][0]|,
+      ~s|*[_type == "note"]{secret, "e": owner->email}|,
+      ~s|*[_id == "m1"][0]{...}|
+    ]
+
+    test "a reader's map never names a private field, as a path, a mapping or by its value", %{
+      reader: reader
+    } do
+      for q <- @private_queries, mode <- ["true", "withKeyArraySelector"] do
+        body = fetch(reader, q, %{"resultSourceMap" => mode})
+        dump = Jason.encode!(body)
+
+        refute dump =~ "s3cret" or dump =~ "mia@example.com",
+               "#{q}: a private value is in the response"
+
+        map = Jason.encode!(body["resultSourceMap"])
+        refute map =~ "secret" or map =~ "email", "#{q} (#{mode}): #{map}"
+        # every mapping points at a path the reader can see in the result
+        assert Enum.all?(
+                 Map.keys(body["resultSourceMap"]["mappings"]),
+                 &(not (&1 =~ ~r/secret|email/))
+               ),
+               q
+      end
+    end
+
+    # The control: the same queries as an admin do map the private fields, so the test above
+    # would see them if they leaked.
+    test "an admin's map does name them", %{admin: admin} do
+      map =
+        Jason.encode!(
+          fetch(admin, hd(@private_queries), %{"resultSourceMap" => "true"})["resultSourceMap"]
+        )
+
+      assert map =~ "secret" and map =~ "email"
+    end
   end
 end
