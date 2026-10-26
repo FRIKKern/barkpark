@@ -114,6 +114,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> Mount.init()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
+      # After Caps: an event Caps refuses never reaches the quota gate.
+      |> BarkparkWeb.Studio.QuotaGate.attach()
       |> load_access_grants()
       |> schedule_access_expiry()
 
