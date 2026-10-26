@@ -71,6 +71,24 @@ defmodule Barkpark.Groq.ParserTest do
     assert eval.(~s|documents::get("alan")|) == nil
   end
 
+  # task-97b8d14ea3d44330: past the float range a number is Sanity's null
+  # (ecu57yeh, 26 Oct), never a crash.
+  test "a number literal or arithmetic past the float range is null" do
+    for {q, want} <- [
+          {"1e400", nil},
+          {"-1e400", nil},
+          {"1E400", nil},
+          {"[1e400]", [nil]},
+          {"1e400 == null", true},
+          {"1e308 * 10", nil},
+          {"-1e308 * 10", nil},
+          {"1e308 + 1e308", nil},
+          {"1e-400", 0}
+        ] do
+      assert eval!(q) == want, q
+    end
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 

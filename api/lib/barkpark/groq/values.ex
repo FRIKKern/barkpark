@@ -118,7 +118,7 @@ defmodule Barkpark.Groq.Values do
   @spec arith(String.t(), t(), t()) :: t()
   def arith("+", {:datetime, dt}, n) when is_number(n), do: add_seconds(dt, n)
   def arith("+", n, {:datetime, dt}) when is_number(n), do: add_seconds(dt, n)
-  def arith("+", a, b) when is_number(a) and is_number(b), do: finite(a + b)
+  def arith("+", a, b) when is_number(a) and is_number(b), do: float_op(fn -> a + b end)
   def arith("+", a, b) when is_binary(a) and is_binary(b), do: a <> b
   def arith("+", a, b) when is_map(a) and is_map(b), do: Map.merge(a, b)
   def arith("+", a, b) when is_list(a) and is_list(b), do: a ++ b
@@ -127,11 +127,11 @@ defmodule Barkpark.Groq.Values do
   def arith("-", {:datetime, a}, {:datetime, b}),
     do: num(DateTime.diff(a, b, :microsecond) / 1_000_000)
 
-  def arith("-", a, b) when is_number(a) and is_number(b), do: finite(a - b)
-  def arith("*", a, b) when is_number(a) and is_number(b), do: finite(a * b)
+  def arith("-", a, b) when is_number(a) and is_number(b), do: float_op(fn -> a - b end)
+  def arith("*", a, b) when is_number(a) and is_number(b), do: float_op(fn -> a * b end)
 
   def arith("/", a, b) when is_number(a) and is_number(b) do
-    if b == 0, do: nil, else: finite(a / b)
+    if b == 0, do: nil, else: float_op(fn -> a / b end)
   end
 
   def arith("%", a, b) when is_integer(a) and is_integer(b) do
@@ -139,20 +139,28 @@ defmodule Barkpark.Groq.Values do
   end
 
   def arith("%", a, b) when is_number(a) and is_number(b) do
-    if b == 0, do: nil, else: finite(:math.fmod(a * 1.0, b * 1.0))
+    if b == 0, do: nil, else: float_op(fn -> :math.fmod(a * 1.0, b * 1.0) end)
   end
 
   def arith("**", a, b) when is_integer(a) and is_integer(b) and b >= 0 and b < 1024 do
-    finite(Integer.pow(a, b))
+    float_op(fn -> Integer.pow(a, b) end)
   end
 
   def arith("**", a, b) when is_number(a) and is_number(b) do
-    finite(:math.pow(a * 1.0, b * 1.0))
+    float_op(fn -> :math.pow(a * 1.0, b * 1.0) end)
   rescue
     ArithmeticError -> nil
   end
 
   def arith(_op, _a, _b), do: nil
+
+  # A float result past the double range raises in the BEAM; JavaScript gives
+  # Infinity, which GROQ answers as null (task-97b8d14ea3d44330).
+  defp float_op(fun) do
+    finite(fun.())
+  rescue
+    ArithmeticError -> nil
+  end
 
   defp finite(n) when is_integer(n), do: num(n)
 
