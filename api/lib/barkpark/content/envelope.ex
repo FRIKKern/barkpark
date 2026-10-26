@@ -250,7 +250,7 @@ defmodule Barkpark.Content.Envelope do
   NESTED VALUES (task-651999345821b5dd): every top-level field is one mapping
   entry naming its key, as before, AND an object or array value is walked, so
   `$["seo"]["metaTitle"]` and `$["links"][0]["title"]` are mapped too (a keyed
-  array item's source path names its `_key`: `$["links"][?(@._key=="l1")]`).
+  array item's source path names its `_key`: `$['links'][?(@._key=='l1')]`).
   System keys are not mapped, and a document stops at `@nested_cap` nested
   entries. Before, a nested value was only ever its whole top-level field. Provenance through `?expand=`
   (a different source document), computed fields (no single source to name)
@@ -260,10 +260,11 @@ defmodule Barkpark.Content.Envelope do
   Returns `nil` for a non-document result (nothing to map) or a `rendered`
   with no user-content keys at all.
 
-  Shape mirrors `@sanity/client`'s `resultSourceMap` loosely (documents/paths/
-  mappings, JSON-Pointer-ish result keys) — NOT byte-compatible, since
-  Barkpark has no stega/visual-editing client to match today; the shape is
-  chosen to be obviously extensible toward that if it is ever built.
+  Shape is `@sanity/client`'s `resultSourceMap` (task-640e8371b8e468ce, T0):
+  `documents`/`paths`/`mappings`, Sanity's single-quoted paths (`$['title']`,
+  `[?(@._key=='l1')]`) and `documentValue` sources, so stega's parser reads
+  it. Granularity differs: this maps each field, where Sanity maps a whole
+  document once as `$`.
 
   Third arg `expanded` (task-0e0cb2167c6fcdea) — the SAME document's envelope
   AFTER `Expand.expand/4` ran, if the caller asked for `?expand=`. `nil`
@@ -309,7 +310,7 @@ defmodule Barkpark.Content.Envelope do
 
             m_acc =
               Map.put(m_acc, result_path(key), %{
-                "source" => %{"document" => 0, "path" => idx},
+                "source" => %{"document" => 0, "path" => idx, "type" => "documentValue"},
                 "type" => "value"
               })
 
@@ -415,7 +416,7 @@ defmodule Barkpark.Content.Envelope do
 
               m_acc =
                 Map.put(m_acc, row_result_path(row_idx, key), %{
-                  "source" => %{"document" => row_idx, "path" => idx},
+                  "source" => %{"document" => row_idx, "path" => idx, "type" => "documentValue"},
                   "type" => "value"
                 })
 
@@ -559,7 +560,7 @@ defmodule Barkpark.Content.Envelope do
 
         m_acc =
           Map.put(m_acc, append_path(prefix, key), %{
-            "source" => %{"document" => doc_index, "path" => idx},
+            "source" => %{"document" => doc_index, "path" => idx, "type" => "documentValue"},
             "type" => "value"
           })
 
@@ -579,7 +580,7 @@ defmodule Barkpark.Content.Envelope do
   # mapped whole AND walked, so a site can mark `seo.metaTitle` or one link's title
   # click-to-edit as Sanity's content source map lets it (every leaf there). Result
   # keys index arrays by position (`$["links"][0]["title"]`); the SOURCE path names a
-  # keyed item by its `_key`, as Sanity's does (`$["links"][?(@._key=="l1")]["title"]`),
+  # keyed item by its `_key`, as Sanity's does (`$['links'][?(@._key=='l1')]['title']`),
   # so it still names the item after a reorder. System keys (`_key`, `_type`, `_ref`)
   # are not mapped. At most @nested_cap entries per document: a long rich-text body
   # stops being walked there rather than growing the opt-in map without bound.
@@ -607,7 +608,7 @@ defmodule Barkpark.Content.Envelope do
     |> Enum.reduce(acc, fn {item, i}, acc ->
       segment =
         case item do
-          %{"_key" => key} when is_binary(key) and key != "" -> "[?(@._key==#{inspect(key)})]"
+          %{"_key" => key} when is_binary(key) and key != "" -> "[?(@._key==#{sq(key)})]"
           _ -> "[#{i}]"
         end
 
@@ -625,27 +626,34 @@ defmodule Barkpark.Content.Envelope do
 
     mappings =
       Map.put(mappings, result, %{
-        "source" => %{"document" => doc_index, "path" => idx},
+        "source" => %{"document" => doc_index, "path" => idx, "type" => "documentValue"},
         "type" => "value"
       })
 
     walk_nested(value, result, source, doc_index, {mappings, table, n + 1})
   end
 
-  defp result_path(key), do: "$[#{inspect(key)}]"
+  defp result_path(key), do: "$[#{sq(key)}]"
 
   # One more `[...]` segment onto an EXISTING result-path prefix — never a
   # new leading `$`, unlike `result_path/1`. `field_prefix_fun` callers
   # (`result_path/1`, `row_result_path/2`) already produced the one-and-only
   # `$`; appending `result_path(key)` again here would double it
   # (`$["author"]$["name"]` instead of `$["author"]["name"]`).
-  defp append_path(prefix, key), do: prefix <> "[#{inspect(key)}]"
+  defp append_path(prefix, key), do: prefix <> "[#{sq(key)}]"
 
-  defp row_result_path(row_idx, key), do: "$[#{row_idx}][#{inspect(key)}]"
+  defp row_result_path(row_idx, key), do: "$[#{row_idx}][#{sq(key)}]"
+
+  # Sanity's path syntax (task-640e8371b8e468ce, T0): single-quoted keys, `'` and
+  # `\` escaped; @sanity/client's stega parses only this form.
+  defp sq(key) when is_binary(key),
+    do: "'" <> (key |> String.replace("\\", "\\\\") |> String.replace("'", "\\'")) <> "'"
+
+  defp sq(key), do: sq(to_string(key))
 
   # THE PATH TABLE (task-d0c2bd670e2d8a87) — a single, shared, deduplicated
   # list of BARE in-document path strings (`result_path/1`'s own output,
-  # e.g. `$["title"]`, never row- or ref-prefixed), built once across every
+  # e.g. `$['title']`, never row- or ref-prefixed), built once across every
   # row and every expanded sub-document a `source_map/3` or
   # `source_map_many/3` call walks. Every mapping's `"source" => %{"path" =>
   # idx}` indexes THIS table, never a per-row or per-sub-document-local
