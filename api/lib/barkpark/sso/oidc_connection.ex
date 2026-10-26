@@ -35,6 +35,11 @@ defmodule Barkpark.Sso.OidcConnection do
     field :tenant_id, :string
     field :strict_validation, :boolean, default: false
 
+    # Count the IdP's MFA as Barkpark MFA: `amr` containing "mfa", or `acr`
+    # equal to `mfa_acr` when set. Off by default.
+    field :trust_idp_mfa, :boolean, default: false
+    field :mfa_acr, :string
+
     belongs_to :organization, Barkpark.Tenancy.Organization
 
     timestamps(type: :utc_datetime_usec)
@@ -56,6 +61,8 @@ defmodule Barkpark.Sso.OidcConnection do
       :token_endpoint_auth_method,
       :tenant_id,
       :strict_validation,
+      :trust_idp_mfa,
+      :mfa_acr,
       :active
     ])
     |> validate_required([:organization_id, :issuer, :client_id])

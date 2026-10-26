@@ -220,4 +220,91 @@ defmodule BarkparkWeb.OidcControllerTest do
                where: e.action == "sso_login_failed" and e.metadata["reason"] == "missing_exp"
            )
   end
+
+  describe "IdP MFA in a require-MFA org" do
+    # An org that requires MFA, with a workspace so JIT-provisioned users are
+    # governed, and an OIDC connection with `extra` settings.
+    defp mfa_org(slug, extra) do
+      {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
+      {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
+      {:ok, ws} = Tenancy.create_workspace(%{slug: slug <> "-ws", name: slug <> "-ws"})
+      {:ok, _} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+      {:ok, _c} =
+        Oidc.create_connection(
+          Map.merge(
+            %{
+              organization_id: org.id,
+              issuer: @issuer,
+              client_id: @client_id,
+              client_secret: "s",
+              authorization_endpoint: @issuer <> "/authorize",
+              token_endpoint: @issuer <> "/token",
+              jwks_uri: @issuer <> "/jwks"
+            },
+            extra
+          )
+        )
+
+      org
+    end
+
+    defp mfa_callback(slug, extra_claims) do
+      mock_op(
+        Map.merge(
+          %{
+            "iss" => @issuer,
+            "aud" => @client_id,
+            "exp" => System.system_time(:second) + 300,
+            "nonce" => "n1",
+            "email" => "editor@#{slug}.com"
+          },
+          extra_claims
+        )
+      )
+
+      build_conn()
+      |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+      |> get("/v1/auth/oidc/#{slug}/callback?code=abc&state=s1")
+    end
+
+    test "amr with mfa on a trusting connection mints an MFA-verified session" do
+      mfa_org("idpmfa", %{trust_idp_mfa: true})
+
+      body = mfa_callback("idpmfa", %{"amr" => ["pwd", "mfa"]}) |> json_response(201)
+      {_user, session} = Accounts.verify_user_session(body["token"])
+      assert session.mfa_verified_at
+      assert session.idp_mfa
+
+      # The org MFA gate accepts the session without a Barkpark factor.
+      assert build_conn()
+             |> put_req_header("authorization", "Bearer " <> body["token"])
+             |> get("/v1/auth/sessions")
+             |> json_response(200)
+    end
+
+    test "acr equal to the connection's mfa_acr counts as MFA" do
+      mfa_org("idpacr", %{trust_idp_mfa: true, mfa_acr: "urn:example:mfa"})
+
+      body = mfa_callback("idpacr", %{"acr" => "urn:example:mfa"}) |> json_response(201)
+      assert {_user, %{idp_mfa: true}} = Accounts.verify_user_session(body["token"])
+    end
+
+    test "without amr mfa or the configured acr, the org MFA rule applies as before" do
+      mfa_org("idpnomfa", %{trust_idp_mfa: true, mfa_acr: "urn:example:mfa"})
+
+      body =
+        mfa_callback("idpnomfa", %{"amr" => ["pwd"], "acr" => "urn:example:pwd"})
+        |> json_response(403)
+
+      assert body["error"]["code"] == "mfa_enrolment_required"
+    end
+
+    test "a connection that does not trust IdP MFA ignores amr" do
+      mfa_org("idpoff", %{})
+
+      body = mfa_callback("idpoff", %{"amr" => ["mfa"]}) |> json_response(403)
+      assert body["error"]["code"] == "mfa_enrolment_required"
+    end
+  end
 end
