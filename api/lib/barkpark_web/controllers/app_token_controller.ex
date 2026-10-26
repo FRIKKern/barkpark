@@ -342,7 +342,7 @@ defmodule BarkparkWeb.AppTokenController do
         unprocessable(conn, "admin tokens cannot self-revoke through the app-token path")
 
       true ->
-        case Auth.revoke_token(token) do
+        case Auth.revoke_token(token, token) do
           # RECEIPT LAW (pds w40): `Auth.revoke_token/1` returns the UPDATED row
           # (auth.ex:200-225) — its own audit block already dereferences
           # `revoked.id`. The old body was a literal `true` that stayed true even
@@ -377,7 +377,7 @@ defmodule BarkparkWeb.AppTokenController do
         if "admin" in (perms || []) do
           unprocessable(conn, "admin tokens cannot be revoked through the app-token path")
         else
-          case Auth.revoke_token(token) do
+          case Auth.revoke_token(token, conn.assigns.api_token) do
             # RECEIPT LAW (pds w40): same callee, same repair as
             # `delete_current/2` above — the admin revoke-by-raw path answered
             # with a literal `true` that could not distinguish a landed stamp

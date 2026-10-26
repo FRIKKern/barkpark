@@ -420,6 +420,10 @@ config :barkpark, Oban,
        # 03:00 UTC (the slot of the never-installed systemd timer it replaces).
        # A no-op tick unless `:public_read_rotation, enabled:` (below) is on.
        {"0 3 * * 1", Barkpark.Auth.PublicReadRotationWorker},
+       # task-ae4b82ef79867237 — API token expiry warnings at 14, 7 and 1 days
+       # ahead, daily. A no-op tick unless `:token_expiry_warnings, enabled:`
+       # (below) is on.
+       {"0 8 * * *", Barkpark.Auth.TokenExpiryWarningWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -555,6 +559,12 @@ config :barkpark, :deleted_payload_retention, enabled: false, days: 90
 # consumer must be reached by the token file or VERCEL_DEPLOY_HOOK first. An
 # operator turns it on with BARKPARK_PUBLIC_READ_ROTATION=on (runtime.exs).
 config :barkpark, :public_read_rotation, enabled: false
+
+# task-ae4b82ef79867237 — API token expiry warnings
+# (Barkpark.Auth.TokenExpiryWarningWorker). SHIPS DISABLED so an existing
+# install does not start mailing: an operator turns it on with
+# BARKPARK_TOKEN_EXPIRY_WARNINGS=on (runtime.exs).
+config :barkpark, :token_expiry_warnings, enabled: false
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`

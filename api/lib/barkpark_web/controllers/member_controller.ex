@@ -263,7 +263,8 @@ defmodule BarkparkWeb.MemberController do
              token_id,
              conn.assigns[:api_token] || conn.assigns[:current_user]
            ),
-         {:ok, token} <- Auth.revoke_token(token_id) do
+         {:ok, token} <-
+           Auth.revoke_token(token_id, conn.assigns[:api_token] || conn.assigns[:current_user]) do
       json(conn, %{revoked: %{id: token.id, label: token.label, revoked_at: token.revoked_at}})
     else
       false ->

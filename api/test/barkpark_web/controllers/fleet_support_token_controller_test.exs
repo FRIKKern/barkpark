@@ -135,6 +135,21 @@ defmodule BarkparkWeb.FleetSupportTokenControllerTest do
     end
   end
 
+  describe "audit" do
+    test "mint and revoke each write an audit row naming the admin token", %{conn: conn} do
+      {:ok, admin} = Auth.verify_token(@admin_token)
+      id = mint(conn, "audited") |> Map.get(:resp_body) |> Jason.decode!() |> Map.get("token_id")
+
+      assert conn |> admin_conn() |> delete("/v1/fleet/support-tokens/#{id}") |> Map.get(:status) ==
+               200
+
+      for action <- ["token_minted", "token_revoked"] do
+        ev = Barkpark.Repo.get_by!(Barkpark.Audit.Event, action: action, subject: id)
+        assert {ev.actor_type, ev.actor_id} == {"api_token", admin.id}
+      end
+    end
+  end
+
   describe "revoke" do
     test "a request authenticated with the revoked token is REJECTED afterward", %{conn: conn} do
       minted = mint(conn, "teardown-me") |> Map.get(:resp_body) |> Jason.decode!()
