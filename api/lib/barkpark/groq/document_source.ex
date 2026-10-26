@@ -653,6 +653,12 @@ defmodule Barkpark.Groq.DocumentSource do
   # array. A key with none of these narrows by a probe join or an `||` whose
   # every branch narrows. Each condition is implied by the key, so the
   # narrowing changes no result.
+  #
+  # When the key has an `_id` list or a `references()` probe, the jsonpath
+  # predicate stays out: the planner reads its rows from the path index's
+  # estimate, which for a common value is far too low (`isMainProduct ==
+  # true`: 6 rows guessed, 11,257 on gyl), so it picks the predicate over the
+  # refs index and tests every match. The copy still tests every condition.
   defp narrowing(key, perspective) do
     case narrowings(key, perspective) do
       [] -> dynamic(true)
@@ -669,11 +675,15 @@ defmodule Barkpark.Groq.DocumentSource do
         {path, value} -> ["@" <> jsonpath_fields(path) <> " == " <> Jason.encode!(value)]
       end) ++ Enum.map(path_probes, &probes_test/1) ++ Enum.flat_map(checks, &path_test/1)
 
+    jsonpath =
+      tests != [] and is_nil(ids) and other_probes == [] and
+        stored_jsonpath("lax $ ? (" <> Enum.join(tests, " && ") <> ")")
+
     found =
       Enum.filter(
         [
           ids && ids_condition(ids, perspective),
-          tests != [] && stored_jsonpath("lax $ ? (" <> Enum.join(tests, " && ") <> ")")
+          jsonpath
           | Enum.map(other_probes, &stored_probes(&1, perspective))
         ],
         & &1

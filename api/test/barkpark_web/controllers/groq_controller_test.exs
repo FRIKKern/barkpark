@@ -824,6 +824,25 @@ defmodule BarkparkWeb.GroqControllerTest do
     end
   end
 
+  test "references() leads the read when the filter also has a common equality", %{
+    conn: conn,
+    token: token
+  } do
+    query =
+      ~s'*[_type == "book" && !(_id in path("drafts.**")) && defined(year) && year == 1999 && references($a)]._id'
+
+    {body, statements} =
+      sql_statements(fn ->
+        conn |> get_query(token, query, %{"$a" => ~s'"ada"'}) |> json_response(200)
+      end)
+
+    assert body["result"] == ["b1"]
+    # gyl's series page: the path index guessed 6 rows for `isMainProduct ==
+    # true` and found 11,257, so the planner chose it over the refs index.
+    refute Enum.any?(statements, &(&1 =~ "@? CAST"))
+    assert Enum.any?(statements, &(&1 =~ "jsonb_path_query_array(d0.\"content\""))
+  end
+
   defp sql_statements(fun) do
     ref = make_ref()
     parent = self()
