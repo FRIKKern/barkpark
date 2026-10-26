@@ -236,7 +236,13 @@ services:
       - BARKPARK_SITE_DEPLOY_CD
       - BARKPARK_SITE_TEMPLATE_DIR
       - VERCEL_DEPLOY_HOOK
-      # Self-update / upstream
+      # Self-update / upstream. A pinned image should set
+      # BARKPARK_SELF_UPDATE_CHECK=off and leave BARKPARK_SELF_UPDATE_APPLY unset.
+      # CHECK=off keeps the update Checker out of the tree, and the Checker is
+      # the only in-app caller of api.github.com for updates. APPLY is off
+      # unless it is "1"; off, the Runner refuses every trigger and runs no
+      # command. BARKPARK_SELF_UPDATE_CD and the BARKPARK_UPSTREAM_* vars have
+      # no effect when both are off.
       - BARKPARK_SELF_UPDATE_APPLY
       - BARKPARK_SELF_UPDATE_CD
       - BARKPARK_SELF_UPDATE_CHECK

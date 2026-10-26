@@ -160,8 +160,7 @@ defmodule Barkpark.Application do
     # (opt-out via BARKPARK_SELF_UPDATE_CHECK=off). Read-only: the Checker
     # only polls the upstream repo for newer release tags — it never mutates
     # the instance. Spliced next to sync_children, before the Endpoint.
-    self_update_children =
-      if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
+    self_update_children = self_update_children()
 
     # C083: a managed instance refuses seed and one-shot boots outright. Their
     # raw Repo writes never reach a door, and the serving tree's coordinator
@@ -273,6 +272,13 @@ defmodule Barkpark.Application do
                 "(expected one of #{inspect(@boot_modes)})"
     end
   end
+
+  @doc false
+  # The update Checker is the only in-app caller of the GitHub API for
+  # self-update. BARKPARK_SELF_UPDATE_CHECK=off leaves it out of the tree.
+  @spec self_update_children() :: [module()]
+  def self_update_children,
+    do: if(Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: [])
 
   @doc """
   Build the top-level child spec list, tiered for blast-radius isolation.
