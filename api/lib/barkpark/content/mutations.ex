@@ -488,6 +488,11 @@ defmodule Barkpark.Content.Mutations do
              document: Envelope.render(doc, schema, caller)
            }, cache}
 
+        # A Sanity-shaped delete of an id that does not exist: no write, no
+        # result row (see `exact_id/3`).
+        :skip ->
+          {[], cache}
+
         {:error, reason} ->
           Repo.rollback(reason)
       end
@@ -509,7 +514,10 @@ defmodule Barkpark.Content.Mutations do
   #   * patch `x` → the published-first patch base, landed through the publish
   #     door; a missing `x` is a 404, not a fresh draft.
   #   * delete `x` → `unpublish` when `drafts.x` exists (the draft stays, as on
-  #     Sanity), else delete; a missing `x` is a 404.
+  #     Sanity), else delete. A delete of an id that does not exist, bare or
+  #     `drafts.`, is a noop with no result row, as on Sanity, so the client's
+  #     `transaction().delete(id).delete("drafts." + id)` works when only one
+  #     exists (task-f456b589609f6a84).
   #
   # Where Sanity would write past a draft twin that our direct publish would
   # delete (the create family, patch), the answer is a 409 naming the twin:
@@ -519,6 +527,7 @@ defmodule Barkpark.Content.Mutations do
     if Keyword.get(opts, :exact_ids, false) do
       case exact_id(m, dataset, opts) do
         {:ok, m} -> apply.(m)
+        :skip -> :skip
         {:error, _} = error -> error
       end
     else
@@ -575,15 +584,20 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp exact_id(%{"delete" => %{"id" => id} = op} = m, dataset, opts) when is_binary(id) do
-    with {:bare, id, type} <- bare(id, op["type"] || type_of(id, dataset, opts)),
-         true <- row?(id, type, dataset, opts) do
-      if row?(DraftId.draft_id(id), type, dataset, opts),
-        do: {:ok, %{"unpublish" => %{"id" => id, "type" => type}}},
-        else: {:ok, %{m | "delete" => Map.put(op, "type", type)}}
-    else
-      :not_bare -> {:ok, m}
-      false -> {:error, :not_found}
-      error -> error
+    type = op["type"] || type_of(id, dataset, opts)
+
+    cond do
+      is_nil(type) or not row?(id, type, dataset, opts) ->
+        :skip
+
+      DraftId.draft?(id) ->
+        {:ok, %{m | "delete" => Map.put(op, "type", type)}}
+
+      row?(DraftId.draft_id(id), type, dataset, opts) ->
+        {:ok, %{"unpublish" => %{"id" => id, "type" => type}}}
+
+      true ->
+        {:ok, %{m | "delete" => Map.put(op, "type", type)}}
     end
   end
 

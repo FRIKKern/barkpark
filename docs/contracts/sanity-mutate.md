@@ -9,6 +9,6 @@
 | `create` | publishes `x`; 409 if `x` exists | 409 |
 | `createIfNotExists` | publishes `x`; noop if `x` exists | 409 |
 | `patch` | patches published `x`; 404 if missing | 409 |
-| `delete` | deletes `x`; 404 if missing | unpublishes `x`, the draft stays |
+| `delete` | deletes `x`; a missing id (bare or `drafts.`) is a noop, no result row | unpublishes `x`, the draft stays |
 
 Sanity would write past a draft twin; here the write is refused with a 409 naming it, so no write discards a draft the client did not name. `patch` and `delete` may omit `type`. The response is Sanity's `{transactionId, results: [{id, operation, document}]}`; the client's `transactionId` is ignored.
