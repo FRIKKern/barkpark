@@ -228,6 +228,9 @@ defmodule Barkpark.Application do
         if boot_mode() != :one_shot do
           Barkpark.Sharing.refresh()
 
+          # Off unless BARKPARK_BOOTSTRAP_OWNER_EMAIL is set and no user exists.
+          bootstrap_owner()
+
           # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
           # this is a no-op (active?/0 is false) and nothing is logged. When
           # active, warn loudly with every reachable reader URL so the operator
@@ -749,6 +752,13 @@ defmodule Barkpark.Application do
   # Fresh-install guard: warn (don't crash) when pg_trgm is absent, since the
   # default Postgres search engine degrades fuzzy/typo recovery without it.
   @spec check_pg_trgm() :: :ok
+  defp bootstrap_owner do
+    Barkpark.Accounts.BootstrapOwner.run()
+  rescue
+    # Never take boot down: an unmigrated DB leaves the owner for the next boot.
+    error -> Logger.warning("[BootstrapOwner] skipped: #{inspect(error)}")
+  end
+
   defp check_pg_trgm do
     case Barkpark.Repo.query("SELECT 1 FROM pg_extension WHERE extname = 'pg_trgm'", []) do
       {:ok, %{num_rows: rows}} when rows > 0 ->
