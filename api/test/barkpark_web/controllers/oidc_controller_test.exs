@@ -169,12 +169,12 @@ defmodule BarkparkWeb.OidcControllerTest do
   test "failed callbacks audit: missing connection, state mismatch, exchange failure (era-w8)",
        %{conn: _conn} do
     # Missing connection → 404, audited.
-    assert build_conn()
+    assert scoped_conn()
            |> get("/v1/auth/oidc/ghost-org/callback?code=x&state=y")
            |> json_response(404)
 
     # State mismatch → 400, audited.
-    assert build_conn()
+    assert scoped_conn()
            |> init_test_session(%{oidc_state: "real", oidc_nonce: "n1", oidc_verifier: "v1"})
            |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
            |> json_response(400)
@@ -188,7 +188,7 @@ defmodule BarkparkWeb.OidcControllerTest do
       "email" => "nope@octrl.com"
     })
 
-    assert build_conn()
+    assert scoped_conn()
            |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
            |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
            |> json_response(401)
@@ -210,7 +210,7 @@ defmodule BarkparkWeb.OidcControllerTest do
 
     mock_op(%{"iss" => @issuer, "aud" => @client_id, "nonce" => "n1", "email" => "x@octrl.com"})
 
-    assert build_conn()
+    assert scoped_conn()
            |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
            |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
            |> json_response(401)
@@ -263,7 +263,7 @@ defmodule BarkparkWeb.OidcControllerTest do
         )
       )
 
-      build_conn()
+      scoped_conn()
       |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
       |> get("/v1/auth/oidc/#{slug}/callback?code=abc&state=s1")
     end
@@ -277,7 +277,7 @@ defmodule BarkparkWeb.OidcControllerTest do
       assert session.idp_mfa
 
       # The org MFA gate accepts the session without a Barkpark factor.
-      assert build_conn()
+      assert scoped_conn()
              |> put_req_header("authorization", "Bearer " <> body["token"])
              |> get("/v1/auth/sessions")
              |> json_response(200)
