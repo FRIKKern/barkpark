@@ -94,7 +94,9 @@ for key in BARKPARK_CLOAK_KEY BARKPARK_KEK SECRET_KEY_BASE PREVIEW_JWT_SECRET; d
   fi
 done
 echo "no key value in the backup"
+start=$SECONDS
 "$tmp/bp" instance restore "$tmp/backup" --database-url "$target" --media-dir "$tmp/media-dst"
+echo "restore took $((SECONDS - start))s"
 
 echo "== boot the prod build against the TLS target with the same keys"
 export DATABASE_URL="ecto://postgres@localhost:$port/barkpark" DATABASE_SSL=verify-full DATABASE_SSL_CA_FILE="$tmp/ca.crt"
