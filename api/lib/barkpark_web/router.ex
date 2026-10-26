@@ -1156,7 +1156,9 @@ defmodule BarkparkWeb.Router do
     # task-9676ef7a58a7d112 — the write buckets' rate limit and quota gate,
     # unchanged, AFTER the token so the bucket keys on it. Reads (the sheets
     # exports, sessions, intents) pass the gate; see RequireWithinQuota's
-    # "Mixed buckets" for `creates:`.
+    # "Mixed buckets" for `creates:`. Only host controllers are named: the
+    # router may not reference a removable plugin's module (fresh-install
+    # invariant), so the sheets import is gated on suspension, not on room.
     plug(BarkparkWeb.Plugs.RateLimit)
 
     plug(BarkparkWeb.Plugs.RequireWithinQuota,
@@ -1165,8 +1167,7 @@ defmodule BarkparkWeb.Router do
         {BarkparkWeb.BulldocsIngestController, :ingest},
         {BarkparkWeb.BulldocsIngestController, :create},
         {BarkparkWeb.BulldocsIngestController, :sync},
-        {BarkparkWeb.BulldocsIngestController, :ingest_session},
-        {Barkpark.Plugins.Sheets.Web.ImportController, :create}
+        {BarkparkWeb.BulldocsIngestController, :ingest_session}
       ]
     )
   end
