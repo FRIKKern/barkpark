@@ -250,14 +250,10 @@ defmodule Barkpark.Groq.DocumentSource do
   @impl true
   def slice(state, constraints, keys, from, to) do
     paths = for {{:path, path}, _dir} <- keys, do: path
+    keys = shape_sort_keys(state, constraints.types, keys)
 
     cond do
       constraints.ids != nil ->
-        :error
-
-      # `order(slug.current)` on a declared slug stored as a string: SQL would
-      # sort it as missing, so the evaluator sorts (read compat).
-      sorts_on_shape?(state, constraints.types, paths) ->
         :error
 
       reads_no_content?(constraints, paths) ->
@@ -619,7 +615,8 @@ defmodule Barkpark.Groq.DocumentSource do
     )
   end
 
-  defp sorts_on_content?(keys), do: Enum.any?(keys, &match?({{:path, _}, _dir}, &1))
+  defp sorts_on_content?(keys),
+    do: Enum.any?(keys, &(match?({{:path, _}, _dir}, &1) or match?({{:shape_path, _}, _dir}, &1)))
 
   # How many times the conditions of a key read `content`, as SQL calls that
   # take it. `_id` lists, view counts and the probe join read none.
@@ -1081,6 +1078,47 @@ defmodule Barkpark.Groq.DocumentSource do
           type(^path, {:array, :string}),
           c.content,
           type(^path, {:array, :string})
+        )
+      )
+    ]
+  end
+
+  # The rank and string keys of {:path, path} (a slug or reference value is a
+  # string or missing), over the value a declared slug or reference holds:
+  # the bare string at the field when it is one, else the Sanity-shaped
+  # object's key (`current` / `_ref`) as stored.
+  defp sort_exprs({:shape_path, path}, _perspective) do
+    base = Enum.drop(path, -1)
+
+    [
+      dynamic(
+        [bp_content: c],
+        fragment(
+          "CASE jsonb_typeof((CASE WHEN jsonb_typeof(? #> ?) = 'string' THEN ? #> ? ELSE ? #> ? END)) WHEN 'number' THEN 2 WHEN 'string' THEN 3 WHEN 'boolean' THEN 4 ELSE 100 END",
+          c.content,
+          type(^base, {:array, :string}),
+          c.content,
+          type(^base, {:array, :string}),
+          c.content,
+          type(^path, {:array, :string})
+        )
+      ),
+      dynamic(
+        [bp_content: c],
+        fragment(
+          "(CASE WHEN jsonb_typeof(? #> ?) = 'string' THEN regexp_replace(? #>> ?, ?, ?, 'g') WHEN jsonb_typeof(? #> ?) = 'string' THEN regexp_replace(? #>> ?, ?, ?, 'g') END) COLLATE \"C\"",
+          c.content,
+          type(^base, {:array, :string}),
+          c.content,
+          type(^base, {:array, :string}),
+          ^@utf16_pattern,
+          ^@utf16_replacement,
+          c.content,
+          type(^path, {:array, :string}),
+          c.content,
+          type(^path, {:array, :string}),
+          ^@utf16_pattern,
+          ^@utf16_replacement
         )
       )
     ]
@@ -1922,11 +1960,32 @@ defmodule Barkpark.Groq.DocumentSource do
     end
   end
 
-  defp sorts_on_shape?(_state, _types, []), do: false
+  # `order(slug.current)` / `order(author._ref)` on a field every type in
+  # scope declares a slug / reference: the SQL sort key reads the bare string
+  # where one is stored, else the Sanity-shaped object's key
+  # ({:shape_path, path}). Declared in only some types (or no type in scope):
+  # the key stays today's {:path, path}, so a bare value sorts as missing. A
+  # known gap (groq-query.md); an evaluator sort there would load every row
+  # and could be refused at the per-fetch limit, where SQL works at any size.
+  defp shape_sort_keys(state, types, keys) do
+    if Enum.any?(keys, &match?({{:path, _}, _}, &1)) do
+      positions = shape_positions(state, types)
 
-  defp sorts_on_shape?(state, types, paths) do
-    positions = shape_positions(state, types)
-    Enum.any?(paths, &(shape_types(positions, &1) != []))
+      Enum.map(keys, fn
+        {{:path, path}, dir} = key ->
+          declaring = shape_types(positions, path)
+
+          if declaring != [] and is_list(types) and
+               Enum.sort(declaring) == Enum.sort(Enum.uniq(types)),
+             do: {{:shape_path, path}, dir},
+             else: key
+
+        key ->
+          key
+      end)
+    else
+      keys
+    end
   end
 
   # The key Sanity's object adds over the bare value: `_ref` on a reference,

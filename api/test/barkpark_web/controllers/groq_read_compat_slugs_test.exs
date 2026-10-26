@@ -56,6 +56,32 @@ defmodule BarkparkWeb.GroqReadCompatSlugsTest do
       {:ok, _} = Content.publish_document(id, "post", @dataset, scope)
     end
 
+    # A type that stores a `slug` string without declaring it a slug: the
+    # mixed case for order(slug.current).
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "page",
+          "title" => "Page",
+          "visibility" => "public",
+          "fields" => [%{"name" => "slug", "type" => "string"}]
+        },
+        @dataset,
+        scope
+      )
+
+    for id <- ["g1", "g2"] do
+      {:ok, _} =
+        Content.create_document(
+          "page",
+          %{"_id" => id, "title" => id, "slug" => "page-" <> id},
+          @dataset,
+          scope
+        )
+
+      {:ok, _} = Content.publish_document(id, "page", @dataset, scope)
+    end
+
     token = "groq-slug-#{System.unique_integer([:positive])}"
     {:ok, _} = Auth.create_token(token, "slug", @dataset, ["read"], ws.id)
     {:ok, token: token}
@@ -99,5 +125,49 @@ defmodule BarkparkWeb.GroqReadCompatSlugsTest do
 
     assert q(conn, t, ~s|*[_type == "post" && defined(slug)] \| order(slug.current desc) [0]._id|) ==
              "p3"
+  end
+
+  # The lead on slice 2: an evaluator sort loads every row, so on a dataset
+  # past the per-fetch limit order(slug.current) would be refused where it
+  # works today. It sorts in SQL: with a per-fetch limit of 2 the first rows
+  # of the 4 posts still come back, in slug order.
+  test "order(slug.current) on a declared slug sorts in SQL, under the per-fetch limit",
+       %{conn: conn, token: t} do
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+
+    Application.put_env(:barkpark, Barkpark.Groq,
+      max_documents_per_fetch: 2,
+      max_documents_loaded: 2
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    assert q(conn, t, ~s|*[_type == "post"] \| order(slug.current asc) [0...2]._id|) == [
+             "p1",
+             "p2"
+           ]
+
+    assert q(conn, t, ~s|*[_type == "post"] \| order(slug.current desc) [0]._id|) == "p4"
+
+    assert q(conn, t, ~s|*[_type == "post" && defined(slug)] \| order(slug.current desc) [0]._id|) ==
+             "p3"
+  end
+
+  # The lead: when only some types in scope declare the slug, order() keeps
+  # today's SQL sort (a bare slug sorts as missing) rather than an evaluator
+  # sort that could be refused at the per-fetch limit. It still answers.
+  test "order(slug.current) over types that declare it and types that don't stays a SQL sort",
+       %{conn: conn, token: t} do
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+
+    Application.put_env(:barkpark, Barkpark.Groq,
+      max_documents_per_fetch: 2,
+      max_documents_loaded: 2
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    ids = q(conn, t, ~s|*[_type in ["post", "page"]] \| order(slug.current asc) [0...2]._id|)
+    assert length(ids) == 2
   end
 end
