@@ -746,8 +746,16 @@ defmodule Barkpark.Groq.DocumentSource do
   defp check_narrowing({:or, []}, _perspective), do: dynamic(false)
 
   defp check_narrowing({:or, branches}, perspective) do
+    # A typed branch (read compat's widening adds them) also narrows by its
+    # types: its content test may be one the index cannot serve, and without
+    # `type IN` the branch would read every row of the dataset.
     narrowed =
-      Enum.map(branches, &narrowings({&1.types, &1.ids, &1.eq, &1.any, &1.checks}, perspective))
+      Enum.map(branches, fn b ->
+        case narrowings({b.types, b.ids, b.eq, b.any, b.checks}, perspective) do
+          [_ | _] = found when is_list(b.types) -> [dynamic([d], d.type in ^b.types) | found]
+          found -> found
+        end
+      end)
 
     if Enum.all?(narrowed, &(&1 != [])) do
       narrowed

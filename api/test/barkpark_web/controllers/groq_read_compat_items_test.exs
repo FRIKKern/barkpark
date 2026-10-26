@@ -236,4 +236,44 @@ defmodule BarkparkWeb.GroqReadCompatItemsTest do
            ) ==
              ["p3", "p4"]
   end
+
+  # The member-name term (`!exists _type && !exists kind`) is one no index
+  # serves: a typeless filter must still read only the declaring types' rows,
+  # never the whole dataset (run-perf on #24093: 41-60 ms through the dataset
+  # index before the branch carried `type IN`).
+  test "a typeless member-name filter reads only the declaring types", %{conn: conn, token: t} do
+    test_pid = self()
+    handler = "groq-items-sql-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, meta, _cfg -> send(test_pid, {:sql, meta.params}) end,
+      nil
+    )
+
+    try do
+      assert q(conn, t, ~s|count(*["card" in cards[]._type])|) == 1
+    after
+      :telemetry.detach(handler)
+    end
+
+    params = drain_params([])
+
+    typed =
+      Enum.filter(params, fn ps -> Enum.any?(ps, &(is_binary(&1) and &1 =~ "keyvalue()")) end)
+
+    # The branch's exact test carries `type IN ["post"]`; its index
+    # narrowing must carry it too, or the planner reads the dataset.
+    assert typed != []
+    assert Enum.all?(typed, fn ps -> Enum.count(ps, &(&1 == ["post"])) >= 2 end)
+  end
+
+  defp drain_params(acc) do
+    receive do
+      {:sql, params} -> drain_params([params | acc])
+    after
+      0 -> acc
+    end
+  end
 end
