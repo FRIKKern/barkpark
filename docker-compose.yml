@@ -82,6 +82,8 @@ services:
       # NEVER ${BARKPARK_PLUGINS:-} — the empty string is the plugin KILL
       # SWITCH server-side, so an unset var must stay unset.
       - BARKPARK_PLUGINS
+      # Break-glass accounts (read in api/config/runtime.exs)
+      - BARKPARK_BREAKGLASS_EMAILS
       # Platform operators, DB statement wall, indx state (census 2026-09-03:
       # all four read in api/config/runtime.exs, none had a passthrough line)
       # First owner on a fresh install (Accounts.BootstrapOwner)

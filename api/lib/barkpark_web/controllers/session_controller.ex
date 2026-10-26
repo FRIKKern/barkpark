@@ -244,6 +244,7 @@ defmodule BarkparkWeb.SessionController do
         conn
         |> put_session("studio_mfa_user", user.id)
         |> put_session("studio_mfa_at", System.system_time(:second))
+        |> put_session("studio_mfa_method", method)
         |> render(:mfa, return_to: return_to, page_title: gettext("Two-step verification"))
 
       # A passkey-only member presents the passkey at its own door (owner
@@ -491,9 +492,12 @@ defmodule BarkparkWeb.SessionController do
     with true <- is_binary(user_id) and fresh?,
          %Barkpark.Accounts.User{} = user <- Barkpark.Accounts.get_user(user_id),
          true <- mfa_factor_ok?(user, params["code"], params["recovery_code"]) do
+      BarkparkWeb.SessionIssuer.audit_breakglass(user, get_session(conn, "studio_mfa_method"))
+
       conn
       |> delete_session("studio_mfa_user")
       |> delete_session("studio_mfa_at")
+      |> delete_session("studio_mfa_method")
       |> mint_user_session(user, return_to, mfa_verified: true)
     else
       _ ->
