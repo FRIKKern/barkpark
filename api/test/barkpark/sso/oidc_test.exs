@@ -9,13 +9,25 @@ defmodule Barkpark.Sso.OidcTest do
   @client_id "bp-client"
 
   # Mock IdP HTTP: token endpoint returns the fixture id_token; JWKS returns the
-  # fixture public key. Fixtures live in app env, set per test.
+  # fixture public key; the discovery URL returns the fixture document. Each
+  # call is also sent to the test process. Fixtures live in app env, set per test.
   defmodule MockIdP do
     @behaviour Barkpark.Sso.Oidc.HTTP
     @impl true
-    def post_form(_url, _params), do: {:ok, %{"id_token" => fixture(:id_token)}}
+    def post_form(url, params, headers) do
+      send(self(), {:token_request, url, params, headers})
+      {:ok, %{"id_token" => fixture(:id_token)}}
+    end
+
     @impl true
-    def get_json(_url), do: {:ok, %{"keys" => [fixture(:jwk)]}}
+    def get_json(url) do
+      send(self(), {:get_json, url})
+
+      if String.ends_with?(url, "/.well-known/openid-configuration"),
+        do: {:ok, fixture(:discovery)},
+        else: {:ok, %{"keys" => [fixture(:jwk)]}}
+    end
+
     defp fixture(k), do: Application.get_env(:barkpark, :oidc_test)[k]
   end
 
@@ -34,35 +46,51 @@ defmodule Barkpark.Sso.OidcTest do
     :ok
   end
 
-  defp connection(slug \\ "oidcorg") do
+  defp connection(slug \\ "oidcorg", extra \\ %{}) do
     {:ok, org} = Tenancy.create_organization(%{slug: slug, name: slug})
 
     {:ok, c} =
-      Oidc.create_connection(%{
-        organization_id: org.id,
-        issuer: @issuer,
-        client_id: @client_id,
-        client_secret: "top-secret",
-        authorization_endpoint: @issuer <> "/authorize",
-        token_endpoint: @issuer <> "/token",
-        jwks_uri: @issuer <> "/jwks"
-      })
+      Oidc.create_connection(
+        Map.merge(
+          %{
+            organization_id: org.id,
+            issuer: @issuer,
+            client_id: @client_id,
+            client_secret: "top-secret",
+            authorization_endpoint: @issuer <> "/authorize",
+            token_endpoint: @issuer <> "/token",
+            jwks_uri: @issuer <> "/jwks"
+          },
+          extra
+        )
+      )
 
     {org, c}
   end
 
   # Sign an id_token with a fresh RSA key and register the matching JWKS.
-  defp mock_op(claims) do
+  defp mock_op(claims, kid \\ "k1") do
     jwk = JOSE.JWK.generate_key({:rsa, 2048})
-    pub = jwk |> JOSE.JWK.to_public_map() |> elem(1) |> Map.put("kid", "k1")
+    sign_with(jwk, kid, claims)
+  end
+
+  defp sign_with(jwk, kid, claims) do
+    pub = jwk |> JOSE.JWK.to_public_map() |> elem(1) |> Map.put("kid", kid)
 
     id_token =
       jwk
-      |> JOSE.JWS.sign(Jason.encode!(claims), %{"alg" => "RS256", "kid" => "k1"})
+      |> JOSE.JWS.sign(Jason.encode!(claims), %{"alg" => "RS256", "kid" => kid})
       |> JOSE.JWS.compact()
       |> elem(1)
 
-    Application.put_env(:barkpark, :oidc_test, %{id_token: id_token, jwk: pub})
+    fixtures = Application.get_env(:barkpark, :oidc_test, %{})
+
+    Application.put_env(
+      :barkpark,
+      :oidc_test,
+      Map.merge(fixtures, %{id_token: id_token, jwk: pub})
+    )
+
     id_token
   end
 
@@ -203,12 +231,174 @@ defmodule Barkpark.Sso.OidcTest do
     test "carries client_id, PKCE challenge, state and nonce" do
       {_org, c} = connection()
       p = Oidc.new_auth_params()
-      url = Oidc.authorize_url(c, Map.put(p, :redirect_uri, "https://bp/cb"))
+      {:ok, url} = Oidc.authorize_url(c, Map.put(p, :redirect_uri, "https://bp/cb"))
 
       assert url =~ @issuer <> "/authorize?"
       assert url =~ "client_id=bp-client"
       assert url =~ "code_challenge_method=S256"
       assert url =~ "response_type=code"
+      assert URI.decode_query(URI.parse(url).query)["scope"] == "openid email"
+    end
+
+    test "carries the connection's configured scopes" do
+      {_org, c} = connection("scoped", %{scopes: "openid profile email"})
+      p = Map.put(Oidc.new_auth_params(), :redirect_uri, "https://bp/cb")
+      {:ok, url} = Oidc.authorize_url(c, p)
+
+      assert URI.decode_query(URI.parse(url).query)["scope"] == "openid profile email"
+    end
+  end
+
+  describe "strict validation" do
+    defp strict(extra \\ %{}), do: connection("strict", Map.put(extra, :strict_validation, true))
+
+    test "a token without exp is refused" do
+      {_org, c} = strict()
+      mock_op(Map.delete(claims(), "exp"))
+      assert {:error, :missing_exp} = callback(c)
+    end
+
+    test "a token whose nbf is in the future is refused" do
+      {_org, c} = strict()
+      mock_op(claims(%{"nbf" => System.system_time(:second) + 600}))
+      assert {:error, :not_yet_valid} = callback(c)
+    end
+
+    test "a token issued in the future is refused" do
+      {_org, c} = strict()
+      mock_op(claims(%{"iat" => System.system_time(:second) + 600}))
+      assert {:error, :issued_in_future} = callback(c)
+    end
+
+    test "time claims within the clock skew are accepted" do
+      {_org, c} = strict()
+      now = System.system_time(:second)
+      mock_op(claims(%{"nbf" => now + 30, "iat" => now + 30, "sub" => "s-1"}))
+      assert {:ok, _user, _} = callback(c)
+    end
+
+    test "a token from another tenant is refused when the tenant is pinned" do
+      {_org, c} = connection("pinned", %{tenant_id: "tenant-a"})
+      mock_op(claims(%{"tid" => "tenant-b"}))
+      assert {:error, :tenant_mismatch} = callback(c)
+
+      mock_op(claims(%{"tid" => "tenant-a"}))
+      assert {:ok, _user, _} = callback(c)
+    end
+
+    test "the instance setting turns strict validation on for every connection" do
+      Application.put_env(:barkpark, :oidc_strict_validation, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_strict_validation) end)
+
+      {_org, c} = connection()
+      mock_op(Map.delete(claims(), "exp"))
+      assert {:error, :missing_exp} = callback(c)
+    end
+
+    test "a changed email at the IdP signs in to the same account" do
+      {_org, c} = strict()
+      mock_op(claims(%{"sub" => "pairwise-1", "oid" => "object-1"}))
+      assert {:ok, user, _} = callback(c)
+
+      mock_op(
+        claims(%{"sub" => "pairwise-1", "oid" => "object-1", "email" => "renamed@oidcorg.com"})
+      )
+
+      assert {:ok, again, _} = callback(c)
+      assert again.id == user.id
+      refute Accounts.get_user_by_email("renamed@oidcorg.com")
+    end
+  end
+
+  describe "strict validation off" do
+    test "an existing connection behaves as before: no exp, future nbf and iat, email matching" do
+      {_org, c} = connection()
+      future = System.system_time(:second) + 600
+
+      mock_op(
+        claims(%{"sub" => "pairwise-1", "nbf" => future, "iat" => future})
+        |> Map.delete("exp")
+      )
+
+      assert {:ok, user, _} = callback(c)
+
+      # Without strict validation the subject is not stored, so a new email is
+      # a new account, as today.
+      mock_op(claims(%{"sub" => "pairwise-1", "email" => "renamed@oidcorg.com"}))
+      assert {:ok, other, _} = callback(c)
+      refute other.id == user.id
+      refute Barkpark.Repo.exists?(Barkpark.Sso.SocialIdentity)
+    end
+  end
+
+  describe "JWKS cache and key rollover" do
+    test "a known key is served from the cache; a new kid refetches the JWKS" do
+      {org, c} = connection()
+      verify_domain!(org, "oidcorg.com")
+      key_a = JOSE.JWK.generate_key({:rsa, 2048})
+
+      sign_with(key_a, "rollover-a", claims())
+      assert {:ok, _, _} = callback(c)
+      assert_received {:get_json, @issuer <> "/jwks"}
+
+      sign_with(key_a, "rollover-a", claims())
+      assert {:ok, _, _} = callback(c)
+      refute_received {:get_json, _}
+
+      # The IdP rotates to a new signing key.
+      mock_op(claims(), "rollover-b")
+      assert {:ok, _, _} = callback(c)
+      assert_received {:get_json, @issuer <> "/jwks"}
+    end
+  end
+
+  describe "discovery" do
+    test "a connection without endpoints reads them from the issuer's discovery document" do
+      issuer = "https://discovery.example.com"
+
+      {_org, c} =
+        connection("disco", %{
+          issuer: issuer,
+          authorization_endpoint: nil,
+          token_endpoint: nil,
+          jwks_uri: nil
+        })
+
+      Application.put_env(:barkpark, :oidc_test, %{
+        discovery: %{
+          "authorization_endpoint" => issuer <> "/oauth2/authorize",
+          "token_endpoint" => issuer <> "/oauth2/token",
+          "jwks_uri" => issuer <> "/keys"
+        }
+      })
+
+      p = Map.put(Oidc.new_auth_params(), :redirect_uri, "https://bp/cb")
+      assert {:ok, url} = Oidc.authorize_url(c, p)
+      assert url =~ issuer <> "/oauth2/authorize?"
+
+      mock_op(claims(%{"iss" => issuer}))
+      assert {:ok, _, _} = callback(c)
+      assert_received {:token_request, "https://discovery.example.com/oauth2/token", _, _}
+      assert_received {:get_json, "https://discovery.example.com/keys"}
+    end
+  end
+
+  describe "client authentication" do
+    test "client_secret_post sends the secret in the body (the default)" do
+      {_org, c} = connection()
+      mock_op(claims())
+      assert {:ok, _, _} = callback(c)
+      assert_received {:token_request, _, %{"client_secret" => "top-secret"}, []}
+    end
+
+    test "client_secret_basic sends the secret in the Authorization header only" do
+      {_org, c} = connection("basic", %{token_endpoint_auth_method: "client_secret_basic"})
+      mock_op(claims())
+      assert {:ok, _, _} = callback(c)
+
+      assert_received {:token_request, _, params, [{"authorization", "Basic " <> basic}]}
+      refute Map.has_key?(params, "client_secret")
+      assert Base.decode64!(basic) == "bp-client:top-secret"
     end
   end
 
