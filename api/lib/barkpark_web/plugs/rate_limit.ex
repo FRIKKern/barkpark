@@ -5,7 +5,8 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   Reads (`GET`/`HEAD`) and writes (other verbs) are billed against
   separate buckets. Limits come from
   `config :barkpark, :rate_limits` with per-dataset overrides in
-  `datasets: %{"ds" => %{read: N, write: M}}`. A credential bucket is keyed on a
+  `datasets: %{"ds" => %{read: N, write: M}}` and per-token overrides in
+  `tokens: %{"<api_token id>" => %{read: N}}`. A credential bucket is keyed on a
   RESOLVED token id — api_token or SCIM token, see `@principal_resolvers` —
   NEVER on the raw Authorization header. Unauthenticated callers, and callers
   presenting a bearer no resolver can verify, are bucketed by client IP,
@@ -144,8 +145,8 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # long queries as POST, as Sanity's does) to the read bucket.
   defp class_plan(conn, class) do
     dataset = conn.path_params["dataset"]
-    {principal_class, key} = bucket_key(conn, class, dataset)
-    per_minute = limit_per_minute(class, dataset, principal_class)
+    {principal_class, key, token_id} = bucket_key(conn, class, dataset)
+    per_minute = limit_per_minute(class, dataset, principal_class, token_id)
     {class, per_minute, key}
   end
 
@@ -157,7 +158,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # debited by, the write bucket the same principal's content saves use.
   defp presence_focus_plan(conn) do
     dataset = conn.path_params["dataset"]
-    {_principal_class, key} = bucket_key(conn, :presence_focus, dataset)
+    {_principal_class, key, _token_id} = bucket_key(conn, :presence_focus, dataset)
     per_minute = limit_per_minute(:presence_focus, dataset, nil)
     {:presence_focus, per_minute, key}
   end
@@ -187,7 +188,10 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
     if browser_enabled?(cfg) do
       per_minute = browser_per_minute(cfg)
-      {_principal_class, key} = bucket_key(conn, :browser, conn.path_params["dataset"])
+
+      {_principal_class, key, _token_id} =
+        bucket_key(conn, :browser, conn.path_params["dataset"])
+
       {:browser, per_minute, key}
     else
       :skip
@@ -331,14 +335,31 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # traffic is UNCHANGED: default_per_minute/3 only branches on `:session`
   # and `:owned`, so every other principal_class keeps the exact
   # byte-identical :write_per_minute default this function always returned.
-  defp limit_per_minute(class, dataset, principal_class) do
+  #
+  # A token override (`tokens: %{"<api_token id>" => %{read: N}}`) wins over
+  # both: it names one credential, such as a site's build token that
+  # prerenders pages in parallel (task-96c1255dd45eeb41).
+  defp limit_per_minute(class, dataset, principal_class, token_id \\ nil) do
     cfg = Application.get_env(:barkpark, :rate_limits, [])
     default = default_per_minute(cfg, class, principal_class)
 
-    case dataset_override(cfg, dataset, class) do
+    case token_override(cfg, token_id, class) || dataset_override(cfg, dataset, class) do
       nil -> default
       n when is_integer(n) and n > 0 -> n
       _ -> default
+    end
+  end
+
+  defp token_override(_cfg, nil, _class), do: nil
+
+  # `token_id` is the resolved principal, `"api:<api_token id>"` for an
+  # api_token; the config names the api_token id alone.
+  defp token_override(cfg, token_id, class) do
+    id = String.replace_prefix(to_string(token_id), "api:", "")
+
+    case Map.get(Keyword.get(cfg, :tokens, %{}) || %{}, id) do
+      %{} = overrides -> Map.get(overrides, class)
+      _ -> nil
     end
   end
 
@@ -401,7 +422,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp bucket_key(conn, class, dataset) do
     scope = dataset || "global"
 
-    {principal_class, key} =
+    {principal_class, key, token_id} =
       case principal_id(conn) do
         nil ->
           # The trust boundary, NOT the raw peer. Every prod instance runs Caddy
@@ -411,16 +432,16 @@ defmodule BarkparkWeb.Plugs.RateLimit do
           # every other anonymous caller. `client_ip/1` believes the chain only
           # when the peer is a trusted front and takes the rightmost non-proxy
           # hop, so a direct caller still cannot pick its own key.
-          {:anonymous, "ip:#{RateLimiter.client_ip(conn)}:#{class}:#{scope}"}
+          {:anonymous, "ip:#{RateLimiter.client_ip(conn)}:#{class}:#{scope}", nil}
 
         {:session, token_id} ->
-          {:session, "token:#{token_id}:#{class}:#{scope}"}
+          {:session, "token:#{token_id}:#{class}:#{scope}", token_id}
 
         {:owned, token_id} ->
-          {:owned, "token:#{token_id}:#{class}:#{scope}"}
+          {:owned, "token:#{token_id}:#{class}:#{scope}", token_id}
 
         token_id ->
-          {:verified, "token:#{token_id}:#{class}:#{scope}"}
+          {:verified, "token:#{token_id}:#{class}:#{scope}", token_id}
       end
 
     # The per-test scope suffix used to be appended HERE, and this plug was the
@@ -429,7 +450,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     # exactly as the other seven sites apply it — so `bucket_key/3` returns the
     # production key and one helper owns the seam. The suffix is byte-identical
     # to what the clause removed from here produced.
-    {principal_class, key}
+    {principal_class, key, token_id}
   end
 
   # THE BUCKET KEY MAY ONLY BE DERIVED FROM A VERIFIED PRINCIPAL — AND EVERY

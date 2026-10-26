@@ -1562,6 +1562,32 @@ if config_env() == :prod do
       System.get_env("BARKPARK_RATE_LIMIT_BROWSER_ENFORCE") in ["true", "1"]
     )
 
+  # Per-token budgets: "<api_token id>:read=3000:write=120,<id>:read=1200".
+  # A token override wins over the class and dataset budgets.
+  rate_limits =
+    case System.get_env("BARKPARK_RATE_LIMIT_TOKENS") do
+      spec when is_binary(spec) and spec != "" ->
+        tokens =
+          for entry <- String.split(spec, ",", trim: true),
+              [id | pairs] = String.split(String.trim(entry), ":"),
+              into: %{} do
+            budgets =
+              for pair <- pairs,
+                  [k, v] = String.split(pair, "="),
+                  k in ["read", "write"],
+                  into: %{} do
+                {String.to_existing_atom(k), String.to_integer(v)}
+              end
+
+            {id, budgets}
+          end
+
+        Keyword.update(rate_limits, :tokens, tokens, &Map.merge(&1 || %{}, tokens))
+
+      _ ->
+        rate_limits
+    end
+
   config :barkpark, :rate_limits, rate_limits
 
   # Quiz room-spawn rails (Barkpark.Quiz.SpawnBudget) — per-hour, per-principal
