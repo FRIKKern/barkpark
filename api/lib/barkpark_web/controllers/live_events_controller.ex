@@ -17,8 +17,8 @@ defmodule BarkparkWeb.LiveEventsController do
     * `event: restart`, `data: {}` when a `Last-Event-ID` / `?lastEventId`
       cannot be honoured (malformed, past the head, or a backlog over
       1,000 tags): the client refetches everything;
-    * `: keepalive` every 15 s, so a stream whose client left ends within
-      about 30 s;
+    * `: keepalive` every 15 s. A stream whose client left ends within about
+      a second (`BarkparkWeb.PeerProbe`), freeing its cap slot;
     * `event: goaway`, then close, instead of a welcome when the credential
       already holds `:live_events_max_streams` (default 20) open streams;
       next-sanity falls back to polling.
@@ -40,7 +40,7 @@ defmodule BarkparkWeb.LiveEventsController do
   alias Barkpark.Content.{Broadcast, DraftId, EventLog}
   alias Barkpark.Groq.SyncTag
   alias Barkpark.Realtime.DrainSignal
-  alias BarkparkWeb.{ErrorResponse, ListenController}
+  alias BarkparkWeb.{ErrorResponse, ListenController, PeerProbe}
 
   @min_api_version "2021-03-25"
   @batch_ms 1_000
@@ -138,6 +138,7 @@ defmodule BarkparkWeb.LiveEventsController do
     case chunk(conn, first) do
       {:ok, conn} ->
         schedule_keepalive()
+        schedule_probe()
         loop(conn, state)
 
       _ ->
@@ -205,6 +206,16 @@ defmodule BarkparkWeb.LiveEventsController do
 
       :flush ->
         flush(conn, state)
+
+      # The client left: end now, freeing the cap slot and the subscription,
+      # instead of waiting for a write to fail (task-8c7219534ff42b88).
+      :probe ->
+        if PeerProbe.closed?(conn) do
+          conn
+        else
+          schedule_probe()
+          loop(conn, state)
+        end
 
       :keepalive ->
         case chunk(conn, ": keepalive\n\n") do
@@ -278,15 +289,22 @@ defmodule BarkparkWeb.LiveEventsController do
     id_line <> "event: #{event}\ndata: #{Jason.encode!(data)}\n\n"
   end
 
-  # 15 s, not listen's 30: a write into a socket the client just closed still
-  # succeeds once (the kernel buffers it), and only the next one fails. A
-  # dead stream therefore ends, and frees its cap slot and its subscription,
-  # within two keepalives: about 30 s on a quiet dataset (run-perf on #24130).
+  # The keepalive writes a comment so proxies keep the stream open. A closed
+  # client is noticed by the probe below, every second, not by a keepalive
+  # write: the first write after a close still succeeds.
   defp schedule_keepalive,
     do:
       Process.send_after(
         self(),
         :keepalive,
         Application.get_env(:barkpark, :live_events_keepalive_ms, 15_000)
+      )
+
+  defp schedule_probe,
+    do:
+      Process.send_after(
+        self(),
+        :probe,
+        Application.get_env(:barkpark, :live_events_probe_ms, 1_000)
       )
 end
