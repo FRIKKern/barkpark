@@ -917,6 +917,20 @@ if System.get_env("BARKPARK_OIDC_STRICT_VALIDATION") in ~w(1 true yes on) do
   config :barkpark, :oidc_strict_validation, true
 end
 
+# The org sign-in policy (allowed_auth_methods, require_mfa) on the doors that
+# carry no second factor: API token paste and the Barkpark Cloud handoff
+# (`BarkparkWeb.SessionIssuer.policy_refusal/3`). Off unless truthy.
+if System.get_env("BARKPARK_SIGN_IN_POLICY_ALL_ROUTES") in ~w(1 true yes on) do
+  config :barkpark, :sign_in_policy_all_routes, true
+end
+
+# An instance Barkpark Cloud does not manage sets BARKPARK_CLOUD_HANDOFF=off:
+# ticket exchange, email login tickets and cloud-user deprovisioning answer 404
+# (`Barkpark.Auth.CloudSeat.handoff_enabled?/0`). On unless set to a false value.
+if System.get_env("BARKPARK_CLOUD_HANDOFF") in ~w(0 false no off) do
+  config :barkpark, :cloud_handoff, false
+end
+
 # Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
 # (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
 # and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
