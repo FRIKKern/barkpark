@@ -762,7 +762,7 @@ defmodule PDS.Census do
     # RE-DERIVED AGAIN 2026-10-26 (task-fa352596d025a916, the Sheets import's own
     # quota check): write-routed 56 -> 57, read-routed 37 -> 36. ONE reclassified
     # site, no added one: Sheets.Web.ImportController.create/2's `ok: true` arm
-    # (import_controller.ex:68) moves [READ] -> [WRITE d4], because create/2 now
+    # moves [READ] -> [WRITE d4], because create/2 now
     # reaches Quota.emit_quota_exceeded/1's audit write through room_for_sheet/3
     # inside the depth budget. textual, ast, emitted, phantom, consumer and
     # unrouted did not move. Derived from this census's own D448-DRIFT-REFUSES line
