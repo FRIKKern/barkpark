@@ -166,11 +166,13 @@ defmodule Barkpark.Tasks.RailTest do
       with_edge = Rail.rev(parent, opts)
       refute base == with_edge
 
-      # Remove: digest returns to the pre-edge value (edge set restored).
+      # Remove: the edge set is restored, but each edge change also writes a new
+      # rev on the child (Tasks.Fence), so the digest moves again rather than
+      # returning to base.
       {:ok, 1} = Tasks.remove_dep(child.id, blocker.id, :blocks)
       after_remove = Rail.rev(parent, opts)
-      assert after_remove == base
       refute after_remove == with_edge
+      refute after_remove == base
     end
 
     test "STABLE under an edit to a NON-child task (another rail)",
