@@ -21,7 +21,7 @@ Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type
 
 `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]` (`getDocument(s)`) reads `*[_id in ids]` as `raw`: `{"documents", "omitted"}`; a missing id is omitted, reason `existence`.
 
-Errors keep Barkpark's envelope plus Sanity's `description`, `statusCode` and `message` (`ClientError.message` names the cause), and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`; no free slot is 503 with `type: "queryBusyError"` and `Retry-After`. A missing parameter is a syntax error, as on Sanity.
+Errors keep Barkpark's envelope plus Sanity's `description`, `statusCode` and `message` (`ClientError.message` names the cause), and `type`: `queryParseError` (400 `malformed`, plus `query`, `start`, `end`), `queryLimitError` or `queryEvaluationError` (422 `bad_request`), `queryBusyError` (503, `Retry-After`). A missing parameter is a syntax error, as on Sanity.
 
 ## Client configuration
 
@@ -41,7 +41,7 @@ const client = createClient({
 
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter (add `_type` for finer refresh). Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin, which live events send. At most 128 tags: past 64 readable ones, type tags only.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter (add `_type` for finer refresh). Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`, token or member) sends changed docs' twins as `message` `{"tags"}` each second, `restart` when `Last-Event-ID` can't resume. At most 128 tags: past 64 readable ones, type tags only.
 
 ## Evaluation and limits
 
@@ -63,7 +63,7 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`groq/conformance_test.exs`): 7147 of 7731 pass; the rest use `diff::` or `fn`.
 
-Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases (a stack's release ids are ignored); `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
+Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases (a stack's release ids are ignored); `resultSourceMap`. Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 
