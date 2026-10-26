@@ -17,7 +17,8 @@ defmodule BarkparkWeb.LiveEventsController do
     * `event: restart`, `data: {}` when a `Last-Event-ID` / `?lastEventId`
       cannot be honoured (malformed, past the head, or a backlog over
       1,000 tags): the client refetches everything;
-    * `: keepalive` every 30 s;
+    * `: keepalive` every 15 s, so a stream whose client left ends within
+      about 30 s;
     * `event: goaway`, then close, instead of a welcome when the credential
       already holds `:live_events_max_streams` (default 20) open streams;
       next-sanity falls back to polling.
@@ -277,11 +278,15 @@ defmodule BarkparkWeb.LiveEventsController do
     id_line <> "event: #{event}\ndata: #{Jason.encode!(data)}\n\n"
   end
 
+  # 15 s, not listen's 30: a write into a socket the client just closed still
+  # succeeds once (the kernel buffers it), and only the next one fails. A
+  # dead stream therefore ends, and frees its cap slot and its subscription,
+  # within two keepalives: about 30 s on a quiet dataset (run-perf on #24130).
   defp schedule_keepalive,
     do:
       Process.send_after(
         self(),
         :keepalive,
-        Application.get_env(:barkpark, :listen_keepalive_ms, 30_000)
+        Application.get_env(:barkpark, :live_events_keepalive_ms, 15_000)
       )
 end
