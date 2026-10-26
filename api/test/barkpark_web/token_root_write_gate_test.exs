@@ -335,7 +335,7 @@ defmodule BarkparkWeb.TokenRootWriteGateTest do
     src = File.read!(@router_path)
 
     case Regex.run(
-           ~r/scope "\/v1" do\n\s*pipe_through\((.+?)\)\n\n\s*plugin_routes\(scope: :token_root\)/,
+           ~r/scope "\/v1" do\n\s*pipe_through\((.+?)\)\n\n\s*plugin_routes\(scope: :token_root\)/s,
            src
          ) do
       [_, pipes] ->

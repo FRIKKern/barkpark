@@ -82,6 +82,8 @@ defmodule BarkparkWeb.Plugs.RateLimitTestConnScopeTest do
     # the request is refused, so the IP bucket is unreachable on this pipeline.
     "RequireToken" => {:required, "deny(conn, {:error, :unauthorized}) on a missing bearer"},
     "RequireScimToken" => {:required, "401 + halt() on a missing/unresolvable SCIM bearer"},
+    "RequireIngestToken" =>
+      {:required, "reject(conn) when no bearer is the ingest secret or an admin api_token"},
     "RequireBearerOrSessionToken" =>
       {:required, "unauthorized/1 -> halt_with/2 when neither bearer nor session resolves"},
     "PreviewToken" => {:required, "deny(conn, :unauthorized) when no Preview JWT extracts"},
