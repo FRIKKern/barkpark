@@ -113,6 +113,16 @@ defmodule Barkpark.Groq.SourceMap do
     end
   end
 
+  # `_ref`, `_type`, `_weak` and `current` read off a bare string (a declared
+  # reference or slug stored as the id or the slug) are computed by the read
+  # compat, not stored: no mapping, as Sanity maps none for `_weak` it computes.
+  defp prov({:attr, base, name}, s, c) when name in ["_ref", "_type", "_weak", "current"] do
+    case if(base, do: ev(base, s, c), else: s.value) do
+      v when is_binary(v) -> nil
+      _ -> child(if(base, do: prov(base, s, c), else: s.prov), name)
+    end
+  end
+
   defp prov({:attr, nil, name}, s, _c), do: child(s.prov, name)
   defp prov({:attr, base, name}, s, c), do: child(prov(base, s, c), name)
 
