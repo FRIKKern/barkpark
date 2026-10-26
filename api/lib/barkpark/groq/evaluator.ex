@@ -18,7 +18,8 @@ defmodule Barkpark.Groq.Evaluator do
   dictionary.
   """
 
-  alias Barkpark.Groq.{Pushdown, Source, Values}
+  alias Barkpark.Groq.{PortableText, Pushdown, Source, Values}
+  alias Barkpark.PortableDoc.BodyWalk
 
   defmodule EvalError do
     @moduledoc "A query that parses but cannot be evaluated (an unsupported function, a tuple)."
@@ -423,6 +424,24 @@ defmodule Barkpark.Groq.Evaluator do
        when t in ["composite", "object"] and is_list(sub),
        do: bare_refs_in(obj, sub, acc)
 
+  # A body link: a wikilink's `docId`, else its `target`, at any depth of a
+  # declared richText field (Sanity: an internalLink markDef's `_ref`). The
+  # same rule `Content.Edges` projects into `content_edges`.
+  defp bare_refs_of(value, %{"type" => "richText"}, acc) when is_map(value) or is_list(value) do
+    value
+    |> BodyWalk.collect(fn
+      %{"type" => "wikilink"} = node ->
+        case node["docId"] || node["target"] do
+          id when is_binary(id) and id != "" -> [id]
+          _ -> []
+        end
+
+      _ ->
+        []
+    end)
+    |> Enum.reduce(acc, &MapSet.put(&2, &1))
+  end
+
   defp bare_refs_of(_value, _field, acc), do: acc
 
   defp ref_member?(%{"type" => "reference"}), do: true
@@ -749,8 +768,16 @@ defmodule Barkpark.Groq.Evaluator do
   defp func("dateTime", "now", [], _scope, ctx),
     do: {:datetime, DateTime.truncate(ctx.now, :millisecond)}
 
-  defp func("pt", "text", [arg], scope, ctx),
-    do: Barkpark.Groq.PortableText.text(eval(arg, scope, ctx))
+  # A declared richText field stores PortableDoc, not Portable Text: read it
+  # as the Portable Text it maps from (read compat, task-c2be444ac1d07719).
+  defp func("pt", "text", [arg], scope, ctx) do
+    value = eval(arg, scope, ctx)
+
+    case field_decl(arg, scope, ctx) do
+      %{"type" => "richText"} -> PortableText.doc_text(value) || PortableText.text(value)
+      _ -> PortableText.text(value)
+    end
+  end
 
   defp func("sanity", "projectId", _args, _scope, ctx), do: ctx.project_id
   defp func("sanity", "dataset", _args, _scope, ctx), do: ctx.dataset
