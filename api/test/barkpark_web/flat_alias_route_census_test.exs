@@ -516,6 +516,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "workspace-B token with the Default Workspace's whole census. counts/2 threads " <>
          "ScopeHelpers.scope_opts/1; the fix was upstream, in the pipeline. Pinned by " <>
          "flat_alias_tenancy_test.exs."},
+    # GroqController.read (task-2b7f715eb6fd0c12, `bp doc groq`)
+    {"GET", "/v1/data/groq/:dataset"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into WriteScope.read_dataset_known?/2 and " <>
+         "Barkpark.Groq.query/3's DocumentSource, so every row read is the " <>
+         "pipeline-derived :current_workspace's, as on the scoped /v<apiVersion> route."},
     # QueryController.show
     {"GET", "/v1/data/doc/:dataset/:type/:doc_id"} =>
       {:workspace_derived,

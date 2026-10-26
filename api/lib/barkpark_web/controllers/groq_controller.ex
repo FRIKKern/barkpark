@@ -110,17 +110,33 @@ defmodule BarkparkWeb.GroqController do
   defp query_params(conn, params) do
     from_body =
       case params["params"] do
-        %{} = map -> map
-        _ -> %{}
+        %{} = map ->
+          map
+
+        # `bp doc groq --params '{"slug":"x"}'` sends the object as a string.
+        json when is_binary(json) ->
+          case Jason.decode(json) do
+            {:ok, %{} = map} -> map
+            _ -> :invalid
+          end
+
+        _ ->
+          %{}
       end
+
+    start = if from_body == :invalid, do: {:error, {:bad_param, "params"}}, else: {:ok, from_body}
 
     conn.query_params
     |> Enum.filter(fn {key, _} -> String.starts_with?(key, "$") end)
-    |> Enum.reduce_while({:ok, from_body}, fn {"$" <> name, raw}, {:ok, acc} ->
-      case Jason.decode(raw) do
-        {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
-        {:error, _} -> {:halt, {:error, {:bad_param, name}}}
-      end
+    |> Enum.reduce_while(start, fn
+      _pair, {:error, _} = error ->
+        {:halt, error}
+
+      {"$" <> name, raw}, {:ok, acc} ->
+        case Jason.decode(raw) do
+          {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
+          {:error, _} -> {:halt, {:error, {:bad_param, name}}}
+        end
     end)
   end
 
@@ -151,17 +167,16 @@ defmodule BarkparkWeb.GroqController do
   defp respond(conn, params, query, result_json, tags, ms) do
     return_query? = params["returnQuery"] not in ["false", false]
 
-    fields =
-      [
-        if(return_query?, do: {"query", query}),
-        {"result", Jason.Fragment.new(result_json)},
-        {"ms", ms},
-        {"syncTags", tags}
-      ]
-      |> Enum.reject(&is_nil/1)
-      |> Jason.OrderedObject.new()
+    result = Jason.Fragment.new(result_json)
 
-    json(conn, fields)
+    # Literal maps, so the /v1/data envelope convention can read them
+    # (response_envelope_convention_test.exs): `result` plus Sanity's
+    # `query`, `ms` and `syncTags`.
+    if return_query? do
+      json(conn, %{query: query, result: result, ms: ms, syncTags: tags})
+    else
+      json(conn, %{result: result, ms: ms, syncTags: tags})
+    end
   end
 
   # A query's own hint: `malformed`'s default speaks of a JSON body, which a GROQ read

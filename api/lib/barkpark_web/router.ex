@@ -2676,6 +2676,8 @@ defmodule BarkparkWeb.Router do
     # (AXI charter decision 19 / manifest `data.counts`). Token/preview only
     # (existence-hiding, like backlinks); tenancy fail-closed in the controller.
     get("/counts/:dataset", QueryController, :counts)
+    # GROQ at an undated path, for `bp doc groq` (task-2b7f715eb6fd0c12).
+    get("/groq/:dataset", GroqController, :read)
   end
 
   # ── Localhost fast-path search (Barkpark Cloud P4 / Move B) ──────────────
@@ -3751,6 +3753,8 @@ defmodule BarkparkWeb.Router do
     pipe_through(:shared_docs_api)
 
     get("/v:api_version/data/query/:dataset", GroqController, :read)
+    # The same read at an undated path, for `bp doc groq` (task-2b7f715eb6fd0c12).
+    get("/v1/data/groq/:dataset", GroqController, :read)
   end
 
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do

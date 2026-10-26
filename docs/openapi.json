@@ -15540,6 +15540,88 @@
         "x-barkpark-scope": "none"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/data/groq/{dataset}": {
+      "get": {
+        "operationId": "doc.groq.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The GROQ query, e.g. *[_type == \"post\"]{_id, title}.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Query parameters as one JSON object, e.g. {\"slug\":\"intro\"}.",
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "published (default), drafts or raw.",
+            "in": "query",
+            "name": "perspective",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [],
+        "summary": "Run a GROQ query over a dataset, as Sanity's query API answers it: {query, result, ms, syncTags}.",
+        "tags": [
+          "doc"
+        ],
+        "x-barkpark-scope": "none"
+      }
+    },
     "/v1/auth/reset": {
       "post": {
         "operationId": "auth.reset",
@@ -17966,6 +18048,72 @@
         "summary": "List the assets in a media collection by id.",
         "tags": [
           "media"
+        ],
+        "x-barkpark-scope": "none"
+      }
+    },
+    "/v1/data/groq/{dataset}": {
+      "get": {
+        "operationId": "doc.groq",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dataset",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The GROQ query, e.g. *[_type == \"post\"]{_id, title}.",
+            "in": "query",
+            "name": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Query parameters as one JSON object, e.g. {\"slug\":\"intro\"}.",
+            "in": "query",
+            "name": "params",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "published (default), drafts or raw.",
+            "in": "query",
+            "name": "perspective",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [],
+        "summary": "Run a GROQ query over a dataset, as Sanity's query API answers it: {query, result, ms, syncTags}.",
+        "tags": [
+          "doc"
         ],
         "x-barkpark-scope": "none"
       }
