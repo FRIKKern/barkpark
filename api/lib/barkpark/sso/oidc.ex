@@ -24,8 +24,54 @@ defmodule Barkpark.Sso.Oidc do
   @doc "Create a per-org OIDC connection."
   @spec create_connection(map()) :: {:ok, OidcConnection.t()} | {:error, Ecto.Changeset.t()}
   def create_connection(attrs) do
-    changeset = OidcConnection.changeset(%OidcConnection{}, attrs)
+    %OidcConnection{} |> OidcConnection.changeset(attrs) |> save(&Repo.insert/1)
+  end
 
+  @doc "Update a connection; group mappings are re-checked like on create."
+  @spec update_connection(OidcConnection.t(), map()) ::
+          {:ok, OidcConnection.t()} | {:error, term()}
+  def update_connection(%OidcConnection{} = c, attrs) do
+    c |> OidcConnection.changeset(attrs) |> save(&Repo.update/1)
+  end
+
+  @doc "Delete a connection. Sign-ins through it stop at once."
+  @spec delete_connection(OidcConnection.t()) :: {:ok, OidcConnection.t()} | {:error, term()}
+  def delete_connection(%OidcConnection{} = c), do: Repo.delete(c)
+
+  @doc """
+  Read the issuer's discovery document and return the endpoint attributes a
+  connection needs. The document must name the same issuer it was fetched from.
+  """
+  @spec discover(String.t()) :: {:ok, map()} | {:error, term()}
+  def discover(issuer) when is_binary(issuer) do
+    url = String.trim_trailing(issuer, "/") <> "/.well-known/openid-configuration"
+
+    case HTTP.get_json(url) do
+      {:ok,
+       %{
+         "issuer" => ^issuer,
+         "authorization_endpoint" => authorize,
+         "token_endpoint" => token,
+         "jwks_uri" => jwks
+       }}
+      when is_binary(authorize) and is_binary(token) and is_binary(jwks) ->
+        {:ok,
+         %{
+           issuer: issuer,
+           authorization_endpoint: authorize,
+           token_endpoint: token,
+           jwks_uri: jwks
+         }}
+
+      {:ok, _doc} ->
+        {:error, :invalid_discovery_document}
+
+      {:error, _} ->
+        {:error, :discovery_unavailable}
+    end
+  end
+
+  defp save(changeset, write) do
     # Mapping TARGETS must be known roles (built-in, or a custom Role defined
     # globally / for one of the org's workspaces) — mirrors SCIM's group
     # validation. Guarded here because the authoritative role sync writes via
@@ -33,7 +79,7 @@ defmodule Barkpark.Sso.Oidc do
     # persist an unknown role string.
     with %{valid?: true} <- changeset,
          :ok <- validate_mapping_roles(changeset) do
-      Repo.insert(changeset)
+      write.(changeset)
     else
       %Ecto.Changeset{} = cs -> {:error, cs}
       {:error, _} = err -> err

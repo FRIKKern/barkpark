@@ -3035,6 +3035,178 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "json"
       ),
+      # Organizations and their OIDC sign-in (task-25386fa77a664587). Same
+      # admin + platform-operator pipeline as workspace.reinstate above.
+      core_cmd(
+        "org.create",
+        "org",
+        "create",
+        "Create an organization (instance-operator only).",
+        "POST",
+        "/v1/admin/orgs",
+        "admin",
+        args: [
+          arg("slug", true, "string", "Organization slug."),
+          arg("name", false, "string", "Display name (the slug when absent).")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.attach-workspace",
+        "org",
+        "attach-workspace",
+        "Attach a workspace to an organization.",
+        "PUT",
+        "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg("workspace_slug", true, "string", "Workspace slug.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.auth-methods",
+        "org",
+        "auth-methods",
+        "Set the sign-in methods an organization allows, e.g. sso. --set methods:=null clears the policy.",
+        "PUT",
+        "/v1/admin/orgs/:org_slug/auth-methods",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg(
+            "methods",
+            false,
+            "string",
+            "Comma-separated: password, magic_link, passkey, sso, social."
+          )
+        ],
+        flags: [
+          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-create",
+        "org",
+        "oidc-create",
+        "Create the organization's OIDC connection from the issuer's discovery document. Map groups to roles with --set group_role_mappings:='<JSON object>'.",
+        "POST",
+        "/v1/admin/orgs/:org_slug/oidc",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg(
+            "issuer",
+            true,
+            "string",
+            "Issuer URL, e.g. https://login.microsoftonline.com/<tenant>/v2.0."
+          ),
+          arg("client_id", true, "string", "Client (application) id."),
+          arg(
+            "client_secret",
+            true,
+            "string",
+            "Client secret. Stored encrypted, never shown again."
+          )
+        ],
+        flags: [
+          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-update",
+        "org",
+        "oidc-update",
+        "Change the OIDC connection's client id, groups claim, group mappings or active flag (use --set).",
+        "PATCH",
+        "/v1/admin/orgs/:org_slug/oidc",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug.")
+        ],
+        flags: [
+          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-rotate-secret",
+        "org",
+        "oidc-rotate-secret",
+        "Replace the OIDC connection's client secret.",
+        "PUT",
+        "/v1/admin/orgs/:org_slug/oidc/client-secret",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg(
+            "client_secret",
+            true,
+            "string",
+            "New client secret. Stored encrypted, never shown again."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-delete",
+        "org",
+        "oidc-delete",
+        "Delete the organization's OIDC connection.",
+        "DELETE",
+        "/v1/admin/orgs/:org_slug/oidc",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.domain-add",
+        "org",
+        "domain-add",
+        "Claim an email domain for SSO routing and get the DNS TXT record to publish.",
+        "POST",
+        "/v1/admin/orgs/:org_slug/domains",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg("domain", true, "string", "Email domain, e.g. example.com.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.domain-verify",
+        "org",
+        "domain-verify",
+        "Check the domain's DNS TXT record. Only a verified domain routes sign-ins.",
+        "POST",
+        "/v1/admin/orgs/:org_slug/domains/:domain/verify",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg("domain", true, "string", "Email domain.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
       core_cmd(
         "token.ls",
         "token",
