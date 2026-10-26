@@ -1832,10 +1832,13 @@ defmodule Barkpark.Groq.DocumentSource do
     if Schema.bypasses_visibility_gate?(state.caller_context) do
       query
     else
+      # `:memoize` (an HTTP request's scope opts) keeps the answer for the rest
+      # of the query: every read (each round, each `->` hop) asked again, two
+      # statements each. The memo key carries dataset, workspace and project.
       public =
         Schema.public_type_names(
           state.dataset,
-          Keyword.take(state.opts, [:workspace_id, :project_id])
+          Keyword.take(state.opts, [:workspace_id, :project_id, :memoize])
         )
 
       where(query, [d], d.type in ^public)
