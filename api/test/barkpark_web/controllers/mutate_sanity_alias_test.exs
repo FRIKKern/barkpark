@@ -150,7 +150,7 @@ defmodule BarkparkWeb.MutateSanityAliasTest do
              404
   end
 
-  test "delete by bare id keeps a draft twin, as on Sanity; a missing id 404s", %{
+  test "delete by bare id keeps a draft twin, as on Sanity", %{
     slug: slug,
     writer: w,
     scope: scope
@@ -164,8 +164,40 @@ defmodule BarkparkWeb.MutateSanityAliasTest do
 
     refute row("f1", scope) || row("f2", scope)
     assert row("drafts.f1", scope).title == "draft"
+  end
 
-    assert sanity(slug, w, [%{"delete" => %{"id" => "nope"}}]).status == 404
+  # task-f456b589609f6a84: the client's (and Sanity Studio's) delete is
+  # `transaction().delete(id).delete("drafts." <> id)`. A missing id is a noop
+  # with no result row, as on Sanity; /v1 keeps its 404.
+  test "delete(id) + delete(drafts.id) works when only one exists; a missing id is a noop", %{
+    slug: slug,
+    writer: w,
+    scope: scope
+  } do
+    both = fn id -> [%{"delete" => %{"id" => id}}, %{"delete" => %{"id" => "drafts." <> id}}] end
+
+    # Only the draft exists.
+    assert post_m(slug, w, "1", [%{"createOrReplace" => note("dm1", "draft")}]).status == 200
+    refute row("dm1", scope)
+    resp = sanity(slug, w, both.("dm1"))
+
+    assert %{"results" => [%{"id" => "drafts.dm1", "operation" => "delete"}]} =
+             json_response(resp, 200)
+
+    refute row("drafts.dm1", scope)
+
+    # Only the published exists.
+    assert sanity(slug, w, [%{"create" => note("dm2", "pub")}]).status == 200
+    refute row("drafts.dm2", scope)
+    resp = sanity(slug, w, both.("dm2"))
+    assert %{"results" => [%{"id" => "dm2", "operation" => "delete"}]} = json_response(resp, 200)
+    refute row("dm2", scope)
+
+    # Neither exists: 200, no result rows.
+    assert %{"results" => []} = json_response(sanity(slug, w, both.("dm3")), 200)
+
+    # /v1 is unchanged: a missing id 404s.
+    assert post_m(slug, w, "1", [%{"delete" => %{"id" => "dm3", "type" => "note"}}]).status == 404
   end
 
   # One test per row of the exact-id table that has a draft-twin case.
