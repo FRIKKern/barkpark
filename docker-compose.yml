@@ -108,6 +108,9 @@ services:
       - BARKPARK_CANONICAL_SHAPE_WRITES
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
+      # Unset = the Barkpark Cloud list (barkpark.cloud, www, *.vercel.app). Set,
+      # this CSV replaces it in check_origin and DatasetCors.
+      - BARKPARK_ALWAYS_ALLOWED_ORIGINS
       - BARKPARK_DEPLOYMENT_DIGEST
       - BARKPARK_EXTRA_ORIGINS
       - BARKPARK_GIT_SHA
@@ -125,6 +128,7 @@ services:
       - BARKPARK_RATE_LIMIT_TOKENS
       - BARKPARK_RATE_LIMIT_WRITE
       - BARKPARK_RETIRE_SSE_ON_SIGTERM
+      - BARKPARK_SCIM_DOCUMENTATION_URI
       - BARKPARK_SEED_ADMIN_TOKEN
       - BARKPARK_TRUSTED_PROXIES
       - DATABASE_SOCKET_DIR

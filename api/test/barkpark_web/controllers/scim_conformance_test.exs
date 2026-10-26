@@ -408,6 +408,23 @@ defmodule BarkparkWeb.ScimConformanceTest do
     end
   end
 
+  describe "ServiceProviderConfig documentationUri" do
+    setup do
+      on_exit(fn -> Application.delete_env(:barkpark, :scim_documentation_uri) end)
+    end
+
+    test "is the configured URL when set, and the Barkpark Cloud page when not" do
+      %{token: token} = org_with_ws("docuri")
+
+      default = scim(token) |> get("/scim/v2/ServiceProviderConfig") |> json_response(200)
+      assert default["documentationUri"] == "https://barkpark.cloud/docs/scim"
+
+      Application.put_env(:barkpark, :scim_documentation_uri, "https://docs.example.no/scim")
+      body = scim(token) |> get("/scim/v2/ServiceProviderConfig") |> json_response(200)
+      assert body["documentationUri"] == "https://docs.example.no/scim"
+    end
+  end
+
   # ── C2 · application/scim+json ─────────────────────────────────────────────
 
   describe "the SCIM media type (RFC 7644 §3.1)" do

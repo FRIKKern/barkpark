@@ -44,7 +44,12 @@ defmodule BarkparkWeb.ScimDiscoveryController do
   def service_provider_config(conn, _params) do
     json(conn, %{
       "schemas" => [@spc_schema],
-      "documentationUri" => "https://barkpark.cloud/docs/scim",
+      "documentationUri" =>
+        Application.get_env(
+          :barkpark,
+          :scim_documentation_uri,
+          "https://barkpark.cloud/docs/scim"
+        ),
       "patch" => %{"supported" => true},
       "bulk" => %{"supported" => false, "maxOperations" => 0, "maxPayloadSize" => 0},
       "filter" => %{"supported" => true, "maxResults" => ScimResponse.max_page()},

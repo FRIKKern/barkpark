@@ -1456,13 +1456,22 @@ if config_env() == :prod do
     |> String.split(",", trim: true)
     |> Enum.map(&String.trim/1)
 
-  check_origin =
-    [
-      "#{scheme}://#{host}",
-      "https://barkpark.cloud",
-      "https://www.barkpark.cloud",
-      "https://*.vercel.app"
-    ] ++ extra_origins
+  # BARKPARK_ALWAYS_ALLOWED_ORIGINS: CSV that, when set, REPLACES the built-in
+  # Barkpark Cloud list below, here and in BarkparkWeb.Plugs.DatasetCors. A
+  # self-hosted box sets its own front ends (for example https://*.vercel.app
+  # or one app's exact origin). Unset keeps today's list.
+  always_allowed_origins =
+    case System.get_env("BARKPARK_ALWAYS_ALLOWED_ORIGINS") do
+      nil ->
+        ["https://barkpark.cloud", "https://www.barkpark.cloud", "https://*.vercel.app"]
+
+      csv ->
+        origins = csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+        config :barkpark, :always_allowed_origins, origins
+        origins
+    end
+
+  check_origin = ["#{scheme}://#{host}"] ++ always_allowed_origins ++ extra_origins
 
   # WebAuthn / passkeys: the relying-party id is the public host, and the
   # expected client origin is scheme://host. Derived from PHX_HOST so passkeys
@@ -1700,6 +1709,10 @@ if config_env() == :prod do
     end
 
   config :barkpark, :auth_write_rate_limits, auth_write_rate_limits
+
+  if uri = System.get_env("BARKPARK_SCIM_DOCUMENTATION_URI") do
+    config :barkpark, :scim_documentation_uri, uri
+  end
 
   if origins = System.get_env("DEFAULT_CORS_ORIGINS") do
     parsed = origins |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
