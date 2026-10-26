@@ -13,7 +13,7 @@ defmodule BarkparkWeb.OidcControllerTest do
   defmodule MockIdP do
     @behaviour Barkpark.Sso.Oidc.HTTP
     @impl true
-    def post_form(_url, _params), do: {:ok, %{"id_token" => fx(:id_token)}}
+    def post_form(_url, _params, _headers), do: {:ok, %{"id_token" => fx(:id_token)}}
     @impl true
     def get_json(_url), do: {:ok, %{"keys" => [fx(:jwk)]}}
     defp fx(k), do: Application.get_env(:barkpark, :oidc_test)[k]
@@ -200,5 +200,24 @@ defmodule BarkparkWeb.OidcControllerTest do
     assert Enum.all?(failures, &(&1.metadata["provider"] == "oidc"))
     assert "no_connection" in reasons
     assert "state_mismatch" in reasons
+  end
+
+  test "a strict connection refuses a token without exp and records the reason", %{org: org} do
+    Barkpark.Sso.OidcConnection
+    |> Repo.get_by!(organization_id: org.id)
+    |> Ecto.Changeset.change(strict_validation: true)
+    |> Repo.update!()
+
+    mock_op(%{"iss" => @issuer, "aud" => @client_id, "nonce" => "n1", "email" => "x@octrl.com"})
+
+    assert build_conn()
+           |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+           |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
+           |> json_response(401)
+
+    assert Repo.exists?(
+             from e in Barkpark.Audit.Event,
+               where: e.action == "sso_login_failed" and e.metadata["reason"] == "missing_exp"
+           )
   end
 end

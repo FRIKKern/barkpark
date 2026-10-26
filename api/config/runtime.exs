@@ -887,6 +887,13 @@ if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
   config :barkpark, :allow_bundle_import, true
 end
 
+# Stricter OIDC ID token checks and subject matching for every connection on
+# this instance (`Barkpark.Sso.Oidc`). Off unless truthy; a connection can also
+# turn them on with its own `strict_validation` field.
+if System.get_env("BARKPARK_OIDC_STRICT_VALIDATION") in ~w(1 true yes on) do
+  config :barkpark, :oidc_strict_validation, true
+end
+
 # Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
 # (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
 # and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
