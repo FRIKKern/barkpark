@@ -3279,6 +3279,22 @@ defmodule BarkparkWeb.Router do
     post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
   end
 
+  # Organizations and their OIDC sign-in, set up without a server shell
+  # (task-25386fa77a664587). Instance-operator tier, like OrgAdminLive.
+  scope "/v1/admin/orgs", BarkparkWeb do
+    pipe_through([:api, :require_admin, :require_platform_operator])
+
+    post("/", OrgSsoController, :create)
+    put("/:org_slug/workspaces/:workspace_slug", OrgSsoController, :attach_workspace)
+    put("/:org_slug/auth-methods", OrgSsoController, :set_auth_methods)
+    post("/:org_slug/oidc", OrgSsoController, :create_oidc)
+    patch("/:org_slug/oidc", OrgSsoController, :update_oidc)
+    put("/:org_slug/oidc/client-secret", OrgSsoController, :rotate_secret)
+    delete("/:org_slug/oidc", OrgSsoController, :delete_oidc)
+    post("/:org_slug/domains", OrgSsoController, :add_domain)
+    post("/:org_slug/domains/:domain/verify", OrgSsoController, :verify_domain)
+  end
+
   # C083 trusted hold endpoint (Barkdown seal-admission contract): operator-gated,
   # owned by WriteAdmission.Holder. RefuseWhileHeld exempts this path so status
   # and reopen answer while held.

@@ -1167,6 +1167,18 @@ defmodule PDS.Census do
     # reports whether the second write happened. Classified by the arriving change, not
     # judged by it.
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
+    # OrgSsoController (task-25386fa77a664587): each action renders the stored row it
+    # wrote (org, connection with client_secret_set, domain with verified) or
+    # `deleted: true`, so success is read off the body, not the status alone.
+    {:delete, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :delete_oidc, :status_only_receipt},
+    {:patch, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :update_oidc, :status_only_receipt},
+    {:post, "/v1/admin/orgs", "BarkparkWeb.OrgSsoController", :create, :status_only_receipt},
+    {:post, "/v1/admin/orgs/:org_slug/domains", "BarkparkWeb.OrgSsoController", :add_domain, :status_only_receipt},
+    {:post, "/v1/admin/orgs/:org_slug/domains/:domain/verify", "BarkparkWeb.OrgSsoController", :verify_domain, :status_only_receipt},
+    {:post, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :create_oidc, :status_only_receipt},
+    {:put, "/v1/admin/orgs/:org_slug/auth-methods", "BarkparkWeb.OrgSsoController", :set_auth_methods, :status_only_receipt},
+    {:put, "/v1/admin/orgs/:org_slug/oidc/client-secret", "BarkparkWeb.OrgSsoController", :rotate_secret, :status_only_receipt},
+    {:put, "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug", "BarkparkWeb.OrgSsoController", :attach_workspace, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/cloud-users/deprovision", "BarkparkWeb.CloudUserController", :deprovision, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
@@ -1468,6 +1480,7 @@ defmodule PDS.Census do
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
     {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold} => {"BarkparkWeb.WriteAdmissionController.hold/2", 2, "111003360"},
+    {:delete, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :delete_oidc} => {"BarkparkWeb.OrgSsoController.delete_oidc/2", 1, "47474787"},
     {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen} => {"BarkparkWeb.WriteAdmissionController.reopen/2", 1, "39928"},
     {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover} => {"BarkparkWeb.WriteAdmissionController.recover/2", 2, "76331147"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
