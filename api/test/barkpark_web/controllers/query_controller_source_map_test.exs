@@ -96,10 +96,10 @@ defmodule BarkparkWeb.QueryControllerSourceMapTest do
     assert doc["_id"] == body["result"]["_id"]
     assert doc["_type"] == "post"
 
-    title_mapping = source_map["mappings"][~s($["title"])]
+    title_mapping = source_map["mappings"][~s($['title'])]
     assert title_mapping["source"]["document"] == 0
     path_idx = title_mapping["source"]["path"]
-    assert Enum.at(source_map["paths"], path_idx) == ~s($["title"])
+    assert Enum.at(source_map["paths"], path_idx) == ~s($['title'])
   end
 
   test "under raw perspective, mappings also resolve", %{conn: conn, scope: scope} do
@@ -115,7 +115,7 @@ defmodule BarkparkWeb.QueryControllerSourceMapTest do
       |> json_response(200)
 
     refute is_nil(body["sourceMap"])
-    assert Map.has_key?(body["sourceMap"]["mappings"], ~s($["body"]))
+    assert Map.has_key?(body["sourceMap"]["mappings"], ~s($['body']))
   end
 
   test "REFUSED/IGNORED under published perspective — no sourceMap key at all", %{
@@ -182,8 +182,8 @@ defmodule BarkparkWeb.QueryControllerSourceMapTest do
       |> json_response(200)
 
     refute Map.has_key?(body["result"], "ssn")
-    refute Map.has_key?(body["sourceMap"]["mappings"], ~s($["ssn"]))
-    refute Enum.member?(body["sourceMap"]["paths"], ~s($["ssn"]))
+    refute Map.has_key?(body["sourceMap"]["mappings"], ~s($['ssn']))
+    refute Enum.member?(body["sourceMap"]["paths"], ~s($['ssn']))
     refute body |> Jason.encode!() |> String.contains?("SECRET")
   end
 end

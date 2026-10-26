@@ -136,10 +136,10 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     assert root["_id"] == body["result"]["_id"]
     assert author_doc["_type"] == "author"
 
-    title_mapping = source_map["mappings"][~s($["title"])]
+    title_mapping = source_map["mappings"][~s($['title'])]
     assert title_mapping["source"]["document"] == 0
 
-    name_mapping = source_map["mappings"][~s($["author"]["name"])]
+    name_mapping = source_map["mappings"][~s($['author']['name'])]
     refute is_nil(name_mapping)
     assert name_mapping["source"]["document"] == 1
     path_idx = name_mapping["source"]["path"]
@@ -150,11 +150,11 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     # index. The invariant that must hold is that `paths[path_idx]` names
     # the author's OWN bare in-document field, "name" — not the root's
     # "title", and not the author's own redacted "email".
-    assert Enum.at(source_map["paths"], path_idx) == ~s($["name"])
+    assert Enum.at(source_map["paths"], path_idx) == ~s($['name'])
 
     # The redacted `email` field never appears — same chokepoint `source_map`
     # already relies on for the root document.
-    refute Map.has_key?(source_map["mappings"], ~s($["author"]["email"]))
+    refute Map.has_key?(source_map["mappings"], ~s($['author']['email']))
   end
 
   test "an array-of-references field gets one documents entry per resolved element, index-addressed",
@@ -184,11 +184,11 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     assert tag_doc_0["_type"] == "tag"
     assert tag_doc_1["_type"] == "tag"
 
-    label_0 = source_map["mappings"][~s($["tags"][0]["label"])]
+    label_0 = source_map["mappings"][~s($['tags'][0]['label'])]
     refute is_nil(label_0)
     assert label_0["source"]["document"] == 1
 
-    label_1 = source_map["mappings"][~s($["tags"][1]["label"])]
+    label_1 = source_map["mappings"][~s($['tags'][1]['label'])]
     refute is_nil(label_1)
     assert label_1["source"]["document"] == 2
   end
@@ -215,7 +215,7 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     # Only the root — the unresolved reference never became a rendered doc,
     # so the diff against base_rendered finds nothing changed at "author".
     assert [_root] = source_map["documents"]
-    refute Map.has_key?(source_map["mappings"], ~s($["author"]["name"]))
+    refute Map.has_key?(source_map["mappings"], ~s($['author']['name']))
   end
 
   test "without ?expand=, the response is byte-identical to the flat-fields-only shape", %{
@@ -236,7 +236,7 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
 
     source_map = body["sourceMap"]
     assert [_root] = source_map["documents"]
-    refute Map.has_key?(source_map["mappings"], ~s($["author"]["name"]))
+    refute Map.has_key?(source_map["mappings"], ~s($['author']['name']))
   end
 
   # ── list results ─────────────────────────────────────────────────────────
@@ -275,16 +275,16 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     assert author_doc_0["_type"] == "author"
     assert author_doc_1["_type"] == "author"
 
-    name_row0 = source_map["mappings"][~s($[0]["author"]["name"])]
+    name_row0 = source_map["mappings"][~s($[0]['author']['name'])]
     refute is_nil(name_row0)
     assert name_row0["source"]["document"] == 2
 
-    name_row1 = source_map["mappings"][~s($[1]["author"]["name"])]
+    name_row1 = source_map["mappings"][~s($[1]['author']['name'])]
     refute is_nil(name_row1)
     assert name_row1["source"]["document"] == 3
 
     # The row's OWN flat field still addresses the row's own slot, unchanged.
-    title_row0 = source_map["mappings"][~s($[0]["title"])]
+    title_row0 = source_map["mappings"][~s($[0]['title'])]
     assert title_row0["source"]["document"] == 0
   end
 
@@ -331,11 +331,11 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     # And the two concrete pairs the live repro actually hit, named directly:
     # the root `title` on EACH row, and the expanded author's OWN `name`.
     for row <- [0, 1] do
-      title_idx = source_map["mappings"][~s($[#{row}]["title"])]["source"]["path"]
-      assert Enum.at(source_map["paths"], title_idx) == ~s($["title"])
+      title_idx = source_map["mappings"][~s($[#{row}]['title'])]["source"]["path"]
+      assert Enum.at(source_map["paths"], title_idx) == ~s($['title'])
 
-      name_idx = source_map["mappings"][~s($[#{row}]["author"]["name"])]["source"]["path"]
-      assert Enum.at(source_map["paths"], name_idx) == ~s($["name"])
+      name_idx = source_map["mappings"][~s($[#{row}]['author']['name'])]["source"]["path"]
+      assert Enum.at(source_map["paths"], name_idx) == ~s($['name'])
     end
   end
 
@@ -425,16 +425,16 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     source_map = body["sourceMap"]
     refute is_nil(source_map)
 
-    title_idx = source_map["mappings"][~s($[0]["title"])]["source"]["path"]
-    format_idx = source_map["mappings"][~s($[0]["format"])]["source"]["path"]
-    assert Enum.at(source_map["paths"], title_idx) == ~s($["title"])
-    assert Enum.at(source_map["paths"], format_idx) == ~s($["format"])
+    title_idx = source_map["mappings"][~s($[0]['title'])]["source"]["path"]
+    format_idx = source_map["mappings"][~s($[0]['format'])]["source"]["path"]
+    assert Enum.at(source_map["paths"], title_idx) == ~s($['title'])
+    assert Enum.at(source_map["paths"], format_idx) == ~s($['format'])
     refute title_idx == format_idx
 
-    name_idx = source_map["mappings"][~s($[0]["author"]["name"])]["source"]["path"]
-    assert Enum.at(source_map["paths"], name_idx) == ~s($["name"])
-    refute Enum.at(source_map["paths"], name_idx) == ~s($["expertise"])
-    refute Enum.at(source_map["paths"], name_idx) == ~s($["format"])
+    name_idx = source_map["mappings"][~s($[0]['author']['name'])]["source"]["path"]
+    assert Enum.at(source_map["paths"], name_idx) == ~s($['name'])
+    refute Enum.at(source_map["paths"], name_idx) == ~s($['expertise'])
+    refute Enum.at(source_map["paths"], name_idx) == ~s($['format'])
   end
 
   test "REFUSED/IGNORED under published perspective, same as the flat-fields rule", %{
@@ -484,12 +484,12 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     refute Map.has_key?(body["result"]["author"], "email")
 
     source_map = body["sourceMap"]
-    refute Map.has_key?(source_map["mappings"], ~s($["author"]["email"]))
+    refute Map.has_key?(source_map["mappings"], ~s($['author']['email']))
 
     # Not "absent because nothing matched" — "name" (same document, same
     # redaction pass) DOES appear, so the absence of "email" is the
     # redaction working, not an empty/vacuous map.
-    assert Map.has_key?(source_map["mappings"], ~s($["author"]["name"]))
+    assert Map.has_key?(source_map["mappings"], ~s($['author']['name']))
   end
 
   test "a reference to a document in a DIFFERENT workspace is never expanded, and leaks nothing into sourceMap",
@@ -581,7 +581,7 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     refute is_nil(source_map)
     # Root only -- no second documents[] entry, because nothing was expanded.
     assert [_root] = source_map["documents"]
-    refute Map.has_key?(source_map["mappings"], ~s($["author"]["name"]))
+    refute Map.has_key?(source_map["mappings"], ~s($['author']['name']))
     refute inspect(source_map) =~ "SECRET_B_NAME"
   end
 end
