@@ -91,6 +91,21 @@ defmodule BarkparkWeb.MediaDeleteSanityRefGuardTest do
     assert WhereUsed.referrers(file).count == 0
   end
 
+  # Criterion 3: the asset's backlinks name the same holder the guard counts.
+  test "the blob's asset backlinks list a document holding its Sanity id" do
+    file = media_file!()
+    asset = Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
+    doc_id = publish!(%{"hero" => image("image-#{file.sha1}-1x1-png")})
+
+    body =
+      admin(scoped_conn())
+      |> get("/v1/data/backlinks/#{@ds}/#{Content.published_id(asset.doc_id)}")
+      |> json_response(200)
+
+    from = Enum.map(body["result"]["backlinks"], & &1["from_doc_id"])
+    assert Content.published_id(doc_id) in from
+  end
+
   defp assert_refused(%MediaFile{} = file, doc_id) do
     body =
       admin(scoped_conn())

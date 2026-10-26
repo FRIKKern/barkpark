@@ -469,6 +469,16 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
+  # A media asset's holders include fields holding its blob's Sanity id
+  # (image-<sha1>-…, file-<sha1>-…, source_id), as the delete guard counts them
+  # (task-bace4f482af160a9). Media resolves them; the graph read stays generic.
+  defp asset_holder_opts(opts, id) do
+    case Barkpark.Media.sanity_ref_patterns_for_asset(id, Keyword.fetch!(opts, :dataset), opts) do
+      [] -> opts
+      patterns -> Keyword.put(opts, :asset_ref_patterns, patterns)
+    end
+  end
+
   @doc """
   Inbound references — the documents that reference `:id` (Sanity's
   `*[references($id)]`). Wraps `Content.Graph.backlinks/2`, which is
@@ -489,7 +499,7 @@ defmodule BarkparkWeb.QueryController do
 
         backlinks =
           id
-          |> Content.Graph.backlinks(opts)
+          |> Content.Graph.backlinks(asset_holder_opts(opts, id))
           |> redact_backlink_content(dataset, opts)
 
         json(conn, %{
@@ -527,7 +537,9 @@ defmodule BarkparkWeb.QueryController do
             by_id =
               Map.new(ids, fn id ->
                 backlinks =
-                  id |> Content.Graph.backlinks(opts) |> redact_backlink_content(dataset, opts)
+                  id
+                  |> Content.Graph.backlinks(asset_holder_opts(opts, id))
+                  |> redact_backlink_content(dataset, opts)
 
                 {id, %{backlinks: backlinks, count: length(backlinks)}}
               end)
@@ -629,7 +641,7 @@ defmodule BarkparkWeb.QueryController do
     if preview?(conn) or authed?(conn) do
       read_region(:locations, "locations/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
         opts = [dataset: dataset] ++ scope_opts(conn)
-        backlinks = Content.Graph.backlinks(id, opts)
+        backlinks = Content.Graph.backlinks(id, asset_holder_opts(opts, id))
 
         url_scope = %{
           workspace_slug: params["workspace_slug"],

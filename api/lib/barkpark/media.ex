@@ -657,6 +657,34 @@ defmodule Barkpark.Media do
   end
 
   @doc """
+  The Sanity-form `_ref` LIKE patterns (`image-<sha1>-%`, `file-<sha1>-%`, the
+  blob's `source_id`) a `mediaAsset` document's blob is also served under, or
+  `[]` for any other id. The backlinks read passes them to
+  `Content.Query.list_reference_holders/3` so a field holding the blob's Sanity
+  id is listed as a holder, as the delete guard counts it
+  (task-bace4f482af160a9).
+  """
+  @spec sanity_ref_patterns_for_asset(String.t(), String.t(), keyword()) :: [String.t()]
+  def sanity_ref_patterns_for_asset(doc_id, dataset, opts)
+      when is_binary(doc_id) and is_binary(dataset) do
+    scope = Keyword.take(opts, [:workspace_id, :project_id])
+
+    if String.starts_with?(Content.published_id(doc_id), "asset-") do
+      with %{content: %{"mediaFileId" => fid}} when is_binary(fid) <-
+             Assets.find_by_doc_id(doc_id, dataset, scope),
+           {:ok, %MediaFile{} = file} <- get_file(fid, scope) do
+        Barkpark.Media.WhereUsed.sanity_ref_patterns(file)
+      else
+        _ -> []
+      end
+    else
+      []
+    end
+  end
+
+  def sanity_ref_patterns_for_asset(_doc_id, _dataset, _opts), do: []
+
+  @doc """
   The `mediaAsset` fields `patch_asset_metadata/3` will accept.
 
   Public so an HTTP edge can ask "does this request carry any metadata at all?"
