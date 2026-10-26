@@ -18,7 +18,7 @@ defmodule Barkpark.Groq.Evaluator do
   dictionary.
   """
 
-  alias Barkpark.Groq.{PortableText, Pushdown, Source, Values}
+  alias Barkpark.Groq.{Geo, PortableText, Pushdown, Source, Values}
 
   defmodule EvalError do
     @moduledoc "A query that parses but cannot be evaluated (an unsupported function, a tuple)."
@@ -822,6 +822,13 @@ defmodule Barkpark.Groq.Evaluator do
     |> Source.fetch(%{Pushdown.empty() | types: ["system.release"]})
     |> Enum.filter(&match?(%{"_type" => "system.release"}, &1))
   end
+
+  # task-ce93ff890a895f54: Sanity's geo::latLng/2 and geo::distance/2.
+  defp func("geo", "latLng", [lat, lng], scope, ctx),
+    do: Geo.lat_lng(eval(lat, scope, ctx), eval(lng, scope, ctx))
+
+  defp func("geo", "distance", [a, b], scope, ctx),
+    do: Geo.distance(eval(a, scope, ctx), eval(b, scope, ctx))
 
   defp func(ns, name, _args, _scope, _ctx) do
     label = if ns == "global", do: name, else: "#{ns}::#{name}"

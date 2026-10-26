@@ -4,9 +4,10 @@ defmodule Barkpark.Groq.Values do
   and the conversion of evaluated values to JSON.
 
   A value is plain decoded JSON (`nil`, booleans, numbers, binaries, lists,
-  maps) or one of two internal kinds that only functions produce:
-  `{:datetime, DateTime.t()}` from `dateTime()` and `{:path, pattern, regex}`
-  from `path()`. `to_json/1` turns both back into strings.
+  maps) or one of three internal kinds that only functions produce:
+  `{:datetime, DateTime.t()}` from `dateTime()`, `{:path, pattern, regex}`
+  from `path()` and `{:geo, lat, lng}` from `geo::latLng()`. `to_json/1` turns
+  the first two back into strings and a geo value into a GeoJSON Point.
 
   Numbers follow JavaScript doubles, as groq-js does: an integral float such as
   `2.0` is the number `2`, and a non-finite result is `null`.
@@ -25,6 +26,7 @@ defmodule Barkpark.Groq.Values do
   def type_of(v) when is_map(v), do: :object
   def type_of({:datetime, _}), do: :datetime
   def type_of({:path, _, _}), do: :path
+  def type_of({:geo, _, _}), do: :geo
   def type_of(_), do: :null
 
   @doc "Normalizes a number the way a JavaScript double would read back."
@@ -233,6 +235,7 @@ defmodule Barkpark.Groq.Values do
 
   def to_json({:datetime, dt}), do: format_datetime(dt)
   def to_json({:path, pattern, _}), do: pattern
+  def to_json({:geo, _, _} = geo), do: geo |> Barkpark.Groq.Geo.to_json() |> to_json()
   def to_json(_), do: nil
 
   @doc "The string form `string()` and `array::join` use, or `:error`."
