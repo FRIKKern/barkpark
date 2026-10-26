@@ -83,9 +83,12 @@ async function loadDataset(args) {
   } else {
     throw new Error('pass --dataset or --export')
   }
-  return lines
-    .filter((l) => l.trim())
-    .map((l) => JSON.parse(l))
+  const docs = lines.filter((l) => l.trim()).map((l) => JSON.parse(l))
+  // A truncated export ends with this marker. Comparing over it reports every
+  // reference to a missing document as a GROQ difference.
+  const incomplete = docs.find((d) => d && d._barkpark_export === 'incomplete')
+  if (incomplete) throw new Error(`the export is incomplete (${incomplete._delivered} documents delivered)`)
+  return docs
     .filter((d) => d && d._id && !d._barkpark_export)
     .map((d) => (args.dataset ? d : exportToSanity(d)))
     .sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0))

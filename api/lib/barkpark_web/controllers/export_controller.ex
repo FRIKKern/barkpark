@@ -47,6 +47,13 @@ defmodule BarkparkWeb.ExportController do
   # exportDataset({perspective: "published"}) all streamed every draft.
   @perspectives ["published", "drafts", "raw"]
 
+  # How long one export may hold its streaming transaction. Without it the
+  # Repo's 15 s default applies, and DBConnection drops the connection under
+  # any export that takes longer: gyl's gyldendal-no export died at 22,500
+  # documents every time and sent the INCOMPLETE marker. The cap still ends
+  # an export a stalled client keeps open.
+  @stream_timeout :timer.minutes(10)
+
   def export(conn, %{"dataset" => dataset} = params) do
     with {:ok, type} <- validate_type(params["type"]),
          {:ok, perspective} <- resolve_perspective(conn, params) do
@@ -143,25 +150,28 @@ defmodule BarkparkWeb.ExportController do
       # that row is NOT closed by it. What changes is that the transaction now
       # ENDS on a hangup instead of being torn down by a raise.
       {:ok, {conn, outcome}} =
-        Repo.transaction(fn ->
-          Content.export_stream(dataset, opts)
-          |> Enum.reduce_while({conn, :ok}, fn doc, {acc, _} ->
-            line = Jason.encode!(doc) <> "\n"
+        Repo.transaction(
+          fn ->
+            Content.export_stream(dataset, opts)
+            |> Enum.reduce_while({conn, :ok}, fn doc, {acc, _} ->
+              line = Jason.encode!(doc) <> "\n"
 
-            case chunk(acc, line) do
-              {:ok, acc} ->
-                :counters.add(delivered, 1, 1)
-                {:cont, {acc, :ok}}
+              case chunk(acc, line) do
+                {:ok, acc} ->
+                  :counters.add(delivered, 1, 1)
+                  {:cont, {acc, :ok}}
 
-              # The client hung up (`:closed`) or the socket errored. Halting
-              # closes the cursor and returns the conn Phoenix already owns; a
-              # strict match here would instead raise a MatchError inside the
-              # open transaction while holding its DB connection.
-              {:error, reason} ->
-                {:halt, {acc, {:error, reason}}}
-            end
-          end)
-        end)
+                # The client hung up (`:closed`) or the socket errored. Halting
+                # closes the cursor and returns the conn Phoenix already owns; a
+                # strict match here would instead raise a MatchError inside the
+                # open transaction while holding its DB connection.
+                {:error, reason} ->
+                  {:halt, {acc, {:error, reason}}}
+              end
+            end)
+          end,
+          timeout: @stream_timeout
+        )
 
       case outcome do
         :ok ->
