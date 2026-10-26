@@ -24,10 +24,12 @@ defmodule Barkpark.Groq.SourceMap do
 
   Covered (T1): `*[...]` and its slices, `[n]` and `order()`, field access,
   `@`, `^`, filters and slices of arrays, projections, `...` spreads, objects,
-  arrays, `->` and maps over arrays. Everything else (functions such as
-  `upper()` or `coalesce()`, `select()`, operators) answers no mapping, as
-  Sanity does for a computed value; T2 adds the functions that pass a value
-  through.
+  arrays, `->` and maps over arrays. T2: `a[]` over a list, `order()` of any
+  list, and the functions that pass a stored value through, as Sanity maps
+  them: `upper()`, `lower()`, `coalesce()` and `select()` (the chosen value),
+  `pt::text()` (the body it reads), `array::unique()` (each first
+  occurrence). Other functions and operators answer no mapping, as Sanity does
+  for a computed value.
 
   ## Output
 
@@ -183,8 +185,8 @@ defmodule Barkpark.Groq.SourceMap do
     end
   end
 
-  defp prov({:pipe, _base, "order", _args} = node, s, c) do
-    if source_list?(node), do: docs_prov(ev(node, s, c))
+  defp prov({:pipe, base, "order", _args} = node, s, c) do
+    if source_list?(node), do: docs_prov(ev(node, s, c)), else: reordered(node, base, s, c)
   end
 
   defp prov({:projection, base, obj}, s, c) do
@@ -245,9 +247,104 @@ defmodule Barkpark.Groq.SourceMap do
      end)}
   end
 
-  # Functions, operators, select(), score() and the rest: computed (T2 adds
-  # the functions that pass a stored value through).
+  # `a[]` over a list (`*[...].tags[]`): each item's own items, in order.
+  defp prov({:flat_map, base, expr}, s, c) do
+    case ev(base, s, c) do
+      list when is_list(list) ->
+        lp = prov(base, s, c)
+
+        {:arr,
+         list
+         |> Enum.with_index()
+         |> Enum.flat_map(fn {item, i} ->
+           inner_scope = hidden(s, item, item_prov(lp, list, i))
+
+           case Evaluator.eval(expr, inner_scope, c) do
+             inner when is_list(inner) ->
+               ip = prov(expr, inner_scope, c)
+               Enum.map(0..(length(inner) - 1)//1, &item_prov(ip, inner, &1))
+
+             _ ->
+               [prov(expr, inner_scope, c)]
+           end
+         end)}
+
+      _ ->
+        nil
+    end
+  end
+
+  # ── T2: functions that pass a stored value through, as Sanity maps them ──
+
+  defp prov({:func, "global", f, [arg]}, s, c) when f in ["upper", "lower"] do
+    if is_binary(ev(arg, s, c)), do: prov(arg, s, c)
+  end
+
+  # The first argument that is not null is the value.
+  defp prov({:func, "global", "coalesce", args}, s, c) do
+    Enum.find_value(args, fn arg -> if ev(arg, s, c) != nil, do: {:hit, prov(arg, s, c)} end)
+    |> case do
+      {:hit, p} -> p
+      nil -> nil
+    end
+  end
+
+  defp prov({:select, branches, default}, s, c) do
+    case Enum.find(branches, fn {cond_expr, _} -> Evaluator.eval(cond_expr, s, c) === true end) do
+      {_, value} -> prov(value, s, c)
+      nil -> if default, do: prov(default, s, c)
+    end
+  end
+
+  # pt::text(body) maps to the body it reads.
+  defp prov({:func, "pt", "text", [arg]}, s, c), do: prov(arg, s, c)
+
+  # array::unique keeps each value's first occurrence.
+  defp prov({:func, "array", "unique", [arg]}, s, c) do
+    case ev(arg, s, c) do
+      list when is_list(list) ->
+        lp = prov(arg, s, c)
+
+        {_, provs} =
+          list
+          |> Enum.with_index()
+          |> Enum.reduce({MapSet.new(), []}, fn {v, i}, {seen, acc} ->
+            if MapSet.member?(seen, v),
+              do: {seen, acc},
+              else: {MapSet.put(seen, v), [item_prov(lp, list, i) | acc]}
+          end)
+
+        {:arr, Enum.reverse(provs)}
+
+      _ ->
+        nil
+    end
+  end
+
+  # Other functions, operators, score() and the rest: computed, no mapping.
   defp prov(_node, _s, _c), do: nil
+
+  # `| order()` of a list that is not `*[...]`: each item of the ordered result
+  # takes the provenance of the first unused equal item of the input.
+  defp reordered(node, base, s, c) do
+    with out when is_list(out) <- ev(node, s, c),
+         input when is_list(input) <- ev(base, s, c) do
+      lp = prov(base, s, c)
+      indexed = Enum.with_index(input)
+
+      {provs, _used} =
+        Enum.map_reduce(out, MapSet.new(), fn v, used ->
+          case Enum.find(indexed, fn {x, i} -> x == v and not MapSet.member?(used, i) end) do
+            {_, i} -> {item_prov(lp, input, i), MapSet.put(used, i)}
+            nil -> {nil, used}
+          end
+        end)
+
+      {:arr, provs}
+    else
+      _ -> nil
+    end
+  end
 
   defp splat(acc, expr, s, c) do
     case ev(expr, s, c) do

@@ -36,6 +36,13 @@ defmodule BarkparkWeb.GroqSourceMapTest do
       "title" => "First",
       "author" => %{"_type" => "reference", "_ref" => "ada"},
       "tags" => ["a", "b"],
+      "body" => [
+        %{
+          "_type" => "block",
+          "_key" => "b1",
+          "children" => [%{"_type" => "span", "_key" => "s1", "text" => "Hello"}]
+        }
+      ],
       "links" => [%{"_key" => "k1", "title" => "A"}, %{"_key" => "k2", "title" => "B"}]
     })
 
@@ -134,6 +141,30 @@ defmodule BarkparkWeb.GroqSourceMapTest do
     keyed = resolved(fetch(token, q, %{"resultSourceMap" => "withKeyArraySelector"}))
     assert keyed["$['second']"] == {"p1", "$['links'][?(@._key=='k2')]['title']"}
     assert keyed["$['b'][0]"] == {"p1", "$['links'][?(@._key=='k2')]"}
+  end
+
+  test "T2: functions that pass a stored value through map to it", %{token: token} do
+    q =
+      ~s|*[_id == "p1"][0]{"up": upper(title), "low": lower(title), "c": coalesce(missing, title), "cl": coalesce("lit", title), "s": select(defined(title) => title, "x"), "sl": select(defined(missing) => title, "x"), "t": pt::text(body), "n": count(tags)}|
+
+    m = resolved(fetch(token, q, %{"resultSourceMap" => "true"}))
+
+    assert m == %{
+             "$['up']" => {"p1", "$['title']"},
+             "$['low']" => {"p1", "$['title']"},
+             "$['c']" => {"p1", "$['title']"},
+             "$['s']" => {"p1", "$['title']"},
+             "$['t']" => {"p1", "$['body']"}
+           }
+  end
+
+  test "T2: a[] over a list, array::unique and order() of a plain list keep each item's source",
+       %{token: token} do
+    q = ~s/array::unique(*[_type == "post"].tags[]) | order(@ desc)/
+    body = fetch(token, q, %{"resultSourceMap" => "true"})
+    # p2 has no tags: its null item sorts first and maps to nothing.
+    assert body["result"] == [nil, "b", "a"]
+    assert resolved(body) == %{"$[1]" => {"p1", "$['tags'][1]"}, "$[2]" => {"p1", "$['tags'][0]"}}
   end
 
   test "a value the read compat computes from a bare string maps to nothing", %{
@@ -241,7 +272,9 @@ defmodule BarkparkWeb.GroqSourceMapTest do
       ~s|*[_id == "n1"][0]{..., "who": owner->}|,
       ~s|*[_id == "n1"][0]|,
       ~s|*[_type == "note"]{secret, "e": owner->email}|,
-      ~s|*[_id == "m1"][0]{...}|
+      ~s|*[_id == "m1"][0]{...}|,
+      # T2 functions over private fields
+      ~s|*[_id == "n1"][0]{"u": upper(secret), "c": coalesce(secret, title), "s": select(defined(secret) => secret, title), "e": owner->{"l": lower(email)}}|
     ]
 
     test "a reader's map never names a private field, as a path, a mapping or by its value", %{
