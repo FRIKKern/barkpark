@@ -30,7 +30,7 @@ defmodule BarkparkWeb.SanityErrorBodyTest do
            401},
           {nil, "/w/sanity-err/p/site/v2025-02-19/data/query/production?query=count(*)", 403}
         ] do
-      resp = get_as(build_conn(), tok, path)
+      resp = get_as(scoped_conn(), tok, path)
       assert resp.status == status, path
       body = json_response(resp, status)
 
@@ -45,7 +45,7 @@ defmodule BarkparkWeb.SanityErrorBodyTest do
 
   test "a Barkpark-only path keeps its body exactly as before", %{token: token} do
     resp =
-      get_as(build_conn(), "bogus-token", "/w/sanity-err/p/site/v1/data/search/production?q=x")
+      get_as(scoped_conn(), "bogus-token", "/w/sanity-err/p/site/v1/data/search/production?q=x")
 
     body = json_response(resp, 401)
     assert body["error"]["code"] == "unauthorized"
