@@ -540,6 +540,7 @@ arm_blessing_grep() {
     docs/setup/SETUP.md
     docs/setup/GO-LIVE.md
     docs/setup/SELF-HOST.md
+    docs/setup/SELF-HOST-OPERATIONS.md
   )
 
   local f allow hits bad=0
