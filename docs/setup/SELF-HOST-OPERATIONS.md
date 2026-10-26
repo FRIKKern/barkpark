@@ -54,6 +54,8 @@ bp org auth-methods gyldendal sso
 
 The tenant in the issuer URL is the only tenant whose tokens sign in. The keys of the mapping are Entra group object ids. Each sign-in sets the role from the user's groups and can lower it, so map a group that holds the owner to `owner`, or the first sign-in demotes the owner.
 
+A barkpark-studio deployment signs editors in through the same connection with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>`. List its origin in `BARKPARK_STUDIO_SSO_ORIGINS` (comma-separated, for example `https://studio.example.com`), or the instance refuses to return a sign-in to it.
+
 ## Rotate keys held in Azure Key Vault
 
 `api/config/runtime.exs` reads the keys below. Keep each in Key Vault behind a Container Apps secret reference, and use a versioned secret URI. A versionless URI restarts the replica on its own within 30 minutes of a new version, which breaks the KEK order below. A versioned URI changes only when you point it at a new version and restart:
