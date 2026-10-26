@@ -288,6 +288,10 @@ defmodule Barkpark.Content.Query do
       Unlike `collect_all_documents/3`'s per-TYPE `max_pages` bound this is a
       WHOLE-CORPUS bound, so the caller's peak memory is bounded by one number
       rather than by (types x pages).
+    * `:doc_ids` — read only rows whose `doc_id` is in this list, through
+      the `(doc_id, type, dataset_id)` index. A caller that pages a large
+      corpus reads its ids with `collect_corpus_slugs/3` and then one page of
+      documents at a time, instead of holding every document at once.
     * `:owner_scoped` — when `true`, appends the row-ownership ACL
       (`scope_to_owner/2`) exactly as `base_query/4` does for an
       `owner_scoped: true` type. Callers holding the schema list MUST split
@@ -450,6 +454,12 @@ defmodule Barkpark.Content.Query do
       if Keyword.get(opts, :owner_scoped, false),
         do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
         else: base
+
+    base =
+      case Keyword.get(opts, :doc_ids) do
+        ids when is_list(ids) -> where(base, [d], d.doc_id in ^ids)
+        _ -> base
+      end
 
     apply_perspective(base, Keyword.get(opts, :perspective, :raw))
   end

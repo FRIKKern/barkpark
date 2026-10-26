@@ -78,31 +78,57 @@ defmodule Barkpark.Groq.Source do
   @callback fetch_exact(state :: term(), constraints :: map(), fields :: [String.t()] | :all) ::
               {:ok, [map()]} | :error
 
-  @optional_callbacks count: 2, scan_count: 4, slice: 5, scan_slice: 6, fetch_exact: 3
+  # Read compat (task-c2be444ac1d07719): the schema fields of a type, so the
+  # evaluator can answer `author._ref` on a declared reference stored as a
+  # bare id; and the constraints widened so SQL also finds those bare ids.
+  @callback schema_fields(state :: term(), type :: String.t()) :: [map()] | nil
+  @callback widen(state :: term(), constraints :: map()) :: map()
+
+  @optional_callbacks count: 2,
+                      scan_count: 4,
+                      slice: 5,
+                      scan_slice: 6,
+                      fetch_exact: 3,
+                      schema_fields: 2,
+                      widen: 2
+
+  @doc "The declared fields of `type`, or nil when the source holds no schema."
+  @spec schema_fields(t(), String.t()) :: [map()] | nil
+  def schema_fields({mod, state}, type) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :schema_fields, 2),
+      do: mod.schema_fields(state, type),
+      else: nil
+  end
+
+  defp widen({mod, state}, constraints) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :widen, 2),
+      do: mod.widen(state, constraints),
+      else: constraints
+  end
 
   @spec fetch(t(), map()) :: [map()]
-  def fetch({mod, state}, constraints), do: mod.fetch(state, constraints)
+  def fetch({mod, state} = src, constraints), do: mod.fetch(state, widen(src, constraints))
 
   @spec count(t(), map()) :: {:ok, non_neg_integer()} | :error
-  def count({mod, state}, constraints) do
+  def count({mod, state} = src, constraints) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :count, 2),
-      do: mod.count(state, constraints),
+      do: mod.count(state, widen(src, constraints)),
       else: :error
   end
 
   @spec scan_count(t(), map(), term(), (map() -> boolean())) ::
           {:ok, non_neg_integer()} | :error
-  def scan_count({mod, state}, constraints, cache, keep?) do
+  def scan_count({mod, state} = src, constraints, cache, keep?) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :scan_count, 4),
-      do: mod.scan_count(state, constraints, cache, keep?),
+      do: mod.scan_count(state, widen(src, constraints), cache, keep?),
       else: :error
   end
 
   @spec slice(t(), map(), list(), non_neg_integer(), non_neg_integer()) ::
           {:ok, [map()]} | :error
-  def slice({mod, state}, constraints, keys, from, to) do
+  def slice({mod, state} = src, constraints, keys, from, to) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :slice, 5),
-      do: mod.slice(state, constraints, keys, from, to),
+      do: mod.slice(state, widen(src, constraints), keys, from, to),
       else: :error
   end
 
@@ -114,16 +140,16 @@ defmodule Barkpark.Groq.Source do
           ([map()] -> [map()]) | nil,
           pos_integer()
         ) :: {:ok, [map()]} | :error
-  def scan_slice({mod, state}, constraints, cache, keep?, rank, take) do
+  def scan_slice({mod, state} = src, constraints, cache, keep?, rank, take) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :scan_slice, 6),
-      do: mod.scan_slice(state, constraints, cache, keep?, rank, take),
+      do: mod.scan_slice(state, widen(src, constraints), cache, keep?, rank, take),
       else: :error
   end
 
   @spec fetch_exact(t(), map(), [String.t()] | :all) :: {:ok, [map()]} | :error
-  def fetch_exact({mod, state}, constraints, fields) do
+  def fetch_exact({mod, state} = src, constraints, fields) do
     if Code.ensure_loaded?(mod) and function_exported?(mod, :fetch_exact, 3),
-      do: mod.fetch_exact(state, constraints, fields),
+      do: mod.fetch_exact(state, widen(src, constraints), fields),
       else: :error
   end
 
