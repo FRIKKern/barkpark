@@ -845,7 +845,7 @@ defmodule Barkpark.Groq.Evaluator do
       {:error, :work_budget} ->
         raise LimitError,
               "the query's geo::contains() and geo::intersects() calls passed their " <>
-                "budget of #{GeoShape.max_work()} position pairs; narrow the documents " <>
+                "budget of #{GeoShape.budget()} position pairs; narrow the documents " <>
                 "they run over first"
 
       answer ->
