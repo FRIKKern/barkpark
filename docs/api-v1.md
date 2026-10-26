@@ -115,21 +115,21 @@ PortableDoc block ops on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`
 
 `…/fields/:field/ops`: `{"ops":[…],"ifRev"}` on one `editor: blocks` field, atomic; `result.rev` = new rev.
 
-## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
+## 7. `GET /w/:ws/p/:proj/v{1|apiVersion}/data/listen/:dataset` [token]
 
-SSE stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
+SSE: a `/w/…/p/…` URL streams one project, a flat URL its workspace.
 
 **Narrowing:** `?types=a,b`; `?ids=a,b`; `?perspective=published` drops drafts; `filter[f]=v1,v2`: any-of equality on redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (or `?lastEventId=`) replays later events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (or `?lastEventId=`) replays later events, then live.
 
-First frame: `event: welcome`.
+First frame: `event: welcome`. `listen()`'s `query` is ignored: use `types`/`ids` (task-e5af22d3).
 
-**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. Keepalive: `: keepalive` per 30 s idle.
+**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. `: keepalive` every 30 s idle.
 
-**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID` (chat never sheds).
+**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`) and closes; reconnect with `Last-Event-ID`.
 
-**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a live workflow summary (unreplayable, NO `id:`).
+**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) never sheds; adds **`event: workflow`**: a live workflow summary (unreplayable, no `id:`).
 
 ## 8. Schema endpoints [admin]
 
