@@ -281,6 +281,7 @@ defmodule BarkparkWeb.OidcControllerTest do
       for to <- [
             "https://evil.example.com/cb",
             "https://studio.example.com.evil.test/cb",
+            "https://studio.example.com/cb#x",
             "/studio"
           ] do
         refused = get(build_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(to))

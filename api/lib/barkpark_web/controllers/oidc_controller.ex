@@ -79,7 +79,7 @@ defmodule BarkparkWeb.OidcController do
 
   defp origin(url) do
     case URI.parse(url) do
-      %URI{scheme: scheme, host: host, port: port, userinfo: nil}
+      %URI{scheme: scheme, host: host, port: port, userinfo: nil, fragment: nil}
       when scheme in ["http", "https"] and is_binary(host) and host != "" ->
         default = if scheme == "https", do: 443, else: 80
         "#{scheme}://#{host}" <> if(port == default, do: "", else: ":#{port}")
