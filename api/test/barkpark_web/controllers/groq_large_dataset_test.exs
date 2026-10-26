@@ -675,7 +675,12 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       ~s'*[_type == "product" && lower(isbn) > "0"] | order(isbn desc)[0...12]._id',
       ~s'*[_type == "product"] | order(lower(isbn) desc)[1]._id',
       ~s'*[_type == "product" && count(slugHistory[match == "url"]) > 0] | order(rank desc)[0...10]{_id, rank}',
-      ~s'{"first": *[_type == "product"][0]._id, "n": count(*[_type == "product"][0...5])}'
+      ~s'{"first": *[_type == "product"][0]._id, "n": count(*[_type == "product"][0...5])}',
+      # A projection or `.key` before the slice: the slice still reads only its rows.
+      ~s'*[_type == "product"]{_id, rank}[0...5]',
+      ~s'*[_type == "product"]{_id}[2]',
+      ~s'*[_type == "product"] | order(isbn desc){_id, "series": seriesIds}[0...12]',
+      ~s'*[_type == "product" && lower(isbn) > "0"]{_id}[0...3]'
     ]
 
     setup %{scope: scope} do
@@ -755,6 +760,24 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       assert length(sized) == 2
       assert Enum.all?(sized, &(&1 =~ ~r/LIMIT \$\d+ OFFSET \$\d+/)), Enum.join(sized, "\n")
       refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/))
+    end
+
+    test "a projection before the slice reads only the rows the slice needs", %{token: token} do
+      sql =
+        sql_reads(fn ->
+          assert result!(token, ~s'*[_type == "product"]{_id}[0...2]', %{}) == [
+                   %{"_id" => "p1"},
+                   %{"_id" => "p10"}
+                 ]
+
+          assert result!(token, ~s'*[_type == "product"] | order(isbn desc){_id}[1]', %{}) == %{
+                   "_id" => "x9"
+                 }
+        end)
+
+      sized = Enum.filter(sql, &(&1 =~ "pg_column_size"))
+      assert length(sized) == 2
+      assert Enum.all?(sized, &(&1 =~ ~r/LIMIT \$\d+ OFFSET \$\d+/)), Enum.join(sized, "\n")
     end
 
     test "an unordered slice over any other filter stops at the chunk that fills it",
