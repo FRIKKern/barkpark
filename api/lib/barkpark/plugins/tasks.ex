@@ -813,6 +813,7 @@ defmodule Barkpark.Plugins.Tasks do
       {:get, "/tasks/events", BarkparkWeb.TasksController, :events, auth: :token_root},
       {:post, "/tasks/claim", BarkparkWeb.TasksController, :claim, auth: :token_root},
       {:post, "/tasks/edges", BarkparkWeb.TasksController, :add_edge, auth: :token_root},
+      {:delete, "/tasks/edges", BarkparkWeb.TasksController, :remove_edge, auth: :token_root},
       {:get, "/tasks/:doc_id", BarkparkWeb.TasksController, :show, auth: :token_root},
       {:get, "/tasks/:doc_id/edges", BarkparkWeb.TasksController, :edges, auth: :token_root},
       {:post, "/tasks/:doc_id/claim", BarkparkWeb.TasksController, :claim_by_id,
@@ -928,6 +929,8 @@ defmodule Barkpark.Plugins.Tasks do
       receipt.
     * `pulse` — `POST /v1/tasks/:doc_id/pulse` (now-line heartbeat + lease
       renewal, one atomic write; no epoch arg — pulse survives fences). WRITES,
+      minimal receipt.
+    * `unblock` — `DELETE /v1/tasks/edges` (remove a `blocks` edge). WRITES,
       minimal receipt.
     * `stage` — `POST /v1/tasks/:doc_id/stage` (sanctioned thought-state
       transition: considering | researching | open — enforces the Transitions
@@ -1672,6 +1675,26 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary: "Destination parent task id; omit (or null) to move to the root."
           }
+        ],
+        flags: [],
+        writes: true,
+        batch: false,
+        paginated: false,
+        dry_run: false,
+        default_output: "minimal",
+        scoped_prefix: nil
+      },
+      %{
+        id: "task.unblock",
+        noun: "task",
+        verb: "unblock",
+        summary:
+          "Remove the `blocks` edge that makes from_id wait on to_id (the inverse of POST /v1/tasks/edges). Idempotent: an absent edge answers ok with removed:false. An in_progress dependent is fenced exactly as an edge-add fences it.",
+        http: %{method: "DELETE", path_template: "/v1/tasks/edges"},
+        auth_tier: "write",
+        args: [
+          %{name: "from_id", required: true, type: "string", summary: "The dependent task id."},
+          %{name: "to_id", required: true, type: "string", summary: "The blocker task id."}
         ],
         flags: [],
         writes: true,

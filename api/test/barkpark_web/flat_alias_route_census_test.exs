@@ -1232,6 +1232,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # TasksController.remove_edge
+    {"DELETE", "/v1/tasks/edges"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
+         "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
+         "from the token before AssignDefaultScope can stamp Default."},
     # TasksController.events
     {"GET", "/v1/tasks/events"} =>
       {:workspace_derived,

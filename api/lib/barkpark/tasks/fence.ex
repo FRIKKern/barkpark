@@ -12,8 +12,8 @@ defmodule Barkpark.Tasks.Fence do
   # blocker should never be blocked by whoever happens to hold the dependent.
   # Allow the write, fence the holder.
   #
-  # This module owns the EDGE-ADD fence (`add_dep/3`, which `Tasks.add_dep/3`
-  # now routes through). The MOVE fence is folded into `Tasks.Move`'s reparent
+  # This module owns the EDGE fence (`add_dep/4` and `remove_dep/4`, which
+  # `Tasks.add_dep/4` and `Tasks.remove_dep/4` route through). The MOVE fence is folded into `Tasks.Move`'s reparent
   # CAS write directly (one UPDATE, not a second one).
 
   import Barkpark.Tasks.Internal,
@@ -50,52 +50,76 @@ defmodule Barkpark.Tasks.Fence do
   @spec add_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
           {:ok, Barkpark.Tasks.Edge.t()} | {:error, Ecto.Changeset.t()}
   def add_dep(child, parent, kind \\ :blocks, caller_token_id \\ nil) do
+    with_dependent_lock(child, fn child_uuid ->
+      case Edges.add_dep(child, parent, kind) do
+        {:ok, edge} ->
+          {:ok, edge, fence(child_uuid, "edge_added", edge.from_id, edge.to_id, caller_token_id)}
+
+        {:error, %Ecto.Changeset{} = cs} ->
+          # A failed INSERT (e.g. FK violation on a ghost id) leaves the
+          # transaction aborted — returning the changeset as a plain value
+          # would surface as {:error, :rollback} to the caller. Repo.rollback
+          # carries it out explicitly, preserving the bare Edges.add_dep
+          # contract ({:error, %Ecto.Changeset{}}).
+          Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
+  Remove a dependency edge `child → parent` under the same lock and fence as
+  `add_dep/4`: removing a blocker changes an `in_progress` holder's world as
+  much as adding one does. Returns `{:ok, removed}`; an absent edge removes 0
+  rows and fences nobody.
+  """
+  @spec remove_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
+          {:ok, non_neg_integer()}
+  def remove_dep(child, parent, kind \\ :blocks, caller_token_id \\ nil) do
+    with_dependent_lock(child, fn child_uuid ->
+      {:ok, removed} = Edges.remove_dep(child, parent, kind)
+
+      bundle =
+        if removed > 0,
+          do:
+            fence(child_uuid, "edge_removed", child_uuid, endpoint_uuid(parent), caller_token_id)
+
+      {:ok, removed, bundle}
+    end)
+  end
+
+  # Advisory lock on the DEPENDENT — the task we may fence. Same key
+  # (`LockKey.task/1` = `task:<uuid>`) close/release/stage/sweep use, so the
+  # epoch bump serializes with them per-task; edges on OTHER tasks pass through
+  # unimpeded. A targeted CLAIM takes this key too, but only AFTER it resolves
+  # the slug — its first lock is `task:<doc_id>` and excludes other claims, not
+  # this. Broadcasts go out only after commit.
+  defp with_dependent_lock(child, fun) do
     child_uuid = endpoint_uuid(child)
 
     result =
       Repo.transaction(fn ->
-        # Advisory lock on the DEPENDENT — the task we may fence. Same key
-        # (`LockKey.task/1` = `task:<uuid>`) close/release/stage/sweep use, so
-        # the epoch bump serializes with them per-task; edges on OTHER tasks
-        # pass through unimpeded. A targeted CLAIM takes this key too, but
-        # only AFTER it resolves the slug — its first lock is `task:<doc_id>`
-        # and excludes other claims, not this.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(child_uuid)])
-
-        case Edges.add_dep(child, parent, kind) do
-          {:ok, edge} ->
-            bundle =
-              fence_in_progress(
-                child_uuid,
-                Map.merge(
-                  %{
-                    "fenced" => "edge_added",
-                    "edge" => %{"from" => edge.from_id, "to" => edge.to_id}
-                  },
-                  caller_stamp(caller_token_id)
-                )
-              )
-
-            {:ok, edge, bundle}
-
-          {:error, %Ecto.Changeset{} = cs} ->
-            # A failed INSERT (e.g. FK violation on a ghost id) leaves the
-            # transaction aborted — returning the changeset as a plain value
-            # would surface as {:error, :rollback} to the caller. Repo.rollback
-            # carries it out explicitly, preserving the bare Edges.add_dep
-            # contract ({:error, %Ecto.Changeset{}}).
-            Repo.rollback(cs)
-        end
+        fun.(child_uuid)
       end)
 
     case result do
-      {:ok, {:ok, edge, bundle}} ->
+      {:ok, {:ok, value, bundle}} ->
         :ok = emit_broadcasts(List.wrap(bundle))
-        {:ok, edge}
+        {:ok, value}
 
       {:error, %Ecto.Changeset{} = cs} ->
         {:error, cs}
     end
+  end
+
+  defp fence(child_uuid, what, from_id, to_id, caller_token_id) do
+    fence_in_progress(
+      child_uuid,
+      Map.merge(
+        %{"fenced" => what, "edge" => %{"from" => from_id, "to" => to_id}},
+        caller_stamp(caller_token_id)
+      )
+    )
   end
 
   defp endpoint_uuid(%Document{id: id}), do: id
