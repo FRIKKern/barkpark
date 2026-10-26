@@ -167,7 +167,7 @@ defmodule BarkparkWeb.GroqSourceMapTest do
     assert resolved(body) == %{"$[1]" => {"p1", "$['tags'][1]"}, "$[2]" => {"p1", "$['tags'][0]"}}
   end
 
-  test "a value the read compat computes from a bare string maps to nothing", %{
+  test "a bare-string reference maps _ref and _type as Sanity does, never a computed _weak", %{
     token: token,
     scope: scope
   } do
@@ -194,12 +194,20 @@ defmodule BarkparkWeb.GroqSourceMapTest do
     {:ok, _} = Content.publish_document("c1", "card", @dataset, scope)
 
     body =
-      fetch(token, ~s|*[_id == "c1"][0]{"ref": who._ref, "t": who._type, "name": who->name}|, %{
-        "resultSourceMap" => "true"
-      })
+      fetch(
+        token,
+        ~s|*[_id == "c1"][0]{"ref": who._ref, "t": who._type, "w": who._weak, "name": who->name}|,
+        %{"resultSourceMap" => "true"}
+      )
 
     assert body["result"]["ref"] == "ada"
-    assert resolved(body) == %{"$['name']" => {"ada", "$['name']"}}
+
+    # _ref and _type map where Sanity's map points; a computed _weak maps nowhere.
+    assert resolved(body) == %{
+             "$['ref']" => {"c1", "$['who']['_ref']"},
+             "$['t']" => {"c1", "$['who']['_type']"},
+             "$['name']" => {"ada", "$['name']"}
+           }
   end
 
   test "a subquery with ^ maps its rows to their documents", %{token: token} do
