@@ -17,7 +17,7 @@ defmodule Barkpark.Groq.GeoShape do
       answer is `{:error, :too_many_positions}`, decided by counting before
       any geometry runs, so a crafted polygon cannot burn CPU. One evaluation
       pass may spend at most `@max_work` units over all its calls (see
-      `reset_budget/0`); past that the answer is `{:error, :work_budget}`.
+      `reset_budget/1`); past that the answer is `{:error, :work_budget}`.
   """
 
   @max_positions 1_000
@@ -26,8 +26,19 @@ defmodule Barkpark.Groq.GeoShape do
   @doc "The position cap per shape."
   def max_positions, do: @max_positions
 
-  @doc "The work budget per evaluation pass."
-  def max_work, do: @max_work
+  @doc "The work budget this process runs under: the last `reset_budget/1`'s."
+  def budget do
+    case Process.get(:groq_geo_work) do
+      {_used, max} -> max
+      nil -> @max_work
+    end
+  end
+
+  @doc """
+  The positions a value counts as, stopping just past the cap: a shape's
+  positions, 1 for a point or anything else.
+  """
+  def count_positions(value), do: positions_in(value)
 
   @spec contains(term(), term()) :: boolean() | nil | {:error, :too_many_positions | :work_budget}
   def contains(a, b), do: with_shapes(a, b, &contains?/2)
@@ -57,26 +68,27 @@ defmodule Barkpark.Groq.GeoShape do
   end
 
   @doc """
-  Start an evaluation pass's geometry budget: `#{@max_work}` work units,
+  Start a geometry budget of `max` work units (default `#{@max_work}`):
   positions of `a` × positions of `b`, summed over every call in this
-  process. `Barkpark.Groq.Evaluator.evaluate/2` starts one per round, beside
-  its memo reset, and the source-map pass starts its own. A call that would
-  pass it is refused before it runs, e.g. `*[geo::contains($big, location)]`
-  over thousands of documents. A process that never started a budget (a
-  listen filter matching one document) is held only by the position cap.
+  process until the next reset. `Barkpark.Groq.Evaluator.evaluate/2` starts
+  one per round, beside its memo reset, and the source-map pass starts its
+  own; a listen filter starts a smaller one per event. A call that would pass
+  it is refused before it runs, e.g. `*[geo::contains($big, location)]` over
+  thousands of documents. A process that never started a budget is held only
+  by the position cap.
   """
-  def reset_budget, do: Process.put(:groq_geo_work, 0)
+  def reset_budget(max \\ @max_work), do: Process.put(:groq_geo_work, {0, max})
 
   defp charge(units) do
     case Process.get(:groq_geo_work) do
       nil ->
         true
 
-      used when used + units > @max_work ->
+      {used, max} when used + units > max ->
         false
 
-      used ->
-        Process.put(:groq_geo_work, used + units)
+      {used, max} ->
+        Process.put(:groq_geo_work, {used + units, max})
         true
     end
   end
