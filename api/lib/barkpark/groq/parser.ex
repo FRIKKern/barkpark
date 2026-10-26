@@ -300,8 +300,13 @@ defmodule Barkpark.Groq.Parser do
           text |> String.to_integer() |> Barkpark.Groq.Values.num()
 
         _ ->
-          {f, ""} = Float.parse(normalize_float_text(text))
-          f
+          # Past the double range (`1e400`) Float.parse refuses the text;
+          # JavaScript reads Infinity, which GROQ answers as null
+          # (task-97b8d14ea3d44330).
+          case Float.parse(normalize_float_text(text)) do
+            {f, ""} -> f
+            _ -> nil
+          end
       end
 
     {{:value, value}, p}
