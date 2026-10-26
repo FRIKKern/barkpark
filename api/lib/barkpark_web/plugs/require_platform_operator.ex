@@ -99,6 +99,10 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
 
   A configured instance is fail-closed by construction: with `emails` and
   `token_ids` both listed, an unrecognised bearer matches neither.
+
+  `BARKPARK_OPERATOR_FAIL_CLOSED=1` (`:operator_fail_closed`) turns the UNSET
+  shape into a refusal for every caller, for an instance that must never fall
+  back to the admin bit. Off by default, so an existing install is unchanged.
   """
 
   import Plug.Conn
@@ -116,7 +120,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
     %{emails: emails, token_ids: ids} = allowlist()
 
     cond do
-      emails == [] and ids == [] -> conn
+      emails == [] and ids == [] -> if fail_closed?(), do: deny(conn), else: conn
       operator?(conn.assigns[:api_token], emails, ids) -> conn
       true -> deny(conn)
     end
@@ -133,7 +137,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   @spec permits?(term()) :: boolean()
   def permits?(principal) do
     case allowlist() do
-      %{emails: [], token_ids: []} -> true
+      %{emails: [], token_ids: []} -> not fail_closed?()
       %{emails: emails, token_ids: ids} -> operator_principal?(principal, emails, ids)
     end
   end
@@ -172,7 +176,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   def warn_if_unset do
     %{emails: emails, token_ids: ids} = allowlist()
 
-    if emails == [] and ids == [] do
+    if emails == [] and ids == [] and not fail_closed?() do
       Logger.warning("""
       [Operator] The instance-operator allowlist is UNSET (#{@emails_env} and #{@ids_env} are
       both empty), so the `admin` permission alone still opens these eight INSTANCE-GLOBAL
@@ -200,6 +204,8 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   end
 
   # ── internals ──────────────────────────────────────────────────────────
+
+  defp fail_closed?, do: Application.get_env(:barkpark, :operator_fail_closed, false) == true
 
   defp normalize(value) do
     value

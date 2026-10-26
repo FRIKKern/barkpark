@@ -86,6 +86,7 @@ services:
       # all four read in api/config/runtime.exs, none had a passthrough line)
       - BARKPARK_DB_STATEMENT_TIMEOUT
       - BARKPARK_INDX_STATE_DIR
+      - BARKPARK_OPERATOR_FAIL_CLOSED
       - BARKPARK_OPERATOR_EMAILS
       - BARKPARK_OPERATOR_TOKEN_IDS
       # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)

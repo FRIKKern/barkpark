@@ -370,4 +370,33 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       refute capture_log(fn -> RequirePlatformOperator.warn_if_unset() end) =~ "[Operator]"
     end
   end
+
+  describe "allowlist UNSET with BARKPARK_OPERATOR_FAIL_CLOSED" do
+    setup do
+      Application.put_env(:barkpark, :operator_fail_closed, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :operator_fail_closed) end)
+      :ok
+    end
+
+    test "every operator route refuses every caller, the listed operators included", ctx do
+      ctx = Map.put(ctx, :probe_plugin, uniq("operator-probe"))
+
+      for bearer <- [ctx.admin_a, ctx.op_id, ctx.op_pat],
+          {label, method, path, body} <- seven_groups(ctx) do
+        conn = send_probe(as(bearer), method, path, body)
+
+        assert conn.status == 403 and conn.resp_body =~ "platform_operator",
+               "#{label}: #{method} #{path} answered #{conn.status} with the allowlist unset"
+      end
+
+      {:ok, token} = Auth.verify_token(ctx.admin_a)
+      refute RequirePlatformOperator.permits?(token)
+    end
+
+    test "an armed allowlist still serves its operators", ctx do
+      put_allowlist([], [ctx.op_id_token.id])
+      assert get(as(ctx.op_id), "/v1/secrets/#{ctx.secret}").status == 200
+      assert get(as(ctx.admin_a), "/v1/secrets/#{ctx.secret}").status == 403
+    end
+  end
 end
