@@ -84,8 +84,26 @@ defmodule Barkpark.Groq.GeoTest do
         do: assert(q(query) == nil, query)
   end
 
+  # task-1db8d92a284a23d2: the shapes themselves are pinned in GeoShapeTest.
+  test "geo::contains and geo::intersects take a geo::latLng point" do
+    square = ~s|{"type": "Polygon", "coordinates": [[[0,0],[10,0],[10,10],[0,10],[0,0]]]}|
+
+    assert q("geo::contains(#{square}, geo::latLng(5, 5))") == true
+    assert q("geo::contains(#{square}, geo::latLng(0, 5))") == false
+    assert q("geo::intersects(#{square}, geo::latLng(0, 5))") == true
+    assert q("geo::intersects(geo::latLng(5, 5), #{square})") == true
+    assert q(~s|geo::contains(#{square}, {"lat": 5, "lng": 5})|) == true
+    assert q("geo::contains(null, geo::latLng(5, 5))") == nil
+  end
+
   test "the wrong number of arguments is a parse error, as on Sanity" do
-    for query <- ["geo::latLng(1)", "geo::latLng(1, 2, 3)", "geo::distance(geo::latLng(0, 0))"] do
+    for query <- [
+          "geo::latLng(1)",
+          "geo::latLng(1, 2, 3)",
+          "geo::distance(geo::latLng(0, 0))",
+          "geo::contains(geo::latLng(0, 0))",
+          "geo::intersects(1, 2, 3)"
+        ] do
       assert {:error, e} = Parser.parse(query)
       assert e.description =~ "incorrect number of arguments", query
     end

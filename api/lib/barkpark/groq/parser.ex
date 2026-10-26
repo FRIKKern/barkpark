@@ -80,7 +80,7 @@ defmodule Barkpark.Groq.Parser do
     "dateTime" => %{"now" => 0},
     "releases" => %{"all" => 0},
     "text" => %{"query" => 1, "semanticSimilarity" => 1},
-    "geo" => %{"latLng" => 2, "contains" => :any, "intersects" => :any, "distance" => 2},
+    "geo" => %{"latLng" => 2, "contains" => 2, "intersects" => 2, "distance" => 2},
     "documents" => %{
       "get" => :any,
       "incomingRefCount" => :any,

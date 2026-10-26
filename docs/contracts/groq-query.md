@@ -12,7 +12,7 @@ Barkpark answers GROQ on Sanity's query API URLs, so a `@sanity/client` or `next
 | `query` | GROQ text; GET query string or POST body `{"query", "params"}` |
 | `$name` | GET only: one parameter, JSON-encoded (`$slug="intro"`) |
 | `params` | POST only: object of decoded parameter values |
-| `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as its base, release ids ignored; `raw` stacked or a lone other value → 400 |
+| `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as its base; `raw` stacked or a lone other value → 400 |
 | `returnQuery` | `false` leaves `query` out |
 | `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
@@ -42,7 +42,7 @@ const client = createClient({
 
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter (add `_type` to narrow). Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, 20 streams each, then `goaway`) sends changed docs' twins in `{"tags"}` messages per second; `restart` if `Last-Event-ID` can't resume. Draft mode only for now: the client sends no token without `includeDrafts`, and anonymous streams await the owner. At most 128 tags: past 64 readable ones, type tags only.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter. Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, 20 streams each, then `goaway`) sends changed docs' twins in `{"tags"}` messages per second; `restart` if `Last-Event-ID` can't resume. Draft mode only: the client sends no token without `includeDrafts`, and anonymous streams await the owner. At most 128 tags: past 64 readable ones, type tags only.
 
 ## Evaluation and limits
 
@@ -62,9 +62,9 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance`, `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps). Sanity's GROQ suite (`groq/conformance_test.exs`, CI): all 7731 pass.
+Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance|contains|intersects` (unlike Sanity, 422 over 1000 positions a shape, 5M pairs a pass), `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps). Sanity's GROQ suite (`groq/conformance_test.exs`): all 7731 pass.
 
-Not yet: `geo::contains|intersects`, `text::query`, other `documents::`, `delta::`, `user::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
+Not yet: `text::query`, other `documents::`, `delta::`, `user::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 
