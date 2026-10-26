@@ -550,8 +550,9 @@ defmodule BarkparkWeb.GroqControllerTest do
   end
 
   test "an unsupported function is a 422 naming it", %{conn: conn, token: token} do
-    body = conn |> get_query(token, ~s'geo::distance(1, 2)') |> json_response(422)
-    assert body["error"]["description"] =~ "geo::distance"
+    # geo::distance is supported since task-ce93ff890a895f54; geo::contains is not yet.
+    body = conn |> get_query(token, ~s'geo::contains(1, 2)') |> json_response(422)
+    assert body["error"]["description"] =~ "geo::contains"
   end
 
   describe "title, which the writer keeps in the documents.title column" do
