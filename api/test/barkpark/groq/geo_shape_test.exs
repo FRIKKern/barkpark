@@ -153,4 +153,25 @@ defmodule Barkpark.Groq.GeoShapeTest do
     GeoShape.reset_budget()
     assert GeoShape.contains(big, pt(1, 1)) == true
   end
+
+  # A listen filter runs in the stream's process for its whole life and never
+  # starts a budget, so a geo filter must not use one up and turn false.
+  test "a listen filter with geo never runs out of budget" do
+    circle = fn r ->
+      poly([
+        ring(for i <- 0..998, do: [:math.cos(i / 999 * 6.28) * r, :math.sin(i / 999 * 6.28) * r])
+      ])
+    end
+
+    {:ok, filter} =
+      BarkparkWeb.ListenFilter.parse(%{
+        "query" => "*[geo::intersects($big, area)]",
+        "$big" => Jason.encode!(circle.(10))
+      })
+
+    doc = %{"_id" => "a", "_type" => "place", "area" => circle.(5)}
+
+    # A million position pairs a match: ten matches pass a query's budget twice.
+    for _ <- 1..10, do: assert(BarkparkWeb.ListenFilter.query_match?(filter.query, doc))
+  end
 end
