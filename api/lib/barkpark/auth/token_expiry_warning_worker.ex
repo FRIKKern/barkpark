@@ -147,8 +147,9 @@ defmodule Barkpark.Auth.TokenExpiryWarningWorker do
     |> Swoosh.Email.text_body("""
     The Barkpark API token "#{name}" (id #{token.id}) expires at #{DateTime.to_iso8601(token.expires_at)}.
 
-    After that time every request made with it is refused. Before then, mint a
-    replacement with `bp token create` and give it to whatever uses this token.
+    After that time every request made with it is refused. Before then, rotate it
+    with `bp token rotate #{token.id} --expires_in_days N`, where N is the new
+    lifetime in days, and give the new token to whatever uses this one.
 
     You receive this because you own the token or administer its workspace.
     """)

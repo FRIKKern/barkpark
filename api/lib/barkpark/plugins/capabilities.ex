@@ -3093,6 +3093,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "int",
             "Seconds the old token keeps working (0 = revoke now; max 604800). Prefer --grace.",
             default: 86_400
+          ),
+          flag(
+            "expires_in_days",
+            "int",
+            "Days until the new token expires. Default: it keeps the old token's expiry."
           )
         ],
         writes: true,

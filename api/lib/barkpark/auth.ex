@@ -878,6 +878,14 @@ defmodule Barkpark.Auth do
   `{:error, :not_rotatable}` — revoked, expired, or not an `api`-kind token.
   `{:error, :invalid_grace}` — not an integer in `0..#{@rotation_max_grace}`.
 
+  ## A new expiry
+
+  `expires_in_days: n` gives the successor `expires_at = now + n days` instead
+  of the old token's expiry, so rotating a token that is about to expire renews
+  it. The class max age applies (`TokenExpiry.resolve/3`). Absent, the
+  successor keeps the old expiry. `{:error, :invalid_expiry}` — not a positive
+  integer; `{:error, {:expiry_exceeds_max, class, days}}` — above the max.
+
   ## The Cloud-held credential
 
   `{:error, :cloud_held_credential}` — the token is the instance admin
@@ -896,8 +904,10 @@ defmodule Barkpark.Auth do
     grace = Keyword.get(opts, :grace_seconds, @rotation_default_grace)
     workspace_id = Keyword.get(opts, :workspace_id)
     force? = Keyword.get(opts, :force, false) == true
+    expires_in_days = Keyword.get(opts, :expires_in_days)
 
     with :ok <- validate_grace(grace),
+         :ok <- validate_expires_in_days(expires_in_days),
          uuid when is_binary(uuid) <- Repo.uuid_or_nil(token_id) || {:error, :not_found} do
       Repo.transaction(fn ->
         now = DateTime.utc_now() |> DateTime.truncate(:second)
@@ -919,8 +929,9 @@ defmodule Barkpark.Auth do
              forced_cloud? = cloud_held_admin?(old),
              :ok <-
                if(forced_cloud? and not force?, do: {:error, :cloud_held_credential}, else: :ok),
+             {:ok, expires_at} <- successor_expiry(old, expires_in_days, now),
              raw = mint_raw(old),
-             {:ok, successor} <- insert_successor(old, raw, forced_cloud?),
+             {:ok, successor} <- insert_successor(old, raw, forced_cloud?, expires_at),
              :ok <- copy_seats(seats, successor.id),
              retire_at = retire_at(old, now, grace),
              {:ok, old} <-
@@ -953,6 +964,17 @@ defmodule Barkpark.Auth do
 
   defp validate_grace(g) when is_integer(g) and g >= 0 and g <= @rotation_max_grace, do: :ok
   defp validate_grace(_), do: {:error, :invalid_grace}
+
+  defp validate_expires_in_days(nil), do: :ok
+  defp validate_expires_in_days(n) when is_integer(n) and n > 0, do: :ok
+  defp validate_expires_in_days(_), do: {:error, :invalid_expiry}
+
+  defp successor_expiry(%ApiToken{expires_at: exp}, nil, _now), do: {:ok, exp}
+
+  defp successor_expiry(%ApiToken{} = old, days, now) do
+    TokenExpiry.class_for_permissions(old.permissions)
+    |> TokenExpiry.resolve(DateTime.add(now, days * 86_400, :second), now: now)
+  end
 
   defp rotatable(%ApiToken{kind: "api", revoked_at: nil, expires_at: nil}, _now), do: :ok
 
@@ -1028,7 +1050,7 @@ defmodule Barkpark.Auth do
 
   # A forced rotation of the Cloud-held credential gives the successor a label
   # that no longer claims Cloud holds it — Cloud keeps the OLD secret.
-  defp insert_successor(%ApiToken{} = old, raw, forced_cloud?) do
+  defp insert_successor(%ApiToken{} = old, raw, forced_cloud?, expires_at) do
     label = if forced_cloud?, do: @cloud_admin_label <> " (rotated)", else: old.label
 
     %ApiToken{dataset_id: old.dataset_id}
@@ -1044,7 +1066,7 @@ defmodule Barkpark.Auth do
       share_scope: old.share_scope,
       owner_user_id: old.owner_user_id,
       created_by: old.created_by,
-      expires_at: old.expires_at
+      expires_at: expires_at
     })
     |> Repo.insert()
   end
@@ -1086,6 +1108,8 @@ defmodule Barkpark.Auth do
         "old_token_id" => old.id,
         "new_token_id" => successor.id,
         "old_token_expires_at" => DateTime.to_iso8601(retire_at),
+        "new_token_expires_at" =>
+          successor.expires_at && DateTime.to_iso8601(successor.expires_at),
         "forced_cloud_held" => forced_cloud?
       }
     })
