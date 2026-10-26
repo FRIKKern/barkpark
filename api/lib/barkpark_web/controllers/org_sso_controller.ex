@@ -17,9 +17,12 @@ defmodule BarkparkWeb.OrgSsoController do
   alias Barkpark.Sso.{Domains, Oidc, OidcConnection, OrgDomain}
   alias Barkpark.Tenancy.Organization
 
+  # Entra ID settings a create or an update may set (PR #24225, #24251).
+  @entra_fields ~w(scopes token_endpoint_auth_method tenant_id strict_validation trust_idp_mfa mfa_acr)
+
   # Fields an update may change. A new issuer is a new connection: delete it
   # and create it again. The secret changes only through `rotate_secret/2`.
-  @update_fields ~w(client_id groups_claim group_role_mappings active)
+  @update_fields ~w(client_id groups_claim group_role_mappings active) ++ @entra_fields
 
   def create(conn, params) do
     attrs = %{slug: params["slug"], name: params["name"] || params["slug"]}
@@ -63,7 +66,10 @@ defmodule BarkparkWeb.OrgSsoController do
          {:ok, endpoints} <- discover(issuer),
          attrs =
            params
-           |> Map.take(["client_id", "client_secret", "groups_claim", "group_role_mappings"])
+           |> Map.take(
+             ["client_id", "client_secret", "groups_claim", "group_role_mappings"] ++
+               @entra_fields
+           )
            |> Map.merge(Map.new(endpoints, fn {k, v} -> {Atom.to_string(k), v} end))
            |> Map.put("organization_id", org.id),
          {:ok, c} <- Oidc.create_connection(attrs) |> mapping_error() do
@@ -211,6 +217,12 @@ defmodule BarkparkWeb.OrgSsoController do
       jwks_uri: c.jwks_uri,
       groups_claim: c.groups_claim,
       group_role_mappings: c.group_role_mappings,
+      scopes: c.scopes,
+      token_endpoint_auth_method: c.token_endpoint_auth_method,
+      tenant_id: c.tenant_id,
+      strict_validation: c.strict_validation,
+      trust_idp_mfa: c.trust_idp_mfa,
+      mfa_acr: c.mfa_acr,
       active: c.active
     }
 
