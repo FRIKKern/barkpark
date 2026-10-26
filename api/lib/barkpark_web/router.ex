@@ -3753,6 +3753,8 @@ defmodule BarkparkWeb.Router do
     pipe_through(:shared_docs_api)
 
     get("/v:api_version/data/query/:dataset", GroqController, :read)
+    # Sanity's document read, `client.getDocument(s)` (task-6a540627a1aec2c1).
+    get("/v:api_version/data/doc/:dataset/:ids", GroqController, :documents)
     # The same read at an undated path, for `bp doc groq` (task-2b7f715eb6fd0c12).
     get("/v1/data/groq/:dataset", GroqController, :read)
   end
