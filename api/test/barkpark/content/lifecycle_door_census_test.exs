@@ -18,13 +18,15 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
   A caller is one of:
 
     * `:caller` - its opts carry the caller: they come from a builder that sets
-      `:caller_context` (`@carriers`), or are the function's own opts parameter,
-      passed on unchanged. Checked from the source; a function that also trims
-      opts (`Keyword.take/drop/delete`) is not taken on trust.
+      `:caller_context` (`@carriers`, or a same-module helper that does), or are
+      the function's own opts parameter,
+      passed on unchanged, or keep it (`Keyword.take(opts, [:caller_context])`).
+      Checked from the source; a function that also takes opts without
+      `:caller_context` (or drops it) is not taken on trust.
     * `{:system, why}` - no caller seat drives the write.
     * `{:pending, task_id, why}` - drops `:caller_context` today; its task fixes it.
-      Held to no check, so the fix's own PR stays green; flip it to `:caller`
-      once the fix lands.
+      Reds once the site carries the caller ("fixed — flip to :caller"), so
+      the fix's PR flips it and nothing stays pending by accident.
 
   An unclassified caller reds the first test; a `:caller` that stops carrying
   the caller reds the second.
@@ -62,9 +64,6 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
   # without the caller.
   @carrier_modules [:ScopeHelpers, :Shared]
 
-  @masters "task-a6307f0d04cf513d"
-  @share "task-e867294fdbcf6f55"
-  @media_delete "task-166a84a8502afbc5"
   @task_verbs "task-8078ea8cff5bdef0"
 
   @census %{
@@ -102,17 +101,23 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
     "barkpark_web/live/studio/studio_live/shared/paper.ex register_label/4 → publish_document" =>
       :caller,
     # Pending: each drops :caller_context today.
-    "barkpark/plugins/bulldocs/masters.ex save_master/4 → publish_document" =>
-      {:pending, @masters, "publishes with a scope rebuilt from opts"},
-    "barkpark/media/storage/share.ex write_share_link/4 → publish_document" =>
-      {:pending, @share, "write_opts/1 keeps scope only"},
-    "barkpark/media.ex delete_asset_doc/1 → delete_for_blob" =>
-      {:pending, @media_delete, "MediaFile.scope_opts/1 carries no caller"},
+    # Fixed: #24166 (masters), #24165 (share), #24164 (media delete).
+    "barkpark/plugins/bulldocs/masters.ex save_master/4 → publish_document" => :caller,
+    "barkpark/media/storage/share.ex write_share_link/4 → publish_document" => :caller,
+    "barkpark/media.ex admitted_delete_file/2 → delete_found_file" => :caller,
+    "barkpark/media.ex commit_pending_delete/2 → delete_row_with_asset_doc" => :caller,
+    "barkpark/media.ex delete_found_file/4 → delete_row_with_asset_doc" => :caller,
+    "barkpark/media.ex delete_row_with_asset_doc/3 → delete_asset_doc" => :caller,
+    "barkpark/media.ex delete_asset_doc/2 → delete_for_blob" => :caller,
     "barkpark/plugins/media.ex after_media_delete/1 → delete_for_blob" =>
-      {:pending, @media_delete, "calls with no opts"},
+      {:system,
+       "a second, idempotent pass over the asset doc delete_asset_doc/2 already deleted " <>
+         "with the seat, in the same transaction"},
     # No caller seat.
     "barkpark/media/sanity_image_asset_doc.ex write/4 → apply_mutations" =>
-      {:system, "derived: the sanityImageAsset doc a saved image ref points at"},
+      {:system,
+       "derived: the sanityImageAsset doc a saved image ref points at; metadata of an " <>
+         "uploaded file, not editorial content, so the save's own seat check covers it"},
     "barkpark/sync/applier.ex apply_upsert/4 → apply_mutations" =>
       {:system, "Sync worker replays another server's listen stream"},
     "barkpark/sync/applier.ex apply_delete/4 → delete_document" =>
@@ -138,9 +143,13 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
       {:system, "operator reseal of encrypted fields"},
     "barkpark/content/reseal.ex reseal_one/1" => {:system, "operator reseal of encrypted fields"},
     "barkpark/content/sessions.ex append_event/5" =>
-      {:system, "append-only type:session event trail, no draft layer"},
+      {:system,
+       "append-only type:session event trail: no draft layer, and an append never " <>
+         "rewrites what a seat published"},
     "barkpark/content/sessions.ex touch_conversation/5" =>
-      {:system, "append-only type:session event trail, no draft layer"},
+      {:system,
+       "type:session conversation registry: whitelisted, server-stamped fields; no " <>
+         "draft layer, and it never rewrites what a seat published"},
     "barkpark/cycle_fleet.ex materialize_release_paper/1" => {:system, "cycle fleet ledger"},
     "barkpark/cycle_fleet.ex insert_candidate_revision/2" => {:system, "cycle fleet ledger"},
     "barkpark/cycle_fleet.ex restore_release_document_in_scope/4" =>
@@ -181,6 +190,14 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
       for {key, class} <- @census, not pending?(class), not Map.has_key?(callers, key), do: key
 
     assert gone == []
+  end
+
+  test "no caller stays pending once fixed", %{callers: callers} do
+    fixed = for {key, {:pending, _, _}} <- @census, Map.get(callers, key) == :carries, do: key
+    assert fixed == [], "fixed — flip to :caller: #{inspect(fixed)}"
+
+    gone = for {key, {:pending, _, _}} <- @census, not Map.has_key?(callers, key), do: key
+    assert gone == [], "gone — classify the site that replaced it: #{inspect(gone)}"
   end
 
   test "every update_all on documents is classified", %{update_all: found} do
@@ -246,14 +263,32 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
         arg = Enum.at(args, doors[key])
         fwd = arg && forwarded(arg, params, body)
         doors = if fwd, do: Map.put_new(doors, {mod, name}, fwd), else: doors
-        carries? = arg != nil and calls?(body, @carriers) and not trims?(body)
-        v = if fwd != nil or carries?, do: :carries, else: :drops
+        v = if fwd != nil or carries?(arg, body, ast), do: :carries, else: :drops
         k = "#{rel} #{name}/#{length(params)} → #{elem(key, 1)}"
         {doors, Map.update(callers, k, v, &if(:drops in [&1, v], do: :drops, else: :carries))}
     end
   end
 
-  # Calls one of `funs`, or sets a `caller_context:` key.
+  # The function's opts carry the caller, or the opts are built by a helper in
+  # the same module whose body does (`write_opts(opts)`).
+  defp carries?(nil, _body, _ast), do: false
+
+  defp carries?(arg, body, ast) do
+    keeps? = fn b -> calls?(b, @carriers) and not trims?(b) end
+
+    keeps?.(body) or
+      case arg do
+        {f, _, args} when is_atom(f) and is_list(args) ->
+          helpers = for {^f, _, b} <- defs(ast), do: b
+          helpers != [] and Enum.all?(helpers, keeps?)
+
+        _ ->
+          false
+      end
+  end
+
+  # Calls one of `funs`, keeps `:caller_context` through `Keyword.take/2`, or
+  # sets a `caller_context:` key.
   defp calls?(ast, funs) do
     {_, hit} =
       Macro.prewalk(ast, false, fn
@@ -262,6 +297,11 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
 
         {:caller_context, _} = n, _ ->
           {n, true}
+
+        {{:., _, [{:__aliases__, _, [:Keyword]}, :take]}, _, [_ | _] = args} = n, _ ->
+          keys = List.last(args)
+
+          {n, is_list(keys) and :caller_context in keys}
 
         {{:., _, [{:__aliases__, _, parts}, f]}, _, args} = n, _ when is_list(args) ->
           {n, f in funs and List.last(parts) in @carrier_modules}
@@ -276,16 +316,24 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
     hit
   end
 
-  # `Keyword.take/2` and friends rebuild opts and can drop the caller; a
-  # function that uses one is not taken on trust.
+  # A `Keyword.take/2` that leaves out `:caller_context`, or a drop/delete of
+  # it, rebuilds opts without the caller: such a function is not taken on trust.
   defp trims?(body) do
     {_, hit} =
       Macro.prewalk(body, false, fn
         _, true ->
           {nil, true}
 
-        {{:., _, [{:__aliases__, _, [:Keyword]}, f]}, _, _} = n, _ ->
-          {n, f in [:take, :drop, :delete]}
+        {{:., _, [{:__aliases__, _, [:Keyword]}, :take]}, _, [_ | _] = args} = n, _ ->
+          keys = List.last(args)
+
+          {n, not (is_list(keys) and :caller_context in keys)}
+
+        {{:., _, [{:__aliases__, _, [:Keyword]}, f]}, _, [_ | _] = args} = n, _
+        when f in [:drop, :delete] ->
+          keys = List.last(args)
+
+          {n, keys == :caller_context or (is_list(keys) and :caller_context in keys)}
 
         n, acc ->
           {n, acc}
