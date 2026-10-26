@@ -34,7 +34,7 @@ GET /w/:ws/p/:proj/files/<projectId>/<dataset>/<sha1>.<ext>[/<vanity>]
 - The file is found by `sourceId` equal to the Sanity asset id (`image-<sha1>-<w>x<h>-<ext>`, `file-<sha1>-<ext>`) in that dataset, and otherwise by the sha1 of its stored bytes.
 - `projectId` is ignored. The workspace and project in the prefix name the tenant.
 - Access, share rules, `ETag` and `Cache-Control` are those of `/w/:ws/p/:proj/media/files/<path>`.
-- Images take the transform parameters `@sanity/image-url` sends: `w`, `h`, `rect`, `fit`, `crop`, `fp-x`, `fp-y`, `fm`, `auto`, `q`. When the stored original is smaller than `<w>x<h>`, `rect` is scaled to it. `dpr`, `blur`, `flip`, `bg` and the rest answer 400 `unsupported_transform_param`. An SVG answers `auto=format` and size or crop parameters with the stored SVG, as Sanity does. An explicit `fm` on an SVG answers 400 `not_transformable`. Every SVG is served `image/svg+xml` with `nosniff` and a CSP holding `script-src 'none'` and `sandbox`, so its script never runs.
+- Images take the transform parameters `@sanity/image-url` sends: `w`, `h`, `rect`, `fit`, `crop`, `fp-x`, `fp-y`, `fm`, `auto`, `q`, and `dpr`, `blur`, `bg`, `pad`, `flip`, `or`, `invert`, `sat` ([IMAGE-TRANSFORMS.md](IMAGE-TRANSFORMS.md)). When the stored original is smaller than `<w>x<h>`, `rect` is scaled to it. An SVG answers `auto=format` and size or crop parameters with the stored SVG, as Sanity does. An explicit `fm` on an SVG answers 400 `not_transformable`. Every SVG is served `image/svg+xml` with `nosniff` and a CSP holding `script-src 'none'` and `sandbox`, so its script never runs.
 - Files ignore query parameters, Sanity's `dl` included.
 - An unknown asset, another dataset or a malformed name answers 404.
 

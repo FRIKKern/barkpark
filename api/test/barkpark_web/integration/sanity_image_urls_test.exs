@@ -226,13 +226,14 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
                404
     end
 
-    test "transform vocabulary Barkpark does not apply is refused with 400", ctx do
+    test "@sanity/image-url's dpr and blur are applied, not refused", ctx do
       sanity_sha = sha("1")
       upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
 
-      resp = as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", "w=10&blur=20"))
-      assert resp.status == 400
-      assert Jason.decode!(resp.resp_body)["error"]["code"] == "unsupported_transform_param"
+      resp = as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", "w=10&dpr=2&blur=20"))
+      assert resp.status == 200
+      {:ok, image} = Image.from_binary(resp.resp_body)
+      assert Image.width(image) == 20
     end
 
     test "another workspace's token cannot read the asset", ctx do

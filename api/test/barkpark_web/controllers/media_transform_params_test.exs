@@ -87,14 +87,14 @@ defmodule BarkparkWeb.MediaTransformParamsTest do
       refute response(conn, 400) =~ @bytes
     end
 
-    test "unapplied transform vocabulary is refused, every name listed", ctx do
-      conn = get_scoped(ctx, "/media/files/#{@path}?dpr=2&w=200&blur=10")
+    # task-e1512b7d39b345c2: @sanity/image-url's dpr and blur are transform
+    # parameters now, so on a non-image they 400 as `w` does, never served raw.
+    test "dpr and blur are transform parameters: on a non-image they are refused as w is", ctx do
+      conn = get_scoped(ctx, "/media/files/#{@path}?dpr=2&blur=10")
 
       assert conn.status == 400
-      body = json_response(conn, 400)
-      assert body["error"]["code"] == "unsupported_transform_param"
-      assert body["error"]["details"]["ignored"] == ["dpr", "blur"]
-      assert body["error"]["message"] =~ "docs/media/IMAGE-TRANSFORMS.md"
+      assert json_response(conn, 400)["error"]["code"] == "not_transformable"
+      refute response(conn, 400) =~ @bytes
     end
 
     test "a signed-url param set is NOT denylisted — original bytes still serve", ctx do
