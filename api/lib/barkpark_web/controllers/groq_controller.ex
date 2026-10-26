@@ -61,6 +61,11 @@ defmodule BarkparkWeb.GroqController do
 
         {:error, {:eval, message}} ->
           query_error(conn, 422, "queryEvaluationError", message)
+
+        {:error, {:busy, message}} ->
+          conn
+          |> put_resp_header("retry-after", "1")
+          |> query_error(503, "queryBusyError", message)
       end
     else
       {:error, :unknown_dataset} ->

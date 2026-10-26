@@ -870,6 +870,47 @@ defmodule BarkparkWeb.GroqControllerTest do
     refute Enum.any?(statements, &(&1 =~ ~r/SELECT d0."id", d0."doc_id".*LIMIT 500/))
   end
 
+  test "a query over the slot cap waits, then answers 503 with Retry-After", %{
+    conn: conn,
+    token: token
+  } do
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_concurrent: 1, queue_ms: 100)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    test_pid = self()
+
+    holder =
+      spawn(fn ->
+        :ok = Barkpark.Groq.Slots.acquire()
+        send(test_pid, :held)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :held
+
+    busy = conn |> get_query(token, ~s'count(*[_type == "book"])')
+    assert busy.status == 503
+    assert get_resp_header(busy, "retry-after") == ["1"]
+    assert json_response(busy, 503)["error"]["type"] == "queryBusyError"
+
+    # A holder that dies without releasing frees its slot.
+    Process.exit(holder, :kill)
+
+    assert scoped_conn() |> get_query(token, ~s'count(*[_type == "book"])') |> json_response(200)
+    assert Barkpark.Groq.Slots.held() == 0
+  end
+
+  test "the default slot cap fits half the memory in query heaps, two per scheduler at most" do
+    heap = 512 * 1024 * 1024
+    # gyl: 3.8 GB, 2 cores -> 3 heaps fit in half the memory.
+    assert Barkpark.Groq.Slots.default_limit(3_907_408 * 1024, heap) ==
+             min(3, 2 * System.schedulers_online())
+
+    assert Barkpark.Groq.Slots.default_limit(256 * 1024 * 1024, heap) == 1
+    assert Barkpark.Groq.Slots.default_limit(nil, heap) == min(4, 2 * System.schedulers_online())
+  end
+
   defp sql_statements(fun) do
     ref = make_ref()
     parent = self()

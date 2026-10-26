@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: groq-query-api | budget: 1500tok -->
 # GROQ query API
 
-Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/` (parser, evaluator, document source), `BarkparkWeb.GroqController`.
+Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/`, `BarkparkWeb.GroqController`.
 
 ## Endpoint
 
@@ -19,7 +19,7 @@ Any `apiVersion` is accepted. Auth, tenancy and share access are those of the sc
 
 Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` comes from the `documents.title` column (`title == "x"` matches it); no title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows as stored.
 
-Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
+Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`; no free slot is 503 with `type: "queryBusyError"` and `Retry-After`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
 
 ## Client configuration
 
@@ -45,7 +45,7 @@ const client = createClient({
 
 ## Evaluation and limits
 
-Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch that reads only `^` and is false for the parent is skipped. GIN indexes over `content` and its `_ref` values serve them. The evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has none but these, apart from `references()`, `title` and `$x in field[].value`, and the caller sees every field it tests; any other is counted in chunks, limited only by wall time. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries are read in rounds: one SQL read per `->` level and subquery shape. A subquery that does not read `^` runs once per query.
+Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch that reads only `^` and is false for the parent is skipped. The evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has only these, except `references()` and `title`, and the caller sees every field it tests; any other is counted in chunks. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries read in rounds, one SQL read per `->` level and subquery shape. A subquery that does not read `^` runs once per query.
 
 | Limit | Default | Config key (`config :barkpark, Barkpark.Groq`) |
 |---|---|---|
@@ -56,6 +56,8 @@ Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, 
 | Stored content one `*[...]` loads | 32 MiB | `:max_bytes_per_fetch` |
 | Documents one query loads | 25 000 | `:max_documents_loaded` |
 | Encoded result | 10 MiB | `:max_result_bytes` |
+| Queries at once | ½ memory ÷ heap, ≤ 2 per scheduler | `:max_concurrent` |
+| Slot wait, then 503 | 5 s | `:queue_ms` |
 
 ## Moving from Sanity
 
@@ -65,4 +67,4 @@ Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::
 
 `score()` weighs as groq-js (a term adds by its count in the field; `boost` adds). Sanity's hosted one favours rarer terms and shorter fields; multi-clause ranks can differ.
 
-Checking a site's queries: `tooling/groq/compare.mjs` runs a query corpus through groq-js and through this endpoint over the same documents and reports the differences (dev only).
+Checking a site's queries: `tooling/groq/compare.mjs` diffs a query corpus between groq-js and this endpoint over the same documents (dev only).
