@@ -1698,7 +1698,8 @@ FLAGS
 // and prints it with a store-it-safely note — eliminating the SSH/rescue-reboot
 // dance just to administer your own instance. The route is team-admin-gated and
 // team-scoped, so only an owner/admin of the owning team can read it. Requires
-// `bp login`.
+// `bp login`. `backup` and `restore` need no login: they work on a self-hosted
+// instance's database and media directory (instance_backup_cmd.go).
 func runInstance(out *writer, g globals, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -1708,7 +1709,7 @@ func runInstance(out *writer, g globals, args []string) int {
 	}
 
 	if len(args) == 0 {
-		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id>", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance backup | bp instance restore <dir>", exitUsage)
 	}
 
 	switch args[0] {
@@ -1716,6 +1717,10 @@ func runInstance(out *writer, g globals, args []string) int {
 		return runInstanceCredentials(out, args[1:])
 	case "admin-token":
 		return runInstanceAdminToken(out, g, args[1:])
+	case "backup":
+		return runInstanceBackup(out, args[1:])
+	case "restore":
+		return runInstanceRestore(out, args[1:])
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown instance verb %q — try: bp instance credentials <id> or bp instance admin-token <id>", args[0]), exitUsage)
 	}
@@ -1844,6 +1849,8 @@ USAGE
   bp instance credentials <id> [--team <slug|id>]
   bp instance admin-token <id> [--label <l>] [--expires-in <d> | --no-expiry]
                                (--install | --out <path> | --reveal) [--team <t>]
+  bp instance backup  --database-url <url> --media-dir <dir> --out <dir>
+  bp instance restore <dir> --database-url <url> --media-dir <dir>
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
@@ -1859,6 +1866,18 @@ WHAT IT DOES
                you name: --install saves it as this server's token in your bp
                config (as 'bp login' does), --out writes a new 0600 file, --reveal
                prints it. With none of them nothing is requested.
+  backup       write a self-hosted instance to <dir>: a pg_dump custom-format
+               db.dump, media.tar.gz and manifest.json with the Postgres major,
+               document counts per type and sha256 of every file. Reads from one
+               snapshot, so the instance may stay up. Keys are never included;
+               the manifest names the ones restore needs from your secret store.
+               --database-url defaults to DATABASE_URL (add ?sslmode=require for
+               TLS), --media-dir to BARKPARK_MEDIA_DIR. Needs pg_dump, pg_restore
+               and psql for the server's Postgres major on PATH.
+  restore      restore <dir> into an EMPTY database on the same Postgres major
+               and an empty media directory. Checks both checksums first, then
+               after pg_restore compares every media file and per-type document
+               count with the manifest and exits 1 on any difference.
 
 FLAGS
   --team <t>   read credentials in an explicit team context (a team slug or id

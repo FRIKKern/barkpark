@@ -87,14 +87,22 @@ func splitPGURL(raw string) (dsn string, pgPassword string) {
 	return u.String(), pgPassword
 }
 
-// buildCmd assembles the pg_dump command with the password kept off argv.
-func (s *pgDumpSource) buildCmd(ctx context.Context) *exec.Cmd {
-	dsn, pw := splitPGURL(s.databaseURL)
-	cmd := exec.CommandContext(ctx, "pg_dump", "--no-owner", "--no-privileges", "--dbname", dsn)
+// pgCommand builds a Postgres client command (pg_dump, pg_restore, psql)
+// against databaseURL with the password moved from argv to PGPASSWORD. The
+// password-less URL goes last as --dbname, so TLS settings in the URL
+// (sslmode=require) reach libpq unchanged.
+func pgCommand(ctx context.Context, name, databaseURL string, args ...string) *exec.Cmd {
+	dsn, pw := splitPGURL(databaseURL)
+	cmd := exec.CommandContext(ctx, name, append(args, "--dbname", dsn)...)
 	if pw != "" {
 		cmd.Env = append(os.Environ(), "PGPASSWORD="+pw)
 	}
 	return cmd
+}
+
+// buildCmd assembles the pg_dump command with the password kept off argv.
+func (s *pgDumpSource) buildCmd(ctx context.Context) *exec.Cmd {
+	return pgCommand(ctx, "pg_dump", s.databaseURL, "--no-owner", "--no-privileges")
 }
 
 func (s *pgDumpSource) Open(ctx context.Context) (io.ReadCloser, error) {
@@ -142,12 +150,7 @@ type psqlSink struct {
 
 // buildCmd assembles the psql command with the password kept off argv.
 func (s *psqlSink) buildCmd(ctx context.Context) *exec.Cmd {
-	dsn, pw := splitPGURL(s.databaseURL)
-	cmd := exec.CommandContext(ctx, "psql", "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--quiet", "--dbname", dsn)
-	if pw != "" {
-		cmd.Env = append(os.Environ(), "PGPASSWORD="+pw)
-	}
-	return cmd
+	return pgCommand(ctx, "psql", s.databaseURL, "--no-psqlrc", "--set", "ON_ERROR_STOP=1", "--quiet")
 }
 
 func (s *psqlSink) Restore(ctx context.Context, r io.Reader) error {
