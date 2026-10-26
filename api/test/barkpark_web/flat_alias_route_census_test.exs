@@ -274,6 +274,61 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          ":instance_global for the identical reason. It touches ONLY the named workspaces row " <>
          "(Quota.reinstate/1 + set_expires_at/2) and no tenant CONTENT at all. Source carries " <>
          "no scope marker at all."},
+    # OrgSsoController
+    {"POST", "/v1/admin/orgs"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): creates an organization. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"PUT", "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): attaches a workspace to an organization. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"PUT", "/v1/admin/orgs/:org_slug/auth-methods"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): sets an organization's allowed sign-in methods. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"POST", "/v1/admin/orgs/:org_slug/oidc"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): creates an organization's OIDC connection. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"PATCH", "/v1/admin/orgs/:org_slug/oidc"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): updates an organization's OIDC connection. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"PUT", "/v1/admin/orgs/:org_slug/oidc/client-secret"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): rotates an OIDC client secret. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"DELETE", "/v1/admin/orgs/:org_slug/oidc"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): deletes an organization's OIDC connection. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"POST", "/v1/admin/orgs/:org_slug/domains"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): claims an SSO routing domain. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
+    {"POST", "/v1/admin/orgs/:org_slug/domains/:domain/verify"} =>
+      {:global,
+       "instance-operator primitive (task-25386fa77a664587): verifies an SSO routing domain. The :org_slug names the " <>
+         "SUBJECT of the operator's action; the permit is the [:api, :require_admin, " <>
+         ":require_platform_operator] pipeline. Touches organization, OIDC connection and " <>
+         "domain rows only, never tenant content. Source carries no scope marker at all."},
     # AppTokenController.delete
     {"DELETE", "/v1/auth/app-tokens"} =>
       {:workspace_derived,
@@ -1173,6 +1228,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "from the token before AssignDefaultScope can stamp Default."},
     # TasksController.add_edge
     {"POST", "/v1/tasks/edges"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
+         "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
+         "from the token before AssignDefaultScope can stamp Default."},
+    # TasksController.remove_edge
+    {"DELETE", "/v1/tasks/edges"} =>
       {:workspace_derived,
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>

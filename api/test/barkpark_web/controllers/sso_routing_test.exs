@@ -16,7 +16,7 @@ defmodule BarkparkWeb.SsoRoutingTest do
   defmodule MockOidcHTTP do
     @behaviour Barkpark.Sso.Oidc.HTTP
     @impl true
-    def post_form(_u, _p),
+    def post_form(_u, _p, _h),
       do: {:ok, %{"id_token" => Application.get_env(:barkpark, :oidc_test)[:id_token]}}
 
     @impl true

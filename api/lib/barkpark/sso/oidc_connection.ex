@@ -27,6 +27,14 @@ defmodule Barkpark.Sso.OidcConnection do
     field :groups_claim, :string, default: "groups"
     field :group_role_mappings, :map, default: %{}
 
+    # Entra ID settings. Empty endpoints are read from the issuer's discovery
+    # document. `strict_validation` turns on the stricter ID token checks and
+    # subject matching in `Barkpark.Sso.Oidc`; `tenant_id` pins Entra's `tid`.
+    field :scopes, :string, default: "openid email"
+    field :token_endpoint_auth_method, :string, default: "client_secret_post"
+    field :tenant_id, :string
+    field :strict_validation, :boolean, default: false
+
     belongs_to :organization, Barkpark.Tenancy.Organization
 
     timestamps(type: :utc_datetime_usec)
@@ -44,16 +52,14 @@ defmodule Barkpark.Sso.OidcConnection do
       :jwks_uri,
       :groups_claim,
       :group_role_mappings,
+      :scopes,
+      :token_endpoint_auth_method,
+      :tenant_id,
+      :strict_validation,
       :active
     ])
-    |> validate_required([
-      :organization_id,
-      :issuer,
-      :client_id,
-      :authorization_endpoint,
-      :token_endpoint,
-      :jwks_uri
-    ])
+    |> validate_required([:organization_id, :issuer, :client_id])
+    |> validate_inclusion(:token_endpoint_auth_method, ~w(client_secret_post client_secret_basic))
     |> validate_change(:group_role_mappings, fn :group_role_mappings, map ->
       if is_map(map) and Enum.all?(map, fn {k, v} -> is_binary(k) and is_binary(v) end) do
         []

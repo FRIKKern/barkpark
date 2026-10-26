@@ -114,6 +114,16 @@ defmodule Barkpark.AuthTest do
       ev = Barkpark.Repo.one(from e in Barkpark.Audit.Event, where: e.action == "token_revoked")
       assert ev.category == "token"
       assert ev.subject == revoked.id
+      assert ev.actor_type == "system"
+    end
+
+    test "names the acting token on the token_revoked audit event" do
+      token = insert_token("rt-actor-" <> Ecto.UUID.generate())
+      actor = insert_token("rt-actor-by-" <> Ecto.UUID.generate())
+      assert {:ok, _} = Auth.revoke_token(token.id, actor)
+
+      ev = Repo.get_by!(Barkpark.Audit.Event, action: "token_revoked", subject: token.id)
+      assert {ev.actor_type, ev.actor_id} == {"api_token", actor.id}
     end
   end
 

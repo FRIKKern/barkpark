@@ -569,11 +569,11 @@ defmodule PDS.Census do
   # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
   # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 118,
-    ast: 109,
+    textual: 119,
+    ast: 110,
     phantom: 9,
     consumer: 4,
-    emitted: 105,
+    emitted: 106,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -751,7 +751,14 @@ defmodule PDS.Census do
     # which call Repo.insert/1 and Repo.delete_all/1 directly. `read` (37),
     # `phantom` (9), `consumer` (4) and `unrouted` (13) did NOT move — two
     # added sites, not a reclassification.
-    write: 55,
+    #
+    # RE-DERIVED AGAIN 2026-10-26 (task-de1360b7d60e2afe, DELETE /v1/tasks/edges):
+    # textual 118 -> 119, ast 109 -> 110, emitted 105 -> 106, write-routed 55 -> 56.
+    # ONE new emitted site, TasksController.remove_edge/2's `ok: true` arm, in the
+    # WRITE class: it reaches Barkpark.Tasks.Edges.remove_dep/3 and Repo.delete_all/1.
+    # `read`, `phantom`, `consumer` and `unrouted` did not move. Derived from this
+    # census's own D448-DRIFT-REFUSES line on this commit's tree.
+    write: 56,
     read: 37,
     unrouted: 13
   }
@@ -1167,6 +1174,18 @@ defmodule PDS.Census do
     # reports whether the second write happened. Classified by the arriving change, not
     # judged by it.
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
+    # OrgSsoController (task-25386fa77a664587): each action renders the stored row it
+    # wrote (org, connection with client_secret_set, domain with verified) or
+    # `deleted: true`, so success is read off the body, not the status alone.
+    {:delete, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :delete_oidc, :status_only_receipt},
+    {:patch, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :update_oidc, :status_only_receipt},
+    {:post, "/v1/admin/orgs", "BarkparkWeb.OrgSsoController", :create, :status_only_receipt},
+    {:post, "/v1/admin/orgs/:org_slug/domains", "BarkparkWeb.OrgSsoController", :add_domain, :status_only_receipt},
+    {:post, "/v1/admin/orgs/:org_slug/domains/:domain/verify", "BarkparkWeb.OrgSsoController", :verify_domain, :status_only_receipt},
+    {:post, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :create_oidc, :status_only_receipt},
+    {:put, "/v1/admin/orgs/:org_slug/auth-methods", "BarkparkWeb.OrgSsoController", :set_auth_methods, :status_only_receipt},
+    {:put, "/v1/admin/orgs/:org_slug/oidc/client-secret", "BarkparkWeb.OrgSsoController", :rotate_secret, :status_only_receipt},
+    {:put, "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug", "BarkparkWeb.OrgSsoController", :attach_workspace, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/cloud-users/deprovision", "BarkparkWeb.CloudUserController", :deprovision, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
@@ -1273,6 +1292,7 @@ defmodule PDS.Census do
     # controller action). The receipt is store-derived and pinned by
     # api/test/barkpark_web/controllers/workspace_locale_controller_test.exs.
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/workspace/locale", "BarkparkWeb.WorkspaceLocaleController", :update, :status_only_receipt},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/workspace/time-zone", "BarkparkWeb.WorkspaceLocaleController", :update_time_zone, :status_only_receipt},
     {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token, :status_only_receipt},
     {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident, :status_only_receipt},
     {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident, :status_only_receipt},
@@ -1422,14 +1442,14 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create} => {"BarkparkWeb.MemberController.create/2", 1, "92306071"},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update} => {"BarkparkWeb.MemberController.update/2", 1, "98799982"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "59503441"},
-    {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "129784508"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "55592382"},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "75946866"},
     {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "17508246"},
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "7533378"},
-    {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "71494351"},
-    {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "31540449"},
+    {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current} => {"BarkparkWeb.AppTokenController.delete_current/2", 1, "51916917"},
+    {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete} => {"BarkparkWeb.FleetSupportTokenController.delete/2", 1, "122449426"},
     {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "98736159"},
     {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
@@ -1468,6 +1488,7 @@ defmodule PDS.Census do
     {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim} => {"BarkparkWeb.AccessController.claim/2", 2, "9774625"},
     {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback} => {"BarkparkWeb.SelfUpdateController.rollback/2", 1, "123741443"},
     {:post, "/v1/admin/write-admission/hold", "BarkparkWeb.WriteAdmissionController", :hold} => {"BarkparkWeb.WriteAdmissionController.hold/2", 2, "111003360"},
+    {:delete, "/v1/admin/orgs/:org_slug/oidc", "BarkparkWeb.OrgSsoController", :delete_oidc} => {"BarkparkWeb.OrgSsoController.delete_oidc/2", 1, "47474787"},
     {:delete, "/v1/admin/write-admission/hold/:capability", "BarkparkWeb.WriteAdmissionController", :reopen} => {"BarkparkWeb.WriteAdmissionController.reopen/2", 1, "39928"},
     {:post, "/v1/admin/write-admission/recover", "BarkparkWeb.WriteAdmissionController", :recover} => {"BarkparkWeb.WriteAdmissionController.recover/2", 2, "76331147"},
     {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger} => {"BarkparkWeb.SiteDeployController.trigger/2", 1, "51850737"},
@@ -2977,6 +2998,10 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_test.exs",
          ~S|test "merge reconcile (close.ex write_reconcile)", %{scope: scope} do|}},
+    # TasksController.remove_edge/2 — `removed` is the delete count
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.remove_edge/2", "45588519", "93077774"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1327
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.relabel/2", "7475620", "84462998"},
@@ -11973,7 +11998,11 @@ defmodule PDS.Census do
   # routed-write members, now disposed through their own register rows
   # (UNJUDGED, added above) rather than excluded — two arrivals, no exclusion
   # added.
-  @derived_disposition_pin %{count: 87, fp: "21248959"}
+  # Re-derived 2026-10-26 (task-de1360b7d60e2afe): DELETE /v1/tasks/edges
+  # (TasksController.remove_edge/2) is one new routed-write member, disposed through
+  # its own register row (UNJUDGED, added above). Pin read from this census's
+  # ROUTED-DERIVED-ARRIVALS-PINNED line: count 87 -> 88, fp 21248959 -> 127668751.
+  @derived_disposition_pin %{count: 88, fp: "127668751"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm

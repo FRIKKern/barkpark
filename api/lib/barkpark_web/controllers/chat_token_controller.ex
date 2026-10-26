@@ -70,7 +70,7 @@ defmodule BarkparkWeb.ChatTokenController do
          %{id: ws_id, slug: ws_slug} <- workspace do
       # DELEGATE (D48). The raw token is generated INSIDE the context fn — the
       # controller never chooses the permissions and never chooses the entropy.
-      case Auth.create_chat_token(label, dataset, ws_id) do
+      case Auth.create_chat_token(label, dataset, ws_id, conn.assigns[:api_token]) do
         {:ok, raw, _token} ->
           conn
           |> put_status(:created)

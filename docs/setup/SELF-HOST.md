@@ -41,3 +41,38 @@ On the managed Hetzner boxes, `barkpark-agent` (`internal/agent/report.go`) send
 | `backup_state` | Flexible Server automated backups for the database; media backups need their own schedule |
 
 The agent's load, swap, runaway-process and systemd slot fields describe a shared Linux host and have no meaning inside one container.
+
+## Features that start local processes
+
+The image ships the BEAM release, `bash`, `wget` and Debian's base tools. It has no `git`, `node`, `npm`, `claude`, `codex`, `bp`, `tmux`, `systemd`, `xmllint` or `procps` (`ps`, `kill`). The features below start one of those programs from the API node. Turn off each one you do not use.
+
+| Feature | Module that starts the process | Program | Setting that turns it off |
+|---|---|---|---|
+| Studio chat with Claude, chat titles, readiness probe | `Barkpark.StudioChat.Provider.Claude`, `.Titles`, `.Probe` | `claude`, `kill` | `BARKPARK_CAPABILITIES_OFF=studio_chat` (or `BARKPARK_CLAUDE_CHAT=off` for the Claude provider only) |
+| Studio chat with Codex | `Barkpark.StudioChat.Runtime.Codex.Session`, `.Readiness` | `codex` | `BARKPARK_CAPABILITIES_OFF=studio_chat` |
+| Studio chat repository context | `Barkpark.StudioChat.ContextIdentity` | `git` | `BARKPARK_CAPABILITIES_OFF=studio_chat` |
+| Cycle fleet release capture | `Barkpark.CycleFleet.ReleaseCaptureAdapter` | `bp` | `BARKPARK_CAPABILITIES_OFF=cycle_fleet` (turning off `epic_fleet` also refuses cycle routes) |
+| Site builder | `Barkpark.Sites.DeployRunner` | `bash deploy/site-deploy.sh`, which runs `npm ci`, under `systemd-run` when present | Off unless `BARKPARK_SITE_DEPLOY_APPLY=1` |
+| Site serving commit | `Barkpark.Sites.ServingMemory` | `git rev-parse HEAD` | Set `BARKPARK_GIT_SHA`; without `git` the commit reads as unknown |
+| Self-update | `Barkpark.SelfUpdate.Runner` | `bash scripts/self-update.sh`, `git`, `mix` | Off unless `BARKPARK_SELF_UPDATE_APPLY=1` |
+| Studio terminal | `BarkparkWeb.Studio.TmuxConsole` | `tmux` | `BARKPARK_TMUX_CONSOLE=off` |
+| ONIX export validation | `Barkpark.Plugins.OnixEdit.Export.Validator` | `xmllint` | Leave `onixedit` out of `BARKPARK_PLUGINS` |
+| Workspace export cleanup | `Barkpark.Tenancy.WorkspaceBundle.Janitor` | `ps` | No setting. Without `ps` the janitor keeps every stale bundle file instead of deleting it. |
+| Workspace export space check | `Barkpark.Tenancy.WorkspaceBundle.Archive` | `df` | No setting needed; `df` is in the image. |
+| Image processing on Windows | `Barkpark.Media.ImageBackend.Magick` | `magick` | Linux uses the libvips NIF and starts no process. |
+
+`Barkpark.PortReaper` runs `kill` only for the chat, cycle, site and self-update processes above. Two more features need something outside the image without starting a process from the API. Connectors (Slack, Linear) talk to a separate Node bridge and stay off while `CONNECTORS_CONNECT_SECRET` is unset. Indx search stays idle without `INDX_API_BASE`; if you use it, set `BARKPARK_INDX_STATE_DIR` to persistent storage such as the Azure Files mount, because the image's default path is lost when the replica restarts.
+
+For a Pensum-only instance with core, media and Studio, set:
+
+```bash
+BARKPARK_PLUGINS=media
+BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
+BARKPARK_TMUX_CONSOLE=off
+```
+
+Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset. An empty `BARKPARK_PLUGINS` is the plugin kill switch and turns off media too, so name `media` explicitly.
+
+## Keys, moves, backups and SSO
+
+Key rotation in Key Vault, moving an instance onto managed Postgres, scheduled backups with the restore drill, and SSO with Entra ID are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).

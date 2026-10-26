@@ -1441,6 +1441,12 @@ defmodule Barkpark.Structure do
   # (task-e9f14aeb3ed09953). `"parentOp": "has"` reads the parent from an
   # array of references (task-c603a1eb83c4fc01); a groupBy takes `"op": "has"`
   # for the same.
+  #
+  # `rootFilter` (task-7d29adf66bbf5df4) alone decides the root level, in place
+  # of the parentless clause and `filter`, as Sanity's category tree roots at
+  # `isTopLevel == true` while those categories have parents of their own.
+  # The levels below keep `filter` and the parent clause, so `rootFilter`
+  # never hides a child.
   defp declared_item_to_node(%{"kind" => "tree"} = item, idx, ctx) do
     type = item["type"]
     parent = item["parent"]
@@ -1457,7 +1463,8 @@ defmodule Barkpark.Structure do
       # holds none (missing or empty: countEq 0), and a document with several
       # parents shows under each.
       root_clause = if array?, do: %{"countEq" => 0}, else: %{"is" => "null"}
-      root = Map.merge(own, %{parent => root_clause})
+      root_filter = root_filter(item)
+      root = root_filter || Map.merge(own, %{parent => root_clause})
 
       %Node{
         id: item["id"] || "#{idx}-#{type}-tree",
@@ -1473,13 +1480,26 @@ defmodule Barkpark.Structure do
         initial_values: initial_values(item, type, ctx),
         views: views(item),
         error:
-          if(own == %{} and not array?, do: nil, else: filter_error(type, root, ctx)) ||
+          if(own == %{} and not array? and root_filter == nil,
+            do: nil,
+            else: filter_error(type, root, ctx)
+          ) ||
+            levels_error(type, own, root_filter, ctx) ||
             views_error(item)
       }
     end
   end
 
   defp declared_item_to_node(_item, _idx, _ctx), do: nil
+
+  defp root_filter(%{"rootFilter" => %{} = filter}) when map_size(filter) > 0, do: filter
+  defp root_filter(_item), do: nil
+
+  # With a `rootFilter` the root no longer carries `filter`, so check it on
+  # its own: the levels below still read it.
+  defp levels_error(_type, own, _root_filter, _ctx) when own == %{}, do: nil
+  defp levels_error(_type, _own, nil, _ctx), do: nil
+  defp levels_error(type, own, _root_filter, ctx), do: filter_error(type, own, ctx)
 
   defp tree_spec(parent, own, array?) do
     spec = if own == %{}, do: %{"parent" => parent}, else: %{"parent" => parent, "filter" => own}

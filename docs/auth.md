@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
-Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`;
+Bearer tokens (`Authorization: Bearer <token>`) in `api_tokens`;
 LiveViews read `session["api_token_session"]`
 (or `session["api_token"]`) via `on_mount`.
 
@@ -19,7 +19,7 @@ The principal is the API token; each binds to one **workspace** (tenancy boundar
 Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
 **before** any permission check: slug unresolved → `404 not_found`; resolved but
-no `workspace_memberships` row for the token → `403 forbidden`, reason
+no membership row for the token → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats). Flat paths (`/v1/data/:dataset/*`, …) resolve to `"Default"`.
 
 Mutate needs `write` after tenancy (else `403`). Minted with an explicit
@@ -71,8 +71,8 @@ env allowlist; see [instance-operator-tier.md](contracts/instance-operator-tier.
 Only `POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`) mints them:
 caller has flat `admin` AND an admin seat, gets at most its own set; seated,
 audited `token_minted`. `bp token create --permissions read,write,admin`.
-`bp token rotate` refuses Cloud's credential (label `barkpark cloud admin`)
-without `--force`.
+`bp token rotate` (new expiry: `--expires_in_days N`) refuses Cloud's credential
+(label `barkpark cloud admin`) without `--force`.
 Self-mint caps a member's PAT at `["read"]`, a MINTING policy; the seat
 writes ([sessions](auth-user-sessions.md)).
 
@@ -95,7 +95,7 @@ on `[:api, :require_admin]` (instance-global only).
 Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
 *replaces* `:api` — `[:api, :require_admin]` is where the convergence above
 bites. `DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
-`AssignDefaultScope` silently does nothing; `FlatAdminTenancyTest` reds on a swap.
+`AssignDefaultScope` does nothing; `FlatAdminTenancyTest` reds on a swap.
 
 ## Dev token
 

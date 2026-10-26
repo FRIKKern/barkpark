@@ -1,14 +1,15 @@
 defmodule Barkpark.Sso.Oidc.HTTP do
   @moduledoc """
-  The two outbound calls the OIDC relying-party makes — the token-endpoint POST
-  and the JWKS GET — behind a swappable behaviour so tests can stand in a mock
+  The outbound calls the OIDC relying-party makes — the token-endpoint POST
+  and the discovery and JWKS GETs — behind a swappable behaviour so tests can stand in a mock
   IdP (config key `:oidc_http`). The default is a `Req`-backed client.
   """
-  @callback post_form(String.t(), map()) :: {:ok, map()} | {:error, term()}
+  @callback post_form(String.t(), map(), [{String.t(), String.t()}]) ::
+              {:ok, map()} | {:error, term()}
   @callback get_json(String.t()) :: {:ok, map()} | {:error, term()}
 
   def impl, do: Application.get_env(:barkpark, :oidc_http, __MODULE__.ReqClient)
-  def post_form(url, params), do: impl().post_form(url, params)
+  def post_form(url, params, headers \\ []), do: impl().post_form(url, params, headers)
   def get_json(url), do: impl().get_json(url)
 
   defmodule ReqClient do
@@ -16,12 +17,17 @@ defmodule Barkpark.Sso.Oidc.HTTP do
     @behaviour Barkpark.Sso.Oidc.HTTP
 
     @impl true
-    def post_form(url, params) do
+    def post_form(url, params, headers \\ []) do
       # Login-path outbound: isolate onto Barkpark.Auth.Finch and cap the wait
       # for the IdP token endpoint at an explicit, tunable 10s (a hung IdP must
       # never stall the login path indefinitely). receive_timeout is a top-level
       # Req option — NEVER connect_options, which Req rejects alongside :finch.
-      case Req.post(url, form: params, finch: Barkpark.Auth.Finch, receive_timeout: 10_000) do
+      case Req.post(url,
+             form: params,
+             headers: headers,
+             finch: Barkpark.Auth.Finch,
+             receive_timeout: 10_000
+           ) do
         {:ok, %{status: s, body: body}} when s in 200..299 and is_map(body) -> {:ok, body}
         {:ok, %{status: s}} -> {:error, {:http_status, s}}
         {:error, e} -> {:error, e}

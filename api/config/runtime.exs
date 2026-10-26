@@ -676,6 +676,12 @@ if System.get_env("BARKPARK_PUBLIC_READ_ROTATION") in ~w(1 true yes on) do
   config :barkpark, :public_read_rotation, enabled: true
 end
 
+# API token expiry warnings (task-ae4b82ef79867237). Off unless switched on
+# here; see config.exs.
+if System.get_env("BARKPARK_TOKEN_EXPIRY_WARNINGS") in ~w(1 true yes on) do
+  config :barkpark, :token_expiry_warnings, enabled: true
+end
+
 # Deleted-payload retention (owner ruling #33). Off unless switched on here;
 # the window keeps config.exs's 90 days unless overridden. Same
 # positive-int-or-warn shape as the access-log window above.
@@ -881,6 +887,13 @@ if System.get_env("BARKPARK_ALLOW_BUNDLE_IMPORT") in ~w(1 true yes on) do
   config :barkpark, :allow_bundle_import, true
 end
 
+# Stricter OIDC ID token checks and subject matching for every connection on
+# this instance (`Barkpark.Sso.Oidc`). Off unless truthy; a connection can also
+# turn them on with its own `strict_validation` field.
+if System.get_env("BARKPARK_OIDC_STRICT_VALIDATION") in ~w(1 true yes on) do
+  config :barkpark, :oidc_strict_validation, true
+end
+
 # Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
 # (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
 # and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
@@ -901,6 +914,12 @@ end
 # owner_user_id -> user.email, or an app token's "app:<email>" label); ids are
 # `api_tokens.id` values, the direct handle for a machine token with no human
 # behind it. Blank entries are dropped, so "a@b.io,," is one operator, not three.
+# BARKPARK_OPERATOR_FAIL_CLOSED=1: with both lists unset the operator routes
+# refuse every caller instead of falling back to the admin bit. Off by default.
+if System.get_env("BARKPARK_OPERATOR_FAIL_CLOSED") in ~w(1 true yes on) do
+  config :barkpark, :operator_fail_closed, true
+end
+
 for {env_name, config_key} <- [
       {"BARKPARK_OPERATOR_EMAILS", :operator_emails},
       {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
@@ -926,6 +945,13 @@ studio_sso_origins =
   |> Enum.reject(&(&1 == ""))
 
 if studio_sso_origins != [], do: config(:barkpark, :studio_sso_origins, studio_sso_origins)
+
+# First owner on a fresh instance (task-2f87e451273f55cc). Unset by default.
+# With no users at boot, Barkpark.Accounts.BootstrapOwner seats this email as
+# owner of the default workspace; with any user present it does nothing.
+if (email = System.get_env("BARKPARK_BOOTSTRAP_OWNER_EMAIL", "")) != "" do
+  config :barkpark, :bootstrap_owner_email, email
+end
 
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
@@ -1218,6 +1244,36 @@ if config_env() == :prod do
   # the `:url` hostname stays authoritative.
   socket_dir = System.get_env("DATABASE_SOCKET_DIR")
 
+  # Optional TLS to a managed Postgres (Azure Database for PostgreSQL and the
+  # like). DATABASE_SSL=verify-full turns on Postgrex's verifying TLS: the server
+  # certificate must chain to a trusted CA and match the DATABASE_URL host. The
+  # CA is the OS store, or DATABASE_SSL_CA_FILE when set. Unset or "off" adds no
+  # :ssl option, so existing boxes connect exactly as before. The job and export
+  # pools copy this repo's config, so they use the same setting.
+  database_ssl =
+    case System.get_env("DATABASE_SSL") do
+      v when v in [nil, "", "off"] ->
+        nil
+
+      "verify-full" ->
+        case System.get_env("DATABASE_SSL_CA_FILE") do
+          ca when ca in [nil, ""] ->
+            true
+
+          ca ->
+            File.regular?(ca) ||
+              raise "DATABASE_SSL_CA_FILE is #{inspect(ca)}, which is not a file."
+
+            [cacertfile: ca]
+        end
+
+      other ->
+        raise """
+        DATABASE_SSL is #{inspect(other)}. Expected "verify-full" (verified TLS to
+        Postgres) or "off". Unset means no TLS, the default.
+        """
+    end
+
   # NOTE ON queue_target/queue_interval PARITY WITH api/config/test.exs: that file
   # widens 50ms/1000ms -> 5_000ms/30_000ms under a comment naming this exact error
   # ("connection not available and request was dropped from queue"). Do NOT copy
@@ -1332,7 +1388,6 @@ if config_env() == :prod do
     end
 
   repo_opts = [
-    # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     # The server-side wall (see the block above `statement_timeout =`).
@@ -1348,6 +1403,9 @@ if config_env() == :prod do
     else
       repo_opts
     end
+
+  repo_opts =
+    if database_ssl, do: Keyword.put(repo_opts, :ssl, database_ssl), else: repo_opts
 
   config :barkpark, Barkpark.Repo, repo_opts
 
@@ -1409,6 +1467,13 @@ if config_env() == :prod do
 
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # BARKPARK_RETIRE_SSE_ON_SIGTERM=1 ends this node's SSE streams with the retire
+  # frame when the release gets SIGTERM (Barkpark.Realtime.DrainSignal). Off by
+  # default.
+  config :barkpark,
+         :retire_sse_on_sigterm,
+         System.get_env("BARKPARK_RETIRE_SSE_ON_SIGTERM") == "1"
+
   # Phoenix Endpoint.check_origin allowlist. Without an explicit list it
   # whitelists only "#{scheme}://#{host}", which silently blocks the Vercel
   # apex demo and preview URLs (LiveView /live/websocket → 403).
@@ -1422,13 +1487,22 @@ if config_env() == :prod do
     |> String.split(",", trim: true)
     |> Enum.map(&String.trim/1)
 
-  check_origin =
-    [
-      "#{scheme}://#{host}",
-      "https://barkpark.cloud",
-      "https://www.barkpark.cloud",
-      "https://*.vercel.app"
-    ] ++ extra_origins
+  # BARKPARK_ALWAYS_ALLOWED_ORIGINS: CSV that, when set, REPLACES the built-in
+  # Barkpark Cloud list below, here and in BarkparkWeb.Plugs.DatasetCors. A
+  # self-hosted box sets its own front ends (for example https://*.vercel.app
+  # or one app's exact origin). Unset keeps today's list.
+  always_allowed_origins =
+    case System.get_env("BARKPARK_ALWAYS_ALLOWED_ORIGINS") do
+      nil ->
+        ["https://barkpark.cloud", "https://www.barkpark.cloud", "https://*.vercel.app"]
+
+      csv ->
+        origins = csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)
+        config :barkpark, :always_allowed_origins, origins
+        origins
+    end
+
+  check_origin = ["#{scheme}://#{host}"] ++ always_allowed_origins ++ extra_origins
 
   # WebAuthn / passkeys: the relying-party id is the public host, and the
   # expected client origin is scheme://host. Derived from PHX_HOST so passkeys
@@ -1666,6 +1740,10 @@ if config_env() == :prod do
     end
 
   config :barkpark, :auth_write_rate_limits, auth_write_rate_limits
+
+  if uri = System.get_env("BARKPARK_SCIM_DOCUMENTATION_URI") do
+    config :barkpark, :scim_documentation_uri, uri
+  end
 
   if origins = System.get_env("DEFAULT_CORS_ORIGINS") do
     parsed = origins |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))

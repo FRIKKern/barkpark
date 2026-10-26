@@ -12,8 +12,10 @@ defmodule Barkpark.Tasks.Fence do
   # blocker should never be blocked by whoever happens to hold the dependent.
   # Allow the write, fence the holder.
   #
-  # This module owns the EDGE-ADD fence (`add_dep/3`, which `Tasks.add_dep/3`
-  # now routes through). The MOVE fence is folded into `Tasks.Move`'s reparent
+  # This module owns the EDGE fence (`add_dep/4` and `remove_dep/4`, which
+  # `Tasks.add_dep/4` and `Tasks.remove_dep/4` route through). Every edge change
+  # also writes a new rev on the dependent and emits `task.mutated`, fenced or
+  # not. The MOVE fence is folded into `Tasks.Move`'s reparent
   # CAS write directly (one UPDATE, not a second one).
 
   import Barkpark.Tasks.Internal,
@@ -50,73 +52,96 @@ defmodule Barkpark.Tasks.Fence do
   @spec add_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
           {:ok, Barkpark.Tasks.Edge.t()} | {:error, Ecto.Changeset.t()}
   def add_dep(child, parent, kind \\ :blocks, caller_token_id \\ nil) do
+    with_dependent_lock(child, fn child_uuid ->
+      case Edges.add_dep(child, parent, kind) do
+        {:ok, edge} ->
+          {:ok, edge, fence(child_uuid, "edge_added", edge.from_id, edge.to_id, caller_token_id)}
+
+        {:error, %Ecto.Changeset{} = cs} ->
+          # A failed INSERT (e.g. FK violation on a ghost id) leaves the
+          # transaction aborted — returning the changeset as a plain value
+          # would surface as {:error, :rollback} to the caller. Repo.rollback
+          # carries it out explicitly, preserving the bare Edges.add_dep
+          # contract ({:error, %Ecto.Changeset{}}).
+          Repo.rollback(cs)
+      end
+    end)
+  end
+
+  @doc """
+  Remove a dependency edge `child → parent` under the same lock and fence as
+  `add_dep/4`: removing a blocker changes an `in_progress` holder's world as
+  much as adding one does. Returns `{:ok, removed}`; an absent edge removes 0
+  rows and fences nobody.
+  """
+  @spec remove_dep(Edges.endpoint(), Edges.endpoint(), atom() | String.t(), binary() | nil) ::
+          {:ok, non_neg_integer()}
+  def remove_dep(child, parent, kind \\ :blocks, caller_token_id \\ nil) do
+    with_dependent_lock(child, fn child_uuid ->
+      {:ok, removed} = Edges.remove_dep(child, parent, kind)
+
+      bundle =
+        if removed > 0,
+          do:
+            fence(child_uuid, "edge_removed", child_uuid, endpoint_uuid(parent), caller_token_id)
+
+      {:ok, removed, bundle}
+    end)
+  end
+
+  # Advisory lock on the DEPENDENT — the task we may fence. Same key
+  # (`LockKey.task/1` = `task:<uuid>`) close/release/stage/sweep use, so the
+  # epoch bump serializes with them per-task; edges on OTHER tasks pass through
+  # unimpeded. A targeted CLAIM takes this key too, but only AFTER it resolves
+  # the slug — its first lock is `task:<doc_id>` and excludes other claims, not
+  # this. Broadcasts go out only after commit.
+  defp with_dependent_lock(child, fun) do
     child_uuid = endpoint_uuid(child)
 
     result =
       Repo.transaction(fn ->
-        # Advisory lock on the DEPENDENT — the task we may fence. Same key
-        # (`LockKey.task/1` = `task:<uuid>`) close/release/stage/sweep use, so
-        # the epoch bump serializes with them per-task; edges on OTHER tasks
-        # pass through unimpeded. A targeted CLAIM takes this key too, but
-        # only AFTER it resolves the slug — its first lock is `task:<doc_id>`
-        # and excludes other claims, not this.
         _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [LockKey.task(child_uuid)])
-
-        case Edges.add_dep(child, parent, kind) do
-          {:ok, edge} ->
-            bundle =
-              fence_in_progress(
-                child_uuid,
-                Map.merge(
-                  %{
-                    "fenced" => "edge_added",
-                    "edge" => %{"from" => edge.from_id, "to" => edge.to_id}
-                  },
-                  caller_stamp(caller_token_id)
-                )
-              )
-
-            {:ok, edge, bundle}
-
-          {:error, %Ecto.Changeset{} = cs} ->
-            # A failed INSERT (e.g. FK violation on a ghost id) leaves the
-            # transaction aborted — returning the changeset as a plain value
-            # would surface as {:error, :rollback} to the caller. Repo.rollback
-            # carries it out explicitly, preserving the bare Edges.add_dep
-            # contract ({:error, %Ecto.Changeset{}}).
-            Repo.rollback(cs)
-        end
+        fun.(child_uuid)
       end)
 
     case result do
-      {:ok, {:ok, edge, bundle}} ->
+      {:ok, {:ok, value, bundle}} ->
         :ok = emit_broadcasts(List.wrap(bundle))
-        {:ok, edge}
+        {:ok, value}
 
       {:error, %Ecto.Changeset{} = cs} ->
         {:error, cs}
     end
   end
 
+  defp fence(child_uuid, what, from_id, to_id, caller_token_id) do
+    announce(
+      child_uuid,
+      what,
+      Map.merge(
+        %{"edge_change" => what, "edge" => %{"from" => from_id, "to" => to_id}},
+        caller_stamp(caller_token_id)
+      )
+    )
+  end
+
   defp endpoint_uuid(%Document{id: id}), do: id
   defp endpoint_uuid(id) when is_binary(id), do: id
 
-  # Bump the epoch of an `in_progress` task (the fencing kick) under the caller's
-  # already-held advisory lock + transaction. Returns a broadcast bundle to emit
-  # AFTER commit, or `nil` when there was nothing to fence (not in_progress / no
-  # claim lease) or the CAS lost. Only `content.claim.epoch` moves — the
-  # work_digest, worker, ts_iso, resources are all left exactly as the holder
-  # stamped them (a fence is not a re-claim; the brief the holder read is
-  # unchanged, so its work_digest close-fence must still fire against a real
-  # foreign brief edit, never against this bump).
-  defp fence_in_progress(doc_uuid, fence_payload) do
+  # Write a new rev on the DEPENDENT and emit one `task.mutated` for it, under
+  # the caller's already-held advisory lock + transaction, whatever its status.
+  # The rev must move: the GitHub mirror skips a row whose rev it already
+  # synced, and the feeds learn of an edge change only through this event. An
+  # `in_progress` dependent with a claim lease also gets its `content.claim.epoch`
+  # bumped (the fencing kick, payload `fenced`); only the epoch moves — the
+  # work_digest, worker, ts_iso, resources stay exactly as the holder stamped
+  # them, so its work_digest close-fence still fires only on a real brief edit.
+  # Returns a broadcast bundle to emit AFTER commit, or `nil` when the CAS lost.
+  defp announce(doc_uuid, what, payload) do
     case Repo.get(Document, doc_uuid) do
-      %Document{content: %{"lifecycle_status" => "in_progress", "claim" => claim} = content} = doc
-      when is_map(claim) ->
+      %Document{} = doc ->
         observed_rev = doc.rev
-        new_rev = generate_rev()
-        new_claim = Map.put(claim, "epoch", current_epoch(doc) + 1)
-        new_content = Map.put(content, "claim", new_claim)
+        {new_content, payload} = maybe_fence(doc, what, payload)
 
         # PDS-D451 — the receipt is the STORED row, not a reconstruction. This
         # arm's receipt never reaches an HTTP caller, but it DOES reach every
@@ -124,16 +149,10 @@ defmodule Barkpark.Tasks.Fence do
         # `doc.updated_at` into BOTH the `doc:` map AND `document._updatedAt`
         # (`Envelope.render`) of the same message. A `%{doc | …}` merge omits
         # `updated_at`, so both fields shipped the PREVIOUS write's timestamp.
-        case Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+        case Internal.fenced_content_write(doc, observed_rev, new_content, generate_rev()) do
           {:ok, updated} ->
             ev =
-              insert_mutation_event!(
-                updated,
-                @event_task_mutated,
-                observed_rev,
-                "api",
-                fence_payload
-              )
+              insert_mutation_event!(updated, @event_task_mutated, observed_rev, "api", payload)
 
             task_broadcast(updated, @event_task_mutated, ev, observed_rev)
 
@@ -144,8 +163,21 @@ defmodule Barkpark.Tasks.Fence do
             nil
         end
 
-      _ ->
+      nil ->
         nil
     end
   end
+
+  defp maybe_fence(
+         %Document{content: %{"lifecycle_status" => "in_progress", "claim" => claim} = content} =
+           doc,
+         what,
+         payload
+       )
+       when is_map(claim) do
+    new_claim = Map.put(claim, "epoch", current_epoch(doc) + 1)
+    {Map.put(content, "claim", new_claim), Map.put(payload, "fenced", what)}
+  end
+
+  defp maybe_fence(%Document{content: content}, _what, payload), do: {content, payload}
 end

@@ -111,4 +111,47 @@ defmodule BarkparkWeb.WorkspaceLocaleControllerTest do
     assert html_response(en, 200) =~ "Sign in with an API token instead"
     refute html_response(en, 200) =~ "Logg inn med et API-token"
   end
+
+  defp time_zone_path(ws, project), do: "/w/#{ws.slug}/p/#{project.slug}/v1/workspace/time-zone"
+
+  test "an admin sets the time zone, the locale read carries it, and null clears it", %{
+    ws: ws,
+    project: project,
+    admin_raw: admin,
+    member_raw: member
+  } do
+    assert %{"time_zone" => nil} = json_response(get(req(member), locale_path(ws, project)), 200)
+
+    conn =
+      patch(req(admin), time_zone_path(ws, project), Jason.encode!(%{time_zone: "Europe/Oslo"}))
+
+    assert %{"time_zone" => "Europe/Oslo", "locale" => "en"} = json_response(conn, 200)
+
+    assert %{"time_zone" => "Europe/Oslo"} =
+             json_response(get(req(member), locale_path(ws, project)), 200)
+
+    assert Tenancy.workspace_time_zone(Tenancy.get_workspace_by_id(ws.id)) == "Europe/Oslo"
+
+    conn = patch(req(admin), time_zone_path(ws, project), Jason.encode!(%{time_zone: nil}))
+    assert %{"time_zone" => nil} = json_response(conn, 200)
+  end
+
+  test "a name not shaped like an IANA zone is a 422, and a member cannot set one", %{
+    ws: ws,
+    project: project,
+    admin_raw: admin,
+    member_raw: member
+  } do
+    for bad <- ["Oslo time", "../etc", "", 5] do
+      conn = patch(req(admin), time_zone_path(ws, project), Jason.encode!(%{time_zone: bad}))
+      assert %{"error" => %{"code" => "invalid_time_zone"}} = json_response(conn, 422)
+    end
+
+    conn = patch(req(admin), time_zone_path(ws, project), Jason.encode!(%{}))
+    assert %{"error" => %{"code" => "invalid_time_zone"}} = json_response(conn, 422)
+
+    conn = patch(req(member), time_zone_path(ws, project), Jason.encode!(%{time_zone: "UTC"}))
+    assert conn.status in [401, 403]
+    assert Tenancy.workspace_time_zone(Tenancy.get_workspace_by_id(ws.id)) == nil
+  end
 end

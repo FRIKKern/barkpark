@@ -2970,6 +2970,51 @@ defmodule BarkparkWeb.TasksControllerTest do
     end
   end
 
+  describe "DELETE /v1/tasks/edges" do
+    test "removing the blocks edge returns the dependent to the ready queue; a repeat is a no-op",
+         %{conn: conn, scope: scope} do
+      blocker = mk_task!(uniq("rmedge-blocker"), scope)
+      dependent = mk_task!(uniq("rmedge-dependent"), scope)
+      body = Jason.encode!(%{from_id: dependent.doc_id, to_id: blocker.doc_id})
+
+      assert conn |> authed() |> post("/v1/tasks/edges", body) |> json_response(200)
+      refute dependent.doc_id in ready_ids(conn)
+
+      resp = conn |> authed() |> delete("/v1/tasks/edges", body)
+      assert %{"ok" => true, "removed" => true} = json_response(resp, 200)
+      assert dependent.doc_id in ready_ids(conn)
+
+      resp = conn |> authed() |> delete("/v1/tasks/edges", body)
+      assert %{"ok" => true, "removed" => false} = json_response(resp, 200)
+    end
+
+    test "an unknown task is 404 and a missing field is 400", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("rmedge-known"), scope)
+
+      resp =
+        conn
+        |> authed()
+        |> delete(
+          "/v1/tasks/edges",
+          Jason.encode!(%{from_id: task.doc_id, to_id: "no-such-task"})
+        )
+
+      assert resp.status == 404
+
+      resp = conn |> authed() |> delete("/v1/tasks/edges", Jason.encode!(%{from_id: task.doc_id}))
+      assert resp.status == 400
+    end
+  end
+
+  defp ready_ids(conn) do
+    conn
+    |> authed()
+    |> get("/v1/tasks/ready?limit=1000")
+    |> json_response(200)
+    |> Map.fetch!("docs")
+    |> Enum.map(& &1["doc_id"])
+  end
+
   # ─── w7-08c (paper-y1c): list-all endpoint ─────────────────────────
 
   describe "GET /v1/tasks" do

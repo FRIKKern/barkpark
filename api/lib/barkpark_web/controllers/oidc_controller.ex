@@ -48,14 +48,26 @@ defmodule BarkparkWeb.OidcController do
 
           studio ->
             p = Oidc.new_auth_params()
-            url = Oidc.authorize_url(c, Map.put(p, :redirect_uri, callback_uri(slug)))
 
-            conn
-            |> put_session(:oidc_state, p.state)
-            |> put_session(:oidc_nonce, p.nonce)
-            |> put_session(:oidc_verifier, p.code_verifier)
-            |> put_session(:oidc_studio, studio)
-            |> redirect(external: url)
+            case Oidc.authorize_url(c, Map.put(p, :redirect_uri, callback_uri(slug))) do
+              {:ok, url} ->
+                conn
+                |> put_session(:oidc_state, p.state)
+                |> put_session(:oidc_nonce, p.nonce)
+                |> put_session(:oidc_verifier, p.code_verifier)
+                |> put_session(:oidc_studio, studio)
+                |> redirect(external: url)
+
+              {:error, reason} ->
+                Sso.record_login_failure("oidc", slug, reason)
+
+                ErrorResponse.emit_custom(
+                  conn,
+                  502,
+                  "upstream_unavailable",
+                  "the identity provider's discovery document could not be read"
+                )
+            end
         end
     end
   end

@@ -41,8 +41,20 @@ defmodule Barkpark.Content.PreviewText do
 
   ## Media
 
-  `media` is a path or a list of paths, the first that holds an image: a URL
-  string (`onix.thumbnail`), or an image value with a `url`.
+  `media` is a path or a list of alternatives, the first that holds an image:
+  a URL string (`onix.thumbnail`), or an image value with a `url`. An
+  alternative can instead pick an icon by a stored value, as a Sanity
+  `prepare` that returns an icon component does:
+
+      %{"icon" => %{"path" => "pageType", "map" => %{"information" => "info-outline"},
+                    "else" => "document", "empty" => "document"}}
+
+  `path` is a path or a list of paths, the first with a value. The value
+  (a string or a number) names its icon in `map`; `else` is the icon for a
+  value the map does not name, and `empty` the icon when no path has a
+  value. A `nil` icon, or a missing `else` or `empty`, picks nothing, and
+  the next alternative is tried. `media_item/3` returns the pick. The caller
+  decides whether it can draw the name.
 
   Pure: the caller loads the referenced documents. `targets/2` loads every
   document a page of rows reads through, one read per reference depth, and
@@ -102,33 +114,152 @@ defmodule Barkpark.Content.PreviewText do
   end
 
   @doc "The text for a document, or nil. `deref` returns a referenced document's fields."
-  @spec format(spec() | nil, map(), deref()) :: String.t() | nil
-  def format(%{"parts" => parts} = spec, root, deref) when is_list(parts) do
-    case parts |> Enum.map(&part(&1, root, deref, @max_hops)) |> Enum.reject(&is_nil/1) do
+  #
+  # `opts`: `date_time: fun` formats a date-time a `|date` part shows, given
+  # its `DateTime` in UTC. The default shows the UTC day as `dd.mm.yyyy`. The
+  # LiveView Studio passes `date_time_marker/1`, and the browser shows the day
+  # in the workspace time zone (`BarkparkWeb.PreviewDay`).
+  @spec format(spec() | nil, map(), deref(), keyword()) :: String.t() | nil
+  def format(spec, root, deref, opts \\ [])
+
+  def format(%{"parts" => parts} = spec, root, deref, o) when is_list(parts) do
+    case parts |> Enum.map(&part(&1, root, deref, @max_hops, o)) |> Enum.reject(&is_nil/1) do
       [] -> blank_to_nil(Map.get(spec, "empty"))
       shown -> Enum.join(shown, Map.get(spec, "join") || " · ")
     end
   end
 
-  def format(spec, root, deref) when is_map(root), do: part(spec, root, deref, @max_hops)
-  def format(_spec, _root, _deref), do: nil
+  def format(spec, root, deref, o) when is_map(root), do: part(spec, root, deref, @max_hops, o)
+  def format(_spec, _root, _deref, _o), do: nil
 
-  @doc "The image URL `spec` finds on a document, or nil."
-  @spec media(spec() | nil, map(), deref()) :: String.t() | nil
-  def media(spec, root, deref) when is_map(root) do
-    spec
-    |> media_paths()
-    |> Enum.find_value(fn path -> path |> value(root, deref) |> url() end)
+  @doc """
+  A date-time as a marker the LiveView Studio turns into a `<time>` element:
+  the UTC instant between two private-use characters. `split_date_times/1`
+  reads it back.
+  """
+  @spec date_time_marker(DateTime.t()) :: String.t()
+  def date_time_marker(%DateTime{} = dt), do: "\u{E000}" <> DateTime.to_iso8601(dt) <> "\u{E001}"
+
+  @doc """
+  A text with date-time markers as a list of plain strings and
+  `{:date_time, utc_iso, utc_day}` tuples, in order.
+  """
+  @spec split_date_times(String.t() | nil) :: [String.t() | {:date_time, String.t(), String.t()}]
+  def split_date_times(nil), do: []
+
+  def split_date_times(text) when is_binary(text) do
+    ~r/\x{E000}([^\x{E001}]*)\x{E001}/u
+    |> Regex.split(text, include_captures: true, trim: true)
+    |> Enum.map(fn piece ->
+      case Regex.run(~r/^\x{E000}([^\x{E001}]*)\x{E001}$/u, piece) do
+        [_, iso] ->
+          case DateTime.from_iso8601(String.upcase(iso)) do
+            {:ok, dt, _} ->
+              {:date_time, DateTime.to_iso8601(dt), dt |> DateTime.to_date() |> dmy()}
+
+            _ ->
+              iso
+          end
+
+        nil ->
+          piece
+      end
+    end)
   end
 
-  def media(_spec, _root, _deref), do: nil
+  @doc "A text with each date-time marker replaced by its UTC day."
+  @spec plain(String.t() | nil) :: String.t() | nil
+  def plain(nil), do: nil
 
-  @doc "The paths a media spec reads, in order."
+  def plain(text) when is_binary(text) do
+    text
+    |> split_date_times()
+    |> Enum.map_join(fn
+      {:date_time, _iso, day} -> day
+      piece -> piece
+    end)
+  end
+
+  @doc "The image URL `spec` finds on a document, or nil (an icon pick is not one)."
+  @spec media(spec() | nil, map(), deref()) :: String.t() | nil
+  def media(spec, root, deref) do
+    case media_item(spec, root, deref) do
+      {:url, url} -> url
+      _ -> nil
+    end
+  end
+
+  @doc """
+  The first media alternative that picks something: `{:url, url}` for an
+  image, `{:icon, name}` for an icon chosen by a stored value, or nil.
+  """
+  @spec media_item(spec() | nil, map(), deref()) :: {:url, String.t()} | {:icon, String.t()} | nil
+  def media_item(spec, root, deref) when is_map(root) do
+    spec
+    |> media_alternatives()
+    |> Enum.find_value(fn
+      {:path, path} ->
+        with u when is_binary(u) <- path |> value(root, deref) |> url(), do: {:url, u}
+
+      {:icon, icon} ->
+        with n when is_binary(n) <- icon_pick(icon, root, deref), do: {:icon, n}
+    end)
+  end
+
+  def media_item(_spec, _root, _deref), do: nil
+
+  @doc "True when a media spec has an alternative: an image path or an icon pick."
+  @spec media?(spec() | nil) :: boolean()
+  def media?(spec), do: media_alternatives(spec) != []
+
+  @doc "The image paths a media spec reads, in order (an icon pick's paths are not)."
   @spec media_paths(spec() | nil) :: [String.t()]
-  def media_paths(path) when is_binary(path) and path != "", do: [path]
-  def media_paths(%{"field" => field}), do: media_paths(field)
-  def media_paths(list) when is_list(list), do: Enum.flat_map(list, &media_paths/1)
-  def media_paths(_), do: []
+  def media_paths(spec), do: for({:path, path} <- media_alternatives(spec), do: path)
+
+  defp media_alternatives(path) when is_binary(path) and path != "", do: [{:path, path}]
+  defp media_alternatives(%{"field" => field}), do: media_alternatives(field)
+  defp media_alternatives(%{"icon" => %{"path" => _} = icon}), do: [{:icon, icon}]
+  defp media_alternatives(list) when is_list(list), do: Enum.flat_map(list, &media_alternatives/1)
+  defp media_alternatives(_), do: []
+
+  # The icon a stored value picks: its `map` entry, `else` for a value the map
+  # does not name, `empty` when no path has a value. A nil or blank name picks
+  # nothing.
+  defp icon_pick(%{"path" => paths} = icon, root, deref) do
+    value =
+      paths
+      |> List.wrap()
+      |> Enum.find_value(fn
+        path when is_binary(path) -> path |> value(root, deref) |> icon_key()
+        _ -> nil
+      end)
+
+    name =
+      case value do
+        nil -> Map.get(icon, "empty")
+        key -> icon |> Map.get("map") |> map_icon(key, icon)
+      end
+
+    blank_to_nil(name)
+  end
+
+  defp map_icon(%{} = map, key, icon) do
+    case Map.fetch(map, key) do
+      {:ok, name} -> name
+      :error -> Map.get(icon, "else")
+    end
+  end
+
+  defp map_icon(_map, _key, icon), do: Map.get(icon, "else")
+
+  defp icon_key(v) when is_binary(v), do: blank_to_nil(v)
+  defp icon_key(v) when is_integer(v), do: Integer.to_string(v)
+
+  defp icon_key(v) when is_float(v),
+    do: if(v == trunc(v), do: v |> trunc() |> Integer.to_string(), else: to_string(v))
+
+  defp icon_key(%{"current" => v}), do: icon_key(v)
+  defp icon_key(_), do: nil
 
   @doc "The value at `path` on `root`, following references through `deref`."
   @spec value(String.t(), map(), deref()) :: term()
@@ -173,10 +304,10 @@ defmodule Barkpark.Content.PreviewText do
 
   # ── parts ──────────────────────────────────────────────────────────────
 
-  defp part(alternatives, root, deref, hops) when is_list(alternatives),
-    do: Enum.find_value(alternatives, &part(&1, root, deref, hops))
+  defp part(alternatives, root, deref, hops, o) when is_list(alternatives),
+    do: Enum.find_value(alternatives, &part(&1, root, deref, hops, o))
 
-  defp part(%{"each" => path} = spec, root, deref, hops) when is_binary(path) do
+  defp part(%{"each" => path} = spec, root, deref, hops, o) when is_binary(path) do
     items =
       case path |> segments() |> walk(root, deref, 0) do
         {list, _} when is_list(list) -> list
@@ -188,7 +319,7 @@ defmodule Barkpark.Content.PreviewText do
 
     shown =
       items
-      |> Enum.map(&item_text(show, &1, deref, hops))
+      |> Enum.map(&item_text(show, &1, deref, hops, o))
       |> Enum.reject(&is_nil/1)
       |> then(fn texts -> if max, do: Enum.take(texts, max), else: texts end)
 
@@ -203,42 +334,43 @@ defmodule Barkpark.Content.PreviewText do
   end
 
   # A nested text spec: its parts joined by its own `join`.
-  defp part(%{"parts" => parts} = spec, root, deref, _hops) when is_list(parts),
-    do: format(spec, root, deref)
+  defp part(%{"parts" => parts} = spec, root, deref, _hops, o) when is_list(parts),
+    do: format(spec, root, deref, o)
 
-  defp part(%{"text" => text}, _root, _deref, _hops), do: blank_to_nil(text)
+  defp part(%{"text" => text}, _root, _deref, _hops, _o), do: blank_to_nil(text)
 
   # `when` is a `visibleWhen` predicate on the document (no reference is
   # followed); `show` stands only while it holds.
-  defp part(%{"when" => %{} = pred} = spec, root, deref, hops) do
+  defp part(%{"when" => %{} = pred} = spec, root, deref, hops, o) do
     if FieldVisibility.visible?(%{"visibleWhen" => pred}, root),
-      do: part(Map.get(spec, "show"), root, deref, hops),
+      do: part(Map.get(spec, "show"), root, deref, hops, o),
       else: nil
   end
 
   # A stored value shown by its label: `{"path": "pageType", "map": {"landingPage":
   # "Landingsside"}}`. A value the map does not name shows as stored.
-  defp part(%{"path" => path, "map" => %{} = labels}, root, deref, hops) when is_binary(path) do
-    case slot(path, root, deref, hops) do
+  defp part(%{"path" => path, "map" => %{} = labels}, root, deref, hops, o)
+       when is_binary(path) do
+    case slot(path, root, deref, hops, o) do
       nil -> nil
       value -> blank_to_nil(Map.get(labels, value, value))
     end
   end
 
-  defp part(text, root, deref, hops) when is_binary(text) do
+  defp part(text, root, deref, hops, o) when is_binary(text) do
     if String.contains?(text, "{"),
-      do: template(text, root, deref, hops),
-      else: slot(text, root, deref, hops)
+      do: template(text, root, deref, hops, o),
+      else: slot(text, root, deref, hops, o)
   end
 
-  defp part(_spec, _root, _deref, _hops), do: nil
+  defp part(_spec, _root, _deref, _hops, _o), do: nil
 
   # An item that is itself a reference reads its target, which costs a hop.
-  defp item_text(show, item, deref, hops) do
+  defp item_text(show, item, deref, hops, o) do
     case ref_id(item) do
       id when is_binary(id) and hops > 0 ->
         case deref.(id) do
-          %{} = target -> part(show, target, deref, hops - 1)
+          %{} = target -> part(show, target, deref, hops - 1, o)
           _ -> nil
         end
 
@@ -246,29 +378,29 @@ defmodule Barkpark.Content.PreviewText do
         nil
 
       nil ->
-        if is_map(item), do: part(show, item, deref, hops), else: nil
+        if is_map(item), do: part(show, item, deref, hops, o), else: nil
     end
   end
 
   @template ~r/\{([^{}]+)\}/
 
-  defp template(text, root, deref, hops) do
+  defp template(text, root, deref, hops, o) do
     slots = Regex.scan(@template, text, capture: :all_but_first) |> List.flatten()
-    values = Map.new(slots, &{&1, slot(&1, root, deref, hops)})
+    values = Map.new(slots, &{&1, slot(&1, root, deref, hops, o)})
 
     if Enum.any?(values, fn {_, v} -> is_nil(v) end),
       do: nil,
       else: blank_to_nil(Regex.replace(@template, text, fn _, s -> values[s] end))
   end
 
-  defp slot(text, root, deref, hops) do
+  defp slot(text, root, deref, hops, o) do
     [path | mods] = text |> String.split("|") |> Enum.map(&String.trim/1)
     {value, _} = path |> segments() |> walk(root, deref, hops)
 
     text =
       cond do
         "count" in mods -> count(value)
-        "date" in mods -> day(value)
+        "date" in mods -> day(value, o)
         true -> scalar(value)
       end
 
@@ -385,6 +517,10 @@ defmodule Barkpark.Content.PreviewText do
 
   defp part_ids(%{"field" => field}, root, deref, hops), do: part_ids(field, root, deref, hops)
 
+  # A media icon pick reads its paths like a text part.
+  defp part_ids(%{"icon" => %{"path" => paths}}, root, deref, hops),
+    do: part_ids(paths, root, deref, hops)
+
   defp part_ids(text, root, deref, hops) when is_binary(text),
     do: part_ids_at(text, root, deref, hops)
 
@@ -444,22 +580,25 @@ defmodule Barkpark.Content.PreviewText do
   defp scalar(%{"current" => v}) when is_binary(v), do: v
   defp scalar(_), do: nil
 
-  # A date ("2026-10-08") or date-time ("2026-10-08T23:30:00Z") as dd.mm.yyyy,
-  # the day it is in UTC.
-  defp day(v) when is_binary(v) do
+  # A date ("2026-10-08") as dd.mm.yyyy; a date-time ("2026-10-08T23:30:00Z")
+  # through `opts[:date_time]`, by default the day it is in UTC.
+  defp day(v, o) when is_binary(v) do
     case Date.from_iso8601(v) do
       {:ok, d} ->
         dmy(d)
 
       _ ->
         case DateTime.from_iso8601(v) do
-          {:ok, dt, _} -> dt |> DateTime.to_date() |> dmy()
+          {:ok, dt, _} -> date_time_day(dt, Keyword.get(o, :date_time))
           _ -> nil
         end
     end
   end
 
-  defp day(_), do: nil
+  defp day(_, _o), do: nil
+
+  defp date_time_day(dt, fun) when is_function(fun, 1), do: fun.(dt)
+  defp date_time_day(dt, _), do: dt |> DateTime.to_date() |> dmy()
 
   # The number of items in a list; a missing list has none.
   defp count(list) when is_list(list), do: list |> length() |> to_string()

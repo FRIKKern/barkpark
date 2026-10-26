@@ -9,7 +9,16 @@ defmodule Barkpark.Sso.Oidc do
        returned `id_token` (JWS RS256, signed by a key from the OP's JWKS),
        validates `iss`/`aud`/`exp`/`nonce`, and find-or-creates the User.
 
-  The two outbound calls go through `Barkpark.Sso.Oidc.HTTP` so tests stand in a
+  With `strict_validation` on (the connection's field, or
+  `BARKPARK_OIDC_STRICT_VALIDATION` for the instance), the id_token must carry
+  `exp`, `nbf`/`iat` may not lie in the future beyond 60s of clock skew, and
+  the user is matched on the IdP subject (Entra `oid`, else `sub`) before the
+  email. A set `tenant_id` must equal the token's `tid`. Empty endpoints come
+  from the issuer's discovery document. Discovery and JWKS are cached in ETS;
+  a token the cached keys cannot verify refetches the JWKS once, so a key
+  rollover at the IdP needs no operator action.
+
+  The outbound calls go through `Barkpark.Sso.Oidc.HTTP` so tests stand in a
   mock IdP. Live-IdP verification (Okta/Entra quirks) is the remaining manual
   step; the protocol logic here is fully covered by tests against a mock OP.
   """
@@ -17,15 +26,65 @@ defmodule Barkpark.Sso.Oidc do
 
   alias Barkpark.{Accounts, Repo}
   alias Barkpark.Accounts.User
-  alias Barkpark.Sso.OidcConnection
+  alias Barkpark.Sso.{OidcConnection, SocialIdentity}
   alias Barkpark.Sso.Oidc.HTTP
   alias Barkpark.Tenancy.Organization
+
+  @cache :barkpark_oidc_cache
+  @cache_ttl_s 3600
+  @clock_skew_s 60
 
   @doc "Create a per-org OIDC connection."
   @spec create_connection(map()) :: {:ok, OidcConnection.t()} | {:error, Ecto.Changeset.t()}
   def create_connection(attrs) do
-    changeset = OidcConnection.changeset(%OidcConnection{}, attrs)
+    %OidcConnection{} |> OidcConnection.changeset(attrs) |> save(&Repo.insert/1)
+  end
 
+  @doc "Update a connection; group mappings are re-checked like on create."
+  @spec update_connection(OidcConnection.t(), map()) ::
+          {:ok, OidcConnection.t()} | {:error, term()}
+  def update_connection(%OidcConnection{} = c, attrs) do
+    c |> OidcConnection.changeset(attrs) |> save(&Repo.update/1)
+  end
+
+  @doc "Delete a connection. Sign-ins through it stop at once."
+  @spec delete_connection(OidcConnection.t()) :: {:ok, OidcConnection.t()} | {:error, term()}
+  def delete_connection(%OidcConnection{} = c), do: Repo.delete(c)
+
+  @doc """
+  Read the issuer's discovery document and return the endpoint attributes a
+  connection needs. The document must name the same issuer it was fetched from.
+  """
+  @spec discover(String.t()) :: {:ok, map()} | {:error, term()}
+  def discover(issuer) when is_binary(issuer) do
+    url = String.trim_trailing(issuer, "/") <> "/.well-known/openid-configuration"
+
+    case HTTP.get_json(url) do
+      {:ok,
+       %{
+         "issuer" => ^issuer,
+         "authorization_endpoint" => authorize,
+         "token_endpoint" => token,
+         "jwks_uri" => jwks
+       }}
+      when is_binary(authorize) and is_binary(token) and is_binary(jwks) ->
+        {:ok,
+         %{
+           issuer: issuer,
+           authorization_endpoint: authorize,
+           token_endpoint: token,
+           jwks_uri: jwks
+         }}
+
+      {:ok, _doc} ->
+        {:error, :invalid_discovery_document}
+
+      {:error, _} ->
+        {:error, :discovery_unavailable}
+    end
+  end
+
+  defp save(changeset, write) do
     # Mapping TARGETS must be known roles (built-in, or a custom Role defined
     # globally / for one of the org's workspaces) — mirrors SCIM's group
     # validation. Guarded here because the authoritative role sync writes via
@@ -33,7 +92,7 @@ defmodule Barkpark.Sso.Oidc do
     # persist an unknown role string.
     with %{valid?: true} <- changeset,
          :ok <- validate_mapping_roles(changeset) do
-      Repo.insert(changeset)
+      write.(changeset)
     else
       %Ecto.Changeset{} = cs -> {:error, cs}
       {:error, _} = err -> err
@@ -104,26 +163,28 @@ defmodule Barkpark.Sso.Oidc do
   end
 
   @doc "Build the OP authorization redirect URL for `connection` + `params`."
-  @spec authorize_url(OidcConnection.t(), map()) :: String.t()
+  @spec authorize_url(OidcConnection.t(), map()) :: {:ok, String.t()} | {:error, term()}
   def authorize_url(%OidcConnection{} = c, %{
         state: state,
         nonce: nonce,
         code_challenge: challenge,
         redirect_uri: redirect_uri
       }) do
-    query =
-      URI.encode_query(%{
-        "response_type" => "code",
-        "client_id" => c.client_id,
-        "redirect_uri" => redirect_uri,
-        "scope" => "openid email",
-        "state" => state,
-        "nonce" => nonce,
-        "code_challenge" => challenge,
-        "code_challenge_method" => "S256"
-      })
+    with {:ok, endpoint} <- endpoint(c, :authorization_endpoint) do
+      query =
+        URI.encode_query(%{
+          "response_type" => "code",
+          "client_id" => c.client_id,
+          "redirect_uri" => redirect_uri,
+          "scope" => c.scopes || "openid email",
+          "state" => state,
+          "nonce" => nonce,
+          "code_challenge" => challenge,
+          "code_challenge_method" => "S256"
+        })
 
-    c.authorization_endpoint <> "?" <> query
+      {:ok, endpoint <> "?" <> query}
+    end
   end
 
   @doc """
@@ -141,7 +202,7 @@ defmodule Barkpark.Sso.Oidc do
     with {:ok, %{"id_token" => id_token}} <- exchange_code(c, code, redirect_uri, verifier),
          {:ok, claims} <- verify_id_token(c, id_token),
          :ok <- validate_claims(c, claims, expected_nonce),
-         {:ok, user} <- find_or_create_user(c.organization_id, claims["email"]) do
+         {:ok, user} <- find_or_create_user(c, claims) do
       # JIT: first SSO login gains a membership in the connection's org
       # (era-w3-jit). When the id_token's groups resolve through the
       # admin-configured group→role mappings (era-w7), that role wins — for
@@ -167,29 +228,122 @@ defmodule Barkpark.Sso.Oidc do
   # ── internals ──────────────────────────────────────────────────────────────
 
   defp exchange_code(c, code, redirect_uri, verifier) do
-    HTTP.post_form(c.token_endpoint, %{
+    params = %{
       "grant_type" => "authorization_code",
       "code" => code,
       "redirect_uri" => redirect_uri,
       "client_id" => c.client_id,
-      "client_secret" => c.client_secret,
       "code_verifier" => verifier
-    })
+    }
+
+    with {:ok, url} <- endpoint(c, :token_endpoint) do
+      case c.token_endpoint_auth_method do
+        # RFC 6749 §2.3.1: form-encode both parts before joining them.
+        "client_secret_basic" ->
+          basic =
+            Base.encode64(
+              URI.encode_www_form(c.client_id) <> ":" <> URI.encode_www_form(c.client_secret)
+            )
+
+          HTTP.post_form(url, params, [{"authorization", "Basic " <> basic}])
+
+        _ ->
+          HTTP.post_form(url, Map.put(params, "client_secret", c.client_secret), [])
+      end
+    end
   end
 
   # Verify the id_token JWS against a key from the OP's JWKS (RS256 only — never
   # trust the token's own alg header, which defeats alg:none / HS256-confusion).
+  # The cached key set is tried first; a miss (unknown kid after a rollover)
+  # refetches the JWKS once.
   defp verify_id_token(c, id_token) do
-    with {:ok, %{"keys" => keys}} <- HTTP.get_json(c.jwks_uri),
-         kid <- token_kid(id_token),
-         %{} = jwk_map <- select_jwk(keys, kid),
+    with {:ok, uri} <- endpoint(c, :jwks_uri),
+         {:error, _} <- verify_with(cached(uri), id_token),
+         {:ok, %{"keys" => keys} = jwks} <- HTTP.get_json(uri) do
+      cache_put(uri, jwks)
+      verify_with(keys, id_token)
+    else
+      {:ok, %{} = claims} -> {:ok, claims}
+      _ -> {:error, :invalid_id_token}
+    end
+  end
+
+  defp verify_with(%{"keys" => keys}, id_token), do: verify_with(keys, id_token)
+
+  defp verify_with(keys, id_token) when is_list(keys) do
+    with %{} = jwk_map <- select_jwk(keys, token_kid(id_token)),
          jwk = JOSE.JWK.from_map(jwk_map),
          {true, payload, _} <- JOSE.JWS.verify_strict(jwk, ["RS256"], id_token),
-         {:ok, claims} <- Jason.decode(payload) do
+         {:ok, %{} = claims} <- Jason.decode(payload) do
       {:ok, claims}
     else
       _ -> {:error, :invalid_id_token}
     end
+  end
+
+  defp verify_with(_, _), do: {:error, :invalid_id_token}
+
+  # A stored endpoint wins; an empty one is read from the issuer's discovery
+  # document, so a connection created before discovery keeps its endpoints.
+  defp endpoint(c, field) do
+    case Map.fetch!(c, field) do
+      url when is_binary(url) and url != "" -> {:ok, url}
+      _ -> discovered(c.issuer, Atom.to_string(field))
+    end
+  end
+
+  defp discovered(issuer, key) do
+    url = String.trim_trailing(issuer, "/") <> "/.well-known/openid-configuration"
+
+    doc =
+      case cached(url) do
+        %{} = doc ->
+          doc
+
+        nil ->
+          case HTTP.get_json(url) do
+            {:ok, %{} = doc} -> cache_put(url, doc)
+            _ -> nil
+          end
+      end
+
+    case doc do
+      %{^key => value} when is_binary(value) -> {:ok, value}
+      _ -> {:error, :discovery_failed}
+    end
+  end
+
+  @doc """
+  Create the discovery and JWKS cache, owned by the caller.
+  `Barkpark.Application.start/2` calls this at boot. Idempotent.
+  """
+  @spec init_cache() :: :ok
+  def init_cache do
+    if :ets.whereis(@cache) == :undefined do
+      try do
+        _ = :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
+      rescue
+        ArgumentError -> :ok
+      end
+    end
+
+    :ok
+  end
+
+  defp cached(url) do
+    now = System.system_time(:second)
+
+    case :ets.whereis(@cache) != :undefined and :ets.lookup(@cache, url) do
+      [{^url, value, fetched_at}] when now - fetched_at < @cache_ttl_s -> value
+      _ -> nil
+    end
+  end
+
+  defp cache_put(url, value) do
+    init_cache()
+    :ets.insert(@cache, {url, value, System.system_time(:second)})
+    value
   end
 
   defp token_kid(jwt) do
@@ -214,8 +368,41 @@ defmodule Barkpark.Sso.Oidc do
       not aud_ok?(claims["aud"], c.client_id) -> {:error, :audience_mismatch}
       is_integer(claims["exp"]) and claims["exp"] < now -> {:error, :expired}
       expected_nonce && claims["nonce"] != expected_nonce -> {:error, :nonce_mismatch}
-      not (is_binary(claims["email"]) and claims["email"] != "") -> {:error, :no_email}
+      c.tenant_id not in [nil, ""] and claims["tid"] != c.tenant_id -> {:error, :tenant_mismatch}
+      not (email?(claims) or strict_subject(c, claims)) -> {:error, :no_email}
+      strict?(c) -> validate_strict(claims, now)
       true -> :ok
+    end
+  end
+
+  # Strict mode: `exp` is required, and `nbf`/`iat` may not lie in the future
+  # beyond a small clock skew. Off by default so existing connections are
+  # unchanged.
+  defp validate_strict(claims, now) do
+    cond do
+      not is_integer(claims["exp"]) -> {:error, :missing_exp}
+      future?(claims["nbf"], now) -> {:error, :not_yet_valid}
+      future?(claims["iat"], now) -> {:error, :issued_in_future}
+      true -> :ok
+    end
+  end
+
+  defp future?(t, now) when is_integer(t), do: t - @clock_skew_s > now
+  defp future?(nil, _now), do: false
+  defp future?(_, _now), do: true
+
+  defp strict?(c),
+    do:
+      c.strict_validation == true or
+        Application.get_env(:barkpark, :oidc_strict_validation, false)
+
+  defp email?(claims), do: is_binary(claims["email"]) and claims["email"] != ""
+
+  # The IdP's stable id for the user under strict mode: Entra's `oid` (the same
+  # across apps in a tenant), else the standard `sub`. Nil when strict is off.
+  defp strict_subject(c, claims) do
+    if strict?(c) do
+      Enum.find([claims["oid"], claims["sub"]], &(is_binary(&1) and &1 != ""))
     end
   end
 
@@ -223,13 +410,45 @@ defmodule Barkpark.Sso.Oidc do
   defp aud_ok?(aud, client_id) when is_list(aud), do: client_id in aud
   defp aud_ok?(_, _), do: false
 
+  # Under strict mode a subject linked at an earlier sign-in re-signs the same
+  # account whatever email the IdP now asserts; the first sign-in links it.
+  defp find_or_create_user(c, claims) do
+    subject = strict_subject(c, claims)
+
+    linked =
+      subject && Repo.get_by(SocialIdentity, provider: provider(c), external_id: subject)
+
+    case linked do
+      %SocialIdentity{user_id: uid} ->
+        {:ok, Accounts.get_user(uid)}
+
+      _ ->
+        with {:ok, user} <- find_or_create_by_email(c.organization_id, claims["email"]) do
+          if subject, do: link_subject(c, user, subject)
+          {:ok, user}
+        end
+    end
+  end
+
+  # One provider namespace per connection: a subject is only unique per IdP.
+  defp provider(c), do: "oidc:" <> c.id
+
+  defp link_subject(c, user, subject) do
+    %SocialIdentity{}
+    |> SocialIdentity.changeset(%{user_id: user.id, provider: provider(c), external_id: subject})
+    |> Repo.insert(on_conflict: :nothing)
+  end
+
+  defp find_or_create_by_email(_org_id, email) when not is_binary(email) or email == "",
+    do: {:error, :no_email}
+
   # Find-or-create the authenticated User (unusable local password — they sign
   # in via the IdP). Confirmed on creation (the IdP vouched for the identity).
   # An EXISTING account is adopted only when the connection's org can vouch
   # for it (`Sso.org_may_adopt?/3`: a seat in the org, or a verified org
   # domain). The IdP is tenant-controlled and may assert any email, so without
   # this an org could sign in as another org's user (task-6f7cd94ab61cc688).
-  defp find_or_create_user(org_id, email) do
+  defp find_or_create_by_email(org_id, email) do
     case Accounts.get_user_by_email(email) do
       %User{} = user ->
         # Seat, or verified domain with an unconfirmed account reclaimed

@@ -637,10 +637,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
             <% end %>
           </span>
           <%= if @meta do %>
-            <span class="pane-doc-sub"><%= @meta %></span>
+            <span class="pane-doc-sub"><BarkparkWeb.PreviewDay.text text={@meta} /></span>
           <% end %>
           <%= if @description do %>
-            <span class="pane-doc-sub pane-doc-desc"><%= @description %></span>
+            <span class="pane-doc-sub pane-doc-desc"><BarkparkWeb.PreviewDay.text text={@description} /></span>
           <% end %>
         </span>
         <span class="pane-doc-chevron" aria-hidden="true">
@@ -664,7 +664,13 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   defp doc_row_label(assigns) do
     status = status_word(if assigns.is_draft, do: "draft", else: assigns.status)
 
-    [assigns.title, status, assigns[:badge], assigns[:meta], assigns[:description]]
+    [
+      assigns.title,
+      status,
+      assigns[:badge],
+      Barkpark.Content.PreviewText.plain(assigns[:meta]),
+      Barkpark.Content.PreviewText.plain(assigns[:description])
+    ]
     |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
     |> Enum.join(", ")
   end

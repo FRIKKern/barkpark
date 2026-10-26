@@ -17,8 +17,14 @@ defmodule Barkpark.Realtime.DrainSignal do
   Triggered by `POST /v1/internal/retire-sse`
   (`BarkparkWeb.DeployController.retire_sse/2`), which `deploy/instance-
   deploy.sh` calls on the OLD slot's OWN port right after the Caddy flip
-  lands — a plain same-node PubSub broadcast, no OS-signal trapping, no
-  dependency on `systemctl disable --now`'s SIGTERM/SIGKILL timing.
+  lands — a plain same-node PubSub broadcast, no dependency on
+  `systemctl disable --now`'s SIGTERM/SIGKILL timing.
+
+  With `BARKPARK_RETIRE_SSE_ON_SIGTERM=1`, `Barkpark.Application` also traps
+  SIGTERM and calls `retire_and_await/1` before the default graceful stop, so
+  a container stop ends this node's streams with the same final frame.
+
+  The broadcast is node-local. A clustered peer keeps its streams open.
   """
 
   @topic "system:retire"
@@ -32,8 +38,29 @@ defmodule Barkpark.Realtime.DrainSignal do
   def subscribe, do: Phoenix.PubSub.subscribe(Barkpark.PubSub, @topic)
 
   @doc "Broadcast to every subscriber on THIS node — called by the retire endpoint."
-  @spec broadcast_retire() :: :ok | {:error, term()}
-  def broadcast_retire, do: Phoenix.PubSub.broadcast(Barkpark.PubSub, @topic, :retire)
+  @spec broadcast_retire() :: :ok
+  def broadcast_retire, do: Phoenix.PubSub.local_broadcast(Barkpark.PubSub, @topic, :retire)
+
+  @doc """
+  Retire this node's streams, then wait up to `timeout_ms` for every subscriber
+  to close, so each stream writes its final frame before the Endpoint stops.
+  The SIGTERM trap's callback. Always returns `:ok`.
+  """
+  @spec retire_and_await(non_neg_integer()) :: :ok
+  def retire_and_await(timeout_ms \\ 5_000) do
+    :ok = broadcast_retire()
+    await_unsubscribed(System.monotonic_time(:millisecond) + timeout_ms)
+  end
+
+  defp await_unsubscribed(deadline) do
+    if Registry.lookup(Barkpark.PubSub, @topic) == [] or
+         System.monotonic_time(:millisecond) >= deadline do
+      :ok
+    else
+      Process.sleep(50)
+      await_unsubscribed(deadline)
+    end
+  end
 
   @doc "The final SSE frame a retiring stream sends before closing — a distinct event so the client can tell a deploy-retire from a network drop and reconnect immediately instead of backing off."
   @spec retire_frame() :: String.t()
