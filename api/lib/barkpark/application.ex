@@ -568,6 +568,9 @@ defmodule Barkpark.Application do
         # one computation, and its result for a short TTL. One small ETS
         # table; no connections, no timers.
         Barkpark.SingleFlight,
+        # GROQ admission (task-8416309ea42ed7d8): how many queries evaluate at
+        # once. Before the Endpoint, so the first query finds it.
+        Barkpark.Groq.Slots,
         # Dedicated supervisor for outbound webhook/media deliveries. The
         # generic TaskSupervisor has max_children: :infinity, so a webhook
         # storm or a slow endpoint (each child sleeps in-task on retry

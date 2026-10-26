@@ -17,6 +17,8 @@ defmodule Barkpark.Groq do
     * `:max_documents_per_fetch`, `:max_bytes_per_fetch`,
       `:max_documents_loaded` — see `Barkpark.Groq.DocumentSource`.
     * `:max_sync_tags` — 128, the most tags one response carries.
+    * `:max_concurrent`, `:queue_ms` — how many queries evaluate at once and
+      how long one waits for a slot; see `Barkpark.Groq.Slots`.
 
   ## Sync tags
 
@@ -28,12 +30,13 @@ defmodule Barkpark.Groq do
   collapse into their type tags.
   """
 
-  alias Barkpark.Groq.{DocumentSource, LimitError, Parser}
+  alias Barkpark.Groq.{DocumentSource, LimitError, Parser, Slots}
 
   @type query_error ::
           {:parse, %{description: String.t(), start: non_neg_integer(), end: non_neg_integer()}}
           | {:limit, String.t()}
           | {:eval, String.t()}
+          | {:busy, String.t()}
 
   @doc """
   Runs `query` with `params` (decoded JSON, names without `$`). Options:
@@ -85,6 +88,20 @@ defmodule Barkpark.Groq do
       dataset: dataset
     ]
 
+    case Slots.acquire() do
+      :ok ->
+        try do
+          evaluate_limited(tree, state, eval_opts, timeout, max_heap_words, dataset)
+        after
+          Slots.release()
+        end
+
+      {:error, :busy} ->
+        {:error, {:busy, "every GROQ slot on this server is busy; retry shortly"}}
+    end
+  end
+
+  defp evaluate_limited(tree, state, eval_opts, timeout, max_heap_words, dataset) do
     task =
       Task.async(fn ->
         Process.flag(:max_heap_size, %{size: max_heap_words, kill: true, error_logger: false})
