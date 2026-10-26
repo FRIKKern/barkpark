@@ -167,6 +167,41 @@ defmodule BarkparkWeb.GroqSourceMapTest do
     assert resolved(body) == %{"$[1]" => {"p1", "$['tags'][1]"}, "$[2]" => {"p1", "$['tags'][0]"}}
   end
 
+  test "a value the read compat computes from a bare string maps to nothing", %{
+    token: token,
+    scope: scope
+  } do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "card",
+          "title" => "card",
+          "visibility" => "public",
+          "fields" => [%{"name" => "who", "type" => "reference", "refType" => "author"}]
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "card",
+        %{"doc_id" => "c1", "content" => %{"who" => "ada"}},
+        @dataset,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document("c1", "card", @dataset, scope)
+
+    body =
+      fetch(token, ~s|*[_id == "c1"][0]{"ref": who._ref, "t": who._type, "name": who->name}|, %{
+        "resultSourceMap" => "true"
+      })
+
+    assert body["result"]["ref"] == "ada"
+    assert resolved(body) == %{"$['name']" => {"ada", "$['name']"}}
+  end
+
   test "a subquery with ^ maps its rows to their documents", %{token: token} do
     q =
       ~s/*[_id == "ada"][0]{name, "posts": *[_type == "post" && author._ref == ^._id] | order(_id){title}}/
