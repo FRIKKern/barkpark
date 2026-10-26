@@ -36,7 +36,7 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
     def get_json(_jwks), do: {:ok, %{"keys" => [fixture(:jwk)]}}
 
     @impl true
-    def post_form(_url, _params), do: {:ok, %{"id_token" => fixture(:id_token)}}
+    def post_form(_url, _params, _headers), do: {:ok, %{"id_token" => fixture(:id_token)}}
 
     defp fixture(k), do: Application.get_env(:barkpark, :oidc_test)[k]
   end
