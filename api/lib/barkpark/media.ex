@@ -911,7 +911,11 @@ defmodule Barkpark.Media do
                        get_file(request["mediaId"], Keyword.drop(opts, [:where_used, :override])) do
                   snapshots = Assets.pending_delete_snapshot(file)
 
-                  case delete_row_with_asset_doc(file, false) do
+                  case delete_row_with_asset_doc(
+                         file,
+                         false,
+                         Keyword.take(opts, [:caller_context])
+                       ) do
                     {:ok, _deleted} -> {:ok, snapshots}
                     error -> error
                   end
@@ -1072,66 +1076,74 @@ defmodule Barkpark.Media do
     # mean a reference is not a reason to stop, so they do not ask.
     recheck? = policy == :guard and is_nil(override)
 
-    case get_file(id, Keyword.drop(opts, [:where_used, :override])) do
-      {:ok, file} ->
-        # Resolve the webhook payload BEFORE deleting so the DB delete is the
-        # FIRST side effect: on failure the row survives intact (still
-        # pointing at a live blob) and no phantom media.deleted fires.
-        doc = asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
+    # THE DRAFT-ONLY SEAT (task-166a84a8502afbc5). The asset doc's delete runs
+    # under the caller's own context, so a contributor is refused a published
+    # asset as on every other delete door; a FORCED delete removes bytes live
+    # pages still show, which is a change to what readers see too. Callers with
+    # no caller context (cascades, jobs) are unchanged.
+    seat = Keyword.take(opts, [:caller_context])
 
-        case delete_row_with_asset_doc(file, recheck?) do
-          {:ok, deleted} ->
-            # The FOUR irreversible non-DB effects — CDN edge purge, the
-            # `media.deleted` webhook, the on-disk `File.rm`, and the rendition
-            # cache removal — are queued AFTER the DB transaction closes, and are
-            # DEFERRED again when an OUTER transaction is still open so a later
-            # rollback cannot strand a surviving row's blob (phantom media).
-            # Outside any transaction they fire IMMEDIATELY (unchanged for the
-            # three non-transaction callers: ticket attachments + the two media
-            # controllers). See `defer_media_effect/1`.
-            defer_media_effect(fn ->
-              Cdn.invalidate(file)
-              Events.dispatch(file.dataset, "media.deleted", file, doc, override)
-              # ROW-ADDRESSED (task-8eb6542ece62aff1): remove THIS row's object.
-              # Path-addressed, a second claimant's delete would erase the first
-              # claimant's bytes — a cross-tenant DESTROY through the same hole
-              # the read substitution came through.
-              Blobstore.delete(file)
-              Barkpark.Media.Renditions.delete_for_file(file.id)
-            end)
+    with :ok <- if(override, do: Barkpark.Content.LiveWriteGate.check_seat(opts), else: :ok),
+         {:ok, file} <- get_file(id, Keyword.drop(opts, [:where_used, :override])) do
+      delete_found_file(file, recheck?, override, seat)
+    end
+  end
 
-            {:ok, deleted}
+  defp delete_found_file(file, recheck?, override, seat) do
+    # Resolve the webhook payload BEFORE deleting so the DB delete is the
+    # FIRST side effect: on failure the row survives intact (still
+    # pointing at a live blob) and no phantom media.deleted fires.
+    doc = asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
 
-          # A stale delete means a concurrent DELETE already consumed the row →
-          # {:error, :not_found} (both controllers 404 via FallbackController)
-          # instead of an uncaught Ecto.StaleEntryError (a 500).
-          {:error, {:row, cs}} ->
-            if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
+    case delete_row_with_asset_doc(file, recheck?, seat) do
+      {:ok, deleted} ->
+        # The FOUR irreversible non-DB effects — CDN edge purge, the
+        # `media.deleted` webhook, the on-disk `File.rm`, and the rendition
+        # cache removal — are queued AFTER the DB transaction closes, and are
+        # DEFERRED again when an OUTER transaction is still open so a later
+        # rollback cannot strand a surviving row's blob (phantom media).
+        # Outside any transaction they fire IMMEDIATELY (unchanged for the
+        # three non-transaction callers: ticket attachments + the two media
+        # controllers). See `defer_media_effect/1`.
+        defer_media_effect(fn ->
+          Cdn.invalidate(file)
+          Events.dispatch(file.dataset, "media.deleted", file, doc, override)
+          # ROW-ADDRESSED (task-8eb6542ece62aff1): remove THIS row's object.
+          # Path-addressed, a second claimant's delete would erase the first
+          # claimant's bytes — a cross-tenant DESTROY through the same hole
+          # the read substitution came through.
+          Blobstore.delete(file)
+          Barkpark.Media.Renditions.delete_for_file(file.id)
+        end)
 
-          # The blob row is BACK (rolled back) and its blob was never touched —
-          # the deferred effects are queued only on the committed path. The
-          # caller sees WHY, and a retry after the concurrent edit settles
-          # succeeds. FallbackController unwraps this to the inner reason's own
-          # named status (rev_mismatch → 412, halted → 409).
-          {:error, {:asset_doc, reason}} ->
-            {:error, {:asset_doc_delete_failed, reason}}
+        {:ok, deleted}
 
-          # Referenced after all: a reference landed after the door's check. Nothing
-          # was deleted; the door answers the same 409 census as its own check.
-          {:error, {:referenced, census}} ->
-            {:error, {:referenced, file, census}}
+      # A stale delete means a concurrent DELETE already consumed the row →
+      # {:error, :not_found} (both controllers 404 via FallbackController)
+      # instead of an uncaught Ecto.StaleEntryError (a 500).
+      {:error, {:row, cs}} ->
+        if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
 
-          # An in-transaction hook rolled back a nested transaction and swallowed
-          # the reason, so DBConnection aborted the connection under us and our
-          # own `conclude` threw `:rollback`. Nothing half-committed — but it
-          # leaves this function without a reason to report, so it gets a NAMED
-          # one rather than escaping as the unmatched tuple that 500'd prod.
-          {:error, :rollback} ->
-            {:error, {:asset_doc_delete_failed, :rollback}}
-        end
+      # The blob row is BACK (rolled back) and its blob was never touched —
+      # the deferred effects are queued only on the committed path. The
+      # caller sees WHY, and a retry after the concurrent edit settles
+      # succeeds. FallbackController unwraps this to the inner reason's own
+      # named status (rev_mismatch → 412, halted → 409).
+      {:error, {:asset_doc, reason}} ->
+        {:error, {:asset_doc_delete_failed, reason}}
 
-      error ->
-        error
+      # Referenced after all: a reference landed after the door's check. Nothing
+      # was deleted; the door answers the same 409 census as its own check.
+      {:error, {:referenced, census}} ->
+        {:error, {:referenced, file, census}}
+
+      # An in-transaction hook rolled back a nested transaction and swallowed
+      # the reason, so DBConnection aborted the connection under us and our
+      # own `conclude` threw `:rollback`. Nothing half-committed — but it
+      # leaves this function without a reason to report, so it gets a NAMED
+      # one rather than escaping as the unmatched tuple that 500'd prod.
+      {:error, :rollback} ->
+        {:error, {:asset_doc_delete_failed, :rollback}}
     end
   end
 
@@ -1204,14 +1216,14 @@ defmodule Barkpark.Media do
   # slot nothing would ever flush: the row deleted, `mutation_events` committed,
   # and the dispatch never happened — not even a `webhook_fanout phase=selected`
   # line to count it by.
-  defp delete_row_with_asset_doc(%MediaFile{} = file, recheck?) do
+  defp delete_row_with_asset_doc(%MediaFile{} = file, recheck?, seat) do
     Barkpark.Content.Broadcast.with_deferred_queue(fn ->
       Repo.transaction(fn ->
         if recheck?, do: recheck_unreferenced!(file)
 
         case Repo.delete(file, stale_error_field: :id) do
           {:ok, deleted} ->
-            case delete_asset_doc(file) do
+            case delete_asset_doc(file, seat) do
               :ok ->
                 # `run_after_media_delete` is a DB write and MUST stay inside the
                 # transaction so it rolls back with the row. HOOK CONTRACT: an
@@ -1258,8 +1270,8 @@ defmodule Barkpark.Media do
   # resolve just found. Unscoped, both resolved the dataset inside the Default
   # project and left a non-Default workspace's asset doc behind as an orphan
   # (task-b9bca4e256a79387).
-  defp delete_asset_doc(%MediaFile{} = file) do
-    Assets.delete_for_blob(file.id, file.dataset, MediaFile.scope_opts(file))
+  defp delete_asset_doc(%MediaFile{} = file, seat) do
+    Assets.delete_for_blob(file.id, file.dataset, MediaFile.scope_opts(file) ++ seat)
   end
 
   # ── Deferred media-delete effects (felix-phantom-media-atomicity) ──────────
