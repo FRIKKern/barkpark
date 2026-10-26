@@ -14,7 +14,7 @@ Barkpark answers GROQ on Sanity's HTTP query API URLs, so a `@sanity/client` or 
 | `params` | POST only: object of decoded parameter values |
 | `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as its base, release ids ignored; `raw` stacked or a lone other value → 400 |
 | `returnQuery` | `false` leaves `query` out |
-| `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, not of function values yet |
+| `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
 Any `apiVersion`. Auth, tenancy and shares are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token on an unshared dataset: 403 (Sanity: 200, empty), kept. POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
 
