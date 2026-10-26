@@ -358,6 +358,11 @@ config :barkpark, Oban,
   # statically here — without it every projection job sits `available` forever
   # and the graph silently goes stale. Own named queue (concurrency 2) so it
   # never competes with `:indx`.
+  # `edge_linkers` drives Barkpark.EdgeProjector.ReprojectLinkersWorker: when a
+  # published row is born, it re-projects the documents linking to it
+  # (task-4ec7e38d85c07ab7). Own queue at concurrency 1, so a bulk publish of
+  # many targets drains slowly in the background instead of crowding
+  # `:edge_projector` or any other queue.
   # `github_mirror` drives Barkpark.Plugins.Github.MirrorJob (outbound task→Issue
   # mirror). A plugin's oban-merge can add CRONTAB but NOT queues (same reason
   # `indx`/`edge_projector` are static here), so the queue is declared statically
@@ -379,6 +384,7 @@ config :barkpark, Oban,
     tasks_compact: 1,
     indx: 2,
     edge_projector: 2,
+    edge_linkers: 1,
     github_mirror: 2,
     playground_ttl: 1
   ],

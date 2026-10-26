@@ -574,15 +574,19 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     |> then(fn {per_type, trunc} -> {Enum.concat(per_type), trunc} end)
   end
 
-  defp hydrate_task_edges(docs) when is_list(docs) do
+  # Public for `ReprojectLinkersWorker`, so this file stays the edge
+  # projector's one sanctioned reach into the Tasks plugin
+  # (PluginFreeBootTest's allowlist).
+  @doc false
+  def hydrate_task_edges(docs) when is_list(docs) do
     Barkpark.Plugins.Tasks.hydrate_edges_batch(docs)
   end
 
-  defp hydrate_task_edges(doc) when is_map(doc) do
+  def hydrate_task_edges(doc) when is_map(doc) do
     Barkpark.Plugins.Tasks.hydrate_edges(doc)
   end
 
-  defp hydrate_task_edges(doc), do: doc
+  def hydrate_task_edges(doc), do: doc
 
   # The projector module is `Projector` in production. Tests pass a
   # `"projector"` arg naming a fake module so the worker's op branching can be
