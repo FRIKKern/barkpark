@@ -64,6 +64,7 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
   # and the :default_cors_origins app config. The Vercel apex is the canonical
   # public site; the wildcard covers preview deployments. Patterns containing
   # `*` match host segments only (no scheme/path globbing).
+  # BARKPARK_ALWAYS_ALLOWED_ORIGINS replaces this list (`:always_allowed_origins`).
   # cross-link: docs/ops/studio-nav-bug-2026-04-19.md (these origins are load-bearing for Vercel apex)
   @always_allowed_origins [
     "https://barkpark.cloud",
@@ -186,15 +187,18 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     # union is read from the CALLER's dataset, not conflated across every project
     # sharing that slug. Flat routes (no prefix) resolve via the seeded Default
     # project inside allowed_origins_for_dataset/2.
-    @always_allowed_origins ++ Content.allowed_origins_for_dataset(ds, cors_scope(tenancy))
+    always_allowed_origins() ++ Content.allowed_origins_for_dataset(ds, cors_scope(tenancy))
   end
 
   defp allowed_origins({:dataset_and_default, ds, tenancy}),
     do: allowed_origins(:no_dataset) ++ allowed_origins({:dataset, ds, tenancy})
 
   defp allowed_origins(_) do
-    @always_allowed_origins ++ Application.get_env(:barkpark, :default_cors_origins, [])
+    always_allowed_origins() ++ Application.get_env(:barkpark, :default_cors_origins, [])
   end
+
+  defp always_allowed_origins,
+    do: Application.get_env(:barkpark, :always_allowed_origins, @always_allowed_origins)
 
   # Resolve a `[project_id: ...]` scope from the stripped tenancy slugs. Returns
   # `[]` (Default-project fallback) when the route is flat or the slugs don't
