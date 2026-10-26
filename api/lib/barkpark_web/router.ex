@@ -3874,6 +3874,9 @@ defmodule BarkparkWeb.Router do
     # @sanity/client's listen() at its own dated apiVersion (`/v2025-02-19/…`,
     # `/vX/…`): the same stream, the same gates (task-e5af22d327a92a44).
     get("/v:api_version/data/listen/:dataset", ListenController, :listen)
+    # Sanity's Live Content API stream, `client.live.events()` / next-sanity
+    # `defineLive` (task-d6566cbed9b7c33c): the same gates as listen.
+    get("/v:api_version/data/live/events/:dataset", LiveEventsController, :events)
     # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
     # GET rides this read pipeline; the POST moves to its own scope right
     # below (task-db8de40bbc928c54) so it gets the presence_focus rate

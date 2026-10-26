@@ -524,6 +524,9 @@ defmodule Barkpark.Application do
         {Oban, oban_config},
         {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
         {Phoenix.PubSub, name: Barkpark.PubSub},
+        # Open live-events streams per principal, for their cap
+        # (BarkparkWeb.LiveEventsController, task-d6566cbed9b7c33c).
+        {Registry, keys: :duplicate, name: Barkpark.Realtime.LiveStreams},
         # Sheets M1 collaborative-session subsystem (was SessionRegistry +
         # SessionSupervisor + ReplayRing flat). CORE, plugin-independent
         # (fresh-install invariant). Wrapped for domain isolation; positioned

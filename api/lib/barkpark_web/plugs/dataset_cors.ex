@@ -236,6 +236,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
       ["v" <> _, "data", kind, ds | _] when kind in ["query", "doc", "listen"] ->
         {{:dataset_and_default, ds, tenancy}, conn}
 
+      ["v" <> _, "data", "live", "events", ds | _] ->
+        {{:dataset_and_default, ds, tenancy}, conn}
+
       ["v1", "preview", _, ds | _] ->
         {{:dataset, ds, tenancy}, conn}
 
