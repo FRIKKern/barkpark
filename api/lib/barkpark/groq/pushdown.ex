@@ -162,10 +162,23 @@ defmodule Barkpark.Groq.Pushdown do
     |> Enum.reduce_while({:ok, empty()}, fn node, {:ok, acc} ->
       case exact_conjunct(node, acc, resolve) do
         {:ok, acc} -> {:cont, {:ok, acc}}
-        :error -> {:halt, :error}
+        :error -> map_member_conjunct(node, acc, resolve)
       end
     end)
   end
+
+  # `"x" in a[].b` narrows a read, and a `||` branch, as a containment probe
+  # (`constraints/2`), which also matches `b` inside a nested array. At the
+  # top of an exact filter it is the `{:some, ...}` check, so a count of it,
+  # once per parent in a projection, is a SQL count.
+  defp map_member_conjunct({:op, "in", l, r}, acc, resolve) do
+    case map_member_check(l, r, resolve) do
+      {:ok, check} -> {:cont, {:ok, %{acc | checks: [check | acc.checks]}}}
+      :error -> {:halt, :error}
+    end
+  end
+
+  defp map_member_conjunct(_node, _acc, _resolve), do: {:halt, :error}
 
   defp exact_conjunct(node, acc, resolve) do
     case check(node, resolve) do
@@ -433,6 +446,23 @@ defmodule Barkpark.Groq.Pushdown do
       _ -> :error
     end
   end
+
+  # `"x" in a[].b`: some element of the array `a` has `b == "x"`, the
+  # `{:some, ...}` check. A non-array `a` maps to null and an element whose
+  # `b` is an array maps to that array, and neither equals a scalar.
+  defp map_member_check(l, {:map, {:array_coerce, base}, mapper}, resolve) do
+    with {:ok, path} <- content_path(base),
+         {:ok, rest} <- this_path(mapper),
+         true <- Enum.all?(rest, &(not (&1 =~ ~r/^-?\d+$/))),
+         {:ok, v} <- value(l, resolve),
+         true <- scalar?(v) do
+      {:ok, {:some, path, [{rest, [v]}]}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp map_member_check(_l, _r, _resolve), do: :error
 
   defp length_n(path, op, n, resolve) do
     case value(n, resolve) do

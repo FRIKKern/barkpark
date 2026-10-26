@@ -843,6 +843,33 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert Enum.any?(statements, &(&1 =~ "jsonb_path_query_array(d0.\"content\""))
   end
 
+  test "a count of \"x\" in a[].b per parent is a SQL count", %{
+    conn: conn,
+    token: token,
+    scope: scope
+  } do
+    publish!("book", %{"_id" => "m1", "genres" => [ref("poetry"), ref("prose")]}, scope)
+    publish!("book", %{"_id" => "m2", "genres" => ref("poetry")}, scope)
+    publish!("book", %{"_id" => "m3", "genres" => [%{"_ref" => ["poetry"]}]}, scope)
+    publish!("book", %{"_id" => "m4", "genres" => [%{"name" => "x"}, ref("poetry")]}, scope)
+
+    {body, statements} =
+      sql_statements(fn ->
+        conn
+        |> get_query(
+          token,
+          ~s'*[_type == "genre"]{_id, "n": count(*[_type == "book" && ^._id in genres[]._ref])}'
+        )
+        |> json_response(200)
+      end)
+
+    # b1, m1 and m4 hold poetry in an element's _ref; an object genres (m2)
+    # and an array _ref (m3) do not.
+    assert body["result"] == [%{"_id" => "poetry", "n" => 3}]
+    assert Enum.any?(statements, &(&1 =~ ~s'count(d0."id")'))
+    refute Enum.any?(statements, &(&1 =~ ~r/SELECT d0."id", d0."doc_id".*LIMIT 500/))
+  end
+
   defp sql_statements(fun) do
     ref = make_ref()
     parent = self()
