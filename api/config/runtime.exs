@@ -916,6 +916,13 @@ for {env_name, config_key} <- [
   end
 end
 
+# First owner on a fresh instance (task-2f87e451273f55cc). Unset by default.
+# With no users at boot, Barkpark.Accounts.BootstrapOwner seats this email as
+# owner of the default workspace; with any user present it does nothing.
+if (email = System.get_env("BARKPARK_BOOTSTRAP_OWNER_EMAIL", "")) != "" do
+  config :barkpark, :bootstrap_owner_email, email
+end
+
 media_signing_secret =
   case System.get_env("MEDIA_SIGNING_SECRET") do
     val when is_binary(val) and val != "" ->

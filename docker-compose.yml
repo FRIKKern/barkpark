@@ -84,6 +84,8 @@ services:
       - BARKPARK_PLUGINS
       # Platform operators, DB statement wall, indx state (census 2026-09-03:
       # all four read in api/config/runtime.exs, none had a passthrough line)
+      # First owner on a fresh install (Accounts.BootstrapOwner)
+      - BARKPARK_BOOTSTRAP_OWNER_EMAIL
       - BARKPARK_DB_STATEMENT_TIMEOUT
       - BARKPARK_INDX_STATE_DIR
       - BARKPARK_OPERATOR_EMAILS
