@@ -73,7 +73,7 @@ bp task landed t1 --commit a1b2c3d --pr 123 --note "merged to main" --criterion 
 
 Full contract — lease TTL, what each verb fences on, every refusal (`409 fenced_off`, `not_holder`, `criteria_unmet`, …), and `--withdraw`, the only verb that LOWERS a met flag (a bare `met:true → met:false` patch is refused), plus its sealed-row rules: [claim-lifecycle](../contracts/task-claim-lifecycle.md); close receipt: [close-packet](../contracts/close-packet.md).
 
-**5. Dependencies, labels, papers.** Routes in the [cheatsheet](../cheatsheets/tasks.md). `POST /v1/tasks/edges` `{"from_id":"t2","to_id":"t1"}` = t2 waits on t1 — from = dependent, to = blocker, `kind` defaults `blocks`; `DELETE` removes it (`bp task unblock t2 t1`).
+**5. Dependencies, labels, papers.** `POST /v1/tasks/edges` `{"from_id":"t2","to_id":"t1"}` = t2 waits on t1 — from = dependent, to = blocker, `kind` defaults `blocks`; `DELETE` removes it (`bp task unblock t2 t1`). `GET /v1/tasks/:id/edges` takes `?kind=all`.
 
 **6. Filtered reads.**
 

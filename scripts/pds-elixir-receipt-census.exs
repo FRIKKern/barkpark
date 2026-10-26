@@ -2984,7 +2984,7 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_test.exs",
          ~S|test "merge reconcile (close.ex write_reconcile)", %{scope: scope} do|}},
-    # barkpark_web/controllers/tasks_controller.ex:3505 — `removed` is the delete count
+    # TasksController.remove_edge/2 — `removed` is the delete count
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.remove_edge/2", "45588519", "93077774"},
       verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
