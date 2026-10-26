@@ -42,7 +42,7 @@ defmodule Barkpark.Media.Transform do
   WebP keys do not change.
   """
 
-  @fits ~w(clip crop fill max min)
+  @fits ~w(clip crop fill fillmax max min scale)
   @crop_modes ~w(center focalpoint entropy attention top bottom left right)
   @formats ~w(jpg png webp avif)
   @default_quality 75
@@ -80,11 +80,20 @@ defmodule Barkpark.Media.Transform do
 
   # Parameters this module owns. Anything else on the URL (signed-URL `_`/`exp`,
   # CDN cache-busters) passes through untouched.
-  @params ~w(w h fit crop rect fp-x fp-y fm q auto)
+  #
+  # The rest of what `@sanity/image-url` sends (task-e1512b7d39b345c2) is read too:
+  # `dpr` scales `w`/`h`; `blur`, `bg`, `pad`, `flip`, `or` and `invert` are
+  # applied; `sat` is applied at -100 (grayscale) and ignored otherwise; `sharp`
+  # is ignored; `quality` stands in for `q`. A parameter that does not change
+  # the output stays out of the cache key.
+  @params ~w(w h fit crop rect fp-x fp-y fm q auto dpr blur bg pad flip or invert sat sharp quality)
 
-  # Transform vocabulary Sanity and imgix accept that Barkpark does not apply.
-  # A request carrying one is refused (400) rather than silently ignored.
-  @unsupported ~w(dpr blur sharp flip or quality bg invert sat pad)
+  # Transform vocabulary a request may carry that Barkpark refuses (400) rather
+  # than ignores. Empty since task-e1512b7d39b345c2.
+  @unsupported []
+
+  @flips ~w(h v hv)
+  @orients [0, 90, 180, 270]
 
   @type rect :: {non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()}
 
@@ -97,7 +106,14 @@ defmodule Barkpark.Media.Transform do
           fp: {float(), float()} | nil,
           fm: String.t() | nil,
           auto_format: boolean(),
-          q: pos_integer()
+          q: pos_integer(),
+          blur: pos_integer() | nil,
+          bg: {0..255, 0..255, 0..255, 0..255} | nil,
+          pad: non_neg_integer(),
+          flip: String.t() | nil,
+          orient: 0 | 90 | 180 | 270,
+          invert: boolean(),
+          gray: boolean()
         }
 
   @doc "Parameter names this module reads from a query string."
@@ -121,7 +137,8 @@ defmodule Barkpark.Media.Transform do
   """
   @spec parse(map()) :: {:ok, plan()} | {:error, {:invalid_param, String.t(), String.t()}}
   def parse(params) when is_map(params) do
-    with {:ok, w} <- dimension(params, "w"),
+    with {:ok, params} <- apply_dpr(params),
+         {:ok, w} <- dimension(params, "w"),
          {:ok, h} <- dimension(params, "h"),
          {:ok, fit} <- enum(params, "fit", @fits, "clip"),
          {:ok, crop} <- crop_modes(params),
@@ -129,7 +146,14 @@ defmodule Barkpark.Media.Transform do
          {:ok, fp} <- focal_point(params),
          {:ok, fm} <- format(params),
          {:ok, auto_format} <- auto(params),
-         {:ok, q} <- quality(params) do
+         {:ok, q} <- quality(params),
+         {:ok, blur} <- blur(params),
+         {:ok, bg} <- background(params),
+         {:ok, pad} <- padding(params),
+         {:ok, flip} <- flip(params),
+         {:ok, orient} <- orientation(params),
+         {:ok, invert} <- invert(params),
+         {:ok, gray} <- saturation(params) do
       crop = if fp && crop == [], do: ["focalpoint"], else: crop
 
       {:ok,
@@ -142,7 +166,14 @@ defmodule Barkpark.Media.Transform do
          fp: fp,
          fm: fm,
          auto_format: auto_format,
-         q: q
+         q: q,
+         blur: blur,
+         bg: bg,
+         pad: pad,
+         flip: flip,
+         orient: orient,
+         invert: invert,
+         gray: gray
        }}
     end
   end
@@ -201,8 +232,27 @@ defmodule Barkpark.Media.Transform do
         tag -> parts ++ ["enc=#{tag}"]
       end
     end)
+    |> Kernel.++(effect_parts(plan))
     |> Enum.join(";")
   end
+
+  # The task-e1512b7d39b345c2 effects, only when set: a URL without them keeps
+  # the key (and the cached file) it had before they existed.
+  defp effect_parts(plan) do
+    [
+      Map.get(plan, :blur) && "blur=#{plan.blur}",
+      Map.get(plan, :bg) && "bg=#{format_bg(plan.bg)}",
+      Map.get(plan, :pad, 0) > 0 && "pad=#{plan.pad}",
+      Map.get(plan, :flip) && "flip=#{plan.flip}",
+      Map.get(plan, :orient, 0) != 0 && "or=#{plan.orient}",
+      Map.get(plan, :invert) == true && "invert",
+      Map.get(plan, :gray) == true && "gray"
+    ]
+    |> Enum.filter(&is_binary/1)
+  end
+
+  defp format_bg({r, g, b, a}),
+    do: Enum.map_join([a, r, g, b], &String.pad_leading(Integer.to_string(&1, 16), 2, "0"))
 
   @doc """
   The encoder settings that change an output's bytes beyond the plan, for the
@@ -246,7 +296,8 @@ defmodule Barkpark.Media.Transform do
         true -> {sw, sh}
       end
 
-    w * h
+    p = 2 * Map.get(plan, :pad, 0)
+    (w + p) * (h + p)
   end
 
   def output_pixels(%{w: w, h: h}, _size) when is_integer(w) and is_integer(h), do: w * h
@@ -303,12 +354,12 @@ defmodule Barkpark.Media.Transform do
 
   # One side given: scale to it, keep the aspect. `max` never upscales.
   defp fit_geometry(%{w: w, h: nil} = plan, sw, sh) do
-    w = if plan.fit in ["max", "min"], do: min(w, sw), else: w
+    w = if plan.fit in ["max", "min", "fillmax"], do: min(w, sw), else: w
     %{resize: {w, max(round(sh * w / sw), 1)}}
   end
 
   defp fit_geometry(%{w: nil, h: h} = plan, sw, sh) do
-    h = if plan.fit in ["max", "min"], do: min(h, sh), else: h
+    h = if plan.fit in ["max", "min", "fillmax"], do: min(h, sh), else: h
     %{resize: {max(round(sw * h / sh), 1), h}}
   end
 
@@ -319,6 +370,13 @@ defmodule Barkpark.Media.Transform do
 
   defp fit_geometry(%{w: w, h: h, fit: "fill"}, sw, sh),
     do: %{resize: contain(sw, sh, w, h, 1.0e9), pad: {w, h}}
+
+  # `fillmax`: as `fill`, but never scaled up; the box is filled around it.
+  defp fit_geometry(%{w: w, h: h, fit: "fillmax"}, sw, sh),
+    do: %{resize: contain(sw, sh, w, h, 1.0), pad: {w, h}}
+
+  # `scale`: exactly w x h, the aspect ratio not kept.
+  defp fit_geometry(%{w: w, h: h, fit: "scale"}, _sw, _sh), do: %{resize: {w, h}}
 
   defp fit_geometry(%{w: w, h: h, fit: "crop"} = plan, sw, sh), do: cover(plan, sw, sh, w, h)
 
@@ -560,7 +618,7 @@ defmodule Barkpark.Media.Transform do
       v when v in [nil, ""] ->
         {:ok, nil}
 
-      "jpeg" ->
+      v when v in ["jpeg", "pjpg"] ->
         {:ok, "jpg"}
 
       v ->
@@ -579,7 +637,7 @@ defmodule Barkpark.Media.Transform do
   end
 
   defp quality(params) do
-    case Map.get(params, "q") do
+    case Map.get(params, "q") || Map.get(params, "quality") do
       v when v in [nil, ""] ->
         {:ok, @default_quality}
 
@@ -587,6 +645,128 @@ defmodule Barkpark.Media.Transform do
         case Integer.parse(to_string(raw)) do
           {n, ""} when n >= 1 and n <= 100 -> {:ok, (round(n / 5) * 5) |> max(5)}
           _ -> invalid("q", "must be an integer from 1 to 100")
+        end
+    end
+  end
+
+  # `dpr` (1 to 5, as Sanity) multiplies `w` and `h`; `w=100&dpr=2` is `w=200`,
+  # one cached file.
+  defp apply_dpr(params) do
+    case Map.get(params, "dpr") do
+      v when v in [nil, ""] ->
+        {:ok, params}
+
+      raw ->
+        case Float.parse(to_string(raw)) do
+          {d, ""} when d >= 1.0 and d <= 5.0 ->
+            scaled =
+              for key <- ["w", "h"], reduce: params do
+                acc ->
+                  case Integer.parse(to_string(Map.get(acc, key, ""))) do
+                    {n, ""} when n > 0 -> Map.put(acc, key, Integer.to_string(round(n * d)))
+                    _ -> acc
+                  end
+              end
+
+            {:ok, scaled}
+
+          _ ->
+            invalid("dpr", "must be a number from 1 to 5")
+        end
+    end
+  end
+
+  # imgix's `blur` (0 to 2000), rounded to a multiple of 5 for the cache key.
+  defp blur(params) do
+    case Map.get(params, "blur") do
+      v when v in [nil, ""] ->
+        {:ok, nil}
+
+      raw ->
+        case Integer.parse(to_string(raw)) do
+          {0, ""} -> {:ok, nil}
+          {n, ""} when n > 0 and n <= 2000 -> {:ok, (round(n / 5) * 5) |> max(5)}
+          _ -> invalid("blur", "must be an integer from 0 to 2000")
+        end
+    end
+  end
+
+  # `bg`: hex RGB, ARGB, RRGGBB or AARRGGBB (imgix), as {r, g, b, a}.
+  defp background(params) do
+    case Map.get(params, "bg") do
+      v when v in [nil, ""] ->
+        {:ok, nil}
+
+      raw ->
+        hex = raw |> to_string() |> String.trim_leading("#")
+
+        hex =
+          case String.length(hex) do
+            n when n in [3, 4] -> hex |> String.graphemes() |> Enum.map_join(&(&1 <> &1))
+            _ -> hex
+          end
+
+        hex = if String.length(hex) == 6, do: "FF" <> hex, else: hex
+
+        case Base.decode16(hex, case: :mixed) do
+          {:ok, <<a, r, g, b>>} -> {:ok, {r, g, b, a}}
+          _ -> invalid("bg", "must be a hex color: RGB, ARGB, RRGGBB or AARRGGBB")
+        end
+    end
+  end
+
+  # `pad`: pixels added on every side, in the `bg` colour.
+  defp padding(params) do
+    case Map.get(params, "pad") do
+      v when v in [nil, ""] ->
+        {:ok, 0}
+
+      raw ->
+        case Integer.parse(to_string(raw)) do
+          {n, ""} when n >= 0 -> {:ok, min(n, div(max_dimension(), 4))}
+          _ -> invalid("pad", "must be a non-negative integer")
+        end
+    end
+  end
+
+  defp flip(params) do
+    case Map.get(params, "flip") do
+      v when v in [nil, ""] -> {:ok, nil}
+      v -> if v in @flips, do: {:ok, v}, else: invalid("flip", "must be h, v or hv")
+    end
+  end
+
+  defp orientation(params) do
+    case Map.get(params, "or") do
+      v when v in [nil, ""] ->
+        {:ok, 0}
+
+      raw ->
+        case Integer.parse(to_string(raw)) do
+          {n, ""} when n in @orients -> {:ok, n}
+          _ -> invalid("or", "must be 0, 90, 180 or 270")
+        end
+    end
+  end
+
+  defp invert(params) do
+    case Map.get(params, "invert") do
+      v when v in [nil, "", "false", "0"] -> {:ok, false}
+      v when v in ["true", "1"] -> {:ok, true}
+      _ -> invalid("invert", "must be true or false")
+    end
+  end
+
+  # `sat`: -100 is grayscale, applied; any other value is ignored.
+  defp saturation(params) do
+    case Map.get(params, "sat") do
+      v when v in [nil, ""] ->
+        {:ok, false}
+
+      raw ->
+        case Integer.parse(to_string(raw)) do
+          {n, ""} when n >= -100 and n <= 100 -> {:ok, n == -100}
+          _ -> invalid("sat", "must be an integer from -100 to 100")
         end
     end
   end

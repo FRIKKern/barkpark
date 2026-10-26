@@ -100,11 +100,82 @@ defmodule Barkpark.Media.TransformTest do
       assert Transform.requested?(%{"fp-x" => "0.5"})
     end
 
-    test "known-but-unapplied vocabulary is listed for a 400" do
-      assert Transform.unsupported(%{"dpr" => "2", "blur" => "5", "w" => "10"}) == [
-               "dpr",
-               "blur"
-             ]
+    test "nothing @sanity/image-url sends is refused any more (task-e1512b7d39b345c2)" do
+      params = Map.new(~w(dpr blur sharp flip or quality bg invert sat pad), &{&1, "1"})
+      assert Transform.unsupported(params) == []
+      assert Transform.requested?(%{"dpr" => "2"})
+    end
+  end
+
+  describe "@sanity/image-url parameters (task-e1512b7d39b345c2)" do
+    test "dpr multiplies w and h, so it shares the plain size's cache file" do
+      assert plan!(%{"w" => "100", "h" => "50", "dpr" => "2"}) |> Map.take([:w, :h]) == %{
+               w: 200,
+               h: 100
+             }
+
+      assert Transform.cache_name(plan!(%{"w" => "300", "dpr" => "1.5"})) ==
+               Transform.cache_name(plan!(%{"w" => "450"}))
+
+      assert {:error, {:invalid_param, "dpr", _}} = Transform.parse(%{"w" => "10", "dpr" => "9"})
+    end
+
+    test "blur, bg, pad, flip, or, invert and sat parse; sharp is ignored; quality stands in for q" do
+      p =
+        plan!(%{
+          "blur" => "52",
+          "bg" => "f00",
+          "pad" => "8",
+          "flip" => "hv",
+          "or" => "270",
+          "invert" => "true",
+          "sat" => "-100",
+          "sharp" => "40",
+          "quality" => "60"
+        })
+
+      assert {p.blur, p.bg, p.pad, p.flip, p.orient, p.invert, p.gray, p.q} ==
+               {50, {255, 0, 0, 255}, 8, "hv", 270, true, true, 60}
+
+      assert plan!(%{"bg" => "8000ff00"}).bg == {0, 255, 0, 128}
+      assert plan!(%{"sat" => "40"}).gray == false
+      assert plan!(%{"fm" => "pjpg"}).fm == "jpg"
+
+      for {k, v} <- [
+            {"blur", "-1"},
+            {"bg", "zz"},
+            {"pad", "x"},
+            {"flip", "d"},
+            {"or", "45"},
+            {"invert", "maybe"},
+            {"sat", "200"}
+          ],
+          do: assert({:error, {:invalid_param, ^k, _}} = Transform.parse(%{k => v}))
+    end
+
+    test "fit=scale stretches to the box; fit=fillmax fills it without scaling up" do
+      assert Transform.geometry(plan!(%{"w" => "100", "h" => "100", "fit" => "scale"}), 600, 400).resize ==
+               {100, 100}
+
+      g = Transform.geometry(plan!(%{"w" => "1000", "h" => "1000", "fit" => "fillmax"}), 600, 400)
+      assert {g.resize, g.pad} == {{600, 400}, {1000, 1000}}
+    end
+
+    test "a URL without the new parameters keeps its cache key" do
+      assert Transform.canonical(
+               plan!(%{
+                 "w" => "1200",
+                 "fm" => "webp",
+                 "q" => "85",
+                 "sharp" => "10",
+                 "sat" => "20"
+               })
+             ) ==
+               "v1;w=1200;h=-;fit=clip;crop=;rect=-;fp=-;fm=webp;q=85;wm=none"
+
+      assert Transform.canonical(
+               plan!(%{"w" => "100", "fm" => "jpg", "blur" => "10", "flip" => "h"})
+             ) =~ ~r/;blur=10;flip=h\z/
     end
   end
 

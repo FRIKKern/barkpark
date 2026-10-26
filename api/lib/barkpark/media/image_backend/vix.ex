@@ -78,7 +78,8 @@ defmodule Barkpark.Media.ImageBackend.Vix do
          geometry = Transform.geometry(plan, src_w, src_h),
          {:ok, image} <- shape(src, geometry),
          {:ok, image} <- crop(image, geometry.crop),
-         {:ok, image} <- pad(image, geometry.pad),
+         {:ok, image} <- pad(image, geometry.pad, Map.get(plan, :bg)),
+         {:ok, image} <- effects(image, plan),
          {:ok, stamped} <- maybe_watermark(image, watermark) do
       write_image(stamped, dest, plan)
     end
@@ -263,18 +264,85 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     )
   end
 
-  defp pad(image, nil), do: {:ok, image}
+  defp pad(image, nil, _bg), do: {:ok, image}
 
-  defp pad(image, {w, h}) do
+  defp pad(image, {w, h}, bg) do
     x = div(max(w - Image.width(image), 0), 2)
     y = div(max(h - Image.height(image), 0), 2)
-    background = List.duplicate(255, Image.bands(image))
+    embed(image, x, y, w, h, bg)
+  end
+
+  # `bg` ({r, g, b, a}) for the fill; white without one. An image without an
+  # alpha band takes the colour's RGB only.
+  defp embed(image, x, y, w, h, bg) do
+    background =
+      case {bg, Image.bands(image)} do
+        {nil, bands} -> List.duplicate(255, bands)
+        {{r, g, b, a}, 4} -> [r, g, b, a]
+        {{r, g, b, _a}, 3} -> [r, g, b]
+        {{r, g, b, _a}, 2} -> [round((r + g + b) / 3), 255]
+        {{r, g, b, _a}, bands} -> List.duplicate(round((r + g + b) / 3), bands)
+      end
 
     Vix.Vips.Operation.embed(image, x, y, w, h,
       extend: :VIPS_EXTEND_BACKGROUND,
       background: background
     )
   end
+
+  # task-e1512b7d39b345c2: `@sanity/image-url`'s effects, on the output-sized
+  # image (cheap there): padding, flip, orientation, invert, grayscale, blur.
+  # `or` turns the finished image, so `w`/`h` name the box before the turn.
+  defp effects(image, plan) do
+    with {:ok, image} <- padded(image, Map.get(plan, :pad, 0), Map.get(plan, :bg)),
+         {:ok, image} <- flipped(image, Map.get(plan, :flip)),
+         {:ok, image} <- turned(image, Map.get(plan, :orient, 0)),
+         {:ok, image} <- inverted(image, Map.get(plan, :invert, false)),
+         {:ok, image} <- grayed(image, Map.get(plan, :gray, false)) do
+      blurred(image, Map.get(plan, :blur))
+    end
+  end
+
+  defp padded(image, p, _bg) when p in [nil, 0], do: {:ok, image}
+
+  defp padded(image, p, bg),
+    do: embed(image, p, p, Image.width(image) + 2 * p, Image.height(image) + 2 * p, bg)
+
+  defp flipped(image, nil), do: {:ok, image}
+  defp flipped(image, "h"), do: Image.flip(image, :horizontal)
+  defp flipped(image, "v"), do: Image.flip(image, :vertical)
+
+  defp flipped(image, "hv") do
+    with {:ok, image} <- Image.flip(image, :horizontal), do: Image.flip(image, :vertical)
+  end
+
+  defp turned(image, 0), do: {:ok, image}
+
+  defp turned(image, deg) do
+    angle = %{90 => :VIPS_ANGLE_D90, 180 => :VIPS_ANGLE_D180, 270 => :VIPS_ANGLE_D270}
+    Vix.Vips.Operation.rot(image, Map.fetch!(angle, deg))
+  end
+
+  defp inverted(image, false), do: {:ok, image}
+
+  # Colour bands only: an alpha band keeps its transparency.
+  defp inverted(image, true) do
+    if Image.has_alpha?(image) do
+      with {:ok, {color, alpha}} <- Image.split_alpha(image),
+           {:ok, color} <- Vix.Vips.Operation.invert(color),
+           do: Image.add_alpha(color, alpha)
+    else
+      Vix.Vips.Operation.invert(image)
+    end
+  end
+
+  defp grayed(image, false), do: {:ok, image}
+  defp grayed(image, true), do: Image.to_colorspace(image, :bw)
+
+  # imgix's 0 to 2000 scale, approximated as a Gaussian of sigma blur / 10 px
+  # on the output image.
+  defp blurred(image, nil), do: {:ok, image}
+  defp blurred(image, blur), do: Vix.Vips.Operation.gaussblur(image, max(blur / 10, 0.3))
 
   # Reject a decompression bomb BEFORE the (lazy) thumbnail pipeline is built.
   # `Image.{width,height,bands}` read the already-parsed header (no decode), so

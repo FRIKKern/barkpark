@@ -284,6 +284,57 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
       assert length(transform_files(result["id"])) == 1
     end
 
+    # task-e1512b7d39b345c2: what @sanity/image-url sends beyond w/h/fit/crop/rect/fm/q.
+    test "dpr, blur, fit=scale|fillmax, bg, pad, flip, or, invert, sat and fm=pjpg answer, never 400",
+         %{conn: conn} do
+      result = upload(conn)
+      get = fn q -> get_image(result["originalUrl"] <> "?" <> q) end
+
+      px = fn image, x ->
+        image
+        |> Vix.Vips.Image.get_pixel(x, div(Image.height(image), 2))
+        |> elem(1)
+        |> Enum.take(3)
+        |> Enum.map(&round/1)
+      end
+
+      for {q, dims} <- [
+            {"w=100&dpr=2", {200, 133}},
+            {"w=100&blur=50", {100, 67}},
+            {"w=100&h=100&fit=scale", {100, 100}},
+            {"w=1000&h=1000&fit=fillmax", {1000, 1000}},
+            {"w=100&pad=10&bg=000", {120, 87}},
+            {"w=150&or=90", {100, 150}},
+            {"w=100&flip=h", {100, 67}},
+            {"w=100&invert=true", {100, 67}},
+            {"w=100&sat=-100", {100, 67}},
+            {"w=100&sharp=30", {100, 67}},
+            {"w=100&fm=pjpg", {100, 67}}
+          ] do
+        resp = get.(q)
+        assert resp.status == 200, "#{q}: #{resp.status} #{resp.resp_body}"
+        assert content_type(resp) == "image/jpeg", q
+        assert size(decode(resp.resp_body)) == dims, q
+      end
+
+      # dpr is a size: one cached file with the plain width.
+      assert get.("w=100&dpr=2").resp_body == get.("w=200").resp_body
+      # sharp is ignored: the same file as without it.
+      assert get.("w=100&sharp=30").resp_body == get.("w=100").resp_body
+
+      # The left edge was red: flip moves blue there, invert makes it cyan, sat=-100 grey.
+      [r, _g, b] = px.(decode(get.("w=100&flip=h").resp_body), 3)
+      assert b > 200 and r < 60
+      [r, g, b] = px.(decode(get.("w=100&invert=true").resp_body), 3)
+      assert r < 60 and g > 200 and b > 200
+      # grayscale: one band, or three equal ones.
+      gray = px.(decode(get.("w=100&sat=-100").resp_body), 3)
+      assert length(gray) == 1 or Enum.max(gray) - Enum.min(gray) < 8
+      # fillmax never scales up: the source sits at its own size on the white box.
+      assert px.(decode(get.("w=1000&h=1000&fit=fillmax").resp_body), 10)
+             |> Enum.all?(&(&1 > 240))
+    end
+
     test "an invalid value is a 400 naming the parameter", %{conn: conn} do
       result = upload(conn)
       resp = get_image(result["originalUrl"] <> "?w=wide")
