@@ -99,22 +99,23 @@ defmodule Barkpark.Groq.Evaluator do
   end
 
   def eval({:elem, base, index}, scope, ctx) do
-    case elem_from_source(base, index, scope, ctx) do
+    with :error <- elem_from_source(base, index, scope, ctx),
+         :error <- elem_through_map(base, index, scope, ctx) do
+      elem_of(base, index, scope, ctx)
+    else
       {:ok, value} -> value
-      :error -> elem_of(base, index, scope, ctx)
     end
   end
 
   def eval({:slice, base, left, right, inclusive?}, scope, ctx) do
-    case slice_from_source(base, left, right, inclusive?, scope, ctx) do
-      {:ok, list} ->
-        list
-
-      :error ->
-        case eval(base, scope, ctx) do
-          list when is_list(list) -> slice(list, left, right, inclusive?)
-          _ -> nil
-        end
+    with :error <- slice_from_source(base, left, right, inclusive?, scope, ctx),
+         :error <- slice_through_map(base, left, right, inclusive?, scope, ctx) do
+      case eval(base, scope, ctx) do
+        list when is_list(list) -> slice(list, left, right, inclusive?)
+        _ -> nil
+      end
+    else
+      {:ok, list} -> list
     end
   end
 
@@ -948,6 +949,32 @@ defmodule Barkpark.Groq.Evaluator do
   end
 
   defp slice_from_source(_base, _left, _right, _inclusive?, _scope, _ctx), do: :error
+
+  # A projection (or `.key`) before the slice, `*[...]{a, b}[0...10]` or
+  # `*[...] | order(x){a}[3]`: a map is element by element, so the slice of the
+  # mapped list is the map of the sliced list. The source then reads only the
+  # documents the slice needs instead of every match, and the projection runs
+  # on those alone.
+  defp slice_through_map(base, left, right, inclusive?, scope, ctx) do
+    with {:map, list_base, mapped} <- unmemo(base),
+         {:ok, docs} <- slice_from_source(list_base, left, right, inclusive?, scope, ctx) do
+      {:ok, Enum.map(docs, &eval(mapped, hidden(scope, &1), ctx))}
+    else
+      _ -> :error
+    end
+  end
+
+  defp elem_through_map(base, index, scope, ctx) do
+    with {:map, list_base, mapped} <- unmemo(base),
+         {:ok, doc} <- elem_from_source(list_base, index, scope, ctx) do
+      {:ok, if(doc == nil, do: nil, else: eval(mapped, hidden(scope, doc), ctx))}
+    else
+      _ -> :error
+    end
+  end
+
+  defp unmemo({:memo, inner}), do: unmemo(inner)
+  defp unmemo(other), do: other
 
   defp source_slice(base, from, to, scope, ctx) do
     root? = scope.value == nil and scope.parent == nil
