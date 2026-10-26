@@ -1153,6 +1153,23 @@ defmodule BarkparkWeb.Router do
     # sheets imported before this change stay exportable.
     plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    # task-9676ef7a58a7d112 — the write buckets' rate limit and quota gate,
+    # unchanged, AFTER the token so the bucket keys on it. Reads (the sheets
+    # exports, sessions, intents) pass the gate; see RequireWithinQuota's
+    # "Mixed buckets" for `creates:`. Only host controllers are named: the
+    # router may not reference a removable plugin's module (fresh-install
+    # invariant), so the sheets import is gated on suspension, not on room.
+    plug(BarkparkWeb.Plugs.RateLimit)
+
+    plug(BarkparkWeb.Plugs.RequireWithinQuota,
+      only: :writes,
+      creates: [
+        {BarkparkWeb.BulldocsIngestController, :ingest},
+        {BarkparkWeb.BulldocsIngestController, :create},
+        {BarkparkWeb.BulldocsIngestController, :sync},
+        {BarkparkWeb.BulldocsIngestController, :ingest_session}
+      ]
+    )
   end
 
   # Anonymous, CORS-open JSON for the `:public_api` plugin bucket (Pulse /
@@ -1404,6 +1421,22 @@ defmodule BarkparkWeb.Router do
   # `:scoped_api` has already resolved `:current_workspace` from the path.
   pipeline :flat_within_quota do
     plug(BarkparkWeb.Plugs.RequireWithinQuota)
+  end
+
+  # task-9676ef7a58a7d112 — the same gate on the `/v1/tasks` verbs and
+  # `/v1/fleet/beat` (`:token_root`): a suspended workspace is refused every
+  # write; a full one only the beat, the one verb that can add a document.
+  pipeline :token_root_within_quota do
+    plug(BarkparkWeb.Plugs.RequireWithinQuota,
+      only: :writes,
+      creates: [{BarkparkWeb.TasksController, :fleet_beat}]
+    )
+  end
+
+  # task-9676ef7a58a7d112 — legacy `/api/documents` writes: create needs room,
+  # delete does not (as a `delete` mutation on /v1/data/mutate).
+  pipeline :legacy_within_quota do
+    plug(BarkparkWeb.Plugs.RequireWithinQuota, creates: [{BarkparkWeb.LegacyController, :create}])
   end
 
   # THE INSTANCE-OPERATOR gate (task-c7e2b87f1bbca815). Layered ON TOP of
@@ -1919,7 +1952,12 @@ defmodule BarkparkWeb.Router do
   # `DELETE /v1/auth/app-tokens/current`, where a read token revoking ITSELF is
   # the correct behaviour.
   scope "/v1" do
-    pipe_through([:api, :require_token, BarkparkWeb.Plugs.RequireWriteForMutation])
+    pipe_through([
+      :api,
+      :require_token,
+      :token_root_within_quota,
+      BarkparkWeb.Plugs.RequireWriteForMutation
+    ])
 
     plugin_routes(scope: :token_root)
   end
@@ -4437,7 +4475,13 @@ defmodule BarkparkWeb.Router do
   # in a separate scope from the legacy GET reads so a read/public-read token can
   # no longer create or delete a document via the deprecated /api/documents surface.
   scope "/api", BarkparkWeb do
-    pipe_through([:api, :require_token, :require_write, BarkparkWeb.Plugs.LegacyDeprecation])
+    pipe_through([
+      :api,
+      :require_token,
+      :legacy_within_quota,
+      :require_write,
+      BarkparkWeb.Plugs.LegacyDeprecation
+    ])
 
     post("/documents/:type", LegacyController, :create)
     delete("/documents/:type/:id", LegacyController, :delete)

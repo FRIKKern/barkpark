@@ -52,6 +52,10 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     "RequireScimToken" =>
       {:resolved,
        "scim token via Scim.resolve_token_id/1 — the kind whose absence caused the 429s"},
+    "RequireIngestToken" =>
+      {:resolved,
+       "the admin arm is an api_token (Auth.verify_token_id/1); the instance ingest secret " <>
+         "is no token, so a producer holding it keys on its client IP"},
     "PreviewToken" => {:not_a_bearer, "reads `Authorization: Preview <jwt>`"},
     "RequireChatHost" => {:not_a_bearer, "reads `Authorization: Host <cred>`"},
     "DeriveWorkspaceFromToken" =>
