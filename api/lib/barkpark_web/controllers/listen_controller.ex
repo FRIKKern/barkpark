@@ -109,6 +109,11 @@ defmodule BarkparkWeb.ListenController do
         sse_mailbox_limit()
       )
 
+    # `?query=` (task-72331698ada8a2f6): which documents match the query now,
+    # read once after subscribing, so an event can say whether its document
+    # matched before (`ListenFilter.query_step/3`).
+    lf = seed_query(lf, dataset, scope)
+
     conn =
       conn
       |> put_resp_content_type("text/event-stream")
@@ -149,8 +154,14 @@ defmodule BarkparkWeb.ListenController do
           # never replay another user's or another grant's row.
           with true <- ListenFilter.pass_meta?(lf, ev),
                result when result != :drop <- redacted_result(ev, dataset, caller_context, scope),
-               true <- ListenFilter.pass_result?(lf, result) do
-            ev = Map.put(ev, :document, result)
+               true <- ListenFilter.pass_result?(lf, result),
+               true <- ListenFilter.query_match?(lf.query, result) do
+            # A replayed event under `?query=` is one whose document matches now.
+            ev =
+              ev
+              |> Map.put(:document, result)
+              |> Map.put(:transition, if(lf.query, do: "update"))
+              |> Map.put(:include_result, lf.include_result)
 
             case chunk(c, format_event(ev, dataset)) do
               {:ok, c2} -> c2
@@ -240,6 +251,37 @@ defmodule BarkparkWeb.ListenController do
 
   def project_path_project_id(_conn, _scope), do: nil
 
+  # The ids of the documents matching `?query=` now, as this subscriber reads
+  # them (raw perspective: drafts are their own ids, as in the events). Past
+  # 10,000, or on any error, the set is `:unknown`: every event then reads as
+  # "did not match before", so a match is an `appear` and a change that makes
+  # a document stop matching is not sent (less than Sanity, never more).
+  @seed_cap 10_000
+  defp seed_query(%ListenFilter{query: nil} = lf, _dataset, _scope), do: lf
+
+  defp seed_query(%ListenFilter{query: q} = lf, dataset, scope) do
+    matched =
+      case Barkpark.Groq.query("(#{q.text})[0...#{@seed_cap + 1}]._id", q.params,
+             dataset: dataset,
+             perspective: :raw,
+             scope_opts: scope
+           ) do
+        {:ok, %{result_json: json}} ->
+          case Jason.decode(IO.iodata_to_binary(json)) do
+            {:ok, ids} when is_list(ids) and length(ids) <= @seed_cap ->
+              ids |> Enum.filter(&is_binary/1) |> MapSet.new()
+
+            _ ->
+              :unknown
+          end
+
+        _ ->
+          :unknown
+      end
+
+    %{lf | matched: matched}
+  end
+
   @doc false
   def format_event(ev, dataset) do
     pub_id = Content.published_id(ev.doc_id)
@@ -258,7 +300,7 @@ defmodule BarkparkWeb.ListenController do
     ]
 
     data =
-      Jason.encode!(%{
+      %{
         eventId: ev.id,
         mutation: ev.mutation,
         type: ev.type,
@@ -267,7 +309,16 @@ defmodule BarkparkWeb.ListenController do
         previousRev: ev.previous_rev,
         result: ev.document,
         syncTags: sync_tags
-      })
+      }
+      # `?query=` adds Sanity's `transition`; `includeResult=false` leaves
+      # `result` out (task-72331698ada8a2f6). Without them the frame is as before.
+      |> then(fn d ->
+        if t = Map.get(ev, :transition), do: Map.put(d, :transition, t), else: d
+      end)
+      |> then(fn d ->
+        if Map.get(ev, :include_result, true), do: d, else: Map.delete(d, :result)
+      end)
+      |> Jason.encode!()
 
     "id: #{ev.id}\nevent: mutation\ndata: #{data}\n\n"
   end
@@ -416,13 +467,21 @@ defmodule BarkparkWeb.ListenController do
           listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
 
         result ->
-          if ListenFilter.pass_result?(lf, result) do
-            case chunk(conn, format_event(live_event(msg, result), dataset)) do
+          with true <- ListenFilter.pass_result?(lf, result),
+               {:send, transition, lf} <- ListenFilter.query_step(lf, msg.doc_id, result) do
+            ev =
+              msg
+              |> live_event(result)
+              |> Map.put(:transition, transition)
+              |> Map.put(:include_result, lf.include_result)
+
+            case chunk(conn, format_event(ev, dataset)) do
               {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
               _ -> conn
             end
           else
-            listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+            {:drop, lf} -> listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+            _ -> listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
           end
       end
     else
