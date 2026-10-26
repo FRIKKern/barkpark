@@ -31,7 +31,7 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
     * `themaCodes` is `["T<g mod 2000>", "T<g * 7 mod 2000>", "U<g mod 23>"]`
   """
 
-  alias Barkpark.Repo
+  alias Barkpark.{Auth, Content, Repo, Tenancy}
 
   @spec seed!(String.t(), pos_integer()) :: :ok
   def seed!(dataset, n) do
@@ -90,5 +90,56 @@ defmodule Barkpark.Test.GroqSyntheticProducts do
 
     Repo.query!("ANALYZE documents")
     :ok
+  end
+
+  @doc """
+  The site the large-dataset GROQ tests query: workspace `groq-big`, project
+  `site`, public `product`, `article` and `department` schemas in `dataset`,
+  `n` products from `seed!/2`, the article `a1` (a hidden redirect to
+  `/bok/p123`), the departments `dept-big` and `dept-small`, and a read+write
+  token. Returns `[token: token, scope: scope]` for a test context.
+  """
+  @spec seed_site!(String.t(), pos_integer()) :: keyword()
+  def seed_site!(dataset, n) do
+    {:ok, ws} = Tenancy.create_workspace(%{slug: "groq-big", name: "GROQ big"})
+    {:ok, proj} = Tenancy.create_project(ws, %{slug: "site", name: "Site"})
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    for type <- ["product", "article", "department"] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => type, "title" => type, "visibility" => "public", "fields" => []},
+          dataset,
+          scope
+        )
+    end
+
+    {:ok, _} = Content.create_document("product", %{"_id" => "template"}, dataset, scope)
+    {:ok, _} = Content.publish_document("template", "product", dataset, scope)
+    seed!(dataset, n)
+
+    {:ok, _} =
+      Content.create_document(
+        "article",
+        %{
+          "_id" => "a1",
+          "isHidden" => true,
+          "slugHistory" => [%{"_key" => "s", "match" => "url", "value" => "/bok/p123"}]
+        },
+        dataset,
+        scope
+      )
+
+    {:ok, _} = Content.publish_document("a1", "article", dataset, scope)
+
+    for id <- ["dept-big", "dept-small"] do
+      {:ok, _} = Content.create_document("department", %{"_id" => id}, dataset, scope)
+      {:ok, _} = Content.publish_document(id, "department", dataset, scope)
+    end
+
+    token = "groq-big-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(token, "groq big", dataset, ["read", "write"], ws.id)
+
+    [token: token, scope: scope]
   end
 end
