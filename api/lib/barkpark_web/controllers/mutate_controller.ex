@@ -14,7 +14,7 @@ defmodule BarkparkWeb.MutateController do
          {:ok, visibility} <- visibility_flag(conn.params["visibility"]),
          {:ok, mutations} <- apply_if_match_header(conn, mutations),
          {:ok, scope, resolved} <- resolve_write_scope(conn) do
-      opts = [source: :api, dry_run: dry_run, visibility: visibility] ++ scope
+      opts = [source: :api, dry_run: dry_run, visibility: visibility] ++ exact_ids(conn) ++ scope
 
       # The advisory channel (authoring-excellence D5): the publish wall queues
       # non-blocking warnings ([{code, severity, message}]) while the batch
@@ -58,6 +58,12 @@ defmodule BarkparkWeb.MutateController do
     end
   end
 
+  # The Sanity-shaped route (`/v<apiVersion>/data/mutate`, which carries
+  # `api_version`) writes exactly the ids it names, as Sanity does
+  # (`Content.Mutations`' exact-id section). `/v1` keeps its semantics.
+  defp exact_ids(%Plug.Conn{path_params: %{"api_version" => _}}), do: [exact_ids: true]
+  defp exact_ids(_conn), do: []
+
   def mutate(conn, _params) do
     respond_with_error(conn, :malformed)
   end
@@ -97,7 +103,8 @@ defmodule BarkparkWeb.MutateController do
   # trace — that is how `dryRun` wrote for real before the door honoured it
   # (task-778e3617070bce11). Named in a non-fatal warning, never refused: a
   # 400 here could break clients that send harmless extras.
-  @known_body_keys ~w(mutations dryRun visibility)
+  # `transactionId`: @sanity/client sends its own; Barkpark mints the id.
+  @known_body_keys ~w(mutations dryRun visibility transactionId)
 
   defp warn_unknown_keys(%{} = body) do
     case body |> Map.keys() |> Enum.reject(&(&1 in @known_body_keys)) |> Enum.sort() do

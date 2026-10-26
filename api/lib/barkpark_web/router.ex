@@ -3919,6 +3919,10 @@ defmodule BarkparkWeb.Router do
     pipe_through(:scoped_mutate)
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
+    # @sanity/client's writes (task-c6cbf346a07ff01e): the same pipeline and
+    # controller, with Sanity's exact-id semantics. Server-side only: no CORS
+    # on this path (an owner decision, task-5e59bca0170d8eda).
+    post("/v:api_version/data/mutate/:dataset", MutateController, :mutate)
     post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
     post("/v1/data/disconnect/:dataset/:doc_id", DisconnectController, :create)
 

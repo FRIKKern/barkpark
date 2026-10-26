@@ -990,6 +990,19 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :conflict}),
     do: %{code: "conflict", message: "document already exists", status: 409}
 
+  # task-c6cbf346a07ff01e — Sanity's mutate semantics on the dated route would
+  # write the published `id` past its draft twin; Barkpark's direct publish
+  # would delete that draft, so the write is refused and the twin named.
+  defp build({:error, {:draft_twin_exists, id}}),
+    do: %{
+      code: "conflict",
+      message:
+        "drafts.#{id} exists; writing #{id} here would discard that draft. " <>
+          "Publish or discard drafts.#{id} first, or write it by its drafts. id",
+      status: 409,
+      details: %{id: id, draft: "drafts." <> id}
+    }
+
   # task-078175e759f71b73 — Sanity's Content Releases id convention,
   # `versions.<release>.<id>`, has no analog here: there is no release/
   # version-set entity to resolve it against. `DraftId.draft_id/1` would

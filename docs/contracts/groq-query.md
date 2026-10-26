@@ -16,11 +16,11 @@ Barkpark answers GROQ on Sanity's HTTP query API URLs, so a `@sanity/client` or 
 | `returnQuery` | `false` leaves `query` out |
 | `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
-Any `apiVersion`. Auth, tenancy and shares are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token on an unshared dataset: 403 (Sanity: 200, empty), kept. POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
+Any `apiVersion`. Auth, tenancy and shares: the scoped document reads' ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token, unshared dataset: 403 (Sanity: 200, empty). POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` too.
 
-`GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]` (`getDocument(s)`) reads `*[_id in ids]` as `raw`: `{"documents", "omitted"}`; a missing id is omitted, reason `existence`.
+Writes: [sanity-mutate.md](sanity-mutate.md). `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]` (`getDocument(s)`) is `*[_id in ids]` as `raw`: `{"documents", "omitted"}`, a missing id omitted (`existence`).
 
 Errors keep Barkpark's envelope plus Sanity's `description`, `statusCode` and `message`, and `type`: `queryParseError` (400 `malformed`, plus `query`, `start`, `end`), `queryLimitError` or `queryEvaluationError` (422 `bad_request`), `queryBusyError` (503, `Retry-After`). A missing parameter is a syntax error, as on Sanity.
 
