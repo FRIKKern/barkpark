@@ -229,6 +229,30 @@ defmodule BarkparkWeb.SessionIssuer do
     end
   end
 
+  @doc """
+  The org sign-in policy for the doors that carry no second factor and are none
+  of the policy's methods: API token paste (`"api_token"`) and the Barkpark
+  Cloud handoff (`"cloud"`). Returns the refused conn, or nil to proceed.
+
+  Off unless `:sign_in_policy_all_routes` is set
+  (`BARKPARK_SIGN_IN_POLICY_ALL_ROUTES`), so these doors behave as before. On,
+  a user whose org set `allowed_auth_methods` is refused, since neither door is
+  on any list, and a user governed by a `require_mfa` org is refused because
+  the door cannot present a factor.
+  """
+  @spec policy_refusal(Plug.Conn.t(), Accounts.User.t() | nil, String.t()) ::
+          Plug.Conn.t() | nil
+  def policy_refusal(conn, user, method) do
+    cond do
+      not Application.get_env(:barkpark, :sign_in_policy_all_routes, false) -> nil
+      not match?(%Accounts.User{}, user) -> nil
+      auth_method_blocked?(user, method) -> deny_auth_method(conn, user, method)
+      org_mfa_enrolment_blocked?(user) -> deny_org_mfa_enrolment(conn, user, method)
+      org_factor_required?(user, :no_code_door) -> deny_org_factor_required(conn, user, method)
+      true -> nil
+    end
+  end
+
   @doc "The human-facing refusal shared by the API and browser doors."
   @spec auth_method_message(String.t()) :: String.t()
   def auth_method_message(method) do
@@ -254,6 +278,8 @@ defmodule BarkparkWeb.SessionIssuer do
   defp method_label("passkey"), do: "Passkey sign-in"
   defp method_label("sso"), do: "Single sign-on"
   defp method_label("social"), do: "Social sign-in"
+  defp method_label("api_token"), do: "API token sign-in"
+  defp method_label("cloud"), do: "Barkpark Cloud sign-in"
   defp method_label(other), do: "#{other} sign-in"
 
   @doc "The human-facing org-MFA enrolment guidance shared by the browser doors."

@@ -93,6 +93,10 @@ services:
       - BARKPARK_OPERATOR_TOKEN_IDS
       # Strict OIDC ID token checks for every connection (read in api/config/runtime.exs)
       - BARKPARK_OIDC_STRICT_VALIDATION
+      # Sign-in policy on token paste and the Cloud handoff; Cloud handoff
+      # switch (both read in api/config/runtime.exs)
+      - BARKPARK_SIGN_IN_POLICY_ALL_ROUTES
+      - BARKPARK_CLOUD_HANDOFF
       # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
       - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
       # Deleted-payload retention, off unless set (owner ruling #33; read in api/config/runtime.exs)
