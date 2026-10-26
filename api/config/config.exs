@@ -416,6 +416,10 @@ config :barkpark, Oban,
        # window in mutation_events.document / webhook_deliveries.payload_snapshot.
        # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
        {"30 4 * * *", Barkpark.Content.Workers.DeletedPayloadSweeper},
+       # task-44cfe871ea0edc30 — purges cancelled schedules past the window.
+       # A no-op tick (it logs the would-delete count) unless
+       # `:cancelled_schedule_retention, enabled:` (below) is on.
+       {"45 4 * * *", Barkpark.Content.Workers.CancelledScheduleSweeper},
        # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation, Mondays
        # 03:00 UTC (the slot of the never-installed systemd timer it replaces).
        # A no-op tick unless `:public_read_rotation, enabled:` (below) is on.
@@ -552,6 +556,15 @@ config :barkpark, :paper_access_log_ttl_days, 90
 # `mix barkpark.deleted_payload_retention` census. Policy:
 # Barkpark.Content.DeletedPayloadRetention.
 config :barkpark, :deleted_payload_retention, enabled: false, days: 90
+
+# task-44cfe871ea0edc30 — cancelled schedules (`scheduled_publishes` rows with
+# status `cancelled`) older than `days` are deleted; no other status is.
+# SHIPS DISABLED — the owner turns it on with
+# BARKPARK_CANCELLED_SCHEDULE_RETENTION=on (window:
+# BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS, see runtime.exs) after reading the
+# `mix barkpark.cancelled_schedules` census. Policy:
+# Barkpark.Content.CancelledScheduleRetention.
+config :barkpark, :cancelled_schedule_retention, enabled: false, days: 30
 
 # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation
 # (Barkpark.Auth.PublicReadRotationWorker). SHIPS DISABLED: switched on it mints
