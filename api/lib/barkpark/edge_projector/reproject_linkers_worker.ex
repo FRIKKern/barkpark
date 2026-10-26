@@ -58,7 +58,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersWorker do
 
   alias Barkpark.Content
   alias Barkpark.Content.{Document, DraftId}
-  alias Barkpark.EdgeProjector.Projector
+  alias Barkpark.EdgeProjector.{Projector, ProjectorWorker}
   alias Barkpark.Repo
   alias Barkpark.Tenancy
 
@@ -117,7 +117,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersWorker do
     project_opts = project_opts(args)
 
     Enum.each(linkers, fn doc ->
-      {:ok, _} = Projector.upsert_record(Barkpark.Plugins.Tasks.hydrate_edges(doc), project_opts)
+      {:ok, _} = Projector.upsert_record(ProjectorWorker.hydrate_task_edges(doc), project_opts)
     end)
 
     Logger.info(
