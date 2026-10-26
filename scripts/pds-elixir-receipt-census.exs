@@ -1273,6 +1273,7 @@ defmodule PDS.Census do
     # controller action). The receipt is store-derived and pinned by
     # api/test/barkpark_web/controllers/workspace_locale_controller_test.exs.
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/workspace/locale", "BarkparkWeb.WorkspaceLocaleController", :update, :status_only_receipt},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/workspace/time-zone", "BarkparkWeb.WorkspaceLocaleController", :update_time_zone, :status_only_receipt},
     {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token, :status_only_receipt},
     {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident, :status_only_receipt},
     {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident, :status_only_receipt},
