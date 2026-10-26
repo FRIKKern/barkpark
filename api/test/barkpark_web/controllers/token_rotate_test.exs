@@ -544,6 +544,57 @@ defmodule BarkparkWeb.TokenRotateTest do
     end
   end
 
+  describe "a new expiry for the successor (bp token rotate --expires_in_days)" do
+    test "expires_in_days gives the successor a new expiry; the old token keeps its grace",
+         ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_raw, victim} = victim!(ws)
+      soon = DateTime.utc_now() |> DateTime.add(3 * 86_400, :second) |> DateTime.truncate(:second)
+      Repo.update_all(from(t in ApiToken, where: t.id == ^victim.id), set: [expires_at: soon])
+
+      body =
+        rotate(admin_raw, ws, project, victim.id, %{expires_in_days: 90}) |> json_response(201)
+
+      {:ok, new_exp, _} = DateTime.from_iso8601(body["expires_at"])
+      assert secs_from_now(new_exp) in (90 * 86_400 - 5)..(90 * 86_400)
+      assert secs_from_now(Repo.get!(ApiToken, victim.id).expires_at) in (86_400 - 5)..86_400
+    end
+
+    test "without it the successor keeps the old expiry", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_raw, victim} = victim!(ws)
+      soon = DateTime.utc_now() |> DateTime.add(3 * 86_400, :second) |> DateTime.truncate(:second)
+      Repo.update_all(from(t in ApiToken, where: t.id == ^victim.id), set: [expires_at: soon])
+
+      body = rotate(admin_raw, ws, project, victim.id) |> json_response(201)
+      assert body["expires_at"] == DateTime.to_iso8601(soon)
+    end
+
+    test "zero, a non-number or a day count past the max age is a 422 and mints nothing", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_raw, victim} = victim!(ws)
+
+      for bad <- [0, -3, "abc", 1.5, 366] do
+        assert rotate(admin_raw, ws, project, victim.id, %{expires_in_days: bad})
+               |> json_response(422),
+               "expires_in_days #{inspect(bad)} must be refused"
+      end
+
+      assert tokens_labelled(victim.label) == 1
+    end
+
+    test "the manifest declares --expires_in_days on token.rotate" do
+      %{"flags" => flags} =
+        Barkpark.Plugins.Capabilities.manifest("admin", project: false)
+        |> Map.fetch!("commands")
+        |> Enum.find(&(&1["id"] == "token.rotate"))
+        |> Jason.encode!()
+        |> Jason.decode!()
+
+      assert Enum.find(flags, &(&1["name"] == "expires_in_days"))["type"] == "int"
+    end
+  end
+
   describe "token ls carries age, last use and rotation due" do
     test "a never-expiring api token is due 365 days after mint; an expiring one at its expiry",
          ctx do
