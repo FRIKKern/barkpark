@@ -173,6 +173,7 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
         )
     end
 
+    assert before > 0
     assert count_queries(fn -> q(conn, t, query) end) == before
   end
 
@@ -184,7 +185,11 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
     :telemetry.attach(
       handler,
       [:barkpark, :repo, :query],
-      fn _, _, _, _ -> send(parent, {ref, :q}) end,
+      # Schema reads only: any process may run other queries meanwhile (a
+      # background job's would make the count flaky).
+      fn _, _, meta, _ ->
+        if meta[:source] == "schema_definitions", do: send(parent, {ref, :q})
+      end,
       nil
     )
 

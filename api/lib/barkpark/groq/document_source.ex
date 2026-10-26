@@ -623,8 +623,8 @@ defmodule Barkpark.Groq.DocumentSource do
   defp content_reads({_types, _ids, eq, any, checks}) do
     probes =
       Enum.sum_by(any, fn probes ->
-        {maps, refs, _ids, bodies} = split_probes(probes)
-        if(maps == [], do: 0, else: 1) + if(refs == [], do: 0, else: 1) + length(bodies)
+        {maps, refs, _ids} = split_probes(probes)
+        if(maps == [], do: 0, else: 1) + if(refs == [], do: 0, else: 1)
       end)
 
     length(eq) + probes + Enum.sum_by(checks, &check_reads/1)
@@ -782,7 +782,7 @@ defmodule Barkpark.Groq.DocumentSource do
     do: dynamic([d], fragment("? @\\? CAST(? AS jsonpath)", d.content, type(^path, :string)))
 
   defp stored_probes(probes, perspective) do
-    {maps, refs, ids, bodies} = split_probes(probes)
+    {maps, refs, ids} = split_probes(probes)
 
     [
       maps != [] &&
@@ -804,36 +804,20 @@ defmodule Barkpark.Groq.DocumentSource do
           )
         ),
       ids != [] && ids_condition(ids, perspective)
-      | Enum.map(bodies, &stored_body_refs/1)
     ]
     |> Enum.reject(&(&1 == false))
     |> Enum.reduce(dynamic(false), fn c, acc -> dynamic(^acc or ^c) end)
   end
 
   defp split_probes(probes) do
-    {maps, refs, ids, bodies} =
-      Enum.reduce(probes, {[], [], [], []}, fn
-        {:refs, r}, {m, rs, is, bs} -> {m, rs ++ r, is, bs}
-        {:ids, i}, {m, rs, is, bs} -> {m, rs, is ++ i, bs}
-        {:body_refs, _type, _path} = b, {m, rs, is, bs} -> {m, rs, is, [b | bs]}
-        map, {m, rs, is, bs} -> {[map | m], rs, is, bs}
+    {maps, refs, ids} =
+      Enum.reduce(probes, {[], [], []}, fn
+        {:refs, r}, {m, rs, is} -> {m, rs ++ r, is}
+        {:ids, i}, {m, rs, is} -> {m, rs, is ++ i}
+        map, {m, rs, is} -> {[map | m], rs, is}
       end)
 
-    {Enum.reverse(maps), Enum.uniq(refs), Enum.uniq(ids), Enum.reverse(bodies)}
-  end
-
-  # A body link (read compat, slice 4): the declaring type's rows whose
-  # richText field holds a wikilink to one of the ids, at any depth. No
-  # index serves `.**`, so `type =` bounds the read to that type's rows.
-  defp stored_body_refs({:body_refs, type, jsonpath}),
-    do: dynamic([d], d.type == ^type and ^stored_jsonpath(jsonpath))
-
-  defp body_refs_condition({:body_refs, type, jsonpath}) do
-    dynamic(
-      [d, bp_content: c],
-      d.type == ^type and
-        fragment("? @\\? CAST(? AS jsonpath)", c.content, type(^jsonpath, :string))
-    )
+    {Enum.reverse(maps), Enum.uniq(refs), Enum.uniq(ids)}
   end
 
   # The exact conditions of a key: `a.b == v` as `strict_eq_condition/2`
@@ -1347,7 +1331,7 @@ defmodule Barkpark.Groq.DocumentSource do
   # `content`, `{:refs, ids}` the GIN index on the `_ref` values and
   # `{:ids, ids}` the `doc_id` index. An empty list matches nothing.
   defp probes_condition(probes, perspective) do
-    {maps, refs, ids, bodies} = split_probes(probes)
+    {maps, refs, ids} = split_probes(probes)
 
     conditions =
       Enum.reject(
@@ -1355,7 +1339,6 @@ defmodule Barkpark.Groq.DocumentSource do
           maps != [] && contains_any(maps),
           refs != [] && references_any(refs),
           ids != [] && ids_condition(ids, perspective)
-          | Enum.map(bodies, &body_refs_condition/1)
         ],
         &(&1 == false)
       )
@@ -2119,36 +2102,17 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp widen_refs(%{any: any} = constraints, positions) do
     refs = for {_t, path, "reference"} <- positions, do: path
-    bodies = for {type, path, "richText"} <- positions, do: {type, path}
 
     any =
       Enum.map(any, fn probes ->
         ids = for {:refs, ids} <- probes, id <- ids, uniq: true, do: id
 
-        cond do
-          ids == [] ->
-            probes
-
-          true ->
-            probes ++
-              for(path <- refs, id <- ids, uniq: true, do: probe_map(path, id)) ++
-              for({type, path} <- bodies, do: {:body_refs, type, body_link_jsonpath(path, ids)})
-        end
+        if ids == [] or refs == [],
+          do: probes,
+          else: probes ++ for(path <- refs, id <- ids, uniq: true, do: probe_map(path, id))
       end)
 
     %{constraints | any: any}
-  end
-
-  # A wikilink to one of `ids` anywhere under a richText field: `docId`, else
-  # `target`, as the evaluator reads it (the SQL test is the superset that
-  # takes either). Lax mode steps through the arrays on the way.
-  defp body_link_jsonpath(path, ids) do
-    at = "$" <> jsonpath_fields(Enum.map(path, &elem(&1, 0)))
-
-    "lax " <>
-      at <>
-      ~s|.** ? (@."type" == "wikilink" && (| <>
-      any_equal(~s|@."docId"|, ids) <> " || " <> any_equal(~s|@."target"|, ids) <> "))"
   end
 
   # The types in scope that declare `path` minus its leaf as the shape whose
@@ -2209,7 +2173,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
   defp field_shape_paths(schema, field, path, ctx) do
     case field["type"] do
-      kind when kind in ["reference", "slug", "richText"] ->
+      kind when kind in ["reference", "slug"] ->
         [{path, kind}]
 
       "arrayOf" ->

@@ -19,7 +19,6 @@ defmodule Barkpark.Groq.Evaluator do
   """
 
   alias Barkpark.Groq.{PortableText, Pushdown, Source, Values}
-  alias Barkpark.PortableDoc.BodyWalk
 
   defmodule EvalError do
     @moduledoc "A query that parses but cannot be evaluated (an unsupported function, a tuple)."
@@ -423,24 +422,6 @@ defmodule Barkpark.Groq.Evaluator do
   defp bare_refs_of(%{} = obj, %{"type" => t, "fields" => sub}, acc)
        when t in ["composite", "object"] and is_list(sub),
        do: bare_refs_in(obj, sub, acc)
-
-  # A body link: a wikilink's `docId`, else its `target`, at any depth of a
-  # declared richText field (Sanity: an internalLink markDef's `_ref`). The
-  # same rule `Content.Edges` projects into `content_edges`.
-  defp bare_refs_of(value, %{"type" => "richText"}, acc) when is_map(value) or is_list(value) do
-    value
-    |> BodyWalk.collect(fn
-      %{"type" => "wikilink"} = node ->
-        case node["docId"] || node["target"] do
-          id when is_binary(id) and id != "" -> [id]
-          _ -> []
-        end
-
-      _ ->
-        []
-    end)
-    |> Enum.reduce(acc, &MapSet.put(&2, &1))
-  end
 
   defp bare_refs_of(_value, _field, acc), do: acc
 
