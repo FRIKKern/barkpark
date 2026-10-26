@@ -98,6 +98,9 @@ services:
       # Deleted-payload retention, off unless set (owner ruling #33; read in api/config/runtime.exs)
       - BARKPARK_DELETED_PAYLOAD_RETENTION
       - BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS
+      # Cancelled-schedule purge, off unless set (task-44cfe871ea0edc30; read in api/config/runtime.exs)
+      - BARKPARK_CANCELLED_SCHEDULE_RETENTION
+      - BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS
       # Weekly public-read token rotation, off unless set (task-eaaf13ab768f34f6; read in api/config/runtime.exs)
       - BARKPARK_PUBLIC_READ_ROTATION
       # API token expiry mails at 14, 7 and 1 days, off unless set (task-ae4b82ef79867237; read in api/config/runtime.exs)
