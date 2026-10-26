@@ -1655,10 +1655,38 @@ defmodule Barkpark.Groq.DocumentSource do
     do: "strict " <> jsonpath(path) <> "[*] ? (" <> element_tests(pairs) <> ")"
 
   defp element_tests(pairs) do
-    Enum.map_join(pairs, " && ", fn {field, values} ->
-      "(" <> any_equal("@" <> jsonpath_fields(field), values) <> ")"
+    Enum.map_join(pairs, " && ", fn
+      {:item_type, values, marker, default} ->
+        "(" <> item_type_test(values, marker, default) <> ")"
+
+      {field, values} ->
+        "(" <> any_equal("@" <> jsonpath_fields(field), values) <> ")"
     end)
   end
+
+  # An item's GROQ `_type` (item_type/2): its stored `_type`, else its
+  # marker field when it has one, else the member's name. A missing key is
+  # tested through keyvalue(): strict mode makes `exists(@."k")` on a
+  # missing key unknown, and `!unknown` never holds.
+  defp item_type_test(values, nil, default) do
+    if default in values,
+      do: any_equal(~s|@."_type"|, values) <> " || " <> no_key("_type"),
+      else: any_equal(~s|@."_type"|, values)
+  end
+
+  defp item_type_test(values, marker, default) do
+    at = "@" <> jsonpath_fields([marker])
+
+    derived =
+      if default in values,
+        do: "(" <> any_equal(at, values) <> " || " <> no_key(marker) <> ")",
+        else: "(" <> any_equal(at, values) <> ")"
+
+    any_equal(~s|@."_type"|, values) <> " || (" <> no_key("_type") <> " && " <> derived <> ")"
+  end
+
+  defp no_key(key),
+    do: "!(exists(@.keyvalue() ? (@.key == " <> Jason.encode!(key) <> ")))"
 
   # `count(a.b[@ in [...]]) > 0` with a long list: one containment probe
   # `{"a": {"b": [v]}}` per value, each looked up on its own in
@@ -1894,7 +1922,9 @@ defmodule Barkpark.Groq.DocumentSource do
 
     rows
     |> Enum.zip(rendered)
-    |> Enum.map(fn {row, doc} -> doc |> to_sanity() |> put_views(row, counts) end)
+    |> Enum.map(fn {row, doc} ->
+      doc |> to_sanity() |> put_item_types(schema_for(row.type, state)) |> put_views(row, counts)
+    end)
     |> apply_overlay(state.perspective)
   end
 
@@ -1953,14 +1983,17 @@ defmodule Barkpark.Groq.DocumentSource do
   def widen(state, constraints) do
     positions = shape_positions(state, constraints.types)
 
-    if positions == [] do
-      constraints
-    else
-      constraints
-      |> widen_shape_eq(positions)
-      |> widen_shape_checks(positions, state)
-      |> widen_refs(positions)
-    end
+    constraints =
+      if positions == [] do
+        constraints
+      else
+        constraints
+        |> widen_shape_eq(positions)
+        |> widen_shape_checks(positions, state)
+        |> widen_refs(positions)
+      end
+
+    widen_item_types(constraints, state)
   end
 
   # `order(slug.current)` / `order(author._ref)` on a field every type in
@@ -2160,6 +2193,223 @@ defmodule Barkpark.Groq.DocumentSource do
       _ ->
         []
     end
+  end
+
+  # ── Array items' `_type` (read compat, slice 3) ──────────────────────────
+  #
+  # Sanity stores `_type` on every object-array item; Barkpark's single-member
+  # `arrayOf` stores the type in a marker field (`kind`, decision 0005: the
+  # member's `options.typeField`, or `kind` the import writes) or nowhere,
+  # when the member's `name` is the type. GROQ reads the item's `_type` as
+  # item_type/2 says, both on a loaded document (put_item_types/2) and in SQL
+  # (widen_item_types/2), so a filter and a read always agree.
+
+  # Its stored `_type`, else its marker field when the item has one, else
+  # the member's name. nil when none of them says.
+  defp item_type(%{"_type" => type}, _of), do: type
+
+  defp item_type(item, of) do
+    case item_marker(of) do
+      nil -> member_name(of)
+      marker when is_map_key(item, marker) -> if is_binary(item[marker]), do: item[marker]
+      _ -> member_name(of)
+    end
+  end
+
+  # The field that names an item's type: `options.typeField`, else `kind`
+  # when the member does not declare a `kind` of its own (then `kind` is the
+  # user's data, not a type).
+  defp item_marker(%{"options" => %{"typeField" => field}}) when is_binary(field), do: field
+
+  defp item_marker(of) do
+    if Enum.any?(of["fields"] || [], &match?(%{"name" => "kind"}, &1)), do: nil, else: "kind"
+  end
+
+  defp member_name(%{"name" => name}) when is_binary(name) and name != "", do: name
+  defp member_name(_of), do: nil
+
+  defp put_item_types(doc, %{fields: fields}) when is_list(fields), do: typed_fields(doc, fields)
+  defp put_item_types(doc, _schema), do: doc
+
+  defp typed_fields(obj, fields) do
+    Enum.reduce(fields, obj, fn
+      %{"name" => name} = field, acc when is_binary(name) and is_map_key(acc, name) ->
+        Map.update!(acc, name, &typed_value(&1, field))
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp typed_value(items, %{"type" => "arrayOf", "of" => %{"fields" => sub} = of})
+       when is_list(items) and is_list(sub) do
+    Enum.map(items, fn
+      %{} = item ->
+        item = typed_fields(item, sub)
+
+        case item_type(item, of) do
+          type when is_binary(type) -> Map.put_new(item, "_type", type)
+          _ -> item
+        end
+
+      other ->
+        other
+    end)
+  end
+
+  defp typed_value(%{} = obj, %{"type" => t, "fields" => sub})
+       when t in ["composite", "object"] and is_list(sub),
+       do: typed_fields(obj, sub)
+
+  defp typed_value(value, _field), do: value
+
+  # `count(a[_type == "x"]) > 0`, `"x" in a[]._type` and the rest Pushdown
+  # reads as {:some, path, pairs} (or {:none, ...}) with a `["_type"]` pair,
+  # on an array a type in scope declares as a single-member object array:
+  # that type's branch tests item_type/2 inside the same element jsonpath
+  # ({:item_type, values, marker, name}). An exact check in, an exact check
+  # out, so a filter SQL answers today, SQL still answers at any size; every
+  # other shape is left as it is.
+  defp widen_item_types(%{checks: checks, any: any} = constraints, state) do
+    if Enum.any?(checks, &item_type_check?/1) or
+         Enum.any?(any, &match?({:ok, _}, item_type_probe(&1))) do
+      positions = item_type_positions(state, constraints.types)
+      paths = for {_t, path, _m, _n} <- positions, uniq: true, do: path
+
+      # `"x" in a[]._type` can also reach here as the probe
+      # {"a": [{"_type": "x"}]}: the same test as {:some, ["a"], ...}.
+      {moved, any} =
+        Enum.split_with(any, fn probes ->
+          case item_type_probe(probes) do
+            {:ok, {path, _v}} -> path in paths
+            :error -> false
+          end
+        end)
+
+      checks =
+        checks ++
+          for probes <- moved,
+              {:ok, {path, v}} = item_type_probe(probes),
+              do: {:some, path, [{["_type"], [v]}]}
+
+      %{
+        constraints
+        | any: any,
+          checks: Enum.map(checks, &widen_item_type(&1, positions, constraints.types, state))
+      }
+    else
+      constraints
+    end
+  end
+
+  # One containment probe `{"a": {"b": [{"_type": v}]}}` as {path, v}.
+  defp item_type_probe([%{} = probe]), do: item_type_probe(probe, [])
+  defp item_type_probe(_probes), do: :error
+
+  defp item_type_probe(probe, path) when map_size(probe) == 1 do
+    case Enum.at(probe, 0) do
+      {key, [%{"_type" => v} = item]} when map_size(item) == 1 and is_binary(v) ->
+        {:ok, {path ++ [key], v}}
+
+      {key, %{} = inner} ->
+        item_type_probe(inner, path ++ [key])
+
+      _ ->
+        :error
+    end
+  end
+
+  defp item_type_probe(_probe, _path), do: :error
+
+  defp item_type_check?({kind, _path, pairs}) when kind in [:some, :none],
+    do: List.keymember?(pairs, ["_type"], 0)
+
+  defp item_type_check?({:or, branches}),
+    do: Enum.any?(branches, fn b -> Enum.any?(b.checks, &item_type_check?/1) end)
+
+  defp item_type_check?(_check), do: false
+
+  defp widen_item_type({kind, path, pairs} = check, positions, types, state)
+       when kind in [:some, :none] do
+    with {["_type"], values} <- List.keyfind(pairs, ["_type"], 0),
+         true <- Enum.all?(values, &is_binary/1),
+         [_ | _] = declaring <- for({t, ^path, m, n} <- positions, do: {t, m, n}) do
+      typed =
+        for {type, marker, name} <- declaring do
+          pair = {:item_type, values, marker, name}
+
+          %{
+            Pushdown.empty()
+            | types: [type],
+              checks: [{kind, path, List.keyreplace(pairs, ["_type"], 0, pair)}]
+          }
+        end
+
+      others = (types || Map.keys(scope_schemas(state))) -- Enum.map(declaring, &elem(&1, 0))
+
+      # {:some}: a stored `_type` matches in every type, as today. {:none}: a
+      # declaring type's items must all fail item_type/2, so the plain check
+      # stays only for the other types.
+      rest =
+        cond do
+          kind == :some -> [%{Pushdown.empty() | checks: [check]}]
+          others == [] -> []
+          true -> [%{Pushdown.empty() | types: others, checks: [check]}]
+        end
+
+      {:or, rest ++ typed}
+    else
+      _ -> check
+    end
+  end
+
+  defp widen_item_type({:or, branches}, positions, types, state) do
+    {:or,
+     Enum.map(branches, fn b ->
+       %{b | checks: Enum.map(b.checks, &widen_item_type(&1, positions, b.types || types, state))}
+     end)}
+  end
+
+  defp widen_item_type(check, _positions, _types, _state), do: check
+
+  # Every readable single-member object array a type in scope declares, on a
+  # plain path (objects, no array step), as {type, path, marker, name}. A
+  # member with no marker and no name gives no type, so it is left out.
+  defp item_type_positions(state, types) do
+    by_name = scope_schemas(state)
+
+    for type <- types || Map.keys(by_name),
+        schema = Map.get(by_name, type) || schema_for(type, state),
+        schema != nil,
+        {path, of} <- object_arrays(schema, schema.fields || [], [], state.caller_context),
+        # A generator, not `marker = ...`: a nil match would filter the row.
+        marker <- [item_marker(of)],
+        marker != nil or member_name(of) != nil,
+        do: {type, path, marker, member_name(of)}
+  end
+
+  defp object_arrays(schema, fields, path, ctx) do
+    Enum.flat_map(fields, fn
+      %{"name" => name} = field when is_binary(name) ->
+        here = path ++ [name]
+
+        cond do
+          not Envelope.field_readable?(schema, Enum.join(here, "."), ctx) ->
+            []
+
+          match?(%{"type" => "arrayOf", "of" => %{"fields" => [_ | _]}}, field) ->
+            [{here, field["of"]}]
+
+          field["type"] in ["composite", "object"] ->
+            object_arrays(schema, field["fields"] || [], here, ctx)
+
+          true ->
+            []
+        end
+
+      _ ->
+        []
+    end)
   end
 
   # Every schema in this source's scope, by name, read once per query.

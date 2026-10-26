@@ -351,7 +351,10 @@ defmodule Barkpark.Groq.Evaluator do
 
   defp field_decl({:attr, parent, field}, scope, ctx) do
     case eval_base(parent, scope, ctx) do
-      %{"_type" => type} when is_binary(type) ->
+      # A document. An array item's `_type` (a `_key`, no `_id`) names its
+      # member, not a document type, so it is walked as an object below.
+      %{"_type" => type} = obj
+      when is_binary(type) and (is_map_key(obj, "_id") or not is_map_key(obj, "_key")) ->
         ctx.source |> Source.schema_fields(type) |> find_field(field)
 
       %{} ->

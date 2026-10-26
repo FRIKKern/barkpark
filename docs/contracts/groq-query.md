@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: groq-query-api | budget: 1500tok -->
 # GROQ query API
 
-Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/` (parser, evaluator, document source), `BarkparkWeb.GroqController`.
+Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/`, `BarkparkWeb.GroqController`.
 
 ## Endpoint
 
@@ -19,7 +19,7 @@ Any `apiVersion` is accepted. Auth, tenancy and share access are those of the sc
 
 Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` comes from the `documents.title` column (`title == "x"` matches it); no title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows as stored.
 
-Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
+Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A missing parameter is a syntax error, as on Sanity.
 
 ## Client configuration
 
@@ -59,12 +59,12 @@ Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, 
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`api/test/barkpark/groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` or custom `fn`.
+Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` or custom `fn`.
 
 Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; release and version perspectives; `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark always to `published`: an older client needing drafts asks for `perspective: 'raw'`.
 
-`score()` weighs as groq-js; Sanity's hosted engine also favours rarer terms and shorter fields, so multi-clause ranks can differ.
+`score()` weighs as groq-js; Sanity's engine also favours rare terms and short fields, so ranks can differ.
 
-Read compat: a declared reference stored as a bare id answers `->`, `_ref`, `_type`, `references()`; a declared slug string `.current`. `order()` is exact where every type in scope declares the field, else a bare value sorts as missing.
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else the member name). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
 
 `tooling/groq/compare.mjs` (dev only) diffs a query corpus between groq-js and this endpoint.
