@@ -90,7 +90,7 @@ defmodule Barkpark.Groq.Evaluator do
       %{} = obj ->
         Map.get(obj, name)
 
-      v when is_binary(v) and name in ["_ref", "_type", "current"] ->
+      v when is_binary(v) and name in ["_ref", "_type", "_weak", "current"] ->
         bare_shape(v, name, base, scope, ctx)
 
       _ ->
@@ -332,7 +332,7 @@ defmodule Barkpark.Groq.Evaluator do
   # A field the schema declares a reference is stored as the bare id, where
   # Sanity stores {_type: "reference", _ref}; a declared slug as the string,
   # where Sanity stores {_type: "slug", current}. `author._ref`,
-  # `author._type`, `slug.current` and `slug._type` answer as Sanity's object
+  # `author._type`, `_weak` (true on a declared weak one), `slug.current` and `slug._type` answer as Sanity's object
   # would, for a declared field only: any other string answers null, as
   # before and as on Sanity. The field's declaration is found by walking
   # `base` back to the nearest value with a `_type` (the document or a typed
@@ -341,6 +341,7 @@ defmodule Barkpark.Groq.Evaluator do
     case {field_decl(base, scope, ctx), name} do
       {%{"type" => "reference"}, "_ref"} -> value
       {%{"type" => "reference"}, "_type"} -> "reference"
+      {%{"type" => "reference", "weak" => true}, "_weak"} -> true
       {%{"type" => "slug"}, "current"} -> value
       {%{"type" => "slug"}, "_type"} -> "slug"
       _ -> nil
