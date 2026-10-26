@@ -133,7 +133,7 @@ First frame: `event: welcome`. `?query=*[…]`: docs matching before/after, with
 
 ## 8. Schema endpoints [admin]
 
-Flat: global `admin`. Scoped reads: member API token or seated login bearer; no grant/share-only sessions. Writes: `owner`/`admin`. `P=/w/:workspace_slug/p/:project_slug`; schema: `{name,title,icon,visibility,fields:[...]}`.
+Flat: global `admin`. Scoped reads, also `GET P/v1/structure/:dataset` (the desk tree): member API token or seated login bearer; no grant/share-only sessions. Writes: `owner`/`admin`. `P=/w/:workspace_slug/p/:project_slug`; schema: `{name,title,icon,visibility,fields:[...]}`.
 
 - `GET P/v1/schemas/:dataset` → `{"_schemaVersion": 1, "schemas": [ <schema>, ... ]}`
 - `GET P/v1/schemas/:dataset/:name` → `{"_schemaVersion": 1, "schema": <schema>}`

@@ -20,8 +20,8 @@ defmodule BarkparkWeb.StructureController do
   registered without an explicit `visibility`, since that defaults to
   `"public"`.
 
-  Auth matches the schema index the TUI already calls (admin token on the
-  same pipelines); response: `{"structure": <node>}` where a node is
+  Auth matches the schema index: an admin token on the flat route; a member
+  API token or a seated login bearer on the scoped route. Response: `{"structure": <node>}` where a node is
   `{id, title, icon, type, typeName, filter, items: [node], child: node}`
   (plus `paneTitle` on a declared list whose pane has its own title, and
   `initialValues` on a declared type list whose "+" presets fields).
