@@ -295,4 +295,24 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
       assert resp.status == 200, resp.resp_body
     end
   end
+
+  # task-0d5ac677450d4c8c: the seat gate on the direct publish leaves a member
+  # session, which may publish, unchanged.
+  test "a member session's direct publish still lands", ctx do
+    token = member!(ctx)
+    id = "a89-direct-#{System.unique_integer([:positive])}"
+
+    body =
+      Jason.encode!(%{
+        mutations: [%{createOrReplace: %{_id: id, _type: "post", title: "live"}, publish: true}]
+      })
+
+    assert json_response(json_conn(token) |> post(mutate_path(ctx), body), 200)
+
+    assert {:ok, %{title: "live"}} =
+             Content.get_document(id, "post", @dataset,
+               workspace_id: ctx.ws.id,
+               project_id: ctx.project.id
+             )
+  end
 end
