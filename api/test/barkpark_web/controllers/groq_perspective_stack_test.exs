@@ -47,7 +47,7 @@ defmodule BarkparkWeb.GroqPerspectiveStackTest do
   end
 
   defp count(token, perspective) do
-    build_conn()
+    scoped_conn()
     |> put_req_header("authorization", "Bearer " <> token)
     |> get(@path, %{"query" => ~s|count(*[_type == "post"])|, "perspective" => perspective})
   end
