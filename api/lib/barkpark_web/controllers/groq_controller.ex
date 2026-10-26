@@ -167,17 +167,16 @@ defmodule BarkparkWeb.GroqController do
   defp respond(conn, params, query, result_json, tags, ms) do
     return_query? = params["returnQuery"] not in ["false", false]
 
-    fields =
-      [
-        if(return_query?, do: {"query", query}),
-        {"result", Jason.Fragment.new(result_json)},
-        {"ms", ms},
-        {"syncTags", tags}
-      ]
-      |> Enum.reject(&is_nil/1)
-      |> Jason.OrderedObject.new()
+    result = Jason.Fragment.new(result_json)
 
-    json(conn, fields)
+    # Literal maps, so the /v1/data envelope convention can read them
+    # (response_envelope_convention_test.exs): `result` plus Sanity's
+    # `query`, `ms` and `syncTags`.
+    if return_query? do
+      json(conn, %{query: query, result: result, ms: ms, syncTags: tags})
+    else
+      json(conn, %{result: result, ms: ms, syncTags: tags})
+    end
   end
 
   # A query's own hint: `malformed`'s default speaks of a JSON body, which a GROQ read

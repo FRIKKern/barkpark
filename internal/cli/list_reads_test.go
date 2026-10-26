@@ -228,6 +228,7 @@ var objectReadCommands = map[string]string{
 	"auth.token":                   "the bearer's own description, one object, no row array (token_self_controller.ex)",
 	"chat.get_attachment":          "single attachment object — id, media_type, byte_size, base64 data; never a row array (chat_attachment_controller.ex)",
 	"chat.get_session":             "single session object (chat_controller.ex)",
+	"doc.groq":                     "Sanity's query response: result plus query, ms and syncTags; result is whatever the GROQ query returns (groq_controller.ex)",
 	"codelist.show":                "values is a nested array, not the top-level row set; codelistId/name/description/issue are metadata (codelist_controller.ex)",
 	"cycle.show":                   "wave projection object; several values are arrays, none is 'the rows' (cycle_fleet_controller.ex)",
 	"data.counts":                  "`counts` is a type=>count MAP, not an array — `{}` is an honest fresh dataset (query_controller.ex)",
