@@ -62,9 +62,9 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance`, and `fn` (400 on a cycle or past 1000 calls expanded). CI runs Sanity's GROQ suite (`groq/conformance_test.exs`): 7156 of 7731 pass.
+Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance`, `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps). Sanity's GROQ suite (`groq/conformance_test.exs`, CI): all 7731 pass.
 
-Not yet: `diff::`, `geo::contains|intersects`, `text::query`, other `documents::`, `delta::`, `user::`; releases. Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; older clients ask for `raw`.
+Not yet: `geo::contains|intersects`, `text::query`, other `documents::`, `delta::`, `user::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 

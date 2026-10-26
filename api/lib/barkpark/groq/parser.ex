@@ -368,6 +368,147 @@ defmodule Barkpark.Groq.Parser do
   defp put_fn_arg(list, arg) when is_list(list), do: Enum.map(list, &put_fn_arg(&1, arg))
   defp put_fn_arg(other, _arg), do: other
 
+  # ── diff:: selectors (task-13790b478beeee4d) ─────────────────────────────
+  #
+  # The third argument of `diff::changedAny` / `diff::changedOnly` is a
+  # selector, not an expression: `a`, `a.b`, `a.(b, c)`, `(a, b).c`, `a[]`,
+  # `a[cond]`, `anywhere(cond)`. Anything else is Sanity's "invalid selector".
+  # A selector may hold at most `@max_selector_steps` steps.
+
+  @max_selector_steps 100
+
+  defp parse_diff_call(s, name, start, open, ctx) do
+    {lhs, p, _} = parse_expr(s, skip_ws(s, open + 1), 0, ctx)
+    p = expect_diff_comma!(s, skip_ws(s, p), start, open)
+    {rhs, p, _} = parse_expr(s, p, 0, ctx)
+    p = expect_diff_comma!(s, skip_ws(s, p), start, open)
+
+    Process.put(:groq_selector_steps, 0)
+    {sel, p} = parse_selector(s, p, ctx)
+    Process.delete(:groq_selector_steps)
+    p = skip_ws(s, p)
+
+    case at(s, p) do
+      ?) -> {{:func, "diff", name, [lhs, rhs, {:selector, sel}]}, p + 1}
+      ?, -> throw({:groq_parse_error, "three arguments expected", start, open})
+      _ -> throw({:groq_parse_error, "invalid selector", p, p + 1})
+    end
+  end
+
+  defp expect_diff_comma!(s, p, start, open) do
+    if at(s, p) == ?,,
+      do: skip_ws(s, p + 1),
+      else: throw({:groq_parse_error, "three arguments expected", start, open})
+  end
+
+  defp parse_selector(s, p, ctx) do
+    {first, p} = selector_component(s, skip_ws(s, p), ctx)
+    selector_postfix(s, p, ctx, [first])
+  end
+
+  defp selector_step!(step) do
+    n = Process.get(:groq_selector_steps, 0) + 1
+
+    if n > @max_selector_steps do
+      throw(
+        {:groq_parse_error, "selector is too large (more than #{@max_selector_steps} steps)", 0}
+      )
+    end
+
+    Process.put(:groq_selector_steps, n)
+    step
+  end
+
+  defp selector_component(s, p, ctx) do
+    case at(s, p) do
+      ?( ->
+        selector_group(s, p, ctx)
+
+      c ->
+        n = if c && ident_start?(c), do: ident_len(s, p), else: 0
+        if n == 0, do: throw({:groq_parse_error, "invalid selector", p, p + 1})
+        name = binary_part(s, p, n)
+        open = skip_ws(s, p + n)
+
+        if name == "anywhere" and at(s, open) == ?( do
+          {cond_expr, q, _} = parse_expr(s, skip_ws(s, open + 1), 0, ctx)
+          q = skip_ws(s, q)
+          if at(s, q) != ?), do: throw({:groq_parse_error, "invalid selector", q, q + 1})
+          {selector_step!({:anywhere, cond_expr}), q + 1}
+        else
+          {selector_step!({:key, name}), p + n}
+        end
+    end
+  end
+
+  defp selector_group(s, p, ctx) do
+    q = skip_ws(s, p + 1)
+
+    if at(s, q) == ?) do
+      throw({:groq_parse_error, "unexpected token \")\", expected expression", q, q + 1})
+    end
+
+    {sels, q} = selector_list(s, q, ctx, [])
+    {selector_step!({:group, sels}), q}
+  end
+
+  defp selector_list(s, p, ctx, acc) do
+    {sel, q} = parse_selector(s, p, ctx)
+    q = skip_ws(s, q)
+
+    case at(s, q) do
+      ?, -> selector_list(s, skip_ws(s, q + 1), ctx, [sel | acc])
+      ?) -> {Enum.reverse([sel | acc]), q + 1}
+      _ -> throw({:groq_parse_error, "invalid selector", q, q + 1})
+    end
+  end
+
+  defp selector_postfix(s, p, ctx, steps) do
+    q = skip_ws(s, p)
+
+    case at(s, q) do
+      ?. ->
+        r = skip_ws(s, q + 1)
+
+        {step, r} =
+          case at(s, r) do
+            ?( ->
+              selector_group(s, r, ctx)
+
+            c ->
+              n = if c && ident_start?(c), do: ident_len(s, r), else: 0
+              if n == 0, do: throw({:groq_parse_error, "invalid selector", r, r + 1})
+              {selector_step!({:key, binary_part(s, r, n)}), r + n}
+          end
+
+        selector_postfix(s, r, ctx, [step | steps])
+
+      ?[ ->
+        r = skip_ws(s, q + 1)
+
+        if at(s, r) == ?] do
+          selector_postfix(s, r + 1, ctx, [selector_step!(:each) | steps])
+        else
+          {cond_expr, e, _} = parse_expr(s, r, 0, ctx)
+          e = skip_ws(s, e)
+
+          if at(s, e) != ?] or index_like?(cond_expr),
+            do: throw({:groq_parse_error, "invalid selector", r, e + 1})
+
+          selector_postfix(s, e + 1, ctx, [selector_step!({:filter, cond_expr}) | steps])
+        end
+
+      _ ->
+        {Enum.reverse(steps), p}
+    end
+  end
+
+  # `a[0]` and `a[0..2]` index an array; a selector only filters it.
+  defp index_like?({:value, n}) when is_number(n), do: true
+  defp index_like?({sign, {:value, n}}) when sign in [:neg, :pos] and is_number(n), do: true
+  defp index_like?({:range, _, _, _}), do: true
+  defp index_like?(_), do: false
+
   # ── Expressions ──────────────────────────────────────────────────────────
 
   defp parse_expr(s, pos, level, ctx) do
@@ -845,7 +986,17 @@ defmodule Barkpark.Groq.Parser do
     end
   end
 
-  defp parse_func_call(s, namespace, name, start, open, ctx) do
+  defp parse_func_call(s, "diff", name, start, open, ctx)
+       when name in ["changedAny", "changedOnly"] do
+    if user_fn?(ctx.fns, "diff", name),
+      do: parse_call_args(s, "diff", name, start, open, ctx),
+      else: parse_diff_call(s, name, start, open, ctx)
+  end
+
+  defp parse_func_call(s, namespace, name, start, open, ctx),
+    do: parse_call_args(s, namespace, name, start, open, ctx)
+
+  defp parse_call_args(s, namespace, name, start, open, ctx) do
     {args, p} = parse_args(s, open, ctx)
 
     cond do
