@@ -1395,19 +1395,6 @@ defmodule Barkpark.Content.Graph do
     end
   end
 
-  defp asset_ref_patterns(%Document{type: "mediaAsset", content: %{"mediaFileId" => fid}}, opts)
-       when is_binary(fid) do
-    case Barkpark.Media.get_file(fid, Keyword.take(opts, [:workspace_id, :project_id])) do
-      {:ok, %Barkpark.Media.Storage.MediaFile{} = file} ->
-        Barkpark.Media.WhereUsed.sanity_ref_patterns(file)
-
-      _ ->
-        []
-    end
-  end
-
-  defp asset_ref_patterns(_target, _opts), do: []
-
   @doc """
   Authenticated used-in cards: live schema-declared references plus projected plugin
   edges. Drafts and recent writes do not depend on the published edge index.
@@ -1422,16 +1409,8 @@ defmodule Barkpark.Content.Graph do
       schemas_by_type = Map.new(schemas, &{&1.name, &1})
       ctx = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
 
-      # A media asset's holders include fields that hold its blob's Sanity id
-      # (image-<sha1>-…, file-<sha1>-…, source_id), as the delete guard counts
-      # them (task-bace4f482af160a9).
-      holder_opts =
-        opts
-        |> Keyword.put(:schemas, schemas)
-        |> Keyword.put(:asset_ref_patterns, asset_ref_patterns(target, opts))
-
       live =
-        Content.Query.list_reference_holders(id, dataset, holder_opts)
+        Content.Query.list_reference_holders(id, dataset, Keyword.put(opts, :schemas, schemas))
         |> Enum.map(fn src ->
           %{
             from_id: src.id,

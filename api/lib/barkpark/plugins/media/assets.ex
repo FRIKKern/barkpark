@@ -119,6 +119,25 @@ defmodule Barkpark.Plugins.Media.Assets do
   end
 
   @doc """
+  The `mediaAsset` document with this id (published or draft), if any, in the
+  dataset and tenancy scope `opts` carries.
+  """
+  @spec find_by_doc_id(String.t(), String.t(), keyword()) :: Document.t() | nil
+  def find_by_doc_id(doc_id, dataset, opts \\ [])
+      when is_binary(doc_id) and is_binary(dataset) and is_list(opts) do
+    pub = Content.published_id(doc_id)
+
+    Document
+    |> where([d], d.type == ^@asset_type)
+    |> scope_asset_dataset(dataset, opts)
+    |> scope_asset_workspace(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
+    |> where([d], d.doc_id in ^[pub, Content.draft_id(pub)])
+    |> order_by([d], desc: d.updated_at)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  @doc """
   Batch lookup of asset documents by blob id.
 
   `opts` may carry tenancy scope (`:workspace_id` / `:project_id`); see
