@@ -87,8 +87,14 @@ defmodule Barkpark.Groq.Evaluator do
 
   def eval({:attr, base, name}, scope, ctx) do
     case eval_base(base, scope, ctx) do
-      %{} = obj -> Map.get(obj, name)
-      _ -> nil
+      %{} = obj ->
+        Map.get(obj, name)
+
+      id when is_binary(id) and name in ["_ref", "_type"] ->
+        bare_reference(id, name, base, scope, ctx)
+
+      _ ->
+        nil
     end
   end
 
@@ -321,6 +327,98 @@ defmodule Barkpark.Groq.Evaluator do
     end
   end
 
+  # ── Read compat (task-c2be444ac1d07719) ──────────────────────────────────
+  #
+  # A field the schema declares a reference is stored as the bare id, where
+  # Sanity stores {_type: "reference", _ref}. `author._ref` and `author._type`
+  # answer as Sanity's object would, for a declared reference only: any other
+  # string answers null, as before and as on Sanity. The field's declaration
+  # is found by walking `base` back to the nearest value with a `_type` (the
+  # document or a typed item) and down its schema, objects included.
+  defp bare_reference(id, name, base, scope, ctx) do
+    case field_decl(base, scope, ctx) do
+      %{"type" => "reference"} -> if name == "_ref", do: id, else: "reference"
+      _ -> nil
+    end
+  end
+
+  defp field_decl({:attr, parent, field}, scope, ctx) do
+    case eval_base(parent, scope, ctx) do
+      %{"_type" => type} when is_binary(type) ->
+        ctx.source |> Source.schema_fields(type) |> find_field(field)
+
+      %{} ->
+        case field_decl(parent, scope, ctx) do
+          %{"fields" => fields} -> find_field(fields, field)
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp field_decl({:group, base}, scope, ctx), do: field_decl(base, scope, ctx)
+  defp field_decl({:memo, base}, scope, ctx), do: field_decl(base, scope, ctx)
+  defp field_decl(_base, _scope, _ctx), do: nil
+
+  defp find_field(fields, name) when is_list(fields),
+    do: Enum.find(fields, &match?(%{"name" => ^name}, &1))
+
+  defp find_field(_fields, _name), do: nil
+
+  # The bare ids a document holds in its declared reference positions: a
+  # reference field, an array of references, inside objects and object arrays.
+  defp bare_refs(%{"_type" => type} = doc, ctx) when is_binary(type) do
+    case Source.schema_fields(ctx.source, type) do
+      fields when is_list(fields) -> bare_refs_in(doc, fields, MapSet.new())
+      _ -> MapSet.new()
+    end
+  end
+
+  defp bare_refs(_doc, _ctx), do: MapSet.new()
+
+  defp bare_refs_in(%{} = obj, fields, acc) do
+    Enum.reduce(fields, acc, fn
+      %{"name" => name} = field, acc when is_binary(name) ->
+        bare_refs_of(Map.get(obj, name), field, acc)
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp bare_refs_in(_obj, _fields, acc), do: acc
+
+  defp bare_refs_of(id, %{"type" => "reference"}, acc) when is_binary(id) and id != "",
+    do: MapSet.put(acc, id)
+
+  defp bare_refs_of(list, %{"type" => "arrayOf", "of" => of}, acc) when is_list(list) do
+    Enum.reduce(list, acc, fn
+      id, acc when is_binary(id) and id != "" ->
+        if ref_member?(of), do: MapSet.put(acc, id), else: acc
+
+      %{} = item, acc ->
+        case of do
+          %{"fields" => sub} when is_list(sub) -> bare_refs_in(item, sub, acc)
+          _ -> acc
+        end
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp bare_refs_of(%{} = obj, %{"type" => t, "fields" => sub}, acc)
+       when t in ["composite", "object"] and is_list(sub),
+       do: bare_refs_in(obj, sub, acc)
+
+  defp bare_refs_of(_value, _field, acc), do: acc
+
+  defp ref_member?(%{"type" => "reference"}), do: true
+  defp ref_member?(members) when is_list(members), do: Enum.any?(members, &ref_member?/1)
+  defp ref_member?(_), do: false
+
   defp eval_base(nil, scope, _ctx), do: scope.value
   defp eval_base(base, scope, ctx), do: eval(base, scope, ctx)
 
@@ -514,7 +612,7 @@ defmodule Barkpark.Groq.Evaluator do
 
     case ids do
       [] -> false
-      _ -> references?(scope.value, MapSet.new(ids))
+      _ -> references?(scope.value, MapSet.new(ids), ctx)
     end
   end
 
@@ -935,14 +1033,17 @@ defmodule Barkpark.Groq.Evaluator do
   # `references()` walks the whole value. A document straight from the source
   # is walked once per query and its id set reused, which matters for the
   # common `*[_type == "x" && references(^._id)]` inside a projection.
-  defp references?(%{"_id" => id} = doc, ids) when is_binary(id) do
+  # A document's set also holds the bare ids in its declared reference
+  # positions (read compat), so references() matches them as Sanity matches
+  # the {_ref} it stores.
+  defp references?(%{"_id" => id} = doc, ids, ctx) when is_binary(id) do
     refs =
       case Process.get({:groq_refs, id}) do
         {^doc, set} ->
           set
 
         _ ->
-          set = collect_refs(doc, MapSet.new())
+          set = doc |> collect_refs(MapSet.new()) |> MapSet.union(bare_refs(doc, ctx))
           Process.put({:groq_refs, id}, {doc, set})
           set
       end
@@ -950,7 +1051,7 @@ defmodule Barkpark.Groq.Evaluator do
     not MapSet.disjoint?(refs, ids)
   end
 
-  defp references?(value, ids), do: has_reference?(value, ids)
+  defp references?(value, ids, _ctx), do: has_reference?(value, ids)
 
   defp has_reference?(list, ids) when is_list(list), do: Enum.any?(list, &has_reference?(&1, ids))
 
