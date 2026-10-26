@@ -201,4 +201,131 @@ defmodule BarkparkWeb.OidcControllerTest do
     assert "no_connection" in reasons
     assert "state_mismatch" in reasons
   end
+
+  describe "a Studio signs in through the instance's SSO (task-8bdf1b15305af840)" do
+    @studio "https://studio.example.com"
+    @verifier String.duplicate("v", 43)
+
+    setup do
+      prev = Application.get_env(:barkpark, :studio_sso_origins)
+      Application.put_env(:barkpark, :studio_sso_origins, [@studio])
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :studio_sso_origins, prev),
+          else: Application.delete_env(:barkpark, :studio_sso_origins)
+      end)
+    end
+
+    defp challenge, do: Base.url_encode64(:crypto.hash(:sha256, @verifier), padding: false)
+
+    defp start_query(return_to),
+      do:
+        URI.encode_query(%{
+          "return_to" => return_to,
+          "state" => "studio-state",
+          "code_challenge" => challenge()
+        })
+
+    # The IdP signs eve in and the callback answers for the Studio that started.
+    defp studio_callback(conn) do
+      nonce = "n#{System.unique_integer([:positive])}"
+
+      mock_op(%{
+        "iss" => @issuer,
+        "aud" => @client_id,
+        "exp" => System.system_time(:second) + 300,
+        "nonce" => nonce,
+        "email" => "eve@octrl.com"
+      })
+
+      studio = %{
+        "to" => @studio <> "/auth/cloud/callback",
+        "origin" => @studio,
+        "state" => "studio-state",
+        "challenge" => challenge()
+      }
+
+      conn =
+        conn
+        |> init_test_session(%{
+          oidc_state: "s1",
+          oidc_nonce: nonce,
+          oidc_verifier: "v1",
+          oidc_studio: studio
+        })
+        |> get("/v1/auth/oidc/octrl/callback?code=#{nonce}&state=s1")
+
+      location = URI.parse(redirected_to(conn, 302))
+      assert "#{location.scheme}://#{location.host}#{location.path}" == studio["to"]
+      refute get_session(conn, "user_session")
+      URI.decode_query(location.query)
+    end
+
+    defp exchange(audience, ticket, verifier \\ @verifier) do
+      build_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/auth/sso/exchange",
+        Jason.encode!(%{ticket: ticket, audience: audience, code_verifier: verifier})
+      )
+    end
+
+    test "start keeps the Studio's return only for an allowed origin", %{conn: conn} do
+      allowed =
+        get(conn, "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/auth/cloud/callback"))
+
+      assert redirected_to(allowed, 302) =~ @issuer <> "/authorize?"
+      assert get_session(allowed, :oidc_studio)["origin"] == @studio
+
+      for to <- [
+            "https://evil.example.com/cb",
+            "https://studio.example.com.evil.test/cb",
+            "/studio"
+          ] do
+        refused = get(build_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(to))
+        assert json_response(refused, 400)["error"]["code"] == "malformed"
+      end
+
+      Application.delete_env(:barkpark, :studio_sso_origins)
+      refused = get(build_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/cb"))
+      assert json_response(refused, 400)
+    end
+
+    test "the callback sends a ticket the Studio trades once for a login session", %{conn: conn} do
+      %{"ticket" => ticket, "state" => "studio-state"} = studio_callback(conn)
+
+      body = json_response(exchange(@studio, ticket), 201)
+      assert body["user"]["email"] == "eve@octrl.com"
+      assert Accounts.verify_user_session_token(body["token"]).email == "eve@octrl.com"
+
+      assert json_response(exchange(@studio, ticket), 401)["error"]["code"] == "invalid_ticket"
+    end
+
+    for {name, audience, verifier} <- [
+          {"audience", "https://evil.example.com", String.duplicate("v", 43)},
+          {"verifier", "https://studio.example.com", "x"}
+        ] do
+      test "a wrong #{name} is refused and the session it carried is revoked", %{conn: conn} do
+        %{"ticket" => ticket} = studio_callback(conn)
+        [session] = Repo.all(from t in Barkpark.Auth.LoginTicket, select: t.api_token)
+
+        assert json_response(exchange(unquote(audience), ticket, unquote(verifier)), 401)
+        refute Accounts.verify_user_session_token(session)
+        assert Repo.all(Barkpark.Auth.LoginTicket) == []
+      end
+    end
+
+    test "the Cloud exchange does not take an SSO ticket", %{conn: conn} do
+      %{"ticket" => ticket} = studio_callback(conn)
+
+      assert build_conn()
+             |> put_req_header("content-type", "application/json")
+             |> post(
+               "/v1/auth/login-tickets/exchange",
+               Jason.encode!(%{ticket: ticket, audience: @studio, code_verifier: @verifier})
+             )
+             |> json_response(401)
+    end
+  end
 end
