@@ -907,6 +907,12 @@ end
 # owner_user_id -> user.email, or an app token's "app:<email>" label); ids are
 # `api_tokens.id` values, the direct handle for a machine token with no human
 # behind it. Blank entries are dropped, so "a@b.io,," is one operator, not three.
+# BARKPARK_OPERATOR_FAIL_CLOSED=1: with both lists unset the operator routes
+# refuse every caller instead of falling back to the admin bit. Off by default.
+if System.get_env("BARKPARK_OPERATOR_FAIL_CLOSED") in ~w(1 true yes on) do
+  config :barkpark, :operator_fail_closed, true
+end
+
 for {env_name, config_key} <- [
       {"BARKPARK_OPERATOR_EMAILS", :operator_emails},
       {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
