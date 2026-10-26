@@ -129,7 +129,14 @@ defmodule Barkpark.Groq.DocumentSource do
            %{ids: MapSet.t(), types: MapSet.t(), id_types: %{String.t() => String.t()}}}
   def run(tree, state, eval_opts) do
     Process.put(:groq_src_loaded, 0)
-    Process.put(:groq_src_touched, %{ids: MapSet.new(), types: MapSet.new(), id_types: %{}})
+
+    Process.put(:groq_src_touched, %{
+      ids: MapSet.new(),
+      types: MapSet.new(),
+      id_types: %{},
+      untyped: false
+    })
+
     result = run_rounds(tree, state, eval_opts, 1)
     {result, Process.get(:groq_src_touched)}
   end
@@ -531,9 +538,9 @@ defmodule Barkpark.Groq.DocumentSource do
       |> Repo.all(@planned_per_call)
       |> Map.new(&{&1.i, &1.n})
 
-    Enum.each(keys, fn {{types, _ids, _eq, _any, _checks} = key, i} ->
+    Enum.each(keys, fn {{types, ids, _eq, _any, _checks} = key, i} ->
       Process.put({:groq_src_count, key}, Map.get(counts, i, 0))
-      Enum.each(types || [], &touch_type/1)
+      touch_scope(types, ids)
     end)
   end
 
@@ -888,8 +895,8 @@ defmodule Barkpark.Groq.DocumentSource do
     end)
   end
 
-  defp scan_query(state, {types, _ids, _eq, _any, _checks} = key) do
-    Enum.each(types || [], &touch_type/1)
+  defp scan_query(state, {types, ids, _eq, _any, _checks} = key) do
+    touch_scope(types, ids)
 
     state
     |> counted_rows()
@@ -933,7 +940,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
   # The exact matches from `from` up to `to`, sized before they load.
   defp load_slice(state, {types, ids, eq, _any, checks}, keys, from, to, fields \\ :all) do
-    Enum.each(types || [], &touch_type/1)
+    touch_scope(types, ids)
 
     ids =
       state
@@ -1212,6 +1219,9 @@ defmodule Barkpark.Groq.DocumentSource do
       else: Enum.each(docs, &touch_type(&1["_type"]))
 
     if types, do: Enum.each(types, &touch_type/1)
+
+    if is_nil(types) and Enum.any?(keys, fn {_types, ids, _eq, _any, _checks} -> ids == nil end),
+      do: touch_untyped()
 
     Enum.each(keys, &Process.put({:groq_src_key, &1}, docs))
   end
@@ -1832,6 +1842,18 @@ defmodule Barkpark.Groq.DocumentSource do
   defp touch_type(type) do
     touched = Process.get(:groq_src_touched)
     Process.put(:groq_src_touched, %{touched | types: MapSet.put(touched.types, type)})
+  end
+
+  # A read's dependency: its types, or, for a scan with neither types nor ids
+  # (`*[slug.current == $s]`), every document of the dataset — a match can
+  # appear in any type, so its tags carry `bp:ds:<dataset>:_all`
+  # (task-d6566cbed9b7c33c). A read by id is tagged by its documents.
+  defp touch_scope(types, _ids) when is_list(types), do: Enum.each(types, &touch_type/1)
+  defp touch_scope(nil, nil), do: touch_untyped()
+  defp touch_scope(nil, _ids), do: :ok
+
+  defp touch_untyped do
+    Process.put(:groq_src_touched, %{Process.get(:groq_src_touched) | untyped: true})
   end
 
   defp count_loaded!(state, n) do

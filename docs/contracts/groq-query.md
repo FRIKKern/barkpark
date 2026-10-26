@@ -17,7 +17,7 @@ Barkpark answers GROQ on Sanity's HTTP query API URLs, so a `@sanity/client` or 
 
 Any `apiVersion`. Auth, tenancy and shares are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token on an unshared dataset: 403 (Sanity: 200, empty), kept. POST bills the read bucket. A GET over 32,753 bytes is 414; use POST.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content fields at the top level, redacted per field visibility. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows.
 
 `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]` (`getDocument(s)`) reads `*[_id in ids]` as `raw`: `{"documents", "omitted"}`; a missing id is omitted, reason `existence`.
 
@@ -29,7 +29,7 @@ Errors keep Barkpark's envelope plus Sanity's `description`, `statusCode` and `m
 import {createClient} from '@sanity/client'
 
 const client = createClient({
-  projectId: 'barkpark', // any value; needed to send perspective
+  projectId: 'barkpark', // any value
   dataset: 'production',
   apiHost: 'https://<host>/w/<workspace>/p/<project>',
   useProjectHostname: false,
@@ -41,7 +41,7 @@ const client = createClient({
 
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, and `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned. The webhook dispatcher sends the same tags on each mutation ([webhook-realtime.md](webhook-realtime.md)), so `revalidateTag` refreshes every cached query that read it. At most 128 tags; beyond that, type tags only.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter (add `_type` for finer refresh). Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin, which live events send. At most 128 tags: past 64 readable ones, type tags only.
 
 ## Evaluation and limits
 
@@ -63,10 +63,10 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`groq/conformance_test.exs`): 7147 of 7731 pass; the rest use `diff::` or `fn`.
 
-Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases (a stack's release ids are ignored); `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`: an older client asks for `perspective: 'raw'`.
+Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases (a stack's release ids are ignored); `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 
-Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()` (its wikilinks do not count for `references()` yet). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()` (its wikilinks are not `references()` yet). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
 
 `tooling/groq/compare.mjs` diffs a corpus against groq-js.

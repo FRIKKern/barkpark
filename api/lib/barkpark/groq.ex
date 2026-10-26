@@ -26,11 +26,14 @@ defmodule Barkpark.Groq do
   `bp:ds:<dataset>:doc:<id>` for every document it read by id whose type was
   not scanned. These are the tags the webhook dispatcher sends on every
   mutation (`Barkpark.Webhooks.Dispatcher`), so a site can call
-  `revalidateTag` with a webhook's tags. Past `:max_sync_tags`, document tags
-  collapse into their type tags.
+  `revalidateTag` with a webhook's tags. A scan with no `_type` and no `_id`
+  filter also carries `bp:ds:<dataset>:_all`: a match can appear in any type.
+  Every readable tag is followed by its opaque twin (`Barkpark.Groq.SyncTag`),
+  which the live events stream sends. Both halves fit `:max_sync_tags`, so past
+  half of it document tags collapse into their type tags.
   """
 
-  alias Barkpark.Groq.{DocumentSource, LimitError, Parser, Slots}
+  alias Barkpark.Groq.{DocumentSource, LimitError, Parser, Slots, SyncTag}
 
   @type query_error ::
           {:parse, %{description: String.t(), start: non_neg_integer(), end: non_neg_integer()}}
@@ -81,6 +84,8 @@ defmodule Barkpark.Groq do
     timeout = limit(:timeout_ms, 10_000)
     max_heap_words = div(limit(:max_heap_bytes, 536_870_912), :erlang.system_info(:wordsize))
 
+    tag_project = opts |> Keyword.get(:scope_opts, []) |> Keyword.get(:project_id)
+
     eval_opts = [
       now: Keyword.get(opts, :now),
       identity: Keyword.get(opts, :identity),
@@ -91,7 +96,14 @@ defmodule Barkpark.Groq do
     case Slots.acquire() do
       :ok ->
         try do
-          evaluate_limited(tree, state, eval_opts, timeout, max_heap_words, dataset)
+          evaluate_limited(
+            tree,
+            state,
+            eval_opts,
+            timeout,
+            max_heap_words,
+            {dataset, tag_project}
+          )
         after
           Slots.release()
         end
@@ -101,7 +113,7 @@ defmodule Barkpark.Groq do
     end
   end
 
-  defp evaluate_limited(tree, state, eval_opts, timeout, max_heap_words, dataset) do
+  defp evaluate_limited(tree, state, eval_opts, timeout, max_heap_words, tag_scope) do
     task =
       Task.async(fn ->
         Process.flag(:max_heap_size, %{size: max_heap_words, kill: true, error_logger: false})
@@ -110,7 +122,7 @@ defmodule Barkpark.Groq do
 
     case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
       {:ok, outcome} ->
-        finish(outcome, dataset)
+        finish(outcome, tag_scope)
 
       {:exit, :killed} ->
         {:error, {:limit, "the query used more memory than the endpoint allows"}}
@@ -131,10 +143,10 @@ defmodule Barkpark.Groq do
     e in LimitError -> {:limit_error, e.message}
   end
 
-  defp finish({:limit_error, message}, _dataset), do: {:error, {:limit, message}}
-  defp finish({{:error, message}, _touched}, _dataset), do: {:error, {:eval, message}}
+  defp finish({:limit_error, message}, _tag_scope), do: {:error, {:limit, message}}
+  defp finish({{:error, message}, _touched}, _tag_scope), do: {:error, {:eval, message}}
 
-  defp finish({{:ok, result}, touched}, dataset) do
+  defp finish({{:ok, result}, touched}, {dataset, project}) do
     json = Jason.encode_to_iodata!(result)
     max_result = limit(:max_result_bytes, 10_485_760)
     size = IO.iodata_length(json)
@@ -144,17 +156,24 @@ defmodule Barkpark.Groq do
        {:limit,
         "the result is #{size} bytes; the limit is #{max_result}. Project fewer fields or slice the result."}}
     else
-      {:ok, %{result_json: json, sync_tags: sync_tags(dataset, touched)}}
+      {:ok, %{result_json: json, sync_tags: sync_tags(dataset, touched, project)}}
     end
   end
 
   @doc false
-  @spec sync_tags(String.t(), %{ids: MapSet.t(), types: MapSet.t(), id_types: map()}) :: [
-          String.t()
-        ]
-  def sync_tags(dataset, touched) do
+  # The readable tags, then each one's opaque twin (`Barkpark.Groq.SyncTag`) for
+  # the live events stream. Both halves together stay within `:max_sync_tags`,
+  # so the readable half collapses document tags into type tags past half of it.
+  @spec sync_tags(String.t(), map(), String.t() | nil) :: [String.t()]
+  def sync_tags(dataset, touched, project \\ nil) do
+    readable = readable_tags(dataset, touched, div(limit(:max_sync_tags, 128), 2))
+    readable ++ Enum.map(readable, &SyncTag.opaque(project, &1))
+  end
+
+  defp readable_tags(dataset, touched, max) do
     types = touched.types
     id_types = Map.get(touched, :id_types, %{})
+    all = if Map.get(touched, :untyped, false), do: [SyncTag.all(dataset)], else: []
 
     doc_ids =
       touched.ids
@@ -163,10 +182,9 @@ defmodule Barkpark.Groq do
 
     type_tags = types |> Enum.sort() |> Enum.map(&"bp:ds:#{dataset}:type:#{&1}")
     doc_tags = Enum.map(doc_ids, &"bp:ds:#{dataset}:doc:#{&1}")
-    max = limit(:max_sync_tags, 128)
 
-    if length(type_tags) + length(doc_tags) <= max do
-      type_tags ++ doc_tags
+    if length(all) + length(type_tags) + length(doc_tags) <= max do
+      all ++ type_tags ++ doc_tags
     else
       collapsed =
         doc_ids
@@ -177,7 +195,7 @@ defmodule Barkpark.Groq do
         |> Enum.sort()
         |> Enum.map(&"bp:ds:#{dataset}:type:#{&1}")
 
-      Enum.take(collapsed, max)
+      Enum.take(all ++ collapsed, max)
     end
   end
 

@@ -336,8 +336,13 @@ defmodule BarkparkWeb.GroqControllerTest do
     body =
       conn |> get_query(token, ~s'*[_id == "b1"][0]{"a": author->name}') |> json_response(200)
 
-    assert Enum.sort(body["syncTags"]) ==
+    {readable, opaque} = Enum.split_with(body["syncTags"], &String.starts_with?(&1, "bp:"))
+
+    assert Enum.sort(readable) ==
              Enum.sort(["bp:ds:#{@dataset}:doc:b1", "bp:ds:#{@dataset}:doc:ada"])
+
+    # Each readable tag has its opaque twin for the live events stream.
+    assert length(opaque) == 2 and Enum.all?(opaque, &String.starts_with?(&1, "s1:"))
   end
 
   test "a query that would load too many documents is refused with 422", %{
