@@ -96,6 +96,67 @@ defmodule BarkparkWeb.GroqController do
     end
   end
 
+  @doc """
+  Sanity's document read, `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]`
+  (`client.getDocument` / `getDocuments`): `{"documents": [...], "omitted":
+  [{"id", "reason": "existence"}]}`, by `_id` alone. It is the GROQ read
+  `*[_id in $ids]` with the same dataset, scope, auth and perspective
+  resolution as `read/2`; the default perspective is `raw`, so an id names
+  exactly one stored document (a `drafts.` id its draft), as on Sanity. A
+  caller pinned to published reads stays pinned. An id the caller cannot see
+  is omitted with reason `existence`.
+  """
+  def documents(conn, %{"dataset" => dataset, "ids" => raw_ids} = params) do
+    ids =
+      raw_ids
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    params = Map.put_new(params, "perspective", "raw")
+
+    with :ok <- known_dataset(dataset, conn),
+         :ok <- perspective_ok(params) do
+      result =
+        Barkpark.Groq.query("*[_id in $ids]", %{"ids" => ids},
+          dataset: dataset,
+          perspective: resolve_perspective(conn, params),
+          scope_opts: scope_opts(conn),
+          identity: identity(conn),
+          project_id: conn.path_params["project_slug"]
+        )
+
+      case result do
+        {:ok, %{result_json: result_json}} ->
+          by_id = result_json |> Jason.decode!() |> Map.new(&{&1["_id"], &1})
+
+          json(conn, %{
+            documents: for(id <- ids, doc = by_id[id], doc != nil, do: doc),
+            omitted:
+              for(id <- ids, not Map.has_key?(by_id, id), do: %{id: id, reason: "existence"})
+          })
+
+        {:error, {:limit, message}} ->
+          query_error(conn, 422, "queryLimitError", message)
+
+        {:error, {:busy, message}} ->
+          conn
+          |> put_resp_header("retry-after", "1")
+          |> query_error(503, "queryBusyError", message)
+
+        {:error, {_kind, message}} ->
+          query_error(conn, 422, "queryEvaluationError", to_string(message))
+      end
+    else
+      {:error, :unknown_dataset} ->
+        ErrorResponse.emit(conn, {:error, {:not_found, "dataset #{inspect(dataset)} not found"}})
+
+      {:error, {:bad_perspective, value}} ->
+        ReadPerspective.refuse(conn, value, @perspectives)
+    end
+  end
+
   defp known_dataset(dataset, conn) do
     if WriteScope.read_dataset_known?(dataset, scope_opts(conn)),
       do: :ok,
