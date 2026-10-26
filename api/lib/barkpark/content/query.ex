@@ -874,6 +874,9 @@ defmodule Barkpark.Content.Query do
     draft_id = Barkpark.Content.draft_id(pub_id)
     ids = [pub_id, draft_id]
     ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+    # Extra `_ref` LIKE patterns an image/file asset also answers to: the media
+    # delete guard passes the blob's Sanity ids (task-bace4f482af160a9).
+    patterns = Keyword.get(opts, :asset_ref_patterns, [])
 
     opts
     |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
@@ -910,6 +913,7 @@ defmodule Barkpark.Content.Query do
               # adds its own match (task-e7a8f98e6924df10).
               field["type"] == "arrayOf" ->
                 array_holder_match(name, array_member_types(field), pub_id, draft_id)
+                |> or_array_asset_patterns(name, array_member_types(field), patterns)
 
               # An `image` field's stored shape is `{asset: {_ref}, hotspot:
               # {...}, crop: {...}}` (docs/contracts/schema-v2.md) — one level
@@ -931,6 +935,7 @@ defmodule Barkpark.Content.Query do
                     ^draft_id
                   )
                 )
+                |> or_field_asset_patterns(name, patterns)
 
               # A `file` field's stored shape is the SAME `{asset: {_ref}}`
               # wrapper an `image` field uses, minus the image-only hotspot/
@@ -952,6 +957,7 @@ defmodule Barkpark.Content.Query do
                     ^draft_id
                   )
                 )
+                |> or_field_asset_patterns(name, patterns)
 
               true ->
                 dynamic(false)
@@ -1197,6 +1203,45 @@ defmodule Barkpark.Content.Query do
       end
 
     dynamic([d], ^ref_match or ^asset_match)
+  end
+
+  # An image/file field (or an array allowing one) whose `asset._ref` matches
+  # one of `patterns` (SQL LIKE). Nothing added when there are none, so every
+  # other caller's query is unchanged.
+  defp or_array_asset_patterns(match, _name, _types, []), do: match
+
+  defp or_array_asset_patterns(match, name, member_types, patterns) do
+    if Enum.any?(member_types, &(&1 in ["image", "file"])) do
+      dynamic(
+        [d],
+        ^match or
+          fragment(
+            "jsonb_typeof(?->?) = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements(?->?) AS e WHERE e->'asset'->>'_ref' LIKE ANY(?))",
+            d.content,
+            ^name,
+            d.content,
+            ^name,
+            type(^patterns, {:array, :string})
+          )
+      )
+    else
+      match
+    end
+  end
+
+  defp or_field_asset_patterns(match, _name, []), do: match
+
+  defp or_field_asset_patterns(match, name, patterns) do
+    dynamic(
+      [d],
+      ^match or
+        fragment(
+          "?->?->'asset'->>'_ref' LIKE ANY(?)",
+          d.content,
+          ^name,
+          type(^patterns, {:array, :string})
+        )
+    )
   end
 
   # The member types an `arrayOf` field allows. A single-type array stores `of`

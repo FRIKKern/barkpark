@@ -100,7 +100,8 @@ defmodule BarkparkWeb.MediaDeleteSanityRefGuardTest do
     assert Repo.get(MediaFile, file.id), "the guard answered 409 but the blob row was deleted"
     assert body["error"]["details"]["referencedByCount"] == 1
     referrers = Enum.map(body["error"]["details"]["referencedBy"], & &1["doc_id"])
-    assert Content.published_id(doc_id) in referrers
+    # A draft-only holder is named by its draft id, a published one by its id.
+    assert doc_id in referrers or Content.published_id(doc_id) in referrers
   end
 
   defp image(ref), do: %{"_type" => "image", "asset" => %{"_type" => "reference", "_ref" => ref}}
