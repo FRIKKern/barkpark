@@ -6,7 +6,7 @@ defmodule BarkparkWeb.ListenController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
   alias Barkpark.Realtime.DrainSignal
-  alias BarkparkWeb.{ErrorResponse, ListenFilter, ReadPerspective}
+  alias BarkparkWeb.{ErrorResponse, ListenFilter, PeerProbe, ReadPerspective}
 
   def listen(conn, %{"dataset" => dataset} = params) do
     # `?types=`, `?perspective=` and `filter[…]` narrow the stream server-side
@@ -179,6 +179,7 @@ defmodule BarkparkWeb.ListenController do
 
     try do
       schedule_keepalive()
+      schedule_probe()
       # task-2bcada0faa01ebb2 — so a blue/green flip can end THIS stream at
       # once instead of leaving it alive-but-deaf on the retiring slot. See
       # `Barkpark.Realtime.DrainSignal`.
@@ -426,6 +427,25 @@ defmodule BarkparkWeb.ListenController do
           _ -> conn
         end
 
+      # The client left: end now, freeing the process and the subscription,
+      # instead of holding them until the keepalive write fails
+      # (task-091e648503fd0896). Same probe as the Live Content API.
+      :probe ->
+        case PeerProbe.status(conn) do
+          :open ->
+            schedule_probe()
+            listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+
+          :closed ->
+            conn
+
+          # A request pipelined behind this endless response: the probe read
+          # it, so the connection must not be reused. End and close it.
+          :pipelined ->
+            PeerProbe.close(conn)
+            conn
+        end
+
       # task-2bcada0faa01ebb2 — the slot this stream is on is retiring
       # (DeployController.retire_sse/2, called by instance-deploy.sh right
       # after the Caddy flip). End it NOW with a distinguishable final frame
@@ -446,6 +466,10 @@ defmodule BarkparkWeb.ListenController do
   defp schedule_keepalive, do: Process.send_after(self(), :keepalive, keepalive_ms())
 
   defp keepalive_ms, do: Application.get_env(:barkpark, :listen_keepalive_ms, 30_000)
+
+  defp schedule_probe,
+    do:
+      Process.send_after(self(), :probe, Application.get_env(:barkpark, :listen_probe_ms, 1_000))
 
   defp forward_live(conn, msg, dataset, workspace_id, caller_context, scope, lf) do
     if forward_event?(msg, workspace_id) and ListenFilter.pass_meta?(lf, msg) do
