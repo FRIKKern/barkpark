@@ -119,9 +119,11 @@ defmodule BarkparkWeb.ListenFilter do
 
   defp parse_query(text, params) when is_binary(text) do
     with {:ok, groq_params} <- groq_params(params),
-         {:ok, tree} <- parse_groq(text, groq_params),
-         {:ok, expr} <- listen_filter_expr(tree) do
-      {:ok, %{text: text, params: groq_params, expr: expr}}
+         {:ok, tree} <- parse_groq(text, groq_params) do
+      case listen_filter_expr(tree) do
+        {:ok, expr} -> {:ok, %{text: text, params: groq_params, expr: expr}}
+        :ignore -> {:ok, nil}
+      end
     end
   end
 
@@ -150,13 +152,21 @@ defmodule BarkparkWeb.ListenFilter do
     end
   end
 
-  # Sanity listens to `*[<filter>]` only.
+  # The `*[<filter>]` a listen query is built on. Sanity applies the filter and
+  # ignores what follows it (a projection, `| order()`, a slice); it accepts any
+  # other query too (`count(*)` opens a stream). Such a query narrows nothing
+  # here (`:ignore`), which is the stream as it was before `query` was read,
+  # so no caller is refused for its shape. A query that does not parse is a
+  # 400, as Sanity answers it.
   defp listen_filter_expr({:memo, inner}), do: listen_filter_expr(inner)
   defp listen_filter_expr({:group, inner}), do: listen_filter_expr(inner)
   defp listen_filter_expr({:filter, {:everything}, expr}), do: {:ok, expr}
-
-  defp listen_filter_expr(_tree),
-    do: {:error, {:filter, "a listen query must be *[<filter>]", %{parameter: "query"}}}
+  defp listen_filter_expr({:map, base, _mapped}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:projection, base, _obj}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:pipe, base, _name, _args}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:slice, base, _l, _r, _inclusive?}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:elem, base, _index}), do: listen_filter_expr(base)
+  defp listen_filter_expr(_tree), do: :ignore
 
   @doc """
   Decide one event under `?query=`: `{:send, transition, filter}` with

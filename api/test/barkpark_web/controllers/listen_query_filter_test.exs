@@ -136,14 +136,32 @@ defmodule BarkparkWeb.ListenQueryFilterTest do
     assert is_map(e["result"])
   end
 
-  test "a query that is not *[filter] is refused before the stream opens", %{token: t} do
-    for q <- [~s|*[_type == "post"]{title}|, ~s|count(*)|, ~s|*[|] do
-      conn =
-        scoped_conn()
-        |> put_req_header("authorization", "Bearer " <> t)
-        |> get("/w/listen-q/p/site/v2025-02-19/data/listen/#{@dataset}", %{"query" => q})
+  # As on Sanity (read-only probe of ecu57yeh, 26 Oct): a projection or order after
+  # the filter is ignored, any other query opens the stream unnarrowed, and only a
+  # query that does not parse is refused.
+  test "the filter under a projection still narrows; another shape narrows nothing", %{
+    token: t,
+    scope: scope
+  } do
+    assert [] ==
+             stream(t, %{"query" => ~s/*[_type == "author"]{name} | order(name)/}, fn ->
+               put!(scope, "post", "p1", %{"title" => "q", "featured" => true})
+             end)
 
-      assert conn.status == 400, q
-    end
+    assert [%{"documentId" => "drafts.p1"} = e] =
+             stream(t, %{"query" => ~s|count(*[_type == "author"])|}, fn ->
+               put!(scope, "post", "p1", %{"title" => "r", "featured" => true})
+             end)
+
+    refute Map.has_key?(e, "transition")
+  end
+
+  test "a query that does not parse is refused before the stream opens", %{token: t} do
+    conn =
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer " <> t)
+      |> get("/w/listen-q/p/site/v2025-02-19/data/listen/#{@dataset}", %{"query" => "*["})
+
+    assert conn.status == 400
   end
 end
