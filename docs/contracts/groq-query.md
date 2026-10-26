@@ -37,15 +37,15 @@ const client = createClient({
 })
 ```
 
-`next-sanity`'s `createClient` takes these too.
+`next-sanity` takes the same options.
 
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, and `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned. They are the tags the webhook dispatcher sends on each mutation ([webhook-realtime.md](webhook-realtime.md)), so `revalidateTag` with a webhook's tags refreshes every cached query that read the changed document. At most 128 tags; past that, document tags collapse into type tags.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, and `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned. The webhook dispatcher sends the same tags on each mutation ([webhook-realtime.md](webhook-realtime.md)), so `revalidateTag` refreshes every cached query that read the changed document. At most 128 tags; beyond that, type tags only.
 
 ## Evaluation and limits
 
-Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch that reads only `^` and is false for the parent is skipped. GIN indexes over `content` and its `_ref` values serve them. The evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has none but these, apart from `references()`, `title` and `$x in field[].value`, and the caller sees every field it tests; any other is counted in chunks, limited only by wall time. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries are read in rounds: one SQL read per `->` level and subquery shape. A subquery that does not read `^` runs once per query.
+Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch reading only `^` that is false for the parent is skipped. GIN indexes over `content` and its `_ref` values serve them; the evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has none but these, apart from `references()`, `title` and `$x in field[].value`, and the caller sees every field it tests; any other is counted in chunks, limited only by wall time. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries read in rounds, one SQL read per `->` level and subquery shape. A subquery not reading `^` runs once per query.
 
 | Limit | Default | Config key (`config :barkpark, Barkpark.Groq`) |
 |---|---|---|
@@ -59,10 +59,12 @@ Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, 
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic; `->` also follows plain id strings) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`api/test/barkpark/groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` or custom `fn`.
+Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`api/test/barkpark/groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` or custom `fn`.
 
-Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; release and version perspectives; `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark always to `published`: an older client that needs drafts asks for `perspective: 'raw'`.
+Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; release and version perspectives; `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark always to `published`: an older client needing drafts asks for `perspective: 'raw'`.
 
-`score()` weighs as groq-js (a term adds by its count in the field; `boost` adds). Sanity's hosted one favours rarer terms and shorter fields; multi-clause ranks can differ.
+`score()` weighs as groq-js; Sanity's hosted engine also favours rarer terms and shorter fields, so multi-clause ranks can differ.
 
-Checking a site's queries: `tooling/groq/compare.mjs` runs a query corpus through groq-js and through this endpoint over the same documents and reports the differences (dev only).
+Read compat: a declared reference stored as a bare id answers `->`, `_ref`, `_type`, `references()`; a declared slug string `.current`. `order()` is exact where every type in scope declares the field, else a bare value sorts as missing.
+
+`tooling/groq/compare.mjs` (dev only) diffs a query corpus between groq-js and this endpoint.

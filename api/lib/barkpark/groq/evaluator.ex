@@ -90,8 +90,8 @@ defmodule Barkpark.Groq.Evaluator do
       %{} = obj ->
         Map.get(obj, name)
 
-      id when is_binary(id) and name in ["_ref", "_type"] ->
-        bare_reference(id, name, base, scope, ctx)
+      v when is_binary(v) and name in ["_ref", "_type", "_weak", "current"] ->
+        bare_shape(v, name, base, scope, ctx)
 
       _ ->
         nil
@@ -331,14 +331,20 @@ defmodule Barkpark.Groq.Evaluator do
   # ── Read compat (task-c2be444ac1d07719) ──────────────────────────────────
   #
   # A field the schema declares a reference is stored as the bare id, where
-  # Sanity stores {_type: "reference", _ref}. `author._ref` and `author._type`
-  # answer as Sanity's object would, for a declared reference only: any other
-  # string answers null, as before and as on Sanity. The field's declaration
-  # is found by walking `base` back to the nearest value with a `_type` (the
-  # document or a typed item) and down its schema, objects included.
-  defp bare_reference(id, name, base, scope, ctx) do
-    case field_decl(base, scope, ctx) do
-      %{"type" => "reference"} -> if name == "_ref", do: id, else: "reference"
+  # Sanity stores {_type: "reference", _ref}; a declared slug as the string,
+  # where Sanity stores {_type: "slug", current}. `author._ref`,
+  # `author._type`, `_weak` (true on a declared weak one), `slug.current` and `slug._type` answer as Sanity's object
+  # would, for a declared field only: any other string answers null, as
+  # before and as on Sanity. The field's declaration is found by walking
+  # `base` back to the nearest value with a `_type` (the document or a typed
+  # item) and down its schema, objects included.
+  defp bare_shape(value, name, base, scope, ctx) do
+    case {field_decl(base, scope, ctx), name} do
+      {%{"type" => "reference"}, "_ref"} -> value
+      {%{"type" => "reference"}, "_type"} -> "reference"
+      {%{"type" => "reference", "weak" => true}, "_weak"} -> true
+      {%{"type" => "slug"}, "current"} -> value
+      {%{"type" => "slug"}, "_type"} -> "slug"
       _ -> nil
     end
   end

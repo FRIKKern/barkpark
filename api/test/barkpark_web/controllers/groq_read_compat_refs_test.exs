@@ -42,6 +42,7 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
             %{"name" => "note", "type" => "string"},
             ref.("author"),
             Map.put(ref.("hidden"), "private", true),
+            Map.put(ref.("weakRef"), "weak", true),
             %{"name" => "seo", "type" => "composite", "fields" => [ref.("reviewer")]},
             %{
               "name" => "coauthors",
@@ -61,7 +62,15 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
 
     publish.("author", %{"_id" => "alan", "name" => "Alan Turing"})
     publish.("author", %{"_id" => "ada", "name" => "Ada Lovelace"})
-    publish.("post", %{"_id" => "p1", "title" => "One", "note" => "alan", "author" => "alan"})
+
+    publish.("post", %{
+      "_id" => "p1",
+      "title" => "One",
+      "note" => "alan",
+      "author" => "alan",
+      "weakRef" => "ada"
+    })
+
     publish.("post", %{"_id" => "p2", "title" => "Two", "seo" => %{"reviewer" => "alan"}})
     publish.("post", %{"_id" => "p3", "title" => "Three", "coauthors" => ["ada", "alan"]})
     publish.("post", %{"_id" => "p4", "title" => "Four", "author" => "ada", "hidden" => "alan"})
@@ -99,6 +108,11 @@ defmodule BarkparkWeb.GroqReadCompatRefsTest do
     assert q(conn, t, ~s|*[_id == "p2"][0].seo.reviewer._ref|) == "alan"
     assert q(conn, t, ~s|*[_id == "p5"][0].author._ref|) == "alan"
     assert q(conn, t, ~s|*[_id == "p1"][0].author->name|) == "Alan Turing"
+    # Sanity: a weak reference reads _weak true; a strong one has no _weak.
+    assert q(conn, t, ~s|*[_id == "p1"][0].weakRef._weak|) == true
+    assert q(conn, t, ~s|*[_id == "p1"][0].weakRef._ref|) == "ada"
+    assert q(conn, t, ~s|*[_id == "p1"][0].author._weak|) == nil
+    assert q(conn, t, ~s|*[_id == "p1"][0].note._weak|) == nil
   end
 
   test "references() matches bare ids in declared positions, nested and in arrays", %{
