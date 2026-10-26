@@ -5,6 +5,8 @@ From nothing to `https://your-host/studio` with working CLI login. Every command
 
 You need: a domain (or subdomain) you control DNS for, an SSH key, and a server (or a Hetzner account to make one). The whole thing takes ~20–35 min — almost all of it the one-time Erlang/Elixir compile on the box.
 
+Running the container image on a platform such as Azure Container Apps instead? See [SELF-HOST.md](SELF-HOST.md).
+
 ## 1 · A server (any Ubuntu 22.04+ box)
 
 Already have one? Skip to step 2 with its public IP. To make one on Hetzner with the `hcloud` CLI:
