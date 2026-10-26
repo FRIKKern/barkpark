@@ -18,7 +18,7 @@ defmodule Barkpark.Groq.Evaluator do
   dictionary.
   """
 
-  alias Barkpark.Groq.{Geo, PortableText, Pushdown, Source, Values}
+  alias Barkpark.Groq.{Geo, GeoShape, LimitError, PortableText, Pushdown, Source, Values}
 
   defmodule EvalError do
     @moduledoc "A query that parses but cannot be evaluated (an unsupported function, a tuple)."
@@ -44,6 +44,7 @@ defmodule Barkpark.Groq.Evaluator do
     }
 
     Process.put(:groq_memo, %{})
+    GeoShape.reset_budget()
     {:ok, tree |> eval(%{value: nil, parent: nil, hidden: false}, ctx) |> Values.to_json()}
   rescue
     e in EvalError -> {:error, e.message}
@@ -829,6 +830,28 @@ defmodule Barkpark.Groq.Evaluator do
 
   defp func("geo", "distance", [a, b], scope, ctx),
     do: Geo.distance(eval(a, scope, ctx), eval(b, scope, ctx))
+
+  # task-1db8d92a284a23d2: geo::contains/2 and geo::intersects/2, planar as on
+  # Sanity. A shape past the position cap, or a pass past the work budget,
+  # stops the query with a LimitError (422) instead of burning CPU.
+  defp func("geo", name, [a, b], scope, ctx) when name in ["contains", "intersects"] do
+    fun = if name == "contains", do: &GeoShape.contains/2, else: &GeoShape.intersects/2
+
+    case fun.(eval(a, scope, ctx), eval(b, scope, ctx)) do
+      {:error, :too_many_positions} ->
+        raise LimitError,
+              "geo::#{name}() takes shapes of at most #{GeoShape.max_positions()} positions"
+
+      {:error, :work_budget} ->
+        raise LimitError,
+              "the query's geo::contains() and geo::intersects() calls passed their " <>
+                "budget of #{GeoShape.max_work()} position pairs; narrow the documents " <>
+                "they run over first"
+
+      answer ->
+        answer
+    end
+  end
 
   defp func(ns, name, _args, _scope, _ctx) do
     label = if ns == "global", do: name, else: "#{ns}::#{name}"
