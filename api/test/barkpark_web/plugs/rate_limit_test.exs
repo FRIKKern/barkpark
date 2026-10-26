@@ -110,6 +110,33 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
     assert RateLimit.call(conn, RateLimit.init([])).halted == true
   end
 
+  test "a per-token override wins over the class and dataset budgets" do
+    {:ok, build_token} =
+      Barkpark.Auth.create_token("rl-build-raw", "site build", "staging", ["read"])
+
+    {:ok, _other} = Barkpark.Auth.create_token("rl-other-raw", "other", "staging", ["read"])
+
+    with_limits(
+      read_per_minute: 1,
+      write_per_minute: 1,
+      datasets: %{"staging" => %{read: 2}},
+      tokens: %{to_string(build_token.id) => %{read: 4}}
+    )
+
+    get = fn raw ->
+      build(:get, "/v1/data/query/staging/post", %{"dataset" => "staging"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+      |> RateLimit.call(RateLimit.init([]))
+    end
+
+    assert Enum.map(1..5, fn _ -> get.("rl-build-raw").halted end) ==
+             [false, false, false, false, true]
+
+    # A token without an override keeps the dataset budget.
+    assert Enum.map(1..3, fn _ -> get.("rl-other-raw").halted end) == [false, false, true]
+  end
+
   test "unauthenticated callers are bucketed by IP" do
     with_limits(read_per_minute: 1, write_per_minute: 1)
 
