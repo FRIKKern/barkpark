@@ -39,7 +39,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersWorker do
   ## Bounded
 
   A page is at most `@page` linkers (`config :barkpark, #{inspect(__MODULE__)},
-  page:` overrides it). A full page enqueues a continuation keyed by the last
+  page:` overrides it). More than a page enqueues a continuation keyed by the last
   pk handled. Runs on its own `:edge_linkers` queue (concurrency 1), unique per
   (target, type, dataset, scope, cursor), scheduled `@delay_seconds` out so
   the target's debounced unpublish/delete job (5 s) runs first.
@@ -133,18 +133,20 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersWorker do
 
   def perform(_job), do: {:cancel, :bad_args}
 
-  # Each arm returns up to `page` published linkers past the cursor, by pk. A
-  # FULL page may have more behind it, so only pks up to the smallest last pk
-  # of the full pages are handled now; the continuation starts after it.
+  # Each arm reads up to `page + 1` published linkers past the cursor, by pk.
+  # An arm that returned the extra row has more behind it, so only pks up to
+  # the smallest `page`-th pk of those arms are handled now and the
+  # continuation starts after it. Exactly `page` linkers continue nowhere.
   defp merge_pages(arms, page) do
     cutoff =
       arms
-      |> Enum.filter(&(length(&1) >= page))
-      |> Enum.map(&List.last(&1).id)
+      |> Enum.filter(&(length(&1) > page))
+      |> Enum.map(&Enum.at(&1, page - 1).id)
       |> Enum.min(fn -> nil end)
 
     linkers =
       arms
+      |> Enum.map(&Enum.take(&1, page))
       |> List.flatten()
       |> Enum.uniq_by(& &1.id)
       |> Enum.filter(&(is_nil(cutoff) or &1.id <= cutoff))
@@ -219,7 +221,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersWorker do
             type(^args["project_id"], :binary_id)
           ),
       order_by: [asc: d.id],
-      limit: ^page
+      limit: ^(page + 1)
     )
     |> then(fn q ->
       if after_pk, do: where(q, [d], d.id > type(^after_pk, :binary_id)), else: q

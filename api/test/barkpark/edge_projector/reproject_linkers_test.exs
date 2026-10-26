@@ -179,6 +179,22 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersTest do
     assert kinds("rl-ps", scope, @ds2) == []
   end
 
+  test "a target with exactly a page of linkers enqueues no empty continuation",
+       %{scope: scope} do
+    Application.put_env(:barkpark, ReprojectLinkersWorker, page: 3)
+    on_exit(fn -> Application.delete_env(:barkpark, ReprojectLinkersWorker) end)
+
+    {:ok, _} = Content.create_document("rl_author", %{"_id" => "rl-a5"}, @ds, scope)
+    for i <- 1..3, do: post!("rl-p5-#{i}", "rl-a5", scope)
+    drain()
+    {:ok, _} = Content.publish_document("rl-a5", "rl_author", @ds, scope)
+
+    assert %{success: 1, failure: 0} =
+             Oban.drain_queue(queue: :edge_linkers, with_scheduled: true, with_recursion: true)
+
+    for i <- 1..3, do: assert(kinds("rl-p5-#{i}", scope) == ["author", "body"])
+  end
+
   test "a bulk publish of 200 targets enqueues one bounded job each on its own queue",
        %{scope: scope} do
     Application.put_env(:barkpark, ReprojectLinkersWorker, page: 3)
