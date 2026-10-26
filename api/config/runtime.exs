@@ -1207,6 +1207,36 @@ if config_env() == :prod do
   # the `:url` hostname stays authoritative.
   socket_dir = System.get_env("DATABASE_SOCKET_DIR")
 
+  # Optional TLS to a managed Postgres (Azure Database for PostgreSQL and the
+  # like). DATABASE_SSL=verify-full turns on Postgrex's verifying TLS: the server
+  # certificate must chain to a trusted CA and match the DATABASE_URL host. The
+  # CA is the OS store, or DATABASE_SSL_CA_FILE when set. Unset or "off" adds no
+  # :ssl option, so existing boxes connect exactly as before. The job and export
+  # pools copy this repo's config, so they use the same setting.
+  database_ssl =
+    case System.get_env("DATABASE_SSL") do
+      v when v in [nil, "", "off"] ->
+        nil
+
+      "verify-full" ->
+        case System.get_env("DATABASE_SSL_CA_FILE") do
+          ca when ca in [nil, ""] ->
+            true
+
+          ca ->
+            File.regular?(ca) ||
+              raise "DATABASE_SSL_CA_FILE is #{inspect(ca)}, which is not a file."
+
+            [cacertfile: ca]
+        end
+
+      other ->
+        raise """
+        DATABASE_SSL is #{inspect(other)}. Expected "verify-full" (verified TLS to
+        Postgres) or "off". Unset means no TLS, the default.
+        """
+    end
+
   # NOTE ON queue_target/queue_interval PARITY WITH api/config/test.exs: that file
   # widens 50ms/1000ms -> 5_000ms/30_000ms under a comment naming this exact error
   # ("connection not available and request was dropped from queue"). Do NOT copy
@@ -1321,7 +1351,6 @@ if config_env() == :prod do
     end
 
   repo_opts = [
-    # ssl: true,
     url: database_url,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10"),
     # The server-side wall (see the block above `statement_timeout =`).
@@ -1337,6 +1366,9 @@ if config_env() == :prod do
     else
       repo_opts
     end
+
+  repo_opts =
+    if database_ssl, do: Keyword.put(repo_opts, :ssl, database_ssl), else: repo_opts
 
   config :barkpark, Barkpark.Repo, repo_opts
 
