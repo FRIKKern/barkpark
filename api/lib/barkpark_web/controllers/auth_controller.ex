@@ -108,7 +108,7 @@ defmodule BarkparkWeb.AuthController do
             BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "password")
 
           user.totp_enabled ->
-            login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
+            login_with_mfa(conn, user, params["totp_code"], params["recovery_code"], "password")
 
           # Owner ruling #14: a passkey-only member of a require-MFA org used to
           # sign in with the password alone (the org check asked "enrolled?",
@@ -137,13 +137,13 @@ defmodule BarkparkWeb.AuthController do
   # "needs a code").
   #
   # MEDIUM-6: the TOTP is consumed via verify_totp so the code is one-time.
-  defp login_with_mfa(conn, user, code, recovery) do
+  defp login_with_mfa(conn, user, code, recovery, method) do
     cond do
       is_binary(code) and match?({:ok, _}, Accounts.verify_totp(user, code)) ->
-        issue_session(conn, user, mfa_verified: true)
+        issue_session(conn, user, mfa_verified: true, method: method)
 
       is_binary(recovery) and match?({:ok, _}, Accounts.consume_recovery_code(user, recovery)) ->
-        issue_session(conn, user, mfa_verified: true)
+        issue_session(conn, user, mfa_verified: true, method: method)
 
       true ->
         # A correct password with a missing OR invalid second factor is a failed
@@ -796,7 +796,7 @@ defmodule BarkparkWeb.AuthController do
             BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "magic_link")
 
           user.totp_enabled ->
-            login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
+            login_with_mfa(conn, user, params["totp_code"], params["recovery_code"], "magic_link")
 
           BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
             BarkparkWeb.SessionIssuer.deny_org_factor_required(conn, user, "magic_link")

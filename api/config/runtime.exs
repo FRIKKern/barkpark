@@ -941,6 +941,12 @@ if System.get_env("BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD") in ~w(1 true yes on
   config :barkpark, :filing_law_absent_surface_hard, true
 end
 
+# BARKPARK_OPERATOR_FAIL_CLOSED=1: with both lists unset the operator routes
+# refuse every caller instead of falling back to the admin bit. Off by default.
+if System.get_env("BARKPARK_OPERATOR_FAIL_CLOSED") in ~w(1 true yes on) do
+  config :barkpark, :operator_fail_closed, true
+end
+
 # INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815), mirroring cloud's
 # PLATFORM_ADMIN_EMAILS shape (cloud/config/runtime.exs). Comma-separated, in
 # ALL envs. BOTH unset/blank => the lists stay [] => UNSET => legacy behaviour
@@ -951,15 +957,14 @@ end
 # owner_user_id -> user.email, or an app token's "app:<email>" label); ids are
 # `api_tokens.id` values, the direct handle for a machine token with no human
 # behind it. Blank entries are dropped, so "a@b.io,," is one operator, not three.
-# BARKPARK_OPERATOR_FAIL_CLOSED=1: with both lists unset the operator routes
-# refuse every caller instead of falling back to the admin bit. Off by default.
-if System.get_env("BARKPARK_OPERATOR_FAIL_CLOSED") in ~w(1 true yes on) do
-  config :barkpark, :operator_fail_closed, true
-end
-
+#
+# BARKPARK_BREAKGLASS_EMAILS: accounts exempt from their org's
+# allowed_auth_methods when they sign in with a password plus TOTP or with a
+# passkey (`BarkparkWeb.SessionIssuer.auth_method_blocked?/2`). Unset = nobody.
 for {env_name, config_key} <- [
       {"BARKPARK_OPERATOR_EMAILS", :operator_emails},
-      {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
+      {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids},
+      {"BARKPARK_BREAKGLASS_EMAILS", :breakglass_emails}
     ] do
   entries =
     System.get_env(env_name, "")

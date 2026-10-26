@@ -22,6 +22,7 @@ defmodule BarkparkWeb.SessionIssuer do
       Accounts.create_user_session_token(user, actor_opts(conn) ++ opts)
 
     audit_session_mint(user, opts)
+    audit_breakglass(user, Keyword.get(opts, :method))
 
     conn
     |> configure_session(renew: true)
@@ -170,8 +171,50 @@ defmodule BarkparkWeb.SessionIssuer do
   """
   @spec auth_method_blocked?(Accounts.User.t(), String.t()) :: boolean()
   def auth_method_blocked?(%Accounts.User{} = user, method) when is_binary(method) do
-    not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method)
+    not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method) and
+      not breakglass_exempt?(user, method)
   end
+
+  # Break-glass (BARKPARK_BREAKGLASS_EMAILS): a listed account keeps the local
+  # doors that carry a second factor when its org allows only SSO, so someone
+  # can still sign in when the IdP is down. The password door opens only for a
+  # TOTP-armed account, which `login_with_mfa` then holds to its code.
+  defp breakglass_exempt?(user, "password"), do: breakglass?(user) and user.totp_enabled
+  defp breakglass_exempt?(user, "passkey"), do: breakglass?(user)
+  defp breakglass_exempt?(_user, _method), do: false
+
+  defp breakglass?(%Accounts.User{email: email}) when is_binary(email) do
+    String.downcase(String.trim(email)) in Enum.map(
+      Application.get_env(:barkpark, :breakglass_emails, []),
+      &String.downcase(String.trim(&1))
+    )
+  end
+
+  defp breakglass?(_user), do: false
+
+  @doc """
+  Record a `breakglass_login` audit event when `user` just signed in through
+  `method` only because of the break-glass exemption. Called where a session
+  that presented its second factor is minted.
+  """
+  @spec audit_breakglass(Accounts.User.t(), String.t() | nil) :: :ok
+  def audit_breakglass(%Accounts.User{} = user, method) when method in ["password", "passkey"] do
+    if breakglass_exempt?(user, method) and
+         not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method) do
+      Barkpark.Audit.emit(%{
+        category: "auth",
+        action: "breakglass_login",
+        subject: user.id,
+        actor_type: "user",
+        actor_id: user.id,
+        metadata: %{"method" => method}
+      })
+    end
+
+    :ok
+  end
+
+  def audit_breakglass(_user, _method), do: :ok
 
   @doc """
   Refuse a session-mint whose METHOD the user's org policy disallows
