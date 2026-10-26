@@ -110,17 +110,33 @@ defmodule BarkparkWeb.GroqController do
   defp query_params(conn, params) do
     from_body =
       case params["params"] do
-        %{} = map -> map
-        _ -> %{}
+        %{} = map ->
+          map
+
+        # `bp doc groq --params '{"slug":"x"}'` sends the object as a string.
+        json when is_binary(json) ->
+          case Jason.decode(json) do
+            {:ok, %{} = map} -> map
+            _ -> :invalid
+          end
+
+        _ ->
+          %{}
       end
+
+    start = if from_body == :invalid, do: {:error, {:bad_param, "params"}}, else: {:ok, from_body}
 
     conn.query_params
     |> Enum.filter(fn {key, _} -> String.starts_with?(key, "$") end)
-    |> Enum.reduce_while({:ok, from_body}, fn {"$" <> name, raw}, {:ok, acc} ->
-      case Jason.decode(raw) do
-        {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
-        {:error, _} -> {:halt, {:error, {:bad_param, name}}}
-      end
+    |> Enum.reduce_while(start, fn
+      _pair, {:error, _} = error ->
+        {:halt, error}
+
+      {"$" <> name, raw}, {:ok, acc} ->
+        case Jason.decode(raw) do
+          {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
+          {:error, _} -> {:halt, {:error, {:bad_param, name}}}
+        end
     end)
   end
 

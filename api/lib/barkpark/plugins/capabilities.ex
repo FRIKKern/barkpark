@@ -1300,6 +1300,36 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # The Sanity-compatible GROQ read (task-2b7f715eb6fd0c12) at its undated
+      # scoped alias; Sanity clients use /v<apiVersion>/data/query/:dataset.
+      core_cmd(
+        "doc.groq",
+        "doc",
+        "groq",
+        "Run a GROQ query over a dataset, as Sanity's query API answers it: {query, result, ms, syncTags}.",
+        "GET",
+        "/v1/data/groq/:dataset",
+        "none",
+        writes: false,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug",
+        args: [
+          arg("query", true, "string", "The GROQ query, e.g. *[_type == \"post\"]{_id, title}.")
+        ],
+        flags: [
+          flag(
+            "params",
+            "string",
+            "Query parameters as one JSON object, e.g. {\"slug\":\"intro\"}."
+          ),
+          flag(
+            "perspective",
+            "string",
+            "published (default), drafts or raw.",
+            default: "published"
+          )
+        ]
+      ),
       core_cmd(
         "doc.query",
         "doc",

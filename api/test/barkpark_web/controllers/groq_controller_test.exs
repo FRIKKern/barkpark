@@ -911,6 +911,35 @@ defmodule BarkparkWeb.GroqControllerTest do
     assert Barkpark.Groq.Slots.default_limit(nil, heap) == min(4, 2 * System.schedulers_online())
   end
 
+  test "params may be one JSON string, as bp doc groq sends them", %{
+    conn: conn,
+    token: token
+  } do
+    post = fn params ->
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> post(path(), %{"query" => ~s'*[_type == "book" && year == $y]._id', "params" => params})
+    end
+
+    assert post.(~s'{"y":1999}') |> json_response(200) |> Map.get("result") == ["b1"]
+    bad = post.("{not json") |> json_response(400)
+    assert bad["error"]["details"]["parameter"] == "$params"
+
+    # The undated GET alias bp uses answers the same read.
+    alias_path = String.replace(path(), "/#{@version}/data/query/", "/v1/data/groq/")
+
+    got =
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> get(alias_path, %{
+        "query" => ~s'*[_type == "book" && year == $y]._id',
+        "params" => ~s'{"y":1999}'
+      })
+      |> json_response(200)
+
+    assert got["result"] == ["b1"]
+  end
+
   defp sql_statements(fun) do
     ref = make_ref()
     parent = self()
