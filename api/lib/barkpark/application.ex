@@ -203,6 +203,14 @@ defmodule Barkpark.Application do
       {:ok, _pid} = ok ->
         Barkpark.Telemetry.Handlers.attach()
 
+        # Off unless BARKPARK_RETIRE_SSE_ON_SIGTERM=1. The trap runs before the
+        # VM's default SIGTERM stop, which still follows.
+        if Application.get_env(:barkpark, :retire_sse_on_sigterm, false) do
+          System.trap_signal(:sigterm, :retire_sse, fn ->
+            Barkpark.Realtime.DrainSignal.retire_and_await()
+          end)
+        end
+
         # Plugin discovery + schema/checker/seeder registration now runs
         # synchronously in Barkpark.SchemaBootstrap (a child positioned
         # before the Oban child above), so it has completed by the time the

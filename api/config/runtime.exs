@@ -1398,6 +1398,13 @@ if config_env() == :prod do
 
   config :barkpark, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 
+  # BARKPARK_RETIRE_SSE_ON_SIGTERM=1 ends this node's SSE streams with the retire
+  # frame when the release gets SIGTERM (Barkpark.Realtime.DrainSignal). Off by
+  # default.
+  config :barkpark,
+         :retire_sse_on_sigterm,
+         System.get_env("BARKPARK_RETIRE_SSE_ON_SIGTERM") == "1"
+
   # Phoenix Endpoint.check_origin allowlist. Without an explicit list it
   # whitelists only "#{scheme}://#{host}", which silently blocks the Vercel
   # apex demo and preview URLs (LiveView /live/websocket → 403).
