@@ -255,6 +255,11 @@ defmodule Barkpark.Groq.DocumentSource do
       constraints.ids != nil ->
         :error
 
+      # `order(slug.current)` on a declared slug stored as a string: SQL would
+      # sort it as missing, so the evaluator sorts (read compat).
+      sorts_on_shape?(state, constraints.types, paths) ->
+        :error
+
       reads_no_content?(constraints, paths) ->
         slice_exact(state, constraints, keys, from, to)
 
@@ -1877,10 +1882,12 @@ defmodule Barkpark.Groq.DocumentSource do
   # ── Read compat (task-c2be444ac1d07719) ──────────────────────────────────
   #
   # Barkpark stores a declared reference as the bare id ("author-alan") where
-  # Sanity stores {_type: "reference", _ref}. Nothing stored changes; the
-  # evaluator answers `author._ref` for a declared reference (schema_fields/2),
-  # and widen/2 lets SQL find the bare ids too, so a filter that reads `_ref`
-  # or calls references() still narrows on an index:
+  # Sanity stores {_type: "reference", _ref}, and a declared slug as the string
+  # where Sanity stores {_type: "slug", current}. Nothing stored changes; the
+  # evaluator answers `author._ref` / `slug.current` for a declared field
+  # (schema_fields/2), and widen/2 lets SQL find the bare values too, so a
+  # filter that reads `_ref`, `current` or calls references() still narrows on
+  # an index:
   #
   #   * `a.b._ref == x` also matches a bare `a.b == x` in each type in scope
   #     that declares `a.b` a reference (an {:or} check, type by type, so a
@@ -1903,28 +1910,39 @@ defmodule Barkpark.Groq.DocumentSource do
 
   @impl true
   def widen(state, constraints) do
-    positions = ref_positions(state, constraints.types)
+    positions = shape_positions(state, constraints.types)
 
     if positions == [] do
       constraints
     else
-      constraints |> widen_ref_eq(positions) |> widen_refs(positions)
+      constraints
+      |> widen_shape_eq(positions)
+      |> widen_shape_checks(positions, state)
+      |> widen_refs(positions)
     end
   end
 
-  defp widen_ref_eq(%{eq: eq} = constraints, positions) do
-    {moved, kept} =
-      Enum.split_with(eq, fn {path, _v} ->
-        List.last(path) == "_ref" and single_ref_types(positions, Enum.drop(path, -1)) != []
-      end)
+  defp sorts_on_shape?(_state, _types, []), do: false
+
+  defp sorts_on_shape?(state, types, paths) do
+    positions = shape_positions(state, types)
+    Enum.any?(paths, &(shape_types(positions, &1) != []))
+  end
+
+  # The key Sanity's object adds over the bare value: `_ref` on a reference,
+  # `current` on a slug.
+  @shape_leaf %{"_ref" => "reference", "current" => "slug"}
+
+  # `a.b._ref == x` / `slug.current == x`: also the bare `a.b == x` in each
+  # type in scope that declares it, as one {:or} check, type by type.
+  defp widen_shape_eq(%{eq: eq} = constraints, positions) do
+    {moved, kept} = Enum.split_with(eq, fn {path, _v} -> shape_types(positions, path) != [] end)
 
     checks =
       for {path, v} <- moved do
-        base = Enum.drop(path, -1)
-
         bare =
-          for type <- single_ref_types(positions, base),
-              do: %{Pushdown.empty() | types: [type], eq: [{base, v}]}
+          for type <- shape_types(positions, path),
+              do: %{Pushdown.empty() | types: [type], eq: [{Enum.drop(path, -1), v}]}
 
         {:or, [%{Pushdown.empty() | eq: [{path, v}]} | bare]}
       end
@@ -1932,23 +1950,78 @@ defmodule Barkpark.Groq.DocumentSource do
     %{constraints | eq: kept, checks: constraints.checks ++ checks}
   end
 
+  # `slug.current in [...]` and `defined(slug.current)` the same way; and
+  # `!defined(slug.current)`, which a bare slug must NOT satisfy, keeps the
+  # check and adds `!defined(slug)` for the declaring types only.
+  defp widen_shape_checks(%{checks: checks} = constraints, positions, state) do
+    %{
+      constraints
+      | checks: Enum.map(checks, &widen_shape_check(&1, positions, constraints.types, state))
+    }
+  end
+
+  defp widen_shape_check({kind, path, arg} = check, positions, _types, _state)
+       when kind in [:in, :defined] do
+    case shape_types(positions, path) do
+      [] ->
+        check
+
+      declaring ->
+        bare =
+          for type <- declaring,
+              do: %{Pushdown.empty() | types: [type], checks: [{kind, Enum.drop(path, -1), arg}]}
+
+        {:or, [%{Pushdown.empty() | checks: [check]} | bare]}
+    end
+  end
+
+  defp widen_shape_check({:not, {:defined, path, nil}} = check, positions, types, state) do
+    case shape_types(positions, path) do
+      [] ->
+        check
+
+      declaring ->
+        others = (types || Map.keys(scope_schemas(state))) -- declaring
+        base_undefined = {:not, {:defined, Enum.drop(path, -1), nil}}
+
+        branches =
+          for(
+            type <- declaring,
+            do: %{Pushdown.empty() | types: [type], checks: [check, base_undefined]}
+          ) ++
+            if(others == [], do: [], else: [%{Pushdown.empty() | types: others, checks: [check]}])
+
+        {:or, branches}
+    end
+  end
+
+  defp widen_shape_check(check, _positions, _types, _state), do: check
+
   defp widen_refs(%{any: any} = constraints, positions) do
+    refs = for {_t, path, "reference"} <- positions, do: path
+
     any =
       Enum.map(any, fn probes ->
         ids = for {:refs, ids} <- probes, id <- ids, uniq: true, do: id
 
-        if ids == [],
+        if ids == [] or refs == [],
           do: probes,
-          else:
-            probes ++ for({_t, path} <- positions, id <- ids, uniq: true, do: probe_map(path, id))
+          else: probes ++ for(path <- refs, id <- ids, uniq: true, do: probe_map(path, id))
       end)
 
     %{constraints | any: any}
   end
 
-  defp single_ref_types(positions, base) do
-    plain = Enum.map(base, &{&1, false})
-    for {type, path} <- positions, path == plain, uniq: true, do: type
+  # The types in scope that declare `path` minus its leaf as the shape whose
+  # Sanity key the leaf is (a plain path: no array step).
+  defp shape_types(positions, path) do
+    with leaf when is_binary(leaf) <- List.last(path),
+         {:ok, kind} <- Map.fetch(@shape_leaf, leaf) do
+      plain = path |> Enum.drop(-1) |> Enum.map(&{&1, false})
+      for {type, p, ^kind} <- positions, p == plain, uniq: true, do: type
+    else
+      _ -> []
+    end
   end
 
   # `[{"seo", false}, {"reviewer", false}]` and an id -> %{"seo" => %{"reviewer" => id}};
@@ -1962,32 +2035,32 @@ defmodule Barkpark.Groq.DocumentSource do
     end)
   end
 
-  # Every readable declared position that may hold a bare id, as
-  # `{type, [{name, array?}]}`: a reference field, an array of references,
-  # inside objects and object arrays. `types` nil means every type.
-  # The scope's schemas come from ONE read (scope_schemas/1), not one lookup
-  # per type: a typeless references() over a 30-type dataset would otherwise
-  # cost 30 round trips. A type the scope read does not hold (none should)
-  # falls back to schema_for/2.
-  defp ref_positions(state, types) do
+  # Every readable declared position that may hold a bare reference id or a
+  # bare slug, as `{type, [{name, array?}], "reference" | "slug"}`: inside
+  # objects and object arrays, and an array of references. `types` nil means
+  # every type. The scope's schemas come from ONE read (scope_schemas/1), not
+  # one lookup per type: a typeless references() over a 30-type dataset would
+  # otherwise cost 30 round trips. A type the scope read does not hold (none
+  # should) falls back to schema_for/2.
+  defp shape_positions(state, types) do
     by_name = scope_schemas(state)
     types = types || Map.keys(by_name)
 
     for type <- types,
         schema = Map.get(by_name, type) || schema_for(type, state),
         schema != nil,
-        path <- ref_paths(schema, schema.fields || [], [], state.caller_context),
-        do: {type, path}
+        {path, kind} <- shape_paths(schema, schema.fields || [], [], state.caller_context),
+        do: {type, path, kind}
   end
 
-  defp ref_paths(schema, fields, path, ctx) do
+  defp shape_paths(schema, fields, path, ctx) do
     Enum.flat_map(fields, fn
       %{"name" => name} = field when is_binary(name) ->
         here = path ++ [{name, false}]
         dotted = Enum.map_join(here, ".", &elem(&1, 0))
 
         if Envelope.field_readable?(schema, dotted, ctx),
-          do: field_ref_paths(schema, field, here, ctx),
+          do: field_shape_paths(schema, field, here, ctx),
           else: []
 
       _ ->
@@ -1995,33 +2068,32 @@ defmodule Barkpark.Groq.DocumentSource do
     end)
   end
 
-  defp field_ref_paths(schema, field, path, ctx) do
+  defp field_shape_paths(schema, field, path, ctx) do
     case field["type"] do
-      "reference" ->
-        [path]
+      kind when kind in ["reference", "slug"] ->
+        [{path, kind}]
 
       "arrayOf" ->
         array_path = List.update_at(path, -1, fn {n, _} -> {n, true} end)
 
         case field["of"] do
           %{"type" => "reference"} ->
-            [array_path]
+            [{array_path, "reference"}]
 
           %{"fields" => sub} when is_list(sub) ->
-            ref_paths(schema, sub, array_path, ctx)
+            shape_paths(schema, sub, array_path, ctx)
 
           members when is_list(members) ->
-            if(Enum.any?(members, &match?(%{"type" => "reference"}, &1)),
-              do: [array_path],
+            if Enum.any?(members, &match?(%{"type" => "reference"}, &1)),
+              do: [{array_path, "reference"}],
               else: []
-            )
 
           _ ->
             []
         end
 
       t when t in ["composite", "object"] ->
-        ref_paths(schema, field["fields"] || [], path, ctx)
+        shape_paths(schema, field["fields"] || [], path, ctx)
 
       _ ->
         []
