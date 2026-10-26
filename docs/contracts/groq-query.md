@@ -13,9 +13,10 @@ Barkpark answers GROQ on Sanity's HTTP query API URLs, so a `@sanity/client` or 
 | `$name` | GET only: one parameter, JSON-encoded (`$slug="intro"`) |
 | `params` | POST only: object of decoded parameter values |
 | `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as its base, release ids ignored; `raw` stacked or a lone other value → 400 |
-| `returnQuery` | `false` leaves `query` out of the response |
+| `returnQuery` | `false` leaves `query` out |
+| `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, not of function values yet |
 
-Any `apiVersion`. Auth, tenancy and shares are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token on an unshared dataset: 403 (Sanity: 200, empty), kept. POST bills the read bucket. A GET over 32,753 bytes is 414; use POST.
+Any `apiVersion`. Auth, tenancy and shares are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token on an unshared dataset: 403 (Sanity: 200, empty), kept. POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
 
 Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows.
 
@@ -41,7 +42,7 @@ const client = createClient({
 
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter (add `_type` for finer refresh). Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, 20 streams each, then `goaway`) sends changed docs' twins as `message` `{"tags"}` each second; `restart` if `Last-Event-ID` can't resume. At most 128 tags: past 64 readable ones, type tags only.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter (add `_type` for finer refresh). Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, 20 streams each, then `goaway`) sends changed docs' twins in `{"tags"}` messages per second; `restart` if `Last-Event-ID` can't resume. At most 128 tags: past 64 readable ones, type tags only.
 
 ## Evaluation and limits
 
@@ -63,7 +64,7 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset). Sanity's GROQ test suite runs in CI (`groq/conformance_test.exs`): 7147 of 7731 pass; the rest use `diff::` or `fn`.
 
-Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases (a stack's release ids are ignored); `resultSourceMap`. Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
+Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases. Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 
