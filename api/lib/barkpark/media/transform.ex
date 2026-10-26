@@ -296,7 +296,7 @@ defmodule Barkpark.Media.Transform do
         true -> {sw, sh}
       end
 
-    p = 2 * Map.get(plan, :pad, 0)
+    p = 2 * padding(plan, w, h)
     (w + p) * (h + p)
   end
 
@@ -304,6 +304,17 @@ defmodule Barkpark.Media.Transform do
   def output_pixels(%{w: w}, _size) when is_integer(w), do: w * w
   def output_pixels(%{h: h}, _size) when is_integer(h), do: h * h
   def output_pixels(_plan, _size), do: nil
+
+  @doc """
+  The `pad` an output of `w` x `h` gets: the plan's, cut so the padded canvas
+  stays within `max_dimension/0` on each side (task-e1512b7d39b345c2). `dpr`
+  scales `w`/`h` before their own clamp, so no parameter grows the output past
+  `max_dimension/0`.
+  """
+  @spec padding(map(), pos_integer(), pos_integer()) :: non_neg_integer()
+  def padding(plan, w, h) do
+    plan |> Map.get(:pad, 0) |> min(max(div(max_dimension() - max(w, h), 2), 0))
+  end
 
   @doc "Cache file name (hash + extension) for a resolved plan."
   @spec cache_name(plan(), String.t() | nil) :: String.t()

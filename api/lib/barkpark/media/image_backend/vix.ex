@@ -294,7 +294,9 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   # image (cheap there): padding, flip, orientation, invert, grayscale, blur.
   # `or` turns the finished image, so `w`/`h` name the box before the turn.
   defp effects(image, plan) do
-    with {:ok, image} <- padded(image, Map.get(plan, :pad, 0), Map.get(plan, :bg)),
+    p = Transform.padding(plan, Image.width(image), Image.height(image))
+
+    with {:ok, image} <- padded(image, p, Map.get(plan, :bg)),
          {:ok, image} <- flipped(image, Map.get(plan, :flip)),
          {:ok, image} <- turned(image, Map.get(plan, :orient, 0)),
          {:ok, image} <- inverted(image, Map.get(plan, :invert, false)),
@@ -340,9 +342,23 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   defp grayed(image, true), do: Image.to_colorspace(image, :bw)
 
   # imgix's 0 to 2000 scale, approximated as a Gaussian of sigma blur / 10 px
-  # on the output image.
+  # on the output image. Past sigma 10 the image is shrunk until the blur is
+  # sigma 10, blurred and scaled back: the same look, at a cost that does not
+  # grow with the radius (a direct sigma 200 on a 4096 px image took 6 s).
   defp blurred(image, nil), do: {:ok, image}
-  defp blurred(image, blur), do: Vix.Vips.Operation.gaussblur(image, max(blur / 10, 0.3))
+
+  defp blurred(image, blur) when blur / 10 <= 10,
+    do: Vix.Vips.Operation.gaussblur(image, max(blur / 10, 0.3))
+
+  defp blurred(image, blur) do
+    {w, h} = {Image.width(image), Image.height(image)}
+    scale = max(10 / (blur / 10), 2 / min(w, h))
+
+    with {:ok, small} <- Vix.Vips.Operation.resize(image, scale),
+         {:ok, soft} <- Vix.Vips.Operation.gaussblur(small, 10.0) do
+      Vix.Vips.Operation.resize(soft, w / Image.width(soft), vscale: h / Image.height(soft))
+    end
+  end
 
   # Reject a decompression bomb BEFORE the (lazy) thumbnail pipeline is built.
   # `Image.{width,height,bands}` read the already-parsed header (no decode), so

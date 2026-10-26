@@ -153,6 +153,21 @@ defmodule Barkpark.Media.TransformTest do
           do: assert({:error, {:invalid_param, ^k, _}} = Transform.parse(%{k => v}))
     end
 
+    test "no parameter grows the output past max_dimension: dpr clamps after the multiply, pad is cut" do
+      assert plan!(%{"w" => "4000", "h" => "3000", "dpr" => "5"}) |> Map.take([:w, :h]) == %{
+               w: 4096,
+               h: 4096
+             }
+
+      max = Transform.max_dimension()
+      assert Transform.padding(plan!(%{"pad" => "5000"}), 4000, 2667) == div(max - 4000, 2)
+      assert Transform.padding(plan!(%{"pad" => "1000"}), max, max) == 0
+      assert Transform.padding(plan!(%{"pad" => "200"}), 1000, 667) == 200
+
+      assert Transform.output_pixels(plan!(%{"w" => "4000", "pad" => "5000"}), {600, 400}) <=
+               max * max
+    end
+
     test "fit=scale stretches to the box; fit=fillmax fills it without scaling up" do
       assert Transform.geometry(plan!(%{"w" => "100", "h" => "100", "fit" => "scale"}), 600, 400).resize ==
                {100, 100}

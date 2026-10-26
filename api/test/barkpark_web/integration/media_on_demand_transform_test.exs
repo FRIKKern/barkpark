@@ -335,6 +335,22 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
              |> Enum.all?(&(&1 > 240))
     end
 
+    test "dpr, blur and pad at their largest stay within max_dimension", %{conn: conn} do
+      result = upload(conn)
+      max = Barkpark.Media.Transform.max_dimension()
+
+      for q <- [
+            "w=4000&dpr=5&blur=2000",
+            "w=4000&pad=5000&bg=000",
+            "w=4000&h=4000&fit=fill&pad=1000"
+          ] do
+        resp = get_image(result["originalUrl"] <> "?" <> q)
+        assert resp.status == 200, q
+        {w, h} = size(decode(resp.resp_body))
+        assert w <= max and h <= max, "#{q}: #{w}x#{h}"
+      end
+    end
+
     test "an invalid value is a 400 naming the parameter", %{conn: conn} do
       result = upload(conn)
       resp = get_image(result["originalUrl"] <> "?w=wide")
