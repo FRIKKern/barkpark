@@ -423,7 +423,10 @@ defmodule Barkpark.Groq.DocumentSource do
 
     branches = for {:or, branches} <- ors, branch <- branches, do: filter_paths(branch)
 
-    Enum.uniq(eq ++ checks ++ List.flatten(branches))
+    # Each branch is a list of paths, and a path is a list of segments, so the
+    # branches join one level deep: List.flatten/1 split every path into its
+    # segments, which path_readable?/3 then could not judge.
+    Enum.uniq(eq ++ checks ++ Enum.concat(branches))
   end
 
   defp check_path({:not, check}), do: check_path(check)
@@ -1869,6 +1872,167 @@ defmodule Barkpark.Groq.DocumentSource do
       |> Map.get(DraftId.published_id(row.doc_id), Views.zero())
 
     Map.merge(doc, values)
+  end
+
+  # ── Read compat (task-c2be444ac1d07719) ──────────────────────────────────
+  #
+  # Barkpark stores a declared reference as the bare id ("author-alan") where
+  # Sanity stores {_type: "reference", _ref}. Nothing stored changes; the
+  # evaluator answers `author._ref` for a declared reference (schema_fields/2),
+  # and widen/2 lets SQL find the bare ids too, so a filter that reads `_ref`
+  # or calls references() still narrows on an index:
+  #
+  #   * `a.b._ref == x` also matches a bare `a.b == x` in each type in scope
+  #     that declares `a.b` a reference (an {:or} check, type by type, so a
+  #     SQL count stays exact);
+  #   * references(ids) also matches a bare id in every declared reference
+  #     position, as containment probes on the content index (the evaluator
+  #     re-checks references(), so these only narrow).
+  #
+  # Only fields the caller may read count, as for #24041's counts.
+
+  @impl true
+  def schema_fields(state, type) when is_binary(type) do
+    case schema_for(type, state) do
+      %{fields: fields} when is_list(fields) -> fields
+      _ -> nil
+    end
+  end
+
+  def schema_fields(_state, _type), do: nil
+
+  @impl true
+  def widen(state, constraints) do
+    positions = ref_positions(state, constraints.types)
+
+    if positions == [] do
+      constraints
+    else
+      constraints |> widen_ref_eq(positions) |> widen_refs(positions)
+    end
+  end
+
+  defp widen_ref_eq(%{eq: eq} = constraints, positions) do
+    {moved, kept} =
+      Enum.split_with(eq, fn {path, _v} ->
+        List.last(path) == "_ref" and single_ref_types(positions, Enum.drop(path, -1)) != []
+      end)
+
+    checks =
+      for {path, v} <- moved do
+        base = Enum.drop(path, -1)
+
+        bare =
+          for type <- single_ref_types(positions, base),
+              do: %{Pushdown.empty() | types: [type], eq: [{base, v}]}
+
+        {:or, [%{Pushdown.empty() | eq: [{path, v}]} | bare]}
+      end
+
+    %{constraints | eq: kept, checks: constraints.checks ++ checks}
+  end
+
+  defp widen_refs(%{any: any} = constraints, positions) do
+    any =
+      Enum.map(any, fn probes ->
+        ids = for {:refs, ids} <- probes, id <- ids, uniq: true, do: id
+
+        if ids == [],
+          do: probes,
+          else:
+            probes ++ for({_t, path} <- positions, id <- ids, uniq: true, do: probe_map(path, id))
+      end)
+
+    %{constraints | any: any}
+  end
+
+  defp single_ref_types(positions, base) do
+    plain = Enum.map(base, &{&1, false})
+    for {type, path} <- positions, path == plain, uniq: true, do: type
+  end
+
+  # `[{"seo", false}, {"reviewer", false}]` and an id -> %{"seo" => %{"reviewer" => id}};
+  # an array step wraps what is below it in a one-element list.
+  defp probe_map(path, id) do
+    path
+    |> Enum.reverse()
+    |> Enum.reduce(id, fn
+      {name, true}, acc -> %{name => [acc]}
+      {name, false}, acc -> %{name => acc}
+    end)
+  end
+
+  # Every readable declared position that may hold a bare id, as
+  # `{type, [{name, array?}]}`: a reference field, an array of references,
+  # inside objects and object arrays. `types` nil means every type.
+  defp ref_positions(state, types) do
+    types = types || all_type_names(state)
+
+    for type <- types,
+        schema = schema_for(type, state),
+        schema != nil,
+        path <- ref_paths(schema, schema.fields || [], [], state.caller_context),
+        do: {type, path}
+  end
+
+  defp ref_paths(schema, fields, path, ctx) do
+    Enum.flat_map(fields, fn
+      %{"name" => name} = field when is_binary(name) ->
+        here = path ++ [{name, false}]
+        dotted = Enum.map_join(here, ".", &elem(&1, 0))
+
+        if Envelope.field_readable?(schema, dotted, ctx),
+          do: field_ref_paths(schema, field, here, ctx),
+          else: []
+
+      _ ->
+        []
+    end)
+  end
+
+  defp field_ref_paths(schema, field, path, ctx) do
+    case field["type"] do
+      "reference" ->
+        [path]
+
+      "arrayOf" ->
+        array_path = List.update_at(path, -1, fn {n, _} -> {n, true} end)
+
+        case field["of"] do
+          %{"type" => "reference"} ->
+            [array_path]
+
+          %{"fields" => sub} when is_list(sub) ->
+            ref_paths(schema, sub, array_path, ctx)
+
+          members when is_list(members) ->
+            if(Enum.any?(members, &match?(%{"type" => "reference"}, &1)),
+              do: [array_path],
+              else: []
+            )
+
+          _ ->
+            []
+        end
+
+      t when t in ["composite", "object"] ->
+        ref_paths(schema, field["fields"] || [], path, ctx)
+
+      _ ->
+        []
+    end
+  end
+
+  defp all_type_names(state) do
+    case Process.get({:groq_src_type_names, state.dataset}) do
+      nil ->
+        names = state.dataset |> Barkpark.Content.list_schemas(state.opts) |> Enum.map(& &1.name)
+        Process.put({:groq_src_type_names, state.dataset}, names)
+        names
+
+      names ->
+        names
+    end
   end
 
   defp schema_for(type, state) do
