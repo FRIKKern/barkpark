@@ -139,4 +139,61 @@ defmodule BarkparkWeb.GroqReadCompatBodyTest do
     assert q(conn, t, ~s|*[_id == "p2"][0]{"r": references("ada")}|) == %{"r" => false}
     assert q(conn, t, ~s|*[_id == "p4"][0]{"r": references("ada")}|) == %{"r" => false}
   end
+
+  test "references() in a filter finds a body link in SQL, beside a direct bare reference", %{
+    conn: conn,
+    token: t
+  } do
+    # p1: a body link; p3: a direct bare `author`, no body link (it never
+    # depends on any body or edge state); p2's link is in a private field.
+    assert q(conn, t, ~s|*[_type == "post" && references("ada")] \| order(_id)._id|) == [
+             "p1",
+             "p3"
+           ]
+
+    assert q(conn, t, ~s|count(*[_type == "post" && references("ada")])|) == 2
+    assert q(conn, t, ~s|count(*[references("ada")])|) == 2
+    assert q(conn, t, ~s|*[references("nobody")]._id|) == []
+  end
+
+  # No index serves a body link's `.**` jsonpath: the probe must stay inside
+  # the declaring type's rows, typeless or not, and never read a private field.
+  test "the body-link probe is bounded by its type and skips private fields", %{
+    conn: conn,
+    token: t
+  } do
+    test_pid = self()
+    handler = "groq-body-sql-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, meta, _cfg -> send(test_pid, {:sql, meta.params}) end,
+      nil
+    )
+
+    try do
+      assert q(conn, t, ~s|count(*[references("ada")])|) == 2
+    after
+      :telemetry.detach(handler)
+    end
+
+    probes =
+      for params <- drain_params([]),
+          p <- params,
+          is_binary(p) and p =~ "wikilink",
+          do: {p, params}
+
+    assert probes != []
+    assert Enum.all?(probes, fn {_p, params} -> "post" in params end)
+    assert Enum.all?(probes, fn {p, _params} -> p =~ ~s|$."body"| and not (p =~ "notes") end)
+  end
+
+  defp drain_params(acc) do
+    receive do
+      {:sql, params} -> drain_params([params | acc])
+    after
+      0 -> acc
+    end
+  end
 end
