@@ -117,6 +117,66 @@ defmodule BarkparkWeb.ContributorSeatPublishDoorsTest do
       assert published?(id)
     end
 
+    # task-0d5ac677450d4c8c: the direct publish (createOrReplace + publish:
+    # true) is a publish too. It skipped the seat gate, so a contributor
+    # changed the published row through it.
+    test "direct publish: refused for a contributor, the published row unchanged", %{
+      ws_id: ws_id
+    } do
+      {contrib, _} = seated_token(ws_id, "contributor")
+      [live, fresh] = [new_id(), new_id()]
+      create_published!(live)
+
+      for id <- [live, fresh] do
+        op = [
+          %{
+            "createOrReplace" => %{"_id" => id, "_type" => @type_name, "title" => "Direct"},
+            "publish" => true
+          }
+        ]
+
+        assert_refused(mutate(contrib, op))
+      end
+
+      assert {:ok, %{title: "Draft"}} = Content.get_document(live, @type_name, @dataset)
+      refute published?(fresh)
+    end
+
+    test "direct publish: allowed for owner, admin and member seats", %{ws_id: ws_id} do
+      for role <- ~w(owner admin member) do
+        {raw, _} = seated_token(ws_id, role)
+        id = new_id()
+
+        op = [
+          %{
+            "createOrReplace" => %{"_id" => id, "_type" => @type_name, "title" => role},
+            "publish" => true
+          }
+        ]
+
+        assert json_response(mutate(raw, op), 200), role
+        assert {:ok, %{title: ^role}} = Content.get_document(id, @type_name, @dataset)
+      end
+    end
+
+    test "direct publish: a read-only token is refused; a contributor's draft write still lands",
+         %{
+           ws_id: ws_id
+         } do
+      ro = "contrib-ro-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(ro, "seat ro", @dataset, ["read"], ws_id)
+      id = new_id()
+      doc = %{"_id" => id, "_type" => @type_name, "title" => "T"}
+
+      assert mutate(ro, [%{"createOrReplace" => doc, "publish" => true}]).status == 403
+      refute published?(id)
+
+      {contrib, _} = seated_token(ws_id, "contributor")
+      assert json_response(mutate(contrib, [%{"createOrReplace" => doc}]), 200)
+      assert {:ok, _} = Content.get_document("drafts." <> id, @type_name, @dataset)
+      refute published?(id)
+    end
+
     test "a publish op inside a batch with draft writes rolls the whole batch back",
          %{ws_id: ws_id} do
       {contrib, _} = seated_token(ws_id, "contributor")

@@ -110,9 +110,13 @@ defmodule Barkpark.Content.Lifecycle do
   def publish_built_draft(%Document{} = draft, type, dataset, opts \\ []) do
     opts = Keyword.put(opts, :built_draft, true)
 
-    span_write(:publish, opts, fn ->
-      publish_draft(draft, DraftId.published_id(draft.doc_id), type, dataset, opts)
-    end)
+    # The draft-only seat gate, as publish_document/4 runs it: a direct
+    # publish changes the published row too (task-0d5ac677450d4c8c).
+    with :ok <- ensure_may_publish(opts) do
+      span_write(:publish, opts, fn ->
+        publish_draft(draft, DraftId.published_id(draft.doc_id), type, dataset, opts)
+      end)
+    end
   end
 
   defp do_publish_document(published_doc_id, type, dataset, opts) do
