@@ -181,6 +181,52 @@ defmodule BarkparkWeb.LiveEventsControllerTest do
     end
   end
 
+  describe "the per-credential cap" do
+    setup do
+      previous = Application.get_env(:barkpark, :live_events_max_streams)
+      Application.put_env(:barkpark, :live_events_max_streams, 2)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :live_events_max_streams, previous),
+          else: Application.delete_env(:barkpark, :live_events_max_streams)
+      end)
+    end
+
+    defp open_stream(token) do
+      Task.async(fn ->
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> token)
+        |> put_req_header("accept", "text/event-stream")
+        |> get(path())
+      end)
+    end
+
+    defp close_stream(task) do
+      send(task.pid, :retire)
+      frames(Task.await(task, 5_000).resp_body)
+    end
+
+    test "at the cap a stream opens; over it the answer is goaway; a closed stream frees its slot",
+         %{token: t} do
+      [a, b] = for _ <- 1..2, do: open_stream(t)
+      Process.sleep(200)
+
+      # The third is over the cap: goaway, and the response ends at once.
+      over = open_stream(t) |> Task.await(5_000)
+      assert [%{event: "goaway", data: %{"reason" => reason}}] = frames(over.resp_body)
+      assert reason =~ "2"
+
+      # Closing one frees its slot for the next.
+      assert [%{event: "welcome"} | _] = close_stream(a)
+      Process.sleep(100)
+      c = open_stream(t)
+      Process.sleep(200)
+
+      for task <- [b, c], do: assert([%{event: "welcome"} | _] = close_stream(task))
+    end
+  end
+
   test "no anonymous stream", %{conn: conn} do
     status = conn |> get(path()) |> Map.fetch!(:status)
     assert status in [401, 403]

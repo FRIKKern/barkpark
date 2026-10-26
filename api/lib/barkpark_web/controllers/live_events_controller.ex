@@ -17,7 +17,10 @@ defmodule BarkparkWeb.LiveEventsController do
     * `event: restart`, `data: {}` when a `Last-Event-ID` / `?lastEventId`
       cannot be honoured (malformed, past the head, or a backlog over
       1,000 tags): the client refetches everything;
-    * `: keepalive` every 30 s.
+    * `: keepalive` every 30 s;
+    * `event: goaway`, then close, instead of a welcome when the credential
+      already holds `:live_events_max_streams` (default 20) open streams;
+      next-sanity falls back to polling.
 
   Changes are batched over a second. Without `includeDrafts=true` a draft's
   change is not sent, as on Sanity. The gate is listen's (`:scoped_api` +
@@ -41,6 +44,7 @@ defmodule BarkparkWeb.LiveEventsController do
   @min_api_version "2021-03-25"
   @batch_ms 1_000
   @max_resume_tags 1_000
+  @streams Barkpark.Realtime.LiveStreams
 
   def events(conn, %{"dataset" => dataset, "api_version" => version} = params) do
     if api_version_ok?(version) do
@@ -62,7 +66,38 @@ defmodule BarkparkWeb.LiveEventsController do
 
   defp api_version_ok?(_), do: false
 
+  # At most `:live_events_max_streams` (default 20) open streams per token, or
+  # per user for a member session. The stream registers first and counts
+  # second, so two racing opens can never both slip under the cap; the
+  # registration ends with the stream's process, which frees the slot.
   defp stream(conn, dataset, params) do
+    key = principal(conn)
+    if key, do: Registry.register(@streams, key, nil)
+    cap = Application.get_env(:barkpark, :live_events_max_streams, 20)
+
+    if key && length(Registry.lookup(@streams, key)) > cap do
+      Registry.unregister(@streams, key)
+
+      conn
+      |> put_resp_content_type("text/event-stream")
+      |> send_resp(
+        200,
+        frame("goaway", nil, %{reason: "too many open live streams for this credential (#{cap})"})
+      )
+    else
+      open(conn, dataset, params)
+    end
+  end
+
+  defp principal(conn) do
+    case conn.assigns do
+      %{api_token: %{id: id}} when not is_nil(id) -> {:token, id}
+      %{current_user: %{id: id}} when not is_nil(id) -> {:user, id}
+      _ -> nil
+    end
+  end
+
+  defp open(conn, dataset, params) do
     # A stalled reader must not grow this process without bound (listen's rule).
     Process.flag(:max_heap_size, %{size: 4_000_000, kill: true, error_logger: true})
 
