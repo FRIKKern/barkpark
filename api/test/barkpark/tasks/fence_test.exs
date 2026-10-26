@@ -143,17 +143,27 @@ defmodule Barkpark.Tasks.FenceTest do
   # ─── edge add on a non-claimed task bumps nothing ────────────────────────
 
   describe "no fence when the dependent is not a live claim" do
-    test "edge add on an open task bumps no epoch and emits no task.mutated",
+    test "edge add and remove on an open task bump no epoch but each emit task.mutated",
          %{scope: scope} do
       dep = mk_task!(uniq("open-dep"), scope, %{})
       blk = mk_task!(uniq("open-blk"), scope, %{})
 
       assert {:ok, _edge} = Tasks.add_dep(dep.id, blk.id, :blocks)
+      added = reload(dep.id)
+      refute added.rev == dep.rev
+      assert {:ok, 1} = Tasks.remove_dep(dep.id, blk.id, :blocks)
+      assert {:ok, 0} = Tasks.remove_dep(dep.id, blk.id, :blocks)
 
       reread = reload(dep.id)
       assert reread.content["lifecycle_status"] == "open"
       refute Map.has_key?(reread.content, "claim")
-      assert events(dep.doc_id, "task.mutated") == []
+      refute reread.rev == added.rev
+
+      assert [add_ev, rm_ev] = events(dep.doc_id, "task.mutated")
+      assert add_ev.document["edge_change"] == "edge_added"
+      assert rm_ev.document["edge_change"] == "edge_removed"
+      refute Map.has_key?(add_ev.document, "fenced")
+      assert rm_ev.rev == reread.rev
     end
   end
 
