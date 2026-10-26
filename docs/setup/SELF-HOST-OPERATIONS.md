@@ -38,21 +38,36 @@ Once a month, restore a `bp instance backup` of the live instance into a scratch
 
 ## SSO with Entra ID
 
-Set `BARKPARK_BOOTSTRAP_OWNER_EMAIL` on the first boot. When the instance has no users, it seats that email as owner of the default workspace. Limit the operator routes with `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_TOKEN_IDS`, and set `BARKPARK_OPERATOR_FAIL_CLOSED=1` so they refuse every caller while both lists are empty. `BARKPARK_OIDC_STRICT_VALIDATION=1` checks token times and links the Entra `oid`, so an account survives an email change.
-
-Register an Entra app with the redirect URI `https://$PHX_HOST/v1/auth/oidc/<org>/callback` and a groups claim, then run these as an operator:
+Set the instance up with the settings in [the next section](#recommended-settings-for-a-pensum-instance). Register an Entra app with the redirect URI `https://$PHX_HOST/v1/auth/oidc/<org>/callback` and a groups claim, then run these as an operator:
 
 ```bash
 bp org create gyldendal Gyldendal
 bp org attach-workspace gyldendal default
 bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$CLIENT_SECRET" \
+  --tenant_id "$TENANT" --strict_validation --trust_idp_mfa \
   --set group_role_mappings:='{"<owners group id>":"owner","<editors group id>":"member"}'
 bp org domain-add gyldendal gyldendal.no      # publish the TXT record it prints
 bp org domain-verify gyldendal gyldendal.no
 bp org auth-methods gyldendal sso
 ```
 
-The tenant in the issuer URL is the only tenant whose tokens sign in. The keys of the mapping are Entra group object ids. Each sign-in sets the role from the user's groups and can lower it, so map a group that holds the owner to `owner`, or the first sign-in demotes the owner.
+`tenant_id` refuses tokens whose `tid` differs. `strict_validation` checks token times and links the Entra `oid`, so an account survives an email change. `trust_idp_mfa` counts Entra MFA as Barkpark MFA. The keys of the mapping are Entra group object ids. Each sign-in sets the role from the user's groups and can lower it, so map a group that holds the owner to `owner`, or the first sign-in demotes the owner. `bp org oidc-update` takes the same flags.
+
+## Recommended settings for a Pensum instance
+
+```bash
+DATABASE_SSL=verify-full DATABASE_SSL_CA_FILE=<Flexible Server CA bundle>
+BARKPARK_SELF_UPDATE_CHECK=off BARKPARK_RETIRE_SSE_ON_SIGTERM=1
+BARKPARK_ALWAYS_ALLOWED_ORIGINS=<Pensum's browser origins, comma-separated>
+BARKPARK_PLUGINS=media BARKPARK_TMUX_CONSOLE=off
+BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
+BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner>          # first boot only
+BARKPARK_OPERATOR_EMAILS=<operators> BARKPARK_OPERATOR_FAIL_CLOSED=1
+BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1 BARKPARK_CLOUD_HANDOFF=off
+BARKPARK_BREAKGLASS_EMAILS=<break-glass account> BARKPARK_TOKEN_EXPIRY_WARNINGS=on
+```
+
+`BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats that email as owner of the default workspace while the instance has no users. With `BARKPARK_OPERATOR_FAIL_CLOSED=1`, the operator routes refuse every caller while both `BARKPARK_OPERATOR_EMAILS` and `BARKPARK_OPERATOR_TOKEN_IDS` are empty. `BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1` also applies the org's sign-in policy to API token paste and the Cloud handoff. `BARKPARK_CLOUD_HANDOFF=off` turns off the Barkpark Cloud ticket and deprovisioning routes. A break-glass account signs in with a password and TOTP while SSO is down. Keep its password and TOTP secret in Key Vault.
 
 ## Rotate keys held in Azure Key Vault
 

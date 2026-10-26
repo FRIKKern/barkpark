@@ -167,6 +167,59 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
       conn = req(ctx.bearer, :post, "/v1/admin/orgs", %{slug: uniq("org")})
       assert %{"error" => %{"required" => "platform_operator"}} = json_response(conn, 403)
     end
+
+    test "create and update store the Entra ID settings and never echo the secret", ctx do
+      slug = uniq("org")
+      req(ctx.bearer, :post, "/v1/admin/orgs", %{slug: slug}) |> json_response(201)
+
+      # What bp sends for `oidc-create … --tenant_id tenant-1 --strict_validation
+      # --trust_idp_mfa`: the args ride the body, the flags the query string.
+      created =
+        req(
+          ctx.bearer,
+          :post,
+          "/v1/admin/orgs/#{slug}/oidc?tenant_id=tenant-1&strict_validation=true&trust_idp_mfa=true",
+          %{issuer: @issuer, client_id: @client_id, client_secret: "entra-secret"}
+        )
+        |> json_response(201)
+
+      assert %{"tenant_id" => "tenant-1", "strict_validation" => true, "trust_idp_mfa" => true} =
+               created
+
+      refute inspect(created) =~ "entra-secret"
+
+      c = Oidc.connection_for_org_slug(slug)
+      assert {c.tenant_id, c.strict_validation, c.trust_idp_mfa} == {"tenant-1", true, true}
+
+      updated =
+        req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+          mfa_acr: "possessionorinherence",
+          token_endpoint_auth_method: "client_secret_basic"
+        })
+        |> json_response(200)
+
+      refute inspect(updated) =~ "entra-secret"
+      c = Oidc.connection_for_org_slug(slug)
+
+      assert {c.mfa_acr, c.token_endpoint_auth_method} ==
+               {"possessionorinherence", "client_secret_basic"}
+
+      refute Repo.all(from e in Event, select: e.metadata) |> inspect() =~ "entra-secret"
+
+      flags =
+        for %{"id" => id, "flags" => fs} <-
+              Barkpark.Plugins.Capabilities.manifest("admin", project: false)["commands"],
+            id in ["org.oidc-create", "org.oidc-update"],
+            into: %{},
+            do: {id, MapSet.new(fs, & &1["name"])}
+
+      assert map_size(flags) == 2
+
+      for {_id, names} <- flags,
+          name <-
+            ~w(tenant_id strict_validation trust_idp_mfa mfa_acr scopes token_endpoint_auth_method),
+          do: assert(name in names)
+    end
   end
 
   describe "group mappings" do
