@@ -1019,6 +1019,24 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # Sanity's mutate API patches by id alone too: `{"patch": {"id": "x", "set":
+  # {...}}}` (@sanity/client's `patch()`). Barkpark's patch heads below need a
+  # type, so, as for the typeless delete above, this one finds it from the
+  # stored row and runs the typed head: every fence, permission and protected
+  # key check stays on that one path (task-c6cbf346a07ff01e). An id that
+  # matches no row answers 404, the same as a typed patch of a missing
+  # document.
+  defp apply_one(%{"patch" => %{"id" => id} = patch} = mutation, dataset, opts)
+       when is_binary(id) and not is_map_key(patch, "type") do
+    case Barkpark.Content.Query.document_type(id, dataset, opts) do
+      {:ok, type} ->
+        apply_one(%{mutation | "patch" => Map.put(patch, "type", type)}, dataset, opts)
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
   defp apply_one(%{"replace" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
