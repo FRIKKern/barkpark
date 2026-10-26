@@ -65,6 +65,6 @@ Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::
 
 `score()` weighs as groq-js; Sanity's engine also favours rare terms and short fields, so ranks can differ.
 
-Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()`, and its wikilinks count for `references()` (reads every row of those types). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()`, its wikilinks count for `references()` (reads every row of those types). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
 
 `tooling/groq/compare.mjs` (dev) diffs a query corpus against groq-js.
