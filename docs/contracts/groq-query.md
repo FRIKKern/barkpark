@@ -62,9 +62,9 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), and `fn` (400 on a cycle or past 1000 calls expanded). Sanity's GROQ test suite runs in CI (`groq/conformance_test.exs`): 7156 of 7731 pass.
+Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps). Sanity's GROQ suite (`groq/conformance_test.exs`, CI): all 7731 pass.
 
-Not yet: `diff::changedAny|changedOnly`, `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases. Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
+Not yet: `geo::`, `text::query`, other `documents::`, `delta::`, `user::`; releases. Sanity defaults to `raw` before 2025-02-19, Barkpark to `published`; an older client asks for `raw`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 

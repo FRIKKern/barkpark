@@ -802,6 +802,21 @@ defmodule Barkpark.Groq.Evaluator do
     end
   end
 
+  # Sanity's diff functions (task-13790b478beeee4d); see Barkpark.Groq.Diff.
+  defp func("diff", kind, [l, r, {:selector, sel}], scope, ctx)
+       when kind in ["changedAny", "changedOnly"] do
+    test = fn cond_expr, value ->
+      eval(cond_expr, %{value: value, parent: scope, hidden: false}, ctx) === true
+    end
+
+    lv = eval(l, scope, ctx)
+    rv = eval(r, scope, ctx)
+
+    if kind == "changedAny",
+      do: Barkpark.Groq.Diff.changed_any?(sel, lv, rv, test),
+      else: Barkpark.Groq.Diff.changed_only?(sel, lv, rv, test)
+  end
+
   defp func("releases", "all", [], _scope, ctx) do
     ctx.source
     |> Source.fetch(%{Pushdown.empty() | types: ["system.release"]})
