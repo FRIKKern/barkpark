@@ -500,7 +500,7 @@ defmodule Barkpark.Content.EnvelopeTest do
       map = Envelope.source_map(doc, rendered)
 
       assert [%{"_id" => "drafts.env-1", "_type" => "post"}] = map["documents"]
-      title_path = ~s($["title"])
+      title_path = ~s($['title'])
       assert title_idx = map["mappings"][title_path]["source"]["path"]
       assert Enum.at(map["paths"], title_idx) == title_path
       assert map["mappings"][title_path]["source"]["document"] == 0
@@ -511,8 +511,8 @@ defmodule Barkpark.Content.EnvelopeTest do
       map = Envelope.source_map(doc, rendered)
 
       for reserved <- ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt) do
-        refute Enum.member?(map["paths"], ~s($["#{reserved}"]))
-        refute Map.has_key?(map["mappings"], ~s($["#{reserved}"]))
+        refute Enum.member?(map["paths"], ~s($['#{reserved}']))
+        refute Map.has_key?(map["mappings"], ~s($['#{reserved}']))
       end
     end
 
@@ -536,8 +536,8 @@ defmodule Barkpark.Content.EnvelopeTest do
       refute Map.has_key?(rendered, "ssn")
 
       map = Envelope.source_map(doc, rendered)
-      refute Map.has_key?(map["mappings"], ~s($["ssn"]))
-      refute Enum.member?(map["paths"], ~s($["ssn"]))
+      refute Map.has_key?(map["mappings"], ~s($['ssn']))
+      refute Enum.member?(map["paths"], ~s($['ssn']))
     end
 
     test "an envelope with no user-content keys returns nil" do
@@ -567,15 +567,15 @@ defmodule Barkpark.Content.EnvelopeTest do
       source = fn result -> Enum.at(map["paths"], map["mappings"][result]["source"]["path"]) end
 
       # The whole field is still one entry, as before.
-      assert source.(~s($["seo"])) == ~s($["seo"])
-      assert source.(~s($["seo"]["metaTitle"])) == ~s($["seo"]["metaTitle"])
-      assert source.(~s($["links"][1])) == ~s{$["links"][?(@._key=="l2")]}
-      assert source.(~s($["links"][1]["title"])) == ~s{$["links"][?(@._key=="l2")]["title"]}
-      assert source.(~s($["tags"][1])) == ~s($["tags"][1])
-      assert map["mappings"][~s($["links"][0]["title"])]["source"]["document"] == 0
+      assert source.(~s($['seo'])) == ~s($['seo'])
+      assert source.(~s($['seo']['metaTitle'])) == ~s($['seo']['metaTitle'])
+      assert source.(~s($['links'][1])) == ~s{$['links'][?(@._key=='l2')]}
+      assert source.(~s($['links'][1]['title'])) == ~s{$['links'][?(@._key=='l2')]['title']}
+      assert source.(~s($['tags'][1])) == ~s($['tags'][1])
+      assert map["mappings"][~s($['links'][0]['title'])]["source"]["document"] == 0
       # System keys are not mapped.
-      refute Map.has_key?(map["mappings"], ~s($["seo"]["_type"]))
-      refute Map.has_key?(map["mappings"], ~s($["links"][0]["_key"]))
+      refute Map.has_key?(map["mappings"], ~s($['seo']['_type']))
+      refute Map.has_key?(map["mappings"], ~s($['links'][0]['_key']))
     end
 
     test "a document's nested entries stop at the cap", %{doc: doc} do
@@ -583,10 +583,10 @@ defmodule Barkpark.Content.EnvelopeTest do
       map = Envelope.source_map(doc, rendered)
 
       nested =
-        Enum.count(map["mappings"], fn {k, _} -> String.starts_with?(k, ~s($["list"][)) end)
+        Enum.count(map["mappings"], fn {k, _} -> String.starts_with?(k, ~s($['list'][)) end)
 
       assert nested == 2_000
-      assert Map.has_key?(map["mappings"], ~s($["list"]))
+      assert Map.has_key?(map["mappings"], ~s($['list']))
     end
   end
 
@@ -614,8 +614,8 @@ defmodule Barkpark.Content.EnvelopeTest do
                %{"_id" => "drafts.env-sm-many-2", "_type" => "post"}
              ] = map["documents"]
 
-      row0_title = ~s($[0]["title"])
-      row1_title = ~s($[1]["title"])
+      row0_title = ~s($[0]['title'])
+      row1_title = ~s($[1]['title'])
       assert map["mappings"][row0_title]["source"]["document"] == 0
       assert map["mappings"][row1_title]["source"]["document"] == 1
     end
@@ -625,9 +625,9 @@ defmodule Barkpark.Content.EnvelopeTest do
       map = Envelope.source_map_many([doc, doc], [rendered, rendered])
 
       assert length(map["documents"]) == 2
-      refute map["mappings"][~s($[0]["title"])] == map["mappings"][~s($[1]["title"])]
-      assert map["mappings"][~s($[0]["title"])]["source"]["document"] == 0
-      assert map["mappings"][~s($[1]["title"])]["source"]["document"] == 1
+      refute map["mappings"][~s($[0]['title'])] == map["mappings"][~s($[1]['title'])]
+      assert map["mappings"][~s($[0]['title'])]["source"]["document"] == 0
+      assert map["mappings"][~s($[1]['title'])]["source"]["document"] == 1
     end
 
     test "a row with no visible user-content key still gets a documents entry, keeping the " <>
@@ -636,8 +636,8 @@ defmodule Barkpark.Content.EnvelopeTest do
       map = Envelope.source_map_many([doc, doc2], [%{}, Envelope.render(doc2)])
 
       assert length(map["documents"]) == 2
-      refute Map.has_key?(map["mappings"], ~s($[0]["title"]))
-      assert map["mappings"][~s($[1]["title"])]["source"]["document"] == 1
+      refute Map.has_key?(map["mappings"], ~s($[0]['title']))
+      assert map["mappings"][~s($[1]['title'])]["source"]["document"] == 1
     end
 
     test "a reserved key never appears in any row's mapping", %{doc: doc, doc2: doc2} do
@@ -646,7 +646,7 @@ defmodule Barkpark.Content.EnvelopeTest do
 
       for row <- [0, 1],
           reserved <- ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt) do
-        refute Map.has_key?(map["mappings"], ~s($[#{row}]["#{reserved}"]))
+        refute Map.has_key?(map["mappings"], ~s($[#{row}]['#{reserved}']))
       end
     end
 

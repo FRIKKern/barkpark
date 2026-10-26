@@ -117,7 +117,7 @@ defmodule BarkparkWeb.QueryControllerListSourceMapTest do
       idx = row_index_of!(rows, "drafts." <> id)
       assert Enum.at(source_map["documents"], idx)["_id"] == "drafts." <> id
 
-      title_path = ~s($[#{idx}]["title"])
+      title_path = ~s($[#{idx}]['title'])
       mapping = source_map["mappings"][title_path]
       assert mapping["source"]["document"] == idx
     end
@@ -136,7 +136,7 @@ defmodule BarkparkWeb.QueryControllerListSourceMapTest do
       |> json_response(200)
 
     refute is_nil(body["sourceMap"])
-    assert Map.has_key?(body["sourceMap"]["mappings"], ~s($[0]["author"]))
+    assert Map.has_key?(body["sourceMap"]["mappings"], ~s($[0]['author']))
   end
 
   test "REFUSED/IGNORED under published perspective — no sourceMap key at all", %{
@@ -189,7 +189,7 @@ defmodule BarkparkWeb.QueryControllerListSourceMapTest do
 
     [row] = body["result"]["documents"]
     refute Map.has_key?(row, "ssn")
-    refute Map.has_key?(body["sourceMap"]["mappings"], ~s($[0]["ssn"]))
+    refute Map.has_key?(body["sourceMap"]["mappings"], ~s($[0]['ssn']))
     refute body |> Jason.encode!() |> String.contains?("SECRET_")
   end
 
