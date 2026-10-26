@@ -18,7 +18,7 @@ defmodule Barkpark.Groq.Evaluator do
   dictionary.
   """
 
-  alias Barkpark.Groq.{Pushdown, Source, Values}
+  alias Barkpark.Groq.{PortableText, Pushdown, Source, Values}
 
   defmodule EvalError do
     @moduledoc "A query that parses but cannot be evaluated (an unsupported function, a tuple)."
@@ -749,8 +749,16 @@ defmodule Barkpark.Groq.Evaluator do
   defp func("dateTime", "now", [], _scope, ctx),
     do: {:datetime, DateTime.truncate(ctx.now, :millisecond)}
 
-  defp func("pt", "text", [arg], scope, ctx),
-    do: Barkpark.Groq.PortableText.text(eval(arg, scope, ctx))
+  # A declared richText field stores PortableDoc, not Portable Text: read it
+  # as the Portable Text it maps from (read compat, task-c2be444ac1d07719).
+  defp func("pt", "text", [arg], scope, ctx) do
+    value = eval(arg, scope, ctx)
+
+    case field_decl(arg, scope, ctx) do
+      %{"type" => "richText"} -> PortableText.doc_text(value) || PortableText.text(value)
+      _ -> PortableText.text(value)
+    end
+  end
 
   defp func("sanity", "projectId", _args, _scope, ctx), do: ctx.project_id
   defp func("sanity", "dataset", _args, _scope, ctx), do: ctx.dataset

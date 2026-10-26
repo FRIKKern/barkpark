@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: groq-query-api | budget: 1500tok -->
 # GROQ query API
 
-Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/`, `BarkparkWeb.GroqController`.
+Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site keeps its queries. Code: `api/lib/barkpark/groq/`, `BarkparkWeb.GroqController`.
 
 ## Endpoint
 
@@ -37,8 +37,6 @@ const client = createClient({
 })
 ```
 
-`next-sanity` takes the same options.
-
 ## Sync tags
 
 `bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, and `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned. The webhook dispatcher sends the same tags on each mutation ([webhook-realtime.md](webhook-realtime.md)), so `revalidateTag` refreshes every cached query that read it. At most 128 tags; beyond that, type tags only.
@@ -67,6 +65,6 @@ Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::
 
 `score()` weighs as groq-js; Sanity's engine also favours rare terms and short fields, so ranks can differ.
 
-Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else the member name). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()` (its wikilinks do not count for `references()` yet). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing, as in `order(a[0]._type)`.
 
-`tooling/groq/compare.mjs` (dev only) diffs a query corpus between groq-js and this endpoint.
+`tooling/groq/compare.mjs` (dev) diffs a query corpus against groq-js.
