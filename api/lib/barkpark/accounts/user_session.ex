@@ -48,6 +48,11 @@ defmodule Barkpark.Accounts.UserSession do
     field :saml_session_index, :string
     field :saml_org_slug, :string
 
+    # Born from an OIDC sign-in whose IdP asserted MFA on a connection that
+    # trusts it (`Barkpark.Sso.Oidc.idp_mfa?/2`). The org require-MFA gates
+    # accept this session without a Barkpark factor.
+    field :idp_mfa, :boolean, default: false
+
     belongs_to :user, Barkpark.Accounts.User
 
     timestamps(type: :utc_datetime_usec)
@@ -220,6 +225,7 @@ defmodule Barkpark.Accounts.UserSession do
       :saml_name_id,
       :saml_session_index,
       :saml_org_slug,
+      :idp_mfa,
       :user_id
     ])
     |> validate_required([:token_hash, :user_id])

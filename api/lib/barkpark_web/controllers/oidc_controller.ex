@@ -82,7 +82,7 @@ defmodule BarkparkWeb.OidcController do
         ]
 
         case Oidc.handle_callback(c, code, opts) do
-          {:ok, user, _claims} ->
+          {:ok, user, claims} ->
             # era-w8-sso-mfa-binding: org-require-MFA binds at session-mint
             # time — a governed factor-less user is refused HERE (audited),
             # never landed in Studio. Checked AFTER handle_callback's JIT so
@@ -93,8 +93,12 @@ defmodule BarkparkWeb.OidcController do
             # narrowed its list without naming "sso" gets this door closed —
             # without the check the allow-list was inert on exactly the door
             # its own vocabulary invited an admin to disable.
+            # An IdP that asserted MFA on a connection trusting it stands in
+            # for a Barkpark factor: the session is born MFA-verified.
+            idp_mfa? = Oidc.idp_mfa?(c, claims)
+
             cond do
-              SessionIssuer.org_mfa_enrolment_blocked?(user) ->
+              not idp_mfa? and SessionIssuer.org_mfa_enrolment_blocked?(user) ->
                 SessionIssuer.deny_org_mfa_enrolment(conn, user, "oidc", c.organization_id)
 
               SessionIssuer.auth_method_blocked?(user, "sso") ->
@@ -103,8 +107,13 @@ defmodule BarkparkWeb.OidcController do
               true ->
                 Sso.record_login(user, "oidc", c.organization_id)
 
+                mfa_opts = if idp_mfa?, do: [mfa_verified: true, idp_mfa: true], else: []
+
                 {:ok, token} =
-                  Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
+                  Accounts.create_user_session_token(
+                    user,
+                    SessionIssuer.actor_opts(conn) ++ mfa_opts
+                  )
 
                 conn =
                   conn |> configure_session(renew: true) |> put_session("user_session", token)
