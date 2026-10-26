@@ -167,7 +167,7 @@ defmodule Barkpark.Tasks.RailTest do
       refute base == with_edge
 
       # Remove: digest returns to the pre-edge value (edge set restored).
-      :ok = Tasks.remove_dep(child.id, blocker.id, :blocks)
+      {:ok, 1} = Tasks.remove_dep(child.id, blocker.id, :blocks)
       after_remove = Rail.rev(parent, opts)
       assert after_remove == base
       refute after_remove == with_edge

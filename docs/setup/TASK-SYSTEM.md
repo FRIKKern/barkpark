@@ -8,7 +8,7 @@ Barkpark as your AI's task board: agents claim work over HTTP, you steer the que
 | Surface | What |
 |---|---|
 | **Studio Tasks pane** | A **Tasks ✅** desk group at `/studio` with lifecycle tabs; editor = four-group dossier (brief · work · close · system); `dependencies`/`claim` read-only. |
-| **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / landed / close / move` — manifest-driven. |
+| **`bp` verbs** | `bp task ls / ready / prime / events / get / next / claim / release / stamp / pulse / landed / close / move / unblock` — manifest-driven. |
 | **Terminal TUI** | `bp tasks` (= `bp task tui`); `c`/`x` claim/close as `BARKPARK_WORKER_ID` (default `tui-<hostname>`). Keys: [tui cheatsheet](../cheatsheets/tui.md). |
 | **HTTP API** | Bearer endpoints under `/v1/tasks/*` (read tier): the verbs plus fetch, edges, labels, papers. |
 | **Events** | Each op emits a `mutation_events` row: `task.{claimed,released,criterion,pulse,closed,mutated,relabeled,referenced,reparented,lease_expired,compacted,compaction_restored}`. **Push** SSE `/v1/data/listen/:dataset`; **pull** keyset feed `GET /v1/tasks/events?since=<id>` (§7). |
@@ -73,7 +73,7 @@ bp task landed t1 --commit a1b2c3d --pr 123 --note "merged to main" --criterion 
 
 Full contract — lease TTL, what each verb fences on, every refusal (`409 fenced_off`, `not_holder`, `criteria_unmet`, …), and `--withdraw`, the only verb that LOWERS a met flag (a bare `met:true → met:false` patch is refused), plus its sealed-row rules: [claim-lifecycle](../contracts/task-claim-lifecycle.md); close receipt: [close-packet](../contracts/close-packet.md).
 
-**5. Dependencies, labels, papers.** Same bearer + JSON headers; routes in the [cheatsheet](../cheatsheets/tasks.md). `POST /v1/tasks/edges` `{"from_id":"t2","to_id":"t1"}` = t2 waits on t1 — from = dependent, to = blocker, `kind` defaults `blocks`. `GET /v1/tasks/:id/edges` takes `?kind=all`.
+**5. Dependencies, labels, papers.** Routes in the [cheatsheet](../cheatsheets/tasks.md). `POST /v1/tasks/edges` `{"from_id":"t2","to_id":"t1"}` = t2 waits on t1 — from = dependent, to = blocker, `kind` defaults `blocks`; `DELETE` removes it (`bp task unblock t2 t1`).
 
 **6. Filtered reads.**
 

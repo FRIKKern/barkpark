@@ -25,6 +25,7 @@ defmodule BarkparkWeb.TasksController do
     * `POST   /v1/tasks/:doc_id/pulse`      — `Tasks.pulse_by_id/3` (now-line + lease renewal)
     * `GET    /v1/tasks/:doc_id/edges`      — `Tasks.dependencies/2` + `dependents/2`
     * `POST   /v1/tasks/edges`              — `Tasks.add_dep/3`
+    * `DELETE /v1/tasks/edges`              — `Tasks.remove_dep/4`
     * `POST   /v1/tasks/:doc_id/labels`     — `Tasks.relabel_by_id/3`
     * `POST   /v1/tasks/:doc_id/papers`     — `Tasks.update_paper_refs_by_id/3`
     * `POST   /v1/tasks/:doc_id/move`       — `Tasks.move_by_id/2` (rail-l3 re-parent)
@@ -3487,6 +3488,25 @@ defmodule BarkparkWeb.TasksController do
 
       {:error, :not_found} ->
         not_found(conn, "from_id or to_id not found")
+    end
+  end
+
+  # ─── DELETE /v1/tasks/edges ─────────────────────────────────────────────
+  # The inverse of add_edge/2: same body, same scoped pre-flight. Idempotent —
+  # an absent edge answers 200 with `removed: false`, so a retry is safe.
+
+  def remove_edge(conn, params) do
+    with {:ok, from_id} <- Params.fetch_string(params, "from_id"),
+         {:ok, to_id} <- Params.fetch_string(params, "to_id"),
+         kind when is_binary(kind) <- params["kind"] || "blocks",
+         {:ok, from_doc} <- find_task_by_doc_id(from_id, conn),
+         {:ok, to_doc} <- find_task_by_doc_id(to_id, conn) do
+      {:ok, removed} = Tasks.remove_dep(from_doc, to_doc, kind, caller_token_id(conn))
+      json(conn, %{ok: true, removed: removed > 0})
+    else
+      {:error, :missing, field} -> bad_request(conn, "#{field} is required")
+      {:error, :not_found} -> not_found(conn, "from_id or to_id not found")
+      _ -> bad_request(conn, "kind must be a string")
     end
   end
 

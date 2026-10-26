@@ -569,11 +569,11 @@ defmodule PDS.Census do
   # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
   # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 118,
-    ast: 109,
+    textual: 119,
+    ast: 110,
     phantom: 9,
     consumer: 4,
-    emitted: 105,
+    emitted: 106,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -751,7 +751,14 @@ defmodule PDS.Census do
     # which call Repo.insert/1 and Repo.delete_all/1 directly. `read` (37),
     # `phantom` (9), `consumer` (4) and `unrouted` (13) did NOT move — two
     # added sites, not a reclassification.
-    write: 55,
+    #
+    # RE-DERIVED AGAIN 2026-10-26 (task-de1360b7d60e2afe, DELETE /v1/tasks/edges):
+    # textual 118 -> 119, ast 109 -> 110, emitted 105 -> 106, write-routed 55 -> 56.
+    # ONE new emitted site, TasksController.remove_edge/2's `ok: true` arm, in the
+    # WRITE class: it reaches Barkpark.Tasks.Edges.remove_dep/3 and Repo.delete_all/1.
+    # `read`, `phantom`, `consumer` and `unrouted` did not move. Derived from this
+    # census's own D448-DRIFT-REFUSES line on this commit's tree.
+    write: 56,
     read: 37,
     unrouted: 13
   }
@@ -2977,6 +2984,10 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :context_differential_only, evidence:
         {"api/test/barkpark/tasks/receipt_honesty_test.exs",
          ~S|test "merge reconcile (close.ex write_reconcile)", %{scope: scope} do|}},
+    # barkpark_web/controllers/tasks_controller.ex:3505 — `removed` is the delete count
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.remove_edge/2", "45588519", "93077774"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
     # barkpark_web/controllers/tasks_controller.ex:1327
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
             "BarkparkWeb.TasksController.relabel/2", "7475620", "84462998"},
@@ -11973,7 +11984,11 @@ defmodule PDS.Census do
   # routed-write members, now disposed through their own register rows
   # (UNJUDGED, added above) rather than excluded — two arrivals, no exclusion
   # added.
-  @derived_disposition_pin %{count: 87, fp: "21248959"}
+  # Re-derived 2026-10-26 (task-de1360b7d60e2afe): DELETE /v1/tasks/edges
+  # (TasksController.remove_edge/2) is one new routed-write member, disposed through
+  # its own register row (UNJUDGED, added above). Pin read from this census's
+  # ROUTED-DERIVED-ARRIVALS-PINNED line: count 87 -> 88, fp 21248959 -> 127668751.
+  @derived_disposition_pin %{count: 88, fp: "127668751"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm
