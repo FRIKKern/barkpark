@@ -330,7 +330,8 @@ defmodule Barkpark.Accounts do
       user_agent: Keyword.get(opts, :user_agent),
       saml_name_id: Keyword.get(opts, :saml_name_id),
       saml_session_index: Keyword.get(opts, :saml_session_index),
-      saml_org_slug: Keyword.get(opts, :saml_org_slug)
+      saml_org_slug: Keyword.get(opts, :saml_org_slug),
+      idp_mfa: Keyword.get(opts, :idp_mfa, false)
     })
     |> Repo.insert()
     |> case do

@@ -21,6 +21,9 @@ defmodule BarkparkWeb.CloudUserController do
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.Plugs.RequirePlatformOperator
 
+  # BARKPARK_CLOUD_HANDOFF=off: an instance Barkpark Cloud does not manage.
+  plug(:require_cloud_handoff)
+
   def deprovision(conn, params) do
     token = conn.assigns[:api_token]
 
@@ -57,5 +60,11 @@ defmodule BarkparkWeb.CloudUserController do
       code: "unprocessable",
       message: "email is required and must be an address"
     })
+  end
+
+  defp require_cloud_handoff(conn, _opts) do
+    if Barkpark.Auth.CloudSeat.handoff_enabled?(),
+      do: conn,
+      else: conn |> ErrorResponse.emit({:error, :not_found}) |> halt()
   end
 end

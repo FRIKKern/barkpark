@@ -50,6 +50,9 @@ defmodule BarkparkWeb.Plugs.RequireOrgMfaEnrolment do
       Accounts.mfa_enrolled?(user) ->
         conn
 
+      match?(%{idp_mfa: true}, conn.assigns[:current_user_session]) ->
+        conn
+
       not Tenancy.org_requires_mfa_for_user?(user.id) ->
         conn
 

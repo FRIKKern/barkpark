@@ -82,6 +82,8 @@ services:
       # NEVER ${BARKPARK_PLUGINS:-} — the empty string is the plugin KILL
       # SWITCH server-side, so an unset var must stay unset.
       - BARKPARK_PLUGINS
+      # Break-glass accounts (read in api/config/runtime.exs)
+      - BARKPARK_BREAKGLASS_EMAILS
       # Platform operators, DB statement wall, indx state (census 2026-09-03:
       # all four read in api/config/runtime.exs, none had a passthrough line)
       # First owner on a fresh install (Accounts.BootstrapOwner)
@@ -95,11 +97,18 @@ services:
       - BARKPARK_STUDIO_SSO_ORIGINS
       # Strict OIDC ID token checks for every connection (read in api/config/runtime.exs)
       - BARKPARK_OIDC_STRICT_VALIDATION
+      # Sign-in policy on token paste and the Cloud handoff; Cloud handoff
+      # switch (both read in api/config/runtime.exs)
+      - BARKPARK_SIGN_IN_POLICY_ALL_ROUTES
+      - BARKPARK_CLOUD_HANDOFF
       # Paper access-log retention (edit-on-the-link slice 4; read in api/config/runtime.exs)
       - BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS
       # Deleted-payload retention, off unless set (owner ruling #33; read in api/config/runtime.exs)
       - BARKPARK_DELETED_PAYLOAD_RETENTION
       - BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS
+      # Cancelled-schedule purge, off unless set (task-44cfe871ea0edc30; read in api/config/runtime.exs)
+      - BARKPARK_CANCELLED_SCHEDULE_RETENTION
+      - BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS
       # Weekly public-read token rotation, off unless set (task-eaaf13ab768f34f6; read in api/config/runtime.exs)
       - BARKPARK_PUBLIC_READ_ROTATION
       # API token expiry mails at 14, 7 and 1 days, off unless set (task-ae4b82ef79867237; read in api/config/runtime.exs)

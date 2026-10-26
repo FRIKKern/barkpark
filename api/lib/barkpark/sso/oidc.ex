@@ -225,6 +225,21 @@ defmodule Barkpark.Sso.Oidc do
     end
   end
 
+  @doc """
+  Did the IdP assert MFA for this sign-in, on a connection that trusts it?
+  True when `trust_idp_mfa` is on and the id_token's `amr` contains `"mfa"`,
+  or its `acr` equals the connection's `mfa_acr`.
+  """
+  @spec idp_mfa?(OidcConnection.t(), map()) :: boolean()
+  def idp_mfa?(%OidcConnection{trust_idp_mfa: true} = c, claims) do
+    amr = claims["amr"]
+
+    (is_list(amr) and "mfa" in amr) or
+      (c.mfa_acr not in [nil, ""] and claims["acr"] == c.mfa_acr)
+  end
+
+  def idp_mfa?(_c, _claims), do: false
+
   # ── internals ──────────────────────────────────────────────────────────────
 
   defp exchange_code(c, code, redirect_uri, verifier) do

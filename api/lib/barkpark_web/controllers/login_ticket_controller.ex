@@ -16,7 +16,12 @@ defmodule BarkparkWeb.LoginTicketController do
   """
   use BarkparkWeb, :controller
 
+  alias Barkpark.Auth.CloudSeat
   alias BarkparkWeb.Plugs.RequirePlatformOperator
+  alias BarkparkWeb.SessionIssuer
+
+  # BARKPARK_CLOUD_HANDOFF=off: the Cloud handoff doors answer 404.
+  plug(:require_cloud_handoff when action == :exchange)
 
   # POST /v1/auth/login-tickets → 201 {ticket, expires_in}. Reads the RAW bearer
   # straight off the header (RequireToken assigns only the verified struct, but
@@ -43,12 +48,17 @@ defmodule BarkparkWeb.LoginTicketController do
   defp mint(conn, raw_token, %{"email" => email} = params) when is_binary(email) do
     token = conn.assigns[:api_token]
 
-    if String.trim(email) != "" and match?(%Barkpark.Auth.ApiToken{}, token) and
-         Barkpark.Auth.has_permission?(token, "admin") and
-         not RequirePlatformOperator.permits?(token) do
-      operator_required(conn)
-    else
-      do_mint(conn, raw_token, params)
+    cond do
+      String.trim(email) != "" and not CloudSeat.handoff_enabled?() ->
+        BarkparkWeb.ErrorResponse.emit(conn, {:error, :not_found})
+
+      String.trim(email) != "" and match?(%Barkpark.Auth.ApiToken{}, token) and
+        Barkpark.Auth.has_permission?(token, "admin") and
+          not RequirePlatformOperator.permits?(token) ->
+        operator_required(conn)
+
+      true ->
+        do_mint(conn, raw_token, params)
     end
   end
 
@@ -119,17 +129,18 @@ defmodule BarkparkWeb.LoginTicketController do
          verifier when is_binary(verifier) <- params["code_verifier"],
          {:ok, {email, role}} <- Barkpark.Auth.consume_exchange_ticket(ticket, audience, verifier) do
       user = Barkpark.Sso.find_or_create_user(email)
-      Barkpark.Auth.CloudSeat.ensure_default_membership(user, role)
+      CloudSeat.ensure_default_membership(user, role)
 
-      {:ok, token} =
-        Barkpark.Accounts.create_user_session_token(
-          user,
-          BarkparkWeb.SessionIssuer.actor_opts(conn)
-        )
+      if refused = SessionIssuer.policy_refusal(conn, user, "cloud") do
+        refused
+      else
+        {:ok, token} =
+          Barkpark.Accounts.create_user_session_token(user, SessionIssuer.actor_opts(conn))
 
-      conn
-      |> put_status(:created)
-      |> json(%{token: token, user: %{id: user.id, email: user.email}})
+        conn
+        |> put_status(:created)
+        |> json(%{token: token, user: %{id: user.id, email: user.email}})
+      end
     else
       _ ->
         BarkparkWeb.ErrorResponse.emit_custom(
@@ -148,6 +159,12 @@ defmodule BarkparkWeb.LoginTicketController do
     conn
     |> put_status(env.status)
     |> json(%{error: body})
+  end
+
+  defp require_cloud_handoff(conn, _opts) do
+    if CloudSeat.handoff_enabled?(),
+      do: conn,
+      else: conn |> BarkparkWeb.ErrorResponse.emit({:error, :not_found}) |> halt()
   end
 
   defp unauthorized(conn) do

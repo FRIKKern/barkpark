@@ -706,6 +706,29 @@ case System.get_env("BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS") do
     :ok
 end
 
+# Cancelled-schedule retention (task-44cfe871ea0edc30). Off unless switched on
+# here; the window keeps config.exs's 30 days unless overridden.
+if System.get_env("BARKPARK_CANCELLED_SCHEDULE_RETENTION") in ~w(1 true yes on) do
+  config :barkpark, :cancelled_schedule_retention, enabled: true
+end
+
+case System.get_env("BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 ->
+        config :barkpark, :cancelled_schedule_retention, days: days
+
+      _ ->
+        IO.warn(
+          "BARKPARK_CANCELLED_SCHEDULE_RETENTION_DAYS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
 # Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
 # env means %{} — every pulse route 404s and nothing on the instance is
 # anonymously writable. Value is a JSON object keyed by channel name; see
@@ -894,6 +917,20 @@ if System.get_env("BARKPARK_OIDC_STRICT_VALIDATION") in ~w(1 true yes on) do
   config :barkpark, :oidc_strict_validation, true
 end
 
+# The org sign-in policy (allowed_auth_methods, require_mfa) on the doors that
+# carry no second factor: API token paste and the Barkpark Cloud handoff
+# (`BarkparkWeb.SessionIssuer.policy_refusal/3`). Off unless truthy.
+if System.get_env("BARKPARK_SIGN_IN_POLICY_ALL_ROUTES") in ~w(1 true yes on) do
+  config :barkpark, :sign_in_policy_all_routes, true
+end
+
+# An instance Barkpark Cloud does not manage sets BARKPARK_CLOUD_HANDOFF=off:
+# ticket exchange, email login tickets and cloud-user deprovisioning answer 404
+# (`Barkpark.Auth.CloudSeat.handoff_enabled?/0`). On unless set to a false value.
+if System.get_env("BARKPARK_CLOUD_HANDOFF") in ~w(0 false no off) do
+  config :barkpark, :cloud_handoff, false
+end
+
 # Filing-law HARD tier for an ABSENT `surface` under cloud-console-hardening-epic
 # (cch-w28-s4-followup). Fail-open by design: OFF unless the env var is truthy,
 # and `Barkpark.Tasks.BirthGuards.surface_declared/6` reads the key with a false
@@ -902,6 +939,12 @@ end
 # open epic rows carry a surface — see that guard's header.
 if System.get_env("BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD") in ~w(1 true yes on) do
   config :barkpark, :filing_law_absent_surface_hard, true
+end
+
+# BARKPARK_OPERATOR_FAIL_CLOSED=1: with both lists unset the operator routes
+# refuse every caller instead of falling back to the admin bit. Off by default.
+if System.get_env("BARKPARK_OPERATOR_FAIL_CLOSED") in ~w(1 true yes on) do
+  config :barkpark, :operator_fail_closed, true
 end
 
 # INSTANCE-OPERATOR allowlist (task-c7e2b87f1bbca815), mirroring cloud's
@@ -914,15 +957,14 @@ end
 # owner_user_id -> user.email, or an app token's "app:<email>" label); ids are
 # `api_tokens.id` values, the direct handle for a machine token with no human
 # behind it. Blank entries are dropped, so "a@b.io,," is one operator, not three.
-# BARKPARK_OPERATOR_FAIL_CLOSED=1: with both lists unset the operator routes
-# refuse every caller instead of falling back to the admin bit. Off by default.
-if System.get_env("BARKPARK_OPERATOR_FAIL_CLOSED") in ~w(1 true yes on) do
-  config :barkpark, :operator_fail_closed, true
-end
-
+#
+# BARKPARK_BREAKGLASS_EMAILS: accounts exempt from their org's
+# allowed_auth_methods when they sign in with a password plus TOTP or with a
+# passkey (`BarkparkWeb.SessionIssuer.auth_method_blocked?/2`). Unset = nobody.
 for {env_name, config_key} <- [
       {"BARKPARK_OPERATOR_EMAILS", :operator_emails},
-      {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids}
+      {"BARKPARK_OPERATOR_TOKEN_IDS", :operator_token_ids},
+      {"BARKPARK_BREAKGLASS_EMAILS", :breakglass_emails}
     ] do
   entries =
     System.get_env(env_name, "")

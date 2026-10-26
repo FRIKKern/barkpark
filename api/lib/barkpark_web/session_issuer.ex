@@ -22,6 +22,7 @@ defmodule BarkparkWeb.SessionIssuer do
       Accounts.create_user_session_token(user, actor_opts(conn) ++ opts)
 
     audit_session_mint(user, opts)
+    audit_breakglass(user, Keyword.get(opts, :method))
 
     conn
     |> configure_session(renew: true)
@@ -170,8 +171,50 @@ defmodule BarkparkWeb.SessionIssuer do
   """
   @spec auth_method_blocked?(Accounts.User.t(), String.t()) :: boolean()
   def auth_method_blocked?(%Accounts.User{} = user, method) when is_binary(method) do
-    not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method)
+    not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method) and
+      not breakglass_exempt?(user, method)
   end
+
+  # Break-glass (BARKPARK_BREAKGLASS_EMAILS): a listed account keeps the local
+  # doors that carry a second factor when its org allows only SSO, so someone
+  # can still sign in when the IdP is down. The password door opens only for a
+  # TOTP-armed account, which `login_with_mfa` then holds to its code.
+  defp breakglass_exempt?(user, "password"), do: breakglass?(user) and user.totp_enabled
+  defp breakglass_exempt?(user, "passkey"), do: breakglass?(user)
+  defp breakglass_exempt?(_user, _method), do: false
+
+  defp breakglass?(%Accounts.User{email: email}) when is_binary(email) do
+    String.downcase(String.trim(email)) in Enum.map(
+      Application.get_env(:barkpark, :breakglass_emails, []),
+      &String.downcase(String.trim(&1))
+    )
+  end
+
+  defp breakglass?(_user), do: false
+
+  @doc """
+  Record a `breakglass_login` audit event when `user` just signed in through
+  `method` only because of the break-glass exemption. Called where a session
+  that presented its second factor is minted.
+  """
+  @spec audit_breakglass(Accounts.User.t(), String.t() | nil) :: :ok
+  def audit_breakglass(%Accounts.User{} = user, method) when method in ["password", "passkey"] do
+    if breakglass_exempt?(user, method) and
+         not Barkpark.Tenancy.auth_method_allowed_for_user?(user.id, method) do
+      Barkpark.Audit.emit(%{
+        category: "auth",
+        action: "breakglass_login",
+        subject: user.id,
+        actor_type: "user",
+        actor_id: user.id,
+        metadata: %{"method" => method}
+      })
+    end
+
+    :ok
+  end
+
+  def audit_breakglass(_user, _method), do: :ok
 
   @doc """
   Refuse a session-mint whose METHOD the user's org policy disallows
@@ -229,6 +272,30 @@ defmodule BarkparkWeb.SessionIssuer do
     end
   end
 
+  @doc """
+  The org sign-in policy for the doors that carry no second factor and are none
+  of the policy's methods: API token paste (`"api_token"`) and the Barkpark
+  Cloud handoff (`"cloud"`). Returns the refused conn, or nil to proceed.
+
+  Off unless `:sign_in_policy_all_routes` is set
+  (`BARKPARK_SIGN_IN_POLICY_ALL_ROUTES`), so these doors behave as before. On,
+  a user whose org set `allowed_auth_methods` is refused, since neither door is
+  on any list, and a user governed by a `require_mfa` org is refused because
+  the door cannot present a factor.
+  """
+  @spec policy_refusal(Plug.Conn.t(), Accounts.User.t() | nil, String.t()) ::
+          Plug.Conn.t() | nil
+  def policy_refusal(conn, user, method) do
+    cond do
+      not Application.get_env(:barkpark, :sign_in_policy_all_routes, false) -> nil
+      not match?(%Accounts.User{}, user) -> nil
+      auth_method_blocked?(user, method) -> deny_auth_method(conn, user, method)
+      org_mfa_enrolment_blocked?(user) -> deny_org_mfa_enrolment(conn, user, method)
+      org_factor_required?(user, :no_code_door) -> deny_org_factor_required(conn, user, method)
+      true -> nil
+    end
+  end
+
   @doc "The human-facing refusal shared by the API and browser doors."
   @spec auth_method_message(String.t()) :: String.t()
   def auth_method_message(method) do
@@ -254,6 +321,8 @@ defmodule BarkparkWeb.SessionIssuer do
   defp method_label("passkey"), do: "Passkey sign-in"
   defp method_label("sso"), do: "Single sign-on"
   defp method_label("social"), do: "Social sign-in"
+  defp method_label("api_token"), do: "API token sign-in"
+  defp method_label("cloud"), do: "Barkpark Cloud sign-in"
   defp method_label(other), do: "#{other} sign-in"
 
   @doc "The human-facing org-MFA enrolment guidance shared by the browser doors."

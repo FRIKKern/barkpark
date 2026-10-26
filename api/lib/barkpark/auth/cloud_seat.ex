@@ -9,6 +9,13 @@ defmodule Barkpark.Auth.CloudSeat do
   seated there by that workspace's own admins.
   """
 
+  @doc """
+  Does this instance accept the Barkpark Cloud handoff? `BARKPARK_CLOUD_HANDOFF=off`
+  turns it off on an instance Barkpark Cloud does not manage; the default is on.
+  """
+  @spec handoff_enabled?() :: boolean()
+  def handoff_enabled?, do: Application.get_env(:barkpark, :cloud_handoff, true) != false
+
   # Owner ruling #26 (2026-10-03, "Match role, revoke"): the handoff seats the
   # user at the Cloud TEAM role the ticket carries — a team member lands as a
   # member, an admin as an admin, the owner as owner. The team is the authority
