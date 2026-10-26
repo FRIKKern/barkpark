@@ -7685,6 +7685,52 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/tasks/edges": {
+      "delete": {
+        "operationId": "task.unblock",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Remove the `blocks` edge that makes from_id wait on to_id (the inverse of POST /v1/tasks/edges). Idempotent: an absent edge answers ok with removed:false. An in_progress dependent is fenced exactly as an edge-add fences it.",
+        "tags": [
+          "task"
+        ],
+        "x-barkpark-scope": "write"
+      }
+    },
     "/v1/data/search/{dataset}/synonyms/{id}": {
       "delete": {
         "operationId": "search.delete-synonym",
@@ -17611,52 +17657,6 @@
           "media"
         ],
         "x-barkpark-scope": "none"
-      }
-    },
-    "/v1/tasks/edges": {
-      "delete": {
-        "operationId": "task.unblock",
-        "parameters": [],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Document"
-                }
-              }
-            },
-            "description": "Mutation applied."
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "403": {
-            "$ref": "#/components/responses/Forbidden"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "412": {
-            "$ref": "#/components/responses/PreconditionFailed"
-          },
-          "422": {
-            "$ref": "#/components/responses/ValidationFailed"
-          },
-          "429": {
-            "$ref": "#/components/responses/RateLimited"
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
-        ],
-        "summary": "Remove the `blocks` edge that makes from_id wait on to_id (the inverse of POST /v1/tasks/edges). Idempotent: an absent edge answers ok with removed:false. An in_progress dependent is fenced exactly as an edge-add fences it.",
-        "tags": [
-          "task"
-        ],
-        "x-barkpark-scope": "write"
       }
     },
     "/v1/tasks/{doc_id}/move": {
