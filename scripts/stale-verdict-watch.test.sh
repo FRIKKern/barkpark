@@ -112,7 +112,7 @@ run_watch() { # <fixture> [extra args…]
   local fx="$1"; shift
   env PATH="$NOGH:/usr/bin:/bin:/usr/sbin:/sbin" \
     bash "$WATCH" --fixture "$fx" --commits "$COMMITS" --spec "$SPEC" \
-      --repo FRIKKern/barkpark "$@" 2>&1
+      --repo FRIKKern/barkpark --baseline '' "$@" 2>&1
 }
 
 # One PR row. `entries` is a JSON array of {name, conclusion, completedAt}.
@@ -1328,7 +1328,7 @@ lpage_bytes="$(wc -c < "$LPAGE" | tr -d ' ')"
   && ok "the generated live page is ${lpage_bytes}B ≥ ${SCALE_MIN}B" \
   || bad "the live-page fixture is only ${lpage_bytes}B — below the ${SCALE_MIN}B bound"
 out="$(env PATH="$LSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
-        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1)"; rc=$?
+        bash "$WATCH" --spec "$SPEC" --repo FRIKKern/barkpark --baseline '' 2>&1)"; rc=$?
 grep -qi "Argument list too long" <<<"$out" \
   && bad "(m) execve E2BIG on the live page loop — the population still travels by argv" \
   || ok "(m) no 'Argument list too long' on the live page loop"
@@ -1392,7 +1392,7 @@ q_run() { # <page json path> — the live read, with only `gh` stubbed
     "$QSTUB/rollup.json" "$page" > "$QSTUB/bin/gh"
   chmod +x "$QSTUB/bin/gh"
   env PATH="$QSTUB/bin:/usr/bin:/bin:/usr/sbin:/sbin" GH_TOKEN=stub \
-    bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark 2>&1
+    bash "$WATCH" --commits "$COMMITS" --spec "$SPEC" --repo FRIKKern/barkpark --baseline '' 2>&1
 }
 
 # (q1) DRAFT — the identical row, marked draft, must NOT be novel and must exit 0.
