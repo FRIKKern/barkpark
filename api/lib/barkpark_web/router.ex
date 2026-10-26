@@ -2484,6 +2484,13 @@ defmodule BarkparkWeb.Router do
     get("/status.json", StatusController, :show_json)
   end
 
+  # Container platform probes. No pipeline: no token lookup, no rate limit, so
+  # /livez never touches the database. Contract: docs/setup/SELF-HOST.md.
+  scope "/", BarkparkWeb do
+    get("/livez", StatusController, :live)
+    get("/readyz", StatusController, :ready)
+  end
+
   # Incident management — admin only.
   scope "/v1/status", BarkparkWeb do
     pipe_through([:api, :require_admin, :require_platform_operator])
