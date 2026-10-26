@@ -236,7 +236,7 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
         )
 
       txn_at = index_of!(body, "Repo.transaction(")
-      doc_delete_at = index_of!(body, "delete_asset_doc(file)")
+      doc_delete_at = index_of!(body, "delete_asset_doc(file, seat)")
       row_delete_at = index_of!(body, "Repo.delete(file, stale_error_field: :id)")
 
       assert resolve_at < txn_at,
