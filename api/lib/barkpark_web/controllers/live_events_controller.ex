@@ -86,7 +86,14 @@ defmodule BarkparkWeb.LiveEventsController do
         frame("goaway", nil, %{reason: "too many open live streams for this credential (#{cap})"})
       )
     else
-      open(conn, dataset, params)
+      # A stream that ends leaves its slot at once. The registration belongs
+      # to the connection's process, which outlives the stream when the
+      # connection stays open for another request.
+      try do
+        open(conn, dataset, params)
+      after
+        if key, do: Registry.unregister(@streams, key)
+      end
     end
   end
 
@@ -210,11 +217,19 @@ defmodule BarkparkWeb.LiveEventsController do
       # The client left: end now, freeing the cap slot and the subscription,
       # instead of waiting for a write to fail (task-8c7219534ff42b88).
       :probe ->
-        if PeerProbe.closed?(conn) do
-          conn
-        else
-          schedule_probe()
-          loop(conn, state)
+        case PeerProbe.status(conn) do
+          :open ->
+            schedule_probe()
+            loop(conn, state)
+
+          :closed ->
+            conn
+
+          # A request pipelined behind this endless response: the probe read
+          # it, so the connection must not be reused. End and close it.
+          :pipelined ->
+            PeerProbe.close(conn)
+            conn
         end
 
       :keepalive ->

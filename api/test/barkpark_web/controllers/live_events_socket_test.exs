@@ -85,6 +85,30 @@ defmodule BarkparkWeb.LiveEventsSocketTest do
     assert wait_for(fn -> open_streams(key) == 0 end), "the closed stream still holds its slot"
   end
 
+  # The probe consumes what it reads. Bytes after an SSE request can only be a
+  # pipelined request; the stream ends and closes the connection rather than
+  # let Bandit read a request missing its head.
+  test "bytes pipelined behind the stream end it and close the connection", %{
+    token: t,
+    key: key,
+    port: port
+  } do
+    {socket, first} = open(port, t)
+    assert first =~ "event: welcome"
+
+    :ok = :gen_tcp.send(socket, "GET /health HTTP/1.1\r\nhost: localhost\r\n\r\n")
+    assert wait_for(fn -> open_streams(key) == 0 end), "the stream kept its slot"
+    assert drain_until_closed(socket) == :closed
+  end
+
+  defp drain_until_closed(socket) do
+    case :gen_tcp.recv(socket, 0, 3_000) do
+      {:ok, _data} -> drain_until_closed(socket)
+      {:error, :closed} -> :closed
+      other -> other
+    end
+  end
+
   test "a client reconnecting 25 times at the cap never meets its own ghosts", %{
     token: t,
     key: key,
