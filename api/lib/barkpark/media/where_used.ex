@@ -248,7 +248,10 @@ defmodule Barkpark.Media.WhereUsed do
   # field holding one of these shows this blob. Any size and extension count:
   # the id names the bytes Sanity saw, not the stored re-encode. Over-matching
   # only makes the guard stricter.
-  defp sanity_ref_patterns(%MediaFile{} = file) do
+  @doc false
+  # Public for `Content.Graph.backlinks/2`, which lists the same holders for
+  # the blob's companion asset document (task-bace4f482af160a9, criterion 3).
+  def sanity_ref_patterns(%MediaFile{} = file) do
     source =
       if is_binary(file.source_id) and file.source_id != "",
         do: [like_literal(file.source_id)],
