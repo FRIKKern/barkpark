@@ -124,7 +124,7 @@ defmodule BarkparkWeb.MutatePatchByIdTest do
       ])
 
     typeless =
-      mutate(build_conn(), slug, ro, [
+      mutate(scoped_conn(), slug, ro, [
         %{"patch" => %{"id" => "drafts.p3", "set" => %{"title" => "x"}}}
       ])
 
