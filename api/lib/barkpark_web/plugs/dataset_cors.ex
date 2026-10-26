@@ -24,6 +24,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
   # allow_headers list at origin/main:api/lib/barkpark_web/endpoint.ex.
   # Preserving the Corsica set prevents preflight regressions for existing
   # browser-based SDK/Studio flows that rely on `accept`, `if-match`, etc.
+  # `x-sanity-project-id`: @sanity/client sends it on every request when it
+  # has a projectId and `useProjectHostname: false` (pointed at Barkpark), so
+  # without it every browser read fails preflight. Barkpark ignores its value.
   @allow_headers_list ~w(
     authorization
     content-type
@@ -35,6 +38,7 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     idempotency-key
     x-barkpark-api-version
     last-event-id
+    x-sanity-project-id
   )
   @allow_headers Enum.join(@allow_headers_list, ", ")
 
@@ -185,6 +189,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     @always_allowed_origins ++ Content.allowed_origins_for_dataset(ds, cors_scope(tenancy))
   end
 
+  defp allowed_origins({:dataset_and_default, ds, tenancy}),
+    do: allowed_origins(:no_dataset) ++ allowed_origins({:dataset, ds, tenancy})
+
   defp allowed_origins(_) do
     @always_allowed_origins ++ Application.get_env(:barkpark, :default_cors_origins, [])
   end
@@ -221,6 +228,13 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     case rest do
       ["v1", "data", _, ds | _] ->
         {{:dataset, ds, tenancy}, conn}
+
+      # The Sanity-shaped routes (`/v2025-02-19/data/query/<ds>`, any
+      # apiVersion): the dataset's cors_origins apply there as on /v1/data.
+      # Before, they resolved no dataset and took only the always-allowed and
+      # :default_cors_origins, which they keep (task-c2d1e40782ca8d69).
+      ["v" <> _, "data", kind, ds | _] when kind in ["query", "doc", "listen"] ->
+        {{:dataset_and_default, ds, tenancy}, conn}
 
       ["v1", "preview", _, ds | _] ->
         {{:dataset, ds, tenancy}, conn}

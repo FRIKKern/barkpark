@@ -282,8 +282,8 @@ defmodule BarkparkWeb.MediaController do
   With image transform parameters (`w`, `h`, `fit`, `crop`, `rect`, `fp-x`,
   `fp-y`, `fm`, `auto`, `q`; contract in `docs/media/IMAGE-TRANSFORMS.md`) it
   serves a transformed copy instead, made on the first request and cached
-  (`serve_transform/3`). Transform vocabulary Barkpark does not apply (`dpr`,
-  `blur`, ...) is still refused with 400 rather than ignored.
+  (`serve_transform/3`). `@sanity/image-url`'s `dpr`, `blur`, `bg`, `pad`,
+  `flip`, `or`, `invert`, `sat` and `sharp` are read too (`Transform`).
   """
   def serve(conn, %{"path" => path_parts}) do
     lookup = by_path(path_parts)

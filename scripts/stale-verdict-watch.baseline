@@ -66,3 +66,4 @@
 # healed, and the watch does not ask you to delete its line.
 23583 f64ec2fb3 2026-10-26 codex/j12-personal-chat (personal chat storage privacy) conflicts with main since 2026-10-16; its author has not rebased; delete when it is rebased or closed
 24047 2d6c009cd 2026-10-26 run-barkpark/groq-v1-perspective is titled HOLD pending the owner's call on breaking v1+perspective clients; delete when the owner decides and it is rebased or closed
+21644 df953d17d 2026-10-26 dependabot upload-artifact 4->6 bump, conflicting since 2026-10-08; @dependabot rebase asked 2026-10-26 got no response; delete when it is rebased, recreated or closed
