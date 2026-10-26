@@ -44,12 +44,22 @@ defmodule Barkpark.Groq do
     * `:dataset` (required), `:perspective` (`:published | :drafts | :raw`)
     * `:scope_opts` — `BarkparkWeb.ScopeHelpers.scope_opts/1`
     * `:identity`, `:project_id`, `:now` — passed to the evaluator
+    * `:source_map` — `:plain` or `:keyed` to also build Sanity's
+      `resultSourceMap` (`Barkpark.Groq.SourceMap`); nil (the default) runs
+      the query exactly as without it
 
-  Returns `{:ok, %{result_json: iodata, sync_tags: [String.t()]}}`; the result
-  is already JSON-encoded because its size is checked on the encoded form.
+  Returns `{:ok, %{result_json: iodata, sync_tags: [String.t()]}}`, plus
+  `:source_map` when asked; the result is already JSON-encoded because its
+  size is checked on the encoded form.
   """
   @spec query(String.t(), map(), keyword()) ::
-          {:ok, %{result_json: iodata(), sync_tags: [String.t()]}} | {:error, query_error()}
+          {:ok,
+           %{
+             required(:result_json) => iodata(),
+             required(:sync_tags) => [String.t()],
+             optional(:source_map) => map() | nil
+           }}
+          | {:error, query_error()}
   def query(query, params, opts) do
     max_query = limit(:max_query_bytes, 262_144)
 
@@ -82,6 +92,7 @@ defmodule Barkpark.Groq do
     max_heap_words = div(limit(:max_heap_bytes, 536_870_912), :erlang.system_info(:wordsize))
 
     eval_opts = [
+      source_map: Keyword.get(opts, :source_map),
       now: Keyword.get(opts, :now),
       identity: Keyword.get(opts, :identity),
       project_id: Keyword.get(opts, :project_id),
@@ -126,13 +137,47 @@ defmodule Barkpark.Groq do
   # Inside the task: exceptions become values so they do not take the caller
   # down with the linked task.
   defp evaluate(tree, state, eval_opts) do
-    DocumentSource.run(tree, state, eval_opts)
+    {mode, eval_opts} = Keyword.pop(eval_opts, :source_map)
+
+    case DocumentSource.run(tree, state, eval_opts) do
+      {{:ok, result}, touched} when mode in [:plain, :keyed] ->
+        {{:ok, result, source_map(tree, result, state, eval_opts, mode)}, touched}
+
+      outcome ->
+        outcome
+    end
   rescue
     e in LimitError -> {:limit_error, e.message}
   end
 
+  # `resultSourceMap` (task-640e8371b8e468ce): one more pass after the rounds,
+  # on the warm cache, reading anything it still needs directly. The sync tags
+  # were taken from the rounds, so the pass does not change them. A pass that
+  # fails leaves the map out rather than the result.
+  defp source_map(tree, result, state, eval_opts, mode) do
+    Process.put(:groq_src_mode, :direct)
+
+    ctx = %Barkpark.Groq.Evaluator{
+      source: {DocumentSource, state},
+      now: Keyword.get(eval_opts, :now) || DateTime.utc_now(),
+      identity: Keyword.get(eval_opts, :identity),
+      project_id: Keyword.get(eval_opts, :project_id),
+      dataset: Keyword.get(eval_opts, :dataset)
+    }
+
+    Barkpark.Groq.SourceMap.build(tree, result, ctx, mode)
+  rescue
+    e in LimitError -> reraise e, __STACKTRACE__
+    _ -> nil
+  end
+
   defp finish({:limit_error, message}, _dataset), do: {:error, {:limit, message}}
   defp finish({{:error, message}, _touched}, _dataset), do: {:error, {:eval, message}}
+
+  defp finish({{:ok, result, source_map}, touched}, dataset) do
+    with {:ok, out} <- finish({{:ok, result}, touched}, dataset),
+         do: {:ok, Map.put(out, :source_map, source_map)}
+  end
 
   defp finish({{:ok, result}, touched}, dataset) do
     json = Jason.encode_to_iodata!(result)
