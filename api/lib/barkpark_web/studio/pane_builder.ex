@@ -1003,10 +1003,19 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   defp schema_icon(%{icon: icon}), do: icon
   defp schema_icon(_), do: nil
 
+  # A row's media pick: an image URL, or an icon that replaces the type's icon
+  # when this Studio can draw it.
+  defp row_media({:url, url}, type_icon), do: {url, type_icon}
+
+  defp row_media({:icon, name}, type_icon),
+    do: {nil, BarkparkWeb.Icons.type_icon(name) || type_icon}
+
+  defp row_media(nil, type_icon), do: {nil, type_icon}
+
   defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
     media_spec = Map.get(preview, "media")
-    media_declared? = PreviewText.media_paths(media_spec) != []
+    media_declared? = PreviewText.media?(media_spec)
     subtitle = Map.get(preview, "subtitle")
     description = Map.get(preview, "description")
     title_spec = title_spec(preview)
@@ -1020,6 +1029,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
 
+      {media, row_icon} =
+        if media_declared?,
+          do: row_media(PreviewText.media_item(media_spec, preview_root(doc), deref), type_icon),
+          else: {nil, type_icon}
+
       %{
         type: :doc,
         id: pub_id,
@@ -1029,12 +1043,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # task-75cb2cac1e875214: `media` is a path or a list of paths (the
         # first that holds an image), and a URL string counts: the twin's
         # product cover is `onix.thumbnail`.
-        media: if(media_declared?, do: PreviewText.media(media_spec, preview_root(doc), deref)),
+        # An icon a stored value picks (`{"icon": {"path", "map"}}`) draws in
+        # place of the type's icon, as a Sanity prepare's icon does.
+        media: media,
         media_slot: media_declared?,
         # task-835fe5219585ca80: Sanity draws the schema type's icon in a
         # preview row with no media, and the document icon when the type has
         # none.
-        type_icon: type_icon,
+        type_icon: row_icon,
         title: row_title(doc, schema, deref),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
@@ -1261,7 +1277,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # references, `|date`, and parts with a fallback — `PreviewText`. The
   # referenced documents of a whole page load in one scoped read per depth.
   defp preview_line(_doc, nil, _deref), do: nil
-  defp preview_line(doc, spec, deref), do: PreviewText.format(spec, preview_root(doc), deref)
+  # A date-time a `|date` part shows rides as a marker, and the row draws it as
+  # a `<time>` the browser shows as its day in the workspace time zone
+  # (task-ecaaa898e346dc73; `BarkparkWeb.PreviewDay`).
+  defp preview_line(doc, spec, deref),
+    do:
+      PreviewText.format(spec, preview_root(doc), deref,
+        date_time: &PreviewText.date_time_marker/1
+      )
 
   # The map a preview path starts from: the content, with the title column as
   # `title` (a titled type keeps its title there, not in content).

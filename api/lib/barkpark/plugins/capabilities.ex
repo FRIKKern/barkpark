@@ -2948,6 +2948,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "workspace.set-time-zone",
+        "workspace",
+        "set-time-zone",
+        "Set the time zone the active --workspace's editors read dates in, an IANA name such as Europe/Oslo. A list preview's |date shows a date-time as its day in that zone in both Studios.",
+        "PATCH",
+        "/v1/workspace/time-zone",
+        "scoped_admin",
+        args: [arg("time_zone", true, "string", "IANA zone name, e.g. Europe/Oslo")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "pref.get",
         "pref",
         "get",

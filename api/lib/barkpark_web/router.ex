@@ -4117,6 +4117,9 @@ defmodule BarkparkWeb.Router do
     # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
     # `bp workspace set-locale <locale>` lands here.
     patch("/v1/workspace/locale", WorkspaceLocaleController, :update)
+    # Workspace time zone (task-ecaaa898e346dc73): a list preview's `|date`
+    # day. `bp workspace set-time-zone Europe/Oslo` lands here.
+    patch("/v1/workspace/time-zone", WorkspaceLocaleController, :update_time_zone)
 
     # Token inventory + revocation. `GET` answers "which credentials reach this
     # workspace"; `DELETE` kills one, gated on that token actually holding a

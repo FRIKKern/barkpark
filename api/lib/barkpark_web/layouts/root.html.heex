@@ -7459,6 +7459,42 @@
     })();
     // BP-PREJOIN-QUEUE-END
 
+    // A list preview's |date of a date-time (task-ecaaa898e346dc73,
+    // BarkparkWeb.PreviewDay): the server writes the UTC day into
+    // <time data-preview-day datetime="…Z">, and this shows the day it is in
+    // the workspace time zone (the shell's data-time-zone), or the browser's
+    // own zone when the workspace sets none, as Sanity does.
+    window.BarkparkPreviewDay = (function () {
+      const formats = {};
+      const format = (zone) => {
+        const key = zone || "";
+        if (!formats[key]) {
+          try {
+            formats[key] = new Intl.DateTimeFormat("en-GB", { timeZone: zone || undefined, day: "2-digit", month: "2-digit", year: "numeric" });
+          } catch (_e) {
+            formats[key] = new Intl.DateTimeFormat("en-GB", { day: "2-digit", month: "2-digit", year: "numeric" });
+          }
+        }
+        return formats[key];
+      };
+      const zone = () => document.querySelector("[data-time-zone]")?.dataset.timeZone || "";
+      const day = (el) => {
+        const at = new Date(el.getAttribute("datetime"));
+        if (Number.isNaN(at.getTime())) return;
+        const parts = Object.fromEntries(format(zone()).formatToParts(at).map((p) => [p.type, p.value]));
+        const text = `${parts.day}.${parts.month}.${parts.year}`;
+        if (el.textContent !== text) el.textContent = text;
+      };
+      const within = (node) => {
+        if (!(node instanceof Element)) return;
+        if (node.matches("time[data-preview-day]")) day(node);
+        node.querySelectorAll("time[data-preview-day]").forEach(day);
+      };
+      if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", () => within(document.body));
+      else within(document.body);
+      return { within, day };
+    })();
+
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: () => ({
         _csrf_token: csrfToken,
@@ -7470,8 +7506,11 @@
       }),
       hooks: Hooks,
       dom: {
-        onBeforeElUpdated: (fromEl, toEl) =>
-          window.BarkparkPaperEditorBeforeElUpdated?.(fromEl, toEl)
+        onBeforeElUpdated: (fromEl, toEl) => {
+          if (toEl.matches?.("time[data-preview-day]")) window.BarkparkPreviewDay.day(toEl);
+          return window.BarkparkPaperEditorBeforeElUpdated?.(fromEl, toEl);
+        },
+        onNodeAdded: (node) => window.BarkparkPreviewDay.within(node)
       }
     });
     liveSocket.connect();
