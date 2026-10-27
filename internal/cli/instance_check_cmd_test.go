@@ -108,7 +108,7 @@ func TestInstanceInitWritesPrivateCompleteFile(t *testing.T) {
 		t.Fatalf("BARKPARK_KEK decodes to %d bytes", len(raw))
 	}
 	for _, r := range instanceRecommendedSettings {
-		if r.appliesTo(instanceTargetContainerApps) && env[r.name] == "" {
+		if r.appliesTo(instanceTargetContainerApps) && env[r.name] == "" && !instanceTemplateOwns(instanceTargetContainerApps, r.name) {
 			t.Fatalf("recommended %s missing from the file", r.name)
 		}
 	}
@@ -202,9 +202,85 @@ func TestInstanceCheckAfterInit(t *testing.T) {
 		got = append(got, strings.Fields(l)[0])
 	}
 	sort.Strings(got)
-	want := []string{"BARKPARK_ALWAYS_ALLOWED_ORIGINS", "BARKPARK_BOOTSTRAP_OWNER_EMAIL", "BARKPARK_BREAKGLASS_EMAILS", "BARKPARK_OPERATOR_EMAILS", "PHX_HOST"}
+	// On Container Apps, main.bicep sets PHX_HOST and the instance's origin.
+	want := []string{"BARKPARK_BOOTSTRAP_OWNER_EMAIL", "BARKPARK_BREAKGLASS_EMAILS", "BARKPARK_OPERATOR_EMAILS"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("problems for %v, want %v", got, want)
+	}
+	if !strings.Contains(stdout, "note: PHX_HOST is not set here, so main.bicep sets it") || !strings.Contains(stdout, "properties.outputs.host.value") {
+		t.Fatalf("check does not say where PHX_HOST comes from: %s", stdout)
+	}
+}
+
+// TestInstanceInitContainerAppsHost: on Container Apps --host is optional.
+// Without it the file has no PHX_HOST, because main.bicep sets the app's
+// address, and the origin list holds only the Studio. With it, PHX_HOST is
+// the custom domain main.example.bicepparam reads as customDomain.
+func TestInstanceInitContainerAppsHost(t *testing.T) {
+	dir := t.TempDir()
+	flags := []string{"--studio-origin", "https://studio.example.com", "--owner-email", "o@example.com", "--operator-emails", "o@example.com", "--breakglass-email", "bg@example.com"}
+	read := func(path string) map[string]string {
+		body, _ := os.ReadFile(path)
+		env, _ := parseInstanceEnv(bytes.NewReader(body))
+		return env
+	}
+	noHost := filepath.Join(dir, "a.env")
+	stdout, stderr, code := runInstanceVerb(t, "init", append([]string{"--out", noHost}, flags...)...)
+	if code != exitOK || strings.Contains(stdout, "fill in") {
+		t.Fatalf("init without --host: exit %d, %s %s", code, stdout, stderr)
+	}
+	env := read(noHost)
+	if _, ok := env["PHX_HOST"]; ok {
+		t.Fatalf("PHX_HOST = %q without --host; main.bicep sets it", env["PHX_HOST"])
+	}
+	if env["BARKPARK_ALWAYS_ALLOWED_ORIGINS"] != "https://studio.example.com" {
+		t.Fatalf("BARKPARK_ALWAYS_ALLOWED_ORIGINS = %q", env["BARKPARK_ALWAYS_ALLOWED_ORIGINS"])
+	}
+	problems, _ := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: map[string]bool{"database": true, "media": true, "url": true}})
+	if len(problems) != 0 {
+		t.Fatalf("check on a containerapps file without --host: %v", problems)
+	}
+	// The same file is a problem for a VM, where nothing sets PHX_HOST.
+	problems, _ = instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetVM, skip: map[string]bool{"database": true, "media": true, "url": true}})
+	if !slices.ContainsFunc(problems, func(p instanceProblem) bool { return p.Setting == "PHX_HOST" }) {
+		t.Fatalf("vm check without PHX_HOST: %v", problems)
+	}
+
+	// No Studio either: the template's own origin is the whole list.
+	bare := filepath.Join(dir, "b.env")
+	if _, stderr, code := runInstanceVerb(t, "init", "--out", bare, "--owner-email", "o@example.com", "--operator-emails", "o@example.com", "--breakglass-email", "bg@example.com"); code != exitOK {
+		t.Fatal(stderr)
+	}
+	if v, ok := read(bare)["BARKPARK_ALWAYS_ALLOWED_ORIGINS"]; ok {
+		t.Fatalf("BARKPARK_ALWAYS_ALLOWED_ORIGINS = %q with no host and no Studio", v)
+	}
+
+	custom := filepath.Join(dir, "c.env")
+	if _, stderr, code := runInstanceVerb(t, "init", append([]string{"--out", custom, "--host", "cms.example.com"}, flags...)...); code != exitOK {
+		t.Fatal(stderr)
+	}
+	env = read(custom)
+	if env["PHX_HOST"] != "cms.example.com" || env["BARKPARK_ALWAYS_ALLOWED_ORIGINS"] != "https://cms.example.com,https://studio.example.com" {
+		t.Fatalf("custom domain file: PHX_HOST %q, origins %q", env["PHX_HOST"], env["BARKPARK_ALWAYS_ALLOWED_ORIGINS"])
+	}
+
+	// main.example.bicepparam passes PHX_HOST as customDomain, and main.bicep
+	// builds PHX_HOST, the origin list and the dnsRecords from it.
+	param, err := os.ReadFile(filepath.Join("..", "..", "deploy", "azure", "main.example.bicepparam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`(?m)^param customDomain = .*env\.\?PHX_HOST`).Match(param) {
+		t.Fatal("main.example.bicepparam does not read customDomain from PHX_HOST")
+	}
+	bicep, err := os.ReadFile(filepath.Join("..", "..", "deploy", "azure", "main.bicep"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"{ name: 'PHX_HOST', value: host }", "{ name: 'BARKPARK_ALWAYS_ALLOWED_ORIGINS', value: allowedOrigins }", "output host string = host", "output dnsRecords array"} {
+		if !strings.Contains(string(bicep), want) {
+			t.Errorf("main.bicep lacks %q", want)
+		}
 	}
 }
 

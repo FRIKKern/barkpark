@@ -34,6 +34,22 @@ The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay 
 - **Redeploy after deleting.** A deleted resource group leaves its Key Vault soft-deleted for 7 days. Run `az keyvault purge -n <vault> -l norwayeast` before deploying again into a group with the same name.
 - **Cost.** See [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-cost).
 
+### Host name on Container Apps
+
+`main.bicep` sets `PHX_HOST` in the deployment that creates the app. Passkeys and the Entra redirect URI depend on it, so choose the final host before the first deployment.
+
+- **Default address.** Leave `PHX_HOST` out of `barkpark.env`. `PHX_HOST` is then `barkpark.` followed by the environment's domain, which Azure picks when it creates the environment.
+- **Your own domain.** Give a subdomain such as `cms.example.com` to `bp instance init --host`. `main.example.bicepparam` passes `PHX_HOST` as `customDomain`, so `PHX_HOST` is that domain from the first deployment. The template does not take an apex domain. Until the domain is bound, the app answers only on its default address.
+- **DNS records.** Print them after the first deployment:
+
+  ```bash
+  az deployment group show -g <rg> -n barkpark --query properties.outputs.dnsRecords.value -o table
+  ```
+
+  Create the CNAME from your domain to the app's default address, with no proxy or CDN in between, and the TXT record `asuid.<domain>`. When the parent domain has a CAA record, add `0 issue digicert.com`.
+- **Bind.** Once both records resolve, set `param bindCustomDomain = true` in `main.bicepparam` and deploy again. That deployment adds the domain to the app and creates a free managed certificate, which Azure renews while the CNAME points at the app. Keep the setting at `true`.
+- **Entra.** `scripts/entra-app-register.sh --resource-group <rg> --org <org>` reads the deployment output `host`, which is `PHX_HOST`, and registers `https://<host>/v1/auth/oidc/<org>/callback`. `bp instance check --target containerapps` names the same command when `barkpark.env` has no `PHX_HOST`.
+
 ## Rotate an API token
 
 `bp token ls` lists the token ids. `bp token rotate <id> --grace 24h` prints the new token once and keeps the old one working for the grace period, at most `7d`. `--now` ends the old one at once. The new token keeps the old expiry unless you pass `--expires_in_days N`. Give the new token to each client during the grace period. In the drill, a client made 165 reads over a 90-second grace and switched tokens halfway, with no failed request. The old token got 401 after the grace.

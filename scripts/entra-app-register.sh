@@ -14,8 +14,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: scripts/entra-app-register.sh --host HOST --org SLUG [--secret-file PATH] [options]
+       scripts/entra-app-register.sh --resource-group RG --org SLUG [...]
 
   --host HOST            Public host name of the Barkpark instance, no scheme.
+  --resource-group RG    On Container Apps, read the host from the output host
+                         of the deployment barkpark in RG instead. It is the
+                         PHX_HOST the app runs under.
   --org SLUG             Barkpark organization slug. It is part of the redirect
                          URI, so choose it before you register the app.
   --secret-file PATH     File that receives the client secret, mode 600. Needed
@@ -35,13 +39,14 @@ Usage: scripts/entra-app-register.sh --host HOST --org SLUG [--secret-file PATH]
 EOF
 }
 
-HOST="" ORG="" SECRET_FILE="" NAME="" GROUP_NAME="" GROUP_CLAIMS="" APP_ID=""
+HOST="" RG="" ORG="" SECRET_FILE="" NAME="" GROUP_NAME="" GROUP_CLAIMS="" APP_ID=""
 YEARS=1 ROTATE=0
 OWNERS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) HOST="${2:?}"; shift 2 ;;
+    --resource-group) RG="${2:?}"; shift 2 ;;
     --org) ORG="${2:?}"; shift 2 ;;
     --secret-file) SECRET_FILE="${2:?}"; shift 2 ;;
     --app-id) APP_ID="${2:?}"; shift 2 ;;
@@ -56,6 +61,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ -n "$RG" ] && [ -n "$HOST" ]; then
+  echo "give --host or --resource-group, not both" >&2
+  exit 2
+fi
+if [ -n "$RG" ]; then
+  # main.bicep sets PHX_HOST to this host, so the redirect URI matches it.
+  HOST=$(az deployment group show -g "$RG" -n barkpark --query properties.outputs.host.value -o tsv)
+  [ -n "$HOST" ] || { echo "the deployment barkpark in $RG has no output host; deploy the current main.bicep" >&2; exit 2; }
+fi
 if [ -z "$HOST" ] || [ -z "$ORG" ]; then
   usage >&2
   exit 2
