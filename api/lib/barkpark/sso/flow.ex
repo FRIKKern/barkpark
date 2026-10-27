@@ -76,5 +76,26 @@ defmodule Barkpark.Sso.Flow do
 
   def take(_provider, _state), do: {:error, :unknown_state}
 
+  @sweep_batch_limit 5_000
+
+  @doc """
+  Delete at most `limit` expired flows, oldest first. Returns the number
+  deleted. `Barkpark.Sso.FlowSweeper` calls this on a schedule, so a flow
+  started and never finished does not stay in the table after it expires.
+  """
+  @spec sweep_expired_batch(DateTime.t(), pos_integer()) :: non_neg_integer()
+  def sweep_expired_batch(now \\ DateTime.utc_now(), limit \\ @sweep_batch_limit) do
+    victims =
+      from(f in __MODULE__,
+        where: f.expires_at <= ^now,
+        order_by: [asc: f.expires_at],
+        limit: ^limit,
+        select: f.id
+      )
+
+    {n, _} = Repo.delete_all(from(f in __MODULE__, where: f.id in subquery(victims)))
+    n
+  end
+
   defp hash(state), do: :crypto.hash(:sha256, state)
 end

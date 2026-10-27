@@ -508,6 +508,9 @@ config :barkpark, Oban,
        # static `default` queue; the worker bounds one tick by construction
        # (`Auth.sweep_token_sessions_batch/1`).
        {"50 * * * *", Barkpark.Auth.TokenSessionSweeper},
+       # #24400 follow-up: delete expired started sign-ins from `sso_flows`.
+       # A flow lives 10 minutes; this bounds an abandoned one to 20.
+       {"*/10 * * * *", Barkpark.Sso.FlowSweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
