@@ -30,12 +30,12 @@ At the end it prints the tenant id, client id, owners group id, secret expiry da
 
 ## Connect the app to Barkpark
 
-Copy the secret file to the server as a file only root can read, then run the printed commands as an operator. They look like this:
+Run the printed commands on your machine with an operator token. They look like this:
 
 ```bash
 bp org create gyldendal Gyldendal
 bp org attach-workspace gyldendal default
-bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$(sudo cat /root/entra-client-secret)" \
+bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$(cat ./entra-client-secret)" \
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \
   --set group_role_mappings:='{"<owners group id>":"owner"}'
 ```

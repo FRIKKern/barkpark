@@ -1,12 +1,12 @@
 <!-- doc-tier: human | canonical-for: self-host-guide | budget: 2500tok -->
 # Set up a Barkpark instance for Pensum
 
-This guide takes you from an empty Azure resource group to Pensum sign-in, in run order. It has two paths that share the same settings. Operations that come after setup, such as backups, moves and key rotation, are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). Running the image on a container platform is experimental.
+This guide takes you from an empty Azure resource group to Pensum sign-in, in run order. It has two paths that share the same settings. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). Running the image on a container platform is experimental.
 
 | Path | What runs | Where the settings live |
 |---|---|---|
 | [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu 22.04 or later server, with local PostgreSQL and Caddy for TLS. | `/opt/barkpark/.env` |
-| [Container Apps](#path-b-azure-container-apps) | The `api/Dockerfile` image with one replica, PostgreSQL Flexible Server, media on Azure Files and keys in Key Vault. | Container App settings and Key Vault references |
+| [Container Apps](#path-b-azure-container-apps) | The published image with one replica, PostgreSQL Flexible Server, media on Azure Files and keys in Key Vault. | Container App settings and Key Vault references |
 
 ## Before you start on Azure
 
@@ -19,21 +19,27 @@ done
 az provider list --query "[?registrationState!='Registered' && starts_with(namespace,'Microsoft.')].namespace" -o tsv
 ```
 
-A new subscription may see no small VM sizes in Norway East, and its B-series quota can be 0. Check with `az vm list-skus --location <region> --size Standard_D2 -o table` and `az vm list-usage --location <region> -o table`. Sweden Central with `Standard_D2als_v7` worked in the first measured run.
+A new subscription may see no small VM sizes in Norway East, and its B-series quota can be 0. Check with `az vm list-skus --location <region> --size Standard_D2 -o table` and `az vm list-usage --location <region> -o table`.
 
 ## Decide the host name and the org slug
 
-Choose both before you register anything. The host name becomes `PHX_HOST`, and passkeys stop working if it changes later. The Entra ID redirect URI contains the org slug, `https://<host>/v1/auth/oidc/<org>/callback`, so the slug must be fixed before you register the Entra app in `ENTRA.md`.
+The host name becomes `PHX_HOST`, and passkeys stop working if it changes later. The Entra ID redirect URI contains the org slug, so fix the slug before you register the app. See [the sign-in URL section](ENTRA.md#sign-in-url-and-redirect-uri).
 
-Install `bp` on your own machine:
+## Write and check the settings file
+
+On your own machine, install `bp` and write a settings file:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp instance init --target vm                # or --target containerapps
+bp instance check --env-file barkpark.env --target vm --skip database,media,url
 ```
+
+`bp instance init` writes `barkpark.env` with mode 600. It holds the required settings, freshly generated keys, a database password and most [Pensum settings](#pensum-settings). Replace every `<...>` value and add the Pensum settings it leaves out. `bp instance check` lists each problem with a doc link and exits 1 if it finds one. `--skip database,media,url` skips the probes that need the server. Before the first start, run the check where the server runs, without `--skip`. If required settings are still missing at boot, the server stops and lists every one.
 
 ## Path A: a single VM
 
-1. Create an Ubuntu 22.04 or later VM with 2 vCPU and 4 GB or more, and open ports 22, 80 and 443. Azure gives you a sudo user, not root, so every command below uses `sudo`.
+1. Create an Ubuntu 22.04 or later VM with 2 vCPU and 4 GB or more, and open ports 22, 80 and 443:
 
    ```bash
    az vm create -g "$RG" -n barkpark --image Ubuntu2204 --size Standard_D2als_v7 \
@@ -41,27 +47,27 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
    az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900
    ```
 
-2. Create a DNS A record from the host name to the VM's public IP. Caddy needs it to resolve publicly before it can issue a certificate.
-3. On the VM, download `deploy.sh` from the repository root and run it as a file. The final banner prints an admin token, so send the output to a file only root can read:
+2. Create a DNS A record from the host name to the VM's public IP. Caddy needs it to issue a certificate.
+3. `deploy.sh` generates its own `DATABASE_URL` and keys, so copy the file without them and run `deploy.sh` over ssh:
 
    ```bash
+   grep -vE '^(DATABASE_URL|SECRET_KEY_BASE|BARKPARK_CLOAK_KEY|BARKPARK_KEK|PREVIEW_JWT_SECRET)=' barkpark.env > pensum.env
+   scp pensum.env azureuser@<ip>:/tmp/pensum.env
    curl -fsSLO https://raw.githubusercontent.com/FRIKKern/barkpark/main/deploy.sh
-   sudo bash -c 'umask 077; DOMAIN=<host> BARKPARK_SEED_PROFILE=clean bash ./deploy.sh > /root/deploy.log 2>&1'
-   sudo tail -n 30 /root/deploy.log
+   ssh azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` installs PostgreSQL, Erlang, Elixir and Go, clones the repository to `/opt/barkpark`, generates every key into `/opt/barkpark/.env`, starts the `barkpark` systemd service and installs Caddy. The build took about 10 minutes on 2 vCPU in the first measured run. `DOMAIN` must be the host name, never an IP, or the Studio websocket answers 403.
-4. Copy the `bp setup --target connect ...` line from the banner and run it on your machine. Store the token in your password manager, then delete `/root/deploy.log`.
-5. Add the [Pensum settings](#pensum-settings) to `/opt/barkpark/.env`. `api/start.sh` reads that file at each start. Run `sudo systemctl restart barkpark`.
+   `deploy.sh` builds Barkpark in `/opt/barkpark`, generates the keys into `/opt/barkpark/.env` and merges the file into it before the first start. Install and build take about 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, both readable by root only. When the file sets `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED`, it adds the id to `BARKPARK_OPERATOR_TOKEN_IDS`. The banner prints the token path, the id and a login command, never the token. `DOMAIN` must be the host name, never an IP, or the Studio websocket answers 403.
+4. Run the printed `bp setup --target connect --server https://<host> --token "$(ssh azureuser@<ip> sudo cat /etc/barkpark/admin-token)"` on your machine, then delete `/tmp/pensum.env` on the VM.
 
-To update, run `cd /opt/barkpark && sudo git pull`. A post-merge hook rebuilds and restarts. `make logs` and `make status` show the service. If the script stops right after "Installed erlang", it was piped over stdin; run it as a file. If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
+To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. To update, run `cd /opt/barkpark && sudo git pull`. A post-merge hook rebuilds and restarts. If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
 ## Path B: Azure Container Apps
 
-1. Create a PostgreSQL Flexible Server and allow the extensions Barkpark uses: `az postgres flexible-server parameter set -g "$RG" -s "$PG" --name azure.extensions --value citext,pg_trgm,pgcrypto`. Create an empty database.
-2. Create a Key Vault with soft delete and purge protection. Store four keys as secrets: `SECRET_KEY_BASE` from `openssl rand -base64 48`, and `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET` and `BARKPARK_KEK` each from `openssl rand -base64 32`. Reference them from the Container App with versioned URIs, as [the rotation section](SELF-HOST-OPERATIONS.md#rotate-keys) shows.
-3. Build the image from `api/Dockerfile` and push it to your registry.
-4. Create the Container App with one replica, an Azure Files mount for media, `DATABASE_URL`, `PHX_HOST` and the [Pensum settings](#pensum-settings). Use these probes. The first boot runs migrations and seeds, so the startup probe allows 300 seconds.
+1. Create a PostgreSQL Flexible Server and allow the extensions Barkpark uses: `az postgres flexible-server parameter set -g "$RG" -s "$PG" --name azure.extensions --value citext,pg_trgm,pgcrypto`. Create an empty database and a login that match `DATABASE_URL` in `barkpark.env`.
+2. Create a Key Vault with soft delete and purge protection. Store the four keys from `barkpark.env` as secrets: `SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET` and `BARKPARK_KEK`. Reference them with versioned URIs, as [the rotation section](SELF-HOST-OPERATIONS.md#rotate-keys) shows.
+3. Use the image `ghcr.io/frikkern/barkpark:<A.B.C>`. A release tag `v<A.B.C>` publishes `<A.B.C>`, `sha-<12 hex>` and `latest`. Pin a version. Its CA bundle holds the Flexible Server roots.
+4. Create the Container App with one replica, an Azure Files mount for media and the rest of `barkpark.env`. Use these probes. The first boot runs migrations and seeds, so the startup probe allows 300 seconds.
 
    ```yaml
    probes:
@@ -70,9 +76,10 @@ To update, run `cd /opt/barkpark && sudo git pull`. A post-merge hook rebuilds a
      - { type: Startup, httpGet: { path: /readyz, port: 4000 }, periodSeconds: 10, failureThreshold: 30 }
    ```
 
-   `/livez` always answers 200 while the server serves HTTP and reads no database. `/readyz` answers 200 when the database answers, no migration is pending and the job queue runs, and 503 otherwise. Neither needs a token.
+   `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs. Neither needs a token.
+5. For the first operator token, generate one with `echo "bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"`, store it in Key Vault and set `BARKPARK_SEED_ADMIN_TOKEN` from it before the first start. Without it, the first boot prints a new token in the log. The log shows `Admin token id: <id>`. Add the id to `BARKPARK_OPERATOR_TOKEN_IDS`, restart, and connect with `bp setup --target connect`.
 
-The image has no `git`, `node`, `claude`, `codex`, `bp`, `tmux` or `ps`. The Pensum settings turn off the features that start those programs. A container runs no `barkpark-agent`. Read health and the running commit from `/status.json`, request rates from `GET /v1/instance/request-stats`, and CPU, memory, restarts and storage from the Container Apps and Flexible Server metrics in Azure.
+The image has no `git`, `node`, `bp` or `tmux`, and the Pensum settings turn off the features that need them. Read health and the running commit from `/status.json`.
 
 ## Pensum settings
 
@@ -87,29 +94,27 @@ BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner>
 BARKPARK_OPERATOR_EMAILS=<operators> BARKPARK_OPERATOR_FAIL_CLOSED=1
 BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1 BARKPARK_CLOUD_HANDOFF=off
 BARKPARK_BREAKGLASS_EMAILS=<break-glass account> BARKPARK_TOKEN_EXPIRY_WARNINGS=on
+BARKPARK_OIDC_KEEP_OWNER=on BARKPARK_OIDC_EMAIL_FROM_UPN=on
 ```
 
-- **VM.** Add the lines to `/opt/barkpark/.env`. PostgreSQL runs on the same host, so no `DATABASE_SSL` is needed. The keys stay in that file. Run `sudo chmod 600 /opt/barkpark/.env` so only root can read it.
-- **Container Apps.** Add `DATABASE_SSL=verify-full`, and `DATABASE_SSL_CA_FILE=<Flexible Server CA bundle>` when the CA is not in the image's store. Keep the keys and the break-glass password in Key Vault.
+On Container Apps, keep the keys and the break-glass password in Key Vault. On the VM, run `sudo chmod 600 /opt/barkpark/.env`.
 
-Pensum calls Barkpark only from its server, so `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance's own origin and Studio's origin. `BARKPARK_BOOTSTRAP_OWNER_EMAIL` makes that email the owner of the default workspace on any boot while the users table is empty. Once a user exists, it does nothing. An empty `BARKPARK_PLUGINS` turns off media too, so name `media`. With `BARKPARK_OPERATOR_FAIL_CLOSED=1`, operator routes refuse every caller while `BARKPARK_OPERATOR_EMAILS` and `BARKPARK_OPERATOR_TOKEN_IDS` are both empty. A break-glass account signs in with a password and TOTP while SSO is down. It must already exist with TOTP turned on. Create it before you turn on SSO-only sign-in: run `bp auth register` with its email, `bp auth mfa-enroll` and `bp auth mfa-verify` while signed in as it, and `bp workspace member-add` to seat it. If `bp org` commands answer 403 after these settings, the admin token is on neither operator list; add its token id to `BARKPARK_OPERATOR_TOKEN_IDS`. Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
+- `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server.
+- `BARKPARK_BOOTSTRAP_OWNER_EMAIL` makes that email the owner of the default workspace while the users table is empty.
+- An empty `BARKPARK_PLUGINS` turns off media too, so name `media`.
+- `BARKPARK_OIDC_KEEP_OWNER=on` refuses a group mapping with no `owner` group, and a sign-in never lowers a workspace's last owner.
+- `BARKPARK_OIDC_EMAIL_FROM_UPN=on` matches an Entra account with no `email` claim on its UPN, so the bootstrap owner can sign in.
+- Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
+
+**Operator access.** With `BARKPARK_OPERATOR_FAIL_CLOSED=1`, operator routes such as `bp org` accept only a user on `BARKPARK_OPERATOR_EMAILS` or a token on `BARKPARK_OPERATOR_TOKEN_IDS`. The admin token has no user, so only its id grants it. `bp token ls` lists it as `admin (bp setup)`. A 403 from `bp org` names the calling token's id in its hint.
+
+**Mail.** Mail is optional. Without `SMTP_HOST`, `/status.json` shows the mail component as degraded, and no sign-in links, password resets or invitations go out. SSO plus a break-glass account does not need mail.
+
+**Break-glass account.** It signs in with a password and TOTP while SSO is down. Create it before you turn on SSO-only sign-in: run `bp auth register` with its email, `bp auth mfa-enroll` and `bp auth mfa-verify` while signed in as it, and `bp workspace member-add` to seat it.
 
 ## Sign in with Entra ID
 
-Register the Entra app as `ENTRA.md` describes, and use the sign-in URL section there for the redirect URI, with the org slug you chose. Then run these with an operator token. On the VM, that is the admin token from step 4. Container Apps has no documented step for the first operator token yet.
-
-```bash
-bp org create <org> "<Org name>"
-bp org attach-workspace <org> default
-bp org oidc-create <org> "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$CLIENT_SECRET" \
-  --tenant_id "$TENANT" --strict_validation --trust_idp_mfa \
-  --set group_role_mappings:='{"<owners group id>":"owner","<editors group id>":"member"}'
-bp org domain-add <org> <email domain>      # publish the TXT record it prints
-bp org domain-verify <org> <email domain>
-bp org auth-methods <org> sso
-```
-
-Each sign-in sets the role from the user's Entra groups and can lower it. Map a group that holds the owner to `owner`, or the first sign-in demotes the owner. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection; list its origin in `BARKPARK_STUDIO_SSO_ORIGINS`.
+Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token, then turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Once the break-glass account exists, run `bp org auth-methods <org> sso`. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection; list its origin in `BARKPARK_STUDIO_SSO_ORIGINS`.
 
 ## Check the instance
 
