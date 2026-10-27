@@ -1859,7 +1859,7 @@ USAGE
                     [--studio-origin <o>] [--owner-email <e>]
                     [--operator-emails <e,...>] [--breakglass-email <e>]
   bp instance check [--env-file <file>] [--target containerapps|vm]
-                    [--skip database,media,url]
+                    [--skip database,media,url] [--studio-url <url>]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
@@ -1900,7 +1900,10 @@ WHAT IT DOES
                pgcrypto, a writable BARKPARK_MEDIA_DIR, the TLS certificate of
                https://PHX_HOST, and the recommended Pensum settings. Exits 1
                on any problem. --skip leaves out the database, the local files
-               (media dir, CA file) or the url. init and check need no server.
+               (media dir, CA file) or the url. --studio-url checks that
+               BARKPARK_STUDIO_SSO_ORIGINS lets that Studio's single sign-on
+               return, and prints its callback and the identity provider's
+               redirect URI. init and check need no server.
 
 FLAGS
   --team <t>   read credentials in an explicit team context (a team slug or id
