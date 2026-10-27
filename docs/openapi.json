@@ -194,6 +194,7 @@
                   "source_not_found",
                   "storage_unavailable",
                   "structure",
+                  "studio_token_forbidden",
                   "unauthorized",
                   "unknown_format",
                   "unknown_tag",
