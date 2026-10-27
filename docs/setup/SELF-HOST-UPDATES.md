@@ -38,7 +38,7 @@ The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay 
 
 `main.bicep` sets `PHX_HOST` in the deployment that creates the app. Passkeys and the Entra redirect URI depend on it, so choose the final host before the first deployment.
 
-- **Default address.** Leave `PHX_HOST` out of `barkpark.env`. `PHX_HOST` is then `barkpark.` followed by the environment's domain, which Azure picks when it creates the environment.
+- **Default address.** Leave `PHX_HOST` out of `barkpark.env`. `PHX_HOST` is then `barkpark.` followed by the environment's domain, which Azure picks when it creates the environment. The first revision already has it.
 - **Your own domain.** Give a subdomain such as `cms.example.com` to `bp instance init --host`. `main.example.bicepparam` passes `PHX_HOST` as `customDomain`, so `PHX_HOST` is that domain from the first deployment. The template does not take an apex domain. Until the domain is bound, the app answers only on its default address.
 - **DNS records.** Print them after the first deployment:
 
@@ -47,7 +47,7 @@ The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay 
   ```
 
   Create the CNAME from your domain to the app's default address, with no proxy or CDN in between, and the TXT record `asuid.<domain>`. When the parent domain has a CAA record, add `0 issue digicert.com`.
-- **Bind.** Once both records resolve, set `param bindCustomDomain = true` in `main.bicepparam` and deploy again. That deployment adds the domain to the app and creates a free managed certificate, which Azure renews while the CNAME points at the app. Keep the setting at `true`.
+- **Bind.** Once both records resolve, set `param bindCustomDomain = true` in `main.bicepparam` and deploy again. That deployment adds the domain to the app and creates a free managed certificate, which Azure renews while the CNAME points at the app. Keep the setting at `true`. Without the TXT record the deployment stops with `InvalidCustomHostNameValidation`, which names the record, and the app keeps running unchanged.
 - **Entra.** `scripts/entra-app-register.sh --resource-group <rg> --org <org>` reads the deployment output `host`, which is `PHX_HOST`, and registers `https://<host>/v1/auth/oidc/<org>/callback`. `bp instance check --target containerapps` names the same command when `barkpark.env` has no `PHX_HOST`.
 
 ## Rotate an API token
