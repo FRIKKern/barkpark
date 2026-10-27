@@ -108,6 +108,32 @@ defmodule BarkparkWeb.OidcControllerTest do
     assert json_response(conn, 400)
   end
 
+  defmodule NoDiscoveryIdP do
+    @behaviour Barkpark.Sso.Oidc.HTTP
+    @impl true
+    def post_form(_url, _params, _headers), do: {:error, :econnrefused}
+    @impl true
+    def get_json(_url), do: {:error, :econnrefused}
+  end
+
+  test "start with an unreadable discovery document is 502 with a guide link", %{conn: conn} do
+    {:ok, org} = Tenancy.create_organization(%{slug: "octrl-nodisc", name: "octrl-nodisc"})
+
+    {:ok, _c} =
+      Oidc.create_connection(%{
+        organization_id: org.id,
+        issuer: "https://nodisc.example.com",
+        client_id: @client_id,
+        client_secret: "s"
+      })
+
+    Application.put_env(:barkpark, :oidc_http, NoDiscoveryIdP)
+
+    body = conn |> get("/v1/auth/oidc/octrl-nodisc/start") |> json_response(502)
+    assert body["error"]["code"] == "upstream_unavailable"
+    assert body["error"]["hint"] =~ Barkpark.SetupDocs.url(:oidc)
+  end
+
   test "start for an org without a connection is 404", %{conn: conn} do
     assert conn |> get("/v1/auth/oidc/no-such-org/start") |> json_response(404)
   end

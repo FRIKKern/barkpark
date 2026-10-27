@@ -97,7 +97,8 @@ case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
 
       Generate one: openssl rand -base64 32 — and set \
       BARKPARK_RELEASE_CAPTURE_HMAC_SECRET in .env (compose) or \
-      /opt/barkpark/.env, then restart. This line never echoes the value.
+      /opt/barkpark/.env, then restart. This line never echoes the value. \
+      #{Barkpark.SetupDocs.see(:settings_file)}
       """)
     end
 end
@@ -118,7 +119,7 @@ if config_env() == :prod do
     raise "required settings are missing:\n" <>
             Enum.map_join(missing_required, "\n", &"  #{&1} is not set") <>
             "\nSet each one, or write a complete env file with bp instance init. " <>
-            "See docs/setup/SELF-HOST-OPERATIONS.md."
+            Barkpark.SetupDocs.see(:settings_file)
   end
 end
 
@@ -151,6 +152,8 @@ secret_key_base =
 
         Generate one: openssl rand -base64 64 — and set SECRET_KEY_BASE in
         .env (compose) or /opt/barkpark/.env.
+
+        #{Barkpark.SetupDocs.see(:keys)}
         """
       end
   end
@@ -305,6 +308,8 @@ cloak_key =
 
         This MUST be independent of SECRET_KEY_BASE so that key rotation
         in either system does not invalidate the other.
+
+        #{Barkpark.SetupDocs.see(:keys)}
         """
       else
         # Dev/test fallback — documented constant; rotation in dev does not matter.
@@ -457,6 +462,8 @@ case System.get_env("BARKPARK_KEK") do
       BARKPARK_KEK=<value>. It MUST be independent of BARKPARK_CLOAK_KEY and
       SECRET_KEY_BASE. Without it, content fields marked `encrypted: true`
       cannot be sealed.
+
+      #{Barkpark.SetupDocs.see(:keys)}
       """
     end
 
@@ -473,6 +480,8 @@ case System.get_env("BARKPARK_KEK") do
         BARKPARK_CLOAK_KEY and SECRET_KEY_BASE; LocalKek would otherwise
         reject this key at the FIRST encrypted-field seal, an unbounded time
         after boot.
+
+        #{Barkpark.SetupDocs.see(:keys)}
         """
     end
 
@@ -1310,6 +1319,7 @@ if config_env() == :prod do
       raise """
       environment variable DATABASE_URL is missing.
       For example: ecto://USER:PASS@HOST/DATABASE
+      #{Barkpark.SetupDocs.see(:settings_file)}
       """
 
   maybe_ipv6 = if System.get_env("ECTO_IPV6") in ~w(true 1), do: [:inet6], else: []
@@ -1340,7 +1350,8 @@ if config_env() == :prod do
 
           ca ->
             File.regular?(ca) ||
-              raise "DATABASE_SSL_CA_FILE is #{inspect(ca)}, which is not a file."
+              raise "DATABASE_SSL_CA_FILE is #{inspect(ca)}, which is not a file. " <>
+                      Barkpark.SetupDocs.see(:database_tls)
 
             [cacertfile: ca]
         end
@@ -1349,6 +1360,7 @@ if config_env() == :prod do
         raise """
         DATABASE_SSL is #{inspect(other)}. Expected "verify-full" (verified TLS to
         Postgres) or "off". Unset means no TLS, the default.
+        #{Barkpark.SetupDocs.see(:database_tls)}
         """
     end
 
@@ -1504,6 +1516,8 @@ if config_env() == :prod do
 
         See docs/ops/studio-nav-bug-2026-04-19.md (task #11) for the incident
         and `make domain-cutover DOMAIN=...` for the remediation workflow.
+
+        #{Barkpark.SetupDocs.see(:host_name)}
         """
 
       "" ->
@@ -1511,6 +1525,7 @@ if config_env() == :prod do
         environment variable PHX_HOST is empty.
         Set PHX_HOST to the public DNS hostname. See
         docs/ops/studio-nav-bug-2026-04-19.md (task #11).
+        #{Barkpark.SetupDocs.see(:host_name)}
         """
 
       value ->
@@ -1532,6 +1547,7 @@ if config_env() == :prod do
     PHX_SCHEME=http and terminate TLS elsewhere.
 
     See docs/ops/studio-nav-bug-2026-04-19.md (task #11).
+    #{Barkpark.SetupDocs.see(:host_name)}
     """
   end
 
@@ -1670,6 +1686,8 @@ if config_env() == :prod do
 
         Generate one: openssl rand -base64 48 — and set PREVIEW_JWT_SECRET in
         .env (compose) or /opt/barkpark/.env.
+
+        #{Barkpark.SetupDocs.see(:keys)}
         """
     end
 

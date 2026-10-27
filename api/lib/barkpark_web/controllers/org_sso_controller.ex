@@ -156,8 +156,15 @@ defmodule BarkparkWeb.OrgSsoController do
 
   defp discover(issuer) do
     case Oidc.discover(issuer) do
-      {:ok, _} = ok -> ok
-      {:error, reason} -> invalid("issuer", "discovery document: #{reason}")
+      {:ok, _} = ok ->
+        ok
+
+      {:error, reason} ->
+        {:error,
+         {:validation_failed, "SSO setting", %{"issuer" => ["discovery document: #{reason}"]},
+          "Check that issuer is the provider's issuer URL, such as " <>
+            "https://login.microsoftonline.com/<tenant id>/v2.0, and send the request again. " <>
+            Barkpark.SetupDocs.see(:oidc)}}
     end
   end
 

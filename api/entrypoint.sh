@@ -13,6 +13,7 @@ if [ ! -w /app/uploads ]; then
   echo "entrypoint: /app/uploads is not writable by uid $(id -u)." >&2
   echo "entrypoint: give the volume to uid 10001, for example:" >&2
   echo "entrypoint:   docker run --rm -u 0 -v <volume>:/app/uploads <image> chown -R 10001:10001 /app/uploads" >&2
+  echo "entrypoint: on Azure Files, mount with uid=10001,gid=10001. See https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST.md#path-b-azure-container-apps" >&2
   exit 1
 fi
 

@@ -303,6 +303,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
 
     "This route needs platform operator access. To grant it, #{who}, " <>
       "or add the token owner's email to #{@emails_env}, then restart the server. " <>
-      "A token with no owner user can only be granted by its id."
+      "A token with no owner user can only be granted by its id. " <>
+      Barkpark.SetupDocs.see(:operator_access)
   end
 end

@@ -16,7 +16,8 @@
 //   path   every repo file path and script exists (gitignored run-time paths
 //          such as api/uploads count)
 //   link   every relative link and #anchor resolves, and every docs/*.md link
-//          in a Go or Elixir string points at a file and anchor that exist
+//          in a Go or Elixir string, or in api/entrypoint.sh, points at a file
+//          and anchor that exist
 //
 // Scope: docs/setup/*.md, the setup sections of README.md, and every doc a Go
 // string in internal/ or cmd/ links to.
@@ -648,7 +649,7 @@ export async function collectScope(repo) {
   const codeLinks = [];
   for (const f of repo.files) {
     const isGo = /^(internal|cmd)\/.*\.go$/.test(f);
-    const isEx = /^(api|cloud)\/lib\/.*\.exs?$/.test(f);
+    const isEx = /^(api|cloud)\/lib\/.*\.exs?$/.test(f) || f === "api/entrypoint.sh";
     if (!(isGo || isEx) || TEST_FILE.test(f)) continue;
     const t = repo.read(f);
     if (!t || !/docs\/[A-Za-z0-9_./-]+\.md|FRIKKern\/barkpark\/(blob|tree)/.test(t)) continue;

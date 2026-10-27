@@ -157,7 +157,10 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
           client_secret: "s"
         })
 
-      assert %{"error" => %{"code" => "validation_failed"}} = json_response(conn, 422)
+      assert %{"error" => %{"code" => "validation_failed", "hint" => hint}} =
+               json_response(conn, 422)
+
+      assert hint =~ Barkpark.SetupDocs.url(:oidc)
       assert Repo.aggregate(OidcConnection, :count) == 0
     end
 
