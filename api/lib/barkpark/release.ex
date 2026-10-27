@@ -302,7 +302,7 @@ defmodule Barkpark.Release do
   def admin_token(opts \\ []) do
     argv =
       Keyword.get_lazy(opts, :argv, fn ->
-        "BARKPARK_ADMIN_TOKEN_ARGV" |> System.get_env("") |> String.split("\n", trim: true)
+        System.get_env("BARKPARK_ADMIN_TOKEN_ARGV", "") |> String.split("\n", trim: true)
       end)
 
     Keyword.get(opts, :boot, &Barkpark.OneShot.boot!/0).()
