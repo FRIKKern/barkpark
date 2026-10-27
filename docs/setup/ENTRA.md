@@ -57,10 +57,13 @@ bp org oidc-update gyldendal --scopes "openid profile email" --yes
 
 `bp org oidc-update <org> --trust_idp_mfa --yes` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
 
-Conditional Access needs Entra ID P1. Without P1, MFA must come from security defaults or per-user MFA.
+Conditional Access needs Entra ID P1. Without P1, security defaults make each user register an authenticator at the first sign-in but do not ask for it at every sign-in. With `trust_idp_mfa` on a connection that has `--tenant_id`, Barkpark asks Entra for MFA with the OIDC `claims` parameter. On 2026-10-27, on a tenant with security defaults and no P1, Entra then asked a non-admin user for the code at every sign-in. Without the parameter it asked at none.
 
-Turn `trust_idp_mfa` on after a test sign-in through the sign-in URL with MFA, with or without P1. On 2026-10-27 such a sign-in to an app made by the script sent `amr` with `mfa` in it. The Entra admin center lists the test sign-in under Sign-in logs, with its authentication details.
+Turn `trust_idp_mfa` on after a test sign-in with MFA. Entra lists it under Sign-in logs. [tooling/entra-signin](../../tooling/entra-signin/README.md) signs a test user in headless and prints the role.
 
+## Removed users
+
+[ENTRA-ACCESS.md](ENTRA-ACCESS.md#removed-users) says what stops a removed user and what does not.
 
 ## The bootstrap owner
 
@@ -70,11 +73,7 @@ The bootstrap owner does not need domain verification. The owner holds a seat in
 
 ## Break-glass account
 
-An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. A break-glass account on `BARKPARK_BREAKGLASS_EMAILS` signs in with a password and TOTP, or a passkey, even when the organization allows only SSO. Create it before you run `bp org auth-methods <org> sso`:
-
-1. `bp auth register <email> <password>` creates the account.
-2. `bp auth login <email> <password>` returns a token. With `BARKPARK_TOKEN` set to it, `bp auth mfa-enroll <password>` returns a TOTP secret. Add it to an authenticator, then run `bp auth mfa-verify <secret> <code> <password>`.
-3. As an owner, `bp workspace member-add <email>` seats it.
+A break-glass account on `BARKPARK_BREAKGLASS_EMAILS` signs in with a password and TOTP, or a passkey, even when the organization allows only SSO. Create it before you run `bp org auth-methods <org> sso`, as [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account) describes.
 
 ## Sign the bp CLI in with SSO
 
