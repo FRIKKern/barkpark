@@ -2697,7 +2697,7 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
          ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
-    # barkpark_web/controllers/oidc_controller.ex:253
+    # barkpark_web/controllers/oidc_controller.ex, signed_in/3
     # The browser sign-in receipt moved out of callback/2 into signed_in/3 when the
     # callback learned to return a sign-in to a Studio (task-8bdf1b15305af840). The
     # receipt expression is unchanged (expr_fp 73996638); the row is re-keyed to the
