@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-operations | budget: 2500tok -->
 # Operate a Barkpark instance
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves, key rotation and Container Apps cost. The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md).
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves, key rotation, database TLS, media on Azure Files and Container Apps cost. The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md).
 
 ## Scheduled backups and the restore drill
 
@@ -85,6 +85,21 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
 ### Cloak key
 
 `Barkpark.Vault` configures one AES-GCM cipher and no retired cipher, and no command re-encrypts Cloak fields. Keep `BARKPARK_CLOAK_KEY` unchanged. After a change, every row sealed under the old key fails to load, including the user row of anyone with TOTP. Recovering from a leaked Cloak key therefore means clearing each Cloak column and entering the secrets again, and no tool does that today.
+
+## Database TLS
+
+`DATABASE_SSL` sets TLS from Barkpark to PostgreSQL:
+
+| Value | Effect |
+|---|---|
+| unset or `off` | No TLS. The single VM uses this, since its PostgreSQL is local. |
+| `verify-full` | Verified TLS. The server certificate must chain to a trusted CA and match the host in `DATABASE_URL`. |
+
+Any other value stops the boot. With `verify-full`, the CA comes from the OS trust store, or from `DATABASE_SSL_CA_FILE` when set, which must name a file. The image's trust store holds the Azure Flexible Server roots, so Path B needs no CA file.
+
+## Media on Azure Files
+
+The image runs as uid and gid 10001, and its entrypoint refuses to start when `/app/uploads` is not writable by that user. Mount the Azure Files share at `/app/uploads` with `uid=10001,gid=10001,dir_mode=0770,file_mode=0660,mfsymlinks,nobrl`. `deploy/azure/main.bicep` sets these options and `BARKPARK_MEDIA_DIR`.
 
 ## Container Apps cost
 

@@ -463,6 +463,7 @@ func TestInstanceInitValueFlags(t *testing.T) {
 		"BARKPARK_BREAKGLASS_EMAILS":      "bg@example.com",
 		"BARKPARK_OIDC_KEEP_OWNER":        "on",
 		"BARKPARK_OIDC_EMAIL_FROM_UPN":    "on",
+		"BARKPARK_STUDIO_SSO_ORIGINS":     "https://studio.example.com",
 	}
 	for k, v := range want {
 		if env[k] != v {
@@ -488,6 +489,26 @@ func TestInstanceInitValueFlags(t *testing.T) {
 	}
 	if _, _, code := runInstanceVerb(t, "init", "--out", path+"2", "--host", "https://cms.example.com"); code != exitUsage {
 		t.Fatalf("--host with a scheme exit %d", code)
+	}
+	if _, _, code := runInstanceVerb(t, "init", "--out", path+"3", "--studio-origin", "studio.example.com"); code != exitUsage {
+		t.Fatalf("--studio-origin without a scheme exit %d", code)
+	}
+	// A Studio URL with a path and a trailing slash is written as its origin.
+	p4 := path + "4"
+	if _, stderr, code := runInstanceVerb(t, "init", "--out", p4, "--target", "vm", "--host", "cms.example.com", "--studio-origin", "https://Studio.example.com:443/studio/"); code != exitOK {
+		t.Fatalf("init exit %d: %s", code, stderr)
+	}
+	b4, _ := os.ReadFile(p4)
+	e4, _ := parseInstanceEnv(bytes.NewReader(b4))
+	if e4["BARKPARK_STUDIO_SSO_ORIGINS"] != "https://studio.example.com" || e4["BARKPARK_ALWAYS_ALLOWED_ORIGINS"] != "https://cms.example.com,https://studio.example.com" {
+		t.Fatalf("studio origin not normalised: %q, %q", e4["BARKPARK_STUDIO_SSO_ORIGINS"], e4["BARKPARK_ALWAYS_ALLOWED_ORIGINS"])
+	}
+	if problems, _ := instanceCheck(context.Background(), e4, instanceCheckOpts{target: instanceTargetVM, studioURL: "https://studio.example.com", skip: map[string]bool{"database": true, "media": true, "url": true}}); len(problems) != 0 {
+		for _, p := range problems {
+			if strings.Contains(p.Setting, "STUDIO_SSO") {
+				t.Fatalf("check --studio-url on an init file: %s", p.Problem)
+			}
+		}
 	}
 }
 

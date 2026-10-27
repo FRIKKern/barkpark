@@ -24,11 +24,11 @@ Check VM size availability and quota with `az vm list-skus --location <region> -
 
 ## Decide the host name and the org slug
 
-The host name becomes `PHX_HOST`, and passkeys stop working if it changes later. The Entra ID redirect URI contains the org slug, so fix the slug before you register the app. See [the sign-in URL section](ENTRA.md#sign-in-url-and-redirect-uri).
+The host name becomes `PHX_HOST`, and passkeys stop working if it changes later. It must be a DNS name, not an IP address: with `PHX_SCHEME=https` the server refuses an IPv4 address. The Entra ID redirect URI contains the org slug, so fix the slug before you register the app. See [the sign-in URL section](ENTRA.md#sign-in-url-and-redirect-uri).
 
 ## Write and check the settings file
 
-On your machine, install `bp` 1.26.0 or newer and write a settings file:
+On your machine, install `bp` 1.26.1 or newer and write a settings file:
 
 <!-- run -->
 ```bash
@@ -94,6 +94,7 @@ Deploy to Azure with `deploy/azure/main.bicep`. Copy `main.example.bicepparam` t
 BARKPARK_SELF_UPDATE_CHECK=off
 BARKPARK_RETIRE_SSE_ON_SIGTERM=1
 BARKPARK_ALWAYS_ALLOWED_ORIGINS=https://<host>,<studio origin>
+BARKPARK_STUDIO_SSO_ORIGINS=<studio origin>
 BARKPARK_PLUGINS=media
 BARKPARK_TMUX_CONSOLE=off
 BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
@@ -110,7 +111,7 @@ BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 
 On Container Apps, keep the keys and the break-glass password in Key Vault. On the VM, run `sudo chmod 600 /opt/barkpark/.env`.
 
-- `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server.
+- `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server. Studio sign-in reads only `BARKPARK_STUDIO_SSO_ORIGINS`.
 - `BARKPARK_BOOTSTRAP_OWNER_EMAIL` makes that email the owner of the default workspace while the users table is empty.
 - An empty `BARKPARK_PLUGINS` turns off media too, so name `media`.
 - `BARKPARK_OIDC_KEEP_OWNER=on` refuses a group mapping with no `owner` group, and a sign-in never lowers a workspace's last owner.
@@ -118,13 +119,15 @@ On Container Apps, keep the keys and the break-glass password in Key Vault. On t
 - `BARKPARK_BREAKGLASS_EMAILS` lets the [break-glass account](ENTRA.md#break-glass-account) sign in with a password and TOTP, or a passkey, while the org allows only SSO.
 - Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
 
-**Operator access.** Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it. `bp token ls` lists it as `admin (bp setup)`. A 403 from `bp org` names the calling token's id in its hint.
+### Operator access
+
+Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it. `bp token ls` lists it as `admin (bp setup)`. A 403 from `bp org` names the calling token's id in its hint.
 
 **Mail.** Optional. Without `SMTP_HOST`, `/status.json` shows the mail component as degraded, and no sign-in links, password resets or invitations go out. SSO plus a break-glass account does not need mail.
 
 ## Sign in with Entra ID
 
-Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token, then turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Once the break-glass account exists, run `bp org auth-methods <org> sso`. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection; list its origin in `BARKPARK_STUDIO_SSO_ORIGINS`.
+Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token, then turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Once the break-glass account exists, run `bp org auth-methods <org> sso`. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List the Studio's origin in `BARKPARK_STUDIO_SSO_ORIGINS` with no path and no trailing slash, then run `bp instance check --env-file <file> --studio-url <studio url>`.
 
 ## Check the instance
 

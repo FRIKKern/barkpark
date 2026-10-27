@@ -16,13 +16,13 @@ defmodule Barkpark.SetupDocs do
     host_name:
       "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST.md#decide-the-host-name-and-the-org-slug",
     operator_access:
-      "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST.md#pensum-settings",
+      "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST.md#operator-access",
     media_dir:
-      "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST.md#path-b-azure-container-apps",
+      "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-OPERATIONS.md#media-on-azure-files",
     keys:
       "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-OPERATIONS.md#rotate-keys",
     database_tls:
-      "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-OPERATIONS.md#moving-an-instance",
+      "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-OPERATIONS.md#database-tls",
     oidc:
       "https://github.com/FRIKKern/barkpark/blob/main/docs/setup/ENTRA.md#connect-the-app-to-barkpark"
   }

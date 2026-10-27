@@ -99,6 +99,13 @@ func runInstanceInit(out *writer, args []string) int {
 		operatorEmails:  strings.TrimSpace(a.val("operator-emails")),
 		breakglassEmail: strings.TrimSpace(a.val("breakglass-email")),
 	}
+	if vals.studioOrigin != "" {
+		origin, err := instanceStudioOrigin(vals.studioOrigin)
+		if err != nil {
+			return useError(out, "usage", fmt.Sprintf("--studio-origin is %q; give the Studio's origin, such as https://studio.example.com", vals.studioOrigin), exitUsage)
+		}
+		vals.studioOrigin = origin
+	}
 	if strings.Contains(vals.host, "/") || strings.Contains(vals.host, ":") {
 		return useError(out, "usage", fmt.Sprintf("--host is %q; give the host name only, such as cms.example.com", vals.host), exitUsage)
 	}
