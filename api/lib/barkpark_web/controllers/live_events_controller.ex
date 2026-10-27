@@ -20,8 +20,9 @@ defmodule BarkparkWeb.LiveEventsController do
     * `: keepalive` every 15 s. A stream whose client left ends within about
       a second (`BarkparkWeb.PeerProbe`), freeing its cap slot;
     * `event: goaway`, then close, instead of a welcome when the credential
-      already holds `:live_events_max_streams` (default 20) open streams;
-      next-sanity falls back to polling.
+      already holds `:live_events_max_streams` (default 20) open streams from
+      this address, or `:live_events_max_streams_per_credential` (default 100)
+      in all (`BarkparkWeb.StreamCap`); next-sanity falls back to polling.
 
   Changes are batched over a second. Without `includeDrafts=true` a draft's
   change is not sent, as on Sanity. The gate is listen's (`:scoped_api` +
@@ -40,12 +41,11 @@ defmodule BarkparkWeb.LiveEventsController do
   alias Barkpark.Content.{Broadcast, DraftId, EventLog}
   alias Barkpark.Groq.SyncTag
   alias Barkpark.Realtime.DrainSignal
-  alias BarkparkWeb.{ErrorResponse, ListenController, PeerProbe}
+  alias BarkparkWeb.{ErrorResponse, ListenController, PeerProbe, StreamCap}
 
   @min_api_version "2021-03-25"
   @batch_ms 1_000
   @max_resume_tags 1_000
-  @streams Barkpark.Realtime.LiveStreams
 
   def events(conn, %{"dataset" => dataset, "api_version" => version} = params) do
     if api_version_ok?(version) do
@@ -67,42 +67,25 @@ defmodule BarkparkWeb.LiveEventsController do
 
   defp api_version_ok?(_), do: false
 
-  # At most `:live_events_max_streams` (default 20) open streams per token, or
-  # per user for a member session. The stream registers first and counts
-  # second, so two racing opens can never both slip under the cap; the
-  # registration ends with the stream's process, which frees the slot.
+  # At most `:live_events_max_streams` (default 20) open streams per credential
+  # from one address, and `:live_events_max_streams_per_credential` (default
+  # 100) in all (`BarkparkWeb.StreamCap`).
   defp stream(conn, dataset, params) do
-    key = principal(conn)
-    if key, do: Registry.register(@streams, key, nil)
-    cap = Application.get_env(:barkpark, :live_events_max_streams, 20)
+    caps =
+      {Application.get_env(:barkpark, :live_events_max_streams, 20),
+       Application.get_env(:barkpark, :live_events_max_streams_per_credential, 100)}
 
-    if key && length(Registry.lookup(@streams, key)) > cap do
-      Registry.unregister(@streams, key)
-
-      conn
-      |> put_resp_content_type("text/event-stream")
-      |> send_resp(
-        200,
-        frame("goaway", nil, %{reason: "too many open live streams for this credential (#{cap})"})
-      )
-    else
-      # A stream that ends leaves its slot at once. The registration belongs
-      # to the connection's process, which outlives the stream when the
-      # connection stays open for another request.
-      try do
-        open(conn, dataset, params)
-      after
-        if key, do: Registry.unregister(@streams, key)
-      end
-    end
-  end
-
-  defp principal(conn) do
-    case conn.assigns do
-      %{api_token: %{id: id}} when not is_nil(id) -> {:token, id}
-      %{current_user: %{id: id}} when not is_nil(id) -> {:user, id}
-      _ -> nil
-    end
+    StreamCap.run(
+      conn,
+      :live_events,
+      caps,
+      fn reason ->
+        conn
+        |> put_resp_content_type("text/event-stream")
+        |> send_resp(200, frame("goaway", nil, %{reason: reason}))
+      end,
+      fn -> open(conn, dataset, params) end
+    )
   end
 
   defp open(conn, dataset, params) do

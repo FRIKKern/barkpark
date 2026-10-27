@@ -6,7 +6,7 @@ defmodule BarkparkWeb.ListenController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
   alias Barkpark.Realtime.DrainSignal
-  alias BarkparkWeb.{ErrorResponse, ListenFilter, PeerProbe, ReadPerspective}
+  alias BarkparkWeb.{ErrorResponse, ListenFilter, PeerProbe, ReadPerspective, StreamCap}
 
   def listen(conn, %{"dataset" => dataset} = params) do
     # `?types=`, `?perspective=` and `filter[…]` narrow the stream server-side
@@ -14,7 +14,7 @@ defmodule BarkparkWeb.ListenController do
     # HERE, before any subscription or chunk, as a plain 400.
     case ListenFilter.parse(params) do
       {:ok, lf} ->
-        stream(conn, dataset, params, lf)
+        capped_stream(conn, dataset, params, lf)
 
       {:error, {:perspective, value}} ->
         ReadPerspective.refuse(conn, value, ListenFilter.perspectives(),
@@ -26,6 +26,31 @@ defmodule BarkparkWeb.ListenController do
       {:error, {:filter, message, details}} ->
         ErrorResponse.emit_custom(conn, 400, "malformed", message, details)
     end
+  end
+
+  # At most `:listen_max_streams` (default 20) open streams per credential
+  # from one address, and `:listen_max_streams_per_credential` (default 100)
+  # in all, counted apart from live.events (`BarkparkWeb.StreamCap`,
+  # task-7a9e8f31be8b7580). Over a cap: one `disconnect` frame and the
+  # response ends. That is listen's final event: `@sanity/client` reports it
+  # as a DisconnectError and does not reconnect, where an unknown `goaway`
+  # would be dropped and the closed stream reopened every second.
+  defp capped_stream(conn, dataset, params, lf) do
+    caps =
+      {Application.get_env(:barkpark, :listen_max_streams, 20),
+       Application.get_env(:barkpark, :listen_max_streams_per_credential, 100)}
+
+    StreamCap.run(
+      conn,
+      :listen,
+      caps,
+      fn reason ->
+        conn
+        |> put_resp_content_type("text/event-stream")
+        |> send_resp(200, "event: disconnect\ndata: #{Jason.encode!(%{reason: reason})}\n\n")
+      end,
+      fn -> stream(conn, dataset, params, lf) end
+    )
   end
 
   defp stream(conn, dataset, params, lf) do
