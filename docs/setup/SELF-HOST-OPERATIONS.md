@@ -69,7 +69,7 @@ BARKPARK_BREAKGLASS_EMAILS=<break-glass account> BARKPARK_TOKEN_EXPIRY_WARNINGS=
 
 `BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats that email as owner of the default workspace while the instance has no users. With `BARKPARK_OPERATOR_FAIL_CLOSED=1`, the operator routes refuse every caller while both `BARKPARK_OPERATOR_EMAILS` and `BARKPARK_OPERATOR_TOKEN_IDS` are empty. `BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1` also applies the org's sign-in policy to API token paste and the Cloud handoff. `BARKPARK_CLOUD_HANDOFF=off` turns off the Barkpark Cloud ticket and deprovisioning routes. A break-glass account signs in with a password and TOTP while SSO is down. Keep its password and TOTP secret in Key Vault.
 
-A barkpark-studio deployment signs editors in through the same connection with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>`. List its origin in `BARKPARK_STUDIO_SSO_ORIGINS` (comma-separated, for example `https://studio.example.com`), or the instance refuses to return a sign-in to it.
+A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its origin in the comma-separated `BARKPARK_STUDIO_SSO_ORIGINS`, or the instance will not return a sign-in to it.
 
 ## Rotate keys held in Azure Key Vault
 
