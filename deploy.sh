@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# The whole body sits in one { ... } block. Over `ssh host 'bash -s' < deploy.sh`
+# bash reads the script from stdin as it runs, and any child that reads stdin
+# eats the rest of it. Measured 2026-10-27 on Ubuntu 22.04: the run stopped with
+# exit 0 right after `asdf install erlang`, before Elixir. A block is parsed in
+# full before it runs, so no child can take the script away.
+{
+
 # task-466aef17f2085404: this runs UNATTENDED over `ssh … 'bash -s'` with no tty.
 # Without GIT_TERMINAL_PROMPT=0 a git that wants a username (a private $REPO, an
 # expired token, git 2.34's protocol-v2 refusal — task-8a523f080fa406d2) HANGS on
@@ -75,7 +82,13 @@ install_caddy_pkg() {
 # Works on both ARM64 (Hetzner cax*) and x86_64 (Hetzner cpx*/ccx*).
 #
 # Usage:
-#   ssh root@YOUR_VPS_IP 'bash -s' < deploy.sh
+#   ssh root@YOUR_VPS_IP 'DOMAIN=example.com bash -s' < deploy.sh
+#   ssh azureuser@YOUR_VM_IP 'sudo DOMAIN=example.com bash -s' < deploy.sh
+#
+# Optional settings file (BARKPARK_ENV_FILE): KEY=VALUE lines in a file on the
+# server, merged into /opt/barkpark/.env before the seed and the first start.
+#   scp barkpark.env azureuser@YOUR_VM_IP:/tmp/barkpark.env
+#   ssh azureuser@YOUR_VM_IP 'sudo DOMAIN=example.com BARKPARK_ENV_FILE=/tmp/barkpark.env bash -s' < deploy.sh
 #
 # After setup:
 #   ssh root@YOUR_VPS_IP
@@ -83,6 +96,16 @@ install_caddy_pkg() {
 #   make rebuild   # after code changes
 #   make logs      # tail service logs
 #   make status    # check health
+
+# Root is required: the script installs packages, writes /etc and runs the
+# service as root. A sudo user runs it as `sudo bash -s`. sudo can keep the
+# caller's HOME, and asdf, hex and rebar install under $HOME, while the
+# service (User=root) and api/start.sh read /root. Pin HOME so both agree.
+if [ "$(id -u)" != 0 ]; then
+  echo "ERROR: deploy.sh must run as root. As a sudo user: sudo DOMAIN=... bash -s < deploy.sh" >&2
+  exit 2
+fi
+export HOME=/root
 
 APP_DIR="/opt/barkpark"
 REPO="https://github.com/FRIKKern/barkpark.git"
@@ -142,16 +165,20 @@ export DEBIAN_FRONTEND=noninteractive
 
 # ── 1. System packages ──────────────────────────────────────────────────────
 echo ">> System packages..."
+# --no-install-recommends: without it Ubuntu 22.04 pulled about 300 packages.
+# Only what the build needs: a C toolchain, libssl-dev and libncurses-dev for
+# the Erlang build (asdf/kerl), autoconf for kerl, unzip for the Elixir
+# release zip. No libvips: the :image dep uses vix, which downloads a
+# precompiled NIF with libvips bundled, so the system library goes unused.
 apt-get update -qq
-apt-get install -y -qq \
-  build-essential git curl wget unzip \
-  libssl-dev automake autoconf libncurses5-dev \
-  libvips-dev \
+apt-get install -y -qq --no-install-recommends \
+  build-essential ca-certificates openssl git curl wget unzip \
+  libssl-dev autoconf m4 libncurses-dev \
   inotify-tools ufw
 
 # ── 2. PostgreSQL ────────────────────────────────────────────────────────────
 echo ">> PostgreSQL..."
-apt-get install -y -qq postgresql postgresql-contrib
+apt-get install -y -qq --no-install-recommends postgresql postgresql-contrib
 systemctl enable postgresql
 systemctl start postgresql
 
@@ -270,6 +297,46 @@ for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK BARKPARK_RELEASE_
   fi
 done
 
+# Operator settings file. BARKPARK_ENV_FILE names a file ON THIS SERVER with
+# KEY=VALUE lines (blank lines, # comments and a leading `export ` are fine).
+# Each key replaces the same key in .env or is appended, so settings such as
+# BARKPARK_BOOTSTRAP_OWNER_EMAIL apply to the seed and the first start below
+# instead of needing a second restart. It runs before the PORT read, so a PORT
+# in the file drives the firewall and the health probe. Values are never
+# printed, only key names. Variables passed on the command line and persisted
+# below (BARKPARK_PLUGINS, BARKPARK_SHAPE, BARKPARK_CLOUD_URL) win over the file.
+if [ -n "${BARKPARK_ENV_FILE:-}" ]; then
+  if [ ! -r "$BARKPARK_ENV_FILE" ]; then
+    echo "deploy.sh: BARKPARK_ENV_FILE=$BARKPARK_ENV_FILE is not a readable file on this server." >&2
+    exit 2
+  fi
+  _bad="$(awk '/^[[:space:]]*(#|$)/{next} { sub(/^[[:space:]]*export[[:space:]]+/, "") } !/^[A-Za-z_][A-Za-z0-9_]*=/{print NR}' "$BARKPARK_ENV_FILE" | tr '\n' ' ')"
+  if [ -n "$_bad" ]; then
+    echo "deploy.sh: BARKPARK_ENV_FILE has lines that are not KEY=VALUE: line(s) $_bad" >&2
+    exit 2
+  fi
+  _merged="$(mktemp)"
+  awk '
+    FNR==NR {
+      if ($0 ~ /^[[:space:]]*(#|$)/) next
+      line=$0; sub(/^[[:space:]]*export[[:space:]]+/, "", line)
+      k=substr(line, 1, index(line, "=")-1)
+      if (!(k in val)) order[++n]=k
+      val[k]=line; next
+    }
+    {
+      k=$0; sub(/=.*/, "", k)
+      if (k in val) { if (!(k in done)) print val[k]; done[k]=1; next }
+      print
+    }
+    END { for (i=1; i<=n; i++) if (!(order[i] in done)) print val[order[i]] }
+  ' "$BARKPARK_ENV_FILE" "$APP_DIR/.env" > "$_merged"
+  # cat into the existing file keeps its owner and mode.
+  cat "$_merged" > "$APP_DIR/.env"
+  rm -f "$_merged"
+  echo ">> Merged settings from $BARKPARK_ENV_FILE into .env: $(awk '/^[[:space:]]*(#|$)/{next} {sub(/^[[:space:]]*export[[:space:]]+/, ""); sub(/=.*/, ""); if (!seen[$0]++) printf "%s ", $0}' "$BARKPARK_ENV_FILE")"
+fi
+
 # Re-derive the port from the .env that is actually on disk — the file
 # api/start.sh sources, i.e. the same source the service binds to. On an
 # EXISTING install we keep the file's secrets (and its PORT), so the value we
@@ -344,13 +411,25 @@ fi
 set -a; source "$APP_DIR/.env"; set +a
 
 # Admin token: on the `clean` profile (the default), mint one now so the seed
-# installs it and we can print the exact `bp` login command at the end. The
-# `demo` profile, only when asked for by name, seeds the shared dev token
-# instead. Never overrides a caller-set one.
+# installs it. The `demo` profile, only when asked for by name, seeds the shared
+# dev token instead. Never overrides a caller-set one (bp setup deploy passes
+# its own and prints it on the operator's machine).
+# The token goes to a root-only file, never to stdout, so it stays out of ssh
+# logs and CI output. The file is written before the build, so it survives a
+# failed run. A re-run reuses the token in the file: the seed installs a token
+# only when no unrevoked admin token exists, so a fresh one would not work.
 SEED_PROFILE="${BARKPARK_SEED_PROFILE:-clean}"
 ADMIN_TOKEN=""
+ADMIN_TOKEN_FILE="${BARKPARK_ADMIN_TOKEN_FILE:-/etc/barkpark/admin-token}"
 if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; then
-  ADMIN_TOKEN="bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"
+  if [ -s "$ADMIN_TOKEN_FILE" ]; then
+    ADMIN_TOKEN="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
+  else
+    ADMIN_TOKEN="bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"
+    mkdir -p "$(dirname "$ADMIN_TOKEN_FILE")"
+    chmod 700 "$(dirname "$ADMIN_TOKEN_FILE")"
+    (umask 077; printf '%s\n' "$ADMIN_TOKEN" > "$ADMIN_TOKEN_FILE")
+  fi
   export BARKPARK_SEED_ADMIN_TOKEN="$ADMIN_TOKEN"
 fi
 
@@ -545,6 +624,26 @@ fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
+# Azure and other clouds put a private address on the NIC (10.0.0.4) and NAT
+# the public one. Print the public address: ask the cloud metadata service
+# first (Azure IMDS), then a public echo service, and keep the NIC address only
+# when both fail. Each call is bounded to 3 seconds.
+case "$IP" in
+  10.* | 192.168.* | 172.1[6-9].* | 172.2[0-9].* | 172.3[01].*)
+    _pub="$(curl -fsS --max-time 3 -H Metadata:true \
+      'http://169.254.169.254/metadata/instance/network/interface/0/ipv4/ipAddress/0/publicIpAddress?api-version=2021-02-01&format=text' 2>/dev/null || true)"
+    [ -n "$_pub" ] || _pub="$(curl -4fsS --max-time 3 https://api.ipify.org 2>/dev/null || true)"
+    case "$_pub" in
+      *[!0-9.]* | '') : ;;
+      *) IP="$_pub" ;;
+    esac
+    ;;
+esac
+# Name the DNS step only when DOMAIN does not already resolve to this host.
+DNS_NOTE="   (after DNS for $DOMAIN points at $IP)"
+if getent ahostsv4 "$DOMAIN" 2>/dev/null | awk '{print $1}' | grep -qxF "$IP"; then
+  DNS_NOTE=""
+fi
 echo ""
 echo "============================================"
 if [ "$HEALTHY" = "1" ]; then
@@ -569,27 +668,29 @@ if [ "$HEALTHY" != "1" ]; then
   echo ""
 fi
 if [ -n "$TLS_READY" ]; then
-  echo "  Live:   https://$DOMAIN/studio   (after DNS for $DOMAIN points at $IP)"
+  echo "  Live:   https://$DOMAIN/studio$DNS_NOTE"
   echo "  API:    https://$DOMAIN/api/schemas"
 else
   echo "  Studio: http://$IP:$APP_PORT/studio"
   echo "  API:    http://$IP:$APP_PORT/api/documents/post"
 fi
 echo ""
+SSH_LOGIN="${SUDO_USER:-root}@$IP"
 if [ -n "$ADMIN_TOKEN" ]; then
-  echo "  Admin token (shown ONCE — save it now):"
-  echo "    $ADMIN_TOKEN"
+  echo "  Admin token: saved to $ADMIN_TOKEN_FILE (root only, mode 0600)."
   echo ""
   echo "  Log in from your machine:"
   if [ -n "$TLS_READY" ]; then
-    echo "    bp setup --target connect --server https://$DOMAIN --token $ADMIN_TOKEN"
+    _server="https://$DOMAIN"
   else
-    echo "    bp setup --target connect --server http://$IP:$APP_PORT --token $ADMIN_TOKEN"
+    _server="http://$IP:$APP_PORT"
   fi
+  echo "    bp setup --target connect --server $_server --token \"\$(ssh $SSH_LOGIN sudo cat $ADMIN_TOKEN_FILE)\""
   echo ""
 fi
 echo "  SSH workflow:"
-echo "    ssh root@$IP"
+echo "    ssh $SSH_LOGIN"
+echo "    sudo -i"
 echo "    cd $APP_DIR"
 echo "    make rebuild   # after code changes"
 echo "    make logs      # tail logs"
@@ -600,11 +701,14 @@ echo "    cd $APP_DIR && git pull && make rebuild"
 echo ""
 
 # The exit code descends from the measurement too. The failure path still
-# prints the admin token first — it is seeded into the database and shown
-# ONCE, so exiting before it would destroy the operator's only credential —
-# and only then refuses. A deploy that leaves the API dead is a failed deploy;
-# `bash -s < deploy.sh` in a provisioning script must be able to see that.
+# prints where the admin token is saved first, and only then refuses. A deploy
+# that leaves the API dead is a failed deploy; `bash -s < deploy.sh` in a
+# provisioning script must be able to see that.
 if [ "$HEALTHY" != "1" ]; then
   echo "  Deploy FAILED: the API is not answering on port $APP_PORT (see diagnostics above)." >&2
   exit 1
 fi
+
+# ── End of body ──────────────────────────────────────────────────────────────
+exit 0
+}
