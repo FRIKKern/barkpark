@@ -17,6 +17,14 @@ defmodule BarkparkWeb.OidcController do
   (`Barkpark.Auth.mint_sso_ticket/4`) bound to the Studio origin and the
   challenge. The org's MFA and allowed-methods rules apply before any ticket.
   With the origin list empty, a start that names `return_to` is refused.
+
+  `bp login --sso` signs the CLI in the same way (RFC 8252 loopback): a
+  `return_to` of `http://127.0.0.1:<port>/callback` or
+  `http://[::1]:<port>/callback`, with `state` and an S256 `code_challenge`,
+  needs no entry in `BARKPARK_STUDIO_SSO_ORIGINS`. Its ticket is bound to the
+  audience `"bp-cli"`, which no Studio origin can equal, so neither ticket
+  works at the other's exchange. An origin listed for a Studio keeps the
+  Studio's audience.
   """
   use BarkparkWeb, :controller
 
@@ -29,6 +37,10 @@ defmodule BarkparkWeb.OidcController do
   alias BarkparkWeb.SsoFlows
 
   require Logger
+
+  # The audience of a `bp login --sso` ticket. Not an origin, so a Studio's
+  # ticket (bound to its origin) never matches it.
+  @cli_audience "bp-cli"
 
   @expired "This sign-in expired, or it was started in another browser or tab. Start it again."
 
@@ -49,7 +61,9 @@ defmodule BarkparkWeb.OidcController do
               conn,
               400,
               "malformed",
-              "return_to must be on an allowed Studio origin, with state and an S256 code_challenge"
+              "return_to must be on an allowed Studio origin or http://127.0.0.1:<port>/callback, with state and an S256 code_challenge",
+              %{},
+              "Start the sign-in from the Studio or with `bp login --sso` again."
             )
 
           studio ->
@@ -86,17 +100,47 @@ defmodule BarkparkWeb.OidcController do
   defp studio_return(%{"return_to" => to} = params) when is_binary(to) do
     origin = origin(to)
 
-    with true <- origin in Application.get_env(:barkpark, :studio_sso_origins, []),
+    audience =
+      cond do
+        origin in Application.get_env(:barkpark, :studio_sso_origins, []) -> origin
+        cli_loopback?(to) -> @cli_audience
+        true -> nil
+      end
+
+    with true <- is_binary(audience),
          state when is_binary(state) and state != "" <- params["state"],
          challenge when is_binary(challenge) <- params["code_challenge"],
-         true <- Regex.match?(~r/\A[A-Za-z0-9_-]{43}\z/, challenge) do
-      %{"to" => to, "origin" => origin, "state" => state, "challenge" => challenge}
+         true <- Regex.match?(~r/\A[A-Za-z0-9_-]{43}\z/, challenge),
+         true <- params["code_challenge_method"] in [nil, "S256"] do
+      %{"to" => to, "origin" => audience, "state" => state, "challenge" => challenge}
     else
       _ -> :error
     end
   end
 
   defp studio_return(_params), do: nil
+
+  # RFC 8252 section 7.3: a native app's loopback redirect, any port, on the IP
+  # literal (never the name "localhost"), plain http, path exactly /callback,
+  # nothing else in the URL. The ticket lands only on the signing-in machine.
+  defp cli_loopback?(to) do
+    case URI.parse(to) do
+      %URI{
+        scheme: "http",
+        host: host,
+        port: port,
+        path: "/callback",
+        query: nil,
+        fragment: nil,
+        userinfo: nil
+      }
+      when host in ["127.0.0.1", "::1"] and is_integer(port) and port > 0 and port < 65_536 ->
+        String.starts_with?(to, "http://127.0.0.1:") or String.starts_with?(to, "http://[::1]:")
+
+      _ ->
+        false
+    end
+  end
 
   defp origin(url) do
     case URI.parse(url) do
@@ -278,7 +322,9 @@ defmodule BarkparkWeb.OidcController do
   @doc """
   `POST /v1/auth/sso/exchange` — body `{ticket, audience, code_verifier}`, the
   shape of `POST /v1/auth/login-tickets/exchange`, and the same answer:
-  `201 {token, user: {id, email}}`. Every failure is `401 invalid_ticket`.
+  `201 {token, user: {id, email}}`, plus the session's `expires_at` and
+  `idp_mfa`. Every failure is `401 invalid_ticket`. `bp login --sso` sends
+  audience `"bp-cli"`.
   """
   def exchange(conn, params) do
     conn = put_resp_header(conn, "cache-control", "no-store")
@@ -289,10 +335,15 @@ defmodule BarkparkWeb.OidcController do
              params["audience"],
              params["code_verifier"]
            ),
-         {%Accounts.User{} = user, _session} <- Accounts.verify_user_session(token) do
+         {%Accounts.User{} = user, session} <- Accounts.verify_user_session(token) do
       conn
       |> put_status(:created)
-      |> json(%{token: token, user: %{id: user.id, email: user.email}})
+      |> json(%{
+        token: token,
+        user: %{id: user.id, email: user.email},
+        expires_at: session.expires_at,
+        idp_mfa: session.idp_mfa
+      })
     else
       _ ->
         ErrorResponse.emit_custom(

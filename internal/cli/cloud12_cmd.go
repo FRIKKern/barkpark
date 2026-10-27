@@ -733,6 +733,21 @@ func runLogout(out *writer, g globals, args []string) int {
 	cfg.CloudToken = ""
 	cfg.CloudTeam = ""
 
+	// A session `bp login --sso` saved for the resolved server is revoked on
+	// the server and dropped from config. A refused revoke still drops it.
+	ssoRevoked, ssoServer, ssoErr := false, "", error(nil)
+	if entry, ok := cfg.FindServer(resolveContext(g).Server); ok && entry.SSOOrg != "" && entry.Token != "" {
+		ssoServer = strings.TrimRight(entry.Server, "/")
+		ssoErr = ssoLogout(ssoServer, entry.Token)
+		ssoRevoked = ssoErr == nil
+		if cfg.IsActiveServer(entry.Server) && cfg.Token == entry.Token {
+			cfg.Token = ""
+		}
+		entry.Token = ""
+		entry.SSOOrg = ""
+		cfg.replaceKnownServer(entry)
+	}
+
 	// --all also drops the active content token (opt-in, never by default).
 	tokenCleared := false
 	if g.all && strings.TrimSpace(cfg.Token) != "" {
@@ -744,12 +759,28 @@ func runLogout(out *writer, g globals, args []string) int {
 		return useError(out, "failed", "save config: "+serr.Error(), exitGeneric)
 	}
 
-	if out.emitStructured(map[string]any{
+	receipt := map[string]any{
 		"ok":            true,
 		"was_logged_in": wasLoggedIn,
 		"token_cleared": tokenCleared,
-	}) {
+	}
+	if ssoServer != "" {
+		receipt["sso_server"] = ssoServer
+		receipt["sso_session_revoked"] = ssoRevoked
+	}
+	if out.emitStructured(receipt) {
 		return exitOK
+	}
+
+	if ssoServer != "" {
+		if ssoRevoked {
+			out.outf("Signed out of %s. The server revoked the SSO session.", ssoServer)
+		} else {
+			out.outf("Removed the SSO session for %s from config, but the server did not confirm the revoke: %v", ssoServer, ssoErr)
+		}
+		if !wasLoggedIn {
+			return exitOK
+		}
 	}
 
 	switch {
@@ -1556,6 +1587,7 @@ USAGE
   bp login --team <id|slug>                 # browser login only a member of that team may approve
   bp login --device-start -o json           # mint a code pair, exit (no polling)
   bp login --device-poll <device_code> -o json   # ONE poll, exit (script owns cadence)
+  bp login --sso --org <org> [-s <server>] [--no-browser]   # a self-hosted instance's SSO
 
 WHAT IT DOES
   On a terminal with no credentials given, opens a copy-a-link BROWSER login: it
@@ -1575,7 +1607,18 @@ WHAT IT DOES
   --device-poll exits 0 ONLY on approval; a non-zero exit (with a {status:…}
   envelope) means keep polling.
 
+SSO TO A SELF-HOSTED INSTANCE
+  --sso signs in to the instance (-s, else the active server) through the
+  identity provider of org --org, for an account with no password. bp listens on
+  127.0.0.1 with a random port, opens the browser at the instance's sign-in,
+  and saves the session as that server's token (0600). It prints the email and
+  the expiry, never the token. --no-browser prints the URL instead; open it on
+  this machine. 'bp logout' revokes the session.
+
 FLAGS
+  --sso               sign in to a self-hosted instance through its org's SSO
+  --org <slug>        the org whose SSO --sso uses
+  --no-browser        with --sso, print the sign-in URL instead of opening it
   --device            force the browser device-link flow (even with a credential)
   --device-start      mint a device code pair as JSON and exit (no polling)
   --device-poll <c>   perform ONE device poll for code <c> and exit
@@ -1624,6 +1667,8 @@ WHAT IT DOES
   config, so 'bp barkparks', 'bp launch', and 'bp go-live' stop using it and ask
   you to 'bp login' again. Your saved content servers and their tokens are left
   intact. Idempotent — logging out when already logged out is a clean no-op.
+  A session 'bp login --sso' saved for the server (-s, else the active one) is
+  revoked on that server and removed from config.
 
 FLAGS
   --all             also clear the ACTIVE content-server token

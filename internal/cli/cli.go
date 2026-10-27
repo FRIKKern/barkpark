@@ -182,6 +182,11 @@ func Execute(args []string) int {
 			printLoginHelp(out)
 			return exitOK
 		}
+		// `bp login --sso --org <slug>` signs in to a self-hosted instance
+		// through its org's SSO instead (login_sso.go).
+		if wantsSSOLogin(rest[1:]) {
+			return runLoginSSO(out, g, rest[1:])
+		}
 		return runLoginCloud(out, rest[1:])
 	case "signup":
 		// `bp signup` — create a Barkpark Cloud account and log in (cloud-12). The
