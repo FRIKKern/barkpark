@@ -150,6 +150,11 @@ defmodule Barkpark.Content.Errors do
                          # user in several workspaces must name the PAT's
                          # workspace (422, with the slugs listed).
                          "workspace_required",
+                         # studio_token_controller.ex create: POST
+                         # /v1/auth/studio-tokens refuses a caller with no owner
+                         # or admin seat in the named workspace, or an unknown
+                         # workspace (403). `bp instance studio-token` reads it.
+                         "studio_token_forbidden",
                          # Herd-s6 fenced state report (chat_host_controller.ex
                          # report_state): an off-vocabulary state or a
                          # missing/non-integer lease epoch — refused before the
