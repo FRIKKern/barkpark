@@ -26,7 +26,7 @@ The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay 
 
 `deploy/azure/main.bicep` sets every non-key line of `barkpark.env` on the app and both jobs, and keeps the keys in Key Vault. Change a setting or a key by editing `barkpark.env` and running the same `az deployment group create` again. A change made with `az containerapp update` is lost at the next deployment.
 
-- **Update.** Set a new `image` in `main.bicepparam` and deploy. Pin a version, such as `ghcr.io/frikkern/barkpark:0.2.28`, not `latest`.
+- **Update.** Set a new `image` in `main.bicepparam` and deploy. Pin a release or `sha-<12>` tag, not `latest`.
 - **Replicas.** The template pins the app to exactly one replica, min and max.
 - **Health.** `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise.
 - **Listen streams.** They last at most 30 minutes behind the Container Apps ingress; clients resume with `Last-Event-ID`.

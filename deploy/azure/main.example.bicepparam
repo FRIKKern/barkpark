@@ -12,7 +12,7 @@ using 'main.bicep'
 var lines = filter(split(loadTextContent('barkpark.env'), '\n'), l => !startsWith(trim(l), '#') && contains(l, '='))
 var env = toObject(lines, l => trim(split(l, '=')[0]), l => trim(substring(l, indexOf(l, '=') + 1)))
 
-param image = 'ghcr.io/frikkern/barkpark:0.2.28'
+param image = 'ghcr.io/frikkern/barkpark:sha-cdc555eb413b'
 
 // Set when the image lives in an Azure Container Registry. Add
 // acrResourceGroup when the registry sits in another resource group.

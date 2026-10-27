@@ -49,7 +49,7 @@ The monthly cost in Norway East at the template's sizes is about USD 47 to 101. 
 
 | Task | What to do |
 |---|---|
-| Upgrades | Pin an image version, such as `ghcr.io/frikkern/barkpark:0.2.28`. The image never updates itself. To upgrade, note the time and the current tag, then run `az containerapp update -g <rg> -n barkpark --image <new tag>` and check `/readyz`. Migrations run when the new image starts. |
+| Upgrades | Pin an image version, such as `ghcr.io/frikkern/barkpark:0.2.28`. The image never updates itself. To upgrade, note the time and the current tag, set `image` in `main.bicepparam`, run `az deployment group create` again and check `/readyz`. Migrations run when the new image starts. |
 | Roll back | Run the same command with the old tag. If the old image does not start on the migrated database, restore the database to the time you noted. |
 | Entra client secret | It expires after 1 or 2 years, and the script prints the date. Sign-ins stop on that date. Put the date in your calendar and rotate it before then with `--rotate-secret` and `bp org oidc-rotate-secret`. |
 | Barkpark keys | Keep a copy in a password manager, apart from the backups. Rotate them as [the key rotation section](SELF-HOST-OPERATIONS.md#rotate-keys) describes. Never change `BARKPARK_CLOAK_KEY`. |
