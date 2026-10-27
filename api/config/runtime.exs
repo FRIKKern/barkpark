@@ -937,6 +937,13 @@ if System.get_env("BARKPARK_OIDC_STRICT_VALIDATION") in ~w(1 true yes on) do
   config :barkpark, :oidc_strict_validation, true
 end
 
+# Sign in on Entra's preferred_username (the UPN) when an OIDC ID token has no
+# email claim (`Barkpark.Sso.Oidc`). Entra leaves out email for an account with
+# no mailbox address. Off unless truthy.
+if System.get_env("BARKPARK_OIDC_EMAIL_FROM_UPN") in ~w(1 true yes on) do
+  config :barkpark, :oidc_email_from_upn, true
+end
+
 # The org sign-in policy (allowed_auth_methods, require_mfa) on the doors that
 # carry no second factor: API token paste and the Barkpark Cloud handoff
 # (`BarkparkWeb.SessionIssuer.policy_refusal/3`). Off unless truthy.

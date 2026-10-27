@@ -384,7 +384,7 @@ defmodule Barkpark.Sso.Oidc do
       is_integer(claims["exp"]) and claims["exp"] < now -> {:error, :expired}
       expected_nonce && claims["nonce"] != expected_nonce -> {:error, :nonce_mismatch}
       c.tenant_id not in [nil, ""] and claims["tid"] != c.tenant_id -> {:error, :tenant_mismatch}
-      not (email?(claims) or strict_subject(c, claims)) -> {:error, :no_email}
+      not (email?(claims) or strict_subject(c, claims) != nil) -> {:error, :no_email}
       strict?(c) -> validate_strict(claims, now)
       true -> :ok
     end
@@ -411,7 +411,19 @@ defmodule Barkpark.Sso.Oidc do
       c.strict_validation == true or
         Application.get_env(:barkpark, :oidc_strict_validation, false)
 
-  defp email?(claims), do: is_binary(claims["email"]) and claims["email"] != ""
+  defp email?(claims), do: login_email(claims) != nil
+
+  # The address a sign-in is matched on: the email claim. With
+  # BARKPARK_OIDC_EMAIL_FROM_UPN on, a token without one falls back to
+  # preferred_username, then upn, when it is an address. Matching on the
+  # address ignores case (`Accounts.get_user_by_email/1`).
+  defp login_email(%{"email" => email}) when is_binary(email) and email != "", do: email
+
+  defp login_email(claims) do
+    if Application.get_env(:barkpark, :oidc_email_from_upn, false) == true do
+      Enum.find([claims["preferred_username"], claims["upn"]], &(is_binary(&1) and &1 =~ "@"))
+    end
+  end
 
   # The IdP's stable id for the user under strict mode: Entra's `oid` (the same
   # across apps in a tenant), else the standard `sub`. Nil when strict is off.
@@ -438,7 +450,7 @@ defmodule Barkpark.Sso.Oidc do
         {:ok, Accounts.get_user(uid)}
 
       _ ->
-        with {:ok, user} <- find_or_create_by_email(c.organization_id, claims["email"]) do
+        with {:ok, user} <- find_or_create_by_email(c.organization_id, login_email(claims)) do
           if subject, do: link_subject(c, user, subject)
           {:ok, user}
         end
