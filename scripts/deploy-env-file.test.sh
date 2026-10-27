@@ -67,7 +67,7 @@ check "no kept line without owned keys" '! grep -q "^>> Kept" <<<"$out2"'
 sed -n '/^secure_env() {/p' "$ROOT/deploy.sh" > "$TMP/secure.sh"
 chmod 644 "$APP_DIR/.env"
 APP_DIR="$APP_DIR" bash -c 'chown() { :; }; . "$1"; secure_env' _ "$TMP/secure.sh"
-mode="$(stat -f %Lp "$APP_DIR/.env" 2>/dev/null || stat -c %a "$APP_DIR/.env")"
+mode="$(stat -c %a "$APP_DIR/.env" 2>/dev/null || stat -f %Lp "$APP_DIR/.env")"
 check "secure_env leaves .env at mode 600" '[ "$mode" = 600 ]'
 check "deploy.sh calls secure_env twice" '[ "$(grep -c "^secure_env$" "$ROOT/deploy.sh")" -eq 2 ]'
 check "secure_env makes root the owner" 'grep -q "chown root:root \"\$APP_DIR/.env\"" "$TMP/secure.sh"'
