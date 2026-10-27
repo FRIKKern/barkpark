@@ -181,6 +181,11 @@ func selfUpdateMessage(ref string, force bool, se *cloudclient.SelfUpdateError) 
 			return fmt.Sprintf("instance %q is pinned%s and the control plane refused the update even with --force — the pin was not overridden. Nothing was started; run with -o json to inspect the envelope.", ref, at)
 		}
 		return fmt.Sprintf("instance %q is pinned%s — autoupdate is frozen there, so the update was refused rather than silently skipped. Pinning holds an instance at or above its current version; it does not roll back. Re-run with --force to override the pin for this ONE run, or `bp cloud autoupdate unpin %s` to lift it for good. Nothing was started.", ref, at, ref)
+	case "paused":
+		if force {
+			return fmt.Sprintf("instance %q has autoupdate paused and the control plane refused the update even with --force, so the pause was not overridden. Nothing was started; run with -o json to inspect the envelope.", ref)
+		}
+		return fmt.Sprintf("instance %q has autoupdate paused, so the update was refused rather than run. Re-run with --force to override the pause for this ONE run, or `bp cloud autoupdate resume %s` to lift it. Nothing was started.", ref, ref)
 	case "already_running":
 		return fmt.Sprintf("a self-update is already running on instance %q — one run at a time (--force overrides a pin, not a run in flight); wait for it to finish (watch `bp cloud status`) and retry. Nothing new was started.", ref)
 	case "not_enabled", "feature_not_configured":

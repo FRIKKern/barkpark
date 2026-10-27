@@ -241,6 +241,31 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
       assert StudioLinkFakeHttpClient.requests() == []
     end
 
+    test "a PAUSED box 409s `paused` on an unforced click; ZERO upstream requests; no refresh enqueued" do
+      {user, team} = user_with_team()
+
+      bp =
+        team
+        |> live_barkpark()
+        |> Ecto.Changeset.change(autoupdate_paused: true)
+        |> Repo.update!()
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Program the 202 the box WOULD answer, so a refusal that slipped below the
+      # relay would show up on the wire and not only in the status.
+      StudioLinkFakeHttpClient.program([
+        {:ok, %{status: 202, body: ~s({"ok":true,"status":"started"})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/self-update", token)
+
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert conn.status == 409
+      assert json_body(conn) == %{"error" => %{"code" => "paused"}}
+      refute_enqueued(worker: UpdateStatusWorker)
+    end
+
     test "a REFUTED box → 409 identity_refused; ZERO upstream requests; never 502 unreachable" do
       {user, team} = user_with_team()
 

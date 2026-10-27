@@ -6119,6 +6119,14 @@ defmodule BarkparkCloud.Registry do
   The rollout worker never hits this — it already excludes pinned rows from its
   candidate query — but the interactive relay must not silently no-op a pin.
 
+  PAUSE HONESTY: `bp cloud autoupdate pause` promises the instance "will not
+  update until resumed", so a paused instance refuses an unforced trigger with
+  `{:error, :paused}` exactly as a pin does. Before this clause the relay checked
+  only the pin, and on 2026-10-27 at 16:23:33Z an unforced
+  `barkpark.self_update_triggered` moved the paused `gyl` from 57e51415f to
+  main's tip. `force: true` overrides the pause for that one run. The pin clause
+  sits above this one, so a pinned and paused box still answers `:pinned`.
+
   IDENTITY REFUSAL (cch-w60-s4): a box whose last probe was refused
   (`update_unavailable_reason == "identity_refused"` — it answered our stored
   admin credential 401) returns `{:error, :identity_refused}` BEFORE the token
@@ -6135,6 +6143,7 @@ defmodule BarkparkCloud.Registry do
              | :decrypt_failed
              | :instance_error
              | :pinned
+             | :paused
              | :identity_refused}
   def trigger_self_update(bp, opts \\ [])
 
@@ -6144,6 +6153,14 @@ defmodule BarkparkCloud.Registry do
       do_trigger_self_update(bp)
     else
       {:error, :pinned}
+    end
+  end
+
+  def trigger_self_update(%Barkpark{autoupdate_paused: true} = bp, opts) do
+    if Keyword.get(opts, :force, false) do
+      do_trigger_self_update(bp)
+    else
+      {:error, :paused}
     end
   end
 

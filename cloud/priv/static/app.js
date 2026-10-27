@@ -11330,7 +11330,7 @@
       var copy = updateConflictCopy(c, r.data);
       // Pin honesty: a pin conflict on a NON-forced call keeps the operator in a
       // modal that names the pin and offers the explicit force re-trigger.
-      if (c.kind === "pinned" && !opts.force) {
+      if ((c.kind === "pinned" || c.kind === "paused") && !opts.force) {
         openUpdateConflictModal(bp, c, copy);
         return;
       }
@@ -12724,6 +12724,7 @@
     var code = typeof err === "string" ? err : err.code;
     var pin = err.pinned_release || err.pinned || (data && data.pinned_release) || null;
     if (code === "pinned" || (code == null && pin)) return { kind: "pinned", pin: pin };
+    if (code === "paused") return { kind: "paused", pin: null };
     if (code === "already_running") return { kind: "already_running", pin: null };
     if (code === "not_enabled") return { kind: "not_enabled", pin: null };
     if (code === "not_live") return { kind: "not_live", pin: null };
@@ -12773,6 +12774,13 @@
         title: "This instance is pinned",
         body: "Autoupdate is frozen" + at + ". Pinning holds an instance at or above its " +
           "current version; it does not roll back. Update anyway to override the pin for this one run.",
+        forceLabel: "Update anyway",
+      };
+    }
+    if (c.kind === "paused") {
+      return {
+        title: "Autoupdate is paused on this instance",
+        body: "A paused instance does not update until it is resumed. Update anyway to override the pause for this one run.",
         forceLabel: "Update anyway",
       };
     }
