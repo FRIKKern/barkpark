@@ -174,17 +174,19 @@ func TestInstanceInitTargetVM(t *testing.T) {
 }
 
 // TestInstanceCheckAfterInit is criterion 2 of the init task: a fresh file
-// reports only the values the operator must still supply.
+// reports only the values the operator must still supply. The database host
+// is a stand-in the template replaces, so the check skips the probe, as the
+// guide does on the operator's machine.
 func TestInstanceCheckAfterInit(t *testing.T) {
 	stubInstanceProbes(t, func(context.Context, string) ([]instanceExtension, error) {
-		t.Fatal("the database probe ran against a placeholder URL")
+		t.Fatal("the database probe ran despite --skip database")
 		return nil, nil
 	}, nil)
 	path := filepath.Join(t.TempDir(), "barkpark.env")
 	if _, stderr, code := runInstanceVerb(t, "init", "--out", path); code != exitOK {
 		t.Fatal(stderr)
 	}
-	stdout, _, code := runInstanceVerb(t, "check", "--env-file", path)
+	stdout, _, code := runInstanceVerb(t, "check", "--env-file", path, "--skip", "database,media")
 	if code != exitGeneric {
 		t.Fatalf("check exit %d, want 1", code)
 	}
@@ -200,7 +202,7 @@ func TestInstanceCheckAfterInit(t *testing.T) {
 		got = append(got, strings.Fields(l)[0])
 	}
 	sort.Strings(got)
-	want := []string{"BARKPARK_ALWAYS_ALLOWED_ORIGINS", "BARKPARK_BOOTSTRAP_OWNER_EMAIL", "BARKPARK_BREAKGLASS_EMAILS", "BARKPARK_MEDIA_DIR", "BARKPARK_OPERATOR_EMAILS", "DATABASE_URL", "PHX_HOST"}
+	want := []string{"BARKPARK_ALWAYS_ALLOWED_ORIGINS", "BARKPARK_BOOTSTRAP_OWNER_EMAIL", "BARKPARK_BREAKGLASS_EMAILS", "BARKPARK_OPERATOR_EMAILS", "PHX_HOST"}
 	if strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("problems for %v, want %v", got, want)
 	}
@@ -538,6 +540,18 @@ func TestInstanceInitContainerAppsSecretsMatchBicep(t *testing.T) {
 	tok := env["BARKPARK_SEED_ADMIN_TOKEN"]
 	if !regexp.MustCompile(`^bp_admin_[0-9a-f]{48}$`).MatchString(tok) || strings.Contains(stdout+stderr, tok) {
 		t.Fatalf("BARKPARK_SEED_ADMIN_TOKEN shape or echo wrong")
+	}
+	// The seeded token is an operator token from the first boot, and the
+	// template sets the database host and the media path.
+	id := env["BARKPARK_SEED_ADMIN_TOKEN_ID"]
+	if !regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$`).MatchString(id) {
+		t.Fatalf("BARKPARK_SEED_ADMIN_TOKEN_ID = %q, want a v4 UUID", id)
+	}
+	if env["BARKPARK_OPERATOR_TOKEN_IDS"] != id {
+		t.Fatalf("BARKPARK_OPERATOR_TOKEN_IDS = %q, want the seed token id", env["BARKPARK_OPERATOR_TOKEN_IDS"])
+	}
+	if env["BARKPARK_MEDIA_DIR"] != "/app/uploads" || isPlaceholder(env["DATABASE_URL"]) {
+		t.Fatalf("containerapps file still has a placeholder the template sets")
 	}
 	param, err := os.ReadFile(filepath.Join("..", "..", "deploy", "azure", "main.example.bicepparam"))
 	if err != nil {

@@ -2,10 +2,10 @@
 // `bp instance init --target containerapps` writes, and set the image. This
 // file reads the seven secrets and the settings from barkpark.env, so neither
 // file goes into version control. The template uses only the password from
-// DATABASE_URL and sets its own database host and BARKPARK_MEDIA_DIR, so any
-// value works for those two placeholders, such as `unused`. Keep barkpark.env
-// in your password manager: a new SECRET_KEY_BASE logs everyone out, and a new
-// cloak key or KEK makes stored encrypted fields unreadable.
+// DATABASE_URL and sets its own database host and BARKPARK_MEDIA_DIR. init
+// lists the seed admin token's id on BARKPARK_OPERATOR_TOKEN_IDS. Keep
+// barkpark.env in your password manager: a new SECRET_KEY_BASE logs everyone
+// out, and a new cloak key or KEK makes stored encrypted fields unreadable.
 
 using 'main.bicep'
 
@@ -20,6 +20,10 @@ param acrName = ''
 
 // Set when a custom domain points at the app.
 param publicHost = ''
+
+// An address for alert mail: /readyz down, a failed backup, repeated
+// restarts. Empty deploys no alerts.
+param alertEmail = ''
 
 // Public addresses let through the Key Vault and storage firewalls, such as
 // your laptop's for `az keyvault secret set` or copying backups. Postgres

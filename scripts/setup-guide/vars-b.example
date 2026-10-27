@@ -1,0 +1,21 @@
+# Vars for scripts/run-setup-guide.sh on docs/setup/SELF-HOST.md, Path B.
+# Copy this directory out of the repository, fill it in, and run:
+#   scripts/run-setup-guide.sh --path b --vars <copy>/vars-b
+#   scripts/setup-guide/azure.sh down "$RG"
+# The down step deletes the group and purges its Key Vault, so the next run
+# can start from empty under the same name. hooks/jobs.sh runs the jobs step.
+
+# Path B's first block creates the group in Norway East. It must not exist.
+RG=rg-barkpark-guide-b1
+resource_group=rg-barkpark-guide-b1
+target=containerapps
+# The template sets PHX_HOST to the app's address. This name only feeds
+# BARKPARK_ALWAYS_ALLOWED_ORIGINS.
+host=bp-guide-b.example.com
+alert_email=owner@example.com
+
+# Values bp instance init writes into barkpark.env.
+owner_email=owner@example.com
+operator_emails=owner@example.com
+breakglass_email=breakglass@example.com
+studio_origin=https://studio.example.com

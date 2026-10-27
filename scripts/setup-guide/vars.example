@@ -9,6 +9,7 @@
 # Path A step 1 creates the group and the key ~/.ssh/barkpark.
 RG=rg-barkpark-guide-run
 resource_group=rg-barkpark-guide-run
+target=vm
 dns_label=bp-guide-run
 host=bp-guide-run.swedencentral.cloudapp.azure.com
 ip=$(az vm show -d -g "$RG" -n barkpark --query publicIps -o tsv)

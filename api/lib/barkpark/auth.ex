@@ -1557,7 +1557,7 @@ defmodule Barkpark.Auth do
   ## `workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
 
   When `workspace_id` is `nil` (or omitted) the token is minted WORKSPACE-LESS:
-  `insert_token_with_membership/3` is skipped entirely and NO
+  `insert_token_with_membership/4` is skipped entirely and NO
   `Barkpark.Tenancy.Membership` row is ever created. This is the same posture
   `create_personal_access_token/3` and `create_claude_session_token/3` already
   hold — `create_token/5` was the last of the three mints still carrying the
@@ -1587,6 +1587,9 @@ defmodule Barkpark.Auth do
     * `:actor` — the minting principal. `:no_expiry` is admitted only when it
       is an `%ApiToken{}` holding the flat `"admin"` permission, and the mint +
       its `token/token_no_expiry_opt_out` audit row commit together.
+    * `:id` — the row id to use instead of a generated one. The seed admin
+      token takes it from `BARKPARK_SEED_ADMIN_TOKEN_ID`, so the operator can
+      list the id in `BARKPARK_OPERATOR_TOKEN_IDS` before the first boot.
   """
   def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil, opts \\ []) do
     ws_id = workspace_id
@@ -1613,13 +1616,15 @@ defmodule Barkpark.Auth do
         owner_user_id: Keyword.get(opts, :owner_user_id)
       }
 
+      base = %ApiToken{id: Keyword.get(opts, :id)}
+
       insert = fn ->
         if is_nil(ws_id) do
-          %ApiToken{}
+          base
           |> ApiToken.changeset(token_attrs)
           |> Repo.insert()
         else
-          insert_token_with_membership(token_attrs, ws_id, permissions)
+          insert_token_with_membership(base, token_attrs, ws_id, permissions)
         end
       end
 
@@ -1901,11 +1906,11 @@ defmodule Barkpark.Auth do
     |> Repo.update()
   end
 
-  defp insert_token_with_membership(token_attrs, ws_id, permissions) do
+  defp insert_token_with_membership(base, token_attrs, ws_id, permissions) do
     role = TenancyAuth.role_for_permissions(permissions)
 
     Repo.transaction(fn ->
-      with {:ok, token} <- %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert(),
+      with {:ok, token} <- base |> ApiToken.changeset(token_attrs) |> Repo.insert(),
            {:ok, _membership} <- TenancyAuth.create_membership(ws_id, token.id, role) do
         token
       else
@@ -2046,7 +2051,7 @@ defmodule Barkpark.Auth do
   ## `:workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
 
   When `:workspace_id` is omitted (or `nil`), the token is minted
-  WORKSPACE-LESS — `insert_token_with_membership/3` is skipped entirely and no
+  WORKSPACE-LESS — `insert_token_with_membership/4` is skipped entirely and no
   `Tenancy.Membership` row is ever created. There used to be an unconditional
   `|| default_workspace_id()` fallback here; it let any caller that forgot to
   resolve a real workspace (the self-service mint was the one that did) hand
@@ -2087,7 +2092,7 @@ defmodule Barkpark.Auth do
         if is_nil(ws_id) do
           %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert()
         else
-          insert_token_with_membership(token_attrs, ws_id, permissions)
+          insert_token_with_membership(%ApiToken{}, token_attrs, ws_id, permissions)
         end
 
       case result do
@@ -2207,7 +2212,7 @@ defmodule Barkpark.Auth do
       `"admin"` — so it satisfies no global perm tier and cannot drive the flat
       mutate route or any membership-gated route;
     * it gets NO `Membership` row (a plain `Repo.insert`, not
-      `insert_token_with_membership/3`), so every normal scoped route denies it;
+      `insert_token_with_membership/4`), so every normal scoped route denies it;
     * `share_scope` byte-binds it to one `"ws/proj/dataset"`.
 
   Defense-in-depth: refuses to mint unless the scope is live-`:edit`-shared for

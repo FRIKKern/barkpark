@@ -5,7 +5,8 @@
 #   scripts/setup-guide/azure.sh vm   <rg> <label>  VM as Path A step 1 makes it,
 #                                                   with a DNS name label
 #   scripts/setup-guide/azure.sh dns  <rg> <label>  put the label on the VM's IP
-#   scripts/setup-guide/azure.sh down <rg>          delete the group and wait
+#   scripts/setup-guide/azure.sh down <rg>          delete the group, wait, and
+#                                                   purge its Key Vaults
 #
 # `up` refuses a group that already exists, so a run starts from empty. The
 # VM is Ubuntu 22.04, Standard_D2als_v7, sudo user azureuser with the key
@@ -19,7 +20,7 @@ sub=()
 [ -n "${AZ_SUBSCRIPTION:-}" ] && sub=(--subscription "$AZ_SUBSCRIPTION")
 
 cmd="${1:-}"; rg="${2:-}"
-[ -n "$cmd" ] && [ -n "$rg" ] || { sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+[ -n "$cmd" ] && [ -n "$rg" ] || { sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 case "$cmd" in
   up)
@@ -50,8 +51,16 @@ case "$cmd" in
     if [ "$(az group exists -n "$rg" ${sub[@]+"${sub[@]}"})" != true ]; then
       echo "azure.sh: $rg does not exist"; exit 0
     fi
+    # A deleted group leaves its Key Vault soft-deleted under the same name,
+    # and the next deployment into a group of that name fails on it.
+    vaults="$(az keyvault list -g "$rg" ${sub[@]+"${sub[@]}"} --query "[].[name,location]" -o tsv)"
     az group delete -n "$rg" --yes ${sub[@]+"${sub[@]}"}
     echo "azure.sh: deleted $rg"
+    while read -r name loc; do
+      [ -n "$name" ] || continue
+      az keyvault purge -n "$name" -l "$loc" ${sub[@]+"${sub[@]}"}
+      echo "azure.sh: purged Key Vault $name"
+    done <<<"$vaults"
     ;;
   *) echo "azure.sh: unknown command $cmd" >&2; exit 2 ;;
 esac

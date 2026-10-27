@@ -145,7 +145,7 @@ func runInstanceInit(out *writer, args []string) int {
 		}
 	}
 	sort.Strings(fill)
-	generated := append(append([]string{}, instanceSecretNames...), "BARKPARK_SEED_ADMIN_TOKEN", "the database password in DATABASE_URL")
+	generated := append(append([]string{}, instanceSecretNames...), "BARKPARK_SEED_ADMIN_TOKEN", "its id on BARKPARK_OPERATOR_TOKEN_IDS", "the database password in DATABASE_URL")
 	if target == instanceTargetVM {
 		generated = []string{}
 	}
