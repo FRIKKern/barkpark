@@ -8,13 +8,14 @@
 #
 # Marker. An HTML comment, which GitHub does not render:
 #
-#   <!-- run: local -->             the next fenced block runs on this machine
-#   <!-- run: vm -->                the next fenced block runs on the VM over ssh
-#   <!-- run: hook name=dns -->     a prose step with no command; the runner
-#                                   runs <vars dir>/hooks/dns.sh on this machine
+#   <!-- run -->            the next fenced block runs on this machine
+#   <!-- run vm -->         the next fenced block runs on the VM over ssh
+#   <!-- run hook=dns -->   a prose step with no command; the runner runs
+#                           <vars dir>/hooks/dns.sh on this machine
 #
-# Optional attribute path=a or path=a,b limits a marker to those paths of the
-# guide; --path picks one. A marker with no path runs on every path. When text
+# --path a runs the markers under a "## Path A" heading and skips those under
+# any other "## Path" heading. Markers in other sections run on every path.
+# An attribute path=a,b overrides the heading. When text
 # follows the marker on the same line and holds an inline code span, the first
 # span is the command, for a step whose command sits in a sentence.
 #
@@ -74,6 +75,7 @@ extract() {
   awk -v want="$GUIDE_PATH" '
     function attr(s, k,   m) { if (match(s, k "=[^ ]+")) return substr(s, RSTART + length(k) + 1, RLENGTH - length(k) - 1); return "" }
     function onpath(p,   n, a, i) {
+      if (p == "") p = secpath
       if (want == "" || p == "") return 1
       n = split(p, a, ","); for (i = 1; i <= n; i++) if (a[i] == want) return 1
       return 0
@@ -104,13 +106,15 @@ extract() {
         infence = 1; body = ""
         next
       }
-      if (match($0, /<!-- run: [^>]*-->/)) {
-        m = substr($0, RSTART + 10, RLENGTH - 13)
+      if ($0 ~ /^## /) secpath = ($0 ~ /^## Path [A-Za-z]([^A-Za-z]|$)/) ? tolower(substr($0, 9, 1)) : ""
+      if (match($0, /<!-- run( [^>]*)? -->/)) {
+        m = substr($0, RSTART + 8, RLENGTH - 11)
         rest = substr($0, RSTART + RLENGTH)
-        split(m, w, " ")
-        where = w[1]; p = attr(m, "path"); name = attr(m, "name")
-        if (where != "local" && where != "vm" && where != "hook") {
-          printf "run-setup-guide: %s:%d: unknown marker \"%s\"\n", FILENAME, NR, where > "/dev/stderr"; bad = 1; next
+        p = attr(m, "path"); name = attr(m, "hook")
+        where = (name != "") ? "hook" : (m ~ /(^| )vm( |$)/) ? "vm" : "local"
+        n = split(m, w, " ")
+        for (i = 1; i <= n; i++) if (w[i] != "vm" && w[i] != "local" && w[i] !~ /^(path|hook)=/) {
+          printf "run-setup-guide: %s:%d: unknown marker word \"%s\"\n", FILENAME, NR, w[i] > "/dev/stderr"; bad = 1
         }
         if (!onpath(p)) next
         if (where == "hook") { emit(NR, where, name, ""); next }
@@ -162,10 +166,13 @@ done < "$VARS"
 # Environment for every block.
 unset BARKPARK_TOKEN BARKPARK_SERVER BP_TOKEN BP_SERVER
 export XDG_CONFIG_HOME="$RUN_DIR/config" BARKPARK_BIN_DIR="$RUN_DIR/bin" ZDOTDIR="$RUN_DIR/zdot"
-export PATH="$RUN_DIR/bin:$PATH"
+# Find the real ssh and scp with the run's bin dir off PATH, so a resumed run
+# does not wrap its own wrapper.
+SYS_PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$RUN_DIR/bin" | paste -sd ':' -)"
+export PATH="$RUN_DIR/bin:$SYS_PATH"
 export GUIDE_RUN_DIR="$RUN_DIR" GUIDE_REPO="$ROOT"
 for t in ssh scp; do
-  real="$(command -v "$t")" || die "$t not found"
+  real="$(PATH="$SYS_PATH" command -v "$t")" || die "$t not found"
   cat > "$RUN_DIR/bin/$t" <<EOF
 #!/bin/sh
 exec "$real" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$RUN_DIR/known_hosts" \\
@@ -210,6 +217,7 @@ export_cache
 mask() {
   SECRETS_FILE="$SECRETS" perl -pe '
     BEGIN {
+      $| = 1;
       @s = ();
       if (open(my $f, "<", $ENV{SECRETS_FILE})) { while (<$f>) { chomp; push @s, $_ if length($_) >= 4 } }
       @s = sort { length($b) <=> length($a) } @s;

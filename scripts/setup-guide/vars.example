@@ -1,4 +1,4 @@
-# Vars for scripts/run-setup-guide.sh on docs/setup/SELF-HOST.md, path a.
+# Vars for scripts/run-setup-guide.sh on docs/setup/SELF-HOST.md, Path A.
 # Copy this directory out of the repository, fill it in, and run:
 #   scripts/setup-guide/azure.sh up "$RG"
 #   scripts/run-setup-guide.sh --path a --vars <copy>/vars

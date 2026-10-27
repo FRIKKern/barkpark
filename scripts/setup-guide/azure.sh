@@ -23,33 +23,33 @@ cmd="${1:-}"; rg="${2:-}"
 
 case "$cmd" in
   up)
-    if [ "$(az group exists -n "$rg" "${sub[@]}")" = true ]; then
+    if [ "$(az group exists -n "$rg" ${sub[@]+"${sub[@]}"})" = true ]; then
       echo "azure.sh: $rg exists. Run: $0 down $rg" >&2; exit 1
     fi
-    az group create -n "$rg" -l "$LOCATION" --tags purpose=setup-guide-run "${sub[@]}" -o none
+    az group create -n "$rg" -l "$LOCATION" --tags purpose=setup-guide-run ${sub[@]+"${sub[@]}"} -o none
     echo "azure.sh: created $rg in $LOCATION"
     ;;
   vm)
     label="${3:?dns label}"
     az vm create -g "$rg" -n "$VM_NAME" --image Ubuntu2204 --size "$SIZE" \
       --location "$LOCATION" --admin-username azureuser --generate-ssh-keys \
-      --public-ip-address-dns-name "$label" "${sub[@]}" -o none
-    az vm open-port -g "$rg" -n "$VM_NAME" --port 80,443 --priority 900 "${sub[@]}" -o none
+      --public-ip-address-dns-name "$label" ${sub[@]+"${sub[@]}"} -o none
+    az vm open-port -g "$rg" -n "$VM_NAME" --port 80,443 --priority 900 ${sub[@]+"${sub[@]}"} -o none
     "$0" dns "$rg" "$label"
     ;;
   dns)
     label="${3:?dns label}"
-    ip="$(az network public-ip list -g "$rg" "${sub[@]}" --query '[0].name' -o tsv)"
+    ip="$(az network public-ip list -g "$rg" ${sub[@]+"${sub[@]}"} --query '[0].name' -o tsv)"
     [ -n "$ip" ] || { echo "azure.sh: no public IP in $rg" >&2; exit 1; }
-    fqdn="$(az network public-ip update -g "$rg" -n "$ip" --dns-name "$label" "${sub[@]}" \
+    fqdn="$(az network public-ip update -g "$rg" -n "$ip" --dns-name "$label" ${sub[@]+"${sub[@]}"} \
       --query dnsSettings.fqdn -o tsv)"
     echo "azure.sh: $fqdn"
     ;;
   down)
-    if [ "$(az group exists -n "$rg" "${sub[@]}")" != true ]; then
+    if [ "$(az group exists -n "$rg" ${sub[@]+"${sub[@]}"})" != true ]; then
       echo "azure.sh: $rg does not exist"; exit 0
     fi
-    az group delete -n "$rg" --yes "${sub[@]}"
+    az group delete -n "$rg" --yes ${sub[@]+"${sub[@]}"}
     echo "azure.sh: deleted $rg"
     ;;
   *) echo "azure.sh: unknown command $cmd" >&2; exit 2 ;;

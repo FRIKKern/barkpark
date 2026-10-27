@@ -12,6 +12,7 @@ This guide takes you from an empty Azure resource group to Pensum sign-in, in ru
 
 A new subscription has no resource providers registered. Register the ones these paths use, then wait until each shows `Registered`:
 
+<!-- run -->
 ```bash
 for p in Compute Network Storage App DBforPostgreSQL KeyVault OperationalInsights ManagedIdentity; do
   az provider register --namespace "Microsoft.$p"
@@ -27,37 +28,46 @@ The host name becomes `PHX_HOST`, and passkeys stop working if it changes later.
 
 ## Write and check the settings file
 
-On your own machine, install `bp` and write a settings file:
+On your machine, install `bp` and write a settings file:
 
+<!-- run -->
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 bp instance init --target vm                # or --target containerapps
+```
+
+<!-- run hook=settings --> `bp instance init` writes `barkpark.env` with mode 600. It holds most [Pensum settings](#pensum-settings), and for `containerapps` also new keys and a database password. Replace every `<...>` value and add the Pensum settings it leaves out. Then check the file:
+
+<!-- run -->
+```bash
 bp instance check --env-file barkpark.env --target vm --skip database,media,url
 ```
 
-`bp instance init` writes `barkpark.env` with mode 600. It holds the required settings, freshly generated keys, a database password and most [Pensum settings](#pensum-settings). Replace every `<...>` value and add the Pensum settings it leaves out. `bp instance check` lists each problem with a doc link and exits 1 if it finds one. `--skip database,media,url` skips the probes that need the server. Before the first start, run the check where the server runs, without `--skip`. A server missing required settings lists every one at boot and stops.
+`bp instance check` lists each problem with a doc link and exits 1 on any. `--skip` leaves out the probes that need the server. Before the first start, run the check where the server runs, without `--skip`. A server missing required settings lists every one at boot and stops.
 
 ## Path A: a single VM
 
 1. Create an Ubuntu 22.04 or later VM with 2 vCPU and 4 GB or more, and open ports 22, 80 and 443:
 
+   <!-- run -->
    ```bash
    az vm create -g "$RG" -n barkpark --image Ubuntu2204 --size Standard_D2als_v7 \
      --location swedencentral --admin-username azureuser --generate-ssh-keys
    az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900
    ```
 
-2. Create a DNS A record from the host name to the VM's public IP. Caddy needs it to issue a certificate.
+2. <!-- run hook=dns --> Create a DNS A record from the host name to the VM's public IP. Caddy needs it for a certificate.
 3. Copy the file and run `deploy.sh` over ssh. `deploy.sh` keeps its own `DATABASE_URL` and keys and ignores those in the file, so `bp instance init --target vm` leaves them out:
 
+   <!-- run -->
    ```bash
    scp barkpark.env azureuser@<ip>:/tmp/pensum.env
    curl -fsSLO https://raw.githubusercontent.com/FRIKKern/barkpark/main/deploy.sh
    ssh azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` builds Barkpark in `/opt/barkpark`, generates the keys into `/opt/barkpark/.env` and merges the file into it before the first start. Install and build take about 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, both readable by root only. When the file sets `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED`, it adds the id to `BARKPARK_OPERATOR_TOKEN_IDS`. The banner prints the token path, the id and a login command, never the token. `DOMAIN` must be the host name. With an IP and HTTPS the server refuses to start, because the Studio websocket would answer 403.
-4. Run the printed `bp setup --target connect --server https://<host> --token "$(ssh azureuser@<ip> sudo cat /etc/barkpark/admin-token)"` on your machine, then delete `/tmp/pensum.env` on the VM.
+   `deploy.sh` builds Barkpark in `/opt/barkpark`, generates the keys into `/opt/barkpark/.env` and merges the file into it before the first start. Install and build take 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, both readable by root only. When the file sets `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED`, it adds the id to `BARKPARK_OPERATOR_TOKEN_IDS`. The banner prints the token path, the id and a login command, never the token. `DOMAIN` must be the host name, not an IP, or the server refuses to start.
+4. <!-- run --> Run the printed `bp setup --target connect --server https://<host> --token "$(ssh azureuser@<ip> sudo cat /etc/barkpark/admin-token)"` on your machine, then delete `/tmp/pensum.env` on the VM.
 
 To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. To update, run `cd /opt/barkpark && sudo git pull`. A post-merge hook rebuilds and restarts. If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
@@ -114,6 +124,7 @@ Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp o
 
 ## Check the instance
 
+<!-- run -->
 ```bash
 curl -sS https://<host>/readyz          # {"status":"ready",...}
 bp capabilities | grep auth_tier        # admin
