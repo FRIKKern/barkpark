@@ -377,6 +377,15 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "token they own — because removal from the owning Cloud team ends ALL their access. " <>
          "Gated like the email form of /v1/auth/login-tickets: admin bearer, plus the " <>
          "platform-operator allowlist when armed. :current_workspace is never read."},
+    # StudioTokenController.create
+    {"POST", "/v1/auth/studio-tokens"} =>
+      {:workspace_derived,
+       "param-derived + seat-gated (task-7855ed1481992cf6): the `workspace` body field " <>
+         "(slug or id) is resolved explicitly, and the caller must hold an owner or admin " <>
+         "seat there (TenancyAuth.workspace_admin?/2,3) or be the instance admin token. " <>
+         "The minted read token is bound to that workspace. :current_workspace is never " <>
+         "read; the only `workspace_id` in the source is the bearer's own binding, " <>
+         "checked against the Default Workspace for the instance-admin rule."},
     # TokenSelfController.show
     {"GET", "/v1/auth/token"} =>
       {:workspace_derived,
