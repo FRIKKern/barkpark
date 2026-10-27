@@ -76,6 +76,16 @@ An instance without outgoing mail cannot send a password reset link, so the owne
 2. `bp auth login <email> <password>` returns a token. With `BARKPARK_TOKEN` set to it, `bp auth mfa-enroll <password>` returns a TOTP secret. Add it to an authenticator, then run `bp auth mfa-verify <secret> <code> <password>`.
 3. As an owner, `bp workspace member-add <email>` seats it.
 
+## Sign the bp CLI in with SSO
+
+An owner who signs in only through Entra signs bp in on their own machine:
+
+```bash
+bp login --sso --org gyldendal -s https://<host>
+```
+
+bp opens the sign-in URL in the browser and waits for the answer on a random port on 127.0.0.1. The instance accepts that loopback return without `BARKPARK_STUDIO_SSO_ORIGINS`. bp saves the session as its token for that server and prints the email and the expiry. Entra MFA counts for this session as it does for a browser sign-in. `--no-browser` prints the URL instead; open it on the same machine. `bp logout -s https://<host>` revokes the session. Commands such as `bp instance studio-token --workspace default` then run as the owner.
+
 ## Domain verification
 
 `bp org domain-add <org> <domain>` prints a TXT record value, `barkpark-verify=...`. Publish it as a TXT record on the domain itself, such as `gyldendal.no`, not on a subdomain. `bp org domain-verify <org> <domain>` then checks it. A verified domain does two things:

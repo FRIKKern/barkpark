@@ -255,6 +255,9 @@ type ServerEntry struct {
 	// demand — and exists only so a future workflow can pin an entry's kind (e.g.
 	// a private-IP server the user wants treated as "cloud"). Empty → derived.
 	Kind string `json:"kind,omitempty"`
+	// SSOOrg is the org slug `bp login --sso` signed in through when Token is
+	// that login session. `bp logout` revokes such a session on the server.
+	SSOOrg string `json:"sso_org,omitempty"`
 }
 
 // maxKnownServers caps the connect history so the file never grows unbounded.
@@ -548,6 +551,20 @@ func (c *Config) RememberServer(entry ServerEntry) {
 	}
 	if entry.Dataset != "" {
 		c.Dataset = entry.Dataset
+	}
+}
+
+// replaceKnownServer writes e over the known entry with the same identity, in
+// place, without promoting it to active. A missing entry is a no-op.
+func (c *Config) replaceKnownServer(e ServerEntry) {
+	if c == nil {
+		return
+	}
+	for i := range c.KnownServers {
+		if sameEntryIdentity(c.KnownServers[i], e) {
+			c.KnownServers[i] = e
+			return
+		}
 	}
 }
 

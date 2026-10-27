@@ -385,6 +385,180 @@ defmodule BarkparkWeb.OidcControllerTest do
     end
   end
 
+  describe "bp login --sso signs the CLI in over a loopback redirect (RFC 8252)" do
+    @verifier String.duplicate("w", 43)
+    @loopback "http://127.0.0.1:53123/callback"
+
+    setup do
+      prev = Application.get_env(:barkpark, :studio_sso_origins)
+      Application.delete_env(:barkpark, :studio_sso_origins)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :studio_sso_origins, prev),
+          else: Application.delete_env(:barkpark, :studio_sso_origins)
+      end)
+    end
+
+    defp cli_challenge, do: Base.url_encode64(:crypto.hash(:sha256, @verifier), padding: false)
+
+    defp cli_start(params) do
+      query =
+        %{"return_to" => @loopback, "state" => "cli-state", "code_challenge" => cli_challenge()}
+        |> Map.merge(params)
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+        |> Map.new()
+        |> URI.encode_query()
+
+      get(scoped_conn(), "/v1/auth/oidc/octrl/start?" <> query)
+    end
+
+    # The IdP signs `email` in to org `slug` and the callback answers the CLI.
+    defp cli_callback(slug \\ "octrl", claims \\ %{}) do
+      nonce = "n#{System.unique_integer([:positive])}"
+
+      mock_op(
+        Map.merge(
+          %{
+            "iss" => @issuer,
+            "aud" => @client_id,
+            "exp" => System.system_time(:second) + 300,
+            "nonce" => nonce,
+            "email" => "cli@#{slug}.com"
+          },
+          claims
+        )
+      )
+
+      cli = %{
+        "to" => @loopback,
+        "origin" => "bp-cli",
+        "state" => "cli-state",
+        "challenge" => cli_challenge()
+      }
+
+      conn =
+        scoped_conn()
+        |> init_test_session(%{
+          oidc_state: "s1",
+          oidc_nonce: nonce,
+          oidc_verifier: "v1",
+          oidc_studio: cli
+        })
+        |> get("/v1/auth/oidc/#{slug}/callback?code=#{nonce}&state=s1")
+
+      location = URI.parse(redirected_to(conn, 302))
+      assert "#{location.scheme}://#{location.host}:#{location.port}#{location.path}" == @loopback
+      URI.decode_query(location.query)
+    end
+
+    defp cli_exchange(ticket, audience \\ "bp-cli", verifier \\ @verifier) do
+      scoped_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/auth/sso/exchange",
+        Jason.encode!(%{ticket: ticket, audience: audience, code_verifier: verifier})
+      )
+    end
+
+    test "a loopback return with PKCE starts a sign-in bound to the bp-cli audience" do
+      for to <- [@loopback, "http://[::1]:8123/callback"] do
+        conn = cli_start(%{"return_to" => to, "code_challenge_method" => "S256"})
+        assert redirected_to(conn, 302) =~ @issuer <> "/authorize?"
+      end
+
+      flows = Repo.all(Barkpark.Sso.Flow)
+      assert length(flows) == 2
+      assert Enum.all?(flows, &(&1.studio["origin"] == "bp-cli"))
+    end
+
+    test "any other http return is refused" do
+      for to <- [
+            "http://localhost:53123/callback",
+            "http://192.168.1.20:53123/callback",
+            "http://127.0.0.1.evil.test:53123/callback",
+            "https://127.0.0.1:53123/callback",
+            "http://127.0.0.1/callback",
+            "http://127.0.0.1:53123/other",
+            "http://127.0.0.1:53123/callback?next=x",
+            "http://127.0.0.1:53123/callback#x",
+            "http://user@127.0.0.1:53123/callback"
+          ] do
+        body = cli_start(%{"return_to" => to}) |> json_response(400)
+        assert body["error"]["code"] == "malformed", to
+      end
+
+      assert Repo.all(Barkpark.Sso.Flow) == []
+    end
+
+    test "a loopback return without PKCE S256 or state is refused" do
+      for params <- [
+            %{"code_challenge" => nil},
+            %{"code_challenge" => "short"},
+            %{"code_challenge_method" => "plain"},
+            %{"state" => nil}
+          ] do
+        assert cli_start(params) |> json_response(400)
+      end
+    end
+
+    test "the ticket is traded once for a session with an expiry" do
+      %{"ticket" => ticket, "state" => "cli-state"} = cli_callback()
+
+      body = json_response(cli_exchange(ticket), 201)
+      assert body["user"]["email"] == "cli@octrl.com"
+      assert body["expires_at"]
+      assert body["idp_mfa"] == false
+      assert Accounts.verify_user_session_token(body["token"]).email == "cli@octrl.com"
+
+      assert json_response(cli_exchange(ticket), 401)["error"]["code"] == "invalid_ticket"
+    end
+
+    test "a CLI ticket is refused at a Studio audience and the session is revoked" do
+      %{"ticket" => ticket} = cli_callback()
+      [session] = Repo.all(from t in Barkpark.Auth.LoginTicket, select: t.api_token)
+
+      assert json_response(cli_exchange(ticket, "http://127.0.0.1:53123"), 401)
+      refute Accounts.verify_user_session_token(session)
+    end
+
+    test "a Studio ticket is refused at the bp-cli audience" do
+      {:ok, user} =
+        Accounts.register_user(%{email: "s@octrl.com", password: "a-long-password-1234"})
+
+      {:ok, session} = Accounts.create_user_session_token(user)
+      studio = "https://studio.example.com"
+      {:ok, ticket} = Barkpark.Auth.mint_sso_ticket(session, user.email, studio, cli_challenge())
+
+      assert json_response(cli_exchange(ticket), 401)
+      refute Accounts.verify_user_session_token(session)
+    end
+
+    test "a loopback origin listed for a Studio keeps the Studio's audience" do
+      Application.put_env(:barkpark, :studio_sso_origins, ["http://127.0.0.1:53123"])
+
+      assert redirected_to(cli_start(%{}), 302) =~ @issuer <> "/authorize?"
+      assert [flow] = Repo.all(Barkpark.Sso.Flow)
+      assert flow.studio["origin"] == "http://127.0.0.1:53123"
+    end
+
+    test "the CLI session carries the IdP's MFA like a browser session" do
+      mfa_org("climfa", %{trust_idp_mfa: true})
+
+      %{"ticket" => ticket} = cli_callback("climfa", %{"amr" => ["pwd", "mfa"]})
+      body = json_response(cli_exchange(ticket), 201)
+      assert body["idp_mfa"] == true
+
+      {_user, session} = Accounts.verify_user_session(body["token"])
+      assert session.mfa_verified_at
+
+      assert scoped_conn()
+             |> put_req_header("authorization", "Bearer " <> body["token"])
+             |> get("/v1/auth/sessions")
+             |> json_response(200)
+    end
+  end
+
   describe "IdP MFA in a require-MFA org" do
     # An org that requires MFA, with a workspace so JIT-provisioned users are
     # governed, and an OIDC connection with `extra` settings.
