@@ -19,7 +19,7 @@ This page is for the IT department of an organisation that will own and run one 
 | Log Analytics workspace for app logs | 30 days |
 | User-assigned identity that reads the Key Vault secrets | |
 
-Postgres has no public endpoint and answers only inside the virtual network. The Key Vault and the storage account accept the environment's subnet and the addresses in `operatorIpRanges`. Only the app's HTTPS ingress is public. The template creates no alert.
+Postgres has no public endpoint and answers only inside the virtual network. The Key Vault and the storage account accept the environment's subnet and the addresses in `operatorIpRanges`. Only the app's HTTPS ingress is public. `deploy/azure/monitor.bicep` adds alerts for `/readyz`, a failed backup job and repeated restarts, as [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-alerts) describes.
 
 ## What you create
 
@@ -39,7 +39,7 @@ Postgres has no public endpoint and answers only inside the virtual network. The
 - **Conditional Access and MFA.** Require MFA for the app with a Conditional Access policy. Barkpark then counts Entra MFA as its own, as [ENTRA.md](ENTRA.md#entra-mfa-counts-as-barkpark-mfa) describes.
 - **Group claims.** Groups assigned to the app need Entra ID P1. Without P1, run the script with `--group-claims security`.
 - **Backup retention.** Choose 7 to 35 days for the database. Decide whether Azure Backup takes snapshots of the media share.
-- **Alerts.** Name who receives them, and create Azure Monitor alerts for the app and the database.
+- **Alerts.** Name the address that receives them. Add Azure Monitor alerts for the database if you need them.
 
 ## What it costs
 
