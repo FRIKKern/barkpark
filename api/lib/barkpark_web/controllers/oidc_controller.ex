@@ -25,6 +25,11 @@ defmodule BarkparkWeb.OidcController do
   alias Barkpark.Sso.Oidc
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
+  alias BarkparkWeb.SignInFailure
+
+  require Logger
+
+  @expired "This sign-in expired, or it was started in another browser or tab. Start it again."
 
   def start(conn, %{"org_slug" => slug} = params) do
     case Oidc.connection_for_org_slug(slug) do
@@ -122,8 +127,7 @@ defmodule BarkparkWeb.OidcController do
         )
 
       state != get_session(conn, :oidc_state) ->
-        Sso.record_login_failure("oidc", slug, :state_mismatch)
-        ErrorResponse.emit_custom(conn, 400, "malformed", "state mismatch")
+        state_mismatch(conn, slug)
 
       true ->
         opts = [
@@ -176,25 +180,75 @@ defmodule BarkparkWeb.OidcController do
             # Failed token exchange / claim validation lands on the audit
             # trail (era-w8) — only successes audited before.
             Sso.record_login_failure("oidc", slug, reason)
+            text = SignInFailure.reason_text(reason)
+            Logger.warning("[OIDC] #{slug}: callback rejected: #{text}")
 
-            ErrorResponse.emit_custom(conn, 401, "unauthorized", "OIDC callback rejected", %{
-              reason: to_string(reason)
+            SignInFailure.respond(conn, %{
+              status: 401,
+              code: "unauthorized",
+              message: "OIDC callback rejected",
+              details: %{reason: text},
+              page_message:
+                "The identity provider did not accept this sign-in. Try again, or ask your administrator.",
+              start_path: start_path(slug)
             })
         end
     end
   end
 
-  def callback(conn, %{"org_slug" => _} = params) do
+  def callback(conn, %{"org_slug" => slug} = params) do
     case params do
       %{"error" => err} ->
-        ErrorResponse.emit_custom(conn, 401, "unauthorized", "the IdP returned an error", %{
-          reason: to_string(err)
+        text = SignInFailure.reason_text(err)
+
+        Logger.warning(
+          "[OIDC] #{slug}: the IdP returned #{text}: " <>
+            SignInFailure.reason_text(params["error_description"] || "")
+        )
+
+        SignInFailure.respond(conn, %{
+          status: 401,
+          code: "unauthorized",
+          message: "the IdP returned an error",
+          details: %{reason: text},
+          page_message:
+            "The identity provider refused this sign-in. Try again, or ask your administrator.",
+          start_path: start_path(slug)
         })
 
       _ ->
-        ErrorResponse.emit_custom(conn, 400, "malformed", "code and state are required")
+        SignInFailure.respond(conn, %{
+          status: 400,
+          code: "malformed",
+          message: "code and state are required",
+          page_message: @expired,
+          start_path: start_path(slug)
+        })
     end
   end
+
+  # No state in the session means the session cookie did not come back with
+  # the callback; a different state means another start replaced it.
+  defp state_mismatch(conn, slug) do
+    Sso.record_login_failure("oidc", slug, :state_mismatch)
+
+    if get_session(conn, :oidc_state) == nil,
+      do:
+        Logger.warning("[OIDC] #{slug}: state mismatch: no sign-in state in the session cookie"),
+      else:
+        Logger.warning("[OIDC] #{slug}: state mismatch: the state differs from this session's")
+
+    SignInFailure.respond(conn, %{
+      status: 400,
+      code: "malformed",
+      message: "state mismatch",
+      hint: "Start the sign-in again in the same browser.",
+      page_message: @expired,
+      start_path: start_path(slug)
+    })
+  end
+
+  defp start_path(slug), do: "/v1/auth/oidc/#{URI.encode_www_form(slug)}/start"
 
   @doc """
   `POST /v1/auth/sso/exchange` — body `{ticket, audience, code_verifier}`, the
@@ -245,7 +299,7 @@ defmodule BarkparkWeb.OidcController do
     # studio-user-login: a browser completing the code flow
     # (Accept: text/html) lands IN Studio on its new session cookie;
     # non-HTML callers keep the JSON contract byte-identical.
-    if browser?(conn) do
+    if SignInFailure.browser?(conn) do
       redirect(conn, to: "/studio")
     else
       conn
@@ -255,11 +309,4 @@ defmodule BarkparkWeb.OidcController do
   end
 
   defp callback_uri(slug), do: BarkparkWeb.Endpoint.url() <> "/v1/auth/oidc/#{slug}/callback"
-
-  # A browser's redirect chain advertises text/html; API clients don't.
-  defp browser?(conn) do
-    conn
-    |> Plug.Conn.get_req_header("accept")
-    |> Enum.any?(&String.contains?(&1, "text/html"))
-  end
 end

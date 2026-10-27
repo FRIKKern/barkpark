@@ -14,6 +14,11 @@ defmodule BarkparkWeb.SocialController do
   alias Barkpark.Sso.Social
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
+  alias BarkparkWeb.SignInFailure
+
+  require Logger
+
+  @expired "This sign-in expired, or it was started in another browser or tab. Start it again."
 
   def start(conn, %{"provider" => name}) do
     case Social.provider(name) do
@@ -45,7 +50,25 @@ defmodule BarkparkWeb.SocialController do
 
       state != get_session(conn, :social_state) ->
         Sso.record_login_failure("social:#{name}", nil, :state_mismatch)
-        ErrorResponse.emit_custom(conn, 400, "malformed", "state mismatch")
+
+        if get_session(conn, :social_state) == nil,
+          do:
+            Logger.warning(
+              "[Social] #{name}: state mismatch: no sign-in state in the session cookie"
+            ),
+          else:
+            Logger.warning(
+              "[Social] #{name}: state mismatch: the state differs from this session's"
+            )
+
+        SignInFailure.respond(conn, %{
+          status: 400,
+          code: "malformed",
+          message: "state mismatch",
+          hint: "Start the sign-in again in the same browser.",
+          page_message: @expired,
+          start_path: start_path(name)
+        })
 
       true ->
         case Social.handle_callback(p, code, callback_uri(name)) do
@@ -89,25 +112,48 @@ defmodule BarkparkWeb.SocialController do
           {:error, reason} ->
             # Failed exchange lands on the audit trail (era-w8).
             Sso.record_login_failure("social:#{name}", nil, reason)
+            text = SignInFailure.reason_text(reason)
+            Logger.warning("[Social] #{name}: callback rejected: #{text}")
 
-            ErrorResponse.emit_custom(conn, 401, "unauthorized", "social callback rejected", %{
-              reason: to_string(reason)
+            SignInFailure.respond(conn, %{
+              status: 401,
+              code: "unauthorized",
+              message: "social callback rejected",
+              details: %{reason: text},
+              page_message: "The provider did not accept this sign-in. Try again.",
+              start_path: start_path(name)
             })
         end
     end
   end
 
-  def callback(conn, %{"provider" => _} = params) do
+  def callback(conn, %{"provider" => name} = params) do
     case params do
       %{"error" => err} ->
-        ErrorResponse.emit_custom(conn, 401, "unauthorized", "the provider returned an error", %{
-          reason: to_string(err)
+        text = SignInFailure.reason_text(err)
+        Logger.warning("[Social] #{name}: the provider returned #{text}")
+
+        SignInFailure.respond(conn, %{
+          status: 401,
+          code: "unauthorized",
+          message: "the provider returned an error",
+          details: %{reason: text},
+          page_message: "The provider refused this sign-in. Try again.",
+          start_path: start_path(name)
         })
 
       _ ->
-        ErrorResponse.emit_custom(conn, 400, "malformed", "code and state are required")
+        SignInFailure.respond(conn, %{
+          status: 400,
+          code: "malformed",
+          message: "code and state are required",
+          page_message: @expired,
+          start_path: start_path(name)
+        })
     end
   end
+
+  defp start_path(name), do: "/v1/auth/social/#{URI.encode_www_form(name)}/start"
 
   defp callback_uri(name), do: BarkparkWeb.Endpoint.url() <> "/v1/auth/social/#{name}/callback"
 end

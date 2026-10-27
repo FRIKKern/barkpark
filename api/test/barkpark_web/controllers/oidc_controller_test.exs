@@ -19,6 +19,14 @@ defmodule BarkparkWeb.OidcControllerTest do
     defp fx(k), do: Application.get_env(:barkpark, :oidc_test)[k]
   end
 
+  defmodule RefusingIdP do
+    @behaviour Barkpark.Sso.Oidc.HTTP
+    @impl true
+    def post_form(_url, _params, _headers), do: {:error, {:http_status, 400}}
+    @impl true
+    def get_json(_url), do: {:ok, %{"keys" => []}}
+  end
+
   setup do
     prev = Application.get_env(:barkpark, :oidc_http)
     Application.put_env(:barkpark, :oidc_http, MockIdP)
@@ -433,6 +441,76 @@ defmodule BarkparkWeb.OidcControllerTest do
 
       body = mfa_callback("idpoff", %{"amr" => ["mfa"]}) |> json_response(403)
       assert body["error"]["code"] == "mfa_enrolment_required"
+    end
+  end
+
+  describe "a failed callback in a browser" do
+    import ExUnit.CaptureLog
+
+    test "a callback without the session cookie shows a page to start again" do
+      log =
+        capture_log(fn ->
+          conn =
+            scoped_conn()
+            |> put_req_header("accept", "text/html")
+            |> init_test_session(%{})
+            |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
+
+          body = html_response(conn, 400)
+          assert body =~ "started in another browser or tab"
+          assert body =~ ~s(href="/v1/auth/oidc/octrl/start")
+          refute body =~ "JSON"
+        end)
+
+      assert log =~ "no sign-in state in the session cookie"
+    end
+
+    test "a different state is logged apart from a missing cookie" do
+      log =
+        capture_log(fn ->
+          scoped_conn()
+          |> put_req_header("accept", "text/html")
+          |> init_test_session(%{oidc_state: "real", oidc_nonce: "n1", oidc_verifier: "v1"})
+          |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
+          |> html_response(400)
+        end)
+
+      assert log =~ "the state differs"
+    end
+
+    test "an API client still gets JSON for a state mismatch, with a sign-in hint" do
+      body =
+        scoped_conn()
+        |> init_test_session(%{oidc_state: "real"})
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
+        |> json_response(400)
+
+      assert body["error"]["hint"] =~ "same browser"
+    end
+
+    test "a refused code exchange is a 401, not a 500, and is logged" do
+      Application.put_env(:barkpark, :oidc_http, RefusingIdP)
+
+      log =
+        capture_log(fn ->
+          conn =
+            scoped_conn()
+            |> put_req_header("accept", "text/html")
+            |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+            |> get("/v1/auth/oidc/octrl/callback?code=fake&state=s1")
+
+          assert html_response(conn, 401) =~ "did not accept this sign-in"
+
+          json =
+            scoped_conn()
+            |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+            |> get("/v1/auth/oidc/octrl/callback?code=fake&state=s1")
+            |> json_response(401)
+
+          assert json["error"]["details"]["reason"] == "http_status 400"
+        end)
+
+      assert log =~ "callback rejected: http_status 400"
     end
   end
 end

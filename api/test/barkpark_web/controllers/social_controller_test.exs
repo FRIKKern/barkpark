@@ -178,4 +178,25 @@ defmodule BarkparkWeb.SocialControllerTest do
     # Fail closed: NO session was minted.
     refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^user.id)
   end
+
+  test "a callback without the session cookie shows a browser a page to start again" do
+    conn =
+      build_conn()
+      |> put_req_header("accept", "text/html")
+      |> init_test_session(%{})
+      |> get("/v1/auth/social/google/callback?code=abc&state=s1")
+
+    body = html_response(conn, 400)
+    assert body =~ "started in another browser or tab"
+    assert body =~ ~s(href="/v1/auth/social/google/start")
+  end
+
+  test "a provider error in a list-valued param is a 401, not a 500" do
+    conn =
+      build_conn()
+      |> init_test_session(%{social_state: "s1"})
+      |> get("/v1/auth/social/google/callback?error[]=x&state=s1")
+
+    assert json_response(conn, 401)
+  end
 end
