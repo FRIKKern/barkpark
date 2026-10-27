@@ -1,0 +1,26 @@
+# Known wrong or out-of-scope facts for tooling/doc-truth/setup-facts.mjs.
+#
+# One entry per line: file | kind | value | owner | reason
+# owner is the task that fixes the fact, or a label for a fact that is right
+# as written: external (another tool or repo reads the name), example (a
+# made-up name in an example) or history (a dated record naming a file as it
+# was then). The line number is not part of the match.
+#
+# When a task fixes its fact, the check prints a note for the stale entry;
+# delete the line in the same PR. Never add a line without a task or label.
+
+# Wrong facts on main when the check landed. Fix these, then delete the line.
+internal/cli/instance_settings.go | link | docs/setup/SELF-HOST-OPERATIONS.md#recommended-settings-for-a-pensum-instance | task-19e28a6c89b02162 | section moved; nearest docs/setup/SELF-HOST.md#pensum-settings
+internal/cli/instance_settings.go | link | docs/setup/SELF-HOST-OPERATIONS.md#rotate-keys-held-in-azure-key-vault | task-19e28a6c89b02162 | heading renamed; nearest #rotate-keys
+api/lib/barkpark_web/live/studio/connectors_live.ex | link | docs/ops/linear-app.md | task-a1d522c3dc06f3c5 | the doc was never written
+
+# Right as written.
+docs/setup/CLAUDE-CODE.md | env | CLAUDE_CODE_WORKFLOWS | external | Claude Code reads it, not Barkpark
+docs/setup/COPILOT.md | env | COPILOT_MCP_ | external | GitHub's prefix for Copilot agent secrets
+docs/setup/SELF-HOST.md | env | STUDIO_SIGN_IN | external | Studio setting, read by FRIKKern/barkpark-studio
+docs/setup/SELF-HOST.md | env | STUDIO_SSO_ORG | external | Studio setting, read by FRIKKern/barkpark-studio
+docs/setup/TASK-SYSTEM.md | path | api/lib/x.ex | example | shows the shape of a symbol citation
+docs/contracts/dispatch-areas.md | path | internal/x.go | example | shows the shape of an area path
+docs/contracts/dispatch-areas.md | path | internal/cli/x.go | example | shows the shape of an area path
+docs/ops/studio-nav-bug-2026-04-19.md | path | docs/ops/caddy-api-tls.md | history | incident record; the doc says the file was later deleted
+docs/ops/studio-nav-bug-2026-04-19.md | path | _attic/docs-2026-06/docs/ops/caddy-api-tls.md | history | incident record; the doc says the file was later deleted
