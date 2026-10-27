@@ -86,7 +86,7 @@ defmodule Barkpark.Groq.Parser do
       "incomingRefCount" => :any,
       "incomingGlobalDocumentReferenceCount" => :any
     },
-    "user" => %{"attributes" => :any}
+    "user" => %{"attributes" => 0}
   }
 
   @pipe_functions %{"order" => {:min, 1}, "score" => {:min, 1}}
