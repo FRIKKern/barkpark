@@ -70,7 +70,7 @@ defmodule Barkpark.Release do
           BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is not set or is shorter than 32 bytes
         This database has not applied migration 20260719020100, which needs it, \
         so no migration ran. Generate one with openssl rand -base64 32, set it, \
-        and restart. bp instance init writes it. See docs/setup/SELF-HOST-OPERATIONS.md.
+        and restart. bp instance init writes it. #{Barkpark.SetupDocs.see(:settings_file)}
         """
       end
     end

@@ -292,6 +292,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       assert body["error"]["hint"] =~ "BARKPARK_OPERATOR_TOKEN_IDS"
       assert body["error"]["hint"] =~ "BARKPARK_OPERATOR_EMAILS"
       refute body["error"]["hint"] =~ "member of this workspace"
+      assert body["error"]["hint"] =~ Barkpark.SetupDocs.url(:operator_access)
       refute conn_body_has_raw?(body, ctx.admin_a)
     end
 

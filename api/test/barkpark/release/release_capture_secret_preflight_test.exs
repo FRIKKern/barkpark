@@ -43,6 +43,7 @@ defmodule Barkpark.Release.ReleaseCaptureSecretPreflightTest do
       assert error.message =~ "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"
       assert error.message =~ "20260719020100"
       assert error.message =~ "openssl rand -base64 32"
+      assert error.message =~ Barkpark.SetupDocs.url(:settings_file)
       refute error.message =~ "leakcheck-value"
     end
   end

@@ -72,7 +72,9 @@ defmodule BarkparkWeb.OidcController do
                   conn,
                   502,
                   "upstream_unavailable",
-                  "the identity provider's discovery document could not be read"
+                  "the identity provider's discovery document could not be read",
+                  %{},
+                  "Check the connection's issuer URL. " <> Barkpark.SetupDocs.see(:oidc)
                 )
             end
         end
