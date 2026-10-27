@@ -2,7 +2,9 @@ package cli
 
 // instance_check_cmd.go is `bp instance init` and `bp instance check`.
 //
-//	bp instance init  [--out <file>] [--target containerapps|vm]
+//	bp instance init  [--out <file>] [--target containerapps|vm] [--host <h>]
+//	                  [--studio-origin <o>] [--owner-email <e>]
+//	                  [--operator-emails <e,...>] [--breakglass-email <e>]
 //	bp instance check [--env-file <file>] [--target containerapps|vm] [--skip database,media,url]
 //
 // init writes a complete env file with generated secrets and the recommended
@@ -72,8 +74,8 @@ func instanceTargetFlag(a *hzArgs) (string, error) {
 }
 
 func runInstanceInit(out *writer, args []string) int {
-	const usage = "bp instance init [--out <file>] [--target containerapps|vm]"
-	a, err := parseHzArgs(args, []string{"out", "target"}, nil, usage)
+	const usage = "bp instance init [--out <file>] [--target containerapps|vm] [--host <h>] [--studio-origin <o>] [--owner-email <e>] [--operator-emails <e,...>] [--breakglass-email <e>]"
+	a, err := parseHzArgs(args, []string{"out", "target", "host", "studio-origin", "owner-email", "operator-emails", "breakglass-email"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -88,14 +90,25 @@ func runInstanceInit(out *writer, args []string) int {
 	if path == "" {
 		path = "barkpark.env"
 	}
+	vals := instanceInitValues{
+		host:            strings.TrimSpace(a.val("host")),
+		studioOrigin:    strings.TrimSpace(a.val("studio-origin")),
+		ownerEmail:      strings.TrimSpace(a.val("owner-email")),
+		operatorEmails:  strings.TrimSpace(a.val("operator-emails")),
+		breakglassEmail: strings.TrimSpace(a.val("breakglass-email")),
+	}
+	if strings.Contains(vals.host, "/") || strings.Contains(vals.host, ":") {
+		return useError(out, "usage", fmt.Sprintf("--host is %q; give the host name only, such as cms.example.com", vals.host), exitUsage)
+	}
 	secrets, err := instanceGenerateSecrets()
 	if err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	if err := writeNewPrivateFile(path, instanceEnvFile(target, secrets)); err != nil {
+	body := instanceEnvFile(target, secrets, vals)
+	if err := writeNewPrivateFile(path, body); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	env, _ := parseInstanceEnv(strings.NewReader(instanceEnvFile(target, secrets)))
+	env, _ := parseInstanceEnv(strings.NewReader(body))
 	var fill []string
 	for k, v := range env {
 		if isPlaceholder(v) {
@@ -103,7 +116,7 @@ func runInstanceInit(out *writer, args []string) int {
 		}
 	}
 	sort.Strings(fill)
-	generated := append(append([]string{}, instanceSecretNames...), "the database password in DATABASE_URL")
+	generated := append(append([]string{}, instanceSecretNames...), "BARKPARK_SEED_ADMIN_TOKEN", "the database password in DATABASE_URL")
 	if target == instanceTargetVM {
 		generated = []string{}
 	}
@@ -116,7 +129,9 @@ func runInstanceInit(out *writer, args []string) int {
 	} else {
 		out.outf("generated %s. The values are in the file only.", strings.Join(generated, ", "))
 	}
-	out.outf("fill in %s.", strings.Join(fill, ", "))
+	if len(fill) > 0 {
+		out.outf("fill in %s.", strings.Join(fill, ", "))
+	}
 	out.outf("then run: bp instance check --env-file %s --target %s", path, target)
 	return exitOK
 }

@@ -74,6 +74,34 @@ var instanceRecommendedSettings = []instanceRecommended{
 	{name: "BARKPARK_CLOUD_HANDOFF", value: "off"},
 	{name: "BARKPARK_BREAKGLASS_EMAILS", hint: "<break-glass account email>"},
 	{name: "BARKPARK_TOKEN_EXPIRY_WARNINGS", value: "on"},
+	{name: "BARKPARK_OIDC_KEEP_OWNER", value: "on"},
+	{name: "BARKPARK_OIDC_EMAIL_FROM_UPN", value: "on"},
+}
+
+// instanceInitValues are the operator's values init can write in place of a
+// placeholder. An empty field keeps the placeholder.
+type instanceInitValues struct {
+	host, studioOrigin, ownerEmail, operatorEmails, breakglassEmail string
+}
+
+// value returns the operator's value for a recommended setting, or "".
+func (v instanceInitValues) value(name string) string {
+	switch name {
+	case "BARKPARK_ALWAYS_ALLOWED_ORIGINS":
+		if v.host == "" {
+			return ""
+		}
+		origins := "https://" + v.host
+		if v.studioOrigin != "" {
+			origins += "," + v.studioOrigin
+		}
+		return origins
+	case "BARKPARK_OPERATOR_EMAILS":
+		return v.operatorEmails
+	case "BARKPARK_BREAKGLASS_EMAILS":
+		return v.breakglassEmail
+	}
+	return ""
 }
 
 func (r instanceRecommended) appliesTo(target string) bool {
@@ -138,7 +166,8 @@ func instanceRandomBytes(n int) ([]byte, error) {
 // accepts: SECRET_KEY_BASE is 88 characters (at least 64 bytes), the KEK is
 // base64 of exactly 32 bytes, the release capture HMAC secret is 44
 // characters (at least 32 bytes), and the database password is 48 hex characters
-// so it needs no escaping in a URL.
+// so it needs no escaping in a URL. The seed admin token is bp_admin_ and 48
+// hex characters, the shape deploy/azure/main.example.bicepparam generates.
 func instanceGenerateSecrets() (map[string]string, error) {
 	sizes := map[string]int{"SECRET_KEY_BASE": 64, "BARKPARK_CLOAK_KEY": 32, "BARKPARK_KEK": 32, "PREVIEW_JWT_SECRET": 48, "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET": 32}
 	out := map[string]string{}
@@ -154,11 +183,16 @@ func instanceGenerateSecrets() (map[string]string, error) {
 		return nil, err
 	}
 	out["database_password"] = hex.EncodeToString(pw)
+	tok, err := instanceRandomBytes(24)
+	if err != nil {
+		return nil, err
+	}
+	out["BARKPARK_SEED_ADMIN_TOKEN"] = "bp_admin_" + hex.EncodeToString(tok)
 	return out, nil
 }
 
 // instanceEnvFile renders the env file init writes.
-func instanceEnvFile(target string, secrets map[string]string) string {
+func instanceEnvFile(target string, secrets map[string]string, vals instanceInitValues) string {
 	var b strings.Builder
 	line := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
 	line("# Barkpark instance settings, written by bp instance init --target %s.", target)
@@ -171,7 +205,11 @@ func instanceEnvFile(target string, secrets map[string]string) string {
 	} else {
 		line("DATABASE_URL=ecto://barkpark:%s@<database host>/barkpark", secrets["database_password"])
 	}
-	line("PHX_HOST=<public host name, such as cms.example.com>")
+	if vals.host != "" {
+		line("PHX_HOST=%s", vals.host)
+	} else {
+		line("PHX_HOST=<public host name, such as cms.example.com>")
+	}
 	if target != instanceTargetVM {
 		for _, name := range instanceSecretNames {
 			line("%s=%s", name, secrets[name])
@@ -189,6 +227,9 @@ func instanceEnvFile(target string, secrets map[string]string) string {
 		}
 		v := r.value
 		if v == "" {
+			v = vals.value(r.name)
+		}
+		if v == "" {
 			v = r.hint
 		}
 		line("%s=%s", r.name, v)
@@ -198,7 +239,15 @@ func instanceEnvFile(target string, secrets map[string]string) string {
 		line("# DATABASE_SSL_CA_FILE=<CA bundle path>")
 	}
 	line("# First boot only. Remove it once the owner has signed in:")
-	line("BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>")
+	if vals.ownerEmail != "" {
+		line("BARKPARK_BOOTSTRAP_OWNER_EMAIL=%s", vals.ownerEmail)
+	} else {
+		line("BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>")
+	}
+	if target == instanceTargetContainerApps {
+		line("# First boot only. The first operator token; add its id to BARKPARK_OPERATOR_TOKEN_IDS:")
+		line("BARKPARK_SEED_ADMIN_TOKEN=%s", secrets["BARKPARK_SEED_ADMIN_TOKEN"])
+	}
 	return b.String()
 }
 

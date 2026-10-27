@@ -4,7 +4,7 @@
 # Runs deploy.sh's BARKPARK_ENV_FILE merge, sliced out of deploy.sh itself,
 # against a temporary .env. It pins that the file cannot replace DATABASE_URL
 # or the generated keys, that deploy.sh prints one line naming each kept key,
-# and that every other key still merges.
+# that every other key still merges, and that the merged file is deleted.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -50,6 +50,12 @@ check "other keys still merge" 'grep -qx "PHX_HOST=cms.example.com" <<<"$env" &&
 check "one line names each kept key" '[ "$(grep -c "^>> Kept deploy.sh" <<<"$out")" -eq 1 ] && grep "^>> Kept deploy.sh" <<<"$out" | grep -q "DATABASE_URL SECRET_KEY_BASE BARKPARK_CLOAK_KEY BARKPARK_KEK PREVIEW_JWT_SECRET"'
 check "merged line leaves out kept keys" 'grep "^>> Merged" <<<"$out" | grep -q "PHX_HOST BARKPARK_OPERATOR_EMAILS" && ! grep "^>> Merged" <<<"$out" | grep -q DATABASE_URL'
 check "no secret value printed" '! grep -q "init-\|initpw\|deploypw" <<<"$out"'
+check "merged file is deleted" '[ ! -e "$TMP/init.env" ] && grep -q "^>> Deleted $TMP/init.env" <<<"$out"'
+
+# A file that is .env itself is merged in place and kept.
+before="$(cat "$APP_DIR/.env")"
+out3="$(APP_DIR="$APP_DIR" BARKPARK_ENV_FILE="$TMP/app/.env" bash -c 'set -euo pipefail; . "$1"' _ "$TMP/merge.sh" 2>&1)"
+check ".env itself is kept" '[ -s "$APP_DIR/.env" ] && [ "$(cat "$APP_DIR/.env")" = "$before" ] && ! grep -q "^>> Deleted" <<<"$out3"'
 
 # A file without owned keys prints no kept line.
 printf 'PHX_HOST=b.example.com\n' > "$TMP/clean.env"

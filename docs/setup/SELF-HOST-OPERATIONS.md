@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-operations | budget: 2500tok -->
 # Operate a Barkpark instance
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves and key rotation for both paths. The command reference for backups is [instance-backup.md](../ops/instance-backup.md).
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves, key rotation and Container Apps cost. The command reference for backups is [instance-backup.md](../ops/instance-backup.md).
 
 ## Scheduled backups and the restore drill
 
@@ -85,3 +85,18 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
 ### Cloak key
 
 `Barkpark.Vault` configures one AES-GCM cipher and no retired cipher, and no command re-encrypts Cloak fields. Keep `BARKPARK_CLOAK_KEY` unchanged. After a change, every row sealed under the old key fails to load, including the user row of anyone with TOTP. Recovering from a leaked Cloak key therefore means clearing each Cloak column and entering the secrets again, and no tool does that today.
+
+## Container Apps cost
+
+Monthly cost in Norway East at the sizes in `deploy/azure/main.bicep`, as of 2026-10-27, is about USD 46 to 100:
+
+| Item | USD per month |
+|---|---|
+| Container App, 1 vCPU and 2 GiB | 24 idle to 73 busy |
+| PostgreSQL Flexible Server, Standard_B1ms | 16 |
+| Storage account | 5 |
+| Azure Files share | 2 |
+| Log Analytics | 0 to 3 |
+| Key Vault | under 0.10 |
+
+A consumption-only environment has no environment management charge.
