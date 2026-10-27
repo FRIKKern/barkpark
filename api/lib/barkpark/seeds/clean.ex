@@ -145,13 +145,15 @@ defmodule Barkpark.Seeds.Clean do
     else
       case System.get_env("BARKPARK_SEED_ADMIN_TOKEN") do
         raw when is_binary(raw) and raw != "" ->
-          mint_admin_token!(raw, scope)
+          token = mint_admin_token!(raw, scope)
           IO.puts("Admin token installed from BARKPARK_SEED_ADMIN_TOKEN (not echoed).")
+          print_operator_id(token)
 
         _ ->
           raw = "bp_admin_" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
-          mint_admin_token!(raw, scope)
+          token = mint_admin_token!(raw, scope)
           print_token_banner(raw)
+          print_operator_id(token)
       end
     end
   end
@@ -229,6 +231,19 @@ defmodule Barkpark.Seeds.Clean do
       {:token_hash, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
       _ -> false
     end)
+  end
+
+  # This token has no owner user, so BARKPARK_OPERATOR_EMAILS can never match
+  # it. Once the operator allowlist is armed, its row id on
+  # BARKPARK_OPERATOR_TOKEN_IDS is the only way it reaches the operator routes
+  # (`bp org`, secrets, self-update). The id is not a secret; printing it here
+  # means nobody has to find it with SQL.
+  defp print_operator_id(%{id: id}) do
+    IO.puts("""
+    Admin token id: #{id}
+      To give this token platform operator access, add the id to
+      BARKPARK_OPERATOR_TOKEN_IDS and restart.\
+    """)
   end
 
   defp print_token_banner(raw) do
