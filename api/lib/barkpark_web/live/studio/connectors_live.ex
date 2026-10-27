@@ -615,7 +615,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         oauth_gate(
           provider,
           gettext(
-            "Connect Linear is not configured on this instance — it needs a Linear OAuth app (a client id from linear.app/settings/api and a public callback URL). See docs/ops/linear-app.md."
+            "Connect Linear is not configured on this instance. It needs a Linear OAuth app from linear.app/settings/api. Set CONNECTORS_LINEAR_CLIENT_ID to its client id and CONNECTORS_LINEAR_REDIRECT_URI to its public callback URL."
           )
         )
 
