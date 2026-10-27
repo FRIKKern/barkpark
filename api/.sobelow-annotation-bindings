@@ -182,4 +182,5 @@ lib/barkpark_web/live/studio/sheet_grid.ex	read_import_upload
 lib/barkpark_web/plugs/idempotency.ex	replay
 lib/barkpark_web/plugs/root_assets.ex	send_asset
 lib/barkpark_web/router/plugins.ex	public_root_session_name
+lib/barkpark_web/sign_in_failure.ex	respond
 lib/barkpark_web/static_assets.ex	fresh_hash
