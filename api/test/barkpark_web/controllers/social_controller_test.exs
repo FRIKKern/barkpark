@@ -35,7 +35,7 @@ defmodule BarkparkWeb.SocialControllerTest do
     loc = redirected_to(conn, 302)
     assert loc =~ "https://accounts.google.com/o/oauth2/v2/auth?"
     assert loc =~ "client_id=cid"
-    assert get_session(conn, :social_state)
+    assert [_state] = get_session(conn, :sso_states)
   end
 
   test "GET callback with matching state mints a session", %{conn: conn} do
@@ -198,5 +198,27 @@ defmodule BarkparkWeb.SocialControllerTest do
       |> get("/v1/auth/social/google/callback?error[]=x&state=s1")
 
     assert json_response(conn, 401)
+  end
+
+  test "after two starts, the callback for the first one signs in; its state works once" do
+    Application.put_env(:barkpark, :social_test, %{
+      "email" => "two@example.com",
+      "sub" => "g-two",
+      "id" => "g-two"
+    })
+
+    first = get(build_conn(), "/v1/auth/social/google/start")
+    %{"state" => state} = URI.decode_query(URI.parse(redirected_to(first, 302)).query)
+    second = get(recycle(first), "/v1/auth/social/google/start")
+
+    assert second
+           |> recycle()
+           |> get("/v1/auth/social/google/callback?code=abc&state=#{state}")
+           |> json_response(201)
+
+    assert second
+           |> recycle()
+           |> get("/v1/auth/social/google/callback?code=abc&state=#{state}")
+           |> json_response(400)
   end
 end
