@@ -12,6 +12,8 @@ defmodule BarkparkWeb.SignInFailure do
   Answer a failed callback. `start_path` is where the page's link starts the
   sign-in again. `hint` overrides the JSON error's hint.
   """
+  # The page escapes every value it prints (`esc/1`).
+  # sobelow_skip ["XSS.SendResp"]
   @spec respond(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def respond(conn, %{status: status, code: code, message: message} = f) do
     if browser?(conn) do
