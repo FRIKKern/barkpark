@@ -15,7 +15,6 @@ api/lib/barkpark_web/live/studio/connectors_live.ex | link | docs/ops/linear-app
 # Right as written.
 docs/setup/CLAUDE-CODE.md | env | CLAUDE_CODE_WORKFLOWS | external | Claude Code reads it, not Barkpark
 docs/setup/COPILOT.md | env | COPILOT_MCP_ | external | GitHub's prefix for Copilot agent secrets
-docs/setup/SELF-HOST.md | env | STUDIO_SIGN_IN | external | Studio setting, read by FRIKKern/barkpark-studio
 docs/setup/TASK-SYSTEM.md | path | api/lib/x.ex | example | shows the shape of a symbol citation
 docs/contracts/dispatch-areas.md | path | internal/x.go | example | shows the shape of an area path
 docs/contracts/dispatch-areas.md | path | internal/cli/x.go | example | shows the shape of an area path

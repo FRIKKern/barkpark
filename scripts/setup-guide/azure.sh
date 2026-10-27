@@ -8,8 +8,8 @@
 #   scripts/setup-guide/azure.sh down <rg>          delete the group and wait
 #
 # `up` refuses a group that already exists, so a run starts from empty. The
-# VM is Ubuntu 22.04, Standard_D2als_v7, sudo user azureuser, ports 22, 80
-# and 443. Set AZ_SUBSCRIPTION to pin a subscription.
+# VM is Ubuntu 22.04, Standard_D2als_v7, sudo user azureuser with the key
+# ~/.ssh/barkpark, ports 22, 80 and 443. Set AZ_SUBSCRIPTION to pin a subscription.
 set -euo pipefail
 
 LOCATION="${LOCATION:-swedencentral}"
@@ -31,8 +31,9 @@ case "$cmd" in
     ;;
   vm)
     label="${3:?dns label}"
+    [ -f "$HOME/.ssh/barkpark" ] || ssh-keygen -t ed25519 -N '' -f "$HOME/.ssh/barkpark"
     az vm create -g "$rg" -n "$VM_NAME" --image Ubuntu2204 --size "$SIZE" \
-      --location "$LOCATION" --admin-username azureuser --generate-ssh-keys \
+      --location "$LOCATION" --admin-username azureuser --ssh-key-values "$HOME/.ssh/barkpark.pub" \
       --public-ip-address-dns-name "$label" ${sub[@]+"${sub[@]}"} -o none
     az vm open-port -g "$rg" -n "$VM_NAME" --port 80,443 --priority 900 ${sub[@]+"${sub[@]}"} -o none
     "$0" dns "$rg" "$label"
