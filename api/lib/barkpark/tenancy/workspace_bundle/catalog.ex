@@ -197,6 +197,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # the live E1/E2/E3 scans never surface them; pinned here so the sentinel is
   # clear. Teardown is NOT export: `Tenancy.delete_workspace/1` deletes the
   # workspace's chats explicitly (`delete_workspace_chats/1`, owner ruling #32).
+  # sso_flows: one row per started OIDC or social sign-in, before any user or
+  # workspace is known, gone after 10 minutes. Instance state, never exported.
   @pinned_non_tenant ~w(
     chat_messages chat_runtime_telemetry_events chat_sessions
     codelist_value_translations codelist_values
@@ -207,7 +209,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
     scim_groups search_refresh_pending scim_tokens social_identities
-    social_providers status_incidents user_email_tokens user_sessions users
+    social_providers sso_flows status_incidents user_email_tokens user_sessions users
     webauthn_challenge_replays webauthn_credentials
   )
 
