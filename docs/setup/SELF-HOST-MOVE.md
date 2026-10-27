@@ -23,7 +23,7 @@ These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backu
      --database-url "postgresql://barkpark:$PASSWORD@$PG.postgres.database.azure.com/barkpark?sslmode=verify-full&sslrootcert=system"
    ```
 
-   Ubuntu's PostgreSQL is 14 on 22.04 and 16 on 24.04, and the template runs 17. bp 1.26.1 and newer restore into the same or a newer major. bp 1.26.0 and older refuse any major but the backup's.
+   Ubuntu's PostgreSQL is 14 on 22.04 and 16 on 24.04, and the template runs 17. bp 1.26.2 and newer restore into the same or a newer major. Older bp refuses any major but the backup's.
 8. Start the app: `az containerapp update -g "$RG" -n barkpark --set-env-vars ...` with the [Pensum settings](SELF-HOST.md#pensum-settings), `BARKPARK_KEK_VERSION` and `BARKPARK_OPERATOR_TOKEN_IDS` from `.env` makes a new revision. API tokens move with the database, so the VM's admin token still works and the target skips its seed token.
 9. Wait for `/readyz` to answer 200. `/v1/auth/oidc/<org>/start` answers 302 only when the cloak key opens the SSO secret. Open a document with an encrypted field, and compare `bp schema ls` with the source.
 10. Repoint DNS. Keep `PHX_HOST`, or passkeys and the Entra redirect URI stop working. Container Apps takes a custom domain only after a TXT record `asuid.<host>`, so a VM on a `cloudapp.azure.com` name needs your own domain before the move.
