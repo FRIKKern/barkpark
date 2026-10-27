@@ -18,7 +18,7 @@ scripts/entra-app-register.sh --host barkpark.example.com --org gyldendal \
   --secret-file ./entra-client-secret --add-owner owner@example.com
 ```
 
-For an app made in the portal, pass `--app-id <appId>` with its Application (client) ID, and `--owners-group <name>` when the owners group has another name than `Barkpark <org> owners`.
+The app's display name is `Barkpark <org>`; pass `--name <display name>` for another. For an app made in the portal, pass `--app-id <appId>` with its Application (client) ID, and `--owners-group <name>` when the owners group has another name than `Barkpark <org> owners`.
 
 The script does these steps and is safe to run again:
 
@@ -35,27 +35,31 @@ At the end it prints the tenant id, client id, owners group id, secret expiry da
 Run the printed commands on your machine with an operator token. They look like this:
 
 ```bash
-bp org create gyldendal Gyldendal
-bp org attach-workspace gyldendal default
+bp org create gyldendal Gyldendal --yes
+bp org attach-workspace gyldendal default --yes
 bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$(cat ./entra-client-secret)" \
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \
   --client_secret_expires_at <secret expiry date> \
-  --set group_role_mappings:='{"<owners group id>":"owner"}'
+  --set group_role_mappings:='{"<owners group id>":"owner"}' --yes
 ```
+
+`bp` asks before it writes to a server that is not on this machine, and without a terminal it refuses the write. `--yes` gives that answer up front.
 
 Add more groups to the mapping, such as an editors group mapped to `member`. The keys are group object ids. Each sign-in sets the role from the user's groups and can lower it, so always map the owners group to `owner`. With `BARKPARK_OIDC_KEEP_OWNER=on`, Barkpark refuses a mapping that maps no group to `owner` while the organization has an owner, and a sign-in never lowers a workspace's last owner.
 
 The scopes must be `openid profile email`. The `profile` scope gives Barkpark `preferred_username`, which the UPN match below needs. Fix a connection made with other scopes:
 
 ```bash
-bp org oidc-update gyldendal --scopes "openid profile email"
+bp org oidc-update gyldendal --scopes "openid profile email" --yes
 ```
 
 ## Entra MFA counts as Barkpark MFA
 
-`bp org oidc-update <org> --trust_idp_mfa` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
+`bp org oidc-update <org> --trust_idp_mfa --yes` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
 
-Conditional Access needs Entra ID P1. Without P1, MFA must come from security defaults or per-user MFA. `trust_idp_mfa` then depends on Entra putting `mfa` in the `amr` claim, so check a test sign-in before you turn it on.
+Conditional Access needs Entra ID P1. Without P1, MFA must come from security defaults or per-user MFA.
+
+Turn `trust_idp_mfa` on after a test sign-in through the sign-in URL with MFA, with or without P1. On 2026-10-27 such a sign-in to an app made by the script sent `amr` with `mfa` in it. The Entra admin center lists the test sign-in under Sign-in logs, with its authentication details.
 
 
 ## The bootstrap owner

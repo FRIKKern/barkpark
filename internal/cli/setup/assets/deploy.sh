@@ -806,6 +806,9 @@ if [ -n "$ADMIN_TOKEN" ]; then
   echo "    bp setup --target connect --server $_server --token \"\$(ssh $SSH_LOGIN sudo cat $ADMIN_TOKEN_FILE)\""
   echo ""
 fi
+echo "  For a separate Studio, a workspace owner or admin gets its BARKPARK_TOKEN line with:"
+echo "    bp instance studio-token --workspace default"
+echo ""
 echo "  SSH workflow:"
 echo "    ssh $SSH_LOGIN"
 echo "    sudo -i"

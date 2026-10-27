@@ -316,22 +316,27 @@ Secret expires:    ${EXPIRES:-unknown}
 
 Sign-ins stop when the secret expires. The commands below store the expiry
 date, and Barkpark warns 30, 14 and 7 days ahead when
-BARKPARK_TOKEN_EXPIRY_WARNINGS=on. Next, as a Barkpark operator:
+BARKPARK_TOKEN_EXPIRY_WARNINGS=on. Next, as a Barkpark operator. --yes answers
+bp's confirmation for a write to a server that is not on this machine:
 
-bp org create $ORG <display name>
-bp org attach-workspace $ORG default
+bp org create $ORG <display name> --yes
+bp org attach-workspace $ORG default --yes
 bp org oidc-create $ORG "https://login.microsoftonline.com/$TENANT/v2.0" "$APP_ID" $SECRET_ARG \\
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \\
   --client_secret_expires_at "${EXPIRES:-<expiry date>}" \\
-  --set group_role_mappings:='$MAPPING'
+  --set group_role_mappings:='$MAPPING' --yes
 
 When the connection already exists, set the scopes and the mapping with:
 
-bp org oidc-update $ORG --scopes "openid profile email" --set group_role_mappings:='$MAPPING'
+bp org oidc-update $ORG --scopes "openid profile email" --set group_role_mappings:='$MAPPING' --yes
+
+After a test sign-in with MFA at the sign-in URL, count Entra MFA as Barkpark MFA:
+
+bp org oidc-update $ORG --trust_idp_mfa --yes
 
 After a new secret, store it with:
 
-bp org oidc-rotate-secret $ORG $SECRET_ARG --client_secret_expires_at "${EXPIRES:-<expiry date>}"
+bp org oidc-rotate-secret $ORG $SECRET_ARG --client_secret_expires_at "${EXPIRES:-<expiry date>}" --yes
 
 Instance settings that go with this connection, described in docs/setup/ENTRA.md:
 BARKPARK_OIDC_KEEP_OWNER=on BARKPARK_OIDC_EMAIL_FROM_UPN=on
