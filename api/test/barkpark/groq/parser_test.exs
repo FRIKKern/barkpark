@@ -89,6 +89,38 @@ defmodule Barkpark.Groq.ParserTest do
     end
   end
 
+  # task-f5fecd9690f62a7e: an integer literal past int64 is clamped to the
+  # int64 bound, then read as a double, as on Sanity (ecu57yeh, 27 Oct).
+  # Arithmetic stays in doubles; a float literal is never clamped.
+  test "an integer literal past int64 is clamped to the int64 bound" do
+    big = "123456789012345678901234567890"
+    two_63 = 9.223372036854776e18
+
+    for {q, want} <- [
+          {big, two_63},
+          {"-" <> big, -two_63},
+          {"-(#{big})", -two_63},
+          {"99999999999999999999", two_63},
+          {"00" <> big, two_63},
+          {String.duplicate("1234567890", 33), two_63},
+          {"[#{big}]", [two_63]},
+          {~s|{"n": 99999999999999999999}|, %{"n" => two_63}},
+          {big <> " + 1", two_63},
+          {big <> " * 2", 1.8446744073709552e19},
+          {big <> " - 9223372036854775807", 0},
+          {big <> " == 9223372036854775807", true},
+          {big <> " > 9223372036854775806", false},
+          {"math::sum([#{big}, 1])", two_63},
+          {"9223372036854775808", two_63},
+          {"-9223372036854775809", -two_63},
+          {"9007199254740993", 9_007_199_254_740_992},
+          {big <> ".5", 1.2345678901234568e29},
+          {"1e30", 1.0e30}
+        ] do
+      assert eval!(q) == want, q
+    end
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 

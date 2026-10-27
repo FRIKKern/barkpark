@@ -643,6 +643,8 @@ defmodule Barkpark.Groq.Parser do
     end
   end
 
+  @int64_max 9_223_372_036_854_775_807
+
   defp parse_number(s, pos) do
     int_len = digits_len(s, pos)
     p = pos + int_len
@@ -671,8 +673,11 @@ defmodule Barkpark.Groq.Parser do
 
     value =
       case kind do
+        # Sanity reads an integer literal into an int64, clamping one past
+        # its range to the bound (task-f5fecd9690f62a7e). A literal is never
+        # negative here: the minus is its own operator.
         :integer ->
-          text |> String.to_integer() |> Barkpark.Groq.Values.num()
+          text |> String.to_integer() |> min(@int64_max) |> Barkpark.Groq.Values.num()
 
         _ ->
           # Past the double range (`1e400`) Float.parse refuses the text;
