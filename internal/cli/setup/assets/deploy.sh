@@ -456,12 +456,14 @@ set -a; source "$APP_DIR/.env"; set +a
 # The token goes to a root-only file, never to stdout, so it stays out of ssh
 # logs and CI output. The file is written before the build, so it survives a
 # failed run. A re-run reuses the token in the file: the seed installs a token
-# only when no unrevoked admin token exists, so a fresh one would not work. For
-# the same reason a box with an existing .env and no token file gets no new
-# token; its first admin token still stands.
+# only when no unrevoked admin token exists, so a fresh one would not work. A
+# box with an existing .env and no token file already has an admin token the
+# seed will not replace. After the seed, that box gets a new one from the
+# server-side recovery command (start.sh admin-token), into the same file.
 SEED_PROFILE="${BARKPARK_SEED_PROFILE:-clean}"
 ADMIN_TOKEN=""
 ADMIN_TOKEN_FILE="${BARKPARK_ADMIN_TOKEN_FILE:-/etc/barkpark/admin-token}"
+RECOVERY_MINT=""
 if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; then
   if [ -s "$ADMIN_TOKEN_FILE" ]; then
     ADMIN_TOKEN="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
@@ -470,6 +472,8 @@ if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; the
     mkdir -p "$(dirname "$ADMIN_TOKEN_FILE")"
     chmod 700 "$(dirname "$ADMIN_TOKEN_FILE")"
     (umask 077; printf '%s\n' "$ADMIN_TOKEN" > "$ADMIN_TOKEN_FILE")
+  else
+    RECOVERY_MINT=1
   fi
   if [ -n "$ADMIN_TOKEN" ]; then
     export BARKPARK_SEED_ADMIN_TOKEN="$ADMIN_TOKEN"
@@ -494,6 +498,19 @@ SEED_LOG="$(mktemp)"
 mix run priv/repo/seeds.exs | tee "$SEED_LOG"
 ADMIN_TOKEN_ID="$(sed -n 's/^Admin token id: *\([A-Za-z0-9-]*\).*/\1/p' "$SEED_LOG" | tail -n1)"
 rm -f "$SEED_LOG"
+# A re-run with no token file: the seed kept the existing admin token, whose
+# value is gone. Mint a new one with the recovery command. It prints only the id
+# and the path. A failure leaves the box running and says what to run by hand.
+if [ -n "$RECOVERY_MINT" ] && [ -z "$ADMIN_TOKEN_ID" ] && [ ! -e "$ADMIN_TOKEN_FILE" ]; then
+  echo ">> No admin token file at $ADMIN_TOKEN_FILE. Minting a new admin token."
+  if _mint_out="$(mix barkpark.admin_token --label "admin (deploy.sh re-run)" --file "$ADMIN_TOKEN_FILE")"; then
+    printf '%s\n' "$_mint_out"
+    ADMIN_TOKEN_ID="$(printf '%s\n' "$_mint_out" | sed -n 's/^Admin token id: *\([A-Za-z0-9-]*\).*/\1/p' | tail -n1)"
+    ADMIN_TOKEN="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
+  else
+    echo "!! Admin token mint failed. Run it by hand: sudo $APP_DIR/api/start.sh admin-token --label admin" >&2
+  fi
+fi
 ADMIN_TOKEN_ID_FILE="$ADMIN_TOKEN_FILE.id"
 if [ -n "$ADMIN_TOKEN_ID" ]; then
   mkdir -p "$(dirname "$ADMIN_TOKEN_ID_FILE")"

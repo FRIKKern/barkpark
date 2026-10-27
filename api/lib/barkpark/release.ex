@@ -287,6 +287,30 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  Mint an admin token from inside the release when the token file is lost.
+  `bin/admin-token` (a release overlay) calls it:
+
+      /app/bin/admin-token --label "admin (recovered)" --file /tmp/admin-token
+
+  The release twin of `mix barkpark.admin_token`. `bin/barkpark eval` passes
+  no arguments, so the overlay puts them in `BARKPARK_ADMIN_TOKEN_ARGV`, one
+  per line. Boots the narrowed one-shot tree, then halts with the exit status
+  of `Barkpark.Auth.AdminTokenRecovery.cli/1`.
+
+  `:argv`, `:boot` and `:halt` exist for tests.
+  """
+  def admin_token(opts \\ []) do
+    argv =
+      Keyword.get_lazy(opts, :argv, fn ->
+        "BARKPARK_ADMIN_TOKEN_ARGV" |> System.get_env("") |> String.split("\n", trim: true)
+      end)
+
+    Keyword.get(opts, :boot, &Barkpark.OneShot.boot!/0).()
+    status = Barkpark.Auth.AdminTokenRecovery.cli(argv)
+    Keyword.get(opts, :halt, &System.halt/1).(status)
+  end
+
+  @doc """
   Hash the media files born before `media_files.sha1` (task-b6e57c37f6928344),
   so upload dedupe and `GET /v1/media/:ds?sha1=` cover them too:
 

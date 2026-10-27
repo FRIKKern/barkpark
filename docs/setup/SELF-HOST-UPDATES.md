@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-updates | budget: 2500tok -->
 # Update an instance and rotate its credentials
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). It covers updates and rollbacks on a single VM and on Container Apps, API token rotation and OIDC client secret rotation. The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). It covers updates and rollbacks on a single VM and on Container Apps, API token rotation, a lost admin token and OIDC client secret rotation. The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
 
 ## Update and roll back a single VM
 
@@ -43,6 +43,29 @@ An operator token loses operator access when it is rotated, because `BARKPARK_OP
 1. Run `bp token rotate <id> --grace 30m` and keep the new token.
 2. In `/opt/barkpark/.env`, replace the old id in `BARKPARK_OPERATOR_TOKEN_IDS` with the new id, and run `sudo systemctl restart barkpark`. Requests failed for 7 seconds during the restart.
 3. Write the new token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, mode 600, and run `bp setup --target connect` with it.
+
+## Lost the admin token
+
+`bp instance admin-token` covers instances that Barkpark Cloud manages. On your own VM or Container App, mint a new admin token on the server. The command adds a token with `read`, `write` and `admin` in the default workspace. It writes the token to a file, mode 600, and the id to the same path with `.id` added. It prints only the id and the path. It refuses to replace an existing file unless you pass `--force`. The audit log records the mint as `admin_token_recovery_mint`.
+
+**On a VM.** The default file is `/etc/barkpark/admin-token`:
+
+```bash
+sudo /opt/barkpark/api/start.sh admin-token --label "admin (recovered)"
+```
+
+A `deploy.sh` re-run on a box with no token file runs the same command.
+
+**On Container Apps.** The app runs as uid 10001, so name a file under `/tmp`. Open a shell in the app, mint, copy the token and delete the files:
+
+```bash
+az containerapp exec -g "$RG" -n "$APP" --command /bin/bash
+/app/bin/admin-token --label "admin (recovered)" --file /tmp/admin-token
+cat /tmp/admin-token
+rm /tmp/admin-token /tmp/admin-token.id
+```
+
+Connect with `bp setup --target connect` and the new token. When `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED` is set, add the id to `BARKPARK_OPERATOR_TOKEN_IDS` and restart, or `bp org` refuses the token. Once connected, `bp token ls -p default` lists the lost token. Revoke it with `bp token revoke <old id> -p default`.
 
 ## Rotate the OIDC client secret
 
