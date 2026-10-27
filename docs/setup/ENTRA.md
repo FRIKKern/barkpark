@@ -18,13 +18,15 @@ scripts/entra-app-register.sh --host barkpark.example.com --org gyldendal \
   --secret-file ./entra-client-secret --add-owner owner@example.com
 ```
 
+For an app made in the portal, pass `--app-id <appId>` with its Application (client) ID, and `--owners-group <name>` when the owners group has another name than `Barkpark <org> owners`.
+
 The script does these steps and is safe to run again:
 
-1. It creates the app registration, or finds it by name. The app is single tenant (`AzureADMyOrg`) and has the redirect URI on the Web platform. A single-page application (SPA) redirect does not work, because Barkpark exchanges the code on the server with a client secret.
-2. It turns on the `groups` claim with group object ids, adds the optional `email` and `amr` claims to the ID token, and adds the Microsoft Graph delegated permissions `openid`, `profile` and `email`. It then grants admin consent.
+1. It creates the app registration, or finds it by `--app-id` or by name. The app is single tenant (`AzureADMyOrg`) and has the redirect URI on the Web platform. A single-page application (SPA) redirect does not work, because Barkpark exchanges the code on the server with a client secret.
+2. It turns on the `groups` claim with group object ids, adds the optional `email` and `amr` claims to the ID token, and adds the Microsoft Graph delegated permissions `openid`, `profile` and `email`. It then grants admin consent. Consent given right after the permissions are added can miss a scope, so the script retries for about a minute and reads the tenant-wide `oauth2PermissionGrants` entry. It stops with an error when that entry never holds all three scopes.
 3. It creates the service principal, which is the enterprise app that users sign in to.
 4. It creates the owners security group and adds each `--add-owner` user to it.
-5. It creates a client secret and writes it to `--secret-file` with mode 600. The secret is never printed. A second run keeps the secret while the file holds one. `--rotate-secret` creates a new one.
+5. It creates a client secret only when the app has none, and writes it to `--secret-file` with mode 600. The secret is never printed. A rerun never creates a secret unless you pass `--rotate-secret`. Without the secret file it prints the expiry date of each existing secret instead. Entra never shows a secret again, so keep the file from the first run.
 
 At the end it prints the tenant id, client id, owners group id, secret expiry date, the sign-in URL and the `bp org` commands to run next. Record the expiry date in the run log. Sign-ins stop on that date, so rotate the secret before it with `--rotate-secret` and `bp org oidc-rotate-secret`.
 
@@ -42,11 +44,17 @@ bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$
 
 Add more groups to the mapping, such as an editors group mapped to `member`. The keys are group object ids. Each sign-in sets the role from the user's groups and can lower it, so always map the owners group to `owner`. With `BARKPARK_OIDC_KEEP_OWNER=on`, Barkpark refuses a mapping that maps no group to `owner` while the organization has an owner, and a sign-in never lowers a workspace's last owner.
 
-The `profile` scope gives Barkpark `preferred_username`, which the UPN match below needs. Barkpark does not read the `name` claim, so `profile` is not needed for display names.
+The scopes must be `openid profile email`. The `profile` scope gives Barkpark `preferred_username`, which the UPN match below needs. Fix a connection made with other scopes:
+
+```bash
+bp org oidc-update gyldendal --scopes "openid profile email"
+```
 
 ## Entra MFA counts as Barkpark MFA
 
 `bp org oidc-update <org> --trust_idp_mfa` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
+
+Conditional Access needs Entra ID P1. Without P1, MFA must come from security defaults or per-user MFA. `trust_idp_mfa` then depends on Entra putting `mfa` in the `amr` claim, so check a test sign-in before you turn it on.
 
 
 ## The bootstrap owner
@@ -76,7 +84,7 @@ Pensum does not need it when editors open the sign-in URL above and every accoun
 
 Entra puts at most 200 groups in a token. A user in more groups gets an overage claim, `_claim_names`, instead of `groups`. Barkpark does not call Microsoft Graph to read the groups. That user's existing role stays as it is, and a new user gets `member`.
 
-The script's default, `--group-claims application`, avoids this. Entra then puts only the groups assigned to the app in the token. The script assigns the owners group to the app. Assign each other mapped group in the portal under Enterprise applications, Users and groups. This mode counts direct members only and needs Entra ID P1. Without P1, run the script with `--group-claims security`, which sends every security group, and keep users who need a mapped role under 200 groups.
+`--group-claims application` avoids this. The script uses it when the tenant has Entra ID P1, which it reads from the `AAD_PREMIUM` service plan in the tenant's subscribed SKUs. Entra then puts only the groups assigned to the app in the token. The script assigns the owners group to the app. Assign each other mapped group in the portal under Enterprise applications, Users and groups. This mode counts direct members only and needs P1. Without P1 the script prints a note and uses `--group-claims security`, which sends every security group. An explicit `--group-claims application` without P1 stops with an error. Keep users who need a mapped role under 200 groups.
 
 ## Portal steps
 
