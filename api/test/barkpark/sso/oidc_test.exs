@@ -588,4 +588,108 @@ defmodule Barkpark.Sso.OidcTest do
       refute log =~ "who@example.com"
     end
   end
+
+  describe "group mappings never leave an org with no owner" do
+    setup do
+      Application.put_env(:barkpark, :oidc_keep_owner, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_keep_owner) end)
+    end
+
+    defp owned_org do
+      {:ok, org} = Tenancy.create_organization(%{slug: "ownedorg", name: "Owned"})
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "owned-ws", name: "WS"})
+      {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+      {:ok, owner} =
+        Accounts.register_user(%{email: "sso@oidcorg.com", password: "correct horse ok"})
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, owner.id, "owner", "user")
+      {org, ws, owner}
+    end
+
+    defp attrs(org, mappings) do
+      %{
+        organization_id: org.id,
+        issuer: @issuer,
+        client_id: @client_id,
+        client_secret: "s",
+        authorization_endpoint: @issuer <> "/authorize",
+        token_endpoint: @issuer <> "/token",
+        jwks_uri: @issuer <> "/jwks",
+        group_role_mappings: mappings
+      }
+    end
+
+    defp role_in(ws_id, user_id) do
+      Barkpark.Repo.one(
+        from m in Barkpark.Tenancy.Membership,
+          where:
+            m.workspace_id == ^ws_id and m.principal_type == "user" and
+              m.principal_id == ^user_id,
+          select: m.role
+      )
+    end
+
+    test "a mapping with no owner group is refused when the org has an owner" do
+      {org, _ws, _owner} = owned_org()
+
+      assert {:error, :no_owner_mapping} =
+               Oidc.create_connection(attrs(org, %{"editors" => "member"}))
+
+      {:ok, c} = Oidc.create_connection(attrs(org, %{}))
+
+      assert {:error, :no_owner_mapping} =
+               Oidc.update_connection(c, %{group_role_mappings: %{"editors" => "admin"}})
+    end
+
+    test "a mapping that keeps an owner group is saved as before" do
+      {org, _ws, _owner} = owned_org()
+      mappings = %{"owners" => "owner", "editors" => "member"}
+
+      assert {:ok, c} = Oidc.create_connection(attrs(org, mappings))
+      assert c.group_role_mappings == mappings
+
+      assert {:ok, c} = Oidc.update_connection(c, %{group_role_mappings: %{"owners" => "owner"}})
+      assert c.group_role_mappings == %{"owners" => "owner"}
+      assert {:ok, _} = Oidc.update_connection(c, %{group_role_mappings: %{}})
+    end
+
+    test "a sign-in never demotes the last owner" do
+      {org, ws, owner} = owned_org()
+      {:ok, c} = Oidc.create_connection(attrs(org, %{"owners" => "owner", "editors" => "member"}))
+      verify_domain!(org, "oidcorg.com")
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+      assert role_in(ws.id, owner.id) == "owner"
+    end
+
+    test "with the setting off, mappings and sign-ins behave as before" do
+      Application.delete_env(:barkpark, :oidc_keep_owner)
+      {org, ws, owner} = owned_org()
+      verify_domain!(org, "oidcorg.com")
+      assert {:ok, c} = Oidc.create_connection(attrs(org, %{"editors" => "member"}))
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, _, _} = callback(c)
+      assert role_in(ws.id, owner.id) == "member"
+    end
+
+    test "a sign-in demotes an owner while another owner remains" do
+      {org, ws, owner} = owned_org()
+      {:ok, c} = Oidc.create_connection(attrs(org, %{"owners" => "owner", "editors" => "member"}))
+
+      {:ok, other} =
+        Accounts.register_user(%{email: "other@oidcorg.com", password: "correct horse ok"})
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, other.id, "owner", "user")
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+      assert role_in(ws.id, owner.id) == "member"
+      assert role_in(ws.id, other.id) == "owner"
+    end
+  end
 end

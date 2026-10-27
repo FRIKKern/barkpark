@@ -944,6 +944,13 @@ if System.get_env("BARKPARK_OIDC_EMAIL_FROM_UPN") in ~w(1 true yes on) do
   config :barkpark, :oidc_email_from_upn, true
 end
 
+# Keep an owner through OIDC group mappings (`Barkpark.Sso`). When on, a mapping
+# change that maps no group to owner is refused while the org has an owner, and
+# a group sync never lowers a workspace's last owner. Off unless truthy.
+if System.get_env("BARKPARK_OIDC_KEEP_OWNER") in ~w(1 true yes on) do
+  config :barkpark, :oidc_keep_owner, true
+end
+
 # The org sign-in policy (allowed_auth_methods, require_mfa) on the doors that
 # carry no second factor: API token paste and the Barkpark Cloud handoff
 # (`BarkparkWeb.SessionIssuer.policy_refusal/3`). Off unless truthy.
