@@ -612,4 +612,42 @@ defmodule Barkpark.Groq.ParserTest do
       assert c.types == ["a"]
     end
   end
+
+  # task-90c6e9c5557cfcea: string() and array::join write a number as Sanity
+  # does (ecu57yeh, 27 Oct): Go's 'g' format, exponent form when the decimal
+  # exponent is below -4 or at least 6, the exponent signed and two digits.
+  test "a number turns into a string as on Sanity" do
+    for {n, want} <- [
+          {"1", "1"},
+          {"-1", "-1"},
+          {"0", "0"},
+          {"1.5", "1.5"},
+          {"999999", "999999"},
+          {"1000000", "1e+06"},
+          {"1234567", "1.234567e+06"},
+          {"-1234567", "-1.234567e+06"},
+          {"1234567.5", "1.2345675e+06"},
+          {"1e6 + 0.5", "1.0000005e+06"},
+          {"-999999.5", "-999999.5"},
+          {"1e15", "1e+15"},
+          {"1e16", "1e+16"},
+          {"9007199254740993", "9.007199254740992e+15"},
+          {"1e21", "1e+21"},
+          {"-1e21", "-1e+21"},
+          {"1.5e300", "1.5e+300"},
+          {"0.0001", "0.0001"},
+          {"0.00001", "1e-05"},
+          {"-1e-5", "-1e-05"},
+          {"2.5e-5", "2.5e-05"},
+          {"0.0000001", "1e-07"},
+          {"123.456", "123.456"},
+          {"0.1 + 0.2", "0.30000000000000004"},
+          {"10 / 3", "3.3333333333333335"},
+          {"5e-324", "5e-324"}
+        ] do
+      assert eval!("string(#{n})") == want, n
+    end
+
+    assert eval!(~s|array::join([1000000, 0.00001, 12, 1.5], ",")|) == "1e+06,1e-05,12,1.5"
+  end
 end
