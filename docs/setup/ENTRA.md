@@ -1,11 +1,13 @@
 <!-- doc-tier: human | canonical-for: entra-app-registration | budget: 2500tok -->
 # Sign in with Microsoft Entra ID
 
-This guide registers the Entra app that a Barkpark organization signs in through, and connects it to Barkpark. The instance settings are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#sso-with-entra-id).
+This guide registers the Entra app that a Barkpark organization signs in through, and connects it to Barkpark. The instance setup is in [SELF-HOST.md](SELF-HOST.md#sign-in-with-entra-id).
 
-## Choose the organization slug first
+## Sign-in URL and redirect URI
 
 The redirect URI holds the organization slug: `https://<host>/v1/auth/oidc/<org>/callback`. Entra accepts sign-ins only for the exact URI on the app. Pick the slug, such as `gyldendal`, before you register the app, and use the same slug in every `bp org` command.
+
+Editors sign in at `https://<host>/v1/auth/oidc/<org>/start`. The script prints both URLs.
 
 ## Register the app with the script
 
@@ -40,8 +42,6 @@ bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$
 
 Add more groups to the mapping, such as an editors group mapped to `member`. The keys are group object ids. Each sign-in sets the role from the user's groups and can lower it, so always map the owners group to `owner`. With `BARKPARK_OIDC_KEEP_OWNER=on`, Barkpark refuses a mapping that maps no group to `owner` while the organization has an owner, and a sign-in never lowers a workspace's last owner.
 
-Editors sign in at `https://<host>/v1/auth/oidc/<org>/start`.
-
 The `profile` scope gives Barkpark `preferred_username`, which the UPN match below needs. Barkpark does not read the `name` claim, so `profile` is not needed for display names.
 
 ## Entra MFA counts as Barkpark MFA
@@ -55,7 +55,7 @@ The `profile` scope gives Barkpark `preferred_username`, which the UPN match bel
 
 The bootstrap owner does not need domain verification. The owner holds a seat in the default workspace, and that seat lets the organization's connection sign the owner in.
 
-An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. Set up the break-glass account before you turn on `bp org auth-methods <org> sso`. See [the recommended settings](SELF-HOST-OPERATIONS.md#recommended-settings-for-a-pensum-instance).
+An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. Set up the break-glass account before you turn on `bp org auth-methods <org> sso`. See [Pensum settings](SELF-HOST.md#pensum-settings).
 
 ## Domain verification
 
