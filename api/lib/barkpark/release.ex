@@ -20,8 +20,59 @@ defmodule Barkpark.Release do
     for repo <- repos() do
       {:ok, _, _} =
         with_statement_timeout_lifted(repo, fn ->
-          with_repo.(repo, &run_migrations(&1, run_opts), [])
+          with_repo.(
+            repo,
+            fn repo ->
+              check_release_capture_secret!(repo)
+              run_migrations(repo, run_opts)
+            end,
+            []
+          )
         end)
+    end
+  end
+
+  @release_capture_migration 20_260_719_020_100
+
+  @doc """
+  Stop before any migration runs when the database still needs migration
+  20260719020100 and BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is missing or
+  shorter than 32 bytes.
+
+  That migration stores a hash of the secret and raises without it.
+  runtime.exs only warns about the secret, so on a fresh database the
+  container used to apply every earlier migration, then crash on that one
+  with a message that does not name the setting. A database that already
+  applied the migration does not need the secret to migrate, so this returns
+  `:ok` there and an existing instance keeps booting.
+
+  `:secret` and `:migrated_versions` exist for tests. The database is read
+  only when the secret is unusable.
+  """
+  @spec check_release_capture_secret!(Ecto.Repo.t(), keyword()) :: :ok
+  def check_release_capture_secret!(repo, opts \\ []) do
+    secret =
+      Keyword.get_lazy(opts, :secret, fn ->
+        Application.get_env(@app, :cycle_release_capture_hmac_secret)
+      end)
+
+    if is_binary(secret) and byte_size(secret) >= 32 do
+      :ok
+    else
+      versions =
+        Keyword.get_lazy(opts, :migrated_versions, fn -> Ecto.Migrator.migrated_versions(repo) end)
+
+      if @release_capture_migration in versions do
+        :ok
+      else
+        raise """
+        required settings are missing:
+          BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is not set or is shorter than 32 bytes
+        This database has not applied migration 20260719020100, which needs it, \
+        so no migration ran. Generate one with openssl rand -base64 32, set it, \
+        and restart. bp instance init writes it. See docs/setup/SELF-HOST-OPERATIONS.md.
+        """
+      end
     end
   end
 

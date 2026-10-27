@@ -31,8 +31,11 @@ const (
 	instanceTargetVM            = "vm"
 )
 
-// instanceRequired are the settings api/config/runtime.exs refuses to boot
-// without in prod.
+// instanceRequired are the settings a fresh prod instance does not start
+// without. api/config/runtime.exs refuses to boot without the first six.
+// BARKPARK_RELEASE_CAPTURE_HMAC_SECRET only warns in runtime.exs, but
+// migration 20260719020100 raises without it, so a fresh database never
+// finishes migrating.
 var instanceRequired = []struct{ name, doc string }{
 	{"DATABASE_URL", instanceDocDatabase},
 	{"PHX_HOST", instanceDocContainer},
@@ -40,6 +43,7 @@ var instanceRequired = []struct{ name, doc string }{
 	{"BARKPARK_CLOAK_KEY", instanceDocKeys},
 	{"BARKPARK_KEK", instanceDocKeys},
 	{"PREVIEW_JWT_SECRET", instanceDocKeys},
+	{"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", instanceDocKeys},
 }
 
 // instanceRecommended is one recommended Pensum setting. A fixed value must
@@ -78,7 +82,7 @@ func (r instanceRecommended) appliesTo(target string) bool {
 
 // instanceSecretNames are the values init generates. Each one is written to
 // the env file only and never printed.
-var instanceSecretNames = []string{"SECRET_KEY_BASE", "BARKPARK_CLOAK_KEY", "BARKPARK_KEK", "PREVIEW_JWT_SECRET"}
+var instanceSecretNames = []string{"SECRET_KEY_BASE", "BARKPARK_CLOAK_KEY", "BARKPARK_KEK", "PREVIEW_JWT_SECRET", "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"}
 
 // instanceDeployOwned are the settings deploy.sh generates on a single VM and
 // keeps when it merges BARKPARK_ENV_FILE. init leaves them out for --target vm.
@@ -132,10 +136,11 @@ func instanceRandomBytes(n int) ([]byte, error) {
 
 // instanceGenerateSecrets returns fresh values in the shapes runtime.exs
 // accepts: SECRET_KEY_BASE is 88 characters (at least 64 bytes), the KEK is
-// base64 of exactly 32 bytes, and the database password is 48 hex characters
+// base64 of exactly 32 bytes, the release capture HMAC secret is 44
+// characters (at least 32 bytes), and the database password is 48 hex characters
 // so it needs no escaping in a URL.
 func instanceGenerateSecrets() (map[string]string, error) {
-	sizes := map[string]int{"SECRET_KEY_BASE": 64, "BARKPARK_CLOAK_KEY": 32, "BARKPARK_KEK": 32, "PREVIEW_JWT_SECRET": 48}
+	sizes := map[string]int{"SECRET_KEY_BASE": 64, "BARKPARK_CLOAK_KEY": 32, "BARKPARK_KEK": 32, "PREVIEW_JWT_SECRET": 48, "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET": 32}
 	out := map[string]string{}
 	for _, name := range instanceSecretNames {
 		b, err := instanceRandomBytes(sizes[name])

@@ -261,6 +261,11 @@ func instanceCheck(ctx context.Context, env map[string]string, opts instanceChec
 			add("PREVIEW_JWT_SECRET", instanceDocKeys, "PREVIEW_JWT_SECRET is shorter than 32 characters or repeats too few characters. Generate one with openssl rand -base64 48.")
 		}
 	}
+	if usable("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") {
+		if v := env["BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"]; len(v) < 32 || weakSecret(v) {
+			add("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET", instanceDocKeys, "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET is shorter than 32 bytes or repeats too few characters. A fresh database does not finish migrating without a valid one. Generate one with openssl rand -base64 32.")
+		}
+	}
 	seen := map[string]string{}
 	for _, name := range instanceSecretNames {
 		if !usable(name) {

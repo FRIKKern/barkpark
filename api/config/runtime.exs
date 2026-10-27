@@ -89,7 +89,9 @@ case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
 
       Every other endpoint serves normally and `mix ecto.migrate` runs, by \
       design: this file must never refuse to migrate for a feature the box may \
-      not use (fleet migration-lag census, 2026-09-19). Activating a release \
+      not use (fleet migration-lag census, 2026-09-19). A database that has \
+      not applied migration 20260719020100 is the exception: that migration \
+      needs the secret, and Barkpark.Release.migrate stops before it starts. Activating a release \
       gate or passing a public smoke will refuse with \
       :release_capture_signing_unavailable until the secret is set.
 
