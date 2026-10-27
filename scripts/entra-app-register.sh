@@ -88,7 +88,7 @@ else
   URIS=()
   while IFS= read -r uri; do
     [ -n "$uri" ] && URIS+=("$uri")
-  done < <(az ad app show --id "$APP_ID" --query "web.redirectUris[]" -o tsv)
+  done <<<"$(az ad app show --id "$APP_ID" --query "web.redirectUris[]" -o tsv)"
   if ! printf '%s\n' "${URIS[@]+"${URIS[@]}"}" | grep -qxF "$REDIRECT"; then
     az ad app update --id "$APP_ID" --web-redirect-uris "${URIS[@]+"${URIS[@]}"}" "$REDIRECT"
   fi
