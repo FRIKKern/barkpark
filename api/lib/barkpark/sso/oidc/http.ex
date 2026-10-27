@@ -15,6 +15,7 @@ defmodule Barkpark.Sso.Oidc.HTTP do
   defmodule ReqClient do
     @moduledoc false
     @behaviour Barkpark.Sso.Oidc.HTTP
+    require Logger
 
     @impl true
     def post_form(url, params, headers \\ []) do
@@ -28,11 +29,29 @@ defmodule Barkpark.Sso.Oidc.HTTP do
              finch: Barkpark.Auth.Finch,
              receive_timeout: 10_000
            ) do
-        {:ok, %{status: s, body: body}} when s in 200..299 and is_map(body) -> {:ok, body}
-        {:ok, %{status: s}} -> {:error, {:http_status, s}}
-        {:error, e} -> {:error, e}
+        {:ok, %{status: s, body: body}} when s in 200..299 and is_map(body) ->
+          {:ok, body}
+
+        {:ok, %{status: s, body: body}} ->
+          log_idp_error(url, s, body)
+          {:error, {:http_status, s}}
+
+        {:error, e} ->
+          {:error, e}
       end
     end
+
+    # The token endpoint names its refusal in `error` and `error_description`
+    # (RFC 6749 section 5.2). Neither carries a secret.
+    defp log_idp_error(url, status, %{"error" => error} = body) do
+      Logger.warning(
+        "[OIDC] token endpoint #{URI.parse(url).host} returned #{status} #{inspect(error)}: " <>
+          inspect(body["error_description"], printable_limit: 500)
+      )
+    end
+
+    defp log_idp_error(url, status, _body),
+      do: Logger.warning("[OIDC] token endpoint #{URI.parse(url).host} returned #{status}")
 
     @impl true
     def get_json(url) do
