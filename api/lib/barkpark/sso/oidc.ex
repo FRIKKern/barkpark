@@ -23,6 +23,7 @@ defmodule Barkpark.Sso.Oidc do
   step; the protocol logic here is fully covered by tests against a mock OP.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias Barkpark.{Accounts, Repo}
   alias Barkpark.Accounts.User
@@ -234,8 +235,17 @@ defmodule Barkpark.Sso.Oidc do
   def idp_mfa?(%OidcConnection{trust_idp_mfa: true} = c, claims) do
     amr = claims["amr"]
 
-    (is_list(amr) and "mfa" in amr) or
-      (c.mfa_acr not in [nil, ""] and claims["acr"] == c.mfa_acr)
+    result =
+      (is_list(amr) and "mfa" in amr) or
+        (c.mfa_acr not in [nil, ""] and claims["acr"] == c.mfa_acr)
+
+    # Method names and context ids only; nothing here identifies the user.
+    Logger.debug(fn ->
+      "[OIDC] MFA claims: amr=#{inspect(amr)} acr=#{inspect(claims["acr"])} " <>
+        "acrs=#{inspect(claims["acrs"])} counted=#{result}"
+    end)
+
+    result
   end
 
   def idp_mfa?(_c, _claims), do: false
