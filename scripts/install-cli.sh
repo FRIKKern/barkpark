@@ -32,7 +32,10 @@ else
   # releases (no bp assets), and one of those holding "latest" 404s every
   # unpinned install. The API lists newest-first; the [0-9.]* charset skips
   # prereleases like cli-v1.2.0-rc.1 (matching the old releases/latest rule).
-  api_url="https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30"
+  # per_page=100 is the API maximum. release-artifact.yml cuts several build-<sha>
+  # releases a day, so a page of 30 can hold no cli-v release at all, and the
+  # install then falls back to releases/latest.
+  api_url="https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=100"
   cli_tag="$( { curl -fsSL "$api_url" 2>/dev/null || wget -qO- "$api_url" 2>/dev/null || true; } \
     | sed -n 's/.*"tag_name"[: ]*"\(cli-v[0-9.]*\)".*/\1/p' | head -n 1 )"
   if [ -n "$cli_tag" ]; then
