@@ -192,6 +192,7 @@ EXEMPT = {
     "CI": "CI-only (2026-08-08)",
     "GITHUB_ACTIONS": "CI-only (2026-08-08)",
     "GITHUB_TOKEN": "CI-only (2026-08-08)",
+    "BARKPARK_ADMIN_TOKEN_ARGV": "set per call by the bin/admin-token release overlay to pass its arguments into Barkpark.Release.admin_token/1; not an operator knob (2026-10-27)",
     "BARKPARK_HTTP_IP": "set by @barkpark/engine to bind loopback in the App shape; a container bound to loopback is unreachable through its port map, so compose must not pass it (2026-10-05)",
 }
 
