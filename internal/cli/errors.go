@@ -88,6 +88,9 @@ var codeExit = map[string]int{
 	"share_expired": exitNotFound, // 410, bucketed as gone/not-found
 	"unauthorized":  exitAuth,
 	"forbidden":     exitAuth,
+	// 403 from POST /v1/auth/studio-tokens: the caller may not mint that
+	// workspace's Studio token.
+	"studio_token_forbidden": exitAuth,
 	// A filter/order over a field the caller may not read — semantically a
 	// permission denial (use a token that can read the field), so the auth
 	// bucket, even though the HTTP status is 422. Added when QueryController /
