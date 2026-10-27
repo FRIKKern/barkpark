@@ -20,7 +20,7 @@ services:
     # The published image, built from each server release by
     # .github/workflows/api-image.yml in the barkpark repo. To build from a
     # checkout instead, see docker-compose.override.yml.example.
-    image: ghcr.io/barkpark/api:latest
+    image: ghcr.io/frikkern/barkpark:latest
     restart: unless-stopped
     depends_on:
       postgres:
