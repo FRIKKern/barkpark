@@ -346,6 +346,12 @@ if [ -n "${BARKPARK_ENV_FILE:-}" ]; then
   if [ -n "$_kept" ]; then
     echo ">> Kept deploy.sh's own values, ignored the file's: $_kept"
   fi
+  # The file holds secrets and .env now has every value, so remove it. A file
+  # that is .env itself stays.
+  if [ "$(readlink -f "$BARKPARK_ENV_FILE")" != "$(readlink -f "$APP_DIR/.env")" ]; then
+    rm -f "$BARKPARK_ENV_FILE"
+    echo ">> Deleted $BARKPARK_ENV_FILE. Its settings are in $APP_DIR/.env."
+  fi
 fi
 
 # Re-derive the port from the .env that is actually on disk — the file
@@ -670,6 +676,30 @@ CADDYEOF
   fi
 fi
 
+# Caddy gets its certificate about 40 seconds after it starts. Wait until
+# https://$DOMAIN/readyz answers 200 with a certificate this box trusts, so the
+# printed login command works the moment the script returns. --resolve sends
+# the request to this box, so the wait does not depend on hairpin NAT.
+TLS_WAIT_S="${TLS_WAIT_S:-180}"
+HTTPS_OK=""
+if [ -n "$TLS_READY" ] && [ "$HEALTHY" = "1" ]; then
+  echo ">> TLS: waiting up to ${TLS_WAIT_S}s for https://$DOMAIN/readyz with a valid certificate..."
+  _t0=$(date +%s)
+  while :; do
+    if curl -fsS --max-time 5 --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/readyz" > /dev/null 2>&1; then
+      HTTPS_OK=1
+      echo "   HTTPS ready after $(( $(date +%s) - _t0 ))s"
+      break
+    fi
+    if [ $(( $(date +%s) - _t0 )) -ge "$TLS_WAIT_S" ]; then
+      echo "!! TLS: https://$DOMAIN/readyz gave no valid answer within ${TLS_WAIT_S}s." >&2
+      echo "   Check that DNS for $DOMAIN points at this server, then run: systemctl status caddy" >&2
+      break
+    fi
+    sleep 5
+  done
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
 # Azure and other clouds put a private address on the NIC (10.0.0.4) and NAT
@@ -713,6 +743,11 @@ if [ "$HEALTHY" != "1" ]; then
   echo "    curl -v http://localhost:$APP_PORT/status.json"
   echo ""
   echo "  Port checked: $APP_PORT (from PORT= in $APP_DIR/.env)"
+  echo ""
+fi
+if [ -n "$TLS_READY" ] && [ "$HEALTHY" = "1" ] && [ -z "${HTTPS_OK:-}" ]; then
+  echo "  HTTPS is NOT READY: https://$DOMAIN/readyz gave no valid answer within ${TLS_WAIT_S:-180}s."
+  echo "  The login command below fails until it does. Check DNS and run: systemctl status caddy"
   echo ""
 fi
 if [ -n "$TLS_READY" ]; then

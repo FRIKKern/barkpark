@@ -1855,7 +1855,9 @@ USAGE
                                (--install | --out <path> | --reveal) [--team <t>]
   bp instance backup  --database-url <url> --media-dir <dir> --out <dir>
   bp instance restore <dir> --database-url <url> --media-dir <dir>
-  bp instance init  [--out <file>] [--target containerapps|vm]
+  bp instance init  [--out <file>] [--target containerapps|vm] [--host <h>]
+                    [--studio-origin <o>] [--owner-email <e>]
+                    [--operator-emails <e,...>] [--breakglass-email <e>]
   bp instance check [--env-file <file>] [--target containerapps|vm]
                     [--skip database,media,url]
 
@@ -1889,6 +1891,8 @@ WHAT IT DOES
                the required settings, generated secrets and the recommended
                Pensum settings for --target (containerapps by default, or vm).
                Refuses to replace an existing file and never prints a secret.
+               --host, --studio-origin, --owner-email, --operator-emails and
+               --breakglass-email write those values instead of placeholders.
   check        read --env-file, or the environment, and print one line per
                problem with a doc link: missing required settings, misspelled
                BARKPARK_* names, weak or malformed secrets, database reachable

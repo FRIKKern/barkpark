@@ -53,7 +53,7 @@ func completeEnv(t *testing.T) map[string]string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env, err := parseInstanceEnv(strings.NewReader(instanceEnvFile(instanceTargetContainerApps, secrets)))
+	env, err := parseInstanceEnv(strings.NewReader(instanceEnvFile(instanceTargetContainerApps, secrets, instanceInitValues{})))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,105 @@ func TestInstanceReleaseCaptureHMACSecret(t *testing.T) {
 	if !noted {
 		t.Fatalf("vm check gave no deploy.sh note for %s", name)
 	}
-	if strings.Contains(instanceEnvFile(instanceTargetVM, map[string]string{name: "x"}), name+"=") {
+	if strings.Contains(instanceEnvFile(instanceTargetVM, map[string]string{name: "x"}, instanceInitValues{}), name+"=") {
 		t.Fatalf("vm init file sets %s", name)
+	}
+}
+
+// TestInstanceInitValueFlags: the guide's values go in by flag, so a vm file
+// written with every flag has no placeholder left, and both OIDC settings the
+// guide recommends are on.
+func TestInstanceInitValueFlags(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vm.env")
+	stdout, stderr, code := runInstanceVerb(t, "init", "--out", path, "--target", "vm",
+		"--host", "cms.example.com", "--studio-origin", "https://studio.example.com",
+		"--owner-email", "owner@example.com", "--operator-emails", "a@example.com,b@example.com",
+		"--breakglass-email", "bg@example.com")
+	if code != exitOK {
+		t.Fatalf("init exit %d: %s", code, stderr)
+	}
+	if strings.Contains(stdout, "fill in") {
+		t.Fatalf("init asks to fill in values after every flag: %s", stdout)
+	}
+	body, _ := os.ReadFile(path)
+	env, _ := parseInstanceEnv(bytes.NewReader(body))
+	want := map[string]string{
+		"PHX_HOST":                        "cms.example.com",
+		"BARKPARK_ALWAYS_ALLOWED_ORIGINS": "https://cms.example.com,https://studio.example.com",
+		"BARKPARK_BOOTSTRAP_OWNER_EMAIL":  "owner@example.com",
+		"BARKPARK_OPERATOR_EMAILS":        "a@example.com,b@example.com",
+		"BARKPARK_BREAKGLASS_EMAILS":      "bg@example.com",
+		"BARKPARK_OIDC_KEEP_OWNER":        "on",
+		"BARKPARK_OIDC_EMAIL_FROM_UPN":    "on",
+	}
+	for k, v := range want {
+		if env[k] != v {
+			t.Errorf("%s = %q, want %q", k, env[k], v)
+		}
+	}
+	for k, v := range env {
+		if isPlaceholder(v) {
+			t.Errorf("%s is still a placeholder: %s", k, v)
+		}
+	}
+	if _, ok := env["BARKPARK_SEED_ADMIN_TOKEN"]; ok {
+		t.Error("vm file sets BARKPARK_SEED_ADMIN_TOKEN; deploy.sh mints the admin token")
+	}
+	problems, notes := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetVM, skip: map[string]bool{"database": true, "media": true, "url": true}})
+	if len(problems) != 0 {
+		t.Fatalf("check on a flag-filled vm file: %v", problems)
+	}
+	for _, n := range notes {
+		if strings.Contains(n.Problem, "OIDC") {
+			t.Errorf("check note names an OIDC setting: %s", n.Problem)
+		}
+	}
+	if _, _, code := runInstanceVerb(t, "init", "--out", path+"2", "--host", "https://cms.example.com"); code != exitUsage {
+		t.Fatalf("--host with a scheme exit %d", code)
+	}
+}
+
+// TestInstanceInitContainerAppsSecretsMatchBicep: init --target containerapps
+// generates the seven secrets deploy/azure/main.example.bicepparam lists.
+func TestInstanceInitContainerAppsSecretsMatchBicep(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "ca.env")
+	stdout, stderr, code := runInstanceVerb(t, "init", "--out", path)
+	if code != exitOK {
+		t.Fatalf("init exit %d: %s", code, stderr)
+	}
+	body, _ := os.ReadFile(path)
+	env, _ := parseInstanceEnv(bytes.NewReader(body))
+	tok := env["BARKPARK_SEED_ADMIN_TOKEN"]
+	if !regexp.MustCompile(`^bp_admin_[0-9a-f]{48}$`).MatchString(tok) || strings.Contains(stdout+stderr, tok) {
+		t.Fatalf("BARKPARK_SEED_ADMIN_TOKEN shape or echo wrong")
+	}
+	param, err := os.ReadFile(filepath.Join("..", "..", "deploy", "azure", "main.example.bicepparam"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The bicepparam names its secrets BARKPARK_<init name> for three of them,
+	// and BARKPARK_PG_PASSWORD for the password init puts in DATABASE_URL.
+	bicepToInit := map[string]string{
+		"BARKPARK_PG_PASSWORD":                 "DATABASE_URL",
+		"BARKPARK_SECRET_KEY_BASE":             "SECRET_KEY_BASE",
+		"BARKPARK_CLOAK_KEY":                   "BARKPARK_CLOAK_KEY",
+		"BARKPARK_KEK":                         "BARKPARK_KEK",
+		"BARKPARK_PREVIEW_JWT_SECRET":          "PREVIEW_JWT_SECRET",
+		"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET": "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET",
+		"BARKPARK_SEED_ADMIN_TOKEN":            "BARKPARK_SEED_ADMIN_TOKEN",
+	}
+	got := regexp.MustCompile(`readEnvironmentVariable\('([A-Z0-9_]+)'\)`).FindAllStringSubmatch(string(param), -1)
+	if len(got) != len(bicepToInit) {
+		t.Fatalf("bicepparam reads %d secrets, init maps %d", len(got), len(bicepToInit))
+	}
+	for _, m := range got {
+		name, ok := bicepToInit[m[1]]
+		if !ok {
+			t.Errorf("bicepparam reads %s, which init does not generate", m[1])
+			continue
+		}
+		if env[name] == "" {
+			t.Errorf("init leaves %s empty for bicepparam %s", name, m[1])
+		}
 	}
 }

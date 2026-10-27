@@ -8,12 +8,12 @@
 # PASSWORD or KEY are masked in all output.
 
 RG=rg-barkpark-guide-run
-DNS_LABEL=bp-guide-run
+dns_label=bp-guide-run
 host=bp-guide-run.swedencentral.cloudapp.azure.com
 ip=$(az vm show -d -g "$RG" -n barkpark --query publicIps -o tsv)
 vm_ssh=$(printf 'azureuser@%s' "$(az vm show -d -g "$RG" -n barkpark --query publicIps -o tsv)")
 
-# Values the settings hook writes into barkpark.env.
+# Values bp instance init writes into barkpark.env.
 owner_email=owner@example.com
 operator_emails=owner@example.com
 breakglass_email=breakglass@example.com

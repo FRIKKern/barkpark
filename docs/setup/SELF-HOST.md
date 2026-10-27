@@ -28,15 +28,17 @@ The host name becomes `PHX_HOST`, and passkeys stop working if it changes later.
 
 ## Write and check the settings file
 
-On your machine, install `bp` 1.25.0 or newer and write a settings file:
+On your machine, install `bp` 1.26.0 or newer and write a settings file:
 
 <!-- run -->
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp instance init --target vm                # or --target containerapps
+bp instance init --target vm --host <host> --studio-origin <studio origin> \
+  --owner-email <owner email> --operator-emails <operator emails> \
+  --breakglass-email <breakglass email>
 ```
 
-<!-- run hook=settings --> `bp instance init` writes `barkpark.env` with mode 600. It holds most [Pensum settings](#pensum-settings). With `--target containerapps` it also writes new keys, a database password and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`, without which a fresh database does not finish migrating. For `--target vm`, `deploy.sh` makes them. Replace every `<...>` value and add the Pensum settings it leaves out. Then check the file:
+`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes new keys, a database password, the first admin token and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`, without which a fresh database does not finish migrating. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
 
 <!-- run -->
 ```bash
@@ -52,12 +54,13 @@ bp instance check --env-file barkpark.env --target vm --skip database,media,url
    <!-- run -->
    ```bash
    az vm create -g "$RG" -n barkpark --image Ubuntu2204 --size Standard_D2als_v7 \
-     --location swedencentral --admin-username azureuser --generate-ssh-keys
+     --location swedencentral --admin-username azureuser --generate-ssh-keys \
+     --public-ip-address-dns-name <dns label>
    az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900
    ```
 
-2. <!-- run hook=dns --> Create a DNS A record from the host name to the VM's public IP. Caddy needs it for a certificate.
-3. Copy the file and run `deploy.sh` over ssh. It keeps its own `DATABASE_URL` and keys:
+2. The host name is then `<dns label>.swedencentral.cloudapp.azure.com`. For your own domain, create a DNS A record to the VM's public IP instead. Caddy needs one of them for a certificate.
+3. Copy the file and run `deploy.sh` over ssh. It keeps its own `DATABASE_URL` and keys, and deletes the copy once merged:
 
    <!-- run -->
    ```bash
@@ -66,42 +69,43 @@ bp instance check --env-file barkpark.env --target vm --skip database,media,url
    ssh azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env` before the first start. Install and build take 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, both root only. When the file sets `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED`, it adds the id to `BARKPARK_OPERATOR_TOKEN_IDS`. The banner prints the token path, the id and a login command, never the token. `DOMAIN` must be the host name, not an IP, or the server refuses to start.
-4. <!-- run --> Run the printed `bp setup --target connect --server https://<host> --token "$(ssh azureuser@<ip> sudo cat /etc/barkpark/admin-token)"` on your machine, then delete `/tmp/pensum.env` on the VM.
+   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env` before the first start. Install and build take 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, both root only. When the file sets `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED`, it adds the id to `BARKPARK_OPERATOR_TOKEN_IDS`. The banner prints the token path, the id and a login command, never the token. `DOMAIN` must be the host name, not an IP, or the server refuses to start. It waits up to 3 minutes for HTTPS.
+4. <!-- run --> Run the printed `bp setup --target connect --server https://<host> --token "$(ssh azureuser@<ip> sudo cat /etc/barkpark/admin-token)"` on your machine.
 
 To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. To update, run `cd /opt/barkpark && sudo git pull`. A post-merge hook rebuilds and restarts. If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
 ## Path B: Azure Container Apps
 
-1. Create a PostgreSQL Flexible Server and allow the extensions Barkpark uses: `az postgres flexible-server parameter set -g "$RG" -s "$PG" --name azure.extensions --value citext,pg_trgm,pgcrypto`. Create an empty database and a login that match `DATABASE_URL` in `barkpark.env`.
-2. Create a Key Vault with soft delete and purge protection. Store the key values from `barkpark.env` as secrets with dashed names, such as `barkpark-kek`. Give the app a system-assigned identity with the Key Vault Secrets User role, and reference the secrets with versioned URIs, as [the rotation section](SELF-HOST-OPERATIONS.md#rotate-keys) shows.
-3. Use the image `ghcr.io/frikkern/barkpark`. A release tag `v<A.B.C>` publishes `<A.B.C>`, `sha-<12 hex>` and `latest`. Pin a version. Before the first release, pin the `sha-` tag of a manual build of main. Its CA bundle holds the Flexible Server roots.
-4. Create the Container App with one replica and the rest of `barkpark.env`. The image runs as uid 10001, so mount Azure Files for media with `uid=10001,gid=10001` and set `BARKPARK_MEDIA_DIR` to the mount path. Use these probes. The first boot runs migrations and seeds, so the startup probe allows 300 seconds.
+Deploy to Azure with `deploy/azure/main.bicep`. Copy `main.example.bicepparam` to `main.bicepparam`, export the seven secrets its header lists, then run `az group create -n <rg> -l norwayeast` and `az deployment group create -g <rg> -p main.bicepparam`. The first deployment takes about 8 minutes, and `/readyz` answers about 1 minute later. Monthly cost is in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-cost).
 
-   ```yaml
-   probes:
-     - { type: Liveness, httpGet: { path: /livez, port: 4000 } }
-     - { type: Readiness, httpGet: { path: /readyz, port: 4000 } }
-     - { type: Startup, httpGet: { path: /readyz, port: 4000 }, periodSeconds: 10, failureThreshold: 30 }
-   ```
-
-   `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise. Neither needs a token.
-5. For the first operator token, generate one with `echo "bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"`, store it in Key Vault and set `BARKPARK_SEED_ADMIN_TOKEN` from it before the first start. Without it, the first boot prints a new token in the log. The log shows `Admin token id: <id>`. Add the id to `BARKPARK_OPERATOR_TOKEN_IDS`, restart, and connect with `bp setup --target connect`.
+- Barkpark runs on exactly one replica; the template pins min and max to 1.
+- Pin an image version, such as `ghcr.io/frikkern/barkpark:0.2.28`. A release tag `v<A.B.C>` publishes `<A.B.C>`, `sha-<12 hex>` and `latest`.
+- Add the Pensum settings from `barkpark.env` with `az containerapp update -g <rg> -n barkpark --set-env-vars`, leaving out the key lines.
+- `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise.
+- The first boot installs `BARKPARK_SEED_ADMIN_TOKEN` and logs `Admin token id: <id>`. Add the id to `BARKPARK_OPERATOR_TOKEN_IDS` and connect with `bp setup --target connect`.
+- Listen streams last at most 30 minutes behind Container Apps ingress; clients resume with `Last-Event-ID`.
+- After deleting the resource group, purge its Key Vault with `az keyvault purge` before deploying again under the same name.
 
 ## Pensum settings
 
-Both paths set these:
+`bp instance init` writes these for both paths:
 
 ```bash
-BARKPARK_SELF_UPDATE_CHECK=off BARKPARK_RETIRE_SSE_ON_SIGTERM=1
-BARKPARK_ALWAYS_ALLOWED_ORIGINS=https://<host>,<Studio origin>
-BARKPARK_PLUGINS=media BARKPARK_TMUX_CONSOLE=off
+BARKPARK_SELF_UPDATE_CHECK=off
+BARKPARK_RETIRE_SSE_ON_SIGTERM=1
+BARKPARK_ALWAYS_ALLOWED_ORIGINS=https://<host>,<studio origin>
+BARKPARK_PLUGINS=media
+BARKPARK_TMUX_CONSOLE=off
 BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
-BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner>
-BARKPARK_OPERATOR_EMAILS=<operators> BARKPARK_OPERATOR_FAIL_CLOSED=1
-BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1 BARKPARK_CLOUD_HANDOFF=off
-BARKPARK_BREAKGLASS_EMAILS=<break-glass account> BARKPARK_TOKEN_EXPIRY_WARNINGS=on
-BARKPARK_OIDC_KEEP_OWNER=on BARKPARK_OIDC_EMAIL_FROM_UPN=on
+BARKPARK_OPERATOR_EMAILS=<operator emails>
+BARKPARK_OPERATOR_FAIL_CLOSED=1
+BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1
+BARKPARK_CLOUD_HANDOFF=off
+BARKPARK_BREAKGLASS_EMAILS=<breakglass email>
+BARKPARK_TOKEN_EXPIRY_WARNINGS=on
+BARKPARK_OIDC_KEEP_OWNER=on
+BARKPARK_OIDC_EMAIL_FROM_UPN=on
+BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 ```
 
 On Container Apps, keep the keys and the break-glass password in Key Vault. On the VM, run `sudo chmod 600 /opt/barkpark/.env`.
@@ -126,8 +130,8 @@ Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp o
 
 <!-- run -->
 ```bash
-curl -sS https://<host>/readyz          # {"status":"ready",...}
-bp capabilities | grep auth_tier        # admin
+curl -fsS https://<host>/readyz           # {"status":"ready",...}
+bp whoami | grep -x 'auth_tier: admin'
 ```
 
 Then sign in at `https://<host>/studio` through Entra ID. Continue with backups in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
