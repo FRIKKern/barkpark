@@ -10,7 +10,6 @@
 # delete the line in the same PR. Never add a line without a task or label.
 
 # Wrong facts on main when the check landed. Fix these, then delete the line.
-api/lib/barkpark_web/live/studio/connectors_live.ex | link | docs/ops/linear-app.md | task-a1d522c3dc06f3c5 | the doc was never written
 
 # Right as written.
 docs/setup/CLAUDE-CODE.md | env | CLAUDE_CODE_WORKFLOWS | external | Claude Code reads it, not Barkpark

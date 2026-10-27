@@ -8541,8 +8541,8 @@ msgstr "Koble til %{name}"
 
 #: lib/barkpark_web/live/studio/connectors_live.ex:614
 #, elixir-autogen, elixir-format
-msgid "Connect Linear is not configured on this instance — it needs a Linear OAuth app (a client id from linear.app/settings/api and a public callback URL). See docs/ops/linear-app.md."
-msgstr "Koble til Linear er ikke satt opp på denne installasjonen — det trengs en Linear OAuth-app (en klient-ID fra linear.app/settings/api og en offentlig tilbakekallings-URL). Se docs/ops/linear-app.md."
+msgid "Connect Linear is not configured on this instance. It needs a Linear OAuth app from linear.app/settings/api. Set CONNECTORS_LINEAR_CLIENT_ID to its client id and CONNECTORS_LINEAR_REDIRECT_URI to its public callback URL."
+msgstr "Koble til Linear er ikke satt opp på denne installasjonen. Det trengs en Linear OAuth-app fra linear.app/settings/api. Sett CONNECTORS_LINEAR_CLIENT_ID til klient-ID-en og CONNECTORS_LINEAR_REDIRECT_URI til den offentlige tilbakekallings-URL-en."
 
 #: lib/barkpark_web/live/studio/connectors_live.ex:677
 #, elixir-autogen, elixir-format
