@@ -16,6 +16,8 @@ on:
       - "deploy.sh"
       - "internal/cli/setup/assets/**"
       - "scripts/deploy-health-banner.test.sh"
+      - "scripts/deploy-env-file.test.sh"
+      - "scripts/deploy-admin-token-recovery.test.sh"
       - ".github/workflows/vendored-assets.yml"
   push:
     branches: [main]
@@ -23,6 +25,8 @@ on:
       - "deploy.sh"
       - "internal/cli/setup/assets/**"
       - "scripts/deploy-health-banner.test.sh"
+      - "scripts/deploy-env-file.test.sh"
+      - "scripts/deploy-admin-token-recovery.test.sh"
       - ".github/workflows/vendored-assets.yml"
 
 concurrency:
@@ -56,3 +60,7 @@ jobs:
       # for origin/main's deploy.sh and cannot run against a shallow clone.
       - name: deploy.sh health-banner harness
         run: bash scripts/deploy-health-banner.test.sh
+      - name: deploy.sh env-file merge harness
+        run: bash scripts/deploy-env-file.test.sh
+      - name: deploy.sh admin token recovery harness
+        run: bash scripts/deploy-admin-token-recovery.test.sh

@@ -355,6 +355,76 @@ defmodule Barkpark.Auth do
 
   def consume_exchange_ticket(_, _, _), do: {:error, :invalid}
 
+  @doc """
+  Mint an SSO ticket: the instance's own OIDC callback hands a Studio the login
+  session it just minted for `email` (task-8bdf1b15305af840). The ticket binds
+  that session bearer, the Studio origin (`audience`) and the Studio server's
+  PKCE S256 `code_challenge`, and lives 60 s like every login ticket.
+
+  `purpose: "sso"` keeps it out of both other doors: the browser consume takes
+  only purpose-less tickets and `consume_exchange_ticket/3` only "exchange", so
+  an SSO ticket never reaches the Cloud handoff's seating.
+  """
+  @spec mint_sso_ticket(binary(), binary(), binary(), binary()) ::
+          {:ok, binary()} | {:error, :invalid_exchange}
+  def mint_sso_ticket(session_token, email, audience, code_challenge) do
+    raw_ticket = "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+    %LoginTicket{}
+    |> LoginTicket.changeset(%{
+      ticket_hash: hash_ticket(raw_ticket),
+      api_token: session_token,
+      user_email: email,
+      purpose: "sso",
+      audience: audience,
+      code_challenge: code_challenge,
+      expires_at: DateTime.add(DateTime.utc_now(), @login_ticket_ttl_seconds)
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _ticket} -> {:ok, raw_ticket}
+      {:error, _changeset} -> {:error, :invalid_exchange}
+    end
+  end
+
+  @doc """
+  Consume an SSO ticket (`mint_sso_ticket/4`) for its login session. The same
+  single-use claim as `consume_exchange_ticket/3`, restricted to
+  `purpose = 'sso'`. A wrong `audience` or `code_verifier` burns the ticket
+  AND revokes the session it carried, so a refused exchange leaves no live
+  session behind. Every failure is `{:error, :invalid}`.
+  """
+  @spec consume_sso_ticket(term(), term(), term()) ::
+          {:ok, {binary(), binary()}} | {:error, :invalid}
+  def consume_sso_ticket(raw_ticket, audience, code_verifier)
+      when is_binary(raw_ticket) and is_binary(audience) and is_binary(code_verifier) do
+    hash = hash_ticket(raw_ticket)
+    now = DateTime.utc_now()
+
+    query =
+      from t in LoginTicket,
+        where:
+          t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now and
+            t.purpose == "sso",
+        select: {t.api_token, t.user_email, t.audience, t.code_challenge}
+
+    case Repo.delete_all(query) do
+      {1, [{session, email, bound_audience, challenge}]} ->
+        if Plug.Crypto.secure_compare(bound_audience, audience) and
+             Plug.Crypto.secure_compare(challenge, pkce_s256(code_verifier)) do
+          {:ok, {session, email}}
+        else
+          Barkpark.Accounts.revoke_user_session_token(session)
+          {:error, :invalid}
+        end
+
+      _ ->
+        {:error, :invalid}
+    end
+  end
+
+  def consume_sso_ticket(_, _, _), do: {:error, :invalid}
+
   defp pkce_s256(verifier),
     do: Base.url_encode64(:crypto.hash(:sha256, verifier), padding: false)
 
@@ -1487,7 +1557,7 @@ defmodule Barkpark.Auth do
   ## `workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
 
   When `workspace_id` is `nil` (or omitted) the token is minted WORKSPACE-LESS:
-  `insert_token_with_membership/3` is skipped entirely and NO
+  `insert_token_with_membership/4` is skipped entirely and NO
   `Barkpark.Tenancy.Membership` row is ever created. This is the same posture
   `create_personal_access_token/3` and `create_claude_session_token/3` already
   hold — `create_token/5` was the last of the three mints still carrying the
@@ -1517,6 +1587,9 @@ defmodule Barkpark.Auth do
     * `:actor` — the minting principal. `:no_expiry` is admitted only when it
       is an `%ApiToken{}` holding the flat `"admin"` permission, and the mint +
       its `token/token_no_expiry_opt_out` audit row commit together.
+    * `:id` — the row id to use instead of a generated one. The seed admin
+      token takes it from `BARKPARK_SEED_ADMIN_TOKEN_ID`, so the operator can
+      list the id in `BARKPARK_OPERATOR_TOKEN_IDS` before the first boot.
   """
   def create_token(raw_token, label, dataset, permissions, workspace_id \\ nil, opts \\ []) do
     ws_id = workspace_id
@@ -1543,13 +1616,15 @@ defmodule Barkpark.Auth do
         owner_user_id: Keyword.get(opts, :owner_user_id)
       }
 
+      base = %ApiToken{id: Keyword.get(opts, :id)}
+
       insert = fn ->
         if is_nil(ws_id) do
-          %ApiToken{}
+          base
           |> ApiToken.changeset(token_attrs)
           |> Repo.insert()
         else
-          insert_token_with_membership(token_attrs, ws_id, permissions)
+          insert_token_with_membership(base, token_attrs, ws_id, permissions)
         end
       end
 
@@ -1831,11 +1906,11 @@ defmodule Barkpark.Auth do
     |> Repo.update()
   end
 
-  defp insert_token_with_membership(token_attrs, ws_id, permissions) do
+  defp insert_token_with_membership(base, token_attrs, ws_id, permissions) do
     role = TenancyAuth.role_for_permissions(permissions)
 
     Repo.transaction(fn ->
-      with {:ok, token} <- %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert(),
+      with {:ok, token} <- base |> ApiToken.changeset(token_attrs) |> Repo.insert(),
            {:ok, _membership} <- TenancyAuth.create_membership(ws_id, token.id, role) do
         token
       else
@@ -1976,7 +2051,7 @@ defmodule Barkpark.Auth do
   ## `:workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
 
   When `:workspace_id` is omitted (or `nil`), the token is minted
-  WORKSPACE-LESS — `insert_token_with_membership/3` is skipped entirely and no
+  WORKSPACE-LESS — `insert_token_with_membership/4` is skipped entirely and no
   `Tenancy.Membership` row is ever created. There used to be an unconditional
   `|| default_workspace_id()` fallback here; it let any caller that forgot to
   resolve a real workspace (the self-service mint was the one that did) hand
@@ -2017,7 +2092,7 @@ defmodule Barkpark.Auth do
         if is_nil(ws_id) do
           %ApiToken{} |> ApiToken.changeset(token_attrs) |> Repo.insert()
         else
-          insert_token_with_membership(token_attrs, ws_id, permissions)
+          insert_token_with_membership(%ApiToken{}, token_attrs, ws_id, permissions)
         end
 
       case result do
@@ -2137,7 +2212,7 @@ defmodule Barkpark.Auth do
       `"admin"` — so it satisfies no global perm tier and cannot drive the flat
       mutate route or any membership-gated route;
     * it gets NO `Membership` row (a plain `Repo.insert`, not
-      `insert_token_with_membership/3`), so every normal scoped route denies it;
+      `insert_token_with_membership/4`), so every normal scoped route denies it;
     * `share_scope` byte-binds it to one `"ws/proj/dataset"`.
 
   Defense-in-depth: refuses to mint unless the scope is live-`:edit`-shared for

@@ -18,7 +18,7 @@ repository root.
 JS docs site: `pnpm -C js install && pnpm -C js --filter @barkpark/docs dev`
 
 **Also supported** — [learn/plugins-catalog.md](learn/plugins-catalog.md):
-papers, tasks, sheets, ONIX. Self-host: [setup/GO-LIVE.md](setup/GO-LIVE.md),
+papers, tasks, sheets, ONIX. Self-host: [setup/SELF-HOST.md](setup/SELF-HOST.md),
 [PHILOSOPHY.md](PHILOSOPHY.md).
 
 Deeper reference: [contracts/schema-v2.md](contracts/schema-v2.md), plus

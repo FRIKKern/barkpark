@@ -40,6 +40,13 @@ defmodule Barkpark.Sso.OidcConnection do
     field :trust_idp_mfa, :boolean, default: false
     field :mfa_acr, :string
 
+    # The date the identity provider gave for `client_secret`, recorded by the
+    # operator. `Barkpark.Sso.OidcSecretExpiryWarningWorker` warns 30, 14 and 7
+    # days ahead and records the last step in `client_secret_expiry_warned_days`.
+    # A new date clears that step. Nil means no date is recorded.
+    field :client_secret_expires_at, :utc_datetime_usec
+    field :client_secret_expiry_warned_days, :integer
+
     belongs_to :organization, Barkpark.Tenancy.Organization
 
     timestamps(type: :utc_datetime_usec)
@@ -63,8 +70,10 @@ defmodule Barkpark.Sso.OidcConnection do
       :strict_validation,
       :trust_idp_mfa,
       :mfa_acr,
+      :client_secret_expires_at,
       :active
     ])
+    |> reset_expiry_warning()
     |> validate_required([:organization_id, :issuer, :client_id])
     |> validate_inclusion(:token_endpoint_auth_method, ~w(client_secret_post client_secret_basic))
     |> validate_change(:group_role_mappings, fn :group_role_mappings, map ->
@@ -76,5 +85,12 @@ defmodule Barkpark.Sso.OidcConnection do
     end)
     |> assoc_constraint(:organization)
     |> unique_constraint(:organization_id)
+  end
+
+  # A new expiry date, or a cleared one, starts the warning steps again.
+  defp reset_expiry_warning(changeset) do
+    if Map.has_key?(changeset.changes, :client_secret_expires_at),
+      do: force_change(changeset, :client_secret_expiry_warned_days, nil),
+      else: changeset
   end
 end

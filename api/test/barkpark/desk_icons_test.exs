@@ -89,4 +89,34 @@ defmodule Barkpark.DeskIconsTest do
              "items" => [%{"icon" => "lucide:tags"}, %{"icon" => "graduation-cap"}]
            }) == []
   end
+
+  # task-374095d722922dde: every lucide icon gyldendal.no's twin names, as
+  # `lucide:<name>`, in its schemas and its list preview icon picks. A schema type
+  # or a row icon with one of these names draws it, not the document icon.
+  @twin_lucide ~w(backpack book book-a book-copy book-dashed book-image book-open book-open-text
+           book-plus book-text calendar-days cassette-tape circle-help clapperboard
+           clipboard-list disc-3 download dumbbell earth file-audio files folder-open
+           glasses globe graduation-cap headphones info languages layout-grid life-buoy list
+           list-checks mail map megaphone message-circle-more mic-vocal monitor-play
+           notebook-pen notebook-text package-open palette podcast presentation printer
+           receipt-text scale scroll shapes spell-check table tablet-smartphone tags
+           tv-minimal-play user-pen volume-2)
+
+  test "every lucide icon the twin names draws as a type icon and a row icon" do
+    names = Enum.map(@twin_lucide, &("lucide:" <> &1))
+    assert length(names) == 56
+
+    fallbacks = Enum.filter(names, &(BarkparkWeb.Icons.row_icon(&1) == "document"))
+
+    assert fallbacks == [],
+           "#{length(fallbacks)} fall back to document: #{Enum.join(fallbacks, " ")}"
+
+    for name <- names do
+      assert BarkparkWeb.Icons.type_icon(name) == name
+      assert BarkparkWeb.Icons.type_icon_svg(name) =~ ~s(data-desk-icon="#{name}")
+
+      assert DeskIcons.body(name) =~
+               ~s|<g transform="translate(0.5 0.5)" stroke="currentColor" stroke-width="1.2"|
+    end
+  end
 end

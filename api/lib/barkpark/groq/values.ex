@@ -243,34 +243,72 @@ defmodule Barkpark.Groq.Values do
   def stringify(v) when is_binary(v), do: {:ok, v}
   def stringify(true), do: {:ok, "true"}
   def stringify(false), do: {:ok, "false"}
-  def stringify(v) when is_integer(v), do: {:ok, Integer.to_string(v)}
-  def stringify(v) when is_float(v), do: {:ok, format_float(v)}
+  def stringify(v) when is_number(v), do: {:ok, format_number(v)}
   def stringify({:datetime, dt}), do: {:ok, format_datetime(dt)}
   def stringify(_), do: :error
 
-  # JavaScript's Number#toString: integral floats print without a fraction,
-  # small/large magnitudes switch to exponent notation.
-  defp format_float(f) do
-    case num(f) do
-      i when is_integer(i) ->
-        Integer.to_string(i)
+  # Sanity writes a number as Go's strconv.FormatFloat(f, 'g', -1, 64)
+  # (task-90c6e9c5557cfcea): the shortest digits that read back as the same
+  # double, in exponent form when the decimal exponent is below -4 or at
+  # least 6, the exponent signed and at least two digits (1e+06, 2.5e-05).
+  defp format_number(n) do
+    f = n * 1.0
+    {digits, point} = shortest_digits(abs(f))
+    sign = if f < 0, do: "-", else: ""
+    exp = point - 1
 
-      _ ->
-        abs = abs(f)
+    body =
+      cond do
+        digits == "0" ->
+          "0"
 
-        if abs >= 1.0e21 or abs < 1.0e-6 do
-          js_exponent(f)
-        else
-          :erlang.float_to_binary(f, [:short])
-        end
-    end
+        exp < -4 or exp >= 6 ->
+          exponent_form(digits, exp)
+
+        point <= 0 ->
+          "0." <> String.duplicate("0", -point) <> digits
+
+        point >= byte_size(digits) ->
+          digits <> String.duplicate("0", point - byte_size(digits))
+
+        true ->
+          binary_part(digits, 0, point) <>
+            "." <> binary_part(digits, point, byte_size(digits) - point)
+      end
+
+    sign <> body
   end
 
-  defp js_exponent(f) do
-    [mantissa, exp] = String.split(:erlang.float_to_binary(f, [:short]), "e")
-    mantissa = String.replace_suffix(mantissa, ".0", "")
-    exp_int = String.to_integer(exp)
-    sign = if exp_int >= 0, do: "+", else: "-"
-    "#{mantissa}e#{sign}#{abs(exp_int)}"
+  defp exponent_form(<<first, rest::binary>>, exp) do
+    mantissa = if rest == "", do: <<first>>, else: <<first, ?., rest::binary>>
+    exp_sign = if exp < 0, do: "-", else: "+"
+    mantissa <> "e" <> exp_sign <> String.pad_leading(Integer.to_string(abs(exp)), 2, "0")
+  end
+
+  # The significant digits of a non-negative double, without leading or
+  # trailing zeros, and where the decimal point falls among them (digits
+  # "15", point 1 is 1.5). Erlang's :short is the same shortest round-trip
+  # digit string Go picks.
+  defp shortest_digits(f) do
+    {mantissa, exp} =
+      case String.split(:erlang.float_to_binary(f, [:short]), "e") do
+        [m, e] -> {m, String.to_integer(e)}
+        [m] -> {m, 0}
+      end
+
+    [int, frac] =
+      case String.split(mantissa, ".") do
+        [i, fr] -> [i, fr]
+        [i] -> [i, ""]
+      end
+
+    raw = int <> frac
+    trimmed = String.trim_leading(raw, "0")
+    point = byte_size(int) + exp - (byte_size(raw) - byte_size(trimmed))
+
+    case String.trim_trailing(trimmed, "0") do
+      "" -> {"0", 1}
+      digits -> {digits, point}
+    end
   end
 end

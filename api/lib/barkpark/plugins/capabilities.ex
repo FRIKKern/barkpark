@@ -113,6 +113,11 @@ defmodule Barkpark.Plugins.Capabilities do
     * `:server` — override the `server` block (a map). Defaults to
       `default_server/0` (read from app config).
     * `:generated_at` — override the RFC-3339 timestamp string. Defaults to now.
+    * `:session` — `true` when the bearer is a login session rather than an
+      API token. A session's tier is `none` (`tier_of/1` ranks tokens), yet
+      the session-gated `auth` verbs (mfa-enroll, invitation-accept, logout …)
+      accept only a session. With this option they stay in the projection, so
+      `bp auth mfa-enroll` works with the token `bp auth login` printed.
   """
   @spec manifest(tier()) :: map()
   @spec manifest(tier(), keyword()) :: map()
@@ -120,7 +125,7 @@ defmodule Barkpark.Plugins.Capabilities do
     superset = build_superset(caller_tier, opts)
 
     if Keyword.get(opts, :project, true) do
-      project(superset, caller_tier)
+      project(superset, caller_tier, session: Keyword.get(opts, :session, false))
     else
       superset
     end
@@ -139,17 +144,19 @@ defmodule Barkpark.Plugins.Capabilities do
 
   No app, no DB, no registry access — safe to call on any plain map.
   """
-  @spec project(map(), tier()) :: map()
-  def project(%{} = manifest, caller_tier) when is_binary(caller_tier) do
+  @spec project(map(), tier(), keyword()) :: map()
+  def project(%{} = manifest, caller_tier, opts \\ []) when is_binary(caller_tier) do
     # The rank the caller is ranked by; the `+chat` capability (if any) rides
     # alongside and is consulted ONLY by the orthogonal chat side-branch.
     base = base_tier(caller_tier)
+    session? = Keyword.get(opts, :session, false)
     commands = Map.get(manifest, "commands", [])
     nouns = Map.get(manifest, "nouns", [])
 
     visible_commands =
       Enum.filter(commands, fn cmd ->
-        visible?(command_tier(cmd), base) or chat_visible?(cmd, caller_tier)
+        visible?(command_tier(cmd), base) or chat_visible?(cmd, caller_tier) or
+          (session? and session_auth_verb?(cmd))
       end)
 
     visible_noun_names =
@@ -598,6 +605,10 @@ defmodule Barkpark.Plugins.Capabilities do
   defp stringify_shallow(other), do: other
 
   # ── Field accessors (string-keyed wire shape) ─────────────────────────────
+
+  # The `auth` verbs a login session may call: the session-gated ones, which
+  # the manifest marks tier "read".
+  defp session_auth_verb?(cmd), do: command_noun(cmd) == "auth" and command_tier(cmd) == "read"
 
   defp command_tier(%{"auth_tier" => t}) when is_binary(t), do: t
   defp command_tier(_), do: "admin"
@@ -3132,6 +3143,11 @@ defmodule Barkpark.Plugins.Capabilities do
         flags:
           oidc_entra_flags() ++
             [
+              flag(
+                "client_secret_expires_at",
+                "string",
+                "When the client secret expires, ISO 8601 date or time. Barkpark warns 30, 14 and 7 days ahead."
+              ),
               flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
                 repeatable: true
               )
@@ -3143,7 +3159,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "org.oidc-update",
         "org",
         "oidc-update",
-        "Change the OIDC connection's client id, groups claim, group mappings, active flag or Entra ID settings.",
+        "Change the OIDC connection's client id, groups claim, group mappings, active flag, client secret expiry date or Entra ID settings.",
         "PATCH",
         "/v1/admin/orgs/:org_slug/oidc",
         "admin",
@@ -3153,6 +3169,11 @@ defmodule Barkpark.Plugins.Capabilities do
         flags:
           oidc_entra_flags() ++
             [
+              flag(
+                "client_secret_expires_at",
+                "string",
+                "When the client secret expires, ISO 8601 date or time. Barkpark warns 30, 14 and 7 days ahead."
+              ),
               flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
                 repeatable: true
               )
@@ -3175,6 +3196,13 @@ defmodule Barkpark.Plugins.Capabilities do
             true,
             "string",
             "New client secret. Stored encrypted, never shown again."
+          )
+        ],
+        flags: [
+          flag(
+            "client_secret_expires_at",
+            "string",
+            "When the new secret expires, ISO 8601 date or time. Without it the stored date is cleared."
           )
         ],
         writes: true,

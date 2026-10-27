@@ -181,6 +181,12 @@ FROM debian:bookworm-20260623-slim
 #                      dependency, so the trust store was implicitly present; on
 #                      debian-slim it is NOT, and every outbound TLS call (webhooks,
 #                      revalidation) would fail with an unknown CA without it.
+#                      It is also the trust store for DATABASE_SSL=verify-full:
+#                      Postgrex with `ssl: true` reads the OS store, and Debian's
+#                      bundle carries the roots Azure Database for PostgreSQL
+#                      chains to (DigiCert Global Root G2, Microsoft RSA Root
+#                      Certificate Authority 2017, DigiCert Global Root CA), so no
+#                      CA file needs mounting. api-image.yml checks all three.
 #   wget         — docker-compose.yml's api healthcheck is
 #                    ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/api/schemas || exit 1"]
 #                  and scripts/compose-smoke.sh's green arm runs the same binary via
@@ -212,11 +218,19 @@ RUN apt-get update -y \
 ENV LANG=C.UTF-8
 ENV LC_ALL=C.UTF-8
 
+# The app runs as uid/gid 10001, not root. The number is fixed so a volume or
+# an Azure Files mount can be given matching uid, gid and file modes. /app is
+# owned by that user because the release writes under it at run time: uploads,
+# tmp/ and the bundle spill directory all resolve below /app.
+RUN groupadd --system --gid 10001 barkpark \
+  && useradd --system --uid 10001 --gid 10001 --home-dir /app --no-create-home \
+       --shell /usr/sbin/nologin barkpark
+
 WORKDIR /app
 
-COPY --from=build /app/_build/prod/rel/barkpark ./
+COPY --from=build --chown=10001:10001 /app/_build/prod/rel/barkpark ./
 
-RUN mkdir -p /app/uploads
+RUN mkdir -p /app/uploads /app/tmp && chown 10001:10001 /app /app/uploads /app/tmp
 
 # NOTHING that prod's runtime.exs REQUIRES may be baked here: a placeholder
 # SECRET_KEY_BASE / DATABASE_URL / PHX_HOST shadows the boot-time raise, so the
@@ -228,6 +242,10 @@ ENV PORT=4000
 EXPOSE 4000
 
 COPY api/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod 0755 /app/entrypoint.sh
+
+# Numeric, so a runtime that enforces runAsNonRoot can check it without
+# reading /etc/passwd.
+USER 10001:10001
 
 CMD ["/app/entrypoint.sh"]

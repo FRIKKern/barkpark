@@ -1,4 +1,8 @@
 lib/barkpark/accounts/webauthn.ex	load_cose
+lib/barkpark/auth/admin_token_recovery.ex	ensure_dir
+lib/barkpark/auth/admin_token_recovery.ex	mint
+lib/barkpark/auth/admin_token_recovery.ex	rename
+lib/barkpark/auth/admin_token_recovery.ex	write_private
 lib/barkpark/auth/public_read.ex	write_token_file
 lib/barkpark/codelists/editeur.ex	parse_xml
 lib/barkpark/codelists/editeur.ex	seed_thema
@@ -182,4 +186,5 @@ lib/barkpark_web/live/studio/sheet_grid.ex	read_import_upload
 lib/barkpark_web/plugs/idempotency.ex	replay
 lib/barkpark_web/plugs/root_assets.ex	send_asset
 lib/barkpark_web/router/plugins.ex	public_root_session_name
+lib/barkpark_web/sign_in_failure.ex	respond
 lib/barkpark_web/static_assets.ex	fresh_hash

@@ -182,6 +182,8 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
     ]
   end
 
+  defp conn_body_has_raw?(body, raw), do: Jason.encode!(body) =~ raw
+
   defp send_probe(conn, :get, path, _body), do: get(conn, path)
   defp send_probe(conn, :post, path, body), do: post(conn, path, body)
   defp send_probe(conn, :put, path, body), do: put(conn, path, body)
@@ -279,6 +281,19 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
 
       refute conn.resp_body =~ ctx.value,
              "the refusal leaked the secret it refused: #{conn.resp_body}"
+    end
+
+    test "the 403 says operator access is required and names the caller's token id", ctx do
+      {:ok, token} = Auth.verify_token(ctx.admin_a)
+      body = json_response(get(as(ctx.admin_a), "/v1/secrets/#{ctx.secret}"), 403)
+
+      assert body["error"]["message"] == "platform operator access required"
+      assert body["error"]["hint"] =~ token.id
+      assert body["error"]["hint"] =~ "BARKPARK_OPERATOR_TOKEN_IDS"
+      assert body["error"]["hint"] =~ "BARKPARK_OPERATOR_EMAILS"
+      refute body["error"]["hint"] =~ "member of this workspace"
+      assert body["error"]["hint"] =~ Barkpark.SetupDocs.url(:operator_access)
+      refute conn_body_has_raw?(body, ctx.admin_a)
     end
 
     test "ALL SEVEN instance-global groups are 403 for A's admin", ctx do
@@ -391,6 +406,19 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
 
       {:ok, token} = Auth.verify_token(ctx.admin_a)
       refute RequirePlatformOperator.permits?(token)
+    end
+
+    test "the fail-closed 403 names the caller's token id so it can be listed", ctx do
+      {:ok, token} = Auth.verify_token(ctx.op_id)
+      body = json_response(get(as(ctx.op_id), "/v1/secrets/#{ctx.secret}"), 403)
+
+      assert body["error"]["required"] == "platform_operator"
+      assert body["error"]["hint"] =~ "BARKPARK_OPERATOR_TOKEN_IDS"
+      assert body["error"]["hint"] =~ token.id
+
+      # Following the hint is enough: the named id on the list is served.
+      put_allowlist([], [token.id])
+      assert get(as(ctx.op_id), "/v1/secrets/#{ctx.secret}").status == 200
     end
 
     test "an armed allowlist still serves its operators", ctx do

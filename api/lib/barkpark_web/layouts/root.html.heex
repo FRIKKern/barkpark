@@ -5524,15 +5524,18 @@
         docs / the tmux console; without it the hook never registers → black
         terminal.) --%>
   <script src={BarkparkWeb.StaticAssets.path("bp-tmux-terminal.js")}></script>
-  <%!-- Mermaid engine for `diagram` blocks in Studio surfaces (Claude chat
-        transcript). `defer` per Golden Rule #4 (never blocking in <head>);
-        startOnLoad:false — the PaperMermaid hook runs it manually so it works
-        with LiveView-patched DOM. Same CDN pin as the Bulldocs reader. --%>
-  <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-  <%!-- Hook + evergreen theming for the engine above. Non-defer so
-        window.BarkparkPaperMermaid exists before the LiveSocket Hooks
-        registration below. --%>
-  <script src={BarkparkWeb.StaticAssets.path("bp-paper-mermaid.js")}></script>
+  <%!-- Mermaid for `diagram` blocks in Studio surfaces (Claude chat
+        transcript). The hook asset fetches the engine named in
+        data-mermaid-src the first time it has a diagram to paint, so a Studio
+        page with no diagram never downloads or parses it
+        (task-cca3c6d48e57097e). Same CDN pin as the Bulldocs reader, and
+        startOnLoad:false: the PaperMermaid hook runs it manually so it works
+        with LiveView-patched DOM. Non-defer so window.BarkparkPaperMermaid
+        exists before the LiveSocket Hooks registration below. --%>
+  <script
+    src={BarkparkWeb.StaticAssets.path("bp-paper-mermaid.js")}
+    data-mermaid-src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"
+  ></script>
   <%!-- Composer paste/drop image attachments for the Studio Claude chat
         (charter D25). Non-defer so window.BarkparkChatComposer exists before the
         Hooks registration + LiveSocket connect below. --%>

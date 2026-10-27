@@ -1,0 +1,13 @@
+{
+  "name": "barkpark-entra-signin",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Headless Entra sign-in to a Barkpark OIDC connection for live role checks. Not a pnpm workspace member. Install with npm.",
+  "type": "module",
+  "scripts": {
+    "signin": "node signin.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.63.0"
+  }
+}

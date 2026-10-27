@@ -64,7 +64,13 @@ defmodule BarkparkWeb.SchemaController do
   tell which of the two halves they were asking for.
   """
   def upsert(conn, %{"dataset" => dataset} = params) do
-    attrs = Map.drop(params, ["dataset", "validate_only"])
+    # Fold the camelCase echo keys GET serves (`listPreview`, `initialValues`,
+    # ...) onto their snake_case keys first, so both branches below see the
+    # same body and a pulled schema posted back loses nothing.
+    attrs =
+      params
+      |> Map.drop(["dataset", "validate_only"])
+      |> SchemaUnknownKeys.fold_camel_echo()
 
     # Validate the `fields` payload at WRITE time so structurally-invalid field
     # defs (missing names, bad v2 types, reserved `plugin:` prefixes) fail with a

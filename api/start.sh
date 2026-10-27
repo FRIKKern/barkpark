@@ -64,6 +64,12 @@ case "${1:-}" in
   rotate-public-read)
     exec mix barkpark.rotate_public_read
     ;;
+  admin-token)
+    # Server-side admin token recovery: start.sh admin-token --label <l>
+    # [--file <path>] [--force]. Prints only the id and the path.
+    shift
+    exec mix barkpark.admin_token "$@"
+    ;;
   mix)
     shift
     exec mix "$@"

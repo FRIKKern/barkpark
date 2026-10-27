@@ -105,7 +105,7 @@ defmodule Barkpark.Groq.GeoTest do
           "geo::intersects(1, 2, 3)"
         ] do
       assert {:error, e} = Parser.parse(query)
-      assert e.description =~ "incorrect number of arguments", query
+      assert e.description =~ "Incorrect number of arguments to function", query
     end
   end
 end

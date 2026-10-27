@@ -23,6 +23,7 @@ defmodule Barkpark.Sso.Oidc do
   step; the protocol logic here is fully covered by tests against a mock OP.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias Barkpark.{Accounts, Repo}
   alias Barkpark.Accounts.User
@@ -91,7 +92,8 @@ defmodule Barkpark.Sso.Oidc do
     # update_all, which would otherwise bypass the membership changeset and
     # persist an unknown role string.
     with %{valid?: true} <- changeset,
-         :ok <- validate_mapping_roles(changeset) do
+         :ok <- validate_mapping_roles(changeset),
+         :ok <- validate_owner_mapping(changeset) do
       write.(changeset)
     else
       %Ecto.Changeset{} = cs -> {:error, cs}
@@ -112,6 +114,25 @@ defmodule Barkpark.Sso.Oidc do
     case unknown do
       [] -> :ok
       names -> {:error, {:unknown_role, names}}
+    end
+  end
+
+  # Each sign-in sets the role from the user's groups and can lower it. With
+  # BARKPARK_OIDC_KEEP_OWNER on and owners in the org, a changed mapping must
+  # still map a group to owner, or the owners' next sign-ins would leave the
+  # org with no owner.
+  defp validate_owner_mapping(changeset) do
+    case Barkpark.Sso.keep_owner?() &&
+           Ecto.Changeset.get_change(changeset, :group_role_mappings) do
+      mappings when is_map(mappings) and map_size(mappings) > 0 ->
+        org_id = Ecto.Changeset.get_field(changeset, :organization_id)
+
+        if "owner" in Map.values(mappings) or not Barkpark.Sso.org_has_owner?(org_id),
+          do: :ok,
+          else: {:error, :no_owner_mapping}
+
+      _ ->
+        :ok
     end
   end
 
@@ -172,7 +193,7 @@ defmodule Barkpark.Sso.Oidc do
       }) do
     with {:ok, endpoint} <- endpoint(c, :authorization_endpoint) do
       query =
-        URI.encode_query(%{
+        %{
           "response_type" => "code",
           "client_id" => c.client_id,
           "redirect_uri" => redirect_uri,
@@ -181,11 +202,28 @@ defmodule Barkpark.Sso.Oidc do
           "nonce" => nonce,
           "code_challenge" => challenge,
           "code_challenge_method" => "S256"
-        })
+        }
+        |> Map.merge(mfa_request(c))
+        |> URI.encode_query()
 
       {:ok, endpoint <> "?" <> query}
     end
   end
+
+  # An Entra connection (tenant_id set) that trusts the IdP's MFA asks for it
+  # with the OIDC `claims` request parameter: `amr` essential with value `mfa`.
+  # Measured 2026-10-27 on a tenant with security defaults and no Entra ID P1:
+  # Entra asked a registered user for the authenticator code on every sign-in
+  # with this parameter and on none without it.
+  @mfa_claims_request Jason.encode!(%{
+                        "id_token" => %{"amr" => %{"essential" => true, "values" => ["mfa"]}}
+                      })
+
+  defp mfa_request(%OidcConnection{trust_idp_mfa: true, tenant_id: tid})
+       when is_binary(tid) and tid != "",
+       do: %{"claims" => @mfa_claims_request}
+
+  defp mfa_request(_c), do: %{}
 
   @doc """
   Complete the callback: exchange `code`, verify the id_token, find-or-create the
@@ -234,8 +272,17 @@ defmodule Barkpark.Sso.Oidc do
   def idp_mfa?(%OidcConnection{trust_idp_mfa: true} = c, claims) do
     amr = claims["amr"]
 
-    (is_list(amr) and "mfa" in amr) or
-      (c.mfa_acr not in [nil, ""] and claims["acr"] == c.mfa_acr)
+    result =
+      (is_list(amr) and "mfa" in amr) or
+        (c.mfa_acr not in [nil, ""] and claims["acr"] == c.mfa_acr)
+
+    # Method names and context ids only; nothing here identifies the user.
+    Logger.debug(fn ->
+      "[OIDC] MFA claims: amr=#{inspect(amr)} acr=#{inspect(claims["acr"])} " <>
+        "acrs=#{inspect(claims["acrs"])} counted=#{result}"
+    end)
+
+    result
   end
 
   def idp_mfa?(_c, _claims), do: false
@@ -384,7 +431,7 @@ defmodule Barkpark.Sso.Oidc do
       is_integer(claims["exp"]) and claims["exp"] < now -> {:error, :expired}
       expected_nonce && claims["nonce"] != expected_nonce -> {:error, :nonce_mismatch}
       c.tenant_id not in [nil, ""] and claims["tid"] != c.tenant_id -> {:error, :tenant_mismatch}
-      not (email?(claims) or strict_subject(c, claims)) -> {:error, :no_email}
+      not (email?(claims) or strict_subject(c, claims) != nil) -> {:error, :no_email}
       strict?(c) -> validate_strict(claims, now)
       true -> :ok
     end
@@ -411,7 +458,19 @@ defmodule Barkpark.Sso.Oidc do
       c.strict_validation == true or
         Application.get_env(:barkpark, :oidc_strict_validation, false)
 
-  defp email?(claims), do: is_binary(claims["email"]) and claims["email"] != ""
+  defp email?(claims), do: login_email(claims) != nil
+
+  # The address a sign-in is matched on: the email claim. With
+  # BARKPARK_OIDC_EMAIL_FROM_UPN on, a token without one falls back to
+  # preferred_username, then upn, when it is an address. Matching on the
+  # address ignores case (`Accounts.get_user_by_email/1`).
+  defp login_email(%{"email" => email}) when is_binary(email) and email != "", do: email
+
+  defp login_email(claims) do
+    if Application.get_env(:barkpark, :oidc_email_from_upn, false) == true do
+      Enum.find([claims["preferred_username"], claims["upn"]], &(is_binary(&1) and &1 =~ "@"))
+    end
+  end
 
   # The IdP's stable id for the user under strict mode: Entra's `oid` (the same
   # across apps in a tenant), else the standard `sub`. Nil when strict is off.
@@ -438,7 +497,7 @@ defmodule Barkpark.Sso.Oidc do
         {:ok, Accounts.get_user(uid)}
 
       _ ->
-        with {:ok, user} <- find_or_create_by_email(c.organization_id, claims["email"]) do
+        with {:ok, user} <- find_or_create_by_email(c.organization_id, login_email(claims)) do
           if subject, do: link_subject(c, user, subject)
           {:ok, user}
         end

@@ -434,6 +434,9 @@ config :barkpark, Oban,
        # ahead, daily. A no-op tick unless `:token_expiry_warnings, enabled:`
        # (below) is on.
        {"0 8 * * *", Barkpark.Auth.TokenExpiryWarningWorker},
+       # task-1b1e79642ddd1261 — OIDC client secret expiry warnings at 30, 14
+       # and 7 days ahead, daily, behind the same `:token_expiry_warnings` switch.
+       {"5 8 * * *", Barkpark.Sso.OidcSecretExpiryWarningWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -505,6 +508,9 @@ config :barkpark, Oban,
        # static `default` queue; the worker bounds one tick by construction
        # (`Auth.sweep_token_sessions_batch/1`).
        {"50 * * * *", Barkpark.Auth.TokenSessionSweeper},
+       # #24400 follow-up: delete expired started sign-ins from `sso_flows`.
+       # A flow lives 10 minutes; this bounds an abandoned one to 20.
+       {"*/10 * * * *", Barkpark.Sso.FlowSweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a

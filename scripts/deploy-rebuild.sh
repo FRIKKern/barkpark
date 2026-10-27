@@ -210,6 +210,53 @@ else
   echo "[deploy-rebuild] go not found — skipping pdrender wasm build."
 fi
 
+# Precompressed .gz / .br siblings for the committed static assets — NON-FATAL,
+# and BEFORE the restart for the same cgroup-kill reason as the builds above.
+# Plug.Static and BarkparkWeb.Plugs.StaticAssets answer Content-Encoding only
+# when a sibling sits next to the file with the file's own mtime, and nothing
+# else on these boxes compresses (Caddy is a bare reverse_proxy). The slot path
+# has built them since task-c154d0d6f4be1cf6 (sync_static_siblings in
+# deploy/instance-deploy.sh, same rules as here); this engine never did, so
+# every Studio page on a single box (gyl) shipped its JS and CSS uncompressed:
+# bp-paper-editor.bundle.js 991 KB where a slot box sends 295 KB
+# (task-cca3c6d48e57097e). Rules, kept equal to the slot path: a sibling counts
+# as current only while its mtime equals its source's (touch -r), a stale one is
+# rebuilt, an orphan is removed, and one that fails to build is deleted so its
+# file is served uncompressed (larger, never wrong). .br only where a brotli
+# binary exists. Only *.js / *.css: bp-pdrender.wasm.gz is `make wasm`'s own.
+STATIC_ASSETS_DIR="${BP_STATIC_ASSETS_DIR:-$REPO/api/priv/static/assets}"
+sync_static_siblings() {
+  local f s enc rebuilt=0 current=0 failed=0
+  [ -d "$STATIC_ASSETS_DIR" ] || return 0
+  for s in "$STATIC_ASSETS_DIR"/*.js.gz "$STATIC_ASSETS_DIR"/*.css.gz "$STATIC_ASSETS_DIR"/*.js.br "$STATIC_ASSETS_DIR"/*.css.br; do
+    [ -e "$s" ] || continue
+    [ -f "${s%.*}" ] || rm -f "$s"
+  done
+  for f in "$STATIC_ASSETS_DIR"/*.js "$STATIC_ASSETS_DIR"/*.css; do
+    [ -f "$f" ] || continue
+    for enc in gz br; do
+      s="$f.$enc"
+      if [ -f "$s" ] && [ ! "$s" -nt "$f" ] && [ ! "$s" -ot "$f" ]; then current=$((current + 1)); continue; fi
+      rm -f "$s" "$s.tmp"
+      if [ "$enc" = br ]; then
+        command -v brotli > /dev/null 2>&1 || continue
+        nice -n 19 brotli -q 11 -c "$f" > "$s.tmp"
+      else
+        nice -n 19 gzip -9 -n -c "$f" > "$s.tmp"
+      fi
+      if [ $? -eq 0 ] && touch -r "$f" "$s.tmp" && mv -f "$s.tmp" "$s"; then
+        rebuilt=$((rebuilt + 1))
+      else
+        rm -f "$s.tmp"; failed=$((failed + 1))
+      fi
+    done
+  done
+  echo "[deploy-rebuild] static siblings: $rebuilt rebuilt, $current current, $failed failed (served uncompressed)$(command -v brotli > /dev/null 2>&1 || echo ', no brotli: .gz only')"
+  return 0
+}
+echo "[deploy-rebuild] Building precompressed static siblings (non-fatal)..."
+sync_static_siblings || echo "[deploy-rebuild] WARN: static sibling build failed — assets are served uncompressed."
+
 # On-box monitoring agent — rebuilt from the just-deployed code, NON-FATAL, and
 # BEFORE the restart for the same cgroup-kill reason as the two builds above.
 # Lifted from deploy/instance-deploy.sh:806-830, which is the ONLY lane that has
