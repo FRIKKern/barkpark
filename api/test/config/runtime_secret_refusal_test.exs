@@ -86,6 +86,30 @@ defmodule Barkpark.Config.RuntimeSecretRefusalTest do
     end
   end
 
+  describe "missing required settings" do
+    test "two or more missing are listed together, one line each" do
+      err =
+        assert_raise RuntimeError, fn ->
+          read!(%{"PHX_HOST" => nil, "BARKPARK_KEK" => "", "PREVIEW_JWT_SECRET" => nil})
+        end
+
+      assert err.message =~ "required settings are missing:"
+      assert err.message =~ "  PHX_HOST is not set\n"
+      assert err.message =~ "  BARKPARK_KEK is not set\n"
+      assert err.message =~ "  PREVIEW_JWT_SECRET is not set\n"
+      refute err.message =~ "DATABASE_URL"
+    end
+
+    test "one missing setting keeps its own refusal" do
+      err = assert_raise RuntimeError, fn -> read!(%{"PHX_HOST" => nil}) end
+      assert err.message =~ "environment variable PHX_HOST is missing."
+    end
+
+    test "dev does not require them" do
+      assert read!(%{"PHX_HOST" => nil, "BARKPARK_KEK" => nil, "PREVIEW_JWT_SECRET" => nil}, :dev)
+    end
+  end
+
   describe "BARKPARK_KEK" do
     @kek_anchor "BARKPARK_KEK must be the base64 encoding of exactly 32 raw bytes."
 

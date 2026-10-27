@@ -100,6 +100,26 @@ case System.get_env("BARKPARK_RELEASE_CAPTURE_HMAC_SECRET") do
     end
 end
 
+# Missing required settings, listed together. Each setting below also has its
+# own refusal further down, which names one setting and how to fix it. When two
+# or more are missing, this stops the boot first with one line for each, so an
+# operator fixes them in one pass. One missing setting still gets its own
+# refusal. `bp instance check` reports the same names before the server starts.
+if config_env() == :prod do
+  missing_required =
+    for name <-
+          ~w(DATABASE_URL PHX_HOST SECRET_KEY_BASE BARKPARK_CLOAK_KEY BARKPARK_KEK PREVIEW_JWT_SECRET),
+        System.get_env(name) in [nil, ""],
+        do: name
+
+  if length(missing_required) >= 2 do
+    raise "required settings are missing:\n" <>
+            Enum.map_join(missing_required, "\n", &"  #{&1} is not set") <>
+            "\nSet each one, or write a complete env file with bp instance init. " <>
+            "See docs/setup/SELF-HOST-OPERATIONS.md."
+  end
+end
+
 # SECRET_KEY_BASE, read and validated ONCE for every consumer (the endpoint
 # and the media-signing derive below both use this binding). The predicate is
 # on the RAW env string — at least 64 bytes, never trimmed, never decoded:
