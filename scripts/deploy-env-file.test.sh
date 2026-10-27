@@ -62,5 +62,15 @@ printf 'PHX_HOST=b.example.com\n' > "$TMP/clean.env"
 out2="$(APP_DIR="$APP_DIR" BARKPARK_ENV_FILE="$TMP/clean.env" bash -c 'set -euo pipefail; . "$1"' _ "$TMP/merge.sh" 2>&1)"
 check "no kept line without owned keys" '! grep -q "^>> Kept" <<<"$out2"'
 
+# .env holds the keys: secure_env sets mode 600, and deploy.sh calls it after
+# the .env is written and again before the instance check, on every run.
+sed -n '/^secure_env() {/p' "$ROOT/deploy.sh" > "$TMP/secure.sh"
+chmod 644 "$APP_DIR/.env"
+APP_DIR="$APP_DIR" bash -c 'chown() { :; }; . "$1"; secure_env' _ "$TMP/secure.sh"
+mode="$(stat -f %Lp "$APP_DIR/.env" 2>/dev/null || stat -c %a "$APP_DIR/.env")"
+check "secure_env leaves .env at mode 600" '[ "$mode" = 600 ]'
+check "deploy.sh calls secure_env twice" '[ "$(grep -c "^secure_env$" "$ROOT/deploy.sh")" -eq 2 ]'
+check "secure_env makes root the owner" 'grep -q "chown root:root \"\$APP_DIR/.env\"" "$TMP/secure.sh"'
+
 if [ "$fails" -ne 0 ]; then echo "deploy-env-file: $fails failed"; exit 1; fi
 echo "deploy-env-file: all passed"

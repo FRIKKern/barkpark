@@ -299,6 +299,11 @@ for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK BARKPARK_RELEASE_
   fi
 done
 
+# .env holds the keys and the database password. The service runs as root, so
+# root only. Set on every run: a file from an older deploy.sh was 644.
+secure_env() { chown root:root "$APP_DIR/.env" && chmod 600 "$APP_DIR/.env"; }
+secure_env
+
 # Operator settings file. BARKPARK_ENV_FILE names a file ON THIS SERVER with
 # KEY=VALUE lines (blank lines, # comments and a leading `export ` are fine).
 # Each key replaces the same key in .env or is appended, so settings such as
@@ -700,6 +705,31 @@ if [ -n "$TLS_READY" ] && [ "$HEALTHY" = "1" ]; then
   done
 fi
 
+# ── 13. bp and the full instance check ───────────────────────────────────────
+# Install bp for root with the same installer an operator uses, into
+# /usr/local/bin, which is on sudo's PATH. Then run the full check against the
+# real .env, with the database, media and URL probes. Problems are reported in
+# the banner; they do not fail the deploy, because the server already runs.
+secure_env
+CHECK_STATUS="not run: bp was not installed (see the install-cli lines above)"
+CHECK_LINES=""
+echo ">> Installing bp into /usr/local/bin..."
+if _cli_out="$(BARKPARK_BIN_DIR=/usr/local/bin sh "$APP_DIR/scripts/install-cli.sh" </dev/null 2>&1)"; then
+  printf '%s\n' "$_cli_out" | grep -E '^install-cli: installed|WARNING' | sed 's/^/   /' || true
+  echo ">> Running bp instance check --target vm --env-file $APP_DIR/.env..."
+  _check_rc=0
+  _check_out="$(/usr/local/bin/bp instance check --target vm --env-file "$APP_DIR/.env" -o table </dev/null 2>&1)" || _check_rc=$?
+  printf '%s\n' "$_check_out" | sed 's/^/   /'
+  CHECK_LINES="$(printf '%s\n' "$_check_out" | grep -vE '^(  |settings in effect|$)' || true)"
+  if [ "$_check_rc" = 0 ]; then
+    CHECK_STATUS="ok"
+  else
+    CHECK_STATUS="FAILED (exit $_check_rc)"
+  fi
+else
+  printf '%s\n' "$_cli_out" | sed 's/^/   /' >&2
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 IP=$(hostname -I | awk '{print $1}')
 # Azure and other clouds put a private address on the NIC (10.0.0.4) and NAT
@@ -784,8 +814,15 @@ echo "    make rebuild   # after code changes"
 echo "    make logs      # tail logs"
 echo "    make status    # service health"
 echo ""
-echo "  Update from GitHub:"
-echo "    cd $APP_DIR && git pull && make rebuild"
+echo "  Instance check (bp instance check --target vm --env-file $APP_DIR/.env): ${CHECK_STATUS:-not run}"
+if [ -n "${CHECK_LINES:-}" ]; then
+  printf '%s\n' "$CHECK_LINES" | sed 's/^/    /'
+fi
+echo "  Run it again with: sudo bp instance check --target vm --env-file $APP_DIR/.env"
+echo ""
+echo "  Update (a post-merge hook rebuilds and restarts):"
+echo "    sudo git -C $APP_DIR pull"
+echo "    See https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm"
 echo ""
 
 # The exit code descends from the measurement too. The failure path still
