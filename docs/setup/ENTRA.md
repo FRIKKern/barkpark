@@ -19,7 +19,7 @@ scripts/entra-app-register.sh --host barkpark.example.com --org gyldendal \
 The script does these steps and is safe to run again:
 
 1. It creates the app registration, or finds it by name. The app is single tenant (`AzureADMyOrg`) and has the redirect URI on the Web platform. A single-page application (SPA) redirect does not work, because Barkpark exchanges the code on the server with a client secret.
-2. It turns on the `groups` claim with group object ids, adds the optional `email` claim to the ID token, and adds the Microsoft Graph delegated permissions `openid`, `profile` and `email`. It then grants admin consent.
+2. It turns on the `groups` claim with group object ids, adds the optional `email` and `amr` claims to the ID token, and adds the Microsoft Graph delegated permissions `openid`, `profile` and `email`. It then grants admin consent.
 3. It creates the service principal, which is the enterprise app that users sign in to.
 4. It creates the owners security group and adds each `--add-owner` user to it.
 5. It creates a client secret and writes it to `--secret-file` with mode 600. The secret is never printed. A second run keeps the secret while the file holds one. `--rotate-secret` creates a new one.
@@ -41,6 +41,13 @@ bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$
 Add more groups to the mapping, such as an editors group mapped to `member`. The keys are group object ids. Each sign-in sets the role from the user's groups and can lower it, so always map the owners group to `owner`. With `BARKPARK_OIDC_KEEP_OWNER=on`, Barkpark refuses a mapping that maps no group to `owner` while the organization has an owner, and a sign-in never lowers a workspace's last owner.
 
 Editors sign in at `https://<host>/v1/auth/oidc/<org>/start`.
+
+The `profile` scope gives Barkpark `preferred_username`, which the UPN match below needs. Barkpark does not read the `name` claim, so `profile` is not needed for display names.
+
+## Entra MFA counts as Barkpark MFA
+
+`bp org oidc-update <org> --trust_idp_mfa` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add the optional claim `amr` to the ID token under Token configuration. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
+
 
 ## The bootstrap owner
 
@@ -70,7 +77,7 @@ The script's default, `--group-claims application`, avoids this. Entra then puts
 When the Azure CLI is not available, do the same in the Entra admin center:
 
 1. App registrations, New registration. Accounts in this organizational directory only. Redirect URI platform Web, with the URI above.
-2. Token configuration. Add groups claim, Groups assigned to the application, or Security groups without P1, emitted as Group ID. Add optional claim, ID token, `email`.
+2. Token configuration. Add groups claim, Groups assigned to the application, or Security groups without P1, emitted as Group ID. Add optional claims, ID token, `email` and `amr`.
 3. API permissions. Microsoft Graph delegated `openid`, `profile` and `email`, then Grant admin consent.
 4. Certificates and secrets. New client secret. Copy the value once and note the expiry date.
 5. Groups. Create the owners security group and add the owner. Under Enterprise applications, Users and groups, assign the group to the app.

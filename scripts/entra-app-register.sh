@@ -94,9 +94,9 @@ else
   fi
 fi
 
-# 2. ID token claims: groups as object ids, the email claim, and the scopes.
+# 2. ID token claims: groups as object ids, email, amr for MFA, and the scopes.
 az ad app update --id "$APP_ID" --set "groupMembershipClaims=$CLAIMS_VALUE" \
-  --optional-claims '{"idToken":[{"name":"email","essential":false}],"accessToken":[],"saml2Token":[]}'
+  --optional-claims '{"idToken":[{"name":"email","essential":false},{"name":"amr","essential":false}],"accessToken":[],"saml2Token":[]}'
 # shellcheck disable=SC2086
 az ad app permission add --id "$APP_ID" --api "$GRAPH" --api-permissions $SCOPES >/dev/null
 
