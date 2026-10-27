@@ -5038,9 +5038,11 @@ defmodule BarkparkCloud.Web.Router do
 
       # PAUSE HONESTY: `bp cloud autoupdate pause` promises no update until
       # resume, so an unforced trigger on a paused box is a 409, never a run.
-      # `force: true` overrides it for one run, like the pin.
+      # `force: true` overrides it for one run, like the pin. Flat on purpose:
+      # the error-envelope census pins the nested set (the console and the
+      # CLI read both shapes).
       {:error, :paused} ->
-        json(conn, 409, %{error: %{code: "paused"}})
+        json(conn, 409, %{error: "paused"})
 
       {:ok, 202, _body} ->
         # OC24: the run started on the box — record the operator

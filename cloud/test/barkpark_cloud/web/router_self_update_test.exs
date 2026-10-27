@@ -262,7 +262,7 @@ defmodule BarkparkCloud.Web.RouterSelfUpdateTest do
 
       assert StudioLinkFakeHttpClient.requests() == []
       assert conn.status == 409
-      assert json_body(conn) == %{"error" => %{"code" => "paused"}}
+      assert json_body(conn) == %{"error" => "paused"}
       refute_enqueued(worker: UpdateStatusWorker)
     end
 

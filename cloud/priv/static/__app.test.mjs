@@ -16070,6 +16070,7 @@ test("isu-w5: updateConflict classifies pinned / already_running / not_enabled /
   assert.deepEqual(plain(hooks.updateConflict({ pinned_release: "v0.4.0" })), { kind: "pinned", pin: "v0.4.0" });
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "already_running" } })), { kind: "already_running", pin: null });
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "paused" } })), { kind: "paused", pin: null });
+  assert.deepEqual(plain(hooks.updateConflict({ error: "paused" })), { kind: "paused", pin: null });
   assert.equal(hooks.updateConflictCopy({ kind: "paused", pin: null }).forceLabel, "Update anyway");
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "not_enabled" } })), { kind: "not_enabled", pin: null });
   assert.deepEqual(plain(hooks.updateConflict({ error: { code: "not_live" } })), { kind: "not_live", pin: null });
