@@ -382,3 +382,58 @@ func TestInstanceKnownSettingsList(t *testing.T) {
 		}
 	}
 }
+
+// TestInstanceReleaseCaptureHMACSecret: migration 20260719020100 raises on a
+// fresh database without BARKPARK_RELEASE_CAPTURE_HMAC_SECRET, so init writes
+// it for containerapps and check requires it unless the target is vm, where
+// deploy.sh generates it.
+func TestInstanceReleaseCaptureHMACSecret(t *testing.T) {
+	const name = "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"
+	skip := map[string]bool{"database": true, "media": true, "url": true}
+	stubInstanceProbes(t, allExtensions, nil)
+
+	env := completeEnv(t)
+	if raw, err := base64.StdEncoding.DecodeString(env[name]); err != nil || len(raw) != 32 {
+		t.Fatalf("containerapps init wrote %s decoding to %d bytes (%v)", name, len(raw), err)
+	}
+	if problems, _ := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: skip}); len(problems) != 0 {
+		t.Fatalf("complete env has problems: %+v", problems)
+	}
+
+	hasProblem := func(problems []instanceProblem, want string) bool {
+		for _, p := range problems {
+			if p.Setting == name && strings.Contains(p.Problem, want) {
+				return true
+			}
+		}
+		return false
+	}
+
+	delete(env, name)
+	problems, _ := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: skip})
+	if !hasProblem(problems, "is not set") {
+		t.Fatalf("containerapps check without %s: %+v", name, problems)
+	}
+
+	env[name] = "short"
+	problems, _ = instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: skip})
+	if !hasProblem(problems, "shorter than 32 bytes") {
+		t.Fatalf("containerapps check with a short %s: %+v", name, problems)
+	}
+
+	delete(env, name)
+	problems, notes := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetVM, skip: skip})
+	if hasProblem(problems, "") {
+		t.Fatalf("vm check reports %s as a problem: %+v", name, problems)
+	}
+	noted := false
+	for _, n := range notes {
+		noted = noted || (n.Setting == name && strings.Contains(n.Problem, "deploy.sh sets it"))
+	}
+	if !noted {
+		t.Fatalf("vm check gave no deploy.sh note for %s", name)
+	}
+	if strings.Contains(instanceEnvFile(instanceTargetVM, map[string]string{name: "x"}), name+"=") {
+		t.Fatalf("vm init file sets %s", name)
+	}
+}
