@@ -42,7 +42,7 @@ const client = createClient({
 
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter. Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, 20 streams each, then `goaway`) sends changed docs' twins in `{"tags"}` messages per second; `restart` if `Last-Event-ID` can't resume. Draft mode only: the client sends no token without `includeDrafts`, and anonymous streams await the owner. At most 128 tags: past 64 readable ones, type tags only.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter. Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, capped as listen, then `goaway`) sends changed docs' twins in `{"tags"}` messages per second; `restart` if `Last-Event-ID` can't resume. Draft mode only: the client sends no token without `includeDrafts`, and anonymous streams await the owner. At most 128 tags: past 64 readable ones, type tags only.
 
 ## Evaluation and limits
 
