@@ -107,3 +107,13 @@ Monthly cost in Norway East at the sizes in `deploy/azure/main.bicep`, as of 202
 | Key Vault | under 0.10 |
 
 The environment runs only the Consumption workload profile, which has no environment management charge. The virtual network and its service endpoints have no charge.
+
+## Container Apps alerts
+
+`deploy/azure/monitor.bicep` adds three alerts that mail one address. Until `main.bicep` calls it, deploy it on its own with `az deployment group create -g <rg> -f deploy/azure/monitor.bicep` and the workspace id, app id, host, job name and address as parameters.
+
+- `/readyz` failed two checks in a row. An Application Insights standard test requests `https://<host>/readyz` every 5 minutes from North Europe. In a test the mail went out 8 minutes after the app stopped.
+- An execution of the backup job failed. Set `backupJobName` to the Container Apps job that runs backups. The job must exist before the deployment.
+- The app restarted 3 times within 30 minutes.
+
+Azure keeps the state of a changed alert rule. After you change a rule, delete it and deploy again, or it may not fire. The app's logs are in the Log Analytics workspace, in `ContainerAppConsoleLogs_CL`. Monitoring costs about USD 6.60 a month, mostly the 8,800 test runs at USD 0.000715 each. `availabilityFrequencySeconds=900` brings it to about USD 2.40 and alerts after about 30 minutes.
