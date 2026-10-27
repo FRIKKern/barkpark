@@ -298,6 +298,43 @@ check "the engine's output still reached stdout through the guard" \
   "grep -qF 'Done. Service restarted and answering' '$TMP/guarded.out'"
 check "mix ran with one scheduler" "grep -q '^mix compile .*' '$CALL_LOG' && grep -qF '+S 1:1' '$TMP/guarded.erlflags'"
 
+echo "== precompressed static siblings track the checkout (task-cca3c6d48e57097e) =="
+# The single-box engine builds the same .gz/.br siblings the slot path does
+# (deploy/instance-deploy.sh). Plug.Static serves a sibling WITHOUT checking it
+# against its file, so a stale or orphaned one must never survive a deploy.
+SIB="$TMP/siblings"
+make_repo "$SIB"
+ASSETS="$SIB/api/priv/static/assets"
+mkdir -p "$ASSETS"
+printf 'console.log("bundle %s");\n' "$RANDOM$RANDOM" > "$ASSETS/a.bundle.js"
+printf '.x{color:red}\n' > "$ASSETS/b.css"
+printf 'stale bytes' | gzip -c > "$ASSETS/a.bundle.js.gz"
+touch -t 202001010000 "$ASSETS/a.bundle.js.gz"
+printf 'orphan' | gzip -c > "$ASSETS/gone.js.gz"
+printf 'wasm' > "$ASSETS/bp-pdrender.wasm.gz"
+sibling_ok() { # $1=source $2=enc: the sibling decodes to the source and carries its mtime
+  local s="$1.$2"
+  [ -f "$s" ] || return 1
+  if [ "$2" = gz ]; then gzip -dc "$s" | cmp -s - "$1" || return 1; else brotli -dc "$s" | cmp -s - "$1" || return 1; fi
+  [ ! "$s" -nt "$1" ] && [ ! "$s" -ot "$1" ]
+}
+: > "$CALL_LOG"
+run_engine "$SIB" "$TMP/siblings.out"
+rc=$?
+check "siblings: the deploy succeeds" "[ '$rc' = 0 ]"
+check "siblings: a stale .gz is rebuilt to decode to its source" "sibling_ok '$ASSETS/a.bundle.js' gz"
+check "siblings: a .css gets a .gz with its source's mtime" "sibling_ok '$ASSETS/b.css' gz"
+check "siblings: .br matches its source where brotli exists, else none is written" \
+  "if PATH=/usr/bin:/bin command -v brotli >/dev/null 2>&1; then sibling_ok '$ASSETS/a.bundle.js' br; else [ ! -e '$ASSETS/a.bundle.js.br' ]; fi"
+check "siblings: an orphan (source gone) is removed" "[ ! -e '$ASSETS/gone.js.gz' ]"
+check "siblings: make wasm's own .gz is left alone" "[ \"\$(cat '$ASSETS/bp-pdrender.wasm.gz')\" = 'wasm' ]"
+check "siblings: the build runs before the restart" \
+  "awk '!s && /static siblings:/{s=NR} /Done. Service restarted/{d=NR} END{exit !(s && d && s < d)}' '$TMP/siblings.out'"
+make_repo "$SIB"
+run_engine "$SIB" "$TMP/siblings2.out"
+check "siblings: a second deploy rebuilds nothing it already has" \
+  "grep -q 'static siblings: 0 rebuilt' '$TMP/siblings2.out'"
+
 if [ "$fails" -ne 0 ]; then
   echo "deploy-rebuild tests: $fails failure(s)" >&2
   exit 1
