@@ -92,7 +92,8 @@ defmodule Barkpark.Sso.Oidc do
     # update_all, which would otherwise bypass the membership changeset and
     # persist an unknown role string.
     with %{valid?: true} <- changeset,
-         :ok <- validate_mapping_roles(changeset) do
+         :ok <- validate_mapping_roles(changeset),
+         :ok <- validate_owner_mapping(changeset) do
       write.(changeset)
     else
       %Ecto.Changeset{} = cs -> {:error, cs}
@@ -113,6 +114,25 @@ defmodule Barkpark.Sso.Oidc do
     case unknown do
       [] -> :ok
       names -> {:error, {:unknown_role, names}}
+    end
+  end
+
+  # Each sign-in sets the role from the user's groups and can lower it. With
+  # BARKPARK_OIDC_KEEP_OWNER on and owners in the org, a changed mapping must
+  # still map a group to owner, or the owners' next sign-ins would leave the
+  # org with no owner.
+  defp validate_owner_mapping(changeset) do
+    case Barkpark.Sso.keep_owner?() &&
+           Ecto.Changeset.get_change(changeset, :group_role_mappings) do
+      mappings when is_map(mappings) and map_size(mappings) > 0 ->
+        org_id = Ecto.Changeset.get_field(changeset, :organization_id)
+
+        if "owner" in Map.values(mappings) or not Barkpark.Sso.org_has_owner?(org_id),
+          do: :ok,
+          else: {:error, :no_owner_mapping}
+
+      _ ->
+        :ok
     end
   end
 

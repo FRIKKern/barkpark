@@ -291,6 +291,35 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
     end
   end
 
+  describe "group mappings and owners" do
+    test "a mapping that would leave the org with no owner is refused", ctx do
+      Application.put_env(:barkpark, :oidc_keep_owner, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_keep_owner) end)
+      {slug, _} = setup_org(ctx)
+
+      {:ok, owner} =
+        Barkpark.Accounts.register_user(%{
+          email: uniq("o") <> "@x.example",
+          password: "correct horse ok"
+        })
+
+      {:ok, _} = Tenancy.Auth.create_membership(ctx.ws.id, owner.id, "owner", "user")
+
+      conn =
+        req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+          group_role_mappings: %{"editors" => "member"}
+        })
+
+      assert %{"error" => %{"code" => "validation_failed"} = error} = json_response(conn, 422)
+      assert inspect(error) =~ "no owner"
+
+      assert req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+               group_role_mappings: %{"owners" => "owner", "editors" => "member"}
+             })
+             |> json_response(200)
+    end
+  end
+
   describe "domains and sign-in methods" do
     test "a domain routes sign-ins only after its TXT record verifies", ctx do
       slug = uniq("org")

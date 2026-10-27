@@ -170,6 +170,14 @@ defmodule BarkparkWeb.OrgSsoController do
   defp mapping_error({:error, {:unknown_role, names}}),
     do: invalid("group_role_mappings", "unknown role(s): #{Enum.join(names, ", ")}")
 
+  defp mapping_error({:error, :no_owner_mapping}),
+    do:
+      invalid(
+        "group_role_mappings",
+        "maps no group to owner. Each sign-in sets the role from the user's groups, " <>
+          "so this mapping would leave the organization with no owner. Map the owners group to owner"
+      )
+
   defp mapping_error(result), do: result
 
   defp invalid(field, message),
