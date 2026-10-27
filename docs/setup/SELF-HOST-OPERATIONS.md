@@ -24,26 +24,7 @@ Once a month, restore a `bp instance backup` of the live instance into a scratch
 
 ## Moving an instance
 
-The backup holds the database and media but no key. The keys move once, by hand, into the target's Key Vault. The steps below move an instance, such as a single VM, onto Container Apps. Run `scripts/instance-move-rehearsal.sh` to rehearse the steps below on one machine. It restores into a Postgres that only accepts verified TLS, boots the prod build, and passes when `/readyz` answers 200 and an encrypted field and a TOTP user read back.
-
-1. On Flexible Server, allow the extensions the dump creates before the restore. Create an empty database for Barkpark.
-
-   ```bash
-   az postgres flexible-server parameter set -g "$RG" -s "$PG" --name azure.extensions --value citext,pg_trgm,pgcrypto
-   ```
-
-2. Freeze writes. Barkpark has no read-only switch, so stop every writer, such as editors and integrations with write tokens, or stop the source app. Writes after the backup starts are not in it.
-3. Back up the source with `bp instance backup`, using client tools for the source's Postgres major. The target must run the same major.
-4. Copy each key that `manifest.json` lists under `secrets.keys` from the source's environment, on a VM `/opt/barkpark/.env`, into Key Vault: `SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET`, `BARKPARK_INGEST_TOKEN`, `BARKPARK_KEK`, and `BARKPARK_KEK_PREVIOUS` if the source sets it. Reference them from the Container App as [the key rotation section](#rotate-keys) shows, and set `BARKPARK_KEK_VERSION` to the source's value. A new key makes encrypted fields and TOTP sign-in unreadable.
-5. Restore into the empty database over TLS. The restore checks every per-type count and media checksum against the manifest and exits 1 on any difference.
-
-   ```bash
-   bp instance restore <dir> --media-dir <empty Azure Files mount> \
-     --database-url "postgresql://$USER@$PG.postgres.database.azure.com/barkpark?sslmode=verify-full"
-   ```
-
-6. Start the app with `DATABASE_SSL=verify-full`. Wait for `/readyz` to answer 200, then sign in once with TOTP and open a document with an encrypted field.
-7. Repoint DNS to the Container App and change the clients' Barkpark URL. API tokens move with the database. Keep `PHX_HOST` on the same host name, or registered passkeys stop working.
+The backup holds the database and media but no key, so the keys move by hand. [SELF-HOST-MOVE.md](SELF-HOST-MOVE.md) moves a single VM onto Container Apps, with the times of a rehearsal. On any target, restore into an empty database with the extensions allowed, on the backup's PostgreSQL major or, with bp 1.26.1 and newer, a newer one. Load the source's keys before the first start.
 
 ## Rotate keys
 

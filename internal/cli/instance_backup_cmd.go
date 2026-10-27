@@ -21,7 +21,7 @@ package cli
 // so. The document counts and the dump come from one exported snapshot, so a
 // backup of a live instance is consistent.
 //
-// Restore refuses a different Postgres major, a non-empty database and a
+// Restore refuses an older Postgres major, a non-empty database and a
 // non-empty media directory, verifies both member checksums before it touches
 // anything, and after pg_restore checks every media file and every per-type
 // count against the manifest. Any difference fails the command.
@@ -229,6 +229,11 @@ func instanceBackup(ctx context.Context, dbURL, mediaDir, outDir string) (instan
 	if err := finish(); err != nil {
 		return man, err
 	}
+	// pg_dump creates the file with the umask, 0644 on most hosts. It holds
+	// password and token hashes, so keep it as private as the other members.
+	if err := os.Chmod(dumpPath, 0o600); err != nil {
+		return man, err
+	}
 
 	mediaPath := filepath.Join(outDir, instanceBackupMedia)
 	f, err := os.OpenFile(mediaPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -295,9 +300,8 @@ func instanceRestore(ctx context.Context, dir, dbURL, mediaDir string) (instance
 	if err != nil {
 		return man, err
 	}
-	if major != man.PostgresMajor {
-		return man, fmt.Errorf("the backup is from Postgres %d and the target runs Postgres %d: restore into a Postgres %d server",
-			man.PostgresMajor, major, man.PostgresMajor)
+	if err := restoreMajorAllowed(man.PostgresMajor, major); err != nil {
+		return man, err
 	}
 	tables, err := psqlQuery(ctx, dbURL, "SELECT count(*) FROM pg_tables WHERE schemaname = 'public';")
 	if err != nil {
@@ -358,6 +362,18 @@ func psqlQuery(ctx context.Context, dbURL, query string) (string, error) {
 		return "", fmt.Errorf("psql: %w: %s", err, strings.TrimSpace(stderr.String()))
 	}
 	return strings.TrimRight(string(b), "\n"), nil
+}
+
+// restoreMajorAllowed lets a backup restore into the same or a newer Postgres
+// major. pg_restore reads archives from older servers, and a move from a
+// single VM (Ubuntu's Postgres 14 or 16) onto Flexible Server 17 needs it. An
+// older target is refused: its pg_restore cannot be trusted with a newer dump.
+func restoreMajorAllowed(backup, target int) error {
+	if target < backup {
+		return fmt.Errorf("the backup is from Postgres %d and the target runs Postgres %d: restore into Postgres %d or newer",
+			backup, target, backup)
+	}
+	return nil
 }
 
 func pgMajor(versionNum string) (int, error) {
