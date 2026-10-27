@@ -14,13 +14,18 @@ bp instance backup --database-url "postgresql://barkpark:<password from .env>@lo
 
 The backup holds no key. Keep a copy of the keys in `/opt/barkpark/.env` in a password manager, apart from the backups.
 
-On Azure, the platform does it:
+On Container Apps, Postgres answers only inside the virtual network, so backups run there in two jobs that `deploy/azure/main.bicep` creates. They run bp and the Postgres 17 client tools with the app's settings, the media share at `/app/uploads` and the `backups` share at `/backups`. `barkpark-backup` runs `bp instance backup` daily at 02:30 UTC and keeps 14 days. `barkpark-ops` runs one operation from its arguments: `check`, `list`, `backup` or `restore <dir> [<database> [<media dir>]]`.
 
-- Flexible Server automated backups give point-in-time restore within the retention period, 7 to 35 days, set with `az postgres flexible-server update --backup-retention`.
-- Azure Backup takes scheduled snapshots of the Azure Files share that holds media.
-- Key Vault keeps the keys. Turn on soft delete and purge protection.
+```bash
+az containerapp job start -g <rg> -n barkpark-backup
+az containerapp job update -g <rg> -n barkpark-ops --args restore <dir> barkpark_restore /tmp/restore-media
+az containerapp job start -g <rg> -n barkpark-ops
+az containerapp job execution list -g <rg> -n barkpark-ops -o table
+```
 
-Once a month, restore a `bp instance backup` of the live instance into a scratch PostgreSQL of the same major with the extensions allowed. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, backup and restore times and the result against the RTO, then delete the scratch server.
+Set arguments with `job update`. Overrides on `job start` drop the job's settings and mounts. The output is in Log Analytics, table `ContainerAppConsoleLogs_CL`. To copy backups to or from your machine, add your address to `operatorIpRanges`, redeploy and use `az storage file download-batch` or `upload-batch` on the `backups` share. Flexible Server also keeps point-in-time restore for 7 to 35 days. Turn on purge protection on the Key Vault.
+
+Once a month, restore a `bp instance backup` of the live instance into a scratch database of the same major with the extensions allowed. On Container Apps, create it with `az postgres flexible-server db create -g <rg> --server-name <server> -n barkpark_restore` and run the restore above. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, backup and restore times and the result against the RTO, then delete the scratch server.
 
 ## Moving an instance
 
@@ -84,15 +89,17 @@ The image runs as uid and gid 10001, and its entrypoint refuses to start when `/
 
 ## Container Apps cost
 
-Monthly cost in Norway East at the sizes in `deploy/azure/main.bicep`, as of 2026-10-27, is about USD 46 to 100:
+Monthly cost in Norway East at the sizes in `deploy/azure/main.bicep`, as of 2026-10-27, is about USD 47 to 101:
 
 | Item | USD per month |
 |---|---|
 | Container App, 1 vCPU and 2 GiB | 24 idle to 73 busy |
 | PostgreSQL Flexible Server, Standard_B1ms | 16 |
 | Storage account | 5 |
-| Azure Files share | 2 |
+| Azure Files shares for media and backups | 2 |
+| Private DNS zone for Postgres | 0.50 |
+| Backup and operations jobs, about 1 minute a day | 0 inside the monthly free grant |
 | Log Analytics | 0 to 3 |
 | Key Vault | under 0.10 |
 
-A consumption-only environment has no environment management charge.
+The environment runs only the Consumption workload profile, which has no environment management charge. The virtual network and its service endpoints have no charge.

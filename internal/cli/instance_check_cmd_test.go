@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -542,29 +543,28 @@ func TestInstanceInitContainerAppsSecretsMatchBicep(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The bicepparam names its secrets BARKPARK_<init name> for three of them,
-	// and BARKPARK_PG_PASSWORD for the password init puts in DATABASE_URL.
-	bicepToInit := map[string]string{
-		"BARKPARK_PG_PASSWORD":                 "DATABASE_URL",
-		"BARKPARK_SECRET_KEY_BASE":             "SECRET_KEY_BASE",
-		"BARKPARK_CLOAK_KEY":                   "BARKPARK_CLOAK_KEY",
-		"BARKPARK_KEK":                         "BARKPARK_KEK",
-		"BARKPARK_PREVIEW_JWT_SECRET":          "PREVIEW_JWT_SECRET",
-		"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET": "BARKPARK_RELEASE_CAPTURE_HMAC_SECRET",
-		"BARKPARK_SEED_ADMIN_TOKEN":            "BARKPARK_SEED_ADMIN_TOKEN",
+	// The bicepparam reads barkpark.env and names each required secret exactly
+	// as init writes it. env.?NAME marks an optional one, which init leaves out.
+	want := []string{
+		"DATABASE_URL",
+		"SECRET_KEY_BASE",
+		"BARKPARK_CLOAK_KEY",
+		"BARKPARK_KEK",
+		"PREVIEW_JWT_SECRET",
+		"BARKPARK_SEED_ADMIN_TOKEN",
+		"BARKPARK_RELEASE_CAPTURE_HMAC_SECRET",
 	}
-	got := regexp.MustCompile(`readEnvironmentVariable\('([A-Z0-9_]+)'\)`).FindAllStringSubmatch(string(param), -1)
-	if len(got) != len(bicepToInit) {
-		t.Fatalf("bicepparam reads %d secrets, init maps %d", len(got), len(bicepToInit))
+	got := regexp.MustCompile(`(?m)^param \w+ = .*\benv\.([A-Z0-9_]+)\b`).FindAllStringSubmatch(string(param), -1)
+	if len(got) != len(want) {
+		t.Fatalf("bicepparam reads %d required secrets, want %d", len(got), len(want))
 	}
 	for _, m := range got {
-		name, ok := bicepToInit[m[1]]
-		if !ok {
+		if !slices.Contains(want, m[1]) {
 			t.Errorf("bicepparam reads %s, which init does not generate", m[1])
 			continue
 		}
-		if env[name] == "" {
-			t.Errorf("init leaves %s empty for bicepparam %s", name, m[1])
+		if env[m[1]] == "" {
+			t.Errorf("init leaves %s empty", m[1])
 		}
 	}
 }
