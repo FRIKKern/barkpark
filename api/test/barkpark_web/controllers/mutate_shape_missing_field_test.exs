@@ -104,11 +104,14 @@ defmodule BarkparkWeb.MutateShapeMissingFieldTest do
     assert error(resp)["message"] == "discardDraft requires both id and type; missing: id"
   end
 
-  test "patch without type answers 422 naming patch and type", %{conn: conn} do
+  # A patch by id alone is Sanity's shape (@sanity/client's `patch()`), so it
+  # no longer needs `type`: the type is found from the stored row
+  # (task-c6cbf346a07ff01e, as task-645fcbef64fac473 did for delete). An id
+  # that matches no row is the typed patch's 404.
+  test "patch without type resolves it from the stored row; a missing id 404s", %{conn: conn} do
     resp = mutate(conn, %{"patch" => %{"id" => "x", "set" => %{"title" => "t"}}})
 
-    assert resp.status == 422
-    assert error(resp)["message"] == "patch requires both id and type; missing: type"
+    assert resp.status == 404
   end
 
   # BOUNDARY, pinned so the next reader does not mistake it for an oversight: a

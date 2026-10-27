@@ -49,7 +49,9 @@ defmodule Barkpark.Config.ObanPoolBudgetTest do
   # `Barkpark.Repo.job_pool_child_specs/0`) instead of taking HTTP's. An
   # EQUALITY on purpose, as in cloud/: it reds when a queue is widened or added
   # (more waiting than was accepted) AND when the gap closes.
-  @accepted_job_queueing 25
+  # 25 -> 26 (task-4ec7e38d85c07ab7): `edge_linkers: 1`, the linker
+  # re-projection's own queue, kept off `:edge_projector` on the lead's call.
+  @accepted_job_queueing 26
 
   test "the partition is ON by default: Oban's share of the web pool is zero" do
     assert oban_pool_default() > 0, """

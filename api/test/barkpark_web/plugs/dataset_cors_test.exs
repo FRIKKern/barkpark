@@ -96,7 +96,7 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
 
       for h <- ~w(authorization content-type x-requested-with x-barkpark-preview-token
                   accept if-match if-none-match idempotency-key x-barkpark-api-version
-                  last-event-id) do
+                  last-event-id x-sanity-project-id) do
         assert allow_headers =~ h
       end
 
@@ -187,6 +187,39 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
     end
   end
 
+  describe ":always_allowed_origins (BARKPARK_ALWAYS_ALLOWED_ORIGINS)" do
+    setup do
+      put_schema("ds_always", "post", [])
+      on_exit(fn -> Application.delete_env(:barkpark, :always_allowed_origins) end)
+      :ok
+    end
+
+    defp acao_for(path, origin) do
+      build_conn(:get, path)
+      |> put_req_header("origin", origin)
+      |> call_plug()
+      |> send_resp(200, "ok")
+      |> get_resp_header("access-control-allow-origin")
+    end
+
+    test "unset, the built-in list is allowed on dataset and no-dataset routes" do
+      for origin <- ["https://www.barkpark.cloud", "https://x.vercel.app"],
+          path <- ["/v1/data/query/ds_always/post", "/v1/meta"] do
+        assert acao_for(path, origin) == [origin]
+      end
+    end
+
+    test "set, it replaces the built-in list" do
+      Application.put_env(:barkpark, :always_allowed_origins, ["https://pensum.example.no"])
+
+      for path <- ["/v1/data/query/ds_always/post", "/v1/meta"] do
+        assert acao_for(path, "https://www.barkpark.cloud") == []
+        assert acao_for(path, "https://x.vercel.app") == []
+        assert acao_for(path, "https://pensum.example.no") == ["https://pensum.example.no"]
+      end
+    end
+  end
+
   describe "path-based tenancy prefix (/w/:ws/p/:project/…)" do
     # The /w/:ws/p/:project prefix shifts every positional path index; the plug
     # strips it before matching, so BOTH shapes must resolve the same dataset.
@@ -208,6 +241,25 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
       # Both shapes reflect the dataset's allowed origin identically.
       assert get_resp_header(flat, "access-control-allow-origin") == ["https://both.example"]
       assert get_resp_header(prefixed, "access-control-allow-origin") == ["https://both.example"]
+    end
+
+    # @sanity/client pointed at Barkpark (useProjectHostname: false) sends
+    # X-Sanity-Project-ID on every GROQ read; the preflight must allow it.
+    # The GROQ path resolves no dataset here, so an always-allowed origin.
+    test "a @sanity/client GROQ preflight allows authorization and x-sanity-project-id" do
+      conn =
+        build_conn(:options, "/w/acme/p/site/v2025-02-19/data/query/ds_sanity")
+        |> put_req_header("origin", "https://barkpark.cloud")
+        |> put_req_header("access-control-request-method", "GET")
+        |> put_req_header("access-control-request-headers", "authorization,x-sanity-project-id")
+        |> call_plug()
+
+      assert conn.status == 204
+      assert get_resp_header(conn, "access-control-allow-origin") == ["https://barkpark.cloud"]
+      [allow_headers] = get_resp_header(conn, "access-control-allow-headers")
+      allowed = allow_headers |> String.split(",") |> Enum.map(&String.trim/1)
+      assert "authorization" in allowed
+      assert "x-sanity-project-id" in allowed
     end
 
     test "prefixed path with a mismatched origin still fails closed (no ACAO)" do
@@ -254,6 +306,88 @@ defmodule BarkparkWeb.Plugs.DatasetCorsTest do
       acao = get_resp_header(conn, "access-control-allow-origin")
       refute "*" in acao
       assert acao == []
+    end
+  end
+
+  # task-c2d1e40782ca8d69: the Sanity-shaped routes resolve their dataset, so
+  # its cors_origins apply as on /v1/data, and keep the always-allowed and
+  # :default_cors_origins they had when they resolved none.
+  describe "Sanity-shaped GROQ paths (/v<ver>/data/query|doc|listen/<ds>)" do
+    setup do
+      prior = Application.get_env(:barkpark, :default_cors_origins)
+      Application.put_env(:barkpark, :default_cors_origins, ["https://sdk.example"])
+      on_exit(fn -> Application.put_env(:barkpark, :default_cors_origins, prior || []) end)
+      put_schema("ds_g", "post", ["https://site.example"])
+      put_schema("ds_h", "post", ["https://other.example"])
+      :ok
+    end
+
+    defp preflight(path, origin) do
+      build_conn(:options, path)
+      |> put_req_header("origin", origin)
+      |> put_req_header("access-control-request-method", "GET")
+      |> put_req_header("access-control-request-headers", "authorization,x-sanity-project-id")
+      |> call_plug()
+    end
+
+    defp acao(conn), do: get_resp_header(conn, "access-control-allow-origin")
+
+    test "a listed origin is allowed, flat and prefixed, on query, doc and listen" do
+      for path <- [
+            "/v2025-02-19/data/query/ds_g",
+            "/w/acme/p/site/v2025-02-19/data/query/ds_g",
+            "/w/acme/p/site/v2021-06-07/data/doc/ds_g/a,b",
+            "/w/acme/p/site/vX/data/listen/ds_g"
+          ] do
+        conn = preflight(path, "https://site.example")
+        assert conn.status == 204, path
+        assert acao(conn) == ["https://site.example"], path
+
+        get =
+          build_conn(:get, path)
+          |> put_req_header("origin", "https://site.example")
+          |> call_plug()
+          |> send_resp(200, "ok")
+
+        assert acao(get) == ["https://site.example"], path
+      end
+    end
+
+    test "an origin not in the dataset's list is still refused" do
+      conn = preflight("/w/acme/p/site/v2025-02-19/data/query/ds_g", "https://evil.example")
+      assert conn.status == 204
+      assert conn.halted
+      assert acao(conn) == []
+    end
+
+    test "another dataset's list does not leak across" do
+      assert acao(
+               preflight("/w/acme/p/site/v2025-02-19/data/query/ds_g", "https://other.example")
+             ) == []
+
+      assert acao(
+               preflight("/w/acme/p/site/v2025-02-19/data/query/ds_h", "https://other.example")
+             ) ==
+               ["https://other.example"]
+
+      assert acao(preflight("/w/acme/p/site/v2025-02-19/data/query/ds_h", "https://site.example")) ==
+               []
+    end
+
+    test "the always-allowed and default origins keep working" do
+      for origin <- ["https://barkpark.cloud", "https://sdk.example"] do
+        assert acao(preflight("/w/acme/p/site/v2025-02-19/data/query/ds_g", origin)) == [origin]
+
+        assert acao(preflight("/w/acme/p/site/v2025-02-19/data/query/no_such_ds", origin)) == [
+                 origin
+               ]
+      end
+    end
+
+    test "a non-data versioned path still resolves no dataset" do
+      assert acao(
+               preflight("/w/acme/p/site/v2025-02-19/data/mutate/ds_g", "https://site.example")
+             ) == []
     end
   end
 end

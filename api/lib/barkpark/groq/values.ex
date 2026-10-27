@@ -4,9 +4,10 @@ defmodule Barkpark.Groq.Values do
   and the conversion of evaluated values to JSON.
 
   A value is plain decoded JSON (`nil`, booleans, numbers, binaries, lists,
-  maps) or one of two internal kinds that only functions produce:
-  `{:datetime, DateTime.t()}` from `dateTime()` and `{:path, pattern, regex}`
-  from `path()`. `to_json/1` turns both back into strings.
+  maps) or one of three internal kinds that only functions produce:
+  `{:datetime, DateTime.t()}` from `dateTime()`, `{:path, pattern, regex}`
+  from `path()` and `{:geo, lat, lng}` from `geo::latLng()`. `to_json/1` turns
+  the first two back into strings and a geo value into a GeoJSON Point.
 
   Numbers follow JavaScript doubles, as groq-js does: an integral float such as
   `2.0` is the number `2`, and a non-finite result is `null`.
@@ -25,6 +26,7 @@ defmodule Barkpark.Groq.Values do
   def type_of(v) when is_map(v), do: :object
   def type_of({:datetime, _}), do: :datetime
   def type_of({:path, _, _}), do: :path
+  def type_of({:geo, _, _}), do: :geo
   def type_of(_), do: :null
 
   @doc "Normalizes a number the way a JavaScript double would read back."
@@ -118,7 +120,7 @@ defmodule Barkpark.Groq.Values do
   @spec arith(String.t(), t(), t()) :: t()
   def arith("+", {:datetime, dt}, n) when is_number(n), do: add_seconds(dt, n)
   def arith("+", n, {:datetime, dt}) when is_number(n), do: add_seconds(dt, n)
-  def arith("+", a, b) when is_number(a) and is_number(b), do: finite(a + b)
+  def arith("+", a, b) when is_number(a) and is_number(b), do: float_op(fn -> a + b end)
   def arith("+", a, b) when is_binary(a) and is_binary(b), do: a <> b
   def arith("+", a, b) when is_map(a) and is_map(b), do: Map.merge(a, b)
   def arith("+", a, b) when is_list(a) and is_list(b), do: a ++ b
@@ -127,11 +129,11 @@ defmodule Barkpark.Groq.Values do
   def arith("-", {:datetime, a}, {:datetime, b}),
     do: num(DateTime.diff(a, b, :microsecond) / 1_000_000)
 
-  def arith("-", a, b) when is_number(a) and is_number(b), do: finite(a - b)
-  def arith("*", a, b) when is_number(a) and is_number(b), do: finite(a * b)
+  def arith("-", a, b) when is_number(a) and is_number(b), do: float_op(fn -> a - b end)
+  def arith("*", a, b) when is_number(a) and is_number(b), do: float_op(fn -> a * b end)
 
   def arith("/", a, b) when is_number(a) and is_number(b) do
-    if b == 0, do: nil, else: finite(a / b)
+    if b == 0, do: nil, else: float_op(fn -> a / b end)
   end
 
   def arith("%", a, b) when is_integer(a) and is_integer(b) do
@@ -139,20 +141,28 @@ defmodule Barkpark.Groq.Values do
   end
 
   def arith("%", a, b) when is_number(a) and is_number(b) do
-    if b == 0, do: nil, else: finite(:math.fmod(a * 1.0, b * 1.0))
+    if b == 0, do: nil, else: float_op(fn -> :math.fmod(a * 1.0, b * 1.0) end)
   end
 
   def arith("**", a, b) when is_integer(a) and is_integer(b) and b >= 0 and b < 1024 do
-    finite(Integer.pow(a, b))
+    float_op(fn -> Integer.pow(a, b) end)
   end
 
   def arith("**", a, b) when is_number(a) and is_number(b) do
-    finite(:math.pow(a * 1.0, b * 1.0))
+    float_op(fn -> :math.pow(a * 1.0, b * 1.0) end)
   rescue
     ArithmeticError -> nil
   end
 
   def arith(_op, _a, _b), do: nil
+
+  # A float result past the double range raises in the BEAM; JavaScript gives
+  # Infinity, which GROQ answers as null (task-97b8d14ea3d44330).
+  defp float_op(fun) do
+    finite(fun.())
+  rescue
+    ArithmeticError -> nil
+  end
 
   defp finite(n) when is_integer(n), do: num(n)
 
@@ -225,6 +235,7 @@ defmodule Barkpark.Groq.Values do
 
   def to_json({:datetime, dt}), do: format_datetime(dt)
   def to_json({:path, pattern, _}), do: pattern
+  def to_json({:geo, _, _} = geo), do: geo |> Barkpark.Groq.Geo.to_json() |> to_json()
   def to_json(_), do: nil
 
   @doc "The string form `string()` and `array::join` use, or `:error`."
@@ -232,34 +243,72 @@ defmodule Barkpark.Groq.Values do
   def stringify(v) when is_binary(v), do: {:ok, v}
   def stringify(true), do: {:ok, "true"}
   def stringify(false), do: {:ok, "false"}
-  def stringify(v) when is_integer(v), do: {:ok, Integer.to_string(v)}
-  def stringify(v) when is_float(v), do: {:ok, format_float(v)}
+  def stringify(v) when is_number(v), do: {:ok, format_number(v)}
   def stringify({:datetime, dt}), do: {:ok, format_datetime(dt)}
   def stringify(_), do: :error
 
-  # JavaScript's Number#toString: integral floats print without a fraction,
-  # small/large magnitudes switch to exponent notation.
-  defp format_float(f) do
-    case num(f) do
-      i when is_integer(i) ->
-        Integer.to_string(i)
+  # Sanity writes a number as Go's strconv.FormatFloat(f, 'g', -1, 64)
+  # (task-90c6e9c5557cfcea): the shortest digits that read back as the same
+  # double, in exponent form when the decimal exponent is below -4 or at
+  # least 6, the exponent signed and at least two digits (1e+06, 2.5e-05).
+  defp format_number(n) do
+    f = n * 1.0
+    {digits, point} = shortest_digits(abs(f))
+    sign = if f < 0, do: "-", else: ""
+    exp = point - 1
 
-      _ ->
-        abs = abs(f)
+    body =
+      cond do
+        digits == "0" ->
+          "0"
 
-        if abs >= 1.0e21 or abs < 1.0e-6 do
-          js_exponent(f)
-        else
-          :erlang.float_to_binary(f, [:short])
-        end
-    end
+        exp < -4 or exp >= 6 ->
+          exponent_form(digits, exp)
+
+        point <= 0 ->
+          "0." <> String.duplicate("0", -point) <> digits
+
+        point >= byte_size(digits) ->
+          digits <> String.duplicate("0", point - byte_size(digits))
+
+        true ->
+          binary_part(digits, 0, point) <>
+            "." <> binary_part(digits, point, byte_size(digits) - point)
+      end
+
+    sign <> body
   end
 
-  defp js_exponent(f) do
-    [mantissa, exp] = String.split(:erlang.float_to_binary(f, [:short]), "e")
-    mantissa = String.replace_suffix(mantissa, ".0", "")
-    exp_int = String.to_integer(exp)
-    sign = if exp_int >= 0, do: "+", else: "-"
-    "#{mantissa}e#{sign}#{abs(exp_int)}"
+  defp exponent_form(<<first, rest::binary>>, exp) do
+    mantissa = if rest == "", do: <<first>>, else: <<first, ?., rest::binary>>
+    exp_sign = if exp < 0, do: "-", else: "+"
+    mantissa <> "e" <> exp_sign <> String.pad_leading(Integer.to_string(abs(exp)), 2, "0")
+  end
+
+  # The significant digits of a non-negative double, without leading or
+  # trailing zeros, and where the decimal point falls among them (digits
+  # "15", point 1 is 1.5). Erlang's :short is the same shortest round-trip
+  # digit string Go picks.
+  defp shortest_digits(f) do
+    {mantissa, exp} =
+      case String.split(:erlang.float_to_binary(f, [:short]), "e") do
+        [m, e] -> {m, String.to_integer(e)}
+        [m] -> {m, 0}
+      end
+
+    [int, frac] =
+      case String.split(mantissa, ".") do
+        [i, fr] -> [i, fr]
+        [i] -> [i, ""]
+      end
+
+    raw = int <> frac
+    trimmed = String.trim_leading(raw, "0")
+    point = byte_size(int) + exp - (byte_size(raw) - byte_size(trimmed))
+
+    case String.trim_trailing(trimmed, "0") do
+      "" -> {"0", 1}
+      digits -> {digits, point}
+    end
   end
 end

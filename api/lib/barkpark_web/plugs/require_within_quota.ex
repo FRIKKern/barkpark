@@ -143,6 +143,24 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   status are identical to what the sheets ops door emits. A new code would have
   added a variant to the public `Error.code` enum and to `docs/api-v1.md` §9 for
   no client-visible gain: nothing a caller does differs between the two.
+
+  ## Mixed buckets: `only: :writes` and `creates:` (task-9676ef7a58a7d112)
+
+  The four mutate pipelines carry writes only, and every write there either
+  sends a `mutations` list or uploads one file. The `/v1/tasks` verbs and
+  `/v1/fleet/beat` (`:token_root`), the legacy `/api/documents` writes and the
+  `:ingest` plugin routes share their pipelines with reads, and most of their
+  writes edit an existing row. Two options fit the same gate to them:
+
+    * `only: :writes` — `GET`/`HEAD`/`OPTIONS` pass untouched, as on a pipeline
+      that carries no reads.
+    * `creates: [{controller, action}]` — a request with no `mutations` list
+      needs room for one document only when its route is one of these; any
+      other write needs none. So a suspended workspace is refused everywhere
+      (403), and a full one (402) only where a document can be added — the
+      `mutations` rule, `delete`/`patch` count zero, applied per route.
+
+  Without `creates:` a request with no `mutations` list needs one, as before.
   """
 
   import Plug.Conn
@@ -186,7 +204,9 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   def call(conn, opts) do
     case conn.assigns[:current_workspace] do
       %Barkpark.Tenancy.Workspace{} = ws ->
-        gate(conn, ws, opts)
+        if Keyword.get(opts, :only) == :writes and conn.method in ~w(GET HEAD OPTIONS),
+          do: conn,
+          else: gate(conn, ws, opts)
 
       # No workspace resolved (share_public / anonymous-default paths already
       # ran ResolveWorkspace, or an unscoped route). Nothing to meter against —
@@ -197,7 +217,7 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   end
 
   defp gate(conn, ws, opts) do
-    case batch_demand(conn) do
+    case batch_demand(conn, opts) do
       {:error, {:batch_too_large, n}} ->
         halt_with(conn, {:error, {:batch_too_large, n, @max_mutations}})
 
@@ -229,7 +249,7 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   # Anything that is not a `mutations` list — every media upload, and a
   # malformed body the controller will 400 anyway — falls back to 1, the
   # historical one-token check.
-  defp batch_demand(conn) do
+  defp batch_demand(conn, opts) do
     case conn.body_params do
       %{"mutations" => mutations} when is_list(mutations) ->
         case length(mutations) do
@@ -244,7 +264,24 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
         end
 
       _ ->
-        {:ok, 1}
+        {:ok, single_demand(conn, Keyword.get(opts, :creates))}
+    end
+  end
+
+  defp single_demand(_conn, nil), do: 1
+
+  defp single_demand(conn, creates) do
+    case Phoenix.Router.route_info(
+           conn.private.phoenix_router,
+           conn.method,
+           conn.request_path,
+           conn.host
+         ) do
+      %{plug: controller, plug_opts: action} ->
+        if {controller, action} in creates, do: 1, else: 0
+
+      :error ->
+        1
     end
   end
 

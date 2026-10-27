@@ -12,8 +12,9 @@ defmodule Barkpark.Content.LiveWriteGateCensusTest do
   the second.
 
   Scope, stated: this census keys on `Document.changeset(`. A writer that
-  updates `documents` through another shape (a raw `update_all`) is not seen
-  here.
+  updates `documents` through another shape (a raw `update_all`), and a door
+  caller that drops `:caller_context`, are censused in
+  `lifecycle_door_census_test.exs`.
   """
   use ExUnit.Case, async: true
 

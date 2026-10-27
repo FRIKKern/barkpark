@@ -308,14 +308,16 @@ defmodule BarkparkWeb.SearchController do
          {:ok, facet_fields} <- parse_facets(conn, params["facet"]),
          {:ok, filter_map, facet_fields} <-
            search_filters(conn, dataset, params, facet_fields),
-         {:ok, order} <- search_order(conn, dataset, params) do
+         {:ok, order} <- search_order(conn, dataset, params),
+         {:ok, collapse} <- search_collapse(conn, dataset, params) do
       {:ok,
        [
          match: match,
          suggest: suggest,
          filter_map: filter_map,
          facet_fields: facet_fields,
-         order: order
+         order: order,
+         collapse: collapse
        ]}
     end
   end
@@ -413,6 +415,48 @@ defmodule BarkparkWeb.SearchController do
              :ok <- readable_facets(conn, facet_fields, schema, caller_context) do
           {:ok, filter_map, facet_fields}
         end
+    end
+  end
+
+  # `collapse=<field>` (task-3bbf99d2bce8ee51): one hit per value of a
+  # top-level field, the best-ranked (or first by `order`). Needs `type`, like
+  # `filter`; a field this caller may not read is `forbidden_field`.
+  defp search_collapse(_conn, _dataset, params) when not is_map_key(params, "collapse"),
+    do: {:ok, nil}
+
+  defp search_collapse(conn, dataset, %{"collapse" => field} = params) do
+    type = bin(params["type"])
+
+    cond do
+      not (is_binary(field) and Regex.match?(~r/^[A-Za-z_][A-Za-z0-9_]*$/, field)) ->
+        {:error,
+         ErrorResponse.emit_custom(
+           conn,
+           400,
+           "malformed",
+           "collapse takes one top-level field name (collapse=familyId); got " <> inspect(field),
+           %{parameter: "collapse", received: inspect(field)}
+         )}
+
+      is_nil(type) ->
+        {:error,
+         ErrorResponse.emit_custom(
+           conn,
+           400,
+           "malformed",
+           "collapse needs type: a field name means something on one type",
+           %{parameter: "type", received: nil}
+         )}
+
+      not Barkpark.Content.Envelope.field_readable?(
+        schema_resolver(conn, dataset).(type),
+        field,
+        CallerContext.from_conn(conn)
+      ) ->
+        {:error, error_json(conn, {:error, {:forbidden_field, field}})}
+
+      true ->
+        {:ok, field}
     end
   end
 

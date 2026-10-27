@@ -139,7 +139,7 @@ defmodule BarkparkWeb.WebauthnController do
         # A passkey is a strong, phishing-resistant factor — mint an
         # already-fresh session so a sensitive action right after login isn't
         # re-challenged.
-        SessionIssuer.issue(conn, user, mfa_verified: true)
+        SessionIssuer.issue(conn, user, mfa_verified: true, method: "passkey")
       end
     else
       _ ->

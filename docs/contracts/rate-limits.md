@@ -22,12 +22,10 @@ A Bearer wins over a session cookie on the same request, same precedence
 every class default, `:session` included: an operator clamping one dataset's
 abuse ceiling means it regardless of who is asking.
 
-## Why `:session` and `:owned` are wider (task-2c31de0cf6597d32 + follow-up)
+## Why `:session` and `:owned` are wider (task-2c31de0cf6597d32)
 
-Studio proxies many editors through one server and egress IP, so N editors
-shared ONE 60/min write bucket and one typist could 429 everyone. `:session` gives each editor's login its own bucket; `:owned`
-does the same for a Bearer whose `owner_user_id` names one human.
-`:verified`/`:anonymous` are untouched — a shared/service Bearer with no owner stays at 60/min.
+Studio proxies many editors through one server and IP; one 60/min bucket let
+one typist 429 everyone. Each editor's login or owned token gets its own.
 
 ## A 429, and a background writer
 
@@ -39,7 +37,11 @@ A 429's `details.budget` names the spent bucket (`class`, `per_minute`,
 
 All three knobs live in `config :barkpark, :rate_limits`
 (`BARKPARK_RATE_LIMIT_*` in `runtime.exs`): `read_per_minute`,
-`write_per_minute`, `session_write_per_minute`. Changing one never changes the
+`write_per_minute`, `session_write_per_minute`. One token (say a site
+build prerendering in parallel) gets its own budget with
+`tokens: %{"<api_token id>" => %{read: N}}` or
+`BARKPARK_RATE_LIMIT_TOKENS="<id>:read=3000:write=120"`; it wins over class
+and dataset budgets. Changing one never changes the
 full-refill window (always 60s for this plug — capacity and refill scale
 together), so `Barkpark.RateLimiter`'s `@stale_after_ms` invariant holds
 without re-deriving it.

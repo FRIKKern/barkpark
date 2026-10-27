@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: media-image-transforms | budget: 1300tok -->
 # Image transforms
 
-Barkpark stores an uploaded image once and makes every size, crop and format on its first request, cached on disk, as Sanity's pipeline and `next/image` do.
+Barkpark stores an image once and makes each size, crop and format on first request, cached on disk, as Sanity and `next/image` do.
 
 ## Upload
 
@@ -13,32 +13,32 @@ Barkpark stores an uploaded image once and makes every size, crop and format on 
 GET /media/files/<path>?w=800&h=450&fit=crop&fp-x=0.3&fp-y=0.4&auto=format&q=70
 ```
 
-`<path>` is the asset's `path`; `url` and `originalUrl` carry it. The scoped form `/w/:ws/p/:proj/media/files/<path>` takes the same parameters. Without them the URL serves the original bytes.
+`<path>` is the asset's `path` (in `url`, `originalUrl`); `/w/:ws/p/:proj/media/files/<path>` is the same. No parameters: the original bytes.
 
 Sanity CDN URLs from `@sanity/image-url` take the same parameters: [SANITY-IMAGE-URLS.md](SANITY-IMAGE-URLS.md).
 
-Anonymous reads, as a website's `<img>` makes, need the scope's `:media` share: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.md).
+Anonymous reads need the scope's `:media` share: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.md).
 
 | Param | Values | Meaning |
 |---|---|---|
-| `w`, `h` | integer ≥ 1 | Output size; one side alone keeps the aspect ratio. |
-| `fit` | `clip` (default), `crop`, `fill`, `max`, `min` | How `w` x `h` is met; see below. |
+| `w`, `h` | integer ≥ 1 | Output size; one side keeps the aspect. |
+| `fit` | `clip` (default), `crop`, `fill`, `fillmax`, `max`, `min`, `scale` | How `w` x `h` is met; see below. |
 | `crop` | `center`, `focalpoint`, `top`, `bottom`, `left`, `right` (comma list), or `entropy`, `attention` | Which part `fit=crop` and `fit=min` keep. |
 | `rect` | `left,top,width,height` | Pixel area of the original to cut first. |
 | `fp-x`, `fp-y` | 0 to 1 | Focal point, as fractions of the image after `rect`. Implies `crop=focalpoint`. |
-| `fm` | `jpg`, `png`, `webp`, `avif` | Output format. Default: the source format (`gif` gives `png`). |
+| `fm` | `jpg` (`pjpg`), `png`, `webp`, `avif` | Output format. Default: the source format (`gif` gives `png`). |
 | `auto` | `format` | Serve AVIF or WebP when `Accept` allows it; see AVIF. |
 | `q` | 1 to 100 | Quality, default 75, rounded to a multiple of 5. |
 
 Fit modes:
 
-- `clip` scales to fit inside the box and keeps the aspect ratio. It may scale up.
-- `max` is `clip` without scaling up.
+- `clip` fits inside the box, keeps the aspect ratio, may scale up; `max` does not.
 - `crop` scales to cover the box, then cuts it to exactly `w` x `h`.
-- `fill` is `clip`, then pads to `w` x `h` with white.
-- `min` is `crop` without scaling up. A source smaller than the box is cut to the box's aspect ratio at its own size.
+- `fill` is `clip`, then pads to `w` x `h` with `bg` (white); `fillmax` does not scale up.
+- `scale` stretches to exactly `w` x `h`.
+- `min` is `crop` without scaling up: a smaller source is cut to the box's aspect at its own size.
 
-`dpr`, `blur`, `sharp`, `flip`, `or`, `quality`, `bg`, `invert`, `sat` and `pad` answer 400 `unsupported_transform_param`.
+Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits); `pad` px per side; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns the result; `invert`; `sat=-100` grayscale, else ignored; `sharp` ignored; `quality` is `q`.
 
 ## AVIF
 
@@ -58,7 +58,7 @@ A Sanity-shaped image value stores `crop` `{top, bottom, left, right}` and `hots
 - The cache key is a SHA-256 of the normalised parameters, the chosen format, the watermark profile and the focal point. An AVIF key adds the encoder settings, so changing them renders new files. The file lives at `_renditions/<asset id>/t/<hash>.<fm>` and is deleted with the asset.
 - Concurrent first requests for one key render once.
 - A public asset answers `Cache-Control: public, max-age=2592000`, a strong `ETag`, `304` on `If-None-Match`, and `Vary: Accept`. A non-public asset answers `no-store`.
-- `w` and `h` are capped at 4096 and values above 100 round up to a multiple of 10. One asset keeps at most 100 cached transforms; a new one past that answers 429 `transform_variant_limit`, while cached ones still serve. Set them in `config :barkpark, Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).
+- `w`, `h` cap at 4096; above 100 they round up to a multiple of 10. An asset keeps at most 100 cached transforms; past that a new one is 429 `transform_variant_limit`. Config: `Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).
 - Access is the original's check (`:original`). A watermark profile on the asset is applied to the transform.
 
 Errors: 400 `invalid_transform_param` (`details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.

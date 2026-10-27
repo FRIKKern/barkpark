@@ -164,4 +164,30 @@ defmodule BarkparkWeb.SearchMatchFilterParamsTest do
       assert body["error"]["details"]["field"] == "Secret"
     end
   end
+
+  # task-3bbf99d2bce8ee51: collapse=<field> keeps one hit per value.
+  describe "collapse" do
+    test "one hit per Format, the total counts groups, sizes ride in collapse", %{conn: conn} do
+      body = conn |> search(q: "norsk", collapse: "Format") |> json_response(200)
+      assert body["count"] == 2
+      assert length(body["documents"]) == 2
+      assert body["collapse"]["field"] == "Format"
+      assert body["collapse"]["counts"] |> Map.values() |> Enum.sort() == [1, 2]
+    end
+
+    test "no collapse, no collapse key", %{conn: conn} do
+      refute conn |> search(q: "norsk") |> json_response(200) |> Map.has_key?("collapse")
+    end
+
+    test "a bad name, a missing type or a private field is refused", %{conn: conn} do
+      assert conn |> search(q: "norsk", collapse: "a-b") |> json_response(400)
+
+      assert conn
+             |> get("/v1/data/search/#{@ds}", q: "norsk", collapse: "Format")
+             |> json_response(400)
+
+      body = conn |> search(q: "norsk", collapse: "Secret") |> json_response(422)
+      assert body["error"]["code"] == "forbidden_field"
+    end
+  end
 end

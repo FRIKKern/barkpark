@@ -360,8 +360,13 @@ defmodule BarkparkWeb.GroqControllerTest do
     body =
       conn |> get_query(token, ~s'*[_id == "b1"][0]{"a": author->name}') |> json_response(200)
 
-    assert Enum.sort(body["syncTags"]) ==
+    {readable, opaque} = Enum.split_with(body["syncTags"], &String.starts_with?(&1, "bp:"))
+
+    assert Enum.sort(readable) ==
              Enum.sort(["bp:ds:#{@dataset}:doc:b1", "bp:ds:#{@dataset}:doc:ada"])
+
+    # Each readable tag has its opaque twin for the live events stream.
+    assert length(opaque) == 2 and Enum.all?(opaque, &String.starts_with?(&1, "s1:"))
   end
 
   test "a query that would load too many documents is refused with 422", %{
@@ -569,8 +574,60 @@ defmodule BarkparkWeb.GroqControllerTest do
   end
 
   test "an unsupported function is a 422 naming it", %{conn: conn, token: token} do
-    body = conn |> get_query(token, ~s'geo::distance(1, 2)') |> json_response(422)
-    assert body["error"]["description"] =~ "geo::distance"
+    body = conn |> get_query(token, ~s'delta::operation()') |> json_response(422)
+    assert body["error"]["description"] =~ "delta::operation"
+  end
+
+  # task-1db8d92a284a23d2: geo::contains/intersects spend a work budget per
+  # evaluation pass (positions × positions). Each call below is the worst case
+  # at the position cap: two 999-gons whose boxes overlap but which never meet.
+  defp geo_circle(cx, cy) do
+    pts =
+      for i <- 0..998,
+          do: [cx + :math.cos(i / 999 * 2 * :math.pi()), cy + :math.sin(i / 999 * 2 * :math.pi())]
+
+    %{"type" => "Polygon", "coordinates" => [pts ++ [hd(pts)]]}
+  end
+
+  defp timed_geo_422(conn, token, query, params) do
+    {micros, conn} = :timer.tc(fn -> get_query(conn, token, query, params) end)
+    body = json_response(conn, 422)
+    assert body["error"]["type"] == "queryLimitError"
+    assert body["error"]["description"] =~ "budget of 5000000 position pairs"
+    assert micros < 3_000_000, "took #{div(micros, 1000)} ms"
+  end
+
+  test "geo checks in a subquery in a projection stop at their budget with 422", %{
+    conn: conn,
+    token: token
+  } do
+    # Three books, six calls of a million pairs each: the sixth is refused.
+    query =
+      ~s'*[_type == "book"]{_id, "near": *[_type == "book" && _id != ^._id && geo::intersects($a, $b)]._id}'
+
+    params = %{
+      "$a" => Jason.encode!(geo_circle(0, 0)),
+      "$b" => Jason.encode!(geo_circle(1.9, 1.9))
+    }
+
+    timed_geo_422(conn, token, query, params)
+  end
+
+  test "geo checks behind a dereference stop at their budget with 422", %{
+    conn: conn,
+    token: token,
+    scope: scope
+  } do
+    publish!("author", %{"_id" => "geo", "name" => "Geo", "area" => geo_circle(1.9, 1.9)}, scope)
+
+    for id <- ["g1", "g2", "g3"],
+        do: publish!("book", %{"_id" => id, "author" => ref("geo")}, scope)
+
+    # Round one has not loaded the author and costs little; round two has it.
+    query =
+      ~s'*[_type == "book"]{_id, "near": *[_type == "book" && _id != ^._id && geo::intersects($a, author->area)]._id}'
+
+    timed_geo_422(conn, token, query, %{"$a" => Jason.encode!(geo_circle(0, 0))})
   end
 
   describe "title, which the writer keeps in the documents.title column" do
@@ -846,6 +903,122 @@ defmodule BarkparkWeb.GroqControllerTest do
       assert read.(admin, ~s'count(*[_type == "vault" && defined(secret)])') == 1
       assert read.(admin, ~s'*[_type == "vault" && defined(secret)]._id') == ["v1"]
     end
+  end
+
+  test "references() leads the read when the filter also has a common equality", %{
+    conn: conn,
+    token: token
+  } do
+    query =
+      ~s'*[_type == "book" && !(_id in path("drafts.**")) && defined(year) && year == 1999 && references($a)]._id'
+
+    {body, statements} =
+      sql_statements(fn ->
+        conn |> get_query(token, query, %{"$a" => ~s'"ada"'}) |> json_response(200)
+      end)
+
+    assert body["result"] == ["b1"]
+    # gyl's series page: the path index guessed 6 rows for `isMainProduct ==
+    # true` and found 11,257, so the planner chose it over the refs index.
+    refute Enum.any?(statements, &(&1 =~ "@? CAST"))
+    assert Enum.any?(statements, &(&1 =~ "jsonb_path_query_array(d0.\"content\""))
+  end
+
+  test "a count of \"x\" in a[].b per parent is a SQL count", %{
+    conn: conn,
+    token: token,
+    scope: scope
+  } do
+    publish!("book", %{"_id" => "m1", "genres" => [ref("poetry"), ref("prose")]}, scope)
+    publish!("book", %{"_id" => "m2", "genres" => ref("poetry")}, scope)
+    publish!("book", %{"_id" => "m3", "genres" => [%{"_ref" => ["poetry"]}]}, scope)
+    publish!("book", %{"_id" => "m4", "genres" => [%{"name" => "x"}, ref("poetry")]}, scope)
+
+    {body, statements} =
+      sql_statements(fn ->
+        conn
+        |> get_query(
+          token,
+          ~s'*[_type == "genre"]{_id, "n": count(*[_type == "book" && ^._id in genres[]._ref])}'
+        )
+        |> json_response(200)
+      end)
+
+    # b1, m1 and m4 hold poetry in an element's _ref; an object genres (m2)
+    # and an array _ref (m3) do not.
+    assert body["result"] == [%{"_id" => "poetry", "n" => 3}]
+    assert Enum.any?(statements, &(&1 =~ ~s'count(d0."id")'))
+    refute Enum.any?(statements, &(&1 =~ ~r/SELECT d0."id", d0."doc_id".*LIMIT 500/))
+  end
+
+  test "a query over the slot cap waits, then answers 503 with Retry-After", %{
+    conn: conn,
+    token: token
+  } do
+    previous = Application.get_env(:barkpark, Barkpark.Groq, [])
+    Application.put_env(:barkpark, Barkpark.Groq, max_concurrent: 1, queue_ms: 100)
+    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Groq, previous) end)
+
+    test_pid = self()
+
+    holder =
+      spawn(fn ->
+        :ok = Barkpark.Groq.Slots.acquire()
+        send(test_pid, :held)
+        Process.sleep(:infinity)
+      end)
+
+    assert_receive :held
+
+    busy = conn |> get_query(token, ~s'count(*[_type == "book"])')
+    assert busy.status == 503
+    assert get_resp_header(busy, "retry-after") == ["1"]
+    assert json_response(busy, 503)["error"]["type"] == "queryBusyError"
+
+    # A holder that dies without releasing frees its slot.
+    Process.exit(holder, :kill)
+
+    assert scoped_conn() |> get_query(token, ~s'count(*[_type == "book"])') |> json_response(200)
+    assert Barkpark.Groq.Slots.held() == 0
+  end
+
+  test "the default slot cap fits half the memory in query heaps, two per scheduler at most" do
+    heap = 512 * 1024 * 1024
+    # gyl: 3.8 GB, 2 cores -> 3 heaps fit in half the memory.
+    assert Barkpark.Groq.Slots.default_limit(3_907_408 * 1024, heap) ==
+             min(3, 2 * System.schedulers_online())
+
+    assert Barkpark.Groq.Slots.default_limit(256 * 1024 * 1024, heap) == 1
+    assert Barkpark.Groq.Slots.default_limit(nil, heap) == min(4, 2 * System.schedulers_online())
+  end
+
+  test "params may be one JSON string, as bp doc groq sends them", %{
+    conn: conn,
+    token: token
+  } do
+    post = fn params ->
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> post(path(), %{"query" => ~s'*[_type == "book" && year == $y]._id', "params" => params})
+    end
+
+    assert post.(~s'{"y":1999}') |> json_response(200) |> Map.get("result") == ["b1"]
+    bad = post.("{not json") |> json_response(400)
+    assert bad["error"]["details"]["parameter"] == "$params"
+
+    # The undated GET alias bp uses answers the same read.
+    alias_path = String.replace(path(), "/#{@version}/data/query/", "/v1/data/groq/")
+
+    got =
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> get(alias_path, %{
+        "query" => ~s'*[_type == "book" && year == $y]._id',
+        "params" => ~s'{"y":1999}'
+      })
+      |> json_response(200)
+
+    assert got["result"] == ["b1"]
   end
 
   defp sql_statements(fun) do

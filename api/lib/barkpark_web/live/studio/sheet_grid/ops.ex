@@ -457,6 +457,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   def send_ops(%{assigns: %{write_capable: false}} = socket, _ops), do: socket
 
   def send_ops(socket, ops) do
+    # A LiveComponent's events pass no host hook: suspension is checked here
+    # (task-72437f78ef0d3184). An edit adds no document, so a full workspace
+    # still edits.
+    workspace_id = (GridData.session_scope(socket) || [])[:workspace_id]
+
+    case BarkparkWeb.Studio.QuotaGate.check(workspace_id, 0) do
+      :ok -> do_send_ops(socket, ops)
+      {:error, message} -> assign(socket, notice: message)
+    end
+  end
+
+  defp do_send_ops(socket, ops) do
     ops =
       case socket.assigns[:user_id] do
         user_id when is_binary(user_id) and user_id != "" ->

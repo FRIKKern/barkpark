@@ -80,7 +80,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # too. A real query adds the full-text/trigram match.
     base =
       from(d in Document, as: :search_doc)
-      |> scope_to_dataset(scope, project_id, workspace_id)
+      |> scope_to_dataset(scope, project_id, workspace_id, Keyword.get(opts, :memoize, false))
       |> scope_to_workspace_or_global(workspace_id, project_id)
       # Row/ownership ACL (Phase 4, core-auth). Applied UNCONDITIONALLY: it is
       # byte-identical for non-owner_scoped types because their rows carry a
@@ -132,7 +132,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # the public vectors in batches after the write (task-9d83c3e0c3b8fabf).
     # Until that is done, a stale vector may still hold a word the field now
     # hides, so a non-admin text search leaves those documents out.
-    base = exclude_pending_refresh(base, Keyword.get(opts, :caller_context), browse?)
+    base = exclude_pending_refresh(base, Keyword.get(opts, :caller_context), browse?, opts)
     match = match_mode(opts)
     suggest? = Keyword.get(opts, :suggest, false) == true
     groups = if browse?, do: [], else: term_groups(parsed)
@@ -252,10 +252,46 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # An empty match ranks nothing. A recovery pass that finds no document
       # (task-722697f4650b2a21) used to run the ranking statement anyway, a
       # second evaluation of the whole match for an empty page.
+      collapse = Keyword.get(opts, :collapse)
+
       docs =
         cond do
           count == 0 ->
             []
+
+          # `?collapse=` keeps the best hit of each group (task-3bbf99d2bce8ee51):
+          # the same order as without it (the field order, or the ranking over
+          # the whole match with the pool first), walked in chunks until the
+          # page's groups are found. Without `collapse` nothing below changes.
+          is_binary(collapse) ->
+            ordered =
+              case Keyword.get(opts, :order) do
+                {spec, collation} ->
+                  base
+                  |> exclude(:order_by)
+                  |> Barkpark.Content.Query.apply_list_order(spec, collation)
+                  |> order_by([d], asc: d.id)
+
+                nil ->
+                  collapse_lead =
+                    if browse? or count <= pool,
+                      do: [],
+                      else: [{:desc, in_pool_key(base, pool, pool_groups, index)}]
+
+                  base
+                  |> order_rank(
+                    parsed,
+                    groups,
+                    config,
+                    if(suggest?, do: :none, else: index),
+                    near_miss?,
+                    collapse_lead,
+                    Keyword.get(opts, :boost),
+                    held_key(near_miss? and not suggest?, groups, index, match)
+                  )
+              end
+
+            collapse_page(ordered, collapse, offset, limit, Keyword.get(opts, :fields))
 
           # `?order=` sorts the whole match by a field instead of ranking it
           # (task-5ddc3e08684f0d48), so no ranking pool: `offset` pages the
@@ -293,8 +329,106 @@ defmodule Barkpark.Search.DocumentsRetriever do
       meta = %{facets: facets, match: if(browse?, do: nil, else: Atom.to_string(match))}
       meta = if is_integer(text_count), do: Map.put(meta, :text_count, text_count), else: meta
 
+      meta =
+        if is_binary(collapse),
+          do:
+            Map.put(meta, :collapse, %{
+              field: collapse,
+              counts: collapse_sizes(base, collapse, docs)
+            }),
+          else: meta
+
       {docs, count, meta}
     end)
+  end
+
+  # ── Collapse (task-3bbf99d2bce8ee51) ─────────────────────────────────────
+  #
+  # A hit's group is the value of a top-level field (`title` and `status` read
+  # their columns); a hit with no value is its own group. The page keeps the
+  # first hit of each group in `ordered`'s order, reading `(id, key)` in
+  # chunks of @collapse_chunk and stopping at @collapse_scan rows, so one huge
+  # group cannot make a page read the whole match.
+  @collapse_chunk 200
+  @collapse_scan 5_000
+
+  defmacrop collapse_key(d, field) do
+    quote do
+      fragment(
+        "coalesce(CASE ? WHEN 'title' THEN ? WHEN 'status' THEN ? ELSE ? ->> ? END, ?::text)",
+        ^unquote(field),
+        unquote(d).title,
+        unquote(d).status,
+        unquote(d).content,
+        ^unquote(field),
+        unquote(d).id
+      )
+    end
+  end
+
+  defp collapse_page(ordered, field, offset, limit, fields) do
+    keyed = ordered |> exclude(:select) |> select([d], {d.id, collapse_key(d, field)})
+    ids = collapse_walk(keyed, offset + limit, 0, MapSet.new(), [])
+
+    ids = ids |> Enum.drop(offset) |> Enum.take(limit)
+
+    by_id =
+      from(d in Document, where: d.id in ^ids)
+      |> maybe_light_select(fields)
+      |> Repo.all(@planned_per_call)
+
+    by_id = Map.new(by_id, &{&1.id, &1})
+    for id <- ids, doc = Map.get(by_id, id), do: doc
+  end
+
+  defp collapse_walk(_keyed, need, scanned, _seen, acc)
+       when length(acc) >= need or scanned >= @collapse_scan,
+       do: Enum.reverse(acc)
+
+  defp collapse_walk(keyed, need, scanned, seen, acc) do
+    rows =
+      keyed |> limit(^@collapse_chunk) |> offset(^scanned) |> Repo.all(@planned_per_call)
+
+    {seen, acc} =
+      Enum.reduce(rows, {seen, acc}, fn {id, key}, {seen, acc} ->
+        if MapSet.member?(seen, key), do: {seen, acc}, else: {MapSet.put(seen, key), [id | acc]}
+      end)
+
+    if length(rows) < @collapse_chunk,
+      do: Enum.reverse(acc),
+      else: collapse_walk(keyed, need, scanned + @collapse_chunk, seen, acc)
+  end
+
+  # How many matched documents each listed hit's group holds, by `doc_id`.
+  defp collapse_sizes(_base, _field, []), do: %{}
+
+  defp collapse_sizes(base, field, docs) do
+    keys =
+      from(d in Document,
+        where: d.id in ^Enum.map(docs, & &1.id),
+        select: {d.id, collapse_key(d, field)}
+      )
+      |> Repo.all(@planned_per_call)
+
+    keyed =
+      base
+      |> exclude(:order_by)
+      |> exclude(:select)
+      |> select([d], %{key: collapse_key(d, field)})
+
+    # Grouped on the subquery's column: the key spelled twice in one statement
+    # carries two parameters, which Postgres does not see as one expression.
+    counts =
+      from(k in subquery(keyed),
+        where: k.key in ^Enum.map(keys, &elem(&1, 1)),
+        group_by: k.key,
+        select: {k.key, count()}
+      )
+      |> Repo.all(@planned_per_call)
+      |> Map.new()
+
+    by_id = Map.new(keys)
+    Map.new(docs, &{&1.doc_id, Map.get(counts, Map.get(by_id, &1.id), 1)})
   end
 
   # With a field filter, how many documents the words match without it, up to
@@ -601,11 +735,18 @@ defmodule Barkpark.Search.DocumentsRetriever do
         _ -> nil
       end
 
-    rows =
-      base
-      |> exclude(:order_by)
-      |> count_and_facets_query(facet_fields)
-      |> Repo.all(@planned_per_call)
+    stripped = exclude(base, :order_by)
+
+    query =
+      case Keyword.get(opts, :collapse) do
+        field when is_binary(field) ->
+          count_groups_and_facets_query(stripped, facet_fields, field)
+
+        _ ->
+          count_and_facets_query(stripped, facet_fields)
+      end
+
+    rows = Repo.all(query, @planned_per_call)
 
     readable = facet_readability(rows, scope, opts)
 
@@ -720,6 +861,80 @@ defmodule Barkpark.Search.DocumentsRetriever do
           fx.v
         ),
       field_count: count(d.id)
+    })
+    |> group_by(
+      [d, ..., fx],
+      fragment(
+        "GROUPING SETS ((?), (?), (?, ?), (?, ?), (), (?, ?))",
+        d.type,
+        d.status,
+        d.type,
+        d.author_text,
+        d.type,
+        d.category_text,
+        fx.k,
+        fx.v
+      )
+    )
+  end
+
+  # `count_and_facets_query/2` with `?collapse=` on: every count is of GROUPS,
+  # `count(DISTINCT key)` where the plain query counts rows, so the total and
+  # each facet say how many groups match, and a group with members on two
+  # values of a facet counts once on each.
+  defp count_groups_and_facets_query(base, nil, field) do
+    base
+    |> select([d], %{
+      g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
+      type: d.type,
+      status: d.status,
+      author: d.author_text,
+      category: d.category_text,
+      count: fragment("count(DISTINCT ?)", collapse_key(d, field))
+    })
+    |> group_by(
+      [d],
+      fragment(
+        "GROUPING SETS ((?), (?), (?, ?), (?, ?), ())",
+        d.type,
+        d.status,
+        d.type,
+        d.author_text,
+        d.type,
+        d.category_text
+      )
+    )
+  end
+
+  defp count_groups_and_facets_query(base, fields, field) do
+    base
+    |> join(
+      :inner_lateral,
+      [d],
+      fx in fragment(
+        "SELECT u.k, u.o, ?->u.k AS v FROM unnest(?::text[]) WITH ORDINALITY AS u(k, o) OFFSET 0",
+        d.content,
+        ^fields
+      ),
+      on: true
+    )
+    |> select([d, ..., fx], %{
+      g: fragment("grouping(?, ?, ?, ?)", d.type, d.status, d.author_text, d.category_text),
+      fg: fragment("grouping(?, ?)", fx.k, fx.v),
+      type: d.type,
+      status: d.status,
+      author: d.author_text,
+      category: d.category_text,
+      count: fragment("count(DISTINCT ?) FILTER (WHERE ? = 1)", collapse_key(d, field), fx.o),
+      field: fx.k,
+      values:
+        fragment(
+          "ARRAY(SELECT DISTINCT t.x FROM jsonb_array_elements(CASE jsonb_typeof(?) WHEN 'array' THEN ? ELSE jsonb_build_array(?) END) AS e(j), LATERAL (SELECT CASE jsonb_typeof(e.j) WHEN 'string' THEN e.j #>> '{}' WHEN 'number' THEN e.j #>> '{}' WHEN 'boolean' THEN e.j #>> '{}' WHEN 'object' THEN e.j ->> '_ref' END AS x) AS t WHERE t.x IS NOT NULL)",
+          fx.v,
+          fx.v,
+          fx.v
+        ),
+      field_count: fragment("count(DISTINCT ?)", collapse_key(d, field))
     })
     |> group_by(
       [d, ..., fx],
@@ -866,7 +1081,8 @@ defmodule Barkpark.Search.DocumentsRetriever do
   defp public_type_names(scope, opts) do
     Barkpark.Content.Schema.public_type_names(scope,
       workspace_id: Keyword.get(opts, :workspace_id),
-      project_id: Keyword.get(opts, :project_id)
+      project_id: Keyword.get(opts, :project_id),
+      memoize: Keyword.get(opts, :memoize, false)
     )
   end
 
@@ -904,11 +1120,11 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # NULL`), not this guard. That reliance is pinned at the door by
   # test/barkpark_web/controllers/search_scope_shared_layer_test.exs (a
   # seat-vacant search returns the shared layer and never workspace A's row).
-  defp scope_to_dataset(query, scope, project_id, workspace_id) do
+  defp scope_to_dataset(query, scope, project_id, workspace_id, memoize) do
     opts =
       if is_binary(workspace_id),
-        do: [project_id: project_id, workspace_id: workspace_id],
-        else: [project_id: project_id]
+        do: [project_id: project_id, workspace_id: workspace_id, memoize: memoize],
+        else: [project_id: project_id, memoize: memoize]
 
     case Barkpark.Content.resolve_read_dataset_id(scope, opts) do
       id when is_binary(id) -> where(query, [d], d.dataset_id == ^id)
@@ -950,12 +1166,24 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   # The scopes `SearchRefresh.gates/0` names, left out of a text search by
   # anyone who reads the public index. A browse reads no vector and keeps them.
-  defp exclude_pending_refresh(base, _ctx, true), do: base
-  defp exclude_pending_refresh(base, %Barkpark.Content.CallerContext{is_admin: true}, _), do: base
-  defp exclude_pending_refresh(base, :internal, _), do: base
+  defp exclude_pending_refresh(base, _ctx, true, _opts), do: base
 
-  defp exclude_pending_refresh(base, _ctx, false) do
-    case SearchRefresh.exclude(SearchRefresh.gates()) do
+  defp exclude_pending_refresh(base, %Barkpark.Content.CallerContext{is_admin: true}, _, _opts),
+    do: base
+
+  defp exclude_pending_refresh(base, :internal, _, _opts), do: base
+
+  defp exclude_pending_refresh(base, _ctx, false, opts) do
+    # Read once per request when the caller opted into the memo: a zero-hit
+    # search's recovery passes ask again, and the gates are global (no scope).
+    gates =
+      Barkpark.Content.WriteScope.request_memo(
+        opts,
+        {:search_refresh_gates},
+        &SearchRefresh.gates/0
+      )
+
+    case SearchRefresh.exclude(gates) do
       nil -> base
       condition -> where(base, ^condition)
     end

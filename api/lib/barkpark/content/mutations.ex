@@ -474,7 +474,9 @@ defmodule Barkpark.Content.Mutations do
 
   defp apply_each(chunk, dataset, opts, caller, cache) do
     Enum.map_reduce(chunk, cache, fn m, cache ->
-      case apply_one(m, dataset, publish_opts(m, opts, cache)) do
+      case with_exact_id(m, dataset, opts, fn m ->
+             apply_one(m, dataset, publish_opts(m, opts, cache))
+           end) do
         {:ok, doc, op} ->
           :ok = between_mutations_barrier()
           cache = note_create_if_not_exists_noop(m, op, doc, cache)
@@ -486,10 +488,143 @@ defmodule Barkpark.Content.Mutations do
              document: Envelope.render(doc, schema, caller)
            }, cache}
 
+        # A Sanity-shaped delete of an id that does not exist: no write, no
+        # result row (see `exact_id/3`).
+        :skip ->
+          {[], cache}
+
         {:error, reason} ->
           Repo.rollback(reason)
       end
     end)
+  end
+
+  # ── Exact ids: Sanity's mutate semantics (task-c6cbf346a07ff01e) ───────────
+  #
+  # On the Sanity-shaped route (`/v<apiVersion>/data/mutate`, `exact_ids: true`)
+  # a mutation writes EXACTLY the id it names, as Sanity's mutate API does: a
+  # bare id is the published document, `drafts.<id>` the draft. Barkpark's
+  # create family writes the draft and its bare-id delete takes both rows, so a
+  # bare id is mapped onto the existing doors here, and nothing else changes:
+  #
+  #   * createOrReplace / create / createIfNotExists `x` → the direct publish
+  #     (`createOrReplace` + `publish: true`: its gates and LiveWriteGate run).
+  #     `create` of an existing `x` is a conflict; `createIfNotExists` of an
+  #     existing `x` keeps today's noop.
+  #   * patch `x` → the published-first patch base, landed through the publish
+  #     door; a missing `x` is a 404, not a fresh draft.
+  #   * delete `x` → `unpublish` when `drafts.x` exists (the draft stays, as on
+  #     Sanity), else delete. A delete of an id that does not exist, bare or
+  #     `drafts.`, is a noop with no result row, as on Sanity, so the client's
+  #     `transaction().delete(id).delete("drafts." + id)` works when only one
+  #     exists (task-f456b589609f6a84).
+  #
+  # Where Sanity would write past a draft twin that our direct publish would
+  # delete (the create family, patch), the answer is a 409 naming the twin:
+  # no write here destroys a draft the client did not name. `drafts.<id>` ids
+  # and the `/v1` route (no `exact_ids`) are untouched.
+  defp with_exact_id(m, dataset, opts, apply) do
+    if Keyword.get(opts, :exact_ids, false) do
+      case exact_id(m, dataset, opts) do
+        {:ok, m} -> apply.(m)
+        :skip -> :skip
+        {:error, _} = error -> error
+      end
+    else
+      apply.(m)
+    end
+  end
+
+  defp exact_id(%{"createOrReplace" => %{} = attrs} = m, dataset, opts)
+       when not is_map_key(m, "publish") do
+    with {:bare, id, type} <- bare(attrs["_id"], attrs["_type"] || attrs["type"]),
+         :ok <- no_draft_twin(id, type, dataset, opts) do
+      {:ok, Map.put(m, "publish", true)}
+    else
+      :not_bare -> {:ok, m}
+      error -> error
+    end
+  end
+
+  defp exact_id(%{"create" => %{} = attrs}, dataset, opts) do
+    with {:bare, id, type} <- bare(attrs["_id"], attrs["_type"] || attrs["type"]),
+         :ok <- no_draft_twin(id, type, dataset, opts),
+         false <- row?(id, type, dataset, opts) do
+      {:ok, %{"createOrReplace" => attrs, "publish" => true}}
+    else
+      :not_bare -> {:ok, %{"create" => attrs}}
+      true -> {:error, :conflict}
+      error -> error
+    end
+  end
+
+  defp exact_id(%{"createIfNotExists" => %{} = attrs} = m, dataset, opts) do
+    with {:bare, id, type} <- bare(attrs["_id"], attrs["_type"] || attrs["type"]),
+         false <- row?(id, type, dataset, opts),
+         :ok <- no_draft_twin(id, type, dataset, opts) do
+      {:ok, %{"createOrReplace" => attrs, "publish" => true}}
+    else
+      # `x` exists: today's createIfNotExists answers the noop.
+      true -> {:ok, m}
+      :not_bare -> {:ok, m}
+      error -> error
+    end
+  end
+
+  defp exact_id(%{"patch" => %{"id" => id} = patch} = m, dataset, opts) when is_binary(id) do
+    with {:bare, id, type} <- bare(id, patch["type"] || type_of(id, dataset, opts)),
+         true <- row?(id, type, dataset, opts),
+         :ok <- no_draft_twin(id, type, dataset, opts) do
+      {:ok, %{m | "patch" => Map.put(patch, "type", type)}}
+    else
+      :not_bare -> {:ok, m}
+      false -> {:error, :not_found}
+      error -> error
+    end
+  end
+
+  defp exact_id(%{"delete" => %{"id" => id} = op} = m, dataset, opts) when is_binary(id) do
+    type = op["type"] || type_of(id, dataset, opts)
+
+    cond do
+      is_nil(type) or not row?(id, type, dataset, opts) ->
+        :skip
+
+      DraftId.draft?(id) ->
+        {:ok, %{m | "delete" => Map.put(op, "type", type)}}
+
+      row?(DraftId.draft_id(id), type, dataset, opts) ->
+        {:ok, %{"unpublish" => %{"id" => id, "type" => type}}}
+
+      true ->
+        {:ok, %{m | "delete" => Map.put(op, "type", type)}}
+    end
+  end
+
+  defp exact_id(m, _dataset, _opts), do: {:ok, m}
+
+  # A bare id with a known type, or :not_bare (a drafts. id, no id, or a type
+  # nothing names: today's path answers those as it does now).
+  defp bare(id, type) when is_binary(id) and is_binary(type) do
+    if DraftId.draft?(id), do: :not_bare, else: {:bare, id, type}
+  end
+
+  defp bare(_id, _type), do: :not_bare
+
+  defp type_of(id, dataset, opts) do
+    case Barkpark.Content.Query.document_type(id, dataset, opts) do
+      {:ok, type} -> type
+      :error -> nil
+    end
+  end
+
+  defp row?(id, type, dataset, opts),
+    do: match?({:ok, %{doc_id: ^id}}, Content.get_document(id, type, dataset, opts))
+
+  defp no_draft_twin(id, type, dataset, opts) do
+    if row?(DraftId.draft_id(id), type, dataset, opts),
+      do: {:error, {:draft_twin_exists, id}},
+      else: :ok
   end
 
   # ── The tsvector cap is a CALLER fault, not an engine fault ────────────────
@@ -1016,6 +1151,24 @@ defmodule Barkpark.Content.Mutations do
 
       :error ->
         with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+    end
+  end
+
+  # Sanity's mutate API patches by id alone too: `{"patch": {"id": "x", "set":
+  # {...}}}` (@sanity/client's `patch()`). Barkpark's patch heads below need a
+  # type, so, as for the typeless delete above, this one finds it from the
+  # stored row and runs the typed head: every fence, permission and protected
+  # key check stays on that one path (task-c6cbf346a07ff01e). An id that
+  # matches no row answers 404, the same as a typed patch of a missing
+  # document.
+  defp apply_one(%{"patch" => %{"id" => id} = patch} = mutation, dataset, opts)
+       when is_binary(id) and not is_map_key(patch, "type") do
+    case Barkpark.Content.Query.document_type(id, dataset, opts) do
+      {:ok, type} ->
+        apply_one(%{mutation | "patch" => Map.put(patch, "type", type)}, dataset, opts)
+
+      :error ->
+        {:error, :not_found}
     end
   end
 
@@ -1546,7 +1699,7 @@ defmodule Barkpark.Content.Mutations do
   # returns the upsert's own document untouched, which is the pre-existing
   # behaviour byte for byte.
   defp land_patch(%{doc_id: base_id}, type, doc, dataset, opts) do
-    if published_first_patch?(base_id, type) do
+    if published_first_patch?(base_id, type, opts) do
       Content.publish_document(DraftId.published_id(doc.doc_id), type, dataset, opts)
     else
       {:ok, doc}
@@ -1562,7 +1715,7 @@ defmodule Barkpark.Content.Mutations do
   @published_first_patch_types ~w(task)
 
   defp get_patch_base(id, type, dataset, opts) do
-    if published_first_patch?(id, type) do
+    if published_first_patch?(id, type, opts) do
       published_first_patch_base(id, type, dataset, opts)
     else
       draft_first_patch_base(id, type, dataset, opts)
@@ -1572,8 +1725,10 @@ defmodule Barkpark.Content.Mutations do
   # BARE ids only: `drafts.task-…` names the twin explicitly and keeps the
   # draft-first path (the escape hatch). A nil/non-binary id falls through to
   # the draft-first clause, whose `id &&` guard already handles it.
-  defp published_first_patch?(id, type),
-    do: is_binary(id) and type in @published_first_patch_types and not DraftId.draft?(id)
+  defp published_first_patch?(id, type, opts \\ []),
+    do:
+      is_binary(id) and not DraftId.draft?(id) and
+        (type in @published_first_patch_types or Keyword.get(opts, :exact_ids, false))
 
   # ── The plugin mutate-door fences (task-b04cbe7823d084a6) ─────────────────
   #

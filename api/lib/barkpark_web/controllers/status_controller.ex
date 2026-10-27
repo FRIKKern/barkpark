@@ -80,6 +80,20 @@ defmodule BarkparkWeb.StatusController do
     })
   end
 
+  # ── Container probes ──────────────────────────────────────────────────────────
+
+  @doc "`GET /livez`: the BEAM answers. Touches no database."
+  def live(conn, _params), do: json(conn, %{status: "ok"})
+
+  @doc "`GET /readyz`: 200 when `Status.readiness/0` passes, 503 otherwise."
+  def ready(conn, _params) do
+    %{ready: ready?, checks: checks} = Status.readiness()
+
+    conn
+    |> put_status(if ready?, do: 200, else: 503)
+    |> json(%{status: if(ready?, do: "ready", else: "not_ready"), checks: checks})
+  end
+
   # ── Admin ─────────────────────────────────────────────────────────────────────
 
   def create_incident(conn, params) do

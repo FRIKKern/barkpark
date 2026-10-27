@@ -97,8 +97,12 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
   defp schemas_path(ctx),
     do: "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/schemas/#{@dataset}"
 
+  defp structure_path(ctx),
+    do: "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/structure/#{@dataset}"
+
   describe "scoped schema reads use the same member session as document reads" do
-    test "a seated login bearer reads the index and schema, but cannot manage schemas", ctx do
+    test "a seated login bearer reads the index, a schema and the desk tree, but cannot manage schemas",
+         ctx do
       token = member!(ctx)
       path = schemas_path(ctx)
 
@@ -113,8 +117,21 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
 
       assert (json_conn(token) |> delete(path <> "/post")).status in [401, 403]
 
-      structure = "/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/structure/#{@dataset}"
-      assert (json_conn(token) |> get(structure)).status in [401, 403]
+      assert json_response(json_conn(token) |> get(structure_path(ctx)), 200)["structure"]
+    end
+
+    test "a read-only API token with a seat reads the desk tree; public-read cannot", ctx do
+      read_raw = "472c-read-#{System.unique_integer([:positive])}"
+      {:ok, read} = Auth.create_token(read_raw, "472c-read", @dataset, ["read"])
+      {:ok, _} = TenancyAuth.create_membership(ctx.ws.id, read.id, "member", "api_token")
+
+      assert json_response(json_conn(read_raw) |> get(structure_path(ctx)), 200)["structure"]
+      assert json_response(json_conn(ctx.admin_raw) |> get(structure_path(ctx)), 200)["structure"]
+
+      public_raw = "472c-public-#{System.unique_integer([:positive])}"
+      {:ok, public} = Auth.create_token(public_raw, "472c-public", @dataset, ["public-read"])
+      {:ok, _} = TenancyAuth.create_membership(ctx.ws.id, public.id, "member", "api_token")
+      assert (json_conn(public_raw) |> get(structure_path(ctx))).status == 403
     end
 
     test "an existing API token still reads the schema index and one schema", ctx do
@@ -148,11 +165,11 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
       assert json_response(json_conn(token) |> get("/v1/auth/token"), 200)["kind"] == "session"
 
       statuses =
-        for path <- [schemas_path(ctx), schemas_path(ctx) <> "/post"] do
+        for path <- [schemas_path(ctx), schemas_path(ctx) <> "/post", structure_path(ctx)] do
           (json_conn(token) |> get(path)).status
         end
 
-      assert statuses == [403, 403]
+      assert statuses == [403, 403, 403]
     end
 
     test "missing, revoked and expired sessions cannot read schemas", ctx do
@@ -294,5 +311,25 @@ defmodule BarkparkWeb.SessionBearerSeatTest do
       resp = json_conn(token) |> post(mutate_path(ctx), create_body("drafts.a89-session"))
       assert resp.status == 200, resp.resp_body
     end
+  end
+
+  # task-0d5ac677450d4c8c: the seat gate on the direct publish leaves a member
+  # session, which may publish, unchanged.
+  test "a member session's direct publish still lands", ctx do
+    token = member!(ctx)
+    id = "a89-direct-#{System.unique_integer([:positive])}"
+
+    body =
+      Jason.encode!(%{
+        mutations: [%{createOrReplace: %{_id: id, _type: "post", title: "live"}, publish: true}]
+      })
+
+    assert json_response(json_conn(token) |> post(mutate_path(ctx), body), 200)
+
+    assert {:ok, %{title: "live"}} =
+             Content.get_document(id, "post", @dataset,
+               workspace_id: ctx.ws.id,
+               project_id: ctx.project.id
+             )
   end
 end

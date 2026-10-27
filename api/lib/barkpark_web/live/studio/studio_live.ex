@@ -114,6 +114,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> Mount.init()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
+      # After Caps: an event Caps refuses never reaches the quota gate.
+      |> BarkparkWeb.Studio.QuotaGate.attach()
       |> load_access_grants()
       |> schedule_access_expiry()
 
@@ -296,6 +298,13 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # mid-session scope switch re-stamps it exactly like the log metadata.
     BarkparkWeb.StudioLocale.put(socket.assigns[:current_workspace])
     socket = assign_type_labels(socket, dataset)
+
+    # The zone a list preview's |date day is read in (task-ecaaa898e346dc73),
+    # stamped on the shell for `BarkparkWeb.PreviewDay`.
+    socket =
+      assign(socket,
+        time_zone: Barkpark.Tenancy.workspace_time_zone(socket.assigns[:current_workspace])
+      )
 
     # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
     # plug). Logger.metadata is per-process; the connected Studio runs on this

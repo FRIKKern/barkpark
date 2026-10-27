@@ -1153,6 +1153,23 @@ defmodule BarkparkWeb.Router do
     # sheets imported before this change stay exportable.
     plug(BarkparkWeb.Plugs.DeriveWorkspaceFromToken)
     plug(BarkparkWeb.Plugs.AssignDefaultScope)
+    # task-9676ef7a58a7d112 — the write buckets' rate limit and quota gate,
+    # unchanged, AFTER the token so the bucket keys on it. Reads (the sheets
+    # exports, sessions, intents) pass the gate; see RequireWithinQuota's
+    # "Mixed buckets" for `creates:`. Only host controllers are named: the
+    # router may not reference a removable plugin's module (fresh-install
+    # invariant), so the sheets import is gated on suspension, not on room.
+    plug(BarkparkWeb.Plugs.RateLimit)
+
+    plug(BarkparkWeb.Plugs.RequireWithinQuota,
+      only: :writes,
+      creates: [
+        {BarkparkWeb.BulldocsIngestController, :ingest},
+        {BarkparkWeb.BulldocsIngestController, :create},
+        {BarkparkWeb.BulldocsIngestController, :sync},
+        {BarkparkWeb.BulldocsIngestController, :ingest_session}
+      ]
+    )
   end
 
   # Anonymous, CORS-open JSON for the `:public_api` plugin bucket (Pulse /
@@ -1404,6 +1421,22 @@ defmodule BarkparkWeb.Router do
   # `:scoped_api` has already resolved `:current_workspace` from the path.
   pipeline :flat_within_quota do
     plug(BarkparkWeb.Plugs.RequireWithinQuota)
+  end
+
+  # task-9676ef7a58a7d112 — the same gate on the `/v1/tasks` verbs and
+  # `/v1/fleet/beat` (`:token_root`): a suspended workspace is refused every
+  # write; a full one only the beat, the one verb that can add a document.
+  pipeline :token_root_within_quota do
+    plug(BarkparkWeb.Plugs.RequireWithinQuota,
+      only: :writes,
+      creates: [{BarkparkWeb.TasksController, :fleet_beat}]
+    )
+  end
+
+  # task-9676ef7a58a7d112 — legacy `/api/documents` writes: create needs room,
+  # delete does not (as a `delete` mutation on /v1/data/mutate).
+  pipeline :legacy_within_quota do
+    plug(BarkparkWeb.Plugs.RequireWithinQuota, creates: [{BarkparkWeb.LegacyController, :create}])
   end
 
   # THE INSTANCE-OPERATOR gate (task-c7e2b87f1bbca815). Layered ON TOP of
@@ -1919,7 +1952,12 @@ defmodule BarkparkWeb.Router do
   # `DELETE /v1/auth/app-tokens/current`, where a read token revoking ITSELF is
   # the correct behaviour.
   scope "/v1" do
-    pipe_through([:api, :require_token, BarkparkWeb.Plugs.RequireWriteForMutation])
+    pipe_through([
+      :api,
+      :require_token,
+      :token_root_within_quota,
+      BarkparkWeb.Plugs.RequireWriteForMutation
+    ])
 
     plugin_routes(scope: :token_root)
   end
@@ -2330,6 +2368,12 @@ defmodule BarkparkWeb.Router do
     # checked-in openapi.yaml. Generated from the capabilities manifest by
     # Barkpark.Api.OpenApi, so it can never drift from the routes.
     get("/openapi.json", OpenApiController, :index)
+
+    # Where an embedder (a studio on another origin) loads the paper canvas
+    # from: the bundle and its stylesheets under their content hash, so they
+    # cache as immutable (EmbedController, task-c57dd84f98c1296c). Public like
+    # the files it names.
+    get("/embed/canvas", EmbedController, :canvas)
   end
 
   # ── Anonymous account creation — its OWN, tighter bucket ────────────────
@@ -2476,6 +2520,13 @@ defmodule BarkparkWeb.Router do
   scope "/", BarkparkWeb do
     pipe_through(:api)
     get("/status.json", StatusController, :show_json)
+  end
+
+  # Container platform probes. No pipeline: no token lookup, no rate limit, so
+  # /livez never touches the database. Contract: docs/setup/SELF-HOST.md.
+  scope "/", BarkparkWeb do
+    get("/livez", StatusController, :live)
+    get("/readyz", StatusController, :ready)
   end
 
   # Incident management — admin only.
@@ -2670,6 +2721,8 @@ defmodule BarkparkWeb.Router do
     # (AXI charter decision 19 / manifest `data.counts`). Token/preview only
     # (existence-hiding, like backlinks); tenancy fail-closed in the controller.
     get("/counts/:dataset", QueryController, :counts)
+    # GROQ at an undated path, for `bp doc groq` (task-2b7f715eb6fd0c12).
+    get("/groq/:dataset", GroqController, :read)
   end
 
   # ── Localhost fast-path search (Barkpark Cloud P4 / Move B) ──────────────
@@ -3226,6 +3279,22 @@ defmodule BarkparkWeb.Router do
     post("/workspaces/:slug/reinstate", WorkspaceReinstateController, :create)
   end
 
+  # Organizations and their OIDC sign-in, set up without a server shell
+  # (task-25386fa77a664587). Instance-operator tier, like OrgAdminLive.
+  scope "/v1/admin/orgs", BarkparkWeb do
+    pipe_through([:api, :require_admin, :require_platform_operator])
+
+    post("/", OrgSsoController, :create)
+    put("/:org_slug/workspaces/:workspace_slug", OrgSsoController, :attach_workspace)
+    put("/:org_slug/auth-methods", OrgSsoController, :set_auth_methods)
+    post("/:org_slug/oidc", OrgSsoController, :create_oidc)
+    patch("/:org_slug/oidc", OrgSsoController, :update_oidc)
+    put("/:org_slug/oidc/client-secret", OrgSsoController, :rotate_secret)
+    delete("/:org_slug/oidc", OrgSsoController, :delete_oidc)
+    post("/:org_slug/domains", OrgSsoController, :add_domain)
+    post("/:org_slug/domains/:domain/verify", OrgSsoController, :verify_domain)
+  end
+
   # C083 trusted hold endpoint (Barkdown seal-admission contract): operator-gated,
   # owned by WriteAdmission.Holder. RefuseWhileHeld exempts this path so status
   # and reopen answer while held.
@@ -3745,6 +3814,10 @@ defmodule BarkparkWeb.Router do
     pipe_through(:shared_docs_api)
 
     get("/v:api_version/data/query/:dataset", GroqController, :read)
+    # Sanity's document read, `client.getDocument(s)` (task-6a540627a1aec2c1).
+    get("/v:api_version/data/doc/:dataset/:ids", GroqController, :documents)
+    # The same read at an undated path, for `bp doc groq` (task-2b7f715eb6fd0c12).
+    get("/v1/data/groq/:dataset", GroqController, :read)
   end
 
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
@@ -3859,6 +3932,12 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/schedules/:dataset", ScheduleController, :index)
 
     get("/v1/data/listen/:dataset", ListenController, :listen)
+    # @sanity/client's listen() at its own dated apiVersion (`/v2025-02-19/…`,
+    # `/vX/…`): the same stream, the same gates (task-e5af22d327a92a44).
+    get("/v:api_version/data/listen/:dataset", ListenController, :listen)
+    # Sanity's Live Content API stream, `client.live.events()` / next-sanity
+    # `defineLive` (task-d6566cbed9b7c33c): the same gates as listen.
+    get("/v:api_version/data/live/events/:dataset", LiveEventsController, :events)
     # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
     # GET rides this read pipeline; the POST moves to its own scope right
     # below (task-db8de40bbc928c54) so it gets the presence_focus rate
@@ -3901,6 +3980,10 @@ defmodule BarkparkWeb.Router do
     pipe_through(:scoped_mutate)
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
+    # @sanity/client's writes (task-c6cbf346a07ff01e): the same pipeline and
+    # controller, with Sanity's exact-id semantics. Server-side only: no CORS
+    # on this path (an owner decision, task-5e59bca0170d8eda).
+    post("/v:api_version/data/mutate/:dataset", MutateController, :mutate)
     post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
     post("/v1/data/disconnect/:dataset/:doc_id", DisconnectController, :create)
 
@@ -3938,12 +4021,16 @@ defmodule BarkparkWeb.Router do
   # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
   # membership at :read). An editing Studio needs the schema with its API token
   # or account-session bearer (task-b21d1b647d448142), without a shared service
-  # credential. The schema write and Structure admin gates below are unchanged.
+  # credential. The desk tree is read the same way: it names the same types and
+  # counts their documents, which a member token can already query
+  # (task-472c206eeff80777). PublicRead still refuses a public-read token here.
+  # The schema write gate below is unchanged.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token_or_member_login_session])
 
     get("/v1/schemas/:dataset", SchemaController, :index)
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
+    get("/v1/structure/:dataset", StructureController, :show)
   end
 
   # Personal members may inspect actions; API tokens retain the existing
@@ -3976,7 +4063,6 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
-    get("/v1/structure/:dataset", StructureController, :show)
     post("/v1/schemas/:dataset", SchemaController, :upsert)
     delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end
@@ -4057,6 +4143,9 @@ defmodule BarkparkWeb.Router do
     # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
     # `bp workspace set-locale <locale>` lands here.
     patch("/v1/workspace/locale", WorkspaceLocaleController, :update)
+    # Workspace time zone (task-ecaaa898e346dc73): a list preview's `|date`
+    # day. `bp workspace set-time-zone Europe/Oslo` lands here.
+    patch("/v1/workspace/time-zone", WorkspaceLocaleController, :update_time_zone)
 
     # Token inventory + revocation. `GET` answers "which credentials reach this
     # workspace"; `DELETE` kills one, gated on that token actually holding a
@@ -4415,7 +4504,13 @@ defmodule BarkparkWeb.Router do
   # in a separate scope from the legacy GET reads so a read/public-read token can
   # no longer create or delete a document via the deprecated /api/documents surface.
   scope "/api", BarkparkWeb do
-    pipe_through([:api, :require_token, :require_write, BarkparkWeb.Plugs.LegacyDeprecation])
+    pipe_through([
+      :api,
+      :require_token,
+      :legacy_within_quota,
+      :require_write,
+      BarkparkWeb.Plugs.LegacyDeprecation
+    ])
 
     post("/documents/:type", LegacyController, :create)
     delete("/documents/:type/:id", LegacyController, :delete)

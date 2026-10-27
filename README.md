@@ -55,4 +55,4 @@ Local and remote instances hold separate data; transfers are explicit today.
 
 [Documentation](docs/INDEX.md) · [JavaScript docs site](js/docs/README.md) · [Build a plugin](docs/cards/plugins.md) · [Principles](docs/PHILOSOPHY.md)
 
-[MIT licensed](LICENSE). Optional [Barkpark Cloud](https://barkpark.cloud) hosting funds development.
+[Apache-2.0 licensed](LICENSE). Optional [Barkpark Cloud](https://barkpark.cloud) hosting funds development.

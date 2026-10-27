@@ -34,6 +34,7 @@ defmodule BarkparkWeb.GroqController do
 
   def read(conn, %{"dataset" => dataset} = params) do
     t0 = System.monotonic_time(:microsecond)
+    params = unstack_perspective(params)
 
     with :ok <- known_dataset(dataset, conn),
          {:ok, query} <- query_text(params),
@@ -46,13 +47,14 @@ defmodule BarkparkWeb.GroqController do
           perspective: resolve_perspective(conn, params),
           scope_opts: scope_opts(conn),
           identity: identity(conn),
-          project_id: conn.path_params["project_slug"]
+          project_id: conn.path_params["project_slug"],
+          source_map: source_map_mode(params)
         )
 
       case result do
-        {:ok, %{result_json: result_json, sync_tags: tags}} ->
+        {:ok, %{result_json: result_json, sync_tags: tags} = out} ->
           ms = div(System.monotonic_time(:microsecond) - t0, 1000)
-          respond(conn, params, query, result_json, tags, ms)
+          respond(conn, params, query, result_json, tags, ms, out[:source_map])
 
         {:error, {:parse, error}} ->
           parse_error(conn, query, error)
@@ -62,6 +64,11 @@ defmodule BarkparkWeb.GroqController do
 
         {:error, {:eval, message}} ->
           query_error(conn, 422, "queryEvaluationError", message)
+
+        {:error, {:busy, message}} ->
+          conn
+          |> put_resp_header("retry-after", "1")
+          |> query_error(503, "queryBusyError", message)
       end
     else
       {:error, :unknown_dataset} ->
@@ -100,6 +107,67 @@ defmodule BarkparkWeb.GroqController do
     end
   end
 
+  @doc """
+  Sanity's document read, `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]`
+  (`client.getDocument` / `getDocuments`): `{"documents": [...], "omitted":
+  [{"id", "reason": "existence"}]}`, by `_id` alone. It is the GROQ read
+  `*[_id in $ids]` with the same dataset, scope, auth and perspective
+  resolution as `read/2`; the default perspective is `raw`, so an id names
+  exactly one stored document (a `drafts.` id its draft), as on Sanity. A
+  caller pinned to published reads stays pinned. An id the caller cannot see
+  is omitted with reason `existence`.
+  """
+  def documents(conn, %{"dataset" => dataset, "ids" => raw_ids} = params) do
+    ids =
+      raw_ids
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.uniq()
+
+    params = Map.put_new(params, "perspective", "raw")
+
+    with :ok <- known_dataset(dataset, conn),
+         :ok <- perspective_ok(params) do
+      result =
+        Barkpark.Groq.query("*[_id in $ids]", %{"ids" => ids},
+          dataset: dataset,
+          perspective: resolve_perspective(conn, params),
+          scope_opts: scope_opts(conn),
+          identity: identity(conn),
+          project_id: conn.path_params["project_slug"]
+        )
+
+      case result do
+        {:ok, %{result_json: result_json}} ->
+          by_id = result_json |> Jason.decode!() |> Map.new(&{&1["_id"], &1})
+
+          json(conn, %{
+            documents: for(id <- ids, doc = by_id[id], doc != nil, do: doc),
+            omitted:
+              for(id <- ids, not Map.has_key?(by_id, id), do: %{id: id, reason: "existence"})
+          })
+
+        {:error, {:limit, message}} ->
+          query_error(conn, 422, "queryLimitError", message)
+
+        {:error, {:busy, message}} ->
+          conn
+          |> put_resp_header("retry-after", "1")
+          |> query_error(503, "queryBusyError", message)
+
+        {:error, {_kind, message}} ->
+          query_error(conn, 422, "queryEvaluationError", to_string(message))
+      end
+    else
+      {:error, :unknown_dataset} ->
+        ErrorResponse.emit(conn, {:error, {:not_found, "dataset #{inspect(dataset)} not found"}})
+
+      {:error, {:bad_perspective, value}} ->
+        ReadPerspective.refuse(conn, value, @perspectives)
+    end
+  end
+
   defp known_dataset(dataset, conn) do
     if WriteScope.read_dataset_known?(dataset, scope_opts(conn)),
       do: :ok,
@@ -114,18 +182,75 @@ defmodule BarkparkWeb.GroqController do
   defp query_params(conn, params) do
     from_body =
       case params["params"] do
-        %{} = map -> map
-        _ -> %{}
+        %{} = map ->
+          map
+
+        # `bp doc groq --params '{"slug":"x"}'` sends the object as a string.
+        json when is_binary(json) ->
+          case Jason.decode(json) do
+            {:ok, %{} = map} -> map
+            _ -> :invalid
+          end
+
+        _ ->
+          %{}
       end
+
+    start = if from_body == :invalid, do: {:error, {:bad_param, "params"}}, else: {:ok, from_body}
 
     conn.query_params
     |> Enum.filter(fn {key, _} -> String.starts_with?(key, "$") end)
-    |> Enum.reduce_while({:ok, from_body}, fn {"$" <> name, raw}, {:ok, acc} ->
-      case Jason.decode(raw) do
-        {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
-        {:error, _} -> {:halt, {:error, {:bad_param, name}}}
-      end
+    |> Enum.reduce_while(start, fn
+      _pair, {:error, _} = error ->
+        {:halt, error}
+
+      {"$" <> name, raw}, {:ok, acc} ->
+        case Jason.decode(raw) do
+          {:ok, value} -> {:cont, {:ok, Map.put(acc, name, value)}}
+          {:error, _} -> {:halt, {:error, {:bad_param, name}}}
+        end
     end)
+  end
+
+  # A perspective stack (task-acbe59f8b19baaf2): `@sanity/client` sends
+  # `perspective: ['rX', 'drafts']` as `perspective=rX,drafts`, and the studio's
+  # Presentation and next-sanity pass the stack the editor picked. Barkpark has
+  # no releases yet, so a release id adds nothing, as Sanity answers an unknown
+  # release: the stack reads as `drafts` when it holds `drafts` (or
+  # `previewDrafts`), else `published`. `raw` cannot be stacked, as on Sanity;
+  # such a stack, an empty member or an id with other characters is left as
+  # sent and refused below. A lone unknown value (no comma) is refused too,
+  # where Sanity reads it as a release: that refusal is what catches a typo
+  # such as `drafst` (`ReadPerspective`).
+  @release_id ~r/\A[A-Za-z0-9][A-Za-z0-9_.-]*\z/
+
+  defp unstack_perspective(%{"perspective" => value} = params) when is_binary(value) do
+    if String.contains?(value, ","),
+      do: unstack(params, value, String.split(value, ",")),
+      else: params
+  end
+
+  defp unstack_perspective(%{"perspective" => [_ | _] = list} = params) do
+    if Enum.all?(list, &is_binary/1),
+      do: unstack(params, Enum.join(list, ","), list),
+      else: params
+  end
+
+  defp unstack_perspective(params), do: params
+
+  defp unstack(params, value, members) do
+    members = Enum.map(members, &String.trim/1)
+
+    cond do
+      "raw" in members or not Enum.all?(members, &Regex.match?(@release_id, &1)) ->
+        Map.put(params, "perspective", value)
+
+      Enum.any?(members, &(&1 in ["drafts", "previewDrafts"])) ->
+        Map.put(params, "perspective", "drafts")
+
+      true ->
+        Map.put(params, "perspective", "published")
+    end
   end
 
   defp perspective_ok(params) do
@@ -160,20 +285,43 @@ defmodule BarkparkWeb.GroqController do
     end
   end
 
-  defp respond(conn, params, query, result_json, tags, ms) do
+  defp respond(conn, params, query, result_json, tags, ms, source_map) do
     return_query? = params["returnQuery"] not in ["false", false]
 
-    fields =
-      [
-        if(return_query?, do: {"query", query}),
-        {"result", Jason.Fragment.new(result_json)},
-        {"ms", ms},
-        {"syncTags", tags}
-      ]
-      |> Enum.reject(&is_nil/1)
-      |> Jason.OrderedObject.new()
+    result = Jason.Fragment.new(result_json)
 
-    json(conn, fields)
+    # Literal maps, so the /v1/data envelope convention can read them
+    # (response_envelope_convention_test.exs): `result` plus Sanity's
+    # `query`, `ms` and `syncTags`, and `resultSourceMap` when asked.
+    cond do
+      source_map && return_query? ->
+        json(conn, %{
+          query: query,
+          result: result,
+          ms: ms,
+          syncTags: tags,
+          resultSourceMap: source_map
+        })
+
+      source_map ->
+        json(conn, %{result: result, ms: ms, syncTags: tags, resultSourceMap: source_map})
+
+      return_query? ->
+        json(conn, %{query: query, result: result, ms: ms, syncTags: tags})
+
+      true ->
+        json(conn, %{result: result, ms: ms, syncTags: tags})
+    end
+  end
+
+  # `resultSourceMap=true` or `withKeyArraySelector` (task-640e8371b8e468ce),
+  # in the query string or a POST body; anything else asks for no map.
+  defp source_map_mode(params) do
+    case params["resultSourceMap"] do
+      v when v in ["true", true] -> :plain
+      "withKeyArraySelector" -> :keyed
+      _ -> nil
+    end
   end
 
   # A query's own hint: `malformed`'s default speaks of a JSON body, which a GROQ read

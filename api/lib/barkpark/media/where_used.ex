@@ -200,16 +200,22 @@ defmodule Barkpark.Media.WhereUsed do
   # delete answered 200 over live `_ref`s.
   defp structural_referrers(%MediaFile{} = file) do
     scope = MediaFile.scope_opts(file)
+    asset_doc = Barkpark.Media.asset_doc_for_file(file, file.dataset, scope)
+    patterns = sanity_ref_patterns(file)
 
-    case Barkpark.Media.asset_doc_for_file(file, file.dataset, scope) do
-      nil ->
+    case {asset_doc, patterns} do
+      {nil, []} ->
         %{count: 0, sample: []}
 
-      asset_doc ->
+      _ ->
         # The upload mints the companion as a DRAFT (`drafts.asset-…`) while a
         # field holds the bare `asset-…`; `list_reference_holders/3` matches the
-        # published id, so normalise here.
-        asset_doc_id = Barkpark.Content.published_id(asset_doc.doc_id)
+        # published id, so normalise here. A blob with no companion (a bare
+        # import) still has its Sanity ids to match.
+        target =
+          if asset_doc,
+            do: Barkpark.Content.published_id(asset_doc.doc_id),
+            else: "asset-" <> to_string(file.id)
 
         ctx = %Barkpark.Content.CallerContext{
           principal_type: :api_token,
@@ -219,9 +225,9 @@ defmodule Barkpark.Media.WhereUsed do
 
         rows =
           Barkpark.Content.Query.list_reference_holders(
-            asset_doc_id,
+            target,
             file.dataset,
-            [caller_context: ctx] ++ scope
+            [caller_context: ctx, asset_ref_patterns: patterns] ++ scope
           )
 
         sample =
@@ -233,6 +239,33 @@ defmodule Barkpark.Media.WhereUsed do
         %{count: length(sample), sample: Enum.take(sample, @sample_limit)}
     end
   end
+
+  # task-bace4f482af160a9 — the Sanity-form ids this blob is ALSO served under
+  # (`Media.SanityAsset` resolves `source_id` first, then the sha1 in
+  # `image-<sha1>-<w>x<h>-<ext>` / `file-<sha1>-<ext>`), as SQL LIKE patterns.
+  # The LiveView save rewrites `asset-<uuid>` into the image form
+  # (`ImageMetadata.backfill/3`) and a Sanity import keeps Sanity's ids, so a
+  # field holding one of these shows this blob. Any size and extension count:
+  # the id names the bytes Sanity saw, not the stored re-encode. Over-matching
+  # only makes the guard stricter.
+  @doc false
+  # Public for `Content.Graph.backlinks/2`, which lists the same holders for
+  # the blob's companion asset document (task-bace4f482af160a9, criterion 3).
+  def sanity_ref_patterns(%MediaFile{} = file) do
+    source =
+      if is_binary(file.source_id) and file.source_id != "",
+        do: [like_literal(file.source_id)],
+        else: []
+
+    sha =
+      if is_binary(file.sha1) and Regex.match?(~r/\A[0-9a-f]{40}\z/, file.sha1),
+        do: ["image-#{file.sha1}-%", "file-#{file.sha1}-%"],
+        else: []
+
+    Enum.uniq(source ++ sha)
+  end
+
+  defp like_literal(s), do: String.replace(s, ~r/[\\%_]/, "\\\\\\0")
 
   # Unions the textual and structural censuses by `doc_id`. Each half's `count`
   # is exact on its OWN query; de-duping a document hit by BOTH (a raw URL

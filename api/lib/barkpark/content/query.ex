@@ -288,6 +288,10 @@ defmodule Barkpark.Content.Query do
       Unlike `collect_all_documents/3`'s per-TYPE `max_pages` bound this is a
       WHOLE-CORPUS bound, so the caller's peak memory is bounded by one number
       rather than by (types x pages).
+    * `:doc_ids` — read only rows whose `doc_id` is in this list, through
+      the `(doc_id, type, dataset_id)` index. A caller that pages a large
+      corpus reads its ids with `collect_corpus_slugs/3` and then one page of
+      documents at a time, instead of holding every document at once.
     * `:owner_scoped` — when `true`, appends the row-ownership ACL
       (`scope_to_owner/2`) exactly as `base_query/4` does for an
       `owner_scoped: true` type. Callers holding the schema list MUST split
@@ -450,6 +454,12 @@ defmodule Barkpark.Content.Query do
       if Keyword.get(opts, :owner_scoped, false),
         do: scope_to_owner(base, Keyword.get(opts, :caller_context)),
         else: base
+
+    base =
+      case Keyword.get(opts, :doc_ids) do
+        ids when is_list(ids) -> where(base, [d], d.doc_id in ^ids)
+        _ -> base
+      end
 
     apply_perspective(base, Keyword.get(opts, :perspective, :raw))
   end
@@ -864,16 +874,26 @@ defmodule Barkpark.Content.Query do
     draft_id = Barkpark.Content.draft_id(pub_id)
     ids = [pub_id, draft_id]
     ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+    # Extra `_ref` LIKE patterns an image/file asset also answers to: the media
+    # delete guard passes the blob's Sanity ids (task-bace4f482af160a9).
+    patterns = Keyword.get(opts, :asset_ref_patterns, [])
 
     opts
     |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
-    |> Enum.flat_map(fn schema ->
+    |> Enum.map(fn schema ->
+      {schema,
+       Enum.filter(
+         schema.fields || [],
+         &(is_binary(&1["name"]) and link_field?(&1) and
+             Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
+       )}
+    end)
+    # A type with no field that can hold a link would run a query whose
+    # predicate is `false`: skip it (one query per such type per backlinks read).
+    |> Enum.reject(fn {_schema, fields} -> fields == [] end)
+    |> Enum.flat_map(fn {schema, fields} ->
       {predicate, via_field} =
-        (schema.fields || [])
-        |> Enum.filter(
-          &(is_binary(&1["name"]) and
-              Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
-        )
+        fields
         |> Enum.reverse()
         |> Enum.reduce({dynamic(false), dynamic(nil)}, fn field, {acc, selected_field} ->
           name = field["name"]
@@ -900,6 +920,7 @@ defmodule Barkpark.Content.Query do
               # adds its own match (task-e7a8f98e6924df10).
               field["type"] == "arrayOf" ->
                 array_holder_match(name, array_member_types(field), pub_id, draft_id)
+                |> or_array_asset_patterns(name, array_member_types(field), patterns)
 
               # An `image` field's stored shape is `{asset: {_ref}, hotspot:
               # {...}, crop: {...}}` (docs/contracts/schema-v2.md) — one level
@@ -921,6 +942,7 @@ defmodule Barkpark.Content.Query do
                     ^draft_id
                   )
                 )
+                |> or_field_asset_patterns(name, patterns)
 
               # A `file` field's stored shape is the SAME `{asset: {_ref}}`
               # wrapper an `image` field uses, minus the image-only hotspot/
@@ -942,6 +964,7 @@ defmodule Barkpark.Content.Query do
                     ^draft_id
                   )
                 )
+                |> or_field_asset_patterns(name, patterns)
 
               true ->
                 dynamic(false)
@@ -1188,6 +1211,55 @@ defmodule Barkpark.Content.Query do
 
     dynamic([d], ^ref_match or ^asset_match)
   end
+
+  # An image/file field (or an array allowing one) whose `asset._ref` matches
+  # one of `patterns` (SQL LIKE). Nothing added when there are none, so every
+  # other caller's query is unchanged.
+  defp or_array_asset_patterns(match, _name, _types, []), do: match
+
+  defp or_array_asset_patterns(match, name, member_types, patterns) do
+    if Enum.any?(member_types, &(&1 in ["image", "file"])) do
+      dynamic(
+        [d],
+        ^match or
+          fragment(
+            "jsonb_typeof(?->?) = 'array' AND EXISTS (SELECT 1 FROM jsonb_array_elements(?->?) AS e WHERE e->'asset'->>'_ref' LIKE ANY(?))",
+            d.content,
+            ^name,
+            d.content,
+            ^name,
+            type(^patterns, {:array, :string})
+          )
+      )
+    else
+      match
+    end
+  end
+
+  defp or_field_asset_patterns(match, _name, []), do: match
+
+  defp or_field_asset_patterns(match, name, patterns) do
+    dynamic(
+      [d],
+      ^match or
+        fragment(
+          "?->?->'asset'->>'_ref' LIKE ANY(?)",
+          d.content,
+          ^name,
+          type(^patterns, {:array, :string})
+        )
+    )
+  end
+
+  # A field `list_reference_holders/3` can match: a reference, an image or file
+  # (its `asset._ref`), or an array allowing one of those. Any other field's
+  # arm is `false`.
+  defp link_field?(%{"type" => type}) when type in ["reference", "image", "file"], do: true
+
+  defp link_field?(%{"type" => "arrayOf"} = field),
+    do: Enum.any?(array_member_types(field), &(&1 in ["reference", "image", "file"]))
+
+  defp link_field?(_field), do: false
 
   # The member types an `arrayOf` field allows. A single-type array stores `of`
   # as one map, a multi-type array as a list of member maps. `get_in/2` with a

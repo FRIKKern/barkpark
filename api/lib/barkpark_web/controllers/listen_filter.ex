@@ -41,6 +41,7 @@ defmodule BarkparkWeb.ListenFilter do
   """
 
   alias Barkpark.Content.DraftId
+  alias Barkpark.Groq.GeoShape
 
   @perspectives ["published", "drafts", "raw"]
 
@@ -59,7 +60,10 @@ defmodule BarkparkWeb.ListenFilter do
             perspective: nil,
             filter: %{},
             project_id: nil,
-            only_doc_ids: nil
+            only_doc_ids: nil,
+            query: nil,
+            include_result: true,
+            matched: nil
 
   @type t :: %__MODULE__{
           types: MapSet.t(String.t()) | nil,
@@ -67,7 +71,10 @@ defmodule BarkparkWeb.ListenFilter do
           perspective: String.t() | nil,
           filter: %{optional(String.t()) => [String.t()]},
           project_id: String.t() | nil,
-          only_doc_ids: MapSet.t(String.t()) | nil
+          only_doc_ids: MapSet.t(String.t()) | nil,
+          query: %{text: String.t(), params: map(), expr: tuple()} | nil,
+          include_result: boolean(),
+          matched: MapSet.t(String.t()) | :unknown | nil
         }
 
   @doc "The `?perspective` values the listen route honours."
@@ -81,16 +88,190 @@ defmodule BarkparkWeb.ListenFilter do
   @spec parse(map()) :: {:ok, t()} | {:error, term()}
   def parse(params) when is_map(params) do
     with {:ok, perspective} <- parse_perspective(Map.get(params, "perspective")),
-         {:ok, filter} <- parse_filter(Map.get(params, "filter")) do
+         {:ok, filter} <- parse_filter(Map.get(params, "filter")),
+         {:ok, query} <- parse_query(Map.get(params, "query"), params) do
       {:ok,
        %__MODULE__{
          types: parse_types(Map.get(params, "types")),
          ids: parse_ids(Map.get(params, "ids")),
          perspective: perspective,
-         filter: filter
+         filter: filter,
+         query: query,
+         include_result: Map.get(params, "includeResult") not in ["false", false]
        }}
     end
   end
+
+  # ── `?query=` (task-72331698ada8a2f6) ──────────────────────────────────────
+  #
+  # `@sanity/client`'s `listen(query, params, opts)` sends the GROQ query it
+  # listens to, `*[<filter>]`, with its parameters as `$name=<json>`, and
+  # `includeResult`. As on Sanity, only a mutation whose document matches the
+  # filter before or after the change is sent, with its `transition`:
+  # `appear` (matches now, did not before), `update` (matched and matches) or
+  # `disappear` (matched, no longer does). The filter only NARROWS: it runs
+  # after every existing fence, on the document as this subscriber may see it
+  # (`pass_result?/2`'s rule), so a field the caller cannot read never
+  # matches. It is evaluated on that one document: a `->` or a subquery inside
+  # the filter reads nothing and answers null, so such a filter can send less
+  # than Sanity, never more.
+  defp parse_query(nil, _params), do: {:ok, nil}
+  defp parse_query("", _params), do: {:ok, nil}
+
+  defp parse_query(text, params) when is_binary(text) do
+    with {:ok, groq_params} <- groq_params(params),
+         {:ok, tree} <- parse_groq(text, groq_params) do
+      case listen_filter_expr(tree) do
+        {:ok, expr} -> geo_affordable(%{text: text, params: groq_params, expr: expr})
+        :ignore -> {:ok, nil}
+      end
+    end
+  end
+
+  defp parse_query(_other, _params),
+    do: {:error, {:filter, "query must be a GROQ string", %{parameter: "query"}}}
+
+  defp groq_params(params) do
+    params
+    |> Enum.filter(fn {key, _} -> is_binary(key) and String.starts_with?(key, "$") end)
+    |> Enum.reduce_while({:ok, %{}}, fn {"$" <> name, raw}, {:ok, acc} ->
+      case Jason.decode(to_string(raw)) do
+        {:ok, value} ->
+          {:cont, {:ok, Map.put(acc, name, value)}}
+
+        _ ->
+          {:halt,
+           {:error, {:filter, "parameter $#{name} is not JSON", %{parameter: "$" <> name}}}}
+      end
+    end)
+  end
+
+  defp parse_groq(text, groq_params) do
+    case Barkpark.Groq.Parser.parse(text, groq_params) do
+      {:ok, tree} -> {:ok, tree}
+      {:error, error} -> {:error, {:filter, "query: #{error.description}", %{parameter: "query"}}}
+    end
+  end
+
+  # The `*[<filter>]` a listen query is built on. Sanity applies the filter and
+  # ignores what follows it (a projection, `| order()`, a slice); it accepts any
+  # other query too (`count(*)` opens a stream). Such a query narrows nothing
+  # here (`:ignore`), which is the stream as it was before `query` was read,
+  # so no caller is refused for its shape. A query that does not parse is a
+  # 400, as Sanity answers it.
+  defp listen_filter_expr({:memo, inner}), do: listen_filter_expr(inner)
+  defp listen_filter_expr({:group, inner}), do: listen_filter_expr(inner)
+  defp listen_filter_expr({:filter, {:everything}, expr}), do: {:ok, expr}
+  defp listen_filter_expr({:map, base, _mapped}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:projection, base, _obj}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:pipe, base, _name, _args}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:slice, base, _l, _r, _inclusive?}), do: listen_filter_expr(base)
+  defp listen_filter_expr({:elem, base, _index}), do: listen_filter_expr(base)
+  defp listen_filter_expr(_tree), do: :ignore
+
+  # ── Geo budget (task-04f37760a2598bbf) ───────────────────────────────────
+  #
+  # The filter runs once per event that passes the fences, in this listener's
+  # process. Each event gets `@geo_budget` position pairs for its
+  # geo::contains / geo::intersects calls: one worst-case call at the
+  # 1000-position cap, about 0.2 s of CPU. A filter that could pass that on
+  # some event is refused at open: each call site costs its literal operands'
+  # positions, and an operand read from the document counts at the cap. A call
+  # run per array element (`areas[geo::contains($b, @)]`) can still pass it;
+  # that event ends the stream with `channelError` (`query_match?/2`), never a
+  # silent false.
+  @geo_budget 1_000_000
+
+  defp geo_affordable(%{expr: expr} = q) do
+    case geo_cost(expr) do
+      cost when cost > @geo_budget ->
+        {:error,
+         {:filter,
+          "query: its geo::contains() and geo::intersects() calls may cost #{cost} position " <>
+            "pairs per event, past the listen budget of #{@geo_budget}; a field counts as a " <>
+            "shape of #{GeoShape.max_positions()} positions", %{parameter: "query"}}}
+
+      _ ->
+        {:ok, q}
+    end
+  end
+
+  defp geo_cost({:func, "geo", name, [a, b]} = node) when name in ["contains", "intersects"],
+    do: operand_positions(a) * operand_positions(b) + children_cost(node)
+
+  defp geo_cost(node) when is_tuple(node), do: children_cost(node)
+  defp geo_cost(list) when is_list(list), do: list |> Enum.map(&geo_cost/1) |> Enum.sum()
+  defp geo_cost(_), do: 0
+
+  defp children_cost(node), do: node |> Tuple.to_list() |> geo_cost()
+
+  defp operand_positions({:value, v}), do: GeoShape.count_positions(v)
+  defp operand_positions({:func, "geo", "latLng", _}), do: 1
+  defp operand_positions(_), do: GeoShape.max_positions()
+
+  @doc """
+  Decide one event under `?query=`: `{:send, transition, filter}` with
+  `"appear"`, `"update"` or `"disappear"`, or `{:drop, filter}`. `result` is
+  the document as this subscriber may see it (nil when deleted or hidden).
+  The returned filter carries the updated set of matching document ids.
+  Without a query every event is sent with no transition (`nil`). A filter
+  past its geo budget on this event answers `{:limit, message, filter}`: the
+  stream ends with `channelError`.
+  """
+  @spec query_step(t(), String.t(), map() | nil) ::
+          {:send, String.t() | nil, t()} | {:drop, t()} | {:limit, String.t(), t()}
+  def query_step(%__MODULE__{query: nil} = f, _doc_id, _result), do: {:send, nil, f}
+
+  def query_step(%__MODULE__{query: q} = f, doc_id, result) do
+    case query_match?(q, result) do
+      {:limit, message} -> {:limit, message, f}
+      now? -> step(f, doc_id, now?)
+    end
+  end
+
+  defp step(%__MODULE__{matched: matched} = f, doc_id, now?) do
+    before? = if is_struct(matched, MapSet), do: MapSet.member?(matched, doc_id), else: false
+
+    matched =
+      cond do
+        not is_struct(matched, MapSet) -> matched
+        now? -> MapSet.put(matched, doc_id)
+        true -> MapSet.delete(matched, doc_id)
+      end
+
+    f = %{f | matched: matched}
+
+    cond do
+      now? and before? -> {:send, "update", f}
+      now? -> {:send, "appear", f}
+      before? -> {:send, "disappear", f}
+      true -> {:drop, f}
+    end
+  end
+
+  @doc """
+  Whether the redacted `result` matches the listen query (nil never does), or
+  `{:limit, message}` when the filter passed a limit on this document (its
+  geo budget, a shape past the position cap).
+  """
+  @spec query_match?(map() | nil, map() | nil) :: boolean() | {:limit, String.t()}
+  def query_match?(nil, _result), do: true
+  def query_match?(_q, nil), do: false
+
+  def query_match?(%{expr: expr}, result) when is_map(result) do
+    ctx = %Barkpark.Groq.Evaluator{
+      source: Barkpark.Groq.MemorySource.new([result]),
+      now: DateTime.utc_now()
+    }
+
+    GeoShape.reset_budget(@geo_budget)
+    Barkpark.Groq.Evaluator.eval(expr, %{value: result, parent: nil, hidden: false}, ctx) === true
+  rescue
+    e in Barkpark.Groq.LimitError -> {:limit, e.message}
+    _ -> false
+  end
+
+  def query_match?(_q, _result), do: false
 
   defp parse_types(v) when is_binary(v) do
     case v |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == "")) do

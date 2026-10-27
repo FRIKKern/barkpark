@@ -192,6 +192,10 @@ defmodule BarkparkWeb.Endpoint do
   plug :secure_session
   plug BarkparkWeb.Plugs.DatasetCors
 
+  # @sanity/client reads an error's message from fields Barkpark's envelope
+  # did not carry (task-0db87287cc6fc325); added on the Sanity-shaped read paths.
+  plug BarkparkWeb.Plugs.SanityErrorBody
+
   plug BarkparkWeb.Router
 
   defp reset_request_memo(conn, _opts) do

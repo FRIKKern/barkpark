@@ -367,7 +367,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   defp connect_channel(socket, ws, provider, install_key, credential, ticket) do
     label = Catalog.token_label(provider, install_key)
 
-    case Auth.create_chat_token(label, @dataset, ws.id) do
+    actor = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    case Auth.create_chat_token(label, @dataset, ws.id, actor) do
       {:ok, raw, token} ->
         # `raw` lives in THIS function and nowhere else: not in the socket, not in
         # a log line, not in the flash. It goes over loopback to the bridge, which
@@ -567,7 +569,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         )
 
       cfg ->
-        {:ok, ws, _principal} = authorize(socket)
+        {:ok, ws, principal} = authorize(socket)
 
         # Any prior unclicked OAuth token for this workspace is stale on this path
         # (no Slack install exists), so revoke it before minting a fresh one — at
@@ -575,7 +577,8 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         revoke_slack_oauth_tokens(ws.id)
 
         with {:ok, ticket} <- ConnectTicket.sign(ws.id, "slack"),
-             {:ok, raw, token} <- Auth.create_chat_token(slack_oauth_label(), @dataset, ws.id) do
+             {:ok, raw, token} <-
+               Auth.create_chat_token(slack_oauth_label(), @dataset, ws.id, principal) do
           case Connectors.bridge().stage_pending(ticket, raw) do
             {:ok, _} ->
               oauth_link(provider, Catalog.slack_authorize_url(ticket, cfg))

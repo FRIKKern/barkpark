@@ -15,6 +15,112 @@ defmodule Barkpark.Groq.ParserTest do
     assert description =~ "$id"
   end
 
+  # task-8a6e47612d2987c6: the span Sanity's API reports for each query, read
+  # from ecu57yeh on 2026-10-25, so an editor underlines the same run.
+  test "a parse error spans the bad token or the unclosed construct, as on Sanity" do
+    for {query, start, stop} <- [
+          {"*[_type=='author'", 1, 17},
+          {"*[_type=='author']{name", 18, 24},
+          {"*[_type=='author'] | order(name", 26, 32},
+          {"*[_type=='author']{\n  'n': lowr(name)}", 27, 31},
+          {"*[delta::changedAny(title)]", 2, 19},
+          {"*[_id == $missing]", 9, 16},
+          {"*[_type=='author']{'x': 'abc}", 24, 29},
+          {"*[_type=='author'][0...'a']", 18, 27}
+        ] do
+      {:error, error} = Parser.parse(query)
+      assert {error.start, error.end} == {start, stop}, query
+    end
+  end
+
+  test "an undefined function is named as Sanity names it" do
+    assert {:error, %{description: ~s(Undefined function "lowr")}} = Parser.parse("lowr(1)")
+
+    assert {:error, %{description: ~s(Undefined function "changedAny" in namespace "delta")}} =
+             Parser.parse("delta::changedAny(title)")
+  end
+
+  # task-13790b478beeee4d: the reference shape Sanity's documents::get reads.
+  test "documents::get reads a global document reference in this project and dataset" do
+    docs = [%{"_id" => "alan", "_type" => "author", "name" => "Alan Turing"}]
+
+    eval = fn q ->
+      {:ok, tree} = Parser.parse(q)
+
+      {:ok, value} =
+        Evaluator.evaluate(tree,
+          source: MemorySource.new(docs),
+          project_id: "site",
+          dataset: "prod"
+        )
+
+      value
+    end
+
+    assert eval.(~s|documents::get({"_ref": "dataset:site.prod:alan"}).name|) == "Alan Turing"
+
+    for ref <- [
+          "dataset:site.other:alan",
+          "dataset:elsewhere.prod:alan",
+          "dataset:site.prod:nope",
+          "alan"
+        ] do
+      assert eval.(~s|documents::get({"_ref": "#{ref}"})|) == nil, ref
+    end
+
+    assert eval.(~s|documents::get("alan")|) == nil
+  end
+
+  # task-97b8d14ea3d44330: past the float range a number is Sanity's null
+  # (ecu57yeh, 26 Oct), never a crash.
+  test "a number literal or arithmetic past the float range is null" do
+    for {q, want} <- [
+          {"1e400", nil},
+          {"-1e400", nil},
+          {"1E400", nil},
+          {"[1e400]", [nil]},
+          {"1e400 == null", true},
+          {"1e308 * 10", nil},
+          {"-1e308 * 10", nil},
+          {"1e308 + 1e308", nil},
+          {"1e-400", 0}
+        ] do
+      assert eval!(q) == want, q
+    end
+  end
+
+  # task-f5fecd9690f62a7e: an integer literal past int64 is clamped to the
+  # int64 bound, then read as a double, as on Sanity (ecu57yeh, 27 Oct).
+  # Arithmetic stays in doubles; a float literal is never clamped.
+  test "an integer literal past int64 is clamped to the int64 bound" do
+    big = "123456789012345678901234567890"
+    two_63 = 9.223372036854776e18
+
+    for {q, want} <- [
+          {big, two_63},
+          {"-" <> big, -two_63},
+          {"-(#{big})", -two_63},
+          {"99999999999999999999", two_63},
+          {"00" <> big, two_63},
+          {String.duplicate("1234567890", 33), two_63},
+          {"[#{big}]", [two_63]},
+          {~s|{"n": 99999999999999999999}|, %{"n" => two_63}},
+          {big <> " + 1", two_63},
+          {big <> " * 2", 1.8446744073709552e19},
+          {big <> " - 9223372036854775807", 0},
+          {big <> " == 9223372036854775807", true},
+          {big <> " > 9223372036854775806", false},
+          {"math::sum([#{big}, 1])", two_63},
+          {"9223372036854775808", two_63},
+          {"-9223372036854775809", -two_63},
+          {"9007199254740993", 9_007_199_254_740_992},
+          {big <> ".5", 1.2345678901234568e29},
+          {"1e30", 1.0e30}
+        ] do
+      assert eval!(q) == want, q
+    end
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 
@@ -505,5 +611,43 @@ defmodule Barkpark.Groq.ParserTest do
       c = constraints(~s|*[_type == "a"]{"x": *[_type == "b" && ref == ^._id]}|)
       assert c.types == ["a"]
     end
+  end
+
+  # task-90c6e9c5557cfcea: string() and array::join write a number as Sanity
+  # does (ecu57yeh, 27 Oct): Go's 'g' format, exponent form when the decimal
+  # exponent is below -4 or at least 6, the exponent signed and two digits.
+  test "a number turns into a string as on Sanity" do
+    for {n, want} <- [
+          {"1", "1"},
+          {"-1", "-1"},
+          {"0", "0"},
+          {"1.5", "1.5"},
+          {"999999", "999999"},
+          {"1000000", "1e+06"},
+          {"1234567", "1.234567e+06"},
+          {"-1234567", "-1.234567e+06"},
+          {"1234567.5", "1.2345675e+06"},
+          {"1e6 + 0.5", "1.0000005e+06"},
+          {"-999999.5", "-999999.5"},
+          {"1e15", "1e+15"},
+          {"1e16", "1e+16"},
+          {"9007199254740993", "9.007199254740992e+15"},
+          {"1e21", "1e+21"},
+          {"-1e21", "-1e+21"},
+          {"1.5e300", "1.5e+300"},
+          {"0.0001", "0.0001"},
+          {"0.00001", "1e-05"},
+          {"-1e-5", "-1e-05"},
+          {"2.5e-5", "2.5e-05"},
+          {"0.0000001", "1e-07"},
+          {"123.456", "123.456"},
+          {"0.1 + 0.2", "0.30000000000000004"},
+          {"10 / 3", "3.3333333333333335"},
+          {"5e-324", "5e-324"}
+        ] do
+      assert eval!("string(#{n})") == want, n
+    end
+
+    assert eval!(~s|array::join([1000000, 0.00001, 12, 1.5], ",")|) == "1e+06,1e-05,12,1.5"
   end
 end

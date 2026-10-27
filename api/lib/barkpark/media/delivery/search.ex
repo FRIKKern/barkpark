@@ -148,7 +148,10 @@ defmodule Barkpark.Media.Delivery.Search do
     |> from(as: :media)
     |> join(:left, [m], d in ^asset_doc_join_query(dataset, dataset_id, workspace_id, project_id),
       as: :asset,
-      on: fragment("(?->>?)::uuid = ?", d.content, "mediaFileId", m.id)
+      # Text against text, the key a literal: documents_media_asset_file_id_index answers it
+      # (the uuid cast and a bound key matched no index, so each media row read every
+      # asset doc: 107,700 rows thrown away for 300 images; task-5374a17d7bec08ab).
+      on: fragment("?->>'mediaFileId' = ?::text", d.content, m.id)
     )
     |> scope_media_to_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
@@ -635,7 +638,7 @@ defmodule Barkpark.Media.Delivery.Search do
     LEFT JOIN documents d
       ON d.type = $1
       AND d.dataset = $2
-      AND (d.content->>'mediaFileId')::uuid = m.id
+      AND d.content->>'mediaFileId' = m.id::text
       #{doc_scope_sql}
     CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(d.content->'tags', '[]'::jsonb)) AS tag
     WHERE m.dataset = $2

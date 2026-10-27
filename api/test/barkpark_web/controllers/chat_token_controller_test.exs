@@ -105,6 +105,17 @@ defmodule BarkparkWeb.ChatTokenControllerTest do
       assert body["workspace"] == "chat-mint-a"
     end
 
+    test "a mint writes a token_minted audit row naming the admin token", %{
+      conn: conn,
+      admin_raw: raw
+    } do
+      {:ok, admin} = Auth.verify_token(raw)
+      {:ok, minted} = conn |> mint_token!(raw, "audited") |> Auth.verify_token()
+
+      ev = Barkpark.Repo.get_by!(Barkpark.Audit.Event, action: "token_minted", subject: minted.id)
+      assert {ev.actor_type, ev.actor_id} == {"api_token", admin.id}
+    end
+
     test "the minted token is BOUND to the workspace (workspace_id + membership row)", %{
       conn: conn,
       admin_raw: raw,

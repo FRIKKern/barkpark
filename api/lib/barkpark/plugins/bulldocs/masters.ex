@@ -90,7 +90,13 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
         }
       }
 
-      scope = [workspace_id: paper.workspace_id, project_id: paper.project_id]
+      # The caller's context rides along (task-a6307f0d04cf513d): the save
+      # PUBLISHES, so a draft-only (`contributor`) seat is refused here as on
+      # every other publish door, and asked BEFORE the create so a refusal
+      # leaves no draft master behind.
+      scope =
+        [workspace_id: paper.workspace_id, project_id: paper.project_id] ++
+          Keyword.take(opts, [:caller_context])
 
       # PUBLISHED ON SAVE (task-59be65118320fa0e, 0010 §5a). `create_document`
       # births every document as a draft, and the public reader resolves
@@ -99,7 +105,8 @@ defmodule Barkpark.Plugins.Bulldocs.Masters do
       # the author's choice to make it a reusable component, so the save
       # publishes it. Later edits land as drafts again (`upsert_document`) and
       # stay off the public reader until published.
-      with {:ok, draft} <- Content.create_document(@type_name, attrs, dataset, scope) do
+      with :ok <- Barkpark.Content.LiveWriteGate.check_seat(scope),
+           {:ok, draft} <- Content.create_document(@type_name, attrs, dataset, scope) do
         Content.publish_document(draft.doc_id, @type_name, dataset, scope)
       end
     else

@@ -158,6 +158,10 @@ defmodule BarkparkWeb.BulldocsLive do
       # on the very assign it guards.
       |> Edit.defaults(paper)
       |> Edit.attach_gate()
+      # Suspension and quota for the paper's workspace (task-72437f78ef0d3184),
+      # after the edit gate so a refused viewer never reaches it.
+      |> assign(:quota_workspace_id, paper.workspace_id)
+      |> BarkparkWeb.Studio.QuotaGate.attach_paper(Edit.edit_events())
       # Slice 4 (task-e99a8e946f80f52c): the attribution actor + the presence
       # room for THIS paper. Assigned for every viewer, including the anonymous
       # one: the strip below renders only for an identified viewer, so an

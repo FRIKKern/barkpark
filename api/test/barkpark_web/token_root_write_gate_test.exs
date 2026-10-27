@@ -209,6 +209,24 @@ defmodule BarkparkWeb.TokenRootWriteGateTest do
       assert reload!(task.doc_id, scope).content["lifecycle_status"] == "open"
     end
 
+    test "DELETE /v1/tasks/edges is refused and the edge survives",
+         %{conn: conn, scope: scope} do
+      blocker = open_task!(scope)
+      dependent = open_task!(scope)
+      {:ok, _} = Tasks.add_dep(dependent, blocker, :blocks)
+
+      resp =
+        conn
+        |> authed(@read_token)
+        |> delete(
+          "/v1/tasks/edges",
+          Jason.encode!(%{from_id: dependent.doc_id, to_id: blocker.doc_id})
+        )
+
+      assert resp.status == 403
+      assert [_] = Tasks.edges(dependent.id)
+    end
+
     test "POST /v1/fleet/beat is refused and registers no listener", %{conn: conn} do
       # `worker`, not `worker_id` — Fleet.beat/3 400s on the wrong key, and a 400
       # would pass a bare `!= 200` assertion while proving nothing.
@@ -335,7 +353,7 @@ defmodule BarkparkWeb.TokenRootWriteGateTest do
     src = File.read!(@router_path)
 
     case Regex.run(
-           ~r/scope "\/v1" do\n\s*pipe_through\((.+?)\)\n\n\s*plugin_routes\(scope: :token_root\)/,
+           ~r/scope "\/v1" do\n\s*pipe_through\((.+?)\)\n\n\s*plugin_routes\(scope: :token_root\)/s,
            src
          ) do
       [_, pipes] ->

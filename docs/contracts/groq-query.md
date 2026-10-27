@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: groq-query-api | budget: 1500tok -->
 # GROQ query API
 
-Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanity/client` or `next-sanity` site can point at Barkpark and keep its queries. Code: `api/lib/barkpark/groq/` (parser, evaluator, document source), `BarkparkWeb.GroqController`.
+Barkpark answers GROQ on Sanity's query API URLs, so a `@sanity/client` or `next-sanity` site keeps its queries. Code: `api/lib/barkpark/groq/`, `BarkparkWeb.GroqController`.
 
 ## Endpoint
 
@@ -12,14 +12,17 @@ Barkpark answers GROQ on the URL scheme of Sanity's HTTP query API, so a `@sanit
 | `query` | GROQ text; GET query string or POST body `{"query", "params"}` |
 | `$name` | GET only: one parameter, JSON-encoded (`$slug="intro"`) |
 | `params` | POST only: object of decoded parameter values |
-| `perspective` | `published` (default, any apiVersion), `drafts` (`previewDrafts` is an alias), `raw`; other values, or any but `raw` on v1 → 400 |
-| `returnQuery` | `false` leaves `query` out of the response |
+| `perspective` | `published` (default), `drafts` (`previewDrafts` alias), `raw`; a stack (`rX,drafts`) reads as base; `raw` stacked, a lone other value, non-`raw` on v1 → 400 |
+| `returnQuery` | `false` leaves `query` out |
+| `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
-Any `apiVersion` is accepted. Auth, tenancy and share access are those of the scoped document reads ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (no token, a share, a `public-read` token) gets `published` regardless. POST bills the read rate-limit bucket. A GET target over 32,753 bytes gets an empty 414; use POST.
+Any `apiVersion`. Auth, tenancy and shares: the scoped document reads' ([api-v1.md](../api-v1.md) §2). A share or `public-read` caller gets `published`. No token, unshared dataset: 403 (Sanity: 200, empty). POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents have `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and their content fields at the top level; field visibility redaction applies. `title` comes from the `documents.title` column (`title == "x"` matches it); no title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` rows as stored.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` too.
 
-Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax error is 400 `malformed` with `type: "queryParseError"`, `query`, `start`, `end`; a limit is 422 `bad_request` with `type: "queryLimitError"`; an unsupported function is 422 `bad_request` with `type: "queryEvaluationError"`. A parameter the query uses but the request lacks is a syntax error, as on Sanity.
+Writes: [sanity-mutate.md](sanity-mutate.md). `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]` (`getDocument(s)`) is `*[_id in ids]` as `raw`: `{"documents", "omitted"}`, a missing id omitted (`existence`).
+
+Errors keep Barkpark's envelope plus Sanity's `description`, `statusCode` and `message`, and `type`: `queryParseError` (400 `malformed`, plus `query`, `start`, `end`), `queryLimitError` or `queryEvaluationError` (422 `bad_request`), `queryBusyError` (503, `Retry-After`). A missing parameter is a syntax error, as on Sanity.
 
 ## Client configuration
 
@@ -27,7 +30,7 @@ Errors keep Barkpark's envelope plus Sanity's `description` and `type`: a syntax
 import {createClient} from '@sanity/client'
 
 const client = createClient({
-  projectId: 'barkpark', // any value; needed to send perspective
+  projectId: 'barkpark', // any value
   dataset: 'production',
   apiHost: 'https://<host>/w/<workspace>/p/<project>',
   useProjectHostname: false,
@@ -37,15 +40,13 @@ const client = createClient({
 })
 ```
 
-`next-sanity`'s `createClient` takes these too.
-
 ## Sync tags
 
-`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, and `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned. They are the tags the webhook dispatcher sends on each mutation ([webhook-realtime.md](webhook-realtime.md)), so `revalidateTag` with a webhook's tags refreshes every cached query that read the changed document. At most 128 tags; past that, document tags collapse into type tags.
+`bp:ds:<dataset>:type:<type>` for every type a `*[...]` scanned, `bp:ds:<dataset>:doc:<id>` for every document read by id (`_id ==`, `->`) whose type was not scanned, and `bp:ds:<dataset>:_all` for a scan with no `_type` or `_id` filter. Webhooks send them too ([webhook-realtime.md](webhook-realtime.md)). Each has an opaque `s1:` twin: `GET …/v{apiVersion}/data/live/events/:dataset` (`live.events()`; token or member, capped as listen, then `goaway`) sends changed docs' twins in `{"tags"}` messages per second; `restart` if `Last-Event-ID` can't resume. Draft mode only: the client sends no token without `includeDrafts`, and anonymous streams await the owner. At most 128 tags: past 64 readable ones, type tags only.
 
 ## Evaluation and limits
 
-Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them; a branch that reads only `^` and is false for the parent is skipped. GIN indexes over `content` and its `_ref` values serve them. The evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has none but these, apart from `references()`, `title` and `$x in field[].value`, and the caller sees every field it tests; any other is counted in chunks, limited only by wall time. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. Dereferences and subqueries are read in rounds: one SQL read per `->` level and subquery shape. A subquery that does not read `^` runs once per query.
+Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, a field `==`, `!=`, `<`, `<=`, `>`, `>=` a scalar, `$x in field[].value`, `references()`, `count(field)` against an integer, `defined()`, `count(field[cond]) > 0` for element `==` and `in`, `!` of `defined()`, `==`, `in` and that count, and an `||` of them. The evaluator then applies the whole filter. `count(*[...])` is a SQL count when its filter has only these, except `references()` and `title`, and the caller sees every field it tests; any other is counted in chunks. A slice (`[n]`, `[a...b]`, no negative bound) of a `*[...]` without `^`, ordered or not, reads only what it returns: in SQL when `count()` would be, else in chunks. `->` and subqueries read in rounds.
 
 | Limit | Default | Config key (`config :barkpark, Barkpark.Groq`) |
 |---|---|---|
@@ -56,13 +57,15 @@ Top-level conditions of each `*[...]` become SQL, `^` values included: `_type`, 
 | Stored content one `*[...]` loads | 32 MiB | `:max_bytes_per_fetch` |
 | Documents one query loads | 25 000 | `:max_documents_loaded` |
 | Encoded result | 10 MiB | `:max_result_bytes` |
+| Queries at once | ½ RAM ÷ heap, ≤ 2 per CPU | `:max_concurrent` |
+| Slot wait, then 503 | 5 s | `:queue_ms` |
 
 ## Moving from Sanity
 
-Supported: the GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic; `->` also follows plain id strings) and the functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`. Sanity's GROQ test suite runs in CI (`api/test/barkpark/groq/conformance_test.exs`): 7147 of 7731 cases pass; the rest use `diff::` or custom `fn`.
+Supported: GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance|contains|intersects` (unlike Sanity: 1000 positions/shape; 5M pairs a pass, 1M a listen event), `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps), `user::attributes` (null). Sanity's GROQ suite: 7731/7731 (`groq/conformance_test.exs`).
 
-Not yet: `diff::changedAny|changedOnly`, `fn` custom functions, `geo::`, `text::query`, `documents::`, `delta::`, `user::`; release and version perspectives; `resultSourceMap`; the Live Content API (`/data/live/events`). Sanity defaults to `raw` before 2025-02-19, Barkpark always to `published`: an older client that needs drafts asks for `perspective: 'raw'`.
+Not yet: `text::query`, other `documents::`, `delta::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
 
-`score()` weighs as groq-js (a term adds by its count in the field; `boost` adds). Sanity's hosted one favours rarer terms and shorter fields; multi-clause ranks can differ.
+`score()` weighs as groq-js; multi-term ranks can differ.
 
-Checking a site's queries: `tooling/groq/compare.mjs` runs a query corpus through groq-js and through this endpoint over the same documents and reports the differences (dev only).
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()` (its wikilinks are not `references()` yet). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing.

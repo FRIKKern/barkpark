@@ -142,6 +142,7 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
 
   alias Barkpark.EdgeProjector.Projector
   alias Barkpark.EdgeProjector.ProjectorWorker
+  alias Barkpark.EdgeProjector.ReprojectLinkersWorker
   alias Barkpark.EdgeProjector.Settings
   alias Barkpark.Repo
   alias Barkpark.Tenancy
@@ -181,6 +182,18 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
       `_id`.
   """
   @spec enqueue_rebuild(map()) :: :ok
+  # A published row was BORN (first publish, re-publish after an unpublish,
+  # re-create after a delete): the documents linking to it lost their edges
+  # with the old row, so they are re-projected in the background
+  # (task-4ec7e38d85c07ab7, `ReprojectLinkersWorker`). Then the publish routes
+  # as any other.
+  def enqueue_rebuild(%{event: :after_publish, published_doc: nil} = payload) do
+    if Map.get(Map.get(payload, :ctx) || %{}, :source) != :worker,
+      do: ReprojectLinkersWorker.enqueue(payload.doc)
+
+    payload |> Map.delete(:published_doc) |> enqueue_rebuild()
+  end
+
   def enqueue_rebuild(%{event: event, doc: doc, dataset: dataset, ctx: ctx})
       when event in @after_events do
     cond do

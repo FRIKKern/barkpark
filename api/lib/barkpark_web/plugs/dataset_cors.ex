@@ -24,6 +24,9 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
   # allow_headers list at origin/main:api/lib/barkpark_web/endpoint.ex.
   # Preserving the Corsica set prevents preflight regressions for existing
   # browser-based SDK/Studio flows that rely on `accept`, `if-match`, etc.
+  # `x-sanity-project-id`: @sanity/client sends it on every request when it
+  # has a projectId and `useProjectHostname: false` (pointed at Barkpark), so
+  # without it every browser read fails preflight. Barkpark ignores its value.
   @allow_headers_list ~w(
     authorization
     content-type
@@ -35,6 +38,7 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     idempotency-key
     x-barkpark-api-version
     last-event-id
+    x-sanity-project-id
   )
   @allow_headers Enum.join(@allow_headers_list, ", ")
 
@@ -60,6 +64,7 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
   # and the :default_cors_origins app config. The Vercel apex is the canonical
   # public site; the wildcard covers preview deployments. Patterns containing
   # `*` match host segments only (no scheme/path globbing).
+  # BARKPARK_ALWAYS_ALLOWED_ORIGINS replaces this list (`:always_allowed_origins`).
   # cross-link: docs/ops/studio-nav-bug-2026-04-19.md (these origins are load-bearing for Vercel apex)
   @always_allowed_origins [
     "https://barkpark.cloud",
@@ -182,12 +187,18 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     # union is read from the CALLER's dataset, not conflated across every project
     # sharing that slug. Flat routes (no prefix) resolve via the seeded Default
     # project inside allowed_origins_for_dataset/2.
-    @always_allowed_origins ++ Content.allowed_origins_for_dataset(ds, cors_scope(tenancy))
+    always_allowed_origins() ++ Content.allowed_origins_for_dataset(ds, cors_scope(tenancy))
   end
 
+  defp allowed_origins({:dataset_and_default, ds, tenancy}),
+    do: allowed_origins(:no_dataset) ++ allowed_origins({:dataset, ds, tenancy})
+
   defp allowed_origins(_) do
-    @always_allowed_origins ++ Application.get_env(:barkpark, :default_cors_origins, [])
+    always_allowed_origins() ++ Application.get_env(:barkpark, :default_cors_origins, [])
   end
+
+  defp always_allowed_origins,
+    do: Application.get_env(:barkpark, :always_allowed_origins, @always_allowed_origins)
 
   # Resolve a `[project_id: ...]` scope from the stripped tenancy slugs. Returns
   # `[]` (Default-project fallback) when the route is flat or the slugs don't
@@ -221,6 +232,16 @@ defmodule BarkparkWeb.Plugs.DatasetCors do
     case rest do
       ["v1", "data", _, ds | _] ->
         {{:dataset, ds, tenancy}, conn}
+
+      # The Sanity-shaped routes (`/v2025-02-19/data/query/<ds>`, any
+      # apiVersion): the dataset's cors_origins apply there as on /v1/data.
+      # Before, they resolved no dataset and took only the always-allowed and
+      # :default_cors_origins, which they keep (task-c2d1e40782ca8d69).
+      ["v" <> _, "data", kind, ds | _] when kind in ["query", "doc", "listen"] ->
+        {{:dataset_and_default, ds, tenancy}, conn}
+
+      ["v" <> _, "data", "live", "events", ds | _] ->
+        {{:dataset_and_default, ds, tenancy}, conn}
 
       ["v1", "preview", _, ds | _] ->
         {{:dataset, ds, tenancy}, conn}

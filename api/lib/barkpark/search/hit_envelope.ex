@@ -163,7 +163,14 @@ defmodule Barkpark.Search.HitEnvelope do
       offset: offset,
       nextOffset: if(has_more, do: next_offset, else: nil)
     }
+    |> put_collapse(meta[:collapse])
   end
+
+  # `?collapse=` only (task-3bbf99d2bce8ee51): the field, and each listed
+  # hit's group size by `_id`. Absent otherwise, so every other response is
+  # byte-identical.
+  defp put_collapse(envelope, nil), do: envelope
+  defp put_collapse(envelope, collapse), do: Map.put(envelope, :collapse, collapse)
 
   defp top_highlights(raw, @brief) do
     Map.new(raw, fn {id, field_highlights} ->

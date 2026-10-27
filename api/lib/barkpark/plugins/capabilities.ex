@@ -1300,6 +1300,36 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # The Sanity-compatible GROQ read (task-2b7f715eb6fd0c12) at its undated
+      # scoped alias; Sanity clients use /v<apiVersion>/data/query/:dataset.
+      core_cmd(
+        "doc.groq",
+        "doc",
+        "groq",
+        "Run a GROQ query over a dataset, as Sanity's query API answers it: {query, result, ms, syncTags}.",
+        "GET",
+        "/v1/data/groq/:dataset",
+        "none",
+        writes: false,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug",
+        args: [
+          arg("query", true, "string", "The GROQ query, e.g. *[_type == \"post\"]{_id, title}.")
+        ],
+        flags: [
+          flag(
+            "params",
+            "string",
+            "Query parameters as one JSON object, e.g. {\"slug\":\"intro\"}."
+          ),
+          flag(
+            "perspective",
+            "string",
+            "published (default), drafts or raw.",
+            default: "published"
+          )
+        ]
+      ),
       core_cmd(
         "doc.query",
         "doc",
@@ -2918,6 +2948,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "workspace.set-time-zone",
+        "workspace",
+        "set-time-zone",
+        "Set the time zone the active --workspace's editors read dates in, an IANA name such as Europe/Oslo. A list preview's |date shows a date-time as its day in that zone in both Studios.",
+        "PATCH",
+        "/v1/workspace/time-zone",
+        "scoped_admin",
+        args: [arg("time_zone", true, "string", "IANA zone name, e.g. Europe/Oslo")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "pref.get",
         "pref",
         "get",
@@ -3005,6 +3048,182 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "json"
       ),
+      # Organizations and their OIDC sign-in (task-25386fa77a664587). Same
+      # admin + platform-operator pipeline as workspace.reinstate above.
+      core_cmd(
+        "org.create",
+        "org",
+        "create",
+        "Create an organization (instance-operator only).",
+        "POST",
+        "/v1/admin/orgs",
+        "admin",
+        args: [
+          arg("slug", true, "string", "Organization slug."),
+          arg("name", false, "string", "Display name (the slug when absent).")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.attach-workspace",
+        "org",
+        "attach-workspace",
+        "Attach a workspace to an organization.",
+        "PUT",
+        "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg("workspace_slug", true, "string", "Workspace slug.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.auth-methods",
+        "org",
+        "auth-methods",
+        "Set the sign-in methods an organization allows, e.g. sso. --set methods:=null clears the policy.",
+        "PUT",
+        "/v1/admin/orgs/:org_slug/auth-methods",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg(
+            "methods",
+            false,
+            "string",
+            "Comma-separated: password, magic_link, passkey, sso, social."
+          )
+        ],
+        flags: [
+          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+            repeatable: true
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-create",
+        "org",
+        "oidc-create",
+        "Create the organization's OIDC connection from the issuer's discovery document. Map groups to roles with --set group_role_mappings:='<JSON object>'.",
+        "POST",
+        "/v1/admin/orgs/:org_slug/oidc",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg(
+            "issuer",
+            true,
+            "string",
+            "Issuer URL, e.g. https://login.microsoftonline.com/<tenant>/v2.0."
+          ),
+          arg("client_id", true, "string", "Client (application) id."),
+          arg(
+            "client_secret",
+            true,
+            "string",
+            "Client secret. Stored encrypted, never shown again."
+          )
+        ],
+        flags:
+          oidc_entra_flags() ++
+            [
+              flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+                repeatable: true
+              )
+            ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-update",
+        "org",
+        "oidc-update",
+        "Change the OIDC connection's client id, groups claim, group mappings, active flag or Entra ID settings.",
+        "PATCH",
+        "/v1/admin/orgs/:org_slug/oidc",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug.")
+        ],
+        flags:
+          oidc_entra_flags() ++
+            [
+              flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+                repeatable: true
+              )
+            ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-rotate-secret",
+        "org",
+        "oidc-rotate-secret",
+        "Replace the OIDC connection's client secret.",
+        "PUT",
+        "/v1/admin/orgs/:org_slug/oidc/client-secret",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg(
+            "client_secret",
+            true,
+            "string",
+            "New client secret. Stored encrypted, never shown again."
+          )
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.oidc-delete",
+        "org",
+        "oidc-delete",
+        "Delete the organization's OIDC connection.",
+        "DELETE",
+        "/v1/admin/orgs/:org_slug/oidc",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.domain-add",
+        "org",
+        "domain-add",
+        "Claim an email domain for SSO routing and get the DNS TXT record to publish.",
+        "POST",
+        "/v1/admin/orgs/:org_slug/domains",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg("domain", true, "string", "Email domain, e.g. example.com.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "org.domain-verify",
+        "org",
+        "domain-verify",
+        "Check the domain's DNS TXT record. Only a verified domain routes sign-ins.",
+        "POST",
+        "/v1/admin/orgs/:org_slug/domains/:domain/verify",
+        "admin",
+        args: [
+          arg("org_slug", true, "string", "Organization slug."),
+          arg("domain", true, "string", "Email domain.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
       core_cmd(
         "token.ls",
         "token",
@@ -3063,6 +3282,11 @@ defmodule Barkpark.Plugins.Capabilities do
             "int",
             "Seconds the old token keeps working (0 = revoke now; max 604800). Prefer --grace.",
             default: 86_400
+          ),
+          flag(
+            "expires_in_days",
+            "int",
+            "Days until the new token expires. Default: it keeps the old token's expiry."
           )
         ],
         writes: true,
@@ -4795,6 +5019,22 @@ defmodule Barkpark.Plugins.Capabilities do
   defp arg(name, required, type, summary) do
     %{"name" => name, "required" => required, "type" => type, "summary" => summary}
   end
+
+  # The OIDC connection's Entra ID settings, shared by org.oidc-create and
+  # org.oidc-update. A switch sends true; turn one off with --set key:=false.
+  defp oidc_entra_flags,
+    do: [
+      flag("scopes", "string", "Space-separated scopes (default \"openid email\")."),
+      flag(
+        "token_endpoint_auth_method",
+        "string",
+        "client_secret_post (default) or client_secret_basic."
+      ),
+      flag("tenant_id", "string", "Entra tenant id. Sign-in requires a matching tid claim."),
+      flag("strict_validation", "boolean", "Turn on the stricter ID token and subject checks."),
+      flag("trust_idp_mfa", "boolean", "Count the identity provider's MFA as Barkpark MFA."),
+      flag("mfa_acr", "string", "acr value that also counts as MFA when trust_idp_mfa is on.")
+    ]
 
   defp flag(name, type, summary, opts \\ []) do
     base = %{"name" => name, "type" => type, "summary" => summary}

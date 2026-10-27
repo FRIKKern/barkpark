@@ -889,11 +889,15 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   # (task-835fe5219585ca80). Types with a drawable icon are listed, and "*"
   # is the document icon for every other type.
   attr :type_icons, :string, default: nil
+  # The workspace's IANA time zone (task-ecaaa898e346dc73): the browser shows
+  # a list preview's |date of a date-time as its day there
+  # (`BarkparkWeb.PreviewDay`). nil reads the browser's own zone.
+  attr :time_zone, :string, default: nil
   slot :inner_block, required: true
 
   def studio_shell(assigns) do
     ~H"""
-    <div class={@class} data-type-labels={@type_labels} data-type-icons={@type_icons}>
+    <div class={@class} data-type-labels={@type_labels} data-type-icons={@type_icons} data-time-zone={@time_zone}>
       <%= render_slot(@inner_block) %>
     </div>
     """

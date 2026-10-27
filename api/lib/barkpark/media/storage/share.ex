@@ -140,8 +140,14 @@ defmodule Barkpark.Media.Storage.Share do
   # names — an EMPTY gallery for a folder holding assets (r4-lane-c dogfood).
   # A published folder gets the link written through and published back in
   # place; a draft-only folder keeps its draft row, as before.
+  #
+  # A published folder's share link is what anonymous visitors see, so a
+  # draft-only (`contributor`) seat may not turn it on or off
+  # (task-e867294fdbcf6f55). The seat is asked BEFORE the draft write, so a
+  # refused share leaves no draft fork carrying a live token behind.
   defp write_share_link(%Document{doc_id: doc_id}, attrs, dataset, opts) do
-    with {:ok, updated} <-
+    with :ok <- published_seat_ok(doc_id, opts),
+         {:ok, updated} <-
            Content.upsert_document(@collection_type, attrs, dataset, write_opts(opts)) do
       if DraftId.draft?(doc_id) do
         {:ok, updated}
@@ -151,9 +157,17 @@ defmodule Barkpark.Media.Storage.Share do
     end
   end
 
+  defp published_seat_ok(doc_id, opts) do
+    if DraftId.draft?(doc_id),
+      do: :ok,
+      else: Barkpark.Content.LiveWriteGate.check_seat(opts)
+  end
+
+  # `:caller_context` rides along so the follow-on publish's own seat gate
+  # sees the caller too (it passed a context-less write before).
   defp write_opts(opts) do
     opts
-    |> Keyword.take([:workspace_id, :project_id])
+    |> Keyword.take([:workspace_id, :project_id, :caller_context])
     |> Keyword.put(:source, :api)
   end
 

@@ -81,7 +81,8 @@ defmodule Barkpark.Content.ReaderWrites do
 
     with {:ok, rw} <- reader_writes(type, dataset, opts),
          true <- rw["create"] == true || {:error, "readerWrites on #{type} does not allow create"},
-         true <- is_binary(id) || {:error, "a read seat must name the _id it creates"} do
+         true <- is_binary(id) || {:error, "a read seat must name the _id it creates"},
+         :ok <- id_free(id, dataset, opts) do
       {:ok, MapSet.put(touched, {type, DraftId.published_id(id)})}
     end
   end
@@ -105,6 +106,17 @@ defmodule Barkpark.Content.ReaderWrites do
 
   defp check_kind(kind, _body, _dataset, _opts, _ctx, _touched),
     do: {:error, "a read seat may not #{kind}"}
+
+  # A read seat creates NEW documents only. Over an existing id the create
+  # mints a draft of someone else's document, and a publish in the same batch
+  # then replaces it (task-6e14a9d3a1a815ab): the id must be free, published
+  # and draft alike.
+  defp id_free(id, dataset, opts) do
+    case Barkpark.Content.Query.document_type(id, dataset, opts) do
+      {:ok, _type} -> {:error, "a read seat may create only a new document; #{id} exists"}
+      :error -> :ok
+    end
+  end
 
   # ── The LiveView twin ──────────────────────────────────────────────────────
   #

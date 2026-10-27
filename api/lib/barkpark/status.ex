@@ -57,6 +57,25 @@ defmodule Barkpark.Status do
     }
   end
 
+  @doc """
+  Readiness for a container platform probe (`GET /readyz`): the database
+  answers, no migration is pending and Oban is running.
+
+  Liveness (`GET /livez`) deliberately has no function here. It answers from the
+  router without touching the Repo, so a slow or unreachable Postgres takes the
+  replica out of traffic instead of restarting it.
+  """
+  @spec readiness() :: %{ready: boolean(), checks: %{atom() => boolean()}}
+  def readiness do
+    checks = %{
+      database: safe(&database_ok?/0, false),
+      migrations: migration_state().pending == 0,
+      oban: is_pid(safe(fn -> Oban.whereis(Oban) end, nil))
+    }
+
+    %{ready: Enum.all?(Map.values(checks)), checks: checks}
+  end
+
   defp check(name, probe) do
     status = if safe(probe, false), do: :operational, else: :degraded
     %{component: name, status: status, detail: nil}

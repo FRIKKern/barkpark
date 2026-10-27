@@ -204,6 +204,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
       "a reader submits a rendered paper's form from the browser",
     {"POST", "/v1/plugins/forms/w/:*/p/:*/d/:*/sites/:*/submissions"} =>
       "a visitor submits a hosted site's form from the browser",
+    {"GET", "/v1/embed/canvas"} =>
+      "an embedding studio's server asks where to load the paper canvas from (hashed asset URLs)",
 
     # ── Scrape + self-describing endpoints ─────────────────────────────────
     # `bp` fetches the manifest and spec directly as part of BEING a client;

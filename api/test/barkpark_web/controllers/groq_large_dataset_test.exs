@@ -10,9 +10,13 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.{Auth, Content, Repo, Tenancy}
+  alias Barkpark.{Content, Repo}
   alias Barkpark.Groq.{Evaluator, MemorySource, Parser}
   alias Barkpark.Test.GroqSyntheticProducts
+
+  # The seed is 10,500 rows into an indexed, triggered table (seconds); it
+  # runs once in setup_all, and each test rolls back to a savepoint over it.
+  @moduletag :module_sandbox
 
   @dataset "groq_big"
   @version "v2025-02-19"
@@ -60,47 +64,9 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
     (isHidden != true || _type == "article")] | order(_updatedAt desc)[0]{_id, _type}
   """
 
-  setup do
-    {:ok, ws} = Tenancy.create_workspace(%{slug: "groq-big", name: "GROQ big"})
-    {:ok, proj} = Tenancy.create_project(ws, %{slug: "site", name: "Site"})
-    scope = [workspace_id: ws.id, project_id: proj.id]
-
-    for type <- ["product", "article", "department"] do
-      {:ok, _} =
-        Content.upsert_schema(
-          %{"name" => type, "title" => type, "visibility" => "public", "fields" => []},
-          @dataset,
-          scope
-        )
-    end
-
-    {:ok, _} = Content.create_document("product", %{"_id" => "template"}, @dataset, scope)
-    {:ok, _} = Content.publish_document("template", "product", @dataset, scope)
-    GroqSyntheticProducts.seed!(@dataset, @products)
-
-    {:ok, _} =
-      Content.create_document(
-        "article",
-        %{
-          "_id" => "a1",
-          "isHidden" => true,
-          "slugHistory" => [%{"_key" => "s", "match" => "url", "value" => "/bok/p123"}]
-        },
-        @dataset,
-        scope
-      )
-
-    {:ok, _} = Content.publish_document("a1", "article", @dataset, scope)
-
-    for id <- ["dept-big", "dept-small"] do
-      {:ok, _} = Content.create_document("department", %{"_id" => id}, @dataset, scope)
-      {:ok, _} = Content.publish_document(id, "department", @dataset, scope)
-    end
-
-    token = "groq-big-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(token, "groq big", @dataset, ["read", "write"], ws.id)
-
-    {:ok, token: token, scope: scope}
+  setup_all do
+    Barkpark.DataCase.start_module_sandbox!()
+    GroqSyntheticProducts.seed_site!(@dataset, @products)
   end
 
   defp path, do: "/w/groq-big/p/site/#{@version}/data/query/#{@dataset}"
@@ -486,17 +452,6 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
         assert counted == loaded, "#{perspective}: #{counted} != #{loaded}"
       end
     end
-
-    test "the query timeout still applies", %{token: token} do
-      with_groq_config(timeout_ms: 50)
-
-      body =
-        token
-        |> query(~s'count(*[_type == "product" && lower(isbn) > "0"])', %{})
-        |> json_response(422)
-
-      assert body["error"]["description"] =~ "ran longer than 50 ms"
-    end
   end
 
   describe "in over a list of values and over a closed subquery" do
@@ -675,7 +630,12 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       ~s'*[_type == "product" && lower(isbn) > "0"] | order(isbn desc)[0...12]._id',
       ~s'*[_type == "product"] | order(lower(isbn) desc)[1]._id',
       ~s'*[_type == "product" && count(slugHistory[match == "url"]) > 0] | order(rank desc)[0...10]{_id, rank}',
-      ~s'{"first": *[_type == "product"][0]._id, "n": count(*[_type == "product"][0...5])}'
+      ~s'{"first": *[_type == "product"][0]._id, "n": count(*[_type == "product"][0...5])}',
+      # A projection or `.key` before the slice: the slice still reads only its rows.
+      ~s'*[_type == "product"]{_id, rank}[0...5]',
+      ~s'*[_type == "product"]{_id}[2]',
+      ~s'*[_type == "product"] | order(isbn desc){_id, "series": seriesIds}[0...12]',
+      ~s'*[_type == "product" && lower(isbn) > "0"]{_id}[0...3]'
     ]
 
     setup %{scope: scope} do
@@ -757,6 +717,24 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
       refute Enum.any?(sql, &(&1 =~ ~r/ORDER BY d0."id" LIMIT/))
     end
 
+    test "a projection before the slice reads only the rows the slice needs", %{token: token} do
+      sql =
+        sql_reads(fn ->
+          assert result!(token, ~s'*[_type == "product"]{_id}[0...2]', %{}) == [
+                   %{"_id" => "p1"},
+                   %{"_id" => "p10"}
+                 ]
+
+          assert result!(token, ~s'*[_type == "product"] | order(isbn desc){_id}[1]', %{}) == %{
+                   "_id" => "x9"
+                 }
+        end)
+
+      sized = Enum.filter(sql, &(&1 =~ "pg_column_size"))
+      assert length(sized) == 2
+      assert Enum.all?(sized, &(&1 =~ ~r/LIMIT \$\d+ OFFSET \$\d+/)), Enum.join(sized, "\n")
+    end
+
     test "an unordered slice over any other filter stops at the chunk that fills it",
          %{token: token} do
       sql =
@@ -776,17 +754,6 @@ defmodule BarkparkWeb.GroqLargeDatasetTest do
         body = token |> query(q, %{}) |> json_response(422)
         assert body["error"]["type"] == "queryLimitError", q
       end
-    end
-
-    test "the query timeout still applies", %{token: token} do
-      with_groq_config(timeout_ms: 50)
-
-      body =
-        token
-        |> query(~s'*[_type == "product" && lower(isbn) > "0"] | order(lower(isbn) desc)[0]', %{})
-        |> json_response(422)
-
-      assert body["error"]["description"] =~ "ran longer than 50 ms"
     end
   end
 

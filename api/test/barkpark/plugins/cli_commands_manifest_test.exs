@@ -66,6 +66,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
                  "/v1/tasks/:doc_id/discharges",
                  "/v1/tasks/:doc_id/move",
                  "/v1/tasks/:doc_id/stage",
+                 "/v1/tasks/edges",
                  # #5627 listener presence — the fleet pair rides the Tasks plugin.
                  "/v1/fleet/roster",
                  "/v1/fleet/beat"
@@ -377,7 +378,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       assert rerun.summary =~ "`'defp handle_[a-z]'`"
     end
 
-    test "declares the sixteen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
+    test "declares the seventeen task verbs, method-derived tier, grounded in a real /v1/tasks route" do
       cmds = Tasks.cli_commands()
 
       ids = Enum.map(cmds, & &1.id)
@@ -403,14 +404,15 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # citations, posted so every SIBLING row the merge also satisfied learns
       # about it. Non-holder like landed/renew, and it never sets `met`.
       assert "task.discharges" in ids
+      assert "task.unblock" in ids
       # The content-graph read verbs are NOT on the Tasks plugin — they moved
       # to CORE (Goal ges/graph-edge-seam) so the kill switch can't drop them.
       refute "task.graph" in ids
       refute "task.graph-orphans" in ids
       refute "task.graph-dangling" in ids
       # #5627 (listener presence) added the two fleet verbs to this plugin —
-      # 16 task.* (13 + task.landed + task.renew + task.discharges)
-      # + fleet.roster/fleet.beat = 18.
+      # 17 task.* (13 + task.landed + task.renew + task.discharges
+      # + task.unblock) + fleet.roster/fleet.beat = 19.
       #
       # THIS INTEGER IS A REGISTRY. A route's declaration surface is not
       # enumerable by reading the failures it produces: the manifest drift
@@ -419,7 +421,7 @@ defmodule Barkpark.Plugins.CliCommandsManifestTest do
       # the previous one is satisfied. Adding a verb means paying all five.
       assert "fleet.roster" in ids
       assert "fleet.beat" in ids
-      assert length(cmds) == 18
+      assert length(cmds) == 19
 
       {fleet_cmds, task_cmds} = Enum.split_with(cmds, &(&1.noun == "fleet"))
 

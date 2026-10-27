@@ -119,20 +119,24 @@ defmodule Barkpark.Tasks.Edges do
   end
 
   @doc """
-  Remove the `(child_id, parent_id, kind)` edge. Always returns `:ok` —
-  removing an absent edge is a no-op, keeping the close-time
-  `unblock_dependents` flow simple in W7-04.
+  Remove the `(child, parent, kind)` edge. Returns `{:ok, removed}`, the
+  number of rows deleted: 0 when the edge was absent, so a repeat call is a
+  no-op the caller can still report. Endpoints are canonicalised exactly as
+  `add_dep/3` stores them, so the published twin's edge is the one removed.
   """
-  @spec remove_dep(binary(), binary(), atom() | String.t()) :: :ok
-  def remove_dep(child_id, parent_id, kind) do
+  @spec remove_dep(endpoint(), endpoint(), atom() | String.t()) :: {:ok, non_neg_integer()}
+  def remove_dep(child, parent, kind) do
     kind_str = normalize_kind(kind)
+    child_id = canonical_endpoint(child)
+    parent_id = canonical_endpoint(parent)
 
-    from(e in Edge,
-      where: e.from_id == ^child_id and e.to_id == ^parent_id and e.kind == ^kind_str
-    )
-    |> Repo.delete_all()
+    {removed, _} =
+      from(e in Edge,
+        where: e.from_id == ^child_id and e.to_id == ^parent_id and e.kind == ^kind_str
+      )
+      |> Repo.delete_all()
 
-    :ok
+    {:ok, removed}
   end
 
   @doc """

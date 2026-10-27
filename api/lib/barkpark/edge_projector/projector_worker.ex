@@ -243,23 +243,30 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     # while the log below reported a clean rebuild. `rebuild_scope`'s own
     # transaction budget is sized for "the largest measured corpus (~4k docs)"
     # — 4x the cap — so the capped read was never the intended contract.
-    {docs, truncated} = collect_corpus(content_mod(args), types, scope, list_opts)
+    #
+    # One page at a time. Holding the whole corpus took ~3.2 GB for gyl's
+    # 18,022 products and the OOM killer stopped the service 88 times on
+    # 2026-10-13/14 (task-6e1007bdd39036c5). Edges are extracted per document
+    # and `rebuild_scope/3` swaps only the outbound edges of the docs it is
+    # handed, so page-sized swaps end in the same edges as one whole swap.
+    content = content_mod(args)
+    projector = projector_mod(args)
 
-    case projector_mod(args).rebuild_scope(scope, docs, project_opts) do
-      {:ok, %{added: added, deleted: deleted}} ->
+    case rebuild_corpus(content, projector, types, scope, list_opts, project_opts) do
+      {:ok, %{added: added, deleted: deleted, docs: docs, truncated: truncated}} ->
         # A bounded walk that stopped at its cap rebuilt a PREFIX. Never let
         # that pass as a clean rebuild — docs past the walk keep stale edges.
         if truncated == :cap do
           Logger.warning(
             "EdgeProjector.ProjectorWorker: scope=#{scope} corpus walk hit its page cap — " <>
-              "the rebuild covered #{length(docs)} docs but the corpus is LARGER. Docs beyond " <>
+              "the rebuild covered #{docs} docs but the corpus is LARGER. Docs beyond " <>
               "the walk keep their pre-rebuild edges; this scope is INCOMPLETE."
           )
         end
 
         Logger.info(
           "EdgeProjector.ProjectorWorker: rebuilt scope=#{scope} " <>
-            "docs=#{length(docs)} added=#{added} deleted=#{deleted} " <>
+            "docs=#{docs} added=#{added} deleted=#{deleted} " <>
             "truncated=#{truncated == :cap}"
         )
 
@@ -439,89 +446,123 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   # BEFORE the pure projection runs (gap #1 fix — `content.dependencies` is a
   # DEAD KEY; `task_edges` is the only authoritative dependency store). This is
   # the DB-touching layer, so reading `task_edges` here keeps the plugin
-  # `extract_edges/2` callback pure. The rebuild path hands the WHOLE corpus to
+  # `extract_edges/2` callback pure. The rebuild path hands each page to
   # the batched `Tasks.hydrate_edges_batch/1` — ONE task_edges query over every
   # task PK plus ONE Document id map, instead of one query per doc + one
   # `Repo.get` per edge row. Non-task docs pass through unchanged. The upsert
   # path still hydrates its single doc via `Tasks.hydrate_edges/1`. The Tasks
   # plugin is first-party + always compiled; the fallback clause only protects
   # a doc payload that is not a map (never crashes the projection).
-  # ONE BOUNDED READ, not (types x pages) OFFSET pages.
   #
-  # THE DEFECT this replaces: the rebuild collected its corpus with
-  # `collect_all_documents/3` ONCE PER TYPE — a `LIMIT/OFFSET` page walk
-  # (`Content.Query.collect_all_documents/3`) at page_size 1000, max_pages 50,
-  # i.e. up to 50 separate connection checkouts PER TYPE per attempt, each at
-  # Ecto's UNCONFIGURED 15,000 ms checkout deadline (queue time included). No
-  # `documents` index carries `updated_at`, so every page re-sorted the entire
-  # type partition — total work QUADRATIC in the corpus (pages x corpus), with
-  # the outer sort spilling to disk at 8k docs. That is the pre-transaction
-  # region the live `Postgrex.Protocol ... client (…ProjectorWorker) timed out
-  # ... longer than 15000ms` disconnect landed on (quoted verbatim in
-  # `Barkpark.Repo`); the rebuild TRANSACTION itself is NOT the exposed part
-  # (`Projector.rebuild_scope/3` sets an explicit `timeout: 60_000`).
+  # PAGES BY ID, not OFFSET pages and not one read of the whole corpus.
   #
-  # `Content.Query.collect_corpus_documents/3` exists precisely for this: ONE
-  # bounded `DISTINCT ON` read of the whole corpus, one sort, no OFFSET walk.
-  # Checkouts here are now bounded by the number of ACL CLASSES (at most two:
-  # owner-scoped and not), NOT by the corpus size.
+  # The OFFSET walk (`collect_all_documents/3` once per type, page_size 1000,
+  # max_pages 50) re-sorted the whole type partition for every page, each at
+  # Ecto's 15,000 ms checkout deadline; that is where the live `client
+  # (…ProjectorWorker) timed out … longer than 15000ms` disconnect landed. One
+  # bounded `collect_corpus_documents/3` read fixed the checkouts but held
+  # every document at once: ~3.2 GB for gyl's 18,022 products, and the OOM
+  # killer stopped the service 88 times on 2026-10-13/14
+  # (task-6e1007bdd39036c5).
   #
-  # Two things are preserved exactly:
+  # So each ACL class (owner-scoped or not, split by `Content.owner_scoped?/3`
+  # because `:owner_scoped` is a whole-call flag) reads its ids with
+  # `collect_corpus_slugs/3`, no `content`, and then one page of documents at a
+  # time through `:doc_ids`, an index lookup. Each page is rebuilt before the
+  # next is read. `perspective: :published` and the owner ACL apply to both
+  # reads. `page_size x max_pages` bounds the docs per class, and `:cap` still
+  # means "this is a PREFIX".
   #
-  #   * `perspective: :published` — `collect_corpus_documents/3` applies the
-  #     same `apply_perspective/2` clause, so the rows are the walk's rows.
-  #   * the row-ownership ACL — `collect_corpus_documents/3` takes a
-  #     WHOLE-CALL `:owner_scoped` flag (a mixed call would apply one type's
-  #     ACL to another's rows), so the types are SPLIT by
-  #     `Content.owner_scoped?/3` and each class read once. With no
-  #     caller_context (the worker is an internal caller) `scope_to_owner/2`
-  #     fails closed to `owner_id IS NULL`, exactly as `base_query/4` did.
-  #
-  # The document bound is unchanged: `page_size x max_pages` (50,000 by
-  # default) is now a WHOLE-CORPUS `:limit` instead of a per-type page budget,
-  # and `:cap` still means "this is a PREFIX" — the truncation warning below
-  # is untouched.
-  #
-  # A content seam that does NOT export `collect_corpus_documents/3` keeps the
-  # old per-type walk. That is deliberate, not a leftover: the test seams that
-  # drive the walk's `:cap`/opts contract still drive it, and a checkout-count
-  # test can measure BOTH collectors in one run.
-  defp collect_corpus(content, types, scope, list_opts) do
-    {docs, truncated} =
-      if corpus_collector?(content) do
-        bounded_collect(content, types, scope, list_opts)
-      else
-        page_walk_collect(content, types, scope, list_opts)
-      end
+  # A content seam that does not export both functions keeps the old per-type
+  # walk, collected whole: the test seams that drive the walk's `:cap`/opts
+  # contract still drive it.
+  # A content module with `collect_corpus_slugs/3` and
+  # `collect_corpus_documents/3` is read in pages of `page_size`, each rebuilt
+  # before the next is read, up to `page_size * max_pages` docs per ACL class.
+  # Any other (a test fake) is collected whole and rebuilt once.
+  defp rebuild_corpus(content, projector, types, scope, list_opts, project_opts) do
+    if corpus_collector?(content) do
+      {owned, plain} = Enum.split_with(types, &Content.owner_scoped?(&1, scope, list_opts))
 
+      [{plain, false}, {owned, true}]
+      |> Enum.reject(fn {class_types, _} -> class_types == [] end)
+      |> Enum.reduce_while({:ok, %{added: 0, deleted: 0, docs: 0, truncated: nil}}, fn
+        {class_types, owner_scoped?}, {:ok, acc} ->
+          opts =
+            list_opts
+            |> Keyword.drop([:page_size, :max_pages])
+            |> Keyword.put(:limit, Keyword.fetch!(list_opts, :page_size))
+            |> Keyword.put(:owner_scoped, owner_scoped?)
+
+          pages = Keyword.fetch!(list_opts, :max_pages)
+
+          case rebuild_pages(
+                 content,
+                 projector,
+                 class_types,
+                 scope,
+                 opts,
+                 project_opts,
+                 pages,
+                 acc
+               ) do
+            {:ok, acc} -> {:cont, {:ok, acc}}
+            error -> {:halt, error}
+          end
+      end)
+    else
+      {docs, truncated} = collect_corpus(content, types, scope, list_opts)
+
+      with {:ok, result} <- projector.rebuild_scope(scope, docs, project_opts),
+           do: {:ok, Map.merge(result, %{docs: length(docs), truncated: truncated})}
+    end
+  end
+
+  # The class's ids first (no `content`), then one page of documents at a
+  # time by id, each rebuilt before the next is read. A page is an index
+  # lookup on its ids, so no read re-sorts the corpus.
+  defp rebuild_pages(content, projector, types, scope, opts, project_opts, pages, acc) do
+    page_size = Keyword.fetch!(opts, :limit)
+    bound = page_size * pages
+
+    {slugs, truncated} =
+      content.collect_corpus_slugs(types, scope, Keyword.put(opts, :limit, bound))
+
+    slugs
+    |> Enum.map(& &1.doc_id)
+    |> Enum.uniq()
+    |> Enum.chunk_every(page_size)
+    |> Enum.reduce_while({:ok, acc}, fn ids, {:ok, acc} ->
+      {rows, _} =
+        content.collect_corpus_documents(
+          types,
+          scope,
+          opts |> Keyword.put(:doc_ids, ids) |> Keyword.put(:limit, page_size * length(types))
+        )
+
+      case projector.rebuild_scope(scope, hydrate_task_edges(rows), project_opts) do
+        {:ok, %{added: added, deleted: deleted}} ->
+          acc = %{acc | added: acc.added + added, deleted: acc.deleted + deleted}
+          {:cont, {:ok, %{acc | docs: acc.docs + length(rows)}}}
+
+        error ->
+          {:halt, error}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, %{acc | truncated: acc.truncated || truncated}}
+      error -> error
+    end
+  end
+
+  defp collect_corpus(content, types, scope, list_opts) do
+    {docs, truncated} = page_walk_collect(content, types, scope, list_opts)
     {hydrate_task_edges(docs), truncated}
   end
 
   defp corpus_collector?(content) do
-    Code.ensure_loaded?(content) and function_exported?(content, :collect_corpus_documents, 3)
-  end
-
-  defp bounded_collect(content, types, scope, list_opts) do
-    corpus_opts =
-      list_opts
-      |> Keyword.drop([:page_size, :max_pages])
-      |> Keyword.put(:limit, corpus_limit(list_opts))
-
-    {owned, plain} = Enum.split_with(types, &Content.owner_scoped?(&1, scope, list_opts))
-
-    [{plain, false}, {owned, true}]
-    |> Enum.reject(fn {class_types, _} -> class_types == [] end)
-    |> Enum.map_reduce(nil, fn {class_types, owner_scoped?}, trunc_acc ->
-      {rows, trunc} =
-        content.collect_corpus_documents(
-          class_types,
-          scope,
-          Keyword.put(corpus_opts, :owner_scoped, owner_scoped?)
-        )
-
-      {rows, trunc_acc || trunc}
-    end)
-    |> then(fn {per_class, trunc} -> {Enum.concat(per_class), trunc} end)
+    Code.ensure_loaded?(content) and function_exported?(content, :collect_corpus_documents, 3) and
+      function_exported?(content, :collect_corpus_slugs, 3)
   end
 
   defp page_walk_collect(content, types, scope, list_opts) do
@@ -533,19 +574,19 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
     |> then(fn {per_type, trunc} -> {Enum.concat(per_type), trunc} end)
   end
 
-  defp corpus_limit(list_opts) do
-    Keyword.fetch!(list_opts, :page_size) * Keyword.fetch!(list_opts, :max_pages)
-  end
-
-  defp hydrate_task_edges(docs) when is_list(docs) do
+  # Public for `ReprojectLinkersWorker`, so this file stays the edge
+  # projector's one sanctioned reach into the Tasks plugin
+  # (PluginFreeBootTest's allowlist).
+  @doc false
+  def hydrate_task_edges(docs) when is_list(docs) do
     Barkpark.Plugins.Tasks.hydrate_edges_batch(docs)
   end
 
-  defp hydrate_task_edges(doc) when is_map(doc) do
+  def hydrate_task_edges(doc) when is_map(doc) do
     Barkpark.Plugins.Tasks.hydrate_edges(doc)
   end
 
-  defp hydrate_task_edges(doc), do: doc
+  def hydrate_task_edges(doc), do: doc
 
   # The projector module is `Projector` in production. Tests pass a
   # `"projector"` arg naming a fake module so the worker's op branching can be

@@ -62,7 +62,7 @@ GROQ as Sanity's query API (client `apiHost`: `/w/…/p/…`): [contracts/groq-q
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin ; a bare `_publishedId` reaches an unpublished doc under both.
+One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin; a bare `_publishedId` reaches an unpublished doc under both.
 
 **Read-after-write is immediate** (`cache-control: max-age=0, private, must-revalidate`; ETags include `_id:_rev`). Writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row; `published` and `bp task get` read the exact ID.
 
@@ -96,9 +96,9 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 The create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`), else a `create.forked_published` warning. `patch` edits a published task in place.
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID`: mismatch → `412` (`ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched item → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`. One doc's patches serialize.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set`. `ifRevisionID`: mismatch → `412` (`ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`; one doc's patches serialize.
 
-The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 `validation_failed`:
+The next four take `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 (`delete`/`patch` read missing `type` from the row):
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — deletes `<id>`; keeps `drafts.<id>`, else copies `<id>` there.
@@ -115,21 +115,21 @@ PortableDoc block ops on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`
 
 `…/fields/:field/ops`: `{"ops":[…],"ifRev"}` on one `editor: blocks` field, atomic; `result.rev` = new rev.
 
-## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
+## 7. `GET /w/:ws/p/:proj/v{1|apiVersion}/data/listen/:dataset` [token]
 
-SSE stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
+SSE: a `/w/…/p/…` URL streams a project, a flat URL a workspace.
 
 **Narrowing:** `?types=a,b`; `?ids=a,b`; `?perspective=published` drops drafts; `filter[f]=v1,v2`: any-of equality on redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (or `?lastEventId=`) replays later events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (or `?lastEventId=`) replays later events, then live.
 
-First frame: `event: welcome`.
+First frame: `event: welcome`. `?query=*[…]`: docs matching before/after, with `transition`; `includeResult=false` no result.
 
-**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. Keepalive: `: keepalive` per 30 s idle.
+**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
 
-**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID` (chat never sheds).
+**Closes:** a slow reader: `event: overloaded`; past 20 streams a credential+address, 100 in all: `event: disconnect`.
 
-**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a live workflow summary (unreplayable, NO `id:`).
+**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) never sheds; adds `event: workflow`: a live workflow summary (unreplayable, no `id:`).
 
 ## 8. Schema endpoints [admin]
 
