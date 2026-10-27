@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-updates | budget: 2500tok -->
 # Update an instance and rotate its credentials
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). It covers updates and rollbacks on a single VM, API token rotation and OIDC client secret rotation. The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). It covers updates and rollbacks on a single VM and on Container Apps, API token rotation and OIDC client secret rotation. The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
 
 ## Update and roll back a single VM
 
@@ -21,6 +21,18 @@ sudo make -C /opt/barkpark rebuild
 ```
 
 The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay applied. The drill's migration added two columns, and the older code ran with them. When an update has a migration that changes or removes data, roll back the code and restore the backup taken before the update. Do not use `git checkout <commit>`, which detaches the checkout so the next `git pull` fails. After a rollback, `git pull` updates to `main` again.
+
+## Container Apps
+
+`deploy/azure/main.bicep` sets every non-key line of `barkpark.env` on the app and both jobs, and keeps the keys in Key Vault. Change a setting or a key by editing `barkpark.env` and running the same `az deployment group create` again. A change made with `az containerapp update` is lost at the next deployment.
+
+- **Update.** Set a new `image` in `main.bicepparam` and deploy. Pin a version, such as `ghcr.io/frikkern/barkpark:0.2.28`, not `latest`.
+- **Replicas.** The template pins the app to exactly one replica, min and max.
+- **Health.** `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise.
+- **Listen streams.** They last at most 30 minutes behind the Container Apps ingress; clients resume with `Last-Event-ID`.
+- **Jobs.** Set job arguments with `az containerapp job update -g <rg> -n barkpark-ops --args ...`, then run `az containerapp job start`. Arguments on `job start` replace the whole container and drop the command, settings and mounts. A deployment resets the arguments.
+- **Redeploy after deleting.** A deleted resource group leaves its Key Vault soft-deleted for 7 days. Run `az keyvault purge -n <vault> -l norwayeast` before deploying again into a group with the same name.
+- **Cost.** See [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-cost).
 
 ## Rotate an API token
 

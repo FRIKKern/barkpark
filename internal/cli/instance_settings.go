@@ -101,6 +101,9 @@ func (v instanceInitValues) value(name string) string {
 		return origins
 	case "BARKPARK_OPERATOR_EMAILS":
 		return v.operatorEmails
+	case "BARKPARK_MEDIA_DIR":
+		// The mount path deploy/azure/main.bicep uses. The template sets it.
+		return instanceContainerAppsMediaDir
 	case "BARKPARK_BREAKGLASS_EMAILS":
 		return v.breakglassEmail
 	}
@@ -110,6 +113,15 @@ func (v instanceInitValues) value(name string) string {
 func (r instanceRecommended) appliesTo(target string) bool {
 	return r.targets == "" || r.targets == target
 }
+
+// instanceContainerAppsMediaDir is where deploy/azure/main.bicep mounts the
+// media share, and instanceContainerAppsDatabaseHost stands in for the database
+// host, which the template sets. The template reads only the password from
+// DATABASE_URL.
+const (
+	instanceContainerAppsMediaDir     = "/app/uploads"
+	instanceContainerAppsDatabaseHost = "unused"
+)
 
 // instanceSecretNames are the values init generates. Each one is written to
 // the env file only and never printed.
@@ -191,7 +203,20 @@ func instanceGenerateSecrets() (map[string]string, error) {
 		return nil, err
 	}
 	out["BARKPARK_SEED_ADMIN_TOKEN"] = "bp_admin_" + hex.EncodeToString(tok)
+	id, err := instanceRandomBytes(16)
+	if err != nil {
+		return nil, err
+	}
+	out["BARKPARK_SEED_ADMIN_TOKEN_ID"] = uuidV4(id)
 	return out, nil
+}
+
+// uuidV4 formats 16 random bytes as a version 4 UUID.
+func uuidV4(b []byte) string {
+	b[6] = b[6]&0x0f | 0x40
+	b[8] = b[8]&0x3f | 0x80
+	h := hex.EncodeToString(b)
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
 
 // instanceEnvFile renders the env file init writes.
@@ -206,7 +231,8 @@ func instanceEnvFile(target string, secrets map[string]string, vals instanceInit
 	if target == instanceTargetVM {
 		line("# deploy.sh sets %s on the VM.", strings.Join(instanceDeployOwned, ", "))
 	} else {
-		line("DATABASE_URL=ecto://barkpark:%s@<database host>/barkpark", secrets["database_password"])
+		line("# deploy/azure/main.bicep sets the database host and BARKPARK_MEDIA_DIR.")
+		line("DATABASE_URL=ecto://barkpark:%s@%s/barkpark", secrets["database_password"], instanceContainerAppsDatabaseHost)
 	}
 	if vals.host != "" {
 		line("PHX_HOST=%s", vals.host)
@@ -255,8 +281,10 @@ func instanceEnvFile(target string, secrets map[string]string, vals instanceInit
 		line("BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>")
 	}
 	if target == instanceTargetContainerApps {
-		line("# First boot only. The first operator token; add its id to BARKPARK_OPERATOR_TOKEN_IDS:")
+		line("# First boot only. The first admin token, an operator token under this id:")
 		line("BARKPARK_SEED_ADMIN_TOKEN=%s", secrets["BARKPARK_SEED_ADMIN_TOKEN"])
+		line("BARKPARK_SEED_ADMIN_TOKEN_ID=%s", secrets["BARKPARK_SEED_ADMIN_TOKEN_ID"])
+		line("BARKPARK_OPERATOR_TOKEN_IDS=%s", secrets["BARKPARK_SEED_ADMIN_TOKEN_ID"])
 	}
 	return b.String()
 }

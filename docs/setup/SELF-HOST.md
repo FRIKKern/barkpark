@@ -1,12 +1,12 @@
 <!-- doc-tier: human | canonical-for: self-host-guide | budget: 2500tok -->
 # Set up a Barkpark instance for Pensum
 
-This guide takes you from an Azure subscription to Pensum sign-in, in run order, on two paths that share the settings. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). Running the image on a container platform is experimental.
+This guide takes you from an Azure subscription to Pensum sign-in, in run order, on two paths that share the settings. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
 
 | Path | What runs | Where the settings live |
 |---|---|---|
 | [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu 22.04 or later server, with local PostgreSQL and Caddy for TLS. | `/opt/barkpark/.env` |
-| [Container Apps](#path-b-azure-container-apps) | The published image with one replica, PostgreSQL Flexible Server, media on Azure Files and keys in Key Vault. | Container App settings and Key Vault references |
+| [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
 
 ## Before you start on Azure
 
@@ -28,26 +28,26 @@ The host name becomes `PHX_HOST`, and passkeys stop working if it changes later.
 
 ## Write and check the settings file
 
-On your machine, install `bp` 1.26.1 or newer and write a settings file:
+On your machine, install `bp` 1.26.5 or newer and write a settings file:
 
 <!-- run -->
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp instance init --target vm --host <host> --studio-origin <studio origin> \
+bp instance init --target <target> --host <host> --studio-origin <studio origin> \
   --owner-email <owner email> --operator-emails <operator emails> \
   --breakglass-email <breakglass email>
 ```
 
-Leave out `--studio-origin` unless you run a separate Studio; then give its origin. `--breakglass-email` is the real mailbox of a person outside SSO who holds a password and TOTP.
+`<target>` is `vm` for Path A and `containerapps` for Path B. Leave out `--studio-origin` unless you run a separate Studio; then give its origin. `--breakglass-email` is the real mailbox of a person outside SSO who holds a password and TOTP.
 
-`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes new keys, a database password, the first admin token and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`, without which a fresh database does not finish migrating. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
+`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes new keys, a database password, the first admin token with its id on `BARKPARK_OPERATOR_TOKEN_IDS`, and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`, without which a fresh database does not finish migrating. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
 
 <!-- run -->
 ```bash
-bp instance check --env-file barkpark.env --target vm --skip database,media,url
+bp instance check --env-file barkpark.env --target <target> --skip database,media,url
 ```
 
-`bp instance check` lists each problem with a doc link and exits 1 on any. `--skip` leaves out server probes; `deploy.sh` runs the full check on the VM.
+`bp instance check` lists each problem with a doc link and exits 1 on any. `--skip` leaves out server probes, which `deploy.sh` and `barkpark-ops` run.
 
 ## Path A: a single VM
 
@@ -74,22 +74,37 @@ bp instance check --env-file barkpark.env --target vm --skip database,media,url
    ssh -i ~/.ssh/barkpark azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env`, mode 600, before the first start. Install and build take 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token` and its id to `/etc/barkpark/admin-token.id`, both root only. It adds the id to `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). It waits up to 3 minutes for HTTPS, installs `bp` for root and runs `bp instance check` without `--skip`. The banner prints the check result, the token path, the id and a login command.
+   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env`, mode 600, in 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). It waits up to 3 minutes for HTTPS, installs `bp` for root and runs `bp instance check`. The banner prints the result and a login command.
 4. <!-- run --> On your machine, run `bp setup --target connect --server https://<host> --token "$(ssh -i ~/.ssh/barkpark azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`.
 
 To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. To update, run `sudo git -C /opt/barkpark pull`. A post-merge hook rebuilds and restarts. Rollback is in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
 ## Path B: Azure Container Apps
 
-Deploy to Azure with `deploy/azure/main.bicep`. Copy `main.example.bicepparam` to `main.bicepparam`, export the seven secrets its header lists, then run `az group create -n <rg> -l norwayeast` and `az deployment group create -g <rg> -p main.bicepparam`. The first deployment takes about 8 minutes, and `/readyz` answers about 1 minute later. Monthly cost is in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-cost).
+`deploy/azure/main.bicep` puts Postgres on a private network and adds jobs for backups and checks. Next to `barkpark.env`, fetch it and deploy. It takes about 8 minutes:
 
-- Barkpark runs on exactly one replica; the template pins min and max to 1.
-- Pin an image version, such as `ghcr.io/frikkern/barkpark:0.2.28`, not `latest`.
-- Add the Pensum settings from `barkpark.env` with `az containerapp update -g <rg> -n barkpark --set-env-vars`, leaving out the key lines.
-- `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise.
-- The first boot installs `BARKPARK_SEED_ADMIN_TOKEN` and logs `Admin token id: <id>`. Add the id to `BARKPARK_OPERATOR_TOKEN_IDS` and connect with `bp setup --target connect`.
-- Listen streams last at most 30 minutes behind Container Apps ingress; clients resume with `Last-Event-ID`.
-- After deleting the resource group, purge its Key Vault with `az keyvault purge` before deploying again under the same name.
+<!-- run -->
+```bash
+RG=<resource group>
+u=https://raw.githubusercontent.com/FRIKKern/barkpark/main/deploy/azure
+for f in main.bicep acr-pull.bicep monitor.bicep main.example.bicepparam; do curl -fsSLO "$u/$f"; done
+cp main.example.bicepparam main.bicepparam
+az group create -n "$RG" -l norwayeast
+az deployment group create -g "$RG" -n barkpark -p main.bicepparam -p alertEmail=<alert email> -o none
+```
+
+`alertEmail` gets [alerts](SELF-HOST-OPERATIONS.md#container-apps-alerts). The admin token in `barkpark.env` is an operator token. Connect once `/readyz` answers, a minute later:
+
+<!-- run -->
+```bash
+URL=$(az deployment group show -g <resource group> -n barkpark --query properties.outputs.url.value -o tsv)
+curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$URL/readyz"
+bp setup --target connect --server "$URL" --token "$(sed -n 's/^BARKPARK_SEED_ADMIN_TOKEN=//p' barkpark.env)"
+```
+
+<!-- run hook=jobs --> Run `az containerapp job start -g <resource group> -n barkpark-ops` for `bp instance check` in the network, and the same with `barkpark-backup` for a [backup](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill).
+
+To change a setting, edit `barkpark.env` and deploy again. [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#container-apps) covers updates, jobs, health checks and cost.
 
 ## Pensum settings
 
@@ -114,8 +129,6 @@ BARKPARK_OIDC_EMAIL_FROM_UPN=on
 BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 ```
 
-On Container Apps, keep the keys and the break-glass password in Key Vault.
-
 - `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server. Studio sign-in reads only `BARKPARK_STUDIO_SSO_ORIGINS`.
 - `BARKPARK_BOOTSTRAP_OWNER_EMAIL` makes that email the owner of the default workspace while the users table is empty.
 - An empty `BARKPARK_PLUGINS` turns off media too, so name `media`.
@@ -127,7 +140,7 @@ On Container Apps, keep the keys and the break-glass password in Key Vault.
 
 Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it. A 403 from `bp org` names the calling token's id in its hint.
 
-**Mail.** Optional. Without `SMTP_HOST`, no sign-in links, password resets or invitations go out, and `/status.json` shows mail as degraded. SSO with a break-glass account needs no mail.
+**Mail.** Optional. Without `SMTP_HOST`, no sign-in links, password resets or invitations go out. SSO with a break-glass account needs no mail.
 
 ## Sign in with Entra ID
 
@@ -135,7 +148,7 @@ Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp o
 
 ## Check the instance
 
-<!-- run -->
+<!-- run path=a -->
 ```bash
 curl -fsS https://<host>/readyz           # {"status":"ready",...}
 bp whoami -o table | grep -x 'auth_tier: admin'

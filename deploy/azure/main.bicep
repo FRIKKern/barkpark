@@ -118,6 +118,16 @@ param restoreMode bool = false
 @description('The first admin API token. Without it the first boot prints a generated token to the logs, which Log Analytics keeps. Generate with: echo "bp_admin_$(openssl rand -hex 24)"')
 param seedAdminToken string
 
+@description('Address that gets the alert mail from monitor.bicep: /readyz down, a failed backup job, repeated restarts. Empty deploys no alerts.')
+param alertEmail string = ''
+
+@description('Seconds between /readyz availability checks, 300 or 900. SELF-HOST-OPERATIONS.md#container-apps-alerts has the cost of each.')
+@allowed([300, 900])
+param availabilityFrequencySeconds int = 300
+
+@description('Days the Log Analytics workspace keeps logs.')
+param logRetentionDays int = 30
+
 var appName = 'barkpark'
 var databaseName = 'barkpark'
 // The image's entrypoint refuses to start when this path is not writable.
@@ -136,7 +146,7 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   location: location
   properties: {
     sku: { name: 'PerGB2018' }
-    retentionInDays: 30
+    retentionInDays: logRetentionDays
     workspaceCapping: { dailyQuotaGb: 1 }
   }
 }
@@ -655,6 +665,27 @@ resource opsJobs 'Microsoft.App/jobs@2024-03-01' = [for job in jobs: {
     vaultSecrets
   ]
 }]
+
+// ── Alerts ──────────────────────────────────────────────────────────────────
+
+// Mail on /readyz down, a failed backup job and repeated restarts. It runs
+// after the jobs, because the backup alert needs the job.
+module monitor 'monitor.bicep' = if (!empty(alertEmail) && !restoreMode) {
+  name: 'monitor-${nameSuffix}'
+  params: {
+    location: location
+    nameSuffix: nameSuffix
+    logAnalyticsWorkspaceId: logs.id
+    containerAppId: app.id
+    publicHost: host
+    backupJobName: jobs[0].name
+    alertEmail: alertEmail
+    availabilityFrequencySeconds: availabilityFrequencySeconds
+  }
+  dependsOn: [
+    opsJobs
+  ]
+}
 
 output url string = 'https://${host}'
 output defaultHost string = '${appName}.${environment.properties.defaultDomain}'

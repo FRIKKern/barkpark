@@ -4,7 +4,7 @@
 # A wrong step in the guide fails when this runs. Usage:
 #
 #   scripts/run-setup-guide.sh --vars <file> [--doc docs/setup/SELF-HOST.md]
-#                              [--path a] [--from N] [--list] [--run-dir DIR]
+#                              [--path a|b] [--from N] [--list] [--run-dir DIR]
 #
 # Marker. An HTML comment, which GitHub does not render:
 #
@@ -14,7 +14,9 @@
 #                           <vars dir>/hooks/dns.sh on this machine
 #
 # --path a runs the markers under a "## Path A" heading and skips those under
-# any other "## Path" heading. Markers in other sections run on every path.
+# any other "## Path" heading; --path b does the same for Path B. The vars
+# templates are scripts/setup-guide/vars.example (A) and vars-b.example (B),
+# and scripts/setup-guide/hooks holds the hooks. Markers in other sections run on every path.
 # An attribute path=a,b overrides the heading. When text
 # follows the marker on the same line and holds an inline code span, the first
 # span is the command, for a step whose command sits in a sentence.

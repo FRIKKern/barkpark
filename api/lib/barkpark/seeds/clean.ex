@@ -186,13 +186,35 @@ defmodule Barkpark.Seeds.Clean do
            "admin (bp setup)",
            scope.dataset,
            ["read", "write", "admin"],
-           scope.workspace_id
+           scope.workspace_id,
+           seed_token_id_opts!()
          ) do
       {:ok, token} ->
         token
 
       {:error, %Ecto.Changeset{} = changeset} ->
         raise AdminTokenMintError, message: mint_failure_message(changeset)
+    end
+  end
+
+  # `bp instance init --target containerapps` writes BARKPARK_SEED_ADMIN_TOKEN_ID
+  # and the same UUID on BARKPARK_OPERATOR_TOKEN_IDS, so the seeded token is an
+  # operator token from the first boot. A malformed id refuses the mint, because
+  # a token under another id would not match the operator list.
+  defp seed_token_id_opts! do
+    case System.get_env("BARKPARK_SEED_ADMIN_TOKEN_ID") do
+      id when id in [nil, ""] ->
+        []
+
+      id ->
+        case Ecto.UUID.cast(id) do
+          {:ok, uuid} ->
+            [id: uuid]
+
+          :error ->
+            raise AdminTokenMintError,
+              message: "BARKPARK_SEED_ADMIN_TOKEN_ID is not a UUID. Remove it or set a UUID."
+        end
     end
   end
 
@@ -239,11 +261,20 @@ defmodule Barkpark.Seeds.Clean do
   # (`bp org`, secrets, self-update). The id is not a secret; printing it here
   # means nobody has to find it with SQL.
   defp print_operator_id(%{id: id}) do
-    IO.puts("""
-    Admin token id: #{id}
-      To give this token platform operator access, add the id to
-      BARKPARK_OPERATOR_TOKEN_IDS and restart.\
-    """)
+    listed =
+      (System.get_env("BARKPARK_OPERATOR_TOKEN_IDS") || "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+
+    if id in listed do
+      IO.puts("Admin token id: #{id} (on BARKPARK_OPERATOR_TOKEN_IDS)")
+    else
+      IO.puts("""
+      Admin token id: #{id}
+        To give this token platform operator access, add the id to
+        BARKPARK_OPERATOR_TOKEN_IDS and restart.\
+      """)
+    end
   end
 
   defp print_token_banner(raw) do

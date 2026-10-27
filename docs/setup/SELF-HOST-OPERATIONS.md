@@ -33,13 +33,7 @@ The backup holds the database and media but no key, so the keys move by hand. [S
 
 ## Rotate keys
 
-`api/config/runtime.exs` reads the keys below. On a single VM they live in `/opt/barkpark/.env`. Where the steps below add a Key Vault version and restart, change the value in that file and run `sudo systemctl restart barkpark`. On Container Apps, keep each in Key Vault behind a Container Apps secret reference, and use a versioned secret URI. A versionless URI restarts the replica on its own within 30 minutes of a new version, which breaks the KEK order below. A versioned URI changes only when you point it at a new version and restart:
-
-```bash
-az containerapp secret set -g "$RG" -n "$APP" \
-  --secrets "barkpark-kek=keyvaultref:$KV_URL/secrets/barkpark-kek/$VERSION,identityref:system"
-az containerapp revision restart -g "$RG" -n "$APP" --revision "$REVISION"
-```
+`api/config/runtime.exs` reads the keys below. On a single VM they live in `/opt/barkpark/.env`; after a change, run `sudo systemctl restart barkpark`. On Container Apps they are lines in `barkpark.env`, which `deploy/azure/main.bicep` stores in Key Vault; after a change, run the same `az deployment group create` again, which starts a new revision. Below, "restart" means either.
 
 | Variable | What it protects | What a rotation ends | Re-key command |
 |---|---|---|---|
@@ -48,14 +42,14 @@ az containerapp revision restart -g "$RG" -n "$APP" --revision "$REVISION"
 | `SECRET_KEY_BASE` | Session cookies, LiveView and `Phoenix.Token` signatures, and media signed URLs unless `MEDIA_SIGNING_SECRET` is set | Every browser session, so editors sign in again. A passkey ceremony in progress fails. Signed media URLs stop working. | None needed |
 | `PREVIEW_JWT_SECRET` | Draft preview tokens (JWTs), not the stored `/preview-links` | Preview tokens issued before the change. They last `PREVIEW_JWT_TTL_SECONDS`, 600 seconds by default. | None needed |
 
-To rotate `SECRET_KEY_BASE` or `PREVIEW_JWT_SECRET`, add a Key Vault version, point the reference at it and restart. Give `MEDIA_SIGNING_SECRET` its own Key Vault secret if signed media URLs must survive a `SECRET_KEY_BASE` rotation. API tokens are stored as SHA-256 hashes and survive every rotation. Passkeys depend on `PHX_HOST`, not on a key. A passkey registered under one host stops working when `PHX_HOST` changes to another domain.
+To rotate `SECRET_KEY_BASE` or `PREVIEW_JWT_SECRET`, set a new value and restart. Set `MEDIA_SIGNING_SECRET` if signed media URLs must survive a `SECRET_KEY_BASE` rotation. API tokens are stored as SHA-256 hashes and survive every rotation. Passkeys depend on `PHX_HOST`, not on a key. A passkey registered under one host stops working when `PHX_HOST` changes to another domain.
 
 ### Rotate the KEK
 
 The KEK wraps the data keys, not the content, so a rotation re-wraps those keys and re-encrypts no content. Run the steps in order, so every restart can still read every data key.
 
-1. Store the current KEK value as a new Key Vault secret `barkpark-kek-previous`. Set `BARKPARK_KEK_PREVIOUS` to reference it and restart. `/status.json` must show the `kek_previous` component as `operational`. A malformed entry shows as `degraded`.
-2. Add a new version of `barkpark-kek` with the value from `openssl rand -base64 32`. Point the reference at that version, raise `BARKPARK_KEK_VERSION` by one, and restart. Old data keys still unwrap with the previous key.
+1. Set `BARKPARK_KEK_PREVIOUS` to the current KEK and restart. `/status.json` must show the `kek_previous` component as `operational`. A malformed entry shows as `degraded`.
+2. Set `BARKPARK_KEK` to the value from `openssl rand -base64 32`, raise `BARKPARK_KEK_VERSION` by one, and restart. Old data keys still unwrap with the previous key.
 3. Re-wrap every data key from a shell in the running replica:
 
    ```bash
@@ -66,7 +60,7 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
    On a single VM, run `sudo /opt/barkpark/api/start.sh mix run -e 'IO.inspect(Barkpark.Crypto.DataKeys.rewrap_all())'`.
 
    `{:ok, n}` means all `n` data keys use the new KEK. `{:error, {:unwrap_failed, id}}` rolls back the run and names a key neither KEK opens. Stop there and keep both keys.
-4. Remove `BARKPARK_KEK_PREVIOUS` and restart. Disable the old Key Vault version. Purge it only after a backup taken after step 3 has been restored once.
+4. Remove `BARKPARK_KEK_PREVIOUS` and restart. Keep the old KEK in your password manager until a backup taken after step 3 has been restored once.
 
 ### Cloak key
 
@@ -110,10 +104,10 @@ The environment runs only the Consumption workload profile, which has no environ
 
 ## Container Apps alerts
 
-`deploy/azure/monitor.bicep` adds three alerts that mail one address. Until `main.bicep` calls it, deploy it on its own with `az deployment group create -g <rg> -f deploy/azure/monitor.bicep` and the workspace id, app id, host, job name and address as parameters.
+`deploy/azure/main.bicep` deploys three alerts from `monitor.bicep` when `alertEmail` is set, and mails them to that address. A deployment with `restoreMode=true` leaves them out.
 
 - `/readyz` failed two checks in a row. An Application Insights standard test requests `https://<host>/readyz` every 5 minutes from North Europe. In a test the mail went out 8 minutes after the app stopped.
-- An execution of the backup job failed. Set `backupJobName` to the Container Apps job that runs backups. The job must exist before the deployment.
+- An execution of the `barkpark-backup` job failed.
 - The app restarted 3 times within 30 minutes.
 
 Azure keeps the state of a changed alert rule. After you change a rule, delete it and deploy again, or it may not fire. The app's logs are in the Log Analytics workspace, in `ContainerAppConsoleLogs_CL`. Monitoring costs about USD 6.60 a month, mostly the 8,800 test runs at USD 0.000715 each. `availabilityFrequencySeconds=900` brings it to about USD 2.40 and alerts after about 30 minutes.
