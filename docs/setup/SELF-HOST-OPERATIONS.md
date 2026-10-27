@@ -24,7 +24,7 @@ Once a month, restore a `bp instance backup` of the live instance into a scratch
 
 ## Moving an instance
 
-The backup holds the database and media but no key, so the keys move by hand. [SELF-HOST-MOVE.md](SELF-HOST-MOVE.md) moves a single VM onto Container Apps, with the times of a rehearsal. On any target, restore into an empty database with the extensions allowed, on the backup's PostgreSQL major or, with bp 1.26.1 and newer, a newer one. Load the source's keys before the first start.
+The backup holds the database and media but no key, so the keys move by hand. [SELF-HOST-MOVE.md](SELF-HOST-MOVE.md) moves a single VM onto Container Apps, with the times of a rehearsal. On any target, restore into an empty database with the extensions allowed, on the backup's PostgreSQL major or, with bp 1.26.2 and newer, a newer one. Load the source's keys before the first start.
 
 ## Rotate keys
 
