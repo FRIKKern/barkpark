@@ -447,7 +447,40 @@ mix deps.get
 mix deps.compile
 mix compile
 mix ecto.migrate
-mix run priv/repo/seeds.exs
+# The clean seed prints `Admin token id: <id>` when it installs a token. Keep
+# that id next to the token file. The token has no owner user, so once the
+# operator allowlist is armed (BARKPARK_OPERATOR_EMAILS set) or
+# BARKPARK_OPERATOR_FAIL_CLOSED is on, only BARKPARK_OPERATOR_TOKEN_IDS lets it
+# reach the operator routes. Add the id there before the first start, so the
+# install cannot lock its own admin token out of `bp org`.
+SEED_LOG="$(mktemp)"
+mix run priv/repo/seeds.exs | tee "$SEED_LOG"
+ADMIN_TOKEN_ID="$(sed -n 's/^Admin token id: *\([A-Za-z0-9-]*\).*/\1/p' "$SEED_LOG" | tail -n1)"
+rm -f "$SEED_LOG"
+ADMIN_TOKEN_ID_FILE="$ADMIN_TOKEN_FILE.id"
+if [ -n "$ADMIN_TOKEN_ID" ]; then
+  mkdir -p "$(dirname "$ADMIN_TOKEN_ID_FILE")"
+  (umask 077; printf '%s\n' "$ADMIN_TOKEN_ID" > "$ADMIN_TOKEN_ID_FILE")
+  _fail_closed="$(sed -n 's/^BARKPARK_OPERATOR_FAIL_CLOSED=//p' "$APP_DIR/.env" | tail -n1 | tr -d '[:space:]"'"'" | tr '[:upper:]' '[:lower:]')"
+  _op_emails="$(sed -n 's/^BARKPARK_OPERATOR_EMAILS=//p' "$APP_DIR/.env" | tail -n1 | tr -d '[:space:]"'"',")"
+  case "$_fail_closed" in 1 | true | yes | on) _armed=1 ;; *) _armed="" ;; esac
+  [ -n "$_op_emails" ] && _armed=1
+  if [ -n "$_armed" ]; then
+    _ids="$(sed -n 's/^BARKPARK_OPERATOR_TOKEN_IDS=//p' "$APP_DIR/.env" | tail -n1 | tr -d '[:space:]"'"'")"
+    case ",$_ids," in
+      *",$ADMIN_TOKEN_ID,"*) : ;;
+      *)
+        _ids="${_ids:+$_ids,}$ADMIN_TOKEN_ID"
+        if grep -q "^BARKPARK_OPERATOR_TOKEN_IDS=" "$APP_DIR/.env"; then
+          sed -i "s|^BARKPARK_OPERATOR_TOKEN_IDS=.*|BARKPARK_OPERATOR_TOKEN_IDS=$_ids|" "$APP_DIR/.env"
+        else
+          echo "BARKPARK_OPERATOR_TOKEN_IDS=$_ids" >> "$APP_DIR/.env"
+        fi
+        echo ">> Added admin token id $ADMIN_TOKEN_ID to BARKPARK_OPERATOR_TOKEN_IDS in .env"
+        ;;
+    esac
+  fi
+fi
 echo "   Phoenix built"
 
 # ── 8. Build Go TUI ─────────────────────────────────────────────────────────
@@ -684,6 +717,11 @@ echo ""
 SSH_LOGIN="${SUDO_USER:-root}@$IP"
 if [ -n "$ADMIN_TOKEN" ]; then
   echo "  Admin token: saved to $ADMIN_TOKEN_FILE (root only, mode 0600)."
+  if [ -s "${ADMIN_TOKEN_ID_FILE:-}" ]; then
+    echo "  Admin token id: $(cat "$ADMIN_TOKEN_ID_FILE") (also in $ADMIN_TOKEN_ID_FILE)."
+    echo "    It is on BARKPARK_OPERATOR_TOKEN_IDS only when the operator allowlist or"
+    echo "    BARKPARK_OPERATOR_FAIL_CLOSED is set in $APP_DIR/.env."
+  fi
   echo ""
   echo "  Log in from your machine:"
   if [ -n "$TLS_READY" ]; then
