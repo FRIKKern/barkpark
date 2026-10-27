@@ -72,9 +72,10 @@ defmodule BarkparkWeb.OidcControllerTest do
     conn = get(conn, "/v1/auth/oidc/octrl/start")
     assert redirected_to(conn, 302) =~ @issuer <> "/authorize?"
     assert redirected_to(conn, 302) =~ "code_challenge_method=S256"
-    # PKCE verifier + state stashed for the callback
-    assert get_session(conn, :oidc_verifier)
-    assert get_session(conn, :oidc_state)
+    # The flow is kept on the server under its state; the session lists the state.
+    assert [state] = get_session(conn, :sso_states)
+    assert redirected_to(conn, 302) =~ "state=#{state}"
+    assert Repo.aggregate(Barkpark.Sso.Flow, :count) == 1
   end
 
   test "GET callback with a valid code + matching state mints a user session", %{conn: conn} do
@@ -303,7 +304,8 @@ defmodule BarkparkWeb.OidcControllerTest do
         get(conn, "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/auth/cloud/callback"))
 
       assert redirected_to(allowed, 302) =~ @issuer <> "/authorize?"
-      assert get_session(allowed, :oidc_studio)["origin"] == @studio
+      assert [flow] = Repo.all(Barkpark.Sso.Flow)
+      assert flow.studio["origin"] == @studio
 
       for to <- [
             "https://evil.example.com/cb",
@@ -475,7 +477,7 @@ defmodule BarkparkWeb.OidcControllerTest do
           |> html_response(400)
         end)
 
-      assert log =~ "the state differs"
+      assert log =~ "did not start a sign-in with that state"
     end
 
     test "an API client still gets JSON for a state mismatch, with a sign-in hint" do
@@ -511,6 +513,85 @@ defmodule BarkparkWeb.OidcControllerTest do
         end)
 
       assert log =~ "callback rejected: http_status 400"
+    end
+  end
+
+  describe "started sign-ins are kept by state" do
+    defp start_state(conn) do
+      conn = get(conn, "/v1/auth/oidc/octrl/start")
+      loc = URI.parse(redirected_to(conn, 302))
+      %{"state" => state, "nonce" => nonce} = URI.decode_query(loc.query)
+      {conn, state, nonce}
+    end
+
+    defp sign_in_token(nonce) do
+      mock_op(%{
+        "iss" => @issuer,
+        "aud" => @client_id,
+        "exp" => System.system_time(:second) + 300,
+        "nonce" => nonce,
+        "email" => "two@octrl.com"
+      })
+    end
+
+    test "after two starts, the callback for the first one signs in", %{conn: conn} do
+      {conn, first, nonce1} = start_state(conn)
+      {conn, _second, _} = start_state(recycle(conn))
+      sign_in_token(nonce1)
+
+      body =
+        conn
+        |> recycle()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{first}")
+        |> json_response(201)
+
+      assert body["user"]["email"] == "two@octrl.com"
+    end
+
+    test "a used state does not sign in again", %{conn: conn} do
+      {conn, state, nonce} = start_state(conn)
+      sign_in_token(nonce)
+
+      used = conn |> recycle() |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+      assert json_response(used, 201)
+
+      # The same browser, still holding the state in an older cookie copy.
+      body =
+        conn
+        |> recycle()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+        |> json_response(400)
+
+      assert body["error"]["details"]["reason"] == "unknown_state"
+    end
+
+    test "an expired state does not sign in", %{conn: conn} do
+      {conn, state, nonce} = start_state(conn)
+      sign_in_token(nonce)
+
+      Repo.update_all(Barkpark.Sso.Flow,
+        set: [expires_at: DateTime.add(DateTime.utc_now(), -1)]
+      )
+
+      body =
+        conn
+        |> recycle()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+        |> json_response(400)
+
+      assert body["error"]["details"]["reason"] == "state_expired"
+    end
+
+    test "another browser cannot use a started state", %{conn: conn} do
+      {_conn, state, nonce} = start_state(conn)
+      sign_in_token(nonce)
+
+      body =
+        build_conn()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+        |> json_response(400)
+
+      assert body["error"]["details"]["reason"] == "no_session_state"
     end
   end
 end

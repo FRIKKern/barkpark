@@ -26,6 +26,7 @@ defmodule BarkparkWeb.OidcController do
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
   alias BarkparkWeb.SignInFailure
+  alias BarkparkWeb.SsoFlows
 
   require Logger
 
@@ -57,10 +58,11 @@ defmodule BarkparkWeb.OidcController do
             case Oidc.authorize_url(c, Map.put(p, :redirect_uri, callback_uri(slug))) do
               {:ok, url} ->
                 conn
-                |> put_session(:oidc_state, p.state)
-                |> put_session(:oidc_nonce, p.nonce)
-                |> put_session(:oidc_verifier, p.code_verifier)
-                |> put_session(:oidc_studio, studio)
+                |> SsoFlows.start("oidc:" <> slug, p.state, %{
+                  nonce: p.nonce,
+                  code_verifier: p.code_verifier,
+                  studio: studio
+                })
                 |> redirect(external: url)
 
               {:error, reason} ->
@@ -114,6 +116,7 @@ defmodule BarkparkWeb.OidcController do
   def callback(conn, %{"org_slug" => slug, "code" => code, "state" => state})
       when is_binary(code) do
     c = Oidc.connection_for_org_slug(slug)
+    flow = c && SsoFlows.take(conn, "oidc:" <> slug, state, &legacy_flow/1)
 
     cond do
       is_nil(c) ->
@@ -126,14 +129,16 @@ defmodule BarkparkWeb.OidcController do
           "no OIDC connection for this organization"
         )
 
-      state != get_session(conn, :oidc_state) ->
-        state_mismatch(conn, slug)
+      match?({:error, _}, flow) ->
+        state_mismatch(conn, slug, elem(flow, 1))
 
       true ->
+        {:ok, conn, flow} = flow
+
         opts = [
           redirect_uri: callback_uri(slug),
-          code_verifier: get_session(conn, :oidc_verifier),
-          nonce: get_session(conn, :oidc_nonce)
+          code_verifier: flow.code_verifier,
+          nonce: flow.nonce
         ]
 
         case Oidc.handle_callback(c, code, opts) do
@@ -170,7 +175,7 @@ defmodule BarkparkWeb.OidcController do
                     SessionIssuer.actor_opts(conn) ++ mfa_opts
                   )
 
-                case get_session(conn, :oidc_studio) do
+                case flow.studio do
                   %{} = studio -> to_studio(conn, studio, token, user)
                   _ -> signed_in(conn, token, user)
                 end
@@ -227,21 +232,39 @@ defmodule BarkparkWeb.OidcController do
     end
   end
 
-  # No state in the session means the session cookie did not come back with
-  # the callback; a different state means another start replaced it.
-  defp state_mismatch(conn, slug) do
-    Sso.record_login_failure("oidc", slug, :state_mismatch)
+  # A flow started before sign-in state moved to the server sits in the
+  # session's single slot. Read it so a sign-in in progress at deploy finishes.
+  defp legacy_flow(conn) do
+    case get_session(conn, :oidc_state) do
+      state when is_binary(state) ->
+        %{
+          state: state,
+          nonce: get_session(conn, :oidc_nonce),
+          code_verifier: get_session(conn, :oidc_verifier),
+          studio: get_session(conn, :oidc_studio)
+        }
 
-    if get_session(conn, :oidc_state) == nil,
-      do:
-        Logger.warning("[OIDC] #{slug}: state mismatch: no sign-in state in the session cookie"),
-      else:
-        Logger.warning("[OIDC] #{slug}: state mismatch: the state differs from this session's")
+      _ ->
+        nil
+    end
+  end
+
+  @state_reasons %{
+    no_session_state: "no sign-in state in the session cookie",
+    state_mismatch: "this browser did not start a sign-in with that state",
+    unknown_state: "the state was already used or is unknown",
+    state_expired: "the sign-in started more than 10 minutes ago"
+  }
+
+  defp state_mismatch(conn, slug, reason) do
+    Sso.record_login_failure("oidc", slug, reason)
+    Logger.warning("[OIDC] #{slug}: #{reason}: #{@state_reasons[reason]}")
 
     SignInFailure.respond(conn, %{
       status: 400,
       code: "malformed",
       message: "state mismatch",
+      details: %{reason: Atom.to_string(reason)},
       hint: "Start the sign-in again in the same browser.",
       page_message: @expired,
       start_path: start_path(slug)
