@@ -178,16 +178,7 @@ func Execute(args []string) int {
 		// `bp login` — authenticate to the Barkpark Cloud control plane and store
 		// the session token (cloud-12). Replaces the v1 token-stub. Its own flags
 		// (--email/--password/--url) are not globals, so they arrive in rest.
-		if g.help {
-			printLoginHelp(out)
-			return exitOK
-		}
-		// `bp login --sso --org <slug>` signs in to a self-hosted instance
-		// through its org's SSO instead (login_sso.go).
-		if wantsSSOLogin(rest[1:]) {
-			return runLoginSSO(out, g, rest[1:])
-		}
-		return runLoginCloud(out, rest[1:])
+		return runLogin(out, g, rest[1:])
 	case "signup":
 		// `bp signup` — create a Barkpark Cloud account and log in (cloud-12). The
 		// registration sibling of `bp login`. Its flags (--email/--team/--password/

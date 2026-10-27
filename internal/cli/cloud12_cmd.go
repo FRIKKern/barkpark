@@ -189,6 +189,26 @@ func cloudErrStatus(err error) (int, bool) {
 	return 0, false
 }
 
+// loginCloudUsage is the Cloud sign-in synopsis. It sits beside the SSO one
+// (loginSSOUsage, login_sso.go) so neither form's flags read as required for
+// every `bp login`.
+const loginCloudUsage = "bp login [--email <addr>] [--password <pw>] [--device] [--team <id|slug>] [--device-start] [--device-poll <code>] [--url <url>]"
+
+// runLogin dispatches `bp login`. `bp login --sso --org <slug>` signs in to a
+// self-hosted instance through its org's SSO (login_sso.go); every other form
+// signs in to the Cloud control plane. The router case calls only this, so
+// the doc checker reads this file's flags for `bp login`.
+func runLogin(out *writer, g globals, args []string) int {
+	if g.help {
+		printLoginHelp(out)
+		return exitOK
+	}
+	if wantsSSOLogin(args) {
+		return runLoginSSO(out, g, args)
+	}
+	return runLoginCloud(out, args)
+}
+
 // runLoginCloud is the `bp login` built-in — it REPLACES the v1 token-stub. It
 // reads an email (--email/--user flag or prompt) and a password (--password flag,
 // BARKPARK_PASSWORD env, or a non-echoed prompt), authenticates against the
@@ -1398,7 +1418,7 @@ func parseLoginArgs(args []string) (la loginArgs, err error) {
 			// them (exact-equality cases, so order is belt-and-braces).
 			la.device = true
 		default:
-			return loginArgs{}, fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--team <id|slug>] [--device-start] [--device-poll <code>] [--url <url>])", a)
+			return loginArgs{}, fmt.Errorf("unexpected argument %q (usage: %s)", a, loginCloudUsage)
 		}
 		if err != nil {
 			return loginArgs{}, err
