@@ -146,9 +146,14 @@ defmodule Barkpark.Groq.GeoShapeTest do
     {micros, results} =
       :timer.tc(fn -> for _ <- 1..10_000, do: GeoShape.contains(big, other) end)
 
-    assert Enum.take(results, 1) == [true]
-    assert {:error, :work_budget} in results
-    assert micros < 1_000_000, "took #{div(micros, 1000)} ms"
+    # The work, not the clock: each call is 1000 × 1000 positions, so exactly
+    # five fit the budget and every later one is refused before any geometry.
+    {answered, refused} = Enum.split_while(results, &is_boolean/1)
+    assert answered == List.duplicate(true, div(GeoShape.budget(), 1_000_000))
+    assert length(answered) == 5
+    assert Enum.all?(refused, &(&1 == {:error, :work_budget}))
+    # Only a hang guard: 9,995 refused calls cost nothing, five answered ones ~1 s.
+    assert micros < 5_000_000, "took #{div(micros, 1000)} ms"
 
     GeoShape.reset_budget()
     assert GeoShape.contains(big, pt(1, 1)) == true
