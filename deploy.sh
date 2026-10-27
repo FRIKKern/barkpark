@@ -245,7 +245,9 @@ fi
 git config core.hooksPath .githooks
 
 # ── 6. Environment ──────────────────────────────────────────────────────────
+FRESH_ENV=""
 if [ ! -f "$APP_DIR/.env" ]; then
+  FRESH_ENV=1
   echo ">> Generating .env..."
   SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
   # Cloak + preview + KEK + release-capture HMAC: prod runtime.exs
@@ -417,20 +419,24 @@ set -a; source "$APP_DIR/.env"; set +a
 # The token goes to a root-only file, never to stdout, so it stays out of ssh
 # logs and CI output. The file is written before the build, so it survives a
 # failed run. A re-run reuses the token in the file: the seed installs a token
-# only when no unrevoked admin token exists, so a fresh one would not work.
+# only when no unrevoked admin token exists, so a fresh one would not work. For
+# the same reason a box with an existing .env and no token file gets no new
+# token; its first admin token still stands.
 SEED_PROFILE="${BARKPARK_SEED_PROFILE:-clean}"
 ADMIN_TOKEN=""
 ADMIN_TOKEN_FILE="${BARKPARK_ADMIN_TOKEN_FILE:-/etc/barkpark/admin-token}"
 if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; then
   if [ -s "$ADMIN_TOKEN_FILE" ]; then
     ADMIN_TOKEN="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
-  else
+  elif [ -n "$FRESH_ENV" ]; then
     ADMIN_TOKEN="bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"
     mkdir -p "$(dirname "$ADMIN_TOKEN_FILE")"
     chmod 700 "$(dirname "$ADMIN_TOKEN_FILE")"
     (umask 077; printf '%s\n' "$ADMIN_TOKEN" > "$ADMIN_TOKEN_FILE")
   fi
-  export BARKPARK_SEED_ADMIN_TOKEN="$ADMIN_TOKEN"
+  if [ -n "$ADMIN_TOKEN" ]; then
+    export BARKPARK_SEED_ADMIN_TOKEN="$ADMIN_TOKEN"
+  fi
 fi
 
 # ── 7. Build Phoenix ────────────────────────────────────────────────────────
