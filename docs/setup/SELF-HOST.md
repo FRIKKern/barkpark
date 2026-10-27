@@ -28,7 +28,7 @@ The host name becomes `PHX_HOST`, and passkeys stop working if it changes later.
 
 ## Write and check the settings file
 
-On your machine, install `bp` 1.26.5 or newer and write a settings file:
+On your machine, install `bp` 1.26.6 or newer and write a settings file:
 
 <!-- run -->
 ```bash
