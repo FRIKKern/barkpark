@@ -22,7 +22,8 @@ defmodule BarkparkWeb.OrgSsoController do
 
   # Fields an update may change. A new issuer is a new connection: delete it
   # and create it again. The secret changes only through `rotate_secret/2`.
-  @update_fields ~w(client_id groups_claim group_role_mappings active) ++ @entra_fields
+  @update_fields ~w(client_id groups_claim group_role_mappings active client_secret_expires_at) ++
+                   @entra_fields
 
   def create(conn, params) do
     attrs = %{slug: params["slug"], name: params["name"] || params["slug"]}
@@ -68,8 +69,9 @@ defmodule BarkparkWeb.OrgSsoController do
            params
            |> Map.take(
              ["client_id", "client_secret", "groups_claim", "group_role_mappings"] ++
-               @entra_fields
+               ["client_secret_expires_at"] ++ @entra_fields
            )
+           |> expiry_date()
            |> Map.merge(Map.new(endpoints, fn {k, v} -> {Atom.to_string(k), v} end))
            |> Map.put("organization_id", org.id),
          {:ok, c} <- Oidc.create_connection(attrs) |> mapping_error() do
@@ -83,7 +85,7 @@ defmodule BarkparkWeb.OrgSsoController do
   end
 
   def update_oidc(conn, %{"org_slug" => slug} = params) do
-    attrs = Map.take(params, @update_fields)
+    attrs = params |> Map.take(@update_fields) |> expiry_date()
 
     with {:ok, org, c} <- fetch_oidc(slug),
          {:ok, c} <- Oidc.update_connection(c, attrs) |> mapping_error() do
@@ -96,8 +98,18 @@ defmodule BarkparkWeb.OrgSsoController do
     with {:ok, org, c} <- fetch_oidc(slug),
          secret when is_binary(secret) and secret != "" <-
            params["client_secret"] || invalid("client_secret", "is required"),
-         {:ok, c} <- Oidc.update_connection(c, %{client_secret: secret}) do
-      audit(conn, org, "oidc_client_secret_rotated", %{})
+         # The stored expiry belonged to the old secret, so a rotation without
+         # a new date clears it.
+         attrs =
+           %{"client_secret" => secret}
+           |> Map.put("client_secret_expires_at", params["client_secret_expires_at"])
+           |> expiry_date(),
+         {:ok, c} <- Oidc.update_connection(c, attrs) do
+      audit(conn, org, "oidc_client_secret_rotated", %{
+        "client_secret_expires_at" =>
+          c.client_secret_expires_at && DateTime.to_iso8601(c.client_secret_expires_at)
+      })
+
       json(conn, oidc_json(org, c))
     end
   end
@@ -167,6 +179,23 @@ defmodule BarkparkWeb.OrgSsoController do
             Barkpark.SetupDocs.see(:oidc)}}
     end
   end
+
+  # Entra prints the expiry as an ISO 8601 time; an operator may type a date.
+  # A bare date means midnight UTC at the start of that day.
+  defp expiry_date(%{"client_secret_expires_at" => v} = attrs) when is_binary(v) do
+    v = String.trim(v)
+
+    value =
+      cond do
+        v == "" -> nil
+        Regex.match?(~r/\A\d{4}-\d{2}-\d{2}\z/, v) -> v <> "T00:00:00Z"
+        true -> v
+      end
+
+    Map.put(attrs, "client_secret_expires_at", value)
+  end
+
+  defp expiry_date(attrs), do: attrs
 
   # The CLI sends one comma-separated string; JSON callers send a list or null.
   defp split(methods) when is_binary(methods),
@@ -238,6 +267,7 @@ defmodule BarkparkWeb.OrgSsoController do
       strict_validation: c.strict_validation,
       trust_idp_mfa: c.trust_idp_mfa,
       mfa_acr: c.mfa_acr,
+      client_secret_expires_at: c.client_secret_expires_at,
       active: c.active
     }
 

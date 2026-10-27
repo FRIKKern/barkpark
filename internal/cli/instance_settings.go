@@ -24,6 +24,7 @@ const (
 	instanceDocKeys        = "docs/setup/SELF-HOST-OPERATIONS.md#rotate-keys"
 	instanceDocDatabase    = "docs/setup/SELF-HOST-OPERATIONS.md#moving-an-instance"
 	instanceDocContainer   = "docs/setup/SELF-HOST.md"
+	instanceDocOIDCSecret  = "docs/setup/SELF-HOST-UPDATES.md#rotate-the-oidc-client-secret"
 )
 
 const (

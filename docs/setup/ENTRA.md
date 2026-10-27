@@ -28,7 +28,7 @@ The script does these steps and is safe to run again:
 4. It creates the owners security group and adds each `--add-owner` user to it.
 5. It creates a client secret only when the app has none, and writes it to `--secret-file` with mode 600. The secret is never printed. A rerun never creates a secret unless you pass `--rotate-secret`. Without the secret file it prints the expiry date of each existing secret instead. Entra never shows a secret again, so keep the file from the first run.
 
-At the end it prints the tenant id, client id, owners group id, secret expiry date, the sign-in URL and the `bp org` commands to run next. Record the expiry date in the run log. Sign-ins stop on that date, so rotate the secret before it with `--rotate-secret` and `bp org oidc-rotate-secret`.
+At the end it prints the tenant id, client id, owners group id, secret expiry date, the sign-in URL and the `bp org` commands to run next. Sign-ins stop on the expiry date. The printed commands store it with `--client_secret_expires_at`, and with `BARKPARK_TOKEN_EXPIRY_WARNINGS=on` the operators get a mail 30, 14 and 7 days ahead. Rotate the secret as [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#rotate-the-oidc-client-secret) describes.
 
 ## Connect the app to Barkpark
 
@@ -39,6 +39,7 @@ bp org create gyldendal Gyldendal
 bp org attach-workspace gyldendal default
 bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$(cat ./entra-client-secret)" \
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \
+  --client_secret_expires_at <secret expiry date> \
   --set group_role_mappings:='{"<owners group id>":"owner"}'
 ```
 

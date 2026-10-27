@@ -3132,6 +3132,11 @@ defmodule Barkpark.Plugins.Capabilities do
         flags:
           oidc_entra_flags() ++
             [
+              flag(
+                "client_secret_expires_at",
+                "string",
+                "When the client secret expires, ISO 8601 date or time. Barkpark warns 30, 14 and 7 days ahead."
+              ),
               flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
                 repeatable: true
               )
@@ -3143,7 +3148,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "org.oidc-update",
         "org",
         "oidc-update",
-        "Change the OIDC connection's client id, groups claim, group mappings, active flag or Entra ID settings.",
+        "Change the OIDC connection's client id, groups claim, group mappings, active flag, client secret expiry date or Entra ID settings.",
         "PATCH",
         "/v1/admin/orgs/:org_slug/oidc",
         "admin",
@@ -3153,6 +3158,11 @@ defmodule Barkpark.Plugins.Capabilities do
         flags:
           oidc_entra_flags() ++
             [
+              flag(
+                "client_secret_expires_at",
+                "string",
+                "When the client secret expires, ISO 8601 date or time. Barkpark warns 30, 14 and 7 days ahead."
+              ),
               flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
                 repeatable: true
               )
@@ -3175,6 +3185,13 @@ defmodule Barkpark.Plugins.Capabilities do
             true,
             "string",
             "New client secret. Stored encrypted, never shown again."
+          )
+        ],
+        flags: [
+          flag(
+            "client_secret_expires_at",
+            "string",
+            "When the new secret expires, ISO 8601 date or time. Without it the stored date is cleared."
           )
         ],
         writes: true,

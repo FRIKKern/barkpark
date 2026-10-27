@@ -223,6 +223,68 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
             ~w(tenant_id strict_validation trust_idp_mfa mfa_acr scopes token_endpoint_auth_method),
           do: assert(name in names)
     end
+
+    test "the client secret expiry is stored, returned, reset by a new date and cleared by a rotation without one",
+         ctx do
+      {slug, created} = setup_org(ctx)
+      assert created["client_secret_expires_at"] == nil
+
+      # What bp sends for `oidc-update <org> --client_secret_expires_at 2027-10-27`.
+      updated =
+        req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc?client_secret_expires_at=2027-10-27")
+        |> json_response(200)
+
+      assert updated["client_secret_expires_at"] == "2027-10-27T00:00:00.000000Z"
+
+      c = Oidc.connection_for_org_slug(slug)
+      c |> Ecto.Changeset.change(client_secret_expiry_warned_days: 14) |> Repo.update!()
+
+      # Entra prints a full time; a new date clears the warning step.
+      req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+        client_secret_expires_at: "2027-11-01T09:30:00Z"
+      })
+      |> json_response(200)
+
+      c = Oidc.connection_for_org_slug(slug)
+      assert c.client_secret_expires_at == ~U[2027-11-01 09:30:00.000000Z]
+      assert c.client_secret_expiry_warned_days == nil
+
+      rotated =
+        req(
+          ctx.bearer,
+          :put,
+          "/v1/admin/orgs/#{slug}/oidc/client-secret?client_secret_expires_at=2028-10-27",
+          %{client_secret: "second-secret"}
+        )
+        |> json_response(200)
+
+      assert rotated["client_secret_expires_at"] == "2028-10-27T00:00:00.000000Z"
+
+      rotated =
+        req(ctx.bearer, :put, "/v1/admin/orgs/#{slug}/oidc/client-secret", %{
+          client_secret: "third-secret"
+        })
+        |> json_response(200)
+
+      assert rotated["client_secret_expires_at"] == nil
+
+      assert req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+               client_secret_expires_at: "next year"
+             })
+             |> json_response(422)
+
+      names =
+        for %{"id" => "org." <> _ = id, "flags" => fs} <-
+              Barkpark.Plugins.Capabilities.manifest("admin", project: false)["commands"],
+            id in ["org.oidc-create", "org.oidc-update", "org.oidc-rotate-secret"],
+            do: {id, "client_secret_expires_at" in Enum.map(fs, & &1["name"])}
+
+      assert Enum.sort(names) == [
+               {"org.oidc-create", true},
+               {"org.oidc-rotate-secret", true},
+               {"org.oidc-update", true}
+             ]
+    end
   end
 
   describe "group mappings" do
