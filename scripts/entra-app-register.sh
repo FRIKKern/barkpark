@@ -260,6 +260,35 @@ case "$SECRET_ACTION" in
     say "--secret-file. If nobody has it, run with --rotate-secret --secret-file PATH."
     ;;
 esac
+# A new secret is refused (AADSTS7000215) for some seconds after Entra creates
+# it, and the 2026-10-27 drill saw refusals now and then for 9 minutes more.
+# Wait until the token endpoint accepts it three times in a row, then tell the
+# operator to wait 10 minutes before storing it in Barkpark. The secret goes to
+# curl from the file, never on argv.
+secret_accepted() {
+  curl -fsS -o /dev/null --max-time 15 -X POST \
+    "https://login.microsoftonline.com/$TENANT/oauth2/v2.0/token" \
+    --data-urlencode "client_id=$APP_ID" --data-urlencode "client_secret@$SECRET_FILE" \
+    --data-urlencode "scope=https://graph.microsoft.com/.default" \
+    --data-urlencode "grant_type=client_credentials" 2>/dev/null
+}
+if [ "$SECRET_ACTION" = create ]; then
+  say "Waiting until Entra accepts the new secret"
+  ok=0
+  for _ in $(seq 1 60); do
+    if secret_accepted; then ok=$((ok + 1)); else ok=0; fi
+    [ "$ok" -ge 3 ] && break
+    sleep 5
+  done
+  if [ "$ok" -ge 3 ]; then
+    say "Entra accepts the new secret. It can still refuse it now and then for about"
+    say "10 minutes. Store it in Barkpark 10 minutes after this line, and keep the old"
+    say "secret until then."
+  else
+    say "Entra did not accept the new secret within 5 minutes. Keep the old secret"
+    say "in Barkpark and run this check again before you store the new one."
+  fi
+fi
 if [ "$SECRET_ACTION" = create ]; then
   EXPIRES=$(az ad app show --id "$APP_ID" \
     --query "sort_by(passwordCredentials[?displayName=='$SECRET_NAME'], &endDateTime)[-1].endDateTime" -o tsv)
