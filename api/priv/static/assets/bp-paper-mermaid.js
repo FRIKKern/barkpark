@@ -26,10 +26,52 @@
 // stays in the reader's own hook, so Studio chat never pays for a player it
 // does not paint.
 //
-// mermaid.min.js loads `defer` (Golden Rule #4: never a blocking script in
-// <head>), so every entry point re-checks for `window.mermaid` and retries on
-// the window load event.
+// Two ways to get the engine (mermaid.min.js, about 745 KB gzip and 3.5 MB of
+// JavaScript to parse):
+//
+//   * The page loads it `defer` (the Bulldocs reader). Golden Rule #4: never
+//     a blocking script in <head>. Every entry point re-checks for
+//     `window.mermaid` and retries on the window load event.
+//   * The page names it in `data-mermaid-src` on this script's own tag (the
+//     Studio root layout). The engine is then fetched the first time a hook
+//     finds a `pre.mermaid` to paint, so a Studio page with no diagram never
+//     downloads or parses it (task-cca3c6d48e57097e: on a cold cache it held
+//     the LiveView connect back until it had loaded).
 (function () {
+  const lazySrc =
+    (document.currentScript && document.currentScript.dataset.mermaidSrc) || null;
+  let engineLoading = null;
+
+  // Resolves once `window.mermaid` exists: at once when it is already there,
+  // on the injected script's load when this page loads it lazily, and on the
+  // window load event for a page that loads it `defer`.
+  function whenEngine() {
+    if (window.mermaid && window.mermaid.run) return Promise.resolve();
+    if (lazySrc) {
+      if (!engineLoading) {
+        engineLoading = new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.src = lazySrc;
+          script.async = true;
+          script.onload = () => {
+            initMermaid();
+            resolve();
+          };
+          script.onerror = () => {
+            engineLoading = null;
+            reject(new Error("mermaid engine failed to load"));
+          };
+          document.head.appendChild(script);
+        });
+      }
+      return engineLoading;
+    }
+    if (document.readyState === "complete") return Promise.reject(new Error("no mermaid engine"));
+    return new Promise((resolve) =>
+      window.addEventListener("load", () => resolve(), { once: true })
+    );
+  }
+
   const mono =
     "'SF Mono', ui-monospace, 'JetBrains Mono', Menlo, Consolas, monospace";
 
@@ -157,8 +199,7 @@
       if (window.mermaid && window.mermaid.run) {
         runAndUnshrink(nodes);
       } else {
-        window.addEventListener(
-          "load",
+        whenEngine().then(
           () => {
             if (window.mermaid && window.mermaid.run) {
               runAndUnshrink(
@@ -168,7 +209,8 @@
               );
             }
           },
-          { once: true }
+          // No engine: the source stays readable as text, as before.
+          () => {}
         );
       }
     },
