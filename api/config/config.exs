@@ -434,6 +434,9 @@ config :barkpark, Oban,
        # ahead, daily. A no-op tick unless `:token_expiry_warnings, enabled:`
        # (below) is on.
        {"0 8 * * *", Barkpark.Auth.TokenExpiryWarningWorker},
+       # task-1b1e79642ddd1261 — OIDC client secret expiry warnings at 30, 14
+       # and 7 days ahead, daily, behind the same `:token_expiry_warnings` switch.
+       {"5 8 * * *", Barkpark.Sso.OidcSecretExpiryWarningWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)

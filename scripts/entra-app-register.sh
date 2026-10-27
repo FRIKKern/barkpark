@@ -285,13 +285,15 @@ Group claims:      $CLAIMS_VALUE
 Secret file:       ${SECRET_FILE:-not given}
 Secret expires:    ${EXPIRES:-unknown}
 
-Record the secret expiry date and rotate the secret before it. Next, as a
-Barkpark operator:
+Sign-ins stop when the secret expires. The commands below store the expiry
+date, and Barkpark warns 30, 14 and 7 days ahead when
+BARKPARK_TOKEN_EXPIRY_WARNINGS=on. Next, as a Barkpark operator:
 
 bp org create $ORG <display name>
 bp org attach-workspace $ORG default
 bp org oidc-create $ORG "https://login.microsoftonline.com/$TENANT/v2.0" "$APP_ID" $SECRET_ARG \\
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \\
+  --client_secret_expires_at "${EXPIRES:-<expiry date>}" \\
   --set group_role_mappings:='$MAPPING'
 
 When the connection already exists, set the scopes and the mapping with:
@@ -300,7 +302,7 @@ bp org oidc-update $ORG --scopes "openid profile email" --set group_role_mapping
 
 After a new secret, store it with:
 
-bp org oidc-rotate-secret $ORG $SECRET_ARG
+bp org oidc-rotate-secret $ORG $SECRET_ARG --client_secret_expires_at "${EXPIRES:-<expiry date>}"
 
 Instance settings that go with this connection, described in docs/setup/ENTRA.md:
 BARKPARK_OIDC_KEEP_OWNER=on BARKPARK_OIDC_EMAIL_FROM_UPN=on

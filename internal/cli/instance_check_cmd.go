@@ -11,7 +11,9 @@ package cli
 // init writes a complete env file with generated secrets and the recommended
 // Pensum settings. check reads that file, or the process environment, and
 // prints one line per problem with a doc link. Neither verb talks to a
-// Barkpark server, so both work before the server first starts.
+// Barkpark server, so both work before the server first starts. When check
+// reaches a migrated database, it also reads each OIDC connection's recorded
+// client secret expiry date.
 
 import (
 	"context"
@@ -20,6 +22,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -63,6 +66,23 @@ var instanceDBProbe = psqlInstanceProbe
 
 // instanceTLSProbe dials host:443 and verifies its certificate. Tests replace it.
 var instanceTLSProbe = dialInstanceTLS
+
+// instanceOIDCSecretProbe reads the recorded client secret expiry of each
+// active OIDC connection. Tests replace it.
+var instanceOIDCSecretProbe = psqlOIDCSecretProbe
+
+// instanceNow is the clock for the expiry notes. Tests replace it.
+var instanceNow = time.Now
+
+// instanceOIDCSecret is one active OIDC connection. ExpiresAt is zero when
+// no date is recorded.
+type instanceOIDCSecret struct {
+	Org       string
+	ExpiresAt time.Time
+}
+
+// instanceOIDCSecretWarnDays matches the server's first warning step.
+const instanceOIDCSecretWarnDays = 30
 
 func instanceTargetFlag(a *hzArgs) (string, error) {
 	t := strings.TrimSpace(a.val("target"))
@@ -399,6 +419,9 @@ func instanceCheck(ctx context.Context, env map[string]string, opts instanceChec
 			cancel()
 			if err != nil {
 				add("DATABASE_URL", instanceDocDatabase, "the database is not reachable with DATABASE_SSL=%s: %v.", orDefault(env["DATABASE_SSL"], "off"), err)
+			} else {
+				p, n := instanceOIDCSecretNotes(ctx, dbURL)
+				problems, notes = append(problems, p...), append(notes, n...)
 			}
 			for _, e := range exts {
 				switch {
@@ -507,6 +530,81 @@ func psqlInstanceProbe(ctx context.Context, dbURL string) ([]instanceExtension, 
 		return nil, err
 	}
 	return parseInstanceExtensions(outText)
+}
+
+// instanceOIDCSecretQuery returns no rows before the migration that adds the
+// column, so an older server reads as "nothing recorded" rather than an error.
+const instanceOIDCSecretQuery = `SELECT o.slug || '|' || coalesce(to_char(c.client_secret_expires_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), '')
+FROM oidc_connections c JOIN organizations o ON o.id = c.organization_id
+WHERE c.active ORDER BY o.slug;`
+
+const instanceOIDCSecretColumnQuery = `SELECT count(*) FROM information_schema.columns
+WHERE table_name = 'oidc_connections' AND column_name = 'client_secret_expires_at';`
+
+func psqlOIDCSecretProbe(ctx context.Context, dbURL string) ([]instanceOIDCSecret, error) {
+	n, err := psqlQuery(ctx, dbURL, instanceOIDCSecretColumnQuery)
+	if err != nil || strings.TrimSpace(n) != "1" {
+		return nil, err
+	}
+	text, err := psqlQuery(ctx, dbURL, instanceOIDCSecretQuery)
+	if err != nil {
+		return nil, err
+	}
+	return parseInstanceOIDCSecrets(text)
+}
+
+func parseInstanceOIDCSecrets(text string) ([]instanceOIDCSecret, error) {
+	var out []instanceOIDCSecret
+	for _, line := range strings.Split(strings.TrimSpace(text), "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		org, at, ok := strings.Cut(line, "|")
+		if !ok {
+			return nil, fmt.Errorf("unexpected OIDC connection row %q", line)
+		}
+		s := instanceOIDCSecret{Org: org}
+		if at != "" {
+			t, err := time.Parse(time.RFC3339, at)
+			if err != nil {
+				return nil, fmt.Errorf("unexpected OIDC secret expiry %q", at)
+			}
+			s.ExpiresAt = t
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// instanceOIDCSecretNotes turns the recorded expiry dates into a problem for
+// a passed date and a note for every other connection. A database it cannot
+// read, such as one not yet migrated, gives neither.
+func instanceOIDCSecretNotes(ctx context.Context, dbURL string) (problems, notes []instanceProblem) {
+	pctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	secrets, err := instanceOIDCSecretProbe(pctx, dbURL)
+	cancel()
+	if err != nil {
+		return nil, nil
+	}
+	now := instanceNow()
+	for _, s := range secrets {
+		p := instanceProblem{Setting: "oidc:" + s.Org, Doc: instanceDocOIDCSecret}
+		switch days := int(math.Ceil(s.ExpiresAt.Sub(now).Hours() / 24)); {
+		case s.ExpiresAt.IsZero():
+			p.Problem = fmt.Sprintf("the OIDC client secret of org %s has no recorded expiry date, so Barkpark cannot warn before it. Set it with bp org oidc-update %s --client_secret_expires_at <date>.", s.Org, s.Org)
+			notes = append(notes, p)
+		case !s.ExpiresAt.After(now):
+			p.Problem = fmt.Sprintf("the OIDC client secret of org %s expired %s. Sign-ins through it fail. Rotate it.", s.Org, s.ExpiresAt.Format("2006-01-02"))
+			problems = append(problems, p)
+		case days <= instanceOIDCSecretWarnDays:
+			p.Problem = fmt.Sprintf("the OIDC client secret of org %s expires %s, in %d days. Rotate it before then.", s.Org, s.ExpiresAt.Format("2006-01-02"), days)
+			notes = append(notes, p)
+		default:
+			p.Problem = fmt.Sprintf("the OIDC client secret of org %s expires %s.", s.Org, s.ExpiresAt.Format("2006-01-02"))
+			notes = append(notes, p)
+		}
+	}
+	return problems, notes
 }
 
 func parseInstanceExtensions(text string) ([]instanceExtension, error) {

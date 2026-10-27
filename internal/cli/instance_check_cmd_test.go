@@ -12,19 +12,21 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // stubInstanceProbes replaces the database and TLS probes for one test.
 func stubInstanceProbes(t *testing.T, db func(context.Context, string) ([]instanceExtension, error), tlsErr error) *[]string {
 	t.Helper()
 	var dbURLs []string
-	oldDB, oldTLS := instanceDBProbe, instanceTLSProbe
+	oldDB, oldTLS, oldOIDC := instanceDBProbe, instanceTLSProbe, instanceOIDCSecretProbe
 	instanceDBProbe = func(ctx context.Context, u string) ([]instanceExtension, error) {
 		dbURLs = append(dbURLs, u)
 		return db(ctx, u)
 	}
 	instanceTLSProbe = func(context.Context, string) error { return tlsErr }
-	t.Cleanup(func() { instanceDBProbe, instanceTLSProbe = oldDB, oldTLS })
+	instanceOIDCSecretProbe = func(context.Context, string) ([]instanceOIDCSecret, error) { return nil, nil }
+	t.Cleanup(func() { instanceDBProbe, instanceTLSProbe, instanceOIDCSecretProbe = oldDB, oldTLS, oldOIDC })
 	return &dbURLs
 }
 
@@ -554,5 +556,68 @@ func TestInstanceInitContainerAppsSecretsMatchBicep(t *testing.T) {
 		if env[name] == "" {
 			t.Errorf("init leaves %s empty for bicepparam %s", name, m[1])
 		}
+	}
+}
+
+func TestInstanceCheckOIDCSecretExpiry(t *testing.T) {
+	stubInstanceProbes(t, allExtensions, nil)
+	now := time.Date(2026, 11, 1, 8, 0, 0, 0, time.UTC)
+	oldNow := instanceNow
+	instanceNow = func() time.Time { return now }
+	t.Cleanup(func() { instanceNow = oldNow })
+	instanceOIDCSecretProbe = func(context.Context, string) ([]instanceOIDCSecret, error) {
+		return []instanceOIDCSecret{
+			{Org: "expired", ExpiresAt: now.Add(-time.Hour)},
+			{Org: "soon", ExpiresAt: now.Add(10 * 24 * time.Hour)},
+			{Org: "later", ExpiresAt: now.Add(200 * 24 * time.Hour)},
+			{Org: "unset"},
+		}, nil
+	}
+	env := completeEnv(t)
+	env["SMTP_HOST"] = "smtp.example.com"
+	problems, notes := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: map[string]bool{}})
+	if len(problems) != 1 || problems[0].Setting != "oidc:expired" || !strings.Contains(problems[0].Problem, "expired 2026-11-01") {
+		t.Fatalf("problems %v", problems)
+	}
+	want := map[string]string{
+		"oidc:soon":  "expires 2026-11-11, in 10 days",
+		"oidc:later": "expires 2027-05-20.",
+		"oidc:unset": "--client_secret_expires_at",
+	}
+	if len(notes) != len(want) {
+		t.Fatalf("notes %v", notes)
+	}
+	for _, n := range notes {
+		if !strings.Contains(n.Problem, want[n.Setting]) || n.Doc != instanceDocOIDCSecret {
+			t.Fatalf("note %+v, want it to contain %q", n, want[n.Setting])
+		}
+	}
+
+	// A probe error, such as a database not yet migrated, adds nothing.
+	instanceOIDCSecretProbe = func(context.Context, string) ([]instanceOIDCSecret, error) {
+		return nil, errors.New("relation does not exist")
+	}
+	if problems, notes := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: map[string]bool{}}); len(problems)+len(notes) != 0 {
+		t.Fatalf("problems %v notes %v", problems, notes)
+	}
+	// --skip database skips it.
+	called := false
+	instanceOIDCSecretProbe = func(context.Context, string) ([]instanceOIDCSecret, error) { called = true; return nil, nil }
+	instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetContainerApps, skip: map[string]bool{"database": true}})
+	if called {
+		t.Fatal("the OIDC probe ran with --skip database")
+	}
+}
+
+func TestParseInstanceOIDCSecrets(t *testing.T) {
+	got, err := parseInstanceOIDCSecrets("acme|2027-10-27T00:00:00Z\nbeta|\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Org != "acme" || got[0].ExpiresAt.Format("2006-01-02") != "2027-10-27" || got[1].Org != "beta" || !got[1].ExpiresAt.IsZero() {
+		t.Fatalf("got %+v", got)
+	}
+	if _, err := parseInstanceOIDCSecrets("no separator"); err == nil {
+		t.Fatal("want an error for a malformed row")
 	}
 }
