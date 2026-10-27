@@ -40,7 +40,7 @@ pnpm barkpark generate        # generate types from schema
 pnpm dev                      # Next.js on :3000
 ```
 
-The generated `docker-compose.yml` is the Docker alternative: it runs the published image `ghcr.io/barkpark/api` and needs a `.env` with the API's secrets — each starter's README lists them.
+The generated `docker-compose.yml` is the Docker alternative: it runs the published image `ghcr.io/frikkern/barkpark` and needs a `.env` with the API's secrets — each starter's README lists them.
 
 ## Demo eject
 

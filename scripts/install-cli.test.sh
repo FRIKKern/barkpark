@@ -104,9 +104,12 @@ DANGER_LOG="$TMP/danger.log"
 # scrubs the environment so the ONLY way bp resolves is via the rc file this
 # login shell reads. Mirrors what install-cli.sh's own probe asserts, but is
 # computed INDEPENDENTLY here so the proof does not lean on installer internals.
+# $2 is the bin dir the install used: the child must run THAT bp, so a bp in
+# a system dir on this machine (macOS path_helper adds /usr/local/bin) does not
+# satisfy the check.
 child_shell_resolves_bp() {
-  local home="$1"
-  env -i HOME="$home" TERM=dumb bash -l -c 'command -v bp >/dev/null 2>&1'
+  local home="$1" bin="$2"
+  [ "$(env -i HOME="$home" TERM=dumb bash -l -c 'command -v bp' 2>/dev/null | tail -n 1)" = "$bin/bp" ]
 }
 
 run_install() {
@@ -124,7 +127,7 @@ H1="$TMP/home1"; BIN1="$TMP/bin1"
 mkdir -p "$H1" "$BIN1"
 # Precondition: a brand-new terminal does NOT resolve bp (nothing installed).
 check "precondition: fresh child shell does NOT resolve bp yet" \
-  "! child_shell_resolves_bp '$H1'"
+  "! child_shell_resolves_bp '$H1' '$BIN1'"
 : > "$DANGER_LOG"
 run_install "$H1" "$BIN1" "$TMP/out1.txt"
 rc=$?
@@ -139,7 +142,7 @@ check "rc patch exports BIN_DIR ahead of PATH" \
   "grep -qF 'export PATH=\"$BIN1:\$PATH\"' '$RC1'"
 # (a) THE postcondition: a freshly-spawned child shell now resolves bp.
 check "(a) a freshly-spawned child shell resolves bp after install" \
-  "child_shell_resolves_bp '$H1'"
+  "child_shell_resolves_bp '$H1' '$BIN1'"
 # (d) GUI-agent caveat printed.
 check "(d) GUI-agent stale-PATH caveat is printed" \
   "grep -qF 'already-running agent' '$TMP/out1.txt'"
@@ -165,7 +168,7 @@ check "(c) marker appears exactly once before and after re-run" \
 check_eq "(c) rc file is byte-identical after re-run (no double-append)" \
   "$before_sha" "$after_sha"
 check "re-run still resolves bp in a fresh child shell" \
-  "child_shell_resolves_bp '$H1'"
+  "child_shell_resolves_bp '$H1' '$BIN1'"
 
 echo "== when a fresh shell already resolves bp, no rc file is touched =="
 H3="$TMP/home3"; BIN3="$TMP/bin3"
@@ -187,6 +190,42 @@ check "seeded-rc install does NOT re-announce a patch" \
   "! grep -qF 'added $BIN3 to PATH' '$TMP/out3.txt'"
 check "seeded-rc install still prints the GUI-agent caveat" \
   "grep -qF 'already-running agent' '$TMP/out3.txt'"
+
+echo "== an explicit BARKPARK_BIN_DIR that is not writable stops the install =="
+H4="$TMP/home4"; RO4="$TMP/ro4"
+mkdir -p "$H4" "$RO4"; chmod 555 "$RO4"
+run_install "$H4" "$RO4/sub" "$TMP/out4.txt"
+rc=$?
+check "(f) installer exits non-zero" "[ '$rc' != 0 ]"
+check "(f) it names BARKPARK_BIN_DIR" "grep -qF \"BARKPARK_BIN_DIR='$RO4/sub' is not writable\" '$TMP/out4.txt'"
+check "(f) nothing fell back to ~/.local/bin" "[ ! -e '$H4/.local/bin/bp' ]"
+chmod 755 "$RO4"
+
+echo "== with no BARKPARK_BIN_DIR, bp replaces the bp already on PATH =="
+H5="$TMP/home5"; OLD5="$TMP/old5"
+mkdir -p "$H5" "$OLD5"
+printf '#!/bin/sh\necho old\n' > "$OLD5/bp"; chmod +x "$OLD5/bp"
+env -i PATH="$OLD5:$FAKE:/usr/bin:/bin" HOME="$H5" SHELL="/bin/bash" \
+  DANGER_LOG="$DANGER_LOG" BARKPARK_CLI_RELEASE_BASE="https://example.invalid/rel" \
+  /bin/sh "$HERE/install-cli.sh" > "$TMP/out5.txt" 2>&1
+rc=$?
+check "(g) installer exits 0" "[ '$rc' = 0 ]"
+check "(g) it installs into the existing bp's directory" "grep -qF 'installing into $OLD5 (the bp already on PATH)' '$TMP/out5.txt'"
+check "(g) the old bp was replaced" "! grep -qx 'echo old' '$OLD5/bp'"
+
+echo "== a bp earlier on PATH than the new one is named in a warning =="
+H6="$TMP/home6"; OTHER6="$TMP/other6"; BIN6="$TMP/bin6"
+mkdir -p "$H6" "$OTHER6" "$BIN6"
+printf '#!/bin/sh\necho "{\\"cli_version\\":\\"1.0.0\\"}"\n' > "$OTHER6/bp"; chmod +x "$OTHER6/bp"
+printf '# barkpark-bp path (added by install-cli)\nexport PATH="%s:$PATH"\n' "$OTHER6" > "$H6/.profile"
+env -i PATH="$OTHER6:$FAKE:/usr/bin:/bin" HOME="$H6" SHELL="/bin/bash" \
+  DANGER_LOG="$DANGER_LOG" BARKPARK_CLI_RELEASE_BASE="https://example.invalid/rel" \
+  BARKPARK_BIN_DIR="$BIN6" /bin/sh "$HERE/install-cli.sh" > "$TMP/out6.txt" 2>&1
+rc=$?
+check "(h) installer exits 0" "[ '$rc' = 0 ]"
+check "(h) bp landed in BARKPARK_BIN_DIR" "[ -x '$BIN6/bp' ]"
+check "(h) the warning names the shadowing bp and its version" \
+  "grep -qF 'another bp comes first on PATH: $OTHER6/bp (version 1.0.0)' '$TMP/out6.txt'"
 
 echo "== Windows mirror (install-cli.ps1) carries the same postcondition =="
 PS1="$HERE/install-cli.ps1"

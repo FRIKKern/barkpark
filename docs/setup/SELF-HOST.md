@@ -1,78 +1,157 @@
-<!-- doc-tier: human | canonical-for: self-host-container | budget: 2500tok -->
-# Run Barkpark from the container image
+<!-- doc-tier: human | canonical-for: self-host-guide | budget: 2500tok -->
+# Set up a Barkpark instance for Pensum
 
-This page covers an instance that runs the `api/Dockerfile` image on a container platform, such as Azure Container Apps with one replica and a managed PostgreSQL server. It is experimental: the first such instance is Gyldendal's Pensum instance. For a single Ubuntu server, use [GO-LIVE.md](GO-LIVE.md) instead.
+This guide takes you from an Azure subscription to Pensum sign-in, in run order, on two paths that share the settings. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
 
-## Health probes
-
-| Path | Answers | Use it for |
+| Path | What runs | Where the settings live |
 |---|---|---|
-| `GET /livez` | Always `200 {"status":"ok"}` while the BEAM serves HTTP. It reads no database. | Liveness probe |
-| `GET /readyz` | `200` when the database answers `SELECT 1`, no migration is pending and Oban is running; otherwise `503`. The body names each check: `{"status":"ready","checks":{"database":true,"migrations":true,"oban":true}}`. | Readiness and startup probes |
-| `GET /status.json` | Component health, running commit, migration state and `uptime_seconds`. | Uptime monitors and people |
+| [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu 22.04 or later server, with local PostgreSQL and Caddy for TLS. | `/opt/barkpark/.env` |
+| [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
 
-Neither probe needs a token or counts against rate limits. Point the liveness probe at `/livez` so a slow Postgres takes the replica out of traffic through `/readyz` instead of restarting it. The first boot runs migrations and seeds, so give the startup probe a window of at least 300 seconds, the same `start_period` the root `docker-compose.yml` uses.
+## Before you start on Azure
 
-```yaml
-probes:
-  - type: Liveness
-    httpGet: { path: /livez, port: 4000 }
-  - type: Readiness
-    httpGet: { path: /readyz, port: 4000 }
-  - type: Startup
-    httpGet: { path: /readyz, port: 4000 }
-    periodSeconds: 10
-    failureThreshold: 30
+A new subscription has no resource providers. Register these and rerun the loop until each line says `Registered`:
+
+<!-- run -->
+```bash
+for p in Compute Network Storage App DBforPostgreSQL KeyVault OperationalInsights ManagedIdentity; do
+  az provider register --namespace "Microsoft.$p"
+  az provider show -n "Microsoft.$p" --query "join(' ', [namespace,registrationState])" -o tsv
+done
 ```
 
-## What the instance reports without barkpark-agent
+Check VM sizes and quota with `az vm list-skus --location <region> --size Standard_D2 -o table` and `az vm list-usage --location <region> -o table`.
 
-On the managed Hetzner boxes, `barkpark-agent` (`internal/agent/report.go`) sends host health to the control plane. A container instance runs no agent and no control plane. The instance serves the signals it can measure itself, and Azure measures the host.
+## Decide the host name and the org slug
 
-| Agent report field | Where to read it on a container instance |
-|---|---|
-| `health_checks`, `health_status` | `GET /readyz` and `GET /status.json` |
-| `git_commit`, `version` | `GET /status.json` keys `commit` and `version` |
-| `req_per_s`, `p95_ms`, `err_5xx_per_s` | `GET /v1/instance/request-stats` with a token |
-| `beam_pss_bytes`, `mem_used_percent` | `vm_memory_total` in `GET /v1/instance/metrics` (operator token), and the Container Apps metric `WorkingSetBytes` |
-| `cpu_percent` | Container Apps metric `UsageNanoCores` |
-| `service_restarts` | Container Apps metric `RestartCount`. `uptime_seconds` in `/status.json` also resets at each restart. |
-| `pg_size_bytes`, `disk_used_percent` | PostgreSQL Flexible Server metrics `storage_used` and `storage_percent`; Azure Files share capacity for media |
-| `backup_state` | Flexible Server automated backups for the database; media backups need their own schedule |
+The host name becomes `PHX_HOST`, and passkeys stop working if it changes later. It must be a DNS name; with `PHX_SCHEME=https` the server refuses an IP address. The Entra ID redirect URI contains the org slug, so fix the slug before you register the app. See [the sign-in URL section](ENTRA.md#sign-in-url-and-redirect-uri).
 
-The agent's load, swap, runaway-process and systemd slot fields describe a shared Linux host and have no meaning inside one container.
+## Write and check the settings file
 
-## Features that start local processes
+On your machine, install `bp` 1.26.5 or newer and write a settings file:
 
-The image ships the BEAM release, `bash`, `wget` and Debian's base tools. It has no `git`, `node`, `npm`, `claude`, `codex`, `bp`, `tmux`, `systemd`, `xmllint` or `procps` (`ps`, `kill`). The features below start one of those programs from the API node. Turn off each one you do not use.
+<!-- run -->
+```bash
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp instance init --target <target> --host <host> --studio-origin <studio origin> \
+  --owner-email <owner email> --operator-emails <operator emails> \
+  --breakglass-email <breakglass email>
+```
 
-| Feature | Module that starts the process | Program | Setting that turns it off |
-|---|---|---|---|
-| Studio chat with Claude, chat titles, readiness probe | `Barkpark.StudioChat.Provider.Claude`, `.Titles`, `.Probe` | `claude`, `kill` | `BARKPARK_CAPABILITIES_OFF=studio_chat` (or `BARKPARK_CLAUDE_CHAT=off` for the Claude provider only) |
-| Studio chat with Codex | `Barkpark.StudioChat.Runtime.Codex.Session`, `.Readiness` | `codex` | `BARKPARK_CAPABILITIES_OFF=studio_chat` |
-| Studio chat repository context | `Barkpark.StudioChat.ContextIdentity` | `git` | `BARKPARK_CAPABILITIES_OFF=studio_chat` |
-| Cycle fleet release capture | `Barkpark.CycleFleet.ReleaseCaptureAdapter` | `bp` | `BARKPARK_CAPABILITIES_OFF=cycle_fleet` (turning off `epic_fleet` also refuses cycle routes) |
-| Site builder | `Barkpark.Sites.DeployRunner` | `bash deploy/site-deploy.sh`, which runs `npm ci`, under `systemd-run` when present | Off unless `BARKPARK_SITE_DEPLOY_APPLY=1` |
-| Site serving commit | `Barkpark.Sites.ServingMemory` | `git rev-parse HEAD` | Set `BARKPARK_GIT_SHA`; without `git` the commit reads as unknown |
-| Self-update | `Barkpark.SelfUpdate.Runner` | `bash scripts/self-update.sh`, `git`, `mix` | Off unless `BARKPARK_SELF_UPDATE_APPLY=1` |
-| Studio terminal | `BarkparkWeb.Studio.TmuxConsole` | `tmux` | `BARKPARK_TMUX_CONSOLE=off` |
-| ONIX export validation | `Barkpark.Plugins.OnixEdit.Export.Validator` | `xmllint` | Leave `onixedit` out of `BARKPARK_PLUGINS` |
-| Workspace export cleanup | `Barkpark.Tenancy.WorkspaceBundle.Janitor` | `ps` | No setting. Without `ps` the janitor keeps every stale bundle file instead of deleting it. |
-| Workspace export space check | `Barkpark.Tenancy.WorkspaceBundle.Archive` | `df` | No setting needed; `df` is in the image. |
-| Image processing on Windows | `Barkpark.Media.ImageBackend.Magick` | `magick` | Linux uses the libvips NIF and starts no process. |
+`<target>` is `vm` for Path A and `containerapps` for Path B. Leave out `--studio-origin` unless you run a separate Studio; then give its origin. `--breakglass-email` is the real mailbox of a person outside SSO who holds a password and TOTP.
 
-`Barkpark.PortReaper` runs `kill` only for the chat, cycle, site and self-update processes above. Two more features need something outside the image without starting a process from the API. Connectors (Slack, Linear) talk to a separate Node bridge and stay off while `CONNECTORS_CONNECT_SECRET` is unset. Indx search stays idle without `INDX_API_BASE`; if you use it, set `BARKPARK_INDX_STATE_DIR` to persistent storage such as the Azure Files mount, because the image's default path is lost when the replica restarts.
+`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes new keys, a database password, the first admin token with its id on `BARKPARK_OPERATOR_TOKEN_IDS`, and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET`, without which a fresh database does not finish migrating. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
 
-For a Pensum-only instance with core, media and Studio, set:
+<!-- run -->
+```bash
+bp instance check --env-file barkpark.env --target <target> --skip database,media,url
+```
+
+`bp instance check` lists each problem with a doc link and exits 1 on any. `--skip` leaves out server probes, which `deploy.sh` and `barkpark-ops` run.
+
+## Path A: a single VM
+
+1. Create a resource group, an ssh key and an Ubuntu 22.04 or later VM with 2 vCPU and 4 GB or more, and open ports 22, 80 and 443:
+
+   <!-- run -->
+   ```bash
+   RG=<resource group>
+   az group create -n "$RG" -l swedencentral
+   test -f ~/.ssh/barkpark || ssh-keygen -t ed25519 -N '' -f ~/.ssh/barkpark
+   az vm create -g "$RG" -n barkpark --image Ubuntu2204 --size Standard_D2als_v7 \
+     --location swedencentral --admin-username azureuser --ssh-key-values ~/.ssh/barkpark.pub \
+     --public-ip-address-dns-name <dns label>
+   az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900
+   ```
+
+2. The host name is then `<dns label>.swedencentral.cloudapp.azure.com`. For your own domain, create a DNS A record to the VM's public IP instead. Caddy needs one of them for a certificate.
+3. Copy the file and run `deploy.sh` over ssh. It keeps its own `DATABASE_URL` and keys, and deletes the copy once merged:
+
+   <!-- run -->
+   ```bash
+   scp -i ~/.ssh/barkpark barkpark.env azureuser@<ip>:/tmp/pensum.env
+   curl -fsSLO https://raw.githubusercontent.com/FRIKKern/barkpark/main/deploy.sh
+   ssh -i ~/.ssh/barkpark azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
+   ```
+
+   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env`, mode 600, in 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). It waits up to 3 minutes for HTTPS, installs `bp` for root and runs `bp instance check`. The banner prints the result and a login command.
+4. <!-- run --> On your machine, run `bp setup --target connect --server https://<host> --token "$(ssh -i ~/.ssh/barkpark azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`.
+
+To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. To update, run `sudo git -C /opt/barkpark pull`. A post-merge hook rebuilds and restarts. Rollback is in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
+
+## Path B: Azure Container Apps
+
+`deploy/azure/main.bicep` puts Postgres on a private network and adds jobs for backups and checks. Next to `barkpark.env`, fetch it and deploy. It takes about 8 minutes:
+
+<!-- run -->
+```bash
+RG=<resource group>
+u=https://raw.githubusercontent.com/FRIKKern/barkpark/main/deploy/azure
+for f in main.bicep acr-pull.bicep monitor.bicep main.example.bicepparam; do curl -fsSLO "$u/$f"; done
+cp main.example.bicepparam main.bicepparam
+az group create -n "$RG" -l norwayeast
+az deployment group create -g "$RG" -n barkpark -p main.bicepparam -p alertEmail=<alert email> -o none
+```
+
+`alertEmail` gets [alerts](SELF-HOST-OPERATIONS.md#container-apps-alerts). The admin token in `barkpark.env` is an operator token. Connect once `/readyz` answers, a minute later:
+
+<!-- run -->
+```bash
+URL=$(az deployment group show -g <resource group> -n barkpark --query properties.outputs.url.value -o tsv)
+curl -fsS --retry 30 --retry-delay 10 --retry-all-errors "$URL/readyz"
+bp setup --target connect --server "$URL" --token "$(sed -n 's/^BARKPARK_SEED_ADMIN_TOKEN=//p' barkpark.env)"
+```
+
+<!-- run hook=jobs --> Run `az containerapp job start -g <resource group> -n barkpark-ops` for `bp instance check` in the network, and the same with `barkpark-backup` for a [backup](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill).
+
+To change a setting, edit `barkpark.env` and deploy again. [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#container-apps) covers updates, jobs, health checks and cost.
+
+## Pensum settings
+
+`bp instance init` writes these for both paths:
 
 ```bash
+BARKPARK_SELF_UPDATE_CHECK=off
+BARKPARK_RETIRE_SSE_ON_SIGTERM=1
+BARKPARK_ALWAYS_ALLOWED_ORIGINS=https://<host>,<studio origin>
+BARKPARK_STUDIO_SSO_ORIGINS=<studio origin>
 BARKPARK_PLUGINS=media
-BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
 BARKPARK_TMUX_CONSOLE=off
+BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
+BARKPARK_OPERATOR_EMAILS=<operator emails>
+BARKPARK_OPERATOR_FAIL_CLOSED=1
+BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1
+BARKPARK_CLOUD_HANDOFF=off
+BARKPARK_BREAKGLASS_EMAILS=<breakglass email>
+BARKPARK_TOKEN_EXPIRY_WARNINGS=on
+BARKPARK_OIDC_KEEP_OWNER=on
+BARKPARK_OIDC_EMAIL_FROM_UPN=on
+BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 ```
 
-Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset. An empty `BARKPARK_PLUGINS` is the plugin kill switch and turns off media too, so name `media` explicitly.
+- `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server. Studio sign-in reads only `BARKPARK_STUDIO_SSO_ORIGINS`.
+- `BARKPARK_BOOTSTRAP_OWNER_EMAIL` makes that email the owner of the default workspace while the users table is empty.
+- An empty `BARKPARK_PLUGINS` turns off media too, so name `media`.
+- [ENTRA.md](ENTRA.md#the-bootstrap-owner) explains `BARKPARK_OIDC_KEEP_OWNER` and `BARKPARK_OIDC_EMAIL_FROM_UPN`.
+- `BARKPARK_BREAKGLASS_EMAILS` lets the [break-glass account](ENTRA.md#break-glass-account) sign in with a password and TOTP, or a passkey, while the org allows only SSO.
+- Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
 
-## Keys, moves, backups and SSO
+### Operator access
 
-Key rotation in Key Vault, moving an instance onto managed Postgres, scheduled backups with the restore drill, and SSO with Entra ID are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
+Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it. A 403 from `bp org` names the calling token's id in its hint.
+
+**Mail.** Optional. Without `SMTP_HOST`, no sign-in links, password resets or invitations go out. SSO with a break-glass account needs no mail.
+
+## Sign in with Entra ID
+
+Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token. After a test sign-in, turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Once the break-glass account exists, run `bp org auth-methods <org> sso`. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List the Studio's origin in `BARKPARK_STUDIO_SSO_ORIGINS` with no path and no trailing slash, then run `bp instance check --env-file <file> --studio-url <studio url>`. A workspace owner or the admin token gets the Studio's `BARKPARK_TOKEN` line from `bp instance studio-token --workspace <ws>` (bp 1.26.3).
+
+## Check the instance
+
+<!-- run path=a -->
+```bash
+curl -fsS https://<host>/readyz           # {"status":"ready",...}
+bp whoami -o table | grep -x 'auth_tier: admin'
+```
+
+Then sign in at `https://<host>/studio` through Entra ID. Continue with backups in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).

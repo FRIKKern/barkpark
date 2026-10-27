@@ -247,6 +247,26 @@ defmodule Barkpark.Sso.OidcTest do
 
       assert URI.decode_query(URI.parse(url).query)["scope"] == "openid profile email"
     end
+
+    test "an Entra connection that trusts IdP MFA requests amr mfa as an essential claim" do
+      {_org, c} = connection("mfareq", %{trust_idp_mfa: true, tenant_id: "tid-1"})
+      p = Map.put(Oidc.new_auth_params(), :redirect_uri, "https://bp/cb")
+      {:ok, url} = Oidc.authorize_url(c, p)
+
+      assert Jason.decode!(URI.decode_query(URI.parse(url).query)["claims"]) == %{
+               "id_token" => %{"amr" => %{"essential" => true, "values" => ["mfa"]}}
+             }
+    end
+
+    test "no claims parameter without trust_idp_mfa or without a tenant id" do
+      p = Map.put(Oidc.new_auth_params(), :redirect_uri, "https://bp/cb")
+
+      for {slug, extra} <- [{"nomfa", %{tenant_id: "tid-1"}}, {"notid", %{trust_idp_mfa: true}}] do
+        {_org, c} = connection(slug, extra)
+        {:ok, url} = Oidc.authorize_url(c, p)
+        refute Map.has_key?(URI.decode_query(URI.parse(url).query), "claims")
+      end
+    end
   end
 
   describe "strict validation" do
@@ -517,6 +537,179 @@ defmodule Barkpark.Sso.OidcTest do
                  jwks_uri: @issuer <> "/j",
                  group_role_mappings: %{"g" => "superadmin"}
                })
+    end
+  end
+
+  describe "the bootstrap owner signs in through Entra" do
+    setup do
+      Barkpark.Repo.delete_all(Barkpark.Accounts.User)
+      ws = Tenancy.establish_default_workspace!()
+      {:ok, owner} = Barkpark.Accounts.BootstrapOwner.run("Owner@Contoso.example")
+      {org, c} = connection("entraorg", %{tenant_id: "tid-1"})
+      {:ok, _} = Tenancy.assign_workspace_to_organization(ws, org.id)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_email_from_upn) end)
+      %{owner: owner, c: c}
+    end
+
+    test "the email claim matches the owner, ignoring case", %{owner: owner, c: c} do
+      mock_op(claims(%{"tid" => "tid-1", "email" => "OWNER@contoso.example"}))
+
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+    end
+
+    test "with no email claim, the UPN matches the owner", %{owner: owner, c: c} do
+      Application.put_env(:barkpark, :oidc_email_from_upn, true)
+
+      mock_op(
+        claims(%{"tid" => "tid-1", "preferred_username" => "owner@CONTOSO.example"})
+        |> Map.delete("email")
+      )
+
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+    end
+
+    test "with the setting off, a token with no email claim is refused as before", %{c: c} do
+      mock_op(
+        claims(%{"tid" => "tid-1", "preferred_username" => "owner@contoso.example"})
+        |> Map.delete("email")
+      )
+
+      assert {:error, :no_email} = callback(c)
+    end
+
+    test "a UPN that is not an address is not used", %{c: c} do
+      Application.put_env(:barkpark, :oidc_email_from_upn, true)
+      mock_op(claims(%{"tid" => "tid-1", "preferred_username" => "owner"}) |> Map.delete("email"))
+
+      assert {:error, :no_email} = callback(c)
+    end
+  end
+
+  describe "IdP MFA claims" do
+    import ExUnit.CaptureLog
+    require Logger
+
+    test "the MFA claims a trusting connection sees are logged at debug, without user claims" do
+      c = %Barkpark.Sso.OidcConnection{trust_idp_mfa: true, mfa_acr: nil}
+      claims = %{"amr" => ["pwd", "mfa"], "acr" => "1", "email" => "who@example.com"}
+
+      Logger.put_module_level(Oidc, :debug)
+      on_exit(fn -> Logger.delete_module_level(Oidc) end)
+      prev = Logger.level()
+      Logger.configure(level: :debug)
+      on_exit(fn -> Logger.configure(level: prev) end)
+
+      log = capture_log([level: :debug], fn -> assert Oidc.idp_mfa?(c, claims) end)
+
+      assert log =~ ~s(amr=["pwd", "mfa"])
+      assert log =~ "counted=true"
+      refute log =~ "who@example.com"
+    end
+  end
+
+  describe "group mappings never leave an org with no owner" do
+    setup do
+      Application.put_env(:barkpark, :oidc_keep_owner, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_keep_owner) end)
+    end
+
+    defp owned_org do
+      {:ok, org} = Tenancy.create_organization(%{slug: "ownedorg", name: "Owned"})
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "owned-ws", name: "WS"})
+      {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+      {:ok, owner} =
+        Accounts.register_user(%{email: "sso@oidcorg.com", password: "correct horse ok"})
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, owner.id, "owner", "user")
+      {org, ws, owner}
+    end
+
+    defp attrs(org, mappings) do
+      %{
+        organization_id: org.id,
+        issuer: @issuer,
+        client_id: @client_id,
+        client_secret: "s",
+        authorization_endpoint: @issuer <> "/authorize",
+        token_endpoint: @issuer <> "/token",
+        jwks_uri: @issuer <> "/jwks",
+        group_role_mappings: mappings
+      }
+    end
+
+    defp role_in(ws_id, user_id) do
+      Barkpark.Repo.one(
+        from m in Barkpark.Tenancy.Membership,
+          where:
+            m.workspace_id == ^ws_id and m.principal_type == "user" and
+              m.principal_id == ^user_id,
+          select: m.role
+      )
+    end
+
+    test "a mapping with no owner group is refused when the org has an owner" do
+      {org, _ws, _owner} = owned_org()
+
+      assert {:error, :no_owner_mapping} =
+               Oidc.create_connection(attrs(org, %{"editors" => "member"}))
+
+      {:ok, c} = Oidc.create_connection(attrs(org, %{}))
+
+      assert {:error, :no_owner_mapping} =
+               Oidc.update_connection(c, %{group_role_mappings: %{"editors" => "admin"}})
+    end
+
+    test "a mapping that keeps an owner group is saved as before" do
+      {org, _ws, _owner} = owned_org()
+      mappings = %{"owners" => "owner", "editors" => "member"}
+
+      assert {:ok, c} = Oidc.create_connection(attrs(org, mappings))
+      assert c.group_role_mappings == mappings
+
+      assert {:ok, c} = Oidc.update_connection(c, %{group_role_mappings: %{"owners" => "owner"}})
+      assert c.group_role_mappings == %{"owners" => "owner"}
+      assert {:ok, _} = Oidc.update_connection(c, %{group_role_mappings: %{}})
+    end
+
+    test "a sign-in never demotes the last owner" do
+      {org, ws, owner} = owned_org()
+      {:ok, c} = Oidc.create_connection(attrs(org, %{"owners" => "owner", "editors" => "member"}))
+      verify_domain!(org, "oidcorg.com")
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+      assert role_in(ws.id, owner.id) == "owner"
+    end
+
+    test "with the setting off, mappings and sign-ins behave as before" do
+      Application.delete_env(:barkpark, :oidc_keep_owner)
+      {org, ws, owner} = owned_org()
+      verify_domain!(org, "oidcorg.com")
+      assert {:ok, c} = Oidc.create_connection(attrs(org, %{"editors" => "member"}))
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, _, _} = callback(c)
+      assert role_in(ws.id, owner.id) == "member"
+    end
+
+    test "a sign-in demotes an owner while another owner remains" do
+      {org, ws, owner} = owned_org()
+      {:ok, c} = Oidc.create_connection(attrs(org, %{"owners" => "owner", "editors" => "member"}))
+
+      {:ok, other} =
+        Accounts.register_user(%{email: "other@oidcorg.com", password: "correct horse ok"})
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, other.id, "owner", "user")
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+      assert role_in(ws.id, owner.id) == "member"
+      assert role_in(ws.id, other.id) == "owner"
     end
   end
 end

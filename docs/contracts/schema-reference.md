@@ -9,6 +9,8 @@ Every key a schema may declare when you `POST /v1/schemas/:dataset` (or `bp sche
 
 A top-level `validations` list is read by `parse/2` but not cast, so it is not stored.
 
+`GET /v1/schemas` serves five of these keys in camelCase: `deskGroups`, `listPreview`, `initialValues`, `crossValidations` and `ownerScoped`. The POST accepts those spellings and stores them under the snake_case key, so a pulled schema posted back unchanged keeps them. When a body carries both spellings, the snake_case value wins.
+
 ## Keys every field accepts
 
 | Key | Meaning |

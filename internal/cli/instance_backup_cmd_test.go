@@ -106,6 +106,12 @@ func TestInstanceRestoreDiffs(t *testing.T) {
 	if m, err := pgMajor("170004"); err != nil || m != 17 {
 		t.Fatalf("pgMajor(170004) = %d, %v", m, err)
 	}
+	if restoreMajorAllowed(14, 17) != nil || restoreMajorAllowed(17, 17) != nil {
+		t.Fatal("a same or newer target major was refused")
+	}
+	if restoreMajorAllowed(17, 14) == nil {
+		t.Fatal("an older target major was allowed")
+	}
 }
 
 func TestExtractMediaRefusesEscape(t *testing.T) {

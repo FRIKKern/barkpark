@@ -168,6 +168,7 @@ defmodule Barkpark.Groq do
   # fails leaves the map out rather than the result.
   defp source_map(tree, result, state, eval_opts, mode) do
     Process.put(:groq_src_mode, :direct)
+    Barkpark.Groq.GeoShape.reset_budget()
 
     ctx = %Barkpark.Groq.Evaluator{
       source: {DocumentSource, state},

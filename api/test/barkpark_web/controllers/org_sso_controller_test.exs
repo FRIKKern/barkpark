@@ -157,7 +157,10 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
           client_secret: "s"
         })
 
-      assert %{"error" => %{"code" => "validation_failed"}} = json_response(conn, 422)
+      assert %{"error" => %{"code" => "validation_failed", "hint" => hint}} =
+               json_response(conn, 422)
+
+      assert hint =~ Barkpark.SetupDocs.url(:oidc)
       assert Repo.aggregate(OidcConnection, :count) == 0
     end
 
@@ -219,6 +222,68 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
           name <-
             ~w(tenant_id strict_validation trust_idp_mfa mfa_acr scopes token_endpoint_auth_method),
           do: assert(name in names)
+    end
+
+    test "the client secret expiry is stored, returned, reset by a new date and cleared by a rotation without one",
+         ctx do
+      {slug, created} = setup_org(ctx)
+      assert created["client_secret_expires_at"] == nil
+
+      # What bp sends for `oidc-update <org> --client_secret_expires_at 2027-10-27`.
+      updated =
+        req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc?client_secret_expires_at=2027-10-27")
+        |> json_response(200)
+
+      assert updated["client_secret_expires_at"] == "2027-10-27T00:00:00.000000Z"
+
+      c = Oidc.connection_for_org_slug(slug)
+      c |> Ecto.Changeset.change(client_secret_expiry_warned_days: 14) |> Repo.update!()
+
+      # Entra prints a full time; a new date clears the warning step.
+      req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+        client_secret_expires_at: "2027-11-01T09:30:00Z"
+      })
+      |> json_response(200)
+
+      c = Oidc.connection_for_org_slug(slug)
+      assert c.client_secret_expires_at == ~U[2027-11-01 09:30:00.000000Z]
+      assert c.client_secret_expiry_warned_days == nil
+
+      rotated =
+        req(
+          ctx.bearer,
+          :put,
+          "/v1/admin/orgs/#{slug}/oidc/client-secret?client_secret_expires_at=2028-10-27",
+          %{client_secret: "second-secret"}
+        )
+        |> json_response(200)
+
+      assert rotated["client_secret_expires_at"] == "2028-10-27T00:00:00.000000Z"
+
+      rotated =
+        req(ctx.bearer, :put, "/v1/admin/orgs/#{slug}/oidc/client-secret", %{
+          client_secret: "third-secret"
+        })
+        |> json_response(200)
+
+      assert rotated["client_secret_expires_at"] == nil
+
+      assert req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+               client_secret_expires_at: "next year"
+             })
+             |> json_response(422)
+
+      names =
+        for %{"id" => "org." <> _ = id, "flags" => fs} <-
+              Barkpark.Plugins.Capabilities.manifest("admin", project: false)["commands"],
+            id in ["org.oidc-create", "org.oidc-update", "org.oidc-rotate-secret"],
+            do: {id, "client_secret_expires_at" in Enum.map(fs, & &1["name"])}
+
+      assert Enum.sort(names) == [
+               {"org.oidc-create", true},
+               {"org.oidc-rotate-secret", true},
+               {"org.oidc-update", true}
+             ]
     end
   end
 
@@ -288,6 +353,35 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
         })
 
       assert %{"error" => %{"code" => "validation_failed"}} = json_response(conn, 422)
+    end
+  end
+
+  describe "group mappings and owners" do
+    test "a mapping that would leave the org with no owner is refused", ctx do
+      Application.put_env(:barkpark, :oidc_keep_owner, true)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_keep_owner) end)
+      {slug, _} = setup_org(ctx)
+
+      {:ok, owner} =
+        Barkpark.Accounts.register_user(%{
+          email: uniq("o") <> "@x.example",
+          password: "correct horse ok"
+        })
+
+      {:ok, _} = Tenancy.Auth.create_membership(ctx.ws.id, owner.id, "owner", "user")
+
+      conn =
+        req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+          group_role_mappings: %{"editors" => "member"}
+        })
+
+      assert %{"error" => %{"code" => "validation_failed"} = error} = json_response(conn, 422)
+      assert inspect(error) =~ "no owner"
+
+      assert req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
+               group_role_mappings: %{"owners" => "owner", "editors" => "member"}
+             })
+             |> json_response(200)
     end
   end
 

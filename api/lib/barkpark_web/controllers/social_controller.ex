@@ -14,6 +14,12 @@ defmodule BarkparkWeb.SocialController do
   alias Barkpark.Sso.Social
   alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.SessionIssuer
+  alias BarkparkWeb.SignInFailure
+  alias BarkparkWeb.SsoFlows
+
+  require Logger
+
+  @expired "This sign-in expired, or it was started in another browser or tab. Start it again."
 
   def start(conn, %{"provider" => name}) do
     case Social.provider(name) do
@@ -25,7 +31,7 @@ defmodule BarkparkWeb.SocialController do
         url = Social.authorize_url(p, state, callback_uri(name))
 
         conn
-        |> put_session(:social_state, state)
+        |> SsoFlows.start("social:" <> name, state)
         |> redirect(external: url)
     end
   end
@@ -37,17 +43,31 @@ defmodule BarkparkWeb.SocialController do
   def callback(conn, %{"provider" => name, "code" => code, "state" => state})
       when is_binary(code) do
     p = Social.provider(name)
+    flow = p && SsoFlows.take(conn, "social:" <> name, state, &legacy_flow/1)
 
     cond do
       is_nil(p) ->
         Sso.record_login_failure("social:#{name}", nil, :provider_not_enabled)
         ErrorResponse.emit_custom(conn, 404, "not_found", "provider not enabled")
 
-      state != get_session(conn, :social_state) ->
-        Sso.record_login_failure("social:#{name}", nil, :state_mismatch)
-        ErrorResponse.emit_custom(conn, 400, "malformed", "state mismatch")
+      match?({:error, _}, flow) ->
+        {:error, reason} = flow
+        Sso.record_login_failure("social:#{name}", nil, reason)
+        Logger.warning("[Social] #{name}: state rejected: #{reason}")
+
+        SignInFailure.respond(conn, %{
+          status: 400,
+          code: "malformed",
+          message: "state mismatch",
+          details: %{reason: Atom.to_string(reason)},
+          hint: "Start the sign-in again in the same browser.",
+          page_message: @expired,
+          start_path: start_path(name)
+        })
 
       true ->
+        {:ok, conn, _flow} = flow
+
         case Social.handle_callback(p, code, callback_uri(name)) do
           {:ok, user} ->
             # era-w8-sso-mfa-binding: org-require-MFA binds at session-mint
@@ -89,25 +109,56 @@ defmodule BarkparkWeb.SocialController do
           {:error, reason} ->
             # Failed exchange lands on the audit trail (era-w8).
             Sso.record_login_failure("social:#{name}", nil, reason)
+            text = SignInFailure.reason_text(reason)
+            Logger.warning("[Social] #{name}: callback rejected: #{text}")
 
-            ErrorResponse.emit_custom(conn, 401, "unauthorized", "social callback rejected", %{
-              reason: to_string(reason)
+            SignInFailure.respond(conn, %{
+              status: 401,
+              code: "unauthorized",
+              message: "social callback rejected",
+              details: %{reason: text},
+              page_message: "The provider did not accept this sign-in. Try again.",
+              start_path: start_path(name)
             })
         end
     end
   end
 
-  def callback(conn, %{"provider" => _} = params) do
+  def callback(conn, %{"provider" => name} = params) do
     case params do
       %{"error" => err} ->
-        ErrorResponse.emit_custom(conn, 401, "unauthorized", "the provider returned an error", %{
-          reason: to_string(err)
+        text = SignInFailure.reason_text(err)
+        Logger.warning("[Social] #{name}: the provider returned #{text}")
+
+        SignInFailure.respond(conn, %{
+          status: 401,
+          code: "unauthorized",
+          message: "the provider returned an error",
+          details: %{reason: text},
+          page_message: "The provider refused this sign-in. Try again.",
+          start_path: start_path(name)
         })
 
       _ ->
-        ErrorResponse.emit_custom(conn, 400, "malformed", "code and state are required")
+        SignInFailure.respond(conn, %{
+          status: 400,
+          code: "malformed",
+          message: "code and state are required",
+          page_message: @expired,
+          start_path: start_path(name)
+        })
     end
   end
+
+  # A start before sign-in state moved to the server kept it in one slot.
+  defp legacy_flow(conn) do
+    case get_session(conn, :social_state) do
+      state when is_binary(state) -> %{state: state}
+      _ -> nil
+    end
+  end
+
+  defp start_path(name), do: "/v1/auth/social/#{URI.encode_www_form(name)}/start"
 
   defp callback_uri(name), do: BarkparkWeb.Endpoint.url() <> "/v1/auth/social/#{name}/callback"
 end

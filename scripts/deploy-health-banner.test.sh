@@ -80,7 +80,7 @@ slice() {
   local src="$1" out="$2"
   local health done_sec
   health="$(awk '/^# ── 11\. Wait for healthy/{f=1} /^# ── 12\. TLS/{f=0} f' "$src")"
-  done_sec="$(awk '/^# ── Done/{f=1} f' "$src")"
+  done_sec="$(awk '/^# ── Done/{f=1} /^# ── End of body/{f=0} f' "$src")"
 
   # Fail-closed: a renamed section header must red HERE, not quietly test air.
   case "$health" in
@@ -103,6 +103,7 @@ slice() {
     printf 'PHX_SCHEME="http"\n'
     printf 'TLS_READY=""\n'
     printf 'ADMIN_TOKEN="bp_admin_HARNESS"\n'
+    printf 'ADMIN_TOKEN_FILE="/etc/barkpark/admin-token"\n'
     printf 'APP_PORT="${APP_PORT:-4000}"\n'
     printf 'HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}"\n'
     printf 'HEALTH_INTERVAL="${HEALTH_INTERVAL:-1}"\n'
@@ -182,7 +183,8 @@ check "(b) does NOT claim Barkpark is running" '! grep -q "Barkpark is running!"
 check "(b) says it is not answering" 'grep -q "NOT ANSWERING" "$TMP/b.out"'
 check "(b) names the port it probed" 'grep -q "localhost:$DEAD_PORT/status.json" "$TMP/b.out"'
 check "(b) offers journalctl as the next step" 'grep -q "journalctl -u barkpark" "$TMP/b.out"'
-check "(b) still prints the once-only admin token" 'grep -q "bp_admin_HARNESS" "$TMP/b.out"'
+check "(b) still names the admin token file" 'grep -q "saved to /etc/barkpark/admin-token" "$TMP/b.out"'
+check "(b) never prints the admin token itself" '! grep -q "bp_admin_HARNESS" "$TMP/b.out"'
 check "(b) exits non-zero" "[ $b_rc -ne 0 ]"
 
 # ── (c) HEALTHY — a server that answers 200 ──────────────────────────────────

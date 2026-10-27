@@ -656,7 +656,7 @@ func classifyErrorBody(status int, body []byte) apiError {
 	// envelope still falls through to the no-code arm further down that decides
 	// between exit 2 and exit 4.
 	if env, ok := apierr.Parse(body); ok && env.Code != "" {
-		return apiError{
+		ae := apiError{
 			exit:       exitForCode(env.Code),
 			code:       env.Code,
 			message:    env.Message,
@@ -664,6 +664,10 @@ func classifyErrorBody(status int, body []byte) apiError {
 			serverHint: env.Hint,
 			details:    normalizeDetails(env.Details),
 		}
+		if env.Required == "platform_operator" {
+			applyOperatorRefusal(&ae)
+		}
+		return ae
 	}
 
 	// Bare string-valued `error` (lifecycle veto / intents / plugin-settings).
@@ -1665,5 +1669,22 @@ func (e apiError) errorMessage() string {
 			return e.message
 		}
 		return "request failed"
+	}
+}
+
+// operatorHint is the remedy for a 403 that required platform operator access.
+const operatorHint = "this route needs platform operator access. Add the token's id to BARKPARK_OPERATOR_TOKEN_IDS, or its owner's email to BARKPARK_OPERATOR_EMAILS, then restart the server. `bp token ls` lists token ids. A token with no owner user, such as the one deploy.sh prints, can only be granted by its id"
+
+// applyOperatorRefusal rewrites a `required: platform_operator` 403 so it says
+// what was required. Servers before this fix sent the generic forbidden message
+// and the code-keyed hint "use a token ... that is a member of this workspace",
+// which cannot pass the operator gate. A server hint that already names the
+// operator env vars is kept, because it can name the caller's own token id.
+func applyOperatorRefusal(ae *apiError) {
+	if ae.message == "" || ae.message == "token lacks required permission" {
+		ae.message = "platform operator access required"
+	}
+	if !strings.Contains(ae.serverHint, "BARKPARK_OPERATOR_") {
+		ae.serverHint = operatorHint
 	}
 }

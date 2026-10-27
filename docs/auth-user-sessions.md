@@ -148,9 +148,8 @@ same confirmation) and `GET|POST /auth/reset/:token` (the emailed link's
 landing page; render never consumes the token, only submit verifies it).
 Magic-link (passwordless) is the same shape: `GET|POST /login/magic`
 (request, anti-enumeration) + `GET /auth/magic/:token` (consume →
-`user_session`). Both browser landings (`/auth/reset`, `/auth/magic`) are
-the emailed URLs the JSON flow already sent but which 404'd in a browser.
-Magic-link consume routes through the **same second-factor step as password
+`user_session`). Both browser landings are the emailed URLs of the JSON flow.
+Magic-link consume takes the **same second-factor step as password
 login** (`complete_sign_in/3`): a TOTP-armed user gets `/login/mfa`, an
 org-governed factor-less user is blocked — magic-link is never a 2FA bypass
 (the JSON `/magic-login` still issues directly; the browser surface is the
@@ -165,8 +164,12 @@ An external Studio (barkpark-studio) signs in the same way server-side: Cloud's
 `/studio-signin` checks team membership and an exact callback allowlist
 (`bp barkparks studio-callback add`), the box mints a `purpose: "exchange"`
 ticket (audience + PKCE S256), and the Studio's server trades it at
-`POST /v1/auth/login-tickets/exchange` for a login session. Neither door takes
-the other's ticket; only the Default workspace is ever seated.
+`POST /v1/auth/login-tickets/exchange` for a login session. No door takes
+another's ticket; only the Default workspace is ever seated.
+Or the instance's OIDC: a start with `return_to` on a `BARKPARK_STUDIO_SSO_ORIGINS`
+origin, `state` and PKCE gets a `purpose: "sso"` ticket for `/v1/auth/sso/exchange`.
+`bp login --sso` returns to `http://127.0.0.1:<port>/callback` (RFC 8252,
+unlisted), audience `bp-cli`.
 
 ### Org-wide required MFA (opt-in overlay)
 

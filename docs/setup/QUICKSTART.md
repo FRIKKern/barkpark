@@ -18,7 +18,7 @@ irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli
 
 | Env | Effect |
 |---|---|
-| `BARKPARK_BIN_DIR` | install dir (default `/usr/local/bin`, fallback `~/.local/bin`) |
+| `BARKPARK_BIN_DIR` | install dir; the install stops if it is not writable. Unset: the dir of the `bp` already on `PATH`, else `/usr/local/bin`, else `~/.local/bin`. The installer warns when another `bp` comes first on `PATH`. |
 | `BARKPARK_CLI_VERSION` | pin a release, e.g. `1.0.1` (default: latest `cli-v*`) |
 
 Binaries are sha256-verified against the release's `checksums.txt` (hard-fail on mismatch; if a release ships no checksums the installer warns and continues).

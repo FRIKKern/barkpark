@@ -39,7 +39,7 @@ describe('starter quick start leads with bp setup, not docker compose', () => {
 
     it(`${starter}: the Docker alternative names the published image and the secrets`, async () => {
       const readme = await fs.readFile(path.join(TEMPLATES, starter, 'README.md'), 'utf8')
-      expect(readme).toContain('ghcr.io/barkpark/api:latest')
+      expect(readme).toContain('ghcr.io/frikkern/barkpark:latest')
       for (const key of [
         'BARKPARK_CLOAK_KEY',
         'BARKPARK_KEK',

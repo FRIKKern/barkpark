@@ -6,6 +6,7 @@ defmodule Barkpark.Sso do
   push. The role defaults to `member`; SCIM group→role sync (era-w4) refines it.
   """
   import Ecto.Query, warn: false
+  require Logger
 
   alias Barkpark.{Accounts, Repo}
   alias Barkpark.Accounts.User
@@ -245,22 +246,76 @@ defmodule Barkpark.Sso do
   semantics — the IdP's current groups win, including downgrades). Returns the
   number of memberships updated. Only called when a mapping actually resolved;
   an absent groups claim never touches existing roles.
+
+  With `BARKPARK_OIDC_KEEP_OWNER` on, a sync never removes a workspace's last
+  owner. Where the user is the only owner, the membership keeps `owner` and a
+  warning is logged.
   """
   @spec set_org_member_role(binary(), binary(), String.t()) :: non_neg_integer()
   def set_org_member_role(org_id, user_id, role)
       when is_binary(org_id) and is_binary(user_id) and is_binary(role) do
     ws_ids = Repo.all(from w in Workspace, where: w.organization_id == ^org_id, select: w.id)
 
+    kept =
+      if role == "owner" or not keep_owner?(),
+        do: [],
+        else: sole_owner_workspaces(ws_ids, user_id)
+
+    if kept != [] do
+      Logger.warning(
+        "[Sso] kept user #{user_id} as owner of #{length(kept)} workspace(s) in org " <>
+          "#{org_id}: the group mapping gave #{role}, which would leave no owner"
+      )
+    end
+
     {n, _} =
       Repo.update_all(
         from(m in Tenancy.Membership,
           where:
             m.principal_type == "user" and m.principal_id == ^user_id and
-              m.workspace_id in ^ws_ids and m.role != ^role
+              m.workspace_id in ^(ws_ids -- kept) and m.role != ^role
         ),
         set: [role: role, updated_at: DateTime.utc_now()]
       )
 
     n
+  end
+
+  @doc "Is `BARKPARK_OIDC_KEEP_OWNER` on? Off by default."
+  @spec keep_owner?() :: boolean()
+  def keep_owner?, do: Application.get_env(:barkpark, :oidc_keep_owner, false) == true
+
+  @doc "Does any workspace of `org_id` have a user owner?"
+  @spec org_has_owner?(binary() | nil) :: boolean()
+  def org_has_owner?(org_id) when is_binary(org_id) do
+    Repo.exists?(
+      from m in Tenancy.Membership,
+        join: w in Workspace,
+        on: w.id == m.workspace_id,
+        where: w.organization_id == ^org_id and m.principal_type == "user" and m.role == "owner"
+    )
+  end
+
+  def org_has_owner?(_), do: false
+
+  # Workspaces among `ws_ids` where `user_id` is the only user owner.
+  defp sole_owner_workspaces([], _user_id), do: []
+
+  defp sole_owner_workspaces(ws_ids, user_id) do
+    Repo.all(
+      from m in Tenancy.Membership,
+        as: :m,
+        where:
+          m.workspace_id in ^ws_ids and m.principal_type == "user" and
+            m.principal_id == ^user_id and m.role == "owner",
+        where:
+          not exists(
+            from o in Tenancy.Membership,
+              where:
+                o.workspace_id == parent_as(:m).workspace_id and o.principal_type == "user" and
+                  o.role == "owner" and o.principal_id != ^user_id
+          ),
+        select: m.workspace_id
+    )
   end
 end

@@ -207,6 +207,24 @@ defmodule BarkparkWeb.LiveEventsControllerTest do
       frames(Task.await(task, 5_000).resp_body)
     end
 
+    # task-7a9e8f31be8b7580: the cap is per address; one credential shared by
+    # several hosts (a preview site's browser token, CI shards) is not cut off.
+    test "over the cap from one address, another address still opens", %{token: t} do
+      [a, b] = for _ <- 1..2, do: open_stream(t)
+      Process.sleep(200)
+
+      other =
+        Task.async(fn ->
+          %{scoped_conn() | remote_ip: {10, 0, 0, 9}}
+          |> put_req_header("authorization", "Bearer " <> t)
+          |> put_req_header("accept", "text/event-stream")
+          |> get(path())
+        end)
+
+      Process.sleep(200)
+      for task <- [other, a, b], do: assert([%{event: "welcome"} | _] = close_stream(task))
+    end
+
     test "at the cap a stream opens; over it the answer is goaway; a closed stream frees its slot",
          %{token: t} do
       [a, b] = for _ <- 1..2, do: open_stream(t)

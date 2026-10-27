@@ -1233,6 +1233,11 @@ jobs:
             # partition is not a measurement: on a real sample the gap between a
             # job's created and started was 3s while the residual computed 4s.
             # Writing either as 0 would invent a verdict nobody measured.
+            #
+            # A job cancelled before it ran can carry completed_at BEFORE
+            # started_at. Run 40515284929 summed one such window to self=-2392,
+            # the writer route answered 422 and the run recorded no row, so
+            # crown-reconcile redded. Windows with e <= s are dropped first.
             if [ "$QUEUED" != "null" ] && [ "$QUEUED" -gt 0 ]; then
               cands="$(gh api "/repos/$R/actions/workflows/deploy.yml/runs?branch=main&per_page=100" --jq "[.workflow_runs[] | select(.id != ${GITHUB_RUN_ID}) | select(.created_at < \"${started}\") | select(.updated_at >= \"${created}\") | .id] | .[0:10] | .[]")"
               cand_rc=$?
@@ -1252,7 +1257,7 @@ jobs:
                 if [ "$fetch_rc" -ne 0 ]; then
                   echo "::warning::a prior run's job list could not be read — queued_self_seconds stays NULL rather than partial"
                 else
-                  self="$(jq -s --argjson a "$wait_start" --argjson b "$wait_end" '[ .[] | select(.started_at != null and .completed_at != null) | {s: (.started_at | fromdateiso8601), e: (.completed_at | fromdateiso8601)} ] | map(select(.e > $a and .s < $b)) | map({s: ([.s, $a] | max), e: ([.e, $b] | min)}) | sort_by(.s) | reduce .[] as $i ([]; if (length > 0) and ($i.s <= .[-1].e) then (.[0:-1] + [{s: .[-1].s, e: ([.[-1].e, $i.e] | max)}]) else (. + [$i]) end) | map(.e - .s) | add // 0 | floor' /tmp/pd-self-jobs.ndjson)"
+                  self="$(jq -s --argjson a "$wait_start" --argjson b "$wait_end" '[ .[] | select(.started_at != null and .completed_at != null) | {s: (.started_at | fromdateiso8601), e: (.completed_at | fromdateiso8601)} ] | map(select(.e > .s)) | map(select(.e > $a and .s < $b)) | map({s: ([.s, $a] | max), e: ([.e, $b] | min)}) | sort_by(.s) | reduce .[] as $i ([]; if (length > 0) and ($i.s <= .[-1].e) then (.[0:-1] + [{s: .[-1].s, e: ([.[-1].e, $i.e] | max)}]) else (. + [$i]) end) | map(.e - .s) | add // 0 | floor' /tmp/pd-self-jobs.ndjson)"
                   self_rc=$?
                   if [ "$self_rc" -eq 0 ] && [ -n "$self" ]; then
                     SELF="$self"

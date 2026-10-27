@@ -550,8 +550,60 @@ defmodule BarkparkWeb.GroqControllerTest do
   end
 
   test "an unsupported function is a 422 naming it", %{conn: conn, token: token} do
-    body = conn |> get_query(token, ~s'geo::distance(1, 2)') |> json_response(422)
-    assert body["error"]["description"] =~ "geo::distance"
+    body = conn |> get_query(token, ~s'delta::operation()') |> json_response(422)
+    assert body["error"]["description"] =~ "delta::operation"
+  end
+
+  # task-1db8d92a284a23d2: geo::contains/intersects spend a work budget per
+  # evaluation pass (positions × positions). Each call below is the worst case
+  # at the position cap: two 999-gons whose boxes overlap but which never meet.
+  defp geo_circle(cx, cy) do
+    pts =
+      for i <- 0..998,
+          do: [cx + :math.cos(i / 999 * 2 * :math.pi()), cy + :math.sin(i / 999 * 2 * :math.pi())]
+
+    %{"type" => "Polygon", "coordinates" => [pts ++ [hd(pts)]]}
+  end
+
+  defp timed_geo_422(conn, token, query, params) do
+    {micros, conn} = :timer.tc(fn -> get_query(conn, token, query, params) end)
+    body = json_response(conn, 422)
+    assert body["error"]["type"] == "queryLimitError"
+    assert body["error"]["description"] =~ "budget of 5000000 position pairs"
+    assert micros < 3_000_000, "took #{div(micros, 1000)} ms"
+  end
+
+  test "geo checks in a subquery in a projection stop at their budget with 422", %{
+    conn: conn,
+    token: token
+  } do
+    # Three books, six calls of a million pairs each: the sixth is refused.
+    query =
+      ~s'*[_type == "book"]{_id, "near": *[_type == "book" && _id != ^._id && geo::intersects($a, $b)]._id}'
+
+    params = %{
+      "$a" => Jason.encode!(geo_circle(0, 0)),
+      "$b" => Jason.encode!(geo_circle(1.9, 1.9))
+    }
+
+    timed_geo_422(conn, token, query, params)
+  end
+
+  test "geo checks behind a dereference stop at their budget with 422", %{
+    conn: conn,
+    token: token,
+    scope: scope
+  } do
+    publish!("author", %{"_id" => "geo", "name" => "Geo", "area" => geo_circle(1.9, 1.9)}, scope)
+
+    for id <- ["g1", "g2", "g3"],
+        do: publish!("book", %{"_id" => id, "author" => ref("geo")}, scope)
+
+    # Round one has not loaded the author and costs little; round two has it.
+    query =
+      ~s'*[_type == "book"]{_id, "near": *[_type == "book" && _id != ^._id && geo::intersects($a, author->area)]._id}'
+
+    timed_geo_422(conn, token, query, %{"$a" => Jason.encode!(geo_circle(0, 0))})
   end
 
   describe "title, which the writer keeps in the documents.title column" do

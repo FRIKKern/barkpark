@@ -19,6 +19,14 @@ defmodule BarkparkWeb.OidcControllerTest do
     defp fx(k), do: Application.get_env(:barkpark, :oidc_test)[k]
   end
 
+  defmodule RefusingIdP do
+    @behaviour Barkpark.Sso.Oidc.HTTP
+    @impl true
+    def post_form(_url, _params, _headers), do: {:error, {:http_status, 400}}
+    @impl true
+    def get_json(_url), do: {:ok, %{"keys" => []}}
+  end
+
   setup do
     prev = Application.get_env(:barkpark, :oidc_http)
     Application.put_env(:barkpark, :oidc_http, MockIdP)
@@ -64,9 +72,10 @@ defmodule BarkparkWeb.OidcControllerTest do
     conn = get(conn, "/v1/auth/oidc/octrl/start")
     assert redirected_to(conn, 302) =~ @issuer <> "/authorize?"
     assert redirected_to(conn, 302) =~ "code_challenge_method=S256"
-    # PKCE verifier + state stashed for the callback
-    assert get_session(conn, :oidc_verifier)
-    assert get_session(conn, :oidc_state)
+    # The flow is kept on the server under its state; the session lists the state.
+    assert [state] = get_session(conn, :sso_states)
+    assert redirected_to(conn, 302) =~ "state=#{state}"
+    assert Repo.aggregate(Barkpark.Sso.Flow, :count) == 1
   end
 
   test "GET callback with a valid code + matching state mints a user session", %{conn: conn} do
@@ -97,6 +106,32 @@ defmodule BarkparkWeb.OidcControllerTest do
       |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
 
     assert json_response(conn, 400)
+  end
+
+  defmodule NoDiscoveryIdP do
+    @behaviour Barkpark.Sso.Oidc.HTTP
+    @impl true
+    def post_form(_url, _params, _headers), do: {:error, :econnrefused}
+    @impl true
+    def get_json(_url), do: {:error, :econnrefused}
+  end
+
+  test "start with an unreadable discovery document is 502 with a guide link", %{conn: conn} do
+    {:ok, org} = Tenancy.create_organization(%{slug: "octrl-nodisc", name: "octrl-nodisc"})
+
+    {:ok, _c} =
+      Oidc.create_connection(%{
+        organization_id: org.id,
+        issuer: "https://nodisc.example.com",
+        client_id: @client_id,
+        client_secret: "s"
+      })
+
+    Application.put_env(:barkpark, :oidc_http, NoDiscoveryIdP)
+
+    body = conn |> get("/v1/auth/oidc/octrl-nodisc/start") |> json_response(502)
+    assert body["error"]["code"] == "upstream_unavailable"
+    assert body["error"]["hint"] =~ Barkpark.SetupDocs.url(:oidc)
   end
 
   test "start for an org without a connection is 404", %{conn: conn} do
@@ -221,6 +256,309 @@ defmodule BarkparkWeb.OidcControllerTest do
            )
   end
 
+  describe "a Studio signs in through the instance's SSO (task-8bdf1b15305af840)" do
+    @studio "https://studio.example.com"
+    @verifier String.duplicate("v", 43)
+
+    setup do
+      prev = Application.get_env(:barkpark, :studio_sso_origins)
+      Application.put_env(:barkpark, :studio_sso_origins, [@studio])
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :studio_sso_origins, prev),
+          else: Application.delete_env(:barkpark, :studio_sso_origins)
+      end)
+    end
+
+    defp challenge, do: Base.url_encode64(:crypto.hash(:sha256, @verifier), padding: false)
+
+    defp start_query(return_to),
+      do:
+        URI.encode_query(%{
+          "return_to" => return_to,
+          "state" => "studio-state",
+          "code_challenge" => challenge()
+        })
+
+    # The IdP signs eve in and the callback answers for the Studio that started.
+    defp studio_callback(conn) do
+      nonce = "n#{System.unique_integer([:positive])}"
+
+      mock_op(%{
+        "iss" => @issuer,
+        "aud" => @client_id,
+        "exp" => System.system_time(:second) + 300,
+        "nonce" => nonce,
+        "email" => "eve@octrl.com"
+      })
+
+      studio = %{
+        "to" => @studio <> "/auth/cloud/callback",
+        "origin" => @studio,
+        "state" => "studio-state",
+        "challenge" => challenge()
+      }
+
+      conn =
+        conn
+        |> init_test_session(%{
+          oidc_state: "s1",
+          oidc_nonce: nonce,
+          oidc_verifier: "v1",
+          oidc_studio: studio
+        })
+        |> get("/v1/auth/oidc/octrl/callback?code=#{nonce}&state=s1")
+
+      location = URI.parse(redirected_to(conn, 302))
+      assert "#{location.scheme}://#{location.host}#{location.path}" == studio["to"]
+      refute get_session(conn, "user_session")
+      URI.decode_query(location.query)
+    end
+
+    defp exchange(audience, ticket, verifier \\ @verifier) do
+      scoped_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/auth/sso/exchange",
+        Jason.encode!(%{ticket: ticket, audience: audience, code_verifier: verifier})
+      )
+    end
+
+    test "start keeps the Studio's return only for an allowed origin", %{conn: conn} do
+      allowed =
+        get(conn, "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/auth/cloud/callback"))
+
+      assert redirected_to(allowed, 302) =~ @issuer <> "/authorize?"
+      assert [flow] = Repo.all(Barkpark.Sso.Flow)
+      assert flow.studio["origin"] == @studio
+
+      for to <- [
+            "https://evil.example.com/cb",
+            "https://studio.example.com.evil.test/cb",
+            "https://studio.example.com/cb#x",
+            "/studio"
+          ] do
+        refused = get(scoped_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(to))
+        assert json_response(refused, 400)["error"]["code"] == "malformed"
+      end
+
+      Application.delete_env(:barkpark, :studio_sso_origins)
+      refused = get(scoped_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/cb"))
+      assert json_response(refused, 400)
+    end
+
+    test "the callback sends a ticket the Studio trades once for a login session", %{conn: conn} do
+      %{"ticket" => ticket, "state" => "studio-state"} = studio_callback(conn)
+
+      body = json_response(exchange(@studio, ticket), 201)
+      assert body["user"]["email"] == "eve@octrl.com"
+      assert Accounts.verify_user_session_token(body["token"]).email == "eve@octrl.com"
+
+      assert json_response(exchange(@studio, ticket), 401)["error"]["code"] == "invalid_ticket"
+    end
+
+    for {name, audience, verifier} <- [
+          {"audience", "https://evil.example.com", String.duplicate("v", 43)},
+          {"verifier", "https://studio.example.com", "x"}
+        ] do
+      test "a wrong #{name} is refused and the session it carried is revoked", %{conn: conn} do
+        %{"ticket" => ticket} = studio_callback(conn)
+        [session] = Repo.all(from t in Barkpark.Auth.LoginTicket, select: t.api_token)
+
+        assert json_response(exchange(unquote(audience), ticket, unquote(verifier)), 401)
+        refute Accounts.verify_user_session_token(session)
+        assert Repo.all(Barkpark.Auth.LoginTicket) == []
+      end
+    end
+
+    test "the Cloud exchange does not take an SSO ticket", %{conn: conn} do
+      %{"ticket" => ticket} = studio_callback(conn)
+
+      assert scoped_conn()
+             |> put_req_header("content-type", "application/json")
+             |> post(
+               "/v1/auth/login-tickets/exchange",
+               Jason.encode!(%{ticket: ticket, audience: @studio, code_verifier: @verifier})
+             )
+             |> json_response(401)
+    end
+  end
+
+  describe "bp login --sso signs the CLI in over a loopback redirect (RFC 8252)" do
+    @verifier String.duplicate("w", 43)
+    @loopback "http://127.0.0.1:53123/callback"
+
+    setup do
+      prev = Application.get_env(:barkpark, :studio_sso_origins)
+      Application.delete_env(:barkpark, :studio_sso_origins)
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :studio_sso_origins, prev),
+          else: Application.delete_env(:barkpark, :studio_sso_origins)
+      end)
+    end
+
+    defp cli_challenge, do: Base.url_encode64(:crypto.hash(:sha256, @verifier), padding: false)
+
+    defp cli_start(params) do
+      query =
+        %{"return_to" => @loopback, "state" => "cli-state", "code_challenge" => cli_challenge()}
+        |> Map.merge(params)
+        |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+        |> Map.new()
+        |> URI.encode_query()
+
+      get(scoped_conn(), "/v1/auth/oidc/octrl/start?" <> query)
+    end
+
+    # The IdP signs `email` in to org `slug` and the callback answers the CLI.
+    defp cli_callback(slug \\ "octrl", claims \\ %{}) do
+      nonce = "n#{System.unique_integer([:positive])}"
+
+      mock_op(
+        Map.merge(
+          %{
+            "iss" => @issuer,
+            "aud" => @client_id,
+            "exp" => System.system_time(:second) + 300,
+            "nonce" => nonce,
+            "email" => "cli@#{slug}.com"
+          },
+          claims
+        )
+      )
+
+      cli = %{
+        "to" => @loopback,
+        "origin" => "bp-cli",
+        "state" => "cli-state",
+        "challenge" => cli_challenge()
+      }
+
+      conn =
+        scoped_conn()
+        |> init_test_session(%{
+          oidc_state: "s1",
+          oidc_nonce: nonce,
+          oidc_verifier: "v1",
+          oidc_studio: cli
+        })
+        |> get("/v1/auth/oidc/#{slug}/callback?code=#{nonce}&state=s1")
+
+      location = URI.parse(redirected_to(conn, 302))
+      assert "#{location.scheme}://#{location.host}:#{location.port}#{location.path}" == @loopback
+      URI.decode_query(location.query)
+    end
+
+    defp cli_exchange(ticket, audience \\ "bp-cli", verifier \\ @verifier) do
+      scoped_conn()
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/auth/sso/exchange",
+        Jason.encode!(%{ticket: ticket, audience: audience, code_verifier: verifier})
+      )
+    end
+
+    test "a loopback return with PKCE starts a sign-in bound to the bp-cli audience" do
+      for to <- [@loopback, "http://[::1]:8123/callback"] do
+        conn = cli_start(%{"return_to" => to, "code_challenge_method" => "S256"})
+        assert redirected_to(conn, 302) =~ @issuer <> "/authorize?"
+      end
+
+      flows = Repo.all(Barkpark.Sso.Flow)
+      assert length(flows) == 2
+      assert Enum.all?(flows, &(&1.studio["origin"] == "bp-cli"))
+    end
+
+    test "any other http return is refused" do
+      for to <- [
+            "http://localhost:53123/callback",
+            "http://192.168.1.20:53123/callback",
+            "http://127.0.0.1.evil.test:53123/callback",
+            "https://127.0.0.1:53123/callback",
+            "http://127.0.0.1/callback",
+            "http://127.0.0.1:53123/other",
+            "http://127.0.0.1:53123/callback?next=x",
+            "http://127.0.0.1:53123/callback#x",
+            "http://user@127.0.0.1:53123/callback"
+          ] do
+        body = cli_start(%{"return_to" => to}) |> json_response(400)
+        assert body["error"]["code"] == "malformed", to
+      end
+
+      assert Repo.all(Barkpark.Sso.Flow) == []
+    end
+
+    test "a loopback return without PKCE S256 or state is refused" do
+      for params <- [
+            %{"code_challenge" => nil},
+            %{"code_challenge" => "short"},
+            %{"code_challenge_method" => "plain"},
+            %{"state" => nil}
+          ] do
+        assert cli_start(params) |> json_response(400)
+      end
+    end
+
+    test "the ticket is traded once for a session with an expiry" do
+      %{"ticket" => ticket, "state" => "cli-state"} = cli_callback()
+
+      body = json_response(cli_exchange(ticket), 201)
+      assert body["user"]["email"] == "cli@octrl.com"
+      assert body["expires_at"]
+      assert body["idp_mfa"] == false
+      assert Accounts.verify_user_session_token(body["token"]).email == "cli@octrl.com"
+
+      assert json_response(cli_exchange(ticket), 401)["error"]["code"] == "invalid_ticket"
+    end
+
+    test "a CLI ticket is refused at a Studio audience and the session is revoked" do
+      %{"ticket" => ticket} = cli_callback()
+      [session] = Repo.all(from t in Barkpark.Auth.LoginTicket, select: t.api_token)
+
+      assert json_response(cli_exchange(ticket, "http://127.0.0.1:53123"), 401)
+      refute Accounts.verify_user_session_token(session)
+    end
+
+    test "a Studio ticket is refused at the bp-cli audience" do
+      {:ok, user} =
+        Accounts.register_user(%{email: "s@octrl.com", password: "a-long-password-1234"})
+
+      {:ok, session} = Accounts.create_user_session_token(user)
+      studio = "https://studio.example.com"
+      {:ok, ticket} = Barkpark.Auth.mint_sso_ticket(session, user.email, studio, cli_challenge())
+
+      assert json_response(cli_exchange(ticket), 401)
+      refute Accounts.verify_user_session_token(session)
+    end
+
+    test "a loopback origin listed for a Studio keeps the Studio's audience" do
+      Application.put_env(:barkpark, :studio_sso_origins, ["http://127.0.0.1:53123"])
+
+      assert redirected_to(cli_start(%{}), 302) =~ @issuer <> "/authorize?"
+      assert [flow] = Repo.all(Barkpark.Sso.Flow)
+      assert flow.studio["origin"] == "http://127.0.0.1:53123"
+    end
+
+    test "the CLI session carries the IdP's MFA like a browser session" do
+      mfa_org("climfa", %{trust_idp_mfa: true})
+
+      %{"ticket" => ticket} = cli_callback("climfa", %{"amr" => ["pwd", "mfa"]})
+      body = json_response(cli_exchange(ticket), 201)
+      assert body["idp_mfa"] == true
+
+      {_user, session} = Accounts.verify_user_session(body["token"])
+      assert session.mfa_verified_at
+
+      assert scoped_conn()
+             |> put_req_header("authorization", "Bearer " <> body["token"])
+             |> get("/v1/auth/sessions")
+             |> json_response(200)
+    end
+  end
+
   describe "IdP MFA in a require-MFA org" do
     # An org that requires MFA, with a workspace so JIT-provisioned users are
     # governed, and an OIDC connection with `extra` settings.
@@ -305,6 +643,155 @@ defmodule BarkparkWeb.OidcControllerTest do
 
       body = mfa_callback("idpoff", %{"amr" => ["mfa"]}) |> json_response(403)
       assert body["error"]["code"] == "mfa_enrolment_required"
+    end
+  end
+
+  describe "a failed callback in a browser" do
+    import ExUnit.CaptureLog
+
+    test "a callback without the session cookie shows a page to start again" do
+      log =
+        capture_log(fn ->
+          conn =
+            scoped_conn()
+            |> put_req_header("accept", "text/html")
+            |> init_test_session(%{})
+            |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
+
+          body = html_response(conn, 400)
+          assert body =~ "started in another browser or tab"
+          assert body =~ ~s(href="/v1/auth/oidc/octrl/start")
+          refute body =~ "JSON"
+        end)
+
+      assert log =~ "no sign-in state in the session cookie"
+    end
+
+    test "a different state is logged apart from a missing cookie" do
+      log =
+        capture_log(fn ->
+          scoped_conn()
+          |> put_req_header("accept", "text/html")
+          |> init_test_session(%{oidc_state: "real", oidc_nonce: "n1", oidc_verifier: "v1"})
+          |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
+          |> html_response(400)
+        end)
+
+      assert log =~ "did not start a sign-in with that state"
+    end
+
+    test "an API client still gets JSON for a state mismatch, with a sign-in hint" do
+      body =
+        scoped_conn()
+        |> init_test_session(%{oidc_state: "real"})
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=forged")
+        |> json_response(400)
+
+      assert body["error"]["hint"] =~ "same browser"
+    end
+
+    test "a refused code exchange is a 401, not a 500, and is logged" do
+      Application.put_env(:barkpark, :oidc_http, RefusingIdP)
+
+      log =
+        capture_log(fn ->
+          conn =
+            scoped_conn()
+            |> put_req_header("accept", "text/html")
+            |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+            |> get("/v1/auth/oidc/octrl/callback?code=fake&state=s1")
+
+          assert html_response(conn, 401) =~ "did not accept this sign-in"
+
+          json =
+            scoped_conn()
+            |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+            |> get("/v1/auth/oidc/octrl/callback?code=fake&state=s1")
+            |> json_response(401)
+
+          assert json["error"]["details"]["reason"] == "http_status 400"
+        end)
+
+      assert log =~ "callback rejected: http_status 400"
+    end
+  end
+
+  describe "started sign-ins are kept by state" do
+    defp start_state(conn) do
+      conn = get(conn, "/v1/auth/oidc/octrl/start")
+      loc = URI.parse(redirected_to(conn, 302))
+      %{"state" => state, "nonce" => nonce} = URI.decode_query(loc.query)
+      {conn, state, nonce}
+    end
+
+    defp sign_in_token(nonce) do
+      mock_op(%{
+        "iss" => @issuer,
+        "aud" => @client_id,
+        "exp" => System.system_time(:second) + 300,
+        "nonce" => nonce,
+        "email" => "two@octrl.com"
+      })
+    end
+
+    test "after two starts, the callback for the first one signs in", %{conn: conn} do
+      {conn, first, nonce1} = start_state(conn)
+      {conn, _second, _} = start_state(recycle(conn))
+      sign_in_token(nonce1)
+
+      body =
+        conn
+        |> recycle()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{first}")
+        |> json_response(201)
+
+      assert body["user"]["email"] == "two@octrl.com"
+    end
+
+    test "a used state does not sign in again", %{conn: conn} do
+      {conn, state, nonce} = start_state(conn)
+      sign_in_token(nonce)
+
+      used = conn |> recycle() |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+      assert json_response(used, 201)
+
+      # The same browser, still holding the state in an older cookie copy.
+      body =
+        conn
+        |> recycle()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+        |> json_response(400)
+
+      assert body["error"]["details"]["reason"] == "unknown_state"
+    end
+
+    test "an expired state does not sign in", %{conn: conn} do
+      {conn, state, nonce} = start_state(conn)
+      sign_in_token(nonce)
+
+      Repo.update_all(Barkpark.Sso.Flow,
+        set: [expires_at: DateTime.add(DateTime.utc_now(), -1)]
+      )
+
+      body =
+        conn
+        |> recycle()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+        |> json_response(400)
+
+      assert body["error"]["details"]["reason"] == "state_expired"
+    end
+
+    test "another browser cannot use a started state", %{conn: conn} do
+      {_conn, state, nonce} = start_state(conn)
+      sign_in_token(nonce)
+
+      body =
+        scoped_conn()
+        |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
+        |> json_response(400)
+
+      assert body["error"]["details"]["reason"] == "no_session_state"
     end
   end
 end

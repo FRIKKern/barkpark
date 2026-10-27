@@ -89,6 +89,38 @@ defmodule Barkpark.Groq.ParserTest do
     end
   end
 
+  # task-f5fecd9690f62a7e: an integer literal past int64 is clamped to the
+  # int64 bound, then read as a double, as on Sanity (ecu57yeh, 27 Oct).
+  # Arithmetic stays in doubles; a float literal is never clamped.
+  test "an integer literal past int64 is clamped to the int64 bound" do
+    big = "123456789012345678901234567890"
+    two_63 = 9.223372036854776e18
+
+    for {q, want} <- [
+          {big, two_63},
+          {"-" <> big, -two_63},
+          {"-(#{big})", -two_63},
+          {"99999999999999999999", two_63},
+          {"00" <> big, two_63},
+          {String.duplicate("1234567890", 33), two_63},
+          {"[#{big}]", [two_63]},
+          {~s|{"n": 99999999999999999999}|, %{"n" => two_63}},
+          {big <> " + 1", two_63},
+          {big <> " * 2", 1.8446744073709552e19},
+          {big <> " - 9223372036854775807", 0},
+          {big <> " == 9223372036854775807", true},
+          {big <> " > 9223372036854775806", false},
+          {"math::sum([#{big}, 1])", two_63},
+          {"9223372036854775808", two_63},
+          {"-9223372036854775809", -two_63},
+          {"9007199254740993", 9_007_199_254_740_992},
+          {big <> ".5", 1.2345678901234568e29},
+          {"1e30", 1.0e30}
+        ] do
+      assert eval!(q) == want, q
+    end
+  end
+
   test "slices take parameters" do
     docs = for i <- 1..5, do: %{"_id" => "d#{i}", "_type" => "t"}
 
@@ -579,5 +611,43 @@ defmodule Barkpark.Groq.ParserTest do
       c = constraints(~s|*[_type == "a"]{"x": *[_type == "b" && ref == ^._id]}|)
       assert c.types == ["a"]
     end
+  end
+
+  # task-90c6e9c5557cfcea: string() and array::join write a number as Sanity
+  # does (ecu57yeh, 27 Oct): Go's 'g' format, exponent form when the decimal
+  # exponent is below -4 or at least 6, the exponent signed and two digits.
+  test "a number turns into a string as on Sanity" do
+    for {n, want} <- [
+          {"1", "1"},
+          {"-1", "-1"},
+          {"0", "0"},
+          {"1.5", "1.5"},
+          {"999999", "999999"},
+          {"1000000", "1e+06"},
+          {"1234567", "1.234567e+06"},
+          {"-1234567", "-1.234567e+06"},
+          {"1234567.5", "1.2345675e+06"},
+          {"1e6 + 0.5", "1.0000005e+06"},
+          {"-999999.5", "-999999.5"},
+          {"1e15", "1e+15"},
+          {"1e16", "1e+16"},
+          {"9007199254740993", "9.007199254740992e+15"},
+          {"1e21", "1e+21"},
+          {"-1e21", "-1e+21"},
+          {"1.5e300", "1.5e+300"},
+          {"0.0001", "0.0001"},
+          {"0.00001", "1e-05"},
+          {"-1e-5", "-1e-05"},
+          {"2.5e-5", "2.5e-05"},
+          {"0.0000001", "1e-07"},
+          {"123.456", "123.456"},
+          {"0.1 + 0.2", "0.30000000000000004"},
+          {"10 / 3", "3.3333333333333335"},
+          {"5e-324", "5e-324"}
+        ] do
+      assert eval!("string(#{n})") == want, n
+    end
+
+    assert eval!(~s|array::join([1000000, 0.00001, 12, 1.5], ",")|) == "1e+06,1e-05,12,1.5"
   end
 end

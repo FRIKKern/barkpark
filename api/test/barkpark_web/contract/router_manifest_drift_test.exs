@@ -178,6 +178,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/auth/social/:*/callback"} => "social OAuth redirect target — browser only",
     {"POST", "/v1/auth/sso/route"} =>
       "tells a LOGIN PAGE which SSO provider to redirect to; the answer is a browser redirect",
+    {"POST", "/v1/auth/sso/exchange"} =>
+      "a Studio's server trades the OIDC callback's ticket — needs the Studio's PKCE verifier, not a CLI verb",
 
     # ── WebAuthn ceremonies ────────────────────────────────────────────────
     # Each is one half of a challenge/response with a platform authenticator
@@ -308,7 +310,9 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
       "bp cloud workspace blob push — internal/cli putOneBlob",
     {"POST", "/v1/tokens/elevated"} =>
       "bp token create --permissions …write|admin — internal/cli runTokenCreate",
-    {"GET", "/v1/tokens/current"} => "bp whoami — internal/cli fetchTokenIdentity"
+    {"GET", "/v1/tokens/current"} => "bp whoami — internal/cli fetchTokenIdentity",
+    {"POST", "/v1/auth/studio-tokens"} =>
+      "bp instance studio-token — internal/cli runInstanceStudioToken"
   }
 
   # Routes that SHOULD carry a `bp` verb and do not. This is the census from

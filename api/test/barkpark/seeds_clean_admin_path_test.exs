@@ -90,4 +90,54 @@ defmodule Barkpark.SeedsCleanAdminPathTest do
     assert {:ok, token} = Barkpark.Auth.verify_token(raw)
     assert Enum.sort(token.permissions) == ["admin", "read", "write"]
   end
+
+  # bp instance init --target containerapps writes BARKPARK_SEED_ADMIN_TOKEN_ID
+  # and lists the same UUID on BARKPARK_OPERATOR_TOKEN_IDS before the first boot.
+  test "BARKPARK_SEED_ADMIN_TOKEN_ID sets the seeded token's id" do
+    id = Ecto.UUID.generate()
+    raw = "bp_admin_" <> Base.encode16(:crypto.strong_rand_bytes(24), case: :lower)
+
+    with_env(
+      %{
+        "BARKPARK_SEED_ADMIN_TOKEN" => raw,
+        "BARKPARK_SEED_ADMIN_TOKEN_ID" => id,
+        "BARKPARK_OPERATOR_TOKEN_IDS" => id
+      },
+      fn ->
+        output = capture_io(fn -> Barkpark.Seeds.run(:clean) end)
+        assert output =~ "Admin token id: #{id} (on BARKPARK_OPERATOR_TOKEN_IDS)"
+        refute output =~ raw
+        assert {:ok, token} = Barkpark.Auth.verify_token(raw)
+        assert token.id == id
+      end
+    )
+  end
+
+  test "a malformed BARKPARK_SEED_ADMIN_TOKEN_ID refuses the mint" do
+    with_env(
+      %{
+        "BARKPARK_SEED_ADMIN_TOKEN" => "bp_admin_" <> String.duplicate("ab", 24),
+        "BARKPARK_SEED_ADMIN_TOKEN_ID" => "nope"
+      },
+      fn ->
+        assert_raise Barkpark.Seeds.AdminTokenMintError, ~r/not a UUID/, fn ->
+          capture_io(fn -> Barkpark.Seeds.run(:clean) end)
+        end
+      end
+    )
+  end
+
+  defp with_env(vars, fun) do
+    old = Map.new(vars, fn {k, _} -> {k, System.get_env(k)} end)
+    Enum.each(vars, fn {k, v} -> System.put_env(k, v) end)
+
+    try do
+      fun.()
+    after
+      Enum.each(old, fn
+        {k, nil} -> System.delete_env(k)
+        {k, v} -> System.put_env(k, v)
+      end)
+    end
+  end
 end

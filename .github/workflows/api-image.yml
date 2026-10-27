@@ -1,96 +1,99 @@
 name: api-image
 
-# Publishes the public, multi-arch Barkpark API image `ghcr.io/barkpark/api`
-# from main on every server release (owner ruling #60, 2026-10-03;
-# task-984d287af0689251). The starters' docker-compose.yml pulls
-# `ghcr.io/barkpark/api:latest`, which nothing published before this file.
+# Publishes the multi-arch Barkpark server image `ghcr.io/frikkern/barkpark`
+# from api/Dockerfile (task-e861a03299733475).
 #
-# WHEN. A server release is a merge that changes VERSION (`chore(release):
-# VERSION x.y.z`), so this runs on push to main touching VERSION, plus
-# workflow_dispatch to (re)publish main's current VERSION by hand.
+# WHEN AND WHICH TAGS.
+#   * A release tag push `v<A.B.C>` publishes `<A.B.C>`, `sha-<12 hex>` and
+#     `latest`. Only a release moves `latest`.
+#   * workflow_dispatch with `ref` set to a branch or commit publishes
+#     `sha-<12 hex>` only, so a build of main never claims a version.
+#     `gh workflow run api-image.yml -f ref=main`
+#   * workflow_dispatch with `ref` set to a `v<A.B.C>` tag re-publishes that
+#     release with all three tags.
 #
-# TAGS. `<VERSION>`, `latest`, and `sha-<12 hex>` on one multi-arch manifest
-# (linux/amd64 + linux/arm64). Each arch builds on its own native runner and
-# pushes by digest; the manifest job stitches them, so no QEMU emulation.
+# CREDENTIAL. The workflow's own GITHUB_TOKEN with `packages: write`. The
+# repository lives under FRIKKern, so GITHUB_TOKEN can push to
+# ghcr.io/frikkern/..., and no personal token or repository secret is needed.
 #
-# THE CREDENTIAL, AND WHY IT IS NOT GITHUB_TOKEN. This repository lives under
-# FRIKKern, and GITHUB_TOKEN can only push packages to its own owner's
-# namespace (ghcr.io/frikkern/...). `ghcr.io/barkpark/api` lives under the
-# `barkpark` GitHub organisation, so the push needs a token with
-# write:packages on that organisation:
-#   secrets.GHCR_TOKEN  — a classic PAT (or org-scoped token) with write:packages
-#   vars.GHCR_USER      — the account that token belongs to (optional; defaults
-#                         to github.actor)
-# The owner creates both, then sets the package's visibility to PUBLIC once
-# (a package's first push is private by default), so an anonymous
-# `docker pull ghcr.io/barkpark/api:latest` works.
+# VISIBILITY. A new GHCR package starts private, and the REST API has no call
+# that changes package visibility. The owner sets it to public once in the
+# package settings on github.com (Package settings, Change visibility, Public).
 #
-# WITHOUT THE SECRET this workflow does not build or push anything: the gate job
-# ends green with a ::warning:: and a step-summary line that says the image was
-# NOT published and why. It does not red main on every release for a credential
-# only the owner can mint (task-dee226be3107a98b c4: no permanently-red workflow
-# on main), and it never claims a publish that did not happen.
+# BUILD. Each arch builds on its own native runner and pushes by digest. The
+# manifest job joins the two digests under the tags, then boots the amd64 image
+# against a throwaway Postgres and waits for /readyz, checks that it runs as a
+# non-root user with the self-update check off, and checks that the CA bundle
+# holds the roots Azure Database for PostgreSQL chains to.
 #
-# Build context and args mirror the root docker-compose.yml: repo-root context
-# (the release reads design/ and api/assets/ at compile time) and the three
-# BuildInfo args, so the image reports its real version and commit.
+# The job names are listed in .github/required-checks.json exclusions and in
+# scripts/required-checks.test.sh, so they stay as they are.
 
 on:
   push:
-    branches: [main]
-    paths:
-      - VERSION
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
   workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, commit or v<A.B.C> tag to build. A v tag also tags the version and latest."
+        required: true
+        default: main
+        type: string
 
 concurrency:
-  # PER PUSH SHA ON MAIN (scripts/main-run-concurrency-check.sh): a flat group
-  # would let a later release evict a queued earlier one before a runner picks
-  # it up. Never cancels a main run.
-  group: api-image-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Per push sha on main (scripts/main-run-concurrency-check.sh), and per
+  # requested ref, so two publishes never evict each other. Never cancels.
+  group: api-image-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}-${{ inputs.ref || 'tag' }}
+  cancel-in-progress: false
 
 permissions:
   contents: read
 
 env:
-  IMAGE: ghcr.io/barkpark/api
+  IMAGE: ghcr.io/frikkern/barkpark
 
 jobs:
   gate:
     name: Decide (credential + version)
     runs-on: ubuntu-latest
     outputs:
-      publish: ${{ steps.cred.outputs.publish }}
-      version: ${{ steps.ver.outputs.version }}
+      sha: ${{ steps.ver.outputs.sha }}
       short_sha: ${{ steps.ver.outputs.short_sha }}
+      release: ${{ steps.ver.outputs.release }}
+      version: ${{ steps.ver.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.ref || github.ref }}
           sparse-checkout: VERSION
           sparse-checkout-cone-mode: false
-      - name: Read VERSION
+      - name: Resolve commit, release and version
         id: ver
+        env:
+          REF: ${{ inputs.ref || github.ref_name }}
         run: |
-          version=$(tr -d '[:space:]' < VERSION)
-          case "$version" in
-            ''|*[!0-9.]*) echo "::error::VERSION is '$version', not a dotted version — refusing to tag an image with it"; exit 1 ;;
+          sha=$(git rev-parse HEAD)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${sha:0:12}" >> "$GITHUB_OUTPUT"
+          file_version=$(tr -d '[:space:]' < VERSION)
+          case "$REF" in
+            v[0-9]*.[0-9]*.[0-9]*)
+              version="${REF#v}"
+              case "$version" in *[!0-9.]*) echo "::error::tag '$REF' is not v<A.B.C>"; exit 1 ;; esac
+              if [ "$version" != "$file_version" ]; then
+                echo "::warning::tag $REF and VERSION ($file_version) differ. The image reports $version."
+              fi
+              echo "release=true" >> "$GITHUB_OUTPUT"
+              echo "Release $REF: $IMAGE:$version, :sha-${sha:0:12} and :latest." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              version="$file_version"
+              echo "release=false" >> "$GITHUB_OUTPUT"
+              echo "Build of $REF: $IMAGE:sha-${sha:0:12} only." >> "$GITHUB_STEP_SUMMARY"
+              ;;
           esac
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
-      - name: Is the publish credential configured?
-        id: cred
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: |
-          if [ -n "$GHCR_TOKEN" ]; then
-            echo "publish=true" >> "$GITHUB_OUTPUT"
-            echo "Publishing $IMAGE:${{ steps.ver.outputs.version }} (+ latest, sha-${{ steps.ver.outputs.short_sha }})." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            msg="NOT PUBLISHED: secrets.GHCR_TOKEN is not set, so $IMAGE:${{ steps.ver.outputs.version }} was not built or pushed. The owner adds a token with write:packages on the barkpark organisation (see the header of .github/workflows/api-image.yml), then re-runs this workflow."
-            echo "::warning::$msg"
-            echo "$msg" >> "$GITHUB_STEP_SUMMARY"
-          fi
 
   # Two explicit jobs rather than a matrix: each renders one fixed check-run
   # name (the .exclusions rows in .github/required-checks.json key on them), and
@@ -98,16 +101,20 @@ jobs:
   build-amd64:
     name: Build linux/amd64
     needs: gate
-    if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ vars.GHCR_USER || github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -117,12 +124,12 @@ jobs:
           platforms: linux/amd64
           build-args: |
             BARKPARK_BUILD_VERSION=${{ needs.gate.outputs.version }}
-            BARKPARK_BUILD_COMMIT=${{ github.sha }}
+            BARKPARK_BUILD_COMMIT=${{ needs.gate.outputs.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
             org.opencontainers.image.version=${{ needs.gate.outputs.version }}
-            org.opencontainers.image.description=Barkpark API (Phoenix) — headless CMS server
+            org.opencontainers.image.description=Barkpark server (Phoenix API and Studio)
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
       - name: Record the digest
         env:
@@ -141,16 +148,20 @@ jobs:
   build-arm64:
     name: Build linux/arm64
     needs: gate
-    if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ vars.GHCR_USER || github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -160,12 +171,12 @@ jobs:
           platforms: linux/arm64
           build-args: |
             BARKPARK_BUILD_VERSION=${{ needs.gate.outputs.version }}
-            BARKPARK_BUILD_COMMIT=${{ github.sha }}
+            BARKPARK_BUILD_COMMIT=${{ needs.gate.outputs.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
             org.opencontainers.image.version=${{ needs.gate.outputs.version }}
-            org.opencontainers.image.description=Barkpark API (Phoenix) — headless CMS server
+            org.opencontainers.image.description=Barkpark server (Phoenix API and Studio)
           outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
       - name: Record the digest
         env:
@@ -184,9 +195,15 @@ jobs:
   manifest:
     name: Tag the multi-arch manifest
     needs: [gate, build-amd64, build-arm64]
-    if: needs.gate.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
+      - name: Name the commit tag
+        env:
+          SHORT_SHA: ${{ needs.gate.outputs.short_sha }}
+        run: echo "SHA_TAG=$IMAGE:sha-$SHORT_SHA" >> "$GITHUB_ENV"
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
@@ -196,25 +213,76 @@ jobs:
       - uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ vars.GHCR_USER || github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
       - name: Create and push the manifest
         working-directory: /tmp/digests
         env:
+          RELEASE: ${{ needs.gate.outputs.release }}
           VERSION: ${{ needs.gate.outputs.version }}
-          SHORT_SHA: ${{ needs.gate.outputs.short_sha }}
         run: |
           refs=()
           for f in *; do refs+=("$IMAGE@sha256:$f"); done
           [ "${#refs[@]}" = "2" ] || { echo "::error::expected 2 per-arch digests, found ${#refs[@]}"; exit 1; }
-          docker buildx imagetools create \
-            -t "$IMAGE:$VERSION" \
-            -t "$IMAGE:latest" \
-            -t "$IMAGE:sha-$SHORT_SHA" \
-            "${refs[@]}"
-      - name: Verify the published manifest carries both architectures
+          tags=(-t "$SHA_TAG")
+          if [ "$RELEASE" = "true" ]; then
+            tags+=(-t "$IMAGE:$VERSION" -t "$IMAGE:latest")
+          fi
+          docker buildx imagetools create "${tags[@]}" "${refs[@]}"
+      - name: Check the manifest carries both architectures
         run: |
-          docker buildx imagetools inspect "$IMAGE:${{ needs.gate.outputs.version }}" | tee /tmp/inspect.txt
+          docker buildx imagetools inspect "$SHA_TAG" | tee /tmp/inspect.txt
           grep -q "linux/amd64" /tmp/inspect.txt || { echo "::error::manifest is missing linux/amd64"; exit 1; }
           grep -q "linux/arm64" /tmp/inspect.txt || { echo "::error::manifest is missing linux/arm64"; exit 1; }
-          echo "Published $IMAGE:${{ needs.gate.outputs.version }}, :latest and :sha-${{ needs.gate.outputs.short_sha }} (linux/amd64 + linux/arm64)." >> "$GITHUB_STEP_SUMMARY"
+      - name: Check the user and the Azure Postgres CA roots
+        run: |
+          docker pull -q "$SHA_TAG"
+          uid=$(docker run --rm "$SHA_TAG" id -u)
+          [ "$uid" != "0" ] || { echo "::error::the image runs as root"; exit 1; }
+          echo "runs as uid $uid"
+          # Azure Database for PostgreSQL chains to these roots (Microsoft Learn,
+          # "Transport Layer Security in Azure Database for PostgreSQL").
+          docker run --rm "$SHA_TAG" sh -c '
+            set -e
+            subjects=$(openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt | openssl pkcs7 -print_certs -noout | grep "^subject=")
+            for cn in "DigiCert Global Root G2" "Microsoft RSA Root Certificate Authority 2017" "DigiCert Global Root CA"; do
+              printf "%s\n" "$subjects" | grep -q "CN = $cn\$" || { echo "missing CA root: $cn"; exit 1; }
+              echo "CA root present: $cn"
+            done'
+      - name: Boot against a throwaway Postgres and wait for /readyz
+        run: |
+          docker network create smoke
+          docker run -d --name db --network smoke -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=barkpark postgres:17-alpine
+          for i in $(seq 1 30); do docker exec db pg_isready -U postgres -q && break; sleep 2; done
+          docker run -d --name api --network smoke -p 4000:4000 \
+            -e DATABASE_URL=ecto://postgres:smoke@db/barkpark \
+            -e SECRET_KEY_BASE="$(openssl rand -base64 64 | tr -d '\n')" \
+            -e BARKPARK_CLOAK_KEY="$(openssl rand -base64 32)" \
+            -e BARKPARK_KEK="$(openssl rand -base64 32)" \
+            -e PREVIEW_JWT_SECRET="$(openssl rand -base64 32)" \
+            -e BARKPARK_RELEASE_CAPTURE_HMAC_SECRET="$(openssl rand -base64 32)" \
+            -e PHX_HOST=localhost \
+            "$SHA_TAG"
+          for i in $(seq 1 90); do
+            if curl -fsS http://localhost:4000/readyz; then echo; ready=1; break; fi
+            [ "$(docker inspect -f '{{.State.Running}}' api)" = "true" ] || break
+            sleep 5
+          done
+          if [ "${ready:-}" != "1" ]; then
+            docker logs api 2>&1 | tail -n 200
+            echo "::error::the image did not answer /readyz"
+            exit 1
+          fi
+          docker exec api sh -c 'cat /proc/1/environ | tr "\0" "\n" | grep "^BARKPARK_SELF_UPDATE_CHECK=off$"' \
+            || { echo "::error::the server process does not run with BARKPARK_SELF_UPDATE_CHECK=off"; exit 1; }
+          curl -fsS http://localhost:4000/status.json | head -c 600; echo
+      - name: Summary
+        env:
+          RELEASE: ${{ needs.gate.outputs.release }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          if [ "$RELEASE" = "true" ]; then
+            echo "Published $IMAGE:$VERSION, :latest and $SHA_TAG (linux/amd64 + linux/arm64). The amd64 image answered /readyz." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Published $SHA_TAG (linux/amd64 + linux/arm64). The amd64 image answered /readyz." >> "$GITHUB_STEP_SUMMARY"
+          fi

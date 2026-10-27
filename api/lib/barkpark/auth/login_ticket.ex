@@ -84,7 +84,7 @@ defmodule Barkpark.Auth.LoginTicket do
     ])
     |> validate_required([:ticket_hash, :api_token, :expires_at])
     |> validate_inclusion(:user_role, ~w(owner admin member))
-    |> validate_inclusion(:purpose, ["exchange"])
+    |> validate_inclusion(:purpose, ["exchange", "sso"])
     |> validate_exchange()
     |> validate_format(:user_email, @email_format, message: "must have the @ sign and no spaces")
     |> unique_constraint(:ticket_hash)
@@ -93,12 +93,21 @@ defmodule Barkpark.Auth.LoginTicket do
   # An exchange ticket is always USER-shaped (it signs a person in, never drops
   # the admin bearer anywhere) and always carries both bindings: an exchange
   # ticket without an audience or a challenge would be redeemable by whoever
-  # holds it, which is exactly what the bindings exist to prevent.
+  # holds it, which is exactly what the bindings exist to prevent. An SSO ticket
+  # (`Auth.mint_sso_ticket/4`) carries the same bindings. Its audience is a
+  # Studio origin, or "bp-cli" for `bp login --sso`.
   defp validate_exchange(changeset) do
-    if get_field(changeset, :purpose) == "exchange" do
+    purpose = get_field(changeset, :purpose)
+
+    if purpose in ["exchange", "sso"] do
       changeset
       |> validate_required([:user_email, :audience, :code_challenge])
-      |> validate_format(:audience, ~r{\Ahttps?://[^/?#\s@]+\z}, message: "must be an origin")
+      |> validate_change(:audience, fn :audience, audience ->
+        if (purpose == "sso" and audience == "bp-cli") or
+             Regex.match?(~r{\Ahttps?://[^/?#\s@]+\z}, audience),
+           do: [],
+           else: [audience: "must be an origin"]
+      end)
       |> validate_format(:code_challenge, ~r/\A[A-Za-z0-9_-]{43}\z/,
         message: "must be a base64url S256 challenge"
       )

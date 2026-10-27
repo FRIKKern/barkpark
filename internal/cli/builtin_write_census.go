@@ -274,6 +274,27 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"`permissions` and `workspace` before anything is written to a sink or the config — a body that names " +
 			"none of them cannot install a credential or print a receipt.",
 	},
+	{
+		File: "internal/cli/instance_studio_token_cmd.go", Func: "studioTokenMint", Sites: 1,
+		Endpoint: "POST /v1/auth/studio-tokens", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx runs through screenBuiltinWriteReceipt, then parseTokenMintReceipt REQUIRES the server's `token`, " +
+			"`permissions` and `workspace` before the BARKPARK_TOKEN line prints.",
+	},
+	{
+		File: "internal/cli/login_sso.go", Func: "ssoExchange", Sites: 1,
+		Endpoint: "POST /v1/auth/sso/exchange", Class: machineRendered,
+		Disposition: dispCannotLie,
+		Why: "anything but 201 is an error, and the body must carry a non-empty `token` before bp saves a session " +
+			"or prints the signed-in receipt; the email and expiry it prints come from the same body.",
+	},
+	{
+		File: "internal/cli/login_sso.go", Func: "ssoLogout", Sites: 1,
+		Endpoint: "DELETE /v1/auth/logout", Class: machineRendered,
+		Disposition: dispCannotLie,
+		Why: "the receipt says the server revoked the session only when the 2xx body's `revoked` count is at least 1; " +
+			"any other answer is reported as an unconfirmed revoke.",
+	},
 	// ---- task create -----------------------------------------------------
 	{
 		File: "internal/cli/tasks_create_cmd.go", Func: "sendTaskMutations", Sites: 1,

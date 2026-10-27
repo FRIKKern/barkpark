@@ -88,13 +88,19 @@ services:
       # all four read in api/config/runtime.exs, none had a passthrough line)
       # First owner on a fresh install (Accounts.BootstrapOwner)
       - BARKPARK_BOOTSTRAP_OWNER_EMAIL
+      # Match an OIDC sign-in on the UPN when email is absent (api/config/runtime.exs)
+      - BARKPARK_OIDC_EMAIL_FROM_UPN
       - BARKPARK_DB_STATEMENT_TIMEOUT
       - BARKPARK_INDX_STATE_DIR
       - BARKPARK_OPERATOR_FAIL_CLOSED
       - BARKPARK_OPERATOR_EMAILS
       - BARKPARK_OPERATOR_TOKEN_IDS
+      # Studio origins the OIDC callback may return a sign-in to (api/config/runtime.exs)
+      - BARKPARK_STUDIO_SSO_ORIGINS
       # Strict OIDC ID token checks for every connection (read in api/config/runtime.exs)
       - BARKPARK_OIDC_STRICT_VALIDATION
+      # Keep an owner through OIDC group mappings (read in api/config/runtime.exs)
+      - BARKPARK_OIDC_KEEP_OWNER
       # Sign-in policy on token paste and the Cloud handoff; Cloud handoff
       # switch (both read in api/config/runtime.exs)
       - BARKPARK_SIGN_IN_POLICY_ALL_ROUTES

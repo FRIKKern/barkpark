@@ -4,7 +4,8 @@ defmodule Barkpark.DeskIcons do
   `@sanity/icons` 5.2.3 names them (MIT), so a desk declared for Sanity draws in
   both Barkpark Studios. `priv/desk_icons.json` maps each name to its SVG body in
   Sanity's 25-unit box; barkpark-studio vendors the same file. Plus `library`
-  (lucide, ISC), which gyldendal.no's desk uses.
+  (lucide, ISC), which gyldendal.no's desk uses, and the `lucide:<name>` icons
+  (lucide-static 1.61.0, ISC) that gyldendal.no's schemas name.
 
   The LiveView Studio draws one of these with `BarkparkWeb.Icons.desk_icon/1`
   when its own (lucide) set has no glyph of that name, and a deskStructure
