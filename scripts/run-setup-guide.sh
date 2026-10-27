@@ -41,6 +41,15 @@
 # code and the end of the masked log. <run dir>/steps.tsv holds seconds per step.
 set -uo pipefail
 
+# The regex below holds a "<(" token. Refuse sh and POSIX mode so the census
+# in scripts/posix-vacuous-green-census.sh can see this file needs bash.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "run-setup-guide.sh: needs bash" >&2; exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*) echo "run-setup-guide.sh: refuses to run in POSIX mode" >&2; exit 2;;
+esac
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DOC="$ROOT/docs/setup/SELF-HOST.md"
 VARS=""

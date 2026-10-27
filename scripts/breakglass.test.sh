@@ -757,9 +757,12 @@ else bad "11.9 the guard refused the repo it ships in (rc $rc): $out"; fi
 if grep -q "BG-20260731-RETRO" "$DOC" && grep -q -- "- closes: BG-20260731-RETRO" "$DOC"; then
   ok "11.10 the 2026-07-31 glass is a RETROSPECTIVE pair in $DOC — an open row AND the close that answers it, so the committed-log authority stops reading that outage as 'never happened' without reding main forever"
 else bad "11.10 the 2026-07-31 incident is still absent from the records section of $DOC"; fi
-if [ -z "$(open_glasses_in_doc)" ]; then
-  ok "11.11 …and the real log carries NO standing open record, so breakglass-watch.sh stays green on main"
-else bad "11.11 the retrospective row left an OPEN glass standing in $DOC: $(open_glasses_in_doc)"; fi
+# Scoped to the 2026-07-31 pair. A later glass that is really open (for example
+# BG-20261027T134000Z-RETRO, kept open on the owner's instruction) is the watch's
+# job to red, not this harness's.
+if ! open_glasses_in_doc | grep -qx "BG-20260731-RETRO"; then
+  ok "11.11 …and the real parser reads BG-20260731-RETRO as CLOSED, so that outage does not red main"
+else bad "11.11 the retrospective row left an OPEN glass standing in $DOC: BG-20260731-RETRO"; fi
 if grep -q "hand-written" "$DOC" && grep -q "131 commits behind" "$DOC"; then
   ok "11.12 …and the row says out loud that it was hand-written and why the script could not have written it (the tree predated breakglass.sh)"
 else bad "11.12 the retrospective row does not disclose its provenance"; fi
