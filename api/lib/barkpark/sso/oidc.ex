@@ -193,7 +193,7 @@ defmodule Barkpark.Sso.Oidc do
       }) do
     with {:ok, endpoint} <- endpoint(c, :authorization_endpoint) do
       query =
-        URI.encode_query(%{
+        %{
           "response_type" => "code",
           "client_id" => c.client_id,
           "redirect_uri" => redirect_uri,
@@ -202,11 +202,28 @@ defmodule Barkpark.Sso.Oidc do
           "nonce" => nonce,
           "code_challenge" => challenge,
           "code_challenge_method" => "S256"
-        })
+        }
+        |> Map.merge(mfa_request(c))
+        |> URI.encode_query()
 
       {:ok, endpoint <> "?" <> query}
     end
   end
+
+  # An Entra connection (tenant_id set) that trusts the IdP's MFA asks for it
+  # with the OIDC `claims` request parameter: `amr` essential with value `mfa`.
+  # Measured 2026-10-27 on a tenant with security defaults and no Entra ID P1:
+  # Entra asked a registered user for the authenticator code on every sign-in
+  # with this parameter and on none without it.
+  @mfa_claims_request Jason.encode!(%{
+                        "id_token" => %{"amr" => %{"essential" => true, "values" => ["mfa"]}}
+                      })
+
+  defp mfa_request(%OidcConnection{trust_idp_mfa: true, tenant_id: tid})
+       when is_binary(tid) and tid != "",
+       do: %{"claims" => @mfa_claims_request}
+
+  defp mfa_request(_c), do: %{}
 
   @doc """
   Complete the callback: exchange `code`, verify the id_token, find-or-create the

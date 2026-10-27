@@ -247,6 +247,26 @@ defmodule Barkpark.Sso.OidcTest do
 
       assert URI.decode_query(URI.parse(url).query)["scope"] == "openid profile email"
     end
+
+    test "an Entra connection that trusts IdP MFA requests amr mfa as an essential claim" do
+      {_org, c} = connection("mfareq", %{trust_idp_mfa: true, tenant_id: "tid-1"})
+      p = Map.put(Oidc.new_auth_params(), :redirect_uri, "https://bp/cb")
+      {:ok, url} = Oidc.authorize_url(c, p)
+
+      assert Jason.decode!(URI.decode_query(URI.parse(url).query)["claims"]) == %{
+               "id_token" => %{"amr" => %{"essential" => true, "values" => ["mfa"]}}
+             }
+    end
+
+    test "no claims parameter without trust_idp_mfa or without a tenant id" do
+      p = Map.put(Oidc.new_auth_params(), :redirect_uri, "https://bp/cb")
+
+      for {slug, extra} <- [{"nomfa", %{tenant_id: "tid-1"}}, {"notid", %{trust_idp_mfa: true}}] do
+        {_org, c} = connection(slug, extra)
+        {:ok, url} = Oidc.authorize_url(c, p)
+        refute Map.has_key?(URI.decode_query(URI.parse(url).query), "claims")
+      end
+    end
   end
 
   describe "strict validation" do
