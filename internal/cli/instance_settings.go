@@ -80,6 +80,22 @@ func (r instanceRecommended) appliesTo(target string) bool {
 // the env file only and never printed.
 var instanceSecretNames = []string{"SECRET_KEY_BASE", "BARKPARK_CLOAK_KEY", "BARKPARK_KEK", "PREVIEW_JWT_SECRET"}
 
+// instanceDeployOwned are the settings deploy.sh generates on a single VM and
+// keeps when it merges BARKPARK_ENV_FILE. init leaves them out for --target vm.
+var instanceDeployOwned = append([]string{"DATABASE_URL"}, instanceSecretNames...)
+
+func instanceDeployOwns(target, name string) bool {
+	if target != instanceTargetVM {
+		return false
+	}
+	for _, n := range instanceDeployOwned {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 // instanceKnownSettings lists every BARKPARK_* name the server, its deploy
 // scripts or bp read. `bp instance check` uses it to spot a misspelled name.
 // Refresh it with: go test ./internal/cli -run TestInstanceKnownSettingsList -update
@@ -146,13 +162,15 @@ func instanceEnvFile(target string, secrets map[string]string) string {
 	line("")
 	line("# Required")
 	if target == instanceTargetVM {
-		line("DATABASE_URL=ecto://barkpark:%s@localhost/barkpark", secrets["database_password"])
+		line("# deploy.sh sets %s on the VM.", strings.Join(instanceDeployOwned, ", "))
 	} else {
 		line("DATABASE_URL=ecto://barkpark:%s@<database host>/barkpark", secrets["database_password"])
 	}
 	line("PHX_HOST=<public host name, such as cms.example.com>")
-	for _, name := range instanceSecretNames {
-		line("%s=%s", name, secrets[name])
+	if target != instanceTargetVM {
+		for _, name := range instanceSecretNames {
+			line("%s=%s", name, secrets[name])
+		}
 	}
 	line("BARKPARK_KEK_VERSION=1")
 	line("")

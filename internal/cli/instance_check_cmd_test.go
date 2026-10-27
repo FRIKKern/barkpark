@@ -131,8 +131,36 @@ func TestInstanceInitTargetVM(t *testing.T) {
 	}
 	body, _ := os.ReadFile(path)
 	env, _ := parseInstanceEnv(bytes.NewReader(body))
-	if env["DATABASE_SSL"] != "off" || !strings.Contains(env["DATABASE_URL"], "@localhost/") {
-		t.Fatalf("vm DATABASE_SSL=%q DATABASE_URL host wrong", env["DATABASE_SSL"])
+	if env["DATABASE_SSL"] != "off" {
+		t.Fatalf("vm DATABASE_SSL=%q", env["DATABASE_SSL"])
+	}
+	// deploy.sh owns these on a VM; the file must not carry them.
+	for _, name := range instanceDeployOwned {
+		if _, ok := env[name]; ok {
+			t.Fatalf("vm file sets %s, which deploy.sh owns", name)
+		}
+	}
+	if !strings.Contains(string(body), "# deploy.sh sets DATABASE_URL") {
+		t.Fatal("vm file does not say deploy.sh sets DATABASE_URL")
+	}
+	// check --target vm reports the missing owned settings as notes, not problems.
+	env["PHX_HOST"] = "cms.example.com"
+	problems, notes := instanceCheck(context.Background(), env, instanceCheckOpts{target: instanceTargetVM, skip: map[string]bool{"database": true, "media": true, "url": true}})
+	for _, p := range problems {
+		for _, name := range instanceDeployOwned {
+			if p.Setting == name {
+				t.Fatalf("check reports owned %s as a problem: %s", name, p.Problem)
+			}
+		}
+	}
+	owned := 0
+	for _, n := range notes {
+		if strings.Contains(n.Problem, "deploy.sh sets it") {
+			owned++
+		}
+	}
+	if owned != len(instanceDeployOwned) {
+		t.Fatalf("check gave %d deploy.sh notes, want %d", owned, len(instanceDeployOwned))
 	}
 	if _, ok := env["BARKPARK_MEDIA_DIR"]; ok {
 		t.Fatal("vm file sets BARKPARK_MEDIA_DIR")

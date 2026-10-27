@@ -48,11 +48,10 @@ bp instance check --env-file barkpark.env --target vm --skip database,media,url
    ```
 
 2. Create a DNS A record from the host name to the VM's public IP. Caddy needs it to issue a certificate.
-3. `deploy.sh` generates its own `DATABASE_URL` and keys, so copy the file without them and run `deploy.sh` over ssh:
+3. Copy the file and run `deploy.sh` over ssh. `deploy.sh` keeps its own `DATABASE_URL` and keys and ignores those in the file, so `bp instance init --target vm` leaves them out:
 
    ```bash
-   grep -vE '^(DATABASE_URL|SECRET_KEY_BASE|BARKPARK_CLOAK_KEY|BARKPARK_KEK|PREVIEW_JWT_SECRET)=' barkpark.env > pensum.env
-   scp pensum.env azureuser@<ip>:/tmp/pensum.env
+   scp barkpark.env azureuser@<ip>:/tmp/pensum.env
    curl -fsSLO https://raw.githubusercontent.com/FRIKKern/barkpark/main/deploy.sh
    ssh azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```

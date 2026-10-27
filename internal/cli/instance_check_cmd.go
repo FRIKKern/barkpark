@@ -104,11 +104,18 @@ func runInstanceInit(out *writer, args []string) int {
 	}
 	sort.Strings(fill)
 	generated := append(append([]string{}, instanceSecretNames...), "the database password in DATABASE_URL")
+	if target == instanceTargetVM {
+		generated = []string{}
+	}
 	if out.emitStructured(map[string]any{"ok": true, "action": "init", "file": path, "target": target, "generated": generated, "fill_in": fill}) {
 		return exitOK
 	}
 	out.outf("wrote %s with mode 600 for target %s.", path, target)
-	out.outf("generated %s. The values are in the file only.", strings.Join(generated, ", "))
+	if target == instanceTargetVM {
+		out.outf("deploy.sh sets %s on the VM, so the file leaves them out.", strings.Join(instanceDeployOwned, ", "))
+	} else {
+		out.outf("generated %s. The values are in the file only.", strings.Join(generated, ", "))
+	}
 	out.outf("fill in %s.", strings.Join(fill, ", "))
 	out.outf("then run: bp instance check --env-file %s --target %s", path, target)
 	return exitOK
@@ -219,6 +226,8 @@ func instanceCheck(ctx context.Context, env map[string]string, opts instanceChec
 
 	for _, r := range instanceRequired {
 		switch {
+		case !set(r.name) && instanceDeployOwns(opts.target, r.name):
+			notes = append(notes, instanceProblem{Setting: r.name, Problem: fmt.Sprintf("%s is not set here. deploy.sh sets it on the VM.", r.name), Doc: r.doc})
 		case !set(r.name):
 			add(r.name, r.doc, "%s is not set. The server does not start without it.", r.name)
 		case isPlaceholder(env[r.name]):
