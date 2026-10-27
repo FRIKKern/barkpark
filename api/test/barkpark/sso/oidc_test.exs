@@ -566,4 +566,26 @@ defmodule Barkpark.Sso.OidcTest do
       assert {:error, :no_email} = callback(c)
     end
   end
+
+  describe "IdP MFA claims" do
+    import ExUnit.CaptureLog
+    require Logger
+
+    test "the MFA claims a trusting connection sees are logged at debug, without user claims" do
+      c = %Barkpark.Sso.OidcConnection{trust_idp_mfa: true, mfa_acr: nil}
+      claims = %{"amr" => ["pwd", "mfa"], "acr" => "1", "email" => "who@example.com"}
+
+      Logger.put_module_level(Oidc, :debug)
+      on_exit(fn -> Logger.delete_module_level(Oidc) end)
+      prev = Logger.level()
+      Logger.configure(level: :debug)
+      on_exit(fn -> Logger.configure(level: prev) end)
+
+      log = capture_log([level: :debug], fn -> assert Oidc.idp_mfa?(c, claims) end)
+
+      assert log =~ ~s(amr=["pwd", "mfa"])
+      assert log =~ "counted=true"
+      refute log =~ "who@example.com"
+    end
+  end
 end
