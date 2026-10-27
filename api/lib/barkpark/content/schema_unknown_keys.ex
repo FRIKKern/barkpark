@@ -17,15 +17,10 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
   `register_schemas/1` and fails if one would be flagged).
   """
 
-  # The changeset's cast list, plus `validations` (read by parse/2, not stored
-  # — still flagged below as dropped) and the echo keys a pulled schema carries
-  # back (`id`, `schemaHash`), so a pull → apply round trip stays quiet.
-  @schema_keys ~w(name title icon visibility owner_scoped singleton kind fields dataset
-                  cors_origins actions groups fieldsets desk_groups desk list_preview initial_values
-                  cross_validations layout prefill reader_writes readerWrites workspace_id project_id dataset_id
-                  id schemaHash)
-
   # The SDK echo spells these camelCase; the changeset casts snake_case only.
+  # `fold_camel_echo/1` moves each onto its snake_case key before the write, so
+  # a pulled schema posted back keeps its list preview and initial values
+  # (task-9374808559bc1bd4).
   @camel_echo %{
     "deskGroups" => "desk_groups",
     "listPreview" => "list_preview",
@@ -33,6 +28,32 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
     "crossValidations" => "cross_validations",
     "ownerScoped" => "owner_scoped"
   }
+
+  # The changeset's cast list, plus `validations` (read by parse/2, not stored
+  # — still flagged below as dropped) and the echo keys a pulled schema carries
+  # back (`id`, `schemaHash` and the camelCase aliases above), so a pull → apply
+  # round trip stays quiet.
+  @schema_keys ~w(name title icon visibility owner_scoped singleton kind fields dataset
+                  cors_origins actions groups fieldsets desk_groups desk list_preview initial_values
+                  cross_validations layout prefill reader_writes readerWrites workspace_id project_id dataset_id
+                  id schemaHash) ++ Map.keys(@camel_echo)
+
+  @doc """
+  Moves each camelCase echo key (`listPreview`, `initialValues`, `deskGroups`,
+  `crossValidations`, `ownerScoped`) in a schema apply body onto its
+  snake_case key, the spelling the changeset casts. The camelCase key is
+  removed either way.
+  """
+  @spec fold_camel_echo(map()) :: map()
+  def fold_camel_echo(attrs) when is_map(attrs) do
+    Enum.reduce(@camel_echo, attrs, fn {camel, snake}, acc ->
+      case Map.fetch(acc, camel) do
+        # Both spellings present: the snake_case value wins, the echo is dropped.
+        {:ok, value} -> acc |> Map.delete(camel) |> Map.put_new(snake, value)
+        :error -> acc
+      end
+    end)
+  end
 
   # `namedType` is stamped by Schema.inline_field/3 when a field of a named
   # object type is inlined, served by GET /v1/schemas, and read by Forms and
@@ -68,12 +89,8 @@ defmodule Barkpark.Content.SchemaUnknownKeys do
   defp top_message("validations"),
     do: "top-level `validations` is not stored; use `cross_validations`"
 
-  defp top_message(k) do
-    case @camel_echo do
-      %{^k => snake} -> "schema key `#{k}` is not stored; send `#{snake}`"
-      _ -> "schema key `#{k}` is not a schema key Barkpark reads; it was dropped"
-    end
-  end
+  defp top_message(k),
+    do: "schema key `#{k}` is not a schema key Barkpark reads; it was dropped"
 
   defp fields(list, path) when is_list(list) do
     list

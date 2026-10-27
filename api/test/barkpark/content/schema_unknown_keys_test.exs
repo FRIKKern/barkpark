@@ -152,10 +152,27 @@ defmodule Barkpark.Content.SchemaUnknownKeysTest do
     assert SchemaUnknownKeys.unknown(attrs) == []
   end
 
-  test "a camelCase echo key names the snake_case key the changeset stores" do
-    [a] = SchemaUnknownKeys.unknown(%{"name" => "p", "title" => "P", "deskGroups" => []})
-    assert a.path == "/deskGroups"
-    assert a.message =~ "desk_groups"
+  test "a camelCase echo key is an accepted alias, not an unknown key" do
+    assert SchemaUnknownKeys.unknown(%{"name" => "p", "title" => "P", "deskGroups" => []}) == []
+  end
+
+  test "fold_camel_echo moves the camelCase echo onto the snake_case key" do
+    assert SchemaUnknownKeys.fold_camel_echo(%{
+             "name" => "p",
+             "listPreview" => %{"title" => "name"},
+             "initialValues" => %{"a" => 1}
+           }) == %{
+             "name" => "p",
+             "list_preview" => %{"title" => "name"},
+             "initial_values" => %{"a" => 1}
+           }
+  end
+
+  test "fold_camel_echo keeps the snake_case value when both spellings are sent" do
+    assert SchemaUnknownKeys.fold_camel_echo(%{
+             "list_preview" => %{"title" => "snake"},
+             "listPreview" => %{"title" => "camel"}
+           }) == %{"list_preview" => %{"title" => "snake"}}
   end
 
   # The vocabulary guard: every schema a shipped plugin registers must pass

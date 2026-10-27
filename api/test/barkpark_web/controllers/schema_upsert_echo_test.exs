@@ -67,4 +67,53 @@ defmodule BarkparkWeb.SchemaUpsertEchoTest do
 
     assert created == show["schema"]
   end
+
+  # task-9374808559bc1bd4 (found in run J8): GET serves listPreview and
+  # initialValues in camelCase, and `bp migrate --include-schemas` posts that
+  # echo back verbatim. Both values must survive the pull -> apply round trip.
+  test "a schema posted with camelCase listPreview and initialValues keeps both",
+       %{conn: conn} do
+    body = %{
+      "name" => "upsert_camel_widget",
+      "title" => "Upsert Camel Widget",
+      "visibility" => "public",
+      "fields" => [
+        %{"name" => "title", "type" => "string"},
+        %{"name" => "featured", "type" => "boolean"}
+      ],
+      "listPreview" => %{"title" => "title", "subtitle" => "title"},
+      "initialValues" => %{"featured" => true}
+    }
+
+    created =
+      conn
+      |> authed(@admin_token)
+      |> post(~p"/v1/schemas/test", Jason.encode!(body))
+      |> json_response(201)
+
+    refute Map.has_key?(created, "warnings")
+
+    show =
+      conn
+      |> authed(@admin_token)
+      |> get(~p"/v1/schemas/test/upsert_camel_widget")
+      |> json_response(200)
+
+    assert show["schema"]["listPreview"] == %{"title" => "title", "subtitle" => "title"}
+    assert show["schema"]["initialValues"] == %{"featured" => true}
+
+    # Posting the GET echo back unchanged stores the same schema.
+    reposted =
+      conn
+      |> authed(@admin_token)
+      |> post(~p"/v1/schemas/test", Jason.encode!(show["schema"]))
+      |> json_response(201)
+
+    assert reposted["listPreview"] == show["schema"]["listPreview"]
+    assert reposted["initialValues"] == show["schema"]["initialValues"]
+    refute Map.has_key?(reposted, "warnings")
+    # schemaHash covers the stored raw field definitions, which the echo
+    # normalizes; every served key besides it must match.
+    assert Map.delete(reposted, "schemaHash") == Map.delete(show["schema"], "schemaHash")
+  end
 end
