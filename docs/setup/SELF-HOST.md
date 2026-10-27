@@ -10,13 +10,13 @@ This guide takes you from an Azure subscription to Pensum sign-in, in run order,
 
 ## Before you start on Azure
 
-A new subscription has no resource providers. Register these, and run the loop again until each line says `Registered`:
+A new subscription has no resource providers. Register these and rerun the loop until each line says `Registered`:
 
 <!-- run -->
 ```bash
 for p in Compute Network Storage App DBforPostgreSQL KeyVault OperationalInsights ManagedIdentity; do
   az provider register --namespace "Microsoft.$p"
-  az provider show -n "Microsoft.$p" --query "[namespace,registrationState]" -o tsv
+  az provider show -n "Microsoft.$p" --query "join(' ', [namespace,registrationState])" -o tsv
 done
 ```
 
