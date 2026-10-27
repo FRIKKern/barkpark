@@ -234,6 +234,13 @@ func instanceEnvFile(target string, secrets map[string]string, vals instanceInit
 		}
 		line("%s=%s", r.name, v)
 	}
+	// Studio SSO reads only BARKPARK_STUDIO_SSO_ORIGINS, not the CORS list.
+	if vals.studioOrigin != "" {
+		line("BARKPARK_STUDIO_SSO_ORIGINS=%s", vals.studioOrigin)
+	} else {
+		line("# For a Studio that signs in with SSO, its origin with no path:")
+		line("# BARKPARK_STUDIO_SSO_ORIGINS=<Studio origin>")
+	}
 	if target == instanceTargetContainerApps {
 		line("# Set when the OS trust store lacks the Flexible Server CA:")
 		line("# DATABASE_SSL_CA_FILE=<CA bundle path>")
