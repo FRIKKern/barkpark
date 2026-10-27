@@ -519,4 +519,51 @@ defmodule Barkpark.Sso.OidcTest do
                })
     end
   end
+
+  describe "the bootstrap owner signs in through Entra" do
+    setup do
+      Barkpark.Repo.delete_all(Barkpark.Accounts.User)
+      ws = Tenancy.establish_default_workspace!()
+      {:ok, owner} = Barkpark.Accounts.BootstrapOwner.run("Owner@Contoso.example")
+      {org, c} = connection("entraorg", %{tenant_id: "tid-1"})
+      {:ok, _} = Tenancy.assign_workspace_to_organization(ws, org.id)
+      on_exit(fn -> Application.delete_env(:barkpark, :oidc_email_from_upn) end)
+      %{owner: owner, c: c}
+    end
+
+    test "the email claim matches the owner, ignoring case", %{owner: owner, c: c} do
+      mock_op(claims(%{"tid" => "tid-1", "email" => "OWNER@contoso.example"}))
+
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+    end
+
+    test "with no email claim, the UPN matches the owner", %{owner: owner, c: c} do
+      Application.put_env(:barkpark, :oidc_email_from_upn, true)
+
+      mock_op(
+        claims(%{"tid" => "tid-1", "preferred_username" => "owner@CONTOSO.example"})
+        |> Map.delete("email")
+      )
+
+      assert {:ok, user, _} = callback(c)
+      assert user.id == owner.id
+    end
+
+    test "with the setting off, a token with no email claim is refused as before", %{c: c} do
+      mock_op(
+        claims(%{"tid" => "tid-1", "preferred_username" => "owner@contoso.example"})
+        |> Map.delete("email")
+      )
+
+      assert {:error, :no_email} = callback(c)
+    end
+
+    test "a UPN that is not an address is not used", %{c: c} do
+      Application.put_env(:barkpark, :oidc_email_from_upn, true)
+      mock_op(claims(%{"tid" => "tid-1", "preferred_username" => "owner"}) |> Map.delete("email"))
+
+      assert {:error, :no_email} = callback(c)
+    end
+  end
 end
