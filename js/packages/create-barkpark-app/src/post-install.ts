@@ -91,7 +91,7 @@ export function printNextSteps(opts: PostInstallOptions): void {
     )
   } else {
     // Owner ruling #60 (2026-10-03): lead with `bp setup`, not `docker compose up`.
-    // The compose file runs the published ghcr.io/barkpark/api image and needs a
+    // The compose file runs the published ghcr.io/frikkern/barkpark image and needs a
     // `.env` with the API's secrets; the starter README covers that path.
     lines.push(
       `  ${pc.cyan('bp setup --target local --yes')}  ${pc.dim('# Barkpark API on :4000 (install bp: see README)')}`,

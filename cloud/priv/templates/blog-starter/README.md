@@ -31,7 +31,7 @@ npm install                   # or: pnpm install · yarn · bun install
 
 Open http://localhost:3000 · Studio: http://localhost:4000/studio
 
-> **Docker instead of `bp setup`:** `docker-compose.yml` runs the published image `ghcr.io/barkpark/api:latest` beside Postgres. Create a `.env` beside it with `BARKPARK_CLOAK_KEY` and `BARKPARK_KEK` (each `openssl rand -base64 32`), `PREVIEW_JWT_SECRET` and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` (each `openssl rand -base64 48`), then `docker compose up -d`. If the image cannot be pulled, build it from a Barkpark checkout: copy `docker-compose.override.yml.example` → `docker-compose.override.yml` and run `docker compose up -d --build`. Full setup guide: [QUICKSTART](https://github.com/FRIKKern/barkpark/blob/main/docs/setup/QUICKSTART.md).
+> **Docker instead of `bp setup`:** `docker-compose.yml` runs the published image `ghcr.io/frikkern/barkpark:latest` beside Postgres. Create a `.env` beside it with `BARKPARK_CLOAK_KEY` and `BARKPARK_KEK` (each `openssl rand -base64 32`), `PREVIEW_JWT_SECRET` and `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` (each `openssl rand -base64 48`), then `docker compose up -d`. If the image cannot be pulled, build it from a Barkpark checkout: copy `docker-compose.override.yml.example` → `docker-compose.override.yml` and run `docker compose up -d --build`. Full setup guide: [QUICKSTART](https://github.com/FRIKKern/barkpark/blob/main/docs/setup/QUICKSTART.md).
 
 ## Auth
 

@@ -55,7 +55,13 @@ The `profile` scope gives Barkpark `preferred_username`, which the UPN match bel
 
 The bootstrap owner does not need domain verification. The owner holds a seat in the default workspace, and that seat lets the organization's connection sign the owner in.
 
-An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. Set up the break-glass account before you turn on `bp org auth-methods <org> sso`. See [Pensum settings](SELF-HOST.md#pensum-settings).
+## Break-glass account
+
+An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. A break-glass account on `BARKPARK_BREAKGLASS_EMAILS` signs in with a password and TOTP, or a passkey, even when the organization allows only SSO. Create it before you run `bp org auth-methods <org> sso`:
+
+1. `bp auth register <email> <password>` creates the account.
+2. `bp auth login <email> <password>` returns a token. With `BARKPARK_TOKEN` set to it, `bp auth mfa-enroll <password>` returns a TOTP secret. Add it to an authenticator, then run `bp auth mfa-verify <secret> <code> <password>`.
+3. As an owner, `bp workspace member-add <email>` seats it.
 
 ## Domain verification
 
