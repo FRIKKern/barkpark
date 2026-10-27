@@ -83,7 +83,32 @@ defmodule Barkpark.DataCase do
   broadcast the mutation that wakes a singleton. Quiescing the singletons before
   the tasks that feed them would leave exactly the in-flight read this exists to
   prevent.
+
+  A module tagged `@moduletag :module_sandbox` (opt-in; one module uses it)
+  shares ONE sandbox transaction that its `setup_all` opened with
+  `start_module_sandbox!/0`, so a costly seed runs once per module instead of
+  once per test. Each test then runs inside a savepoint that its on_exit rolls
+  back, and the schema catalog cache is cleared, so no test sees another
+  test's writes.
   """
+  def setup_sandbox(%{module_sandbox: true} = tags) do
+    # Unwrapped: the sandbox runs each query inside its own savepoint, and
+    # releasing that one would release this one with it.
+    Barkpark.Repo.query!("SAVEPOINT module_sandbox_test", [], sandbox_subtransaction: false)
+    test_pid = self()
+
+    on_exit(fn ->
+      drain_owned_tasks(test_pid, tags)
+      Barkpark.PubSubSingletons.drain!()
+
+      Barkpark.Repo.query!("ROLLBACK TO SAVEPOINT module_sandbox_test", [],
+        sandbox_subtransaction: false
+      )
+
+      Barkpark.Content.SchemaCatalogCache.invalidate()
+    end)
+  end
+
   def setup_sandbox(tags) do
     # A test that legitimately holds its connection longer than DBConnection's
     # 15s default (e.g. the full EDItEUR/Thema codelist seed under suite load)
@@ -104,6 +129,32 @@ defmodule Barkpark.DataCase do
       Barkpark.PubSubSingletons.drain!()
       Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
     end)
+  end
+
+  @module_sandbox_timeout_ms 30 * 60_000
+
+  @doc """
+  Open the shared sandbox transaction for a `@moduletag :module_sandbox`
+  module. Call it first in `setup_all`; its on_exit rolls the whole module
+  back after the last test. Only a sync module may use it: shared mode is
+  global, and sync modules run one at a time.
+  """
+  def start_module_sandbox! do
+    pid =
+      Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo,
+        shared: true,
+        ownership_timeout: @module_sandbox_timeout_ms
+      )
+
+    module_pid = self()
+
+    on_exit(fn ->
+      drain_owned_tasks(module_pid, %{})
+      Barkpark.PubSubSingletons.drain!()
+      Ecto.Adapters.SQL.Sandbox.stop_owner(pid)
+    end)
+
+    :ok
   end
 
   @task_supervisors [Barkpark.TaskSupervisor, Barkpark.WebhookDeliverySupervisor]

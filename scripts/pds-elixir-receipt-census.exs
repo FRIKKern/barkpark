@@ -758,8 +758,18 @@ defmodule PDS.Census do
     # WRITE class: it reaches Barkpark.Tasks.Edges.remove_dep/3 and Repo.delete_all/1.
     # `read`, `phantom`, `consumer` and `unrouted` did not move. Derived from this
     # census's own D448-DRIFT-REFUSES line on this commit's tree.
-    write: 56,
-    read: 37,
+    #
+    # RE-DERIVED AGAIN 2026-10-26 (task-fa352596d025a916, the Sheets import's own
+    # quota check): write-routed 56 -> 57, read-routed 37 -> 36. ONE reclassified
+    # site, no added one: Sheets.Web.ImportController.create/2's `ok: true` arm
+    # moves [READ] -> [WRITE d4], because create/2 now
+    # reaches Quota.emit_quota_exceeded/1's audit write through room_for_sheet/3
+    # inside the depth budget. textual, ast, emitted, phantom, consumer and
+    # unrouted did not move. Derived from this census's own D448-DRIFT-REFUSES line
+    # and `--sites` on this commit's tree (Elixir 1.19.5 · Erlang/OTP 28 (erts
+    # 16.3.1) · aarch64-apple-darwin24.6.0).
+    write: 57,
+    read: 36,
     unrouted: 13
   }
 

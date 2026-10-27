@@ -62,6 +62,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
          {:ok, content} <- convert(kind, raw, params),
          {:ok, cell_count} <- check_cap(content),
          {:ok, slug, title, dataset} <- resolve_identity(params, upload),
+         :ok <- room_for_sheet(conn, slug, dataset),
          {:ok, doc} <- save(conn, slug, title, dataset, content) do
       json(conn, %{
         ok: true,
@@ -76,7 +77,38 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
       {:error, status, code, message} ->
         conn
         |> ErrorResponse.emit_fields(status, %{code: code, message: message})
+
+      {:error, {:quota_exceeded, _} = reason} ->
+        env = Barkpark.Content.Errors.to_envelope({:error, reason}, conn)
+
+        conn
+        |> put_status(env.status)
+        |> json(%{error: Map.delete(env, :status)})
     end
+  end
+
+  # A full workspace may not gain a sheet (task-fa352596d025a916). The
+  # `:ingest` pipeline's RequireWithinQuota refuses a SUSPENDED workspace, but
+  # it can only charge a create to the routes its `creates:` list names, and
+  # the router may not name this plugin module (the fresh-install invariant),
+  # so the room check lives here: the same `Quota.check/2`, audit line and 402
+  # `quota_exceeded` envelope the plug answers with. Re-importing an existing
+  # sheet adds no document and needs no room.
+  defp room_for_sheet(conn, slug, dataset) do
+    with %Barkpark.Tenancy.Workspace{} = ws <- conn.assigns[:current_workspace],
+         false <- sheet_exists?(slug, dataset, scope_opts(conn)),
+         {:error, :quota_exceeded} <- Barkpark.Tenancy.Quota.check(ws, 1) do
+      Barkpark.Tenancy.Quota.emit_quota_exceeded(ws)
+      {:error, {:quota_exceeded, ws.quota}}
+    else
+      _ -> :ok
+    end
+  end
+
+  defp sheet_exists?(slug, dataset, scope) do
+    Enum.any?([slug, "drafts." <> slug], fn id ->
+      match?({:ok, _}, Content.get_document(id, "sheet", dataset, scope))
+    end)
   end
 
   defp fetch_upload(%{"file" => %Plug.Upload{} = upload}), do: {:ok, upload}

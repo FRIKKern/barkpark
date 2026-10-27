@@ -24877,7 +24877,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Change the OIDC connection's client id, groups claim, group mappings or active flag (use --set).",
+        "summary": "Change the OIDC connection's client id, groups claim, group mappings, active flag or Entra ID settings.",
         "tags": [
           "org"
         ],

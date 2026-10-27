@@ -880,13 +880,20 @@ defmodule Barkpark.Content.Query do
 
     opts
     |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
-    |> Enum.flat_map(fn schema ->
+    |> Enum.map(fn schema ->
+      {schema,
+       Enum.filter(
+         schema.fields || [],
+         &(is_binary(&1["name"]) and link_field?(&1) and
+             Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
+       )}
+    end)
+    # A type with no field that can hold a link would run a query whose
+    # predicate is `false`: skip it (one query per such type per backlinks read).
+    |> Enum.reject(fn {_schema, fields} -> fields == [] end)
+    |> Enum.flat_map(fn {schema, fields} ->
       {predicate, via_field} =
-        (schema.fields || [])
-        |> Enum.filter(
-          &(is_binary(&1["name"]) and
-              Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
-        )
+        fields
         |> Enum.reverse()
         |> Enum.reduce({dynamic(false), dynamic(nil)}, fn field, {acc, selected_field} ->
           name = field["name"]
@@ -1243,6 +1250,16 @@ defmodule Barkpark.Content.Query do
         )
     )
   end
+
+  # A field `list_reference_holders/3` can match: a reference, an image or file
+  # (its `asset._ref`), or an array allowing one of those. Any other field's
+  # arm is `false`.
+  defp link_field?(%{"type" => type}) when type in ["reference", "image", "file"], do: true
+
+  defp link_field?(%{"type" => "arrayOf"} = field),
+    do: Enum.any?(array_member_types(field), &(&1 in ["reference", "image", "file"]))
+
+  defp link_field?(_field), do: false
 
   # The member types an `arrayOf` field allows. A single-type array stores `of`
   # as one map, a multi-type array as a list of member maps. `get_in/2` with a

@@ -18,7 +18,7 @@ defmodule Barkpark.Groq.Evaluator do
   dictionary.
   """
 
-  alias Barkpark.Groq.{PortableText, Pushdown, Source, Values}
+  alias Barkpark.Groq.{Geo, GeoShape, LimitError, PortableText, Pushdown, Source, Values}
 
   defmodule EvalError do
     @moduledoc "A query that parses but cannot be evaluated (an unsupported function, a tuple)."
@@ -44,6 +44,7 @@ defmodule Barkpark.Groq.Evaluator do
     }
 
     Process.put(:groq_memo, %{})
+    GeoShape.reset_budget()
     {:ok, tree |> eval(%{value: nil, parent: nil, hidden: false}, ctx) |> Values.to_json()}
   rescue
     e in EvalError -> {:error, e.message}
@@ -587,6 +588,11 @@ defmodule Barkpark.Groq.Evaluator do
   defp func("global", "defined", [arg], scope, ctx), do: eval(arg, scope, ctx) != nil
   defp func("global", "identity", [], _scope, ctx), do: ctx.identity || "anonymous"
 
+  # Sanity reads a member's parameterized-role attributes; a robot token or no
+  # token gets null. Barkpark has seats and roles, not attributes, so every
+  # caller gets null (task-de59c528ba98db66, /papers/groq-user-attributes-design).
+  defp func("user", "attributes", [], _scope, _ctx), do: nil
+
   defp func("global", "length", [arg], scope, ctx) do
     case eval(arg, scope, ctx) do
       s when is_binary(s) -> utf16_length(s)
@@ -802,10 +808,54 @@ defmodule Barkpark.Groq.Evaluator do
     end
   end
 
+  # Sanity's diff functions (task-13790b478beeee4d); see Barkpark.Groq.Diff.
+  defp func("diff", kind, [l, r, {:selector, sel}], scope, ctx)
+       when kind in ["changedAny", "changedOnly"] do
+    test = fn cond_expr, value ->
+      eval(cond_expr, %{value: value, parent: scope, hidden: false}, ctx) === true
+    end
+
+    lv = eval(l, scope, ctx)
+    rv = eval(r, scope, ctx)
+
+    if kind == "changedAny",
+      do: Barkpark.Groq.Diff.changed_any?(sel, lv, rv, test),
+      else: Barkpark.Groq.Diff.changed_only?(sel, lv, rv, test)
+  end
+
   defp func("releases", "all", [], _scope, ctx) do
     ctx.source
     |> Source.fetch(%{Pushdown.empty() | types: ["system.release"]})
     |> Enum.filter(&match?(%{"_type" => "system.release"}, &1))
+  end
+
+  # task-ce93ff890a895f54: Sanity's geo::latLng/2 and geo::distance/2.
+  defp func("geo", "latLng", [lat, lng], scope, ctx),
+    do: Geo.lat_lng(eval(lat, scope, ctx), eval(lng, scope, ctx))
+
+  defp func("geo", "distance", [a, b], scope, ctx),
+    do: Geo.distance(eval(a, scope, ctx), eval(b, scope, ctx))
+
+  # task-1db8d92a284a23d2: geo::contains/2 and geo::intersects/2, planar as on
+  # Sanity. A shape past the position cap, or a pass past the work budget,
+  # stops the query with a LimitError (422) instead of burning CPU.
+  defp func("geo", name, [a, b], scope, ctx) when name in ["contains", "intersects"] do
+    fun = if name == "contains", do: &GeoShape.contains/2, else: &GeoShape.intersects/2
+
+    case fun.(eval(a, scope, ctx), eval(b, scope, ctx)) do
+      {:error, :too_many_positions} ->
+        raise LimitError,
+              "geo::#{name}() takes shapes of at most #{GeoShape.max_positions()} positions"
+
+      {:error, :work_budget} ->
+        raise LimitError,
+              "the query's geo::contains() and geo::intersects() calls passed their " <>
+                "budget of #{GeoShape.budget()} position pairs; narrow the documents " <>
+                "they run over first"
+
+      answer ->
+        answer
+    end
   end
 
   defp func(ns, name, _args, _scope, _ctx) do

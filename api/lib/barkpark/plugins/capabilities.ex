@@ -3129,11 +3129,13 @@ defmodule Barkpark.Plugins.Capabilities do
             "Client secret. Stored encrypted, never shown again."
           )
         ],
-        flags: [
-          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
-            repeatable: true
-          )
-        ],
+        flags:
+          oidc_entra_flags() ++
+            [
+              flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+                repeatable: true
+              )
+            ],
         writes: true,
         default_output: "json"
       ),
@@ -3141,18 +3143,20 @@ defmodule Barkpark.Plugins.Capabilities do
         "org.oidc-update",
         "org",
         "oidc-update",
-        "Change the OIDC connection's client id, groups claim, group mappings or active flag (use --set).",
+        "Change the OIDC connection's client id, groups claim, group mappings, active flag or Entra ID settings.",
         "PATCH",
         "/v1/admin/orgs/:org_slug/oidc",
         "admin",
         args: [
           arg("org_slug", true, "string", "Organization slug.")
         ],
-        flags: [
-          flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
-            repeatable: true
-          )
-        ],
+        flags:
+          oidc_entra_flags() ++
+            [
+              flag("set", "string", "Field key=value (repeatable; key:=json for typed values).",
+                repeatable: true
+              )
+            ],
         writes: true,
         default_output: "json"
       ),
@@ -5015,6 +5019,22 @@ defmodule Barkpark.Plugins.Capabilities do
   defp arg(name, required, type, summary) do
     %{"name" => name, "required" => required, "type" => type, "summary" => summary}
   end
+
+  # The OIDC connection's Entra ID settings, shared by org.oidc-create and
+  # org.oidc-update. A switch sends true; turn one off with --set key:=false.
+  defp oidc_entra_flags,
+    do: [
+      flag("scopes", "string", "Space-separated scopes (default \"openid email\")."),
+      flag(
+        "token_endpoint_auth_method",
+        "string",
+        "client_secret_post (default) or client_secret_basic."
+      ),
+      flag("tenant_id", "string", "Entra tenant id. Sign-in requires a matching tid claim."),
+      flag("strict_validation", "boolean", "Turn on the stricter ID token and subject checks."),
+      flag("trust_idp_mfa", "boolean", "Count the identity provider's MFA as Barkpark MFA."),
+      flag("mfa_acr", "string", "acr value that also counts as MFA when trust_idp_mfa is on.")
+    ]
 
   defp flag(name, type, summary, opts \\ []) do
     base = %{"name" => name, "type" => type, "summary" => summary}

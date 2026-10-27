@@ -62,7 +62,7 @@ GROQ as Sanity's query API (client `apiHost`: `/w/…/p/…`): [contracts/groq-q
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin ; a bare `_publishedId` reaches an unpublished doc under both.
+One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin; a bare `_publishedId` reaches an unpublished doc under both.
 
 **Read-after-write is immediate** (`cache-control: max-age=0, private, must-revalidate`; ETags include `_id:_rev`). Writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row; `published` and `bp task get` read the exact ID.
 
@@ -117,7 +117,7 @@ PortableDoc block ops on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`
 
 ## 7. `GET /w/:ws/p/:proj/v{1|apiVersion}/data/listen/:dataset` [token]
 
-SSE: a `/w/…/p/…` URL streams one project, a flat URL a workspace.
+SSE: a `/w/…/p/…` URL streams a project, a flat URL a workspace.
 
 **Narrowing:** `?types=a,b`; `?ids=a,b`; `?perspective=published` drops drafts; `filter[f]=v1,v2`: any-of equality on redacted doc; else 400.
 
@@ -125,11 +125,11 @@ SSE: a `/w/…/p/…` URL streams one project, a flat URL a workspace.
 
 First frame: `event: welcome`. `?query=*[…]`: docs matching before/after, with `transition`; `includeResult=false` no result.
 
-**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
+**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
 
-**Shed frame:** a stalled consumer gets one `event: overloaded` and closes; reconnect with `Last-Event-ID`.
+**Closes:** a slow reader: `event: overloaded`; past 20 streams a credential+address, 100 in all: `event: disconnect`.
 
-**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) never sheds; adds **`event: workflow`**: a live workflow summary (unreplayable, no `id:`).
+**Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) never sheds; adds `event: workflow`: a live workflow summary (unreplayable, no `id:`).
 
 ## 8. Schema endpoints [admin]
 

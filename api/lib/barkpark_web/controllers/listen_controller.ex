@@ -6,7 +6,7 @@ defmodule BarkparkWeb.ListenController do
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
   alias Barkpark.Realtime.DrainSignal
-  alias BarkparkWeb.{ErrorResponse, ListenFilter, PeerProbe, ReadPerspective}
+  alias BarkparkWeb.{ErrorResponse, ListenFilter, PeerProbe, ReadPerspective, StreamCap}
 
   def listen(conn, %{"dataset" => dataset} = params) do
     # `?types=`, `?perspective=` and `filter[…]` narrow the stream server-side
@@ -14,7 +14,7 @@ defmodule BarkparkWeb.ListenController do
     # HERE, before any subscription or chunk, as a plain 400.
     case ListenFilter.parse(params) do
       {:ok, lf} ->
-        stream(conn, dataset, params, lf)
+        capped_stream(conn, dataset, params, lf)
 
       {:error, {:perspective, value}} ->
         ReadPerspective.refuse(conn, value, ListenFilter.perspectives(),
@@ -26,6 +26,31 @@ defmodule BarkparkWeb.ListenController do
       {:error, {:filter, message, details}} ->
         ErrorResponse.emit_custom(conn, 400, "malformed", message, details)
     end
+  end
+
+  # At most `:listen_max_streams` (default 20) open streams per credential
+  # from one address, and `:listen_max_streams_per_credential` (default 100)
+  # in all, counted apart from live.events (`BarkparkWeb.StreamCap`,
+  # task-7a9e8f31be8b7580). Over a cap: one `disconnect` frame and the
+  # response ends. That is listen's final event: `@sanity/client` reports it
+  # as a DisconnectError and does not reconnect, where an unknown `goaway`
+  # would be dropped and the closed stream reopened every second.
+  defp capped_stream(conn, dataset, params, lf) do
+    caps =
+      {Application.get_env(:barkpark, :listen_max_streams, 20),
+       Application.get_env(:barkpark, :listen_max_streams_per_credential, 100)}
+
+    StreamCap.run(
+      conn,
+      :listen,
+      caps,
+      fn reason ->
+        conn
+        |> put_resp_content_type("text/event-stream")
+        |> send_resp(200, "event: disconnect\ndata: #{Jason.encode!(%{reason: reason})}\n\n")
+      end,
+      fn -> stream(conn, dataset, params, lf) end
+    )
   end
 
   defp stream(conn, dataset, params, lf) do
@@ -142,39 +167,55 @@ defmodule BarkparkWeb.ListenController do
         _ -> conn
       end
 
-    conn =
+    {replay, conn} =
       if since do
-        Enum.reduce(replay_since(dataset, since, workspace_id, replay_opts(lf)), conn, fn ev, c ->
-          # The replay path reads the STORED mutation_events.document — a frozen,
-          # unredacted snapshot. Re-render from the CURRENT document so a privacy
-          # change since write is honoured; fall back to redacting the snapshot
-          # only when the document is gone (a delete event). A `:drop` means this
-          # caller is denied the row — by the owner-row ACL, or by her grant
-          # ladder (task-c9c962c3451fd831) — so skip the chunk entirely and
-          # never replay another user's or another grant's row.
-          with true <- ListenFilter.pass_meta?(lf, ev),
-               result when result != :drop <- redacted_result(ev, dataset, caller_context, scope),
-               true <- ListenFilter.pass_result?(lf, result),
-               true <- ListenFilter.query_match?(lf.query, result) do
-            # A replayed event under `?query=` is one whose document matches now.
-            ev =
-              ev
-              |> Map.put(:document, result)
-              |> Map.put(:transition, if(lf.query, do: "update"))
-              |> Map.put(:include_result, lf.include_result)
+        Enum.reduce_while(
+          replay_since(dataset, since, workspace_id, replay_opts(lf)),
+          {:ok, conn},
+          fn ev, {:ok, c} ->
+            # The replay path reads the STORED mutation_events.document — a frozen,
+            # unredacted snapshot. Re-render from the CURRENT document so a privacy
+            # change since write is honoured; fall back to redacting the snapshot
+            # only when the document is gone (a delete event). A `:drop` means this
+            # caller is denied the row — by the owner-row ACL, or by her grant
+            # ladder (task-c9c962c3451fd831) — so skip the chunk entirely and
+            # never replay another user's or another grant's row.
+            with true <- ListenFilter.pass_meta?(lf, ev),
+                 result when result != :drop <-
+                   redacted_result(ev, dataset, caller_context, scope),
+                 true <- ListenFilter.pass_result?(lf, result),
+                 {:match, true} <- {:match, ListenFilter.query_match?(lf.query, result)} do
+              # A replayed event under `?query=` is one whose document matches now.
+              ev =
+                ev
+                |> Map.put(:document, result)
+                |> Map.put(:transition, if(lf.query, do: "update"))
+                |> Map.put(:include_result, lf.include_result)
 
-            case chunk(c, format_event(ev, dataset)) do
-              {:ok, c2} -> c2
-              _ -> c
+              case chunk(c, format_event(ev, dataset)) do
+                {:ok, c2} -> {:cont, {:ok, c2}}
+                _ -> {:cont, {:ok, c}}
+              end
+            else
+              {:match, {:limit, message}} -> {:halt, {:limit, channel_error(c, message)}}
+              _ -> {:cont, {:ok, c}}
             end
-          else
-            _ -> c
           end
-        end)
+        )
       else
-        conn
+        {:ok, conn}
       end
 
+    # A replayed event past the filter's geo budget already ended the stream.
+    if replay == :limit do
+      send(forwarder, :stop)
+      conn
+    else
+      live(conn, dataset, workspace_id, caller_context, scope, lf, forwarder)
+    end
+  end
+
+  defp live(conn, dataset, workspace_id, caller_context, scope, lf, forwarder) do
     conn = arm_reauth(conn, workspace_id)
 
     try do
@@ -505,6 +546,7 @@ defmodule BarkparkWeb.ListenController do
             end
           else
             {:drop, lf} -> listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+            {:limit, message, _lf} -> channel_error(conn, message)
             _ -> listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
           end
       end
@@ -680,6 +722,17 @@ defmodule BarkparkWeb.ListenController do
   def should_shed?(queue_len, limit)
       when is_integer(queue_len) and is_integer(limit),
       do: queue_len > limit
+
+  # task-04f37760a2598bbf: the listen filter passed a limit on an event (its
+  # geo budget). As on Sanity, `channelError` ends the stream and
+  # `@sanity/client` reports it as a ChannelError without reconnecting, so the
+  # filter never answers a silent false.
+  defp channel_error(conn, message) do
+    case chunk(conn, "event: channelError\ndata: #{Jason.encode!(%{message: message})}\n\n") do
+      {:ok, c} -> c
+      _ -> conn
+    end
+  end
 
   # The final frame emitted before a slow consumer is shed. A distinct event so
   # the client can tell backpressure-close from a network drop and immediately

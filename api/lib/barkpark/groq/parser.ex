@@ -71,8 +71,8 @@ defmodule Barkpark.Groq.Parser do
     "diff" => %{"changedAny" => 3, "changedOnly" => 3},
     "media" => %{"aspect" => 2},
     "sanity" => %{
-      "projectId" => :any,
-      "dataset" => :any,
+      "projectId" => 0,
+      "dataset" => 0,
       "versionOf" => 1,
       "partOfRelease" => 1
     },
@@ -80,13 +80,13 @@ defmodule Barkpark.Groq.Parser do
     "dateTime" => %{"now" => 0},
     "releases" => %{"all" => 0},
     "text" => %{"query" => 1, "semanticSimilarity" => 1},
-    "geo" => %{"latLng" => :any, "contains" => :any, "intersects" => :any, "distance" => :any},
+    "geo" => %{"latLng" => 2, "contains" => 2, "intersects" => 2, "distance" => 2},
     "documents" => %{
-      "get" => :any,
+      "get" => 1,
       "incomingRefCount" => :any,
       "incomingGlobalDocumentReferenceCount" => :any
     },
-    "user" => %{"attributes" => :any}
+    "user" => %{"attributes" => 0}
   }
 
   @pipe_functions %{"order" => {:min, 1}, "score" => {:min, 1}}
@@ -115,13 +115,23 @@ defmodule Barkpark.Groq.Parser do
   """
   @spec parse(String.t(), map()) :: {:ok, tree()} | {:error, parse_error()}
   def parse(query, params \\ %{}) when is_binary(query) and is_map(params) do
-    ctx = %{params: params, allow_boost: false}
+    ctx = %{params: params, allow_boost: false, fns: nil, fn_param: nil}
     pos = skip_ws(query, 0)
 
-    if at(query, pos) == ?f and at(query, pos + 1) == ?n and not ident_char?(at(query, pos + 2)) do
-      throw({:groq_parse_error, "custom functions (fn) are not supported", pos, pos + 2})
-    end
+    # Custom functions first (`fn ns::name($p) = body;`). The definitions are
+    # read twice: once to learn every name (a body may call a function defined
+    # after it, or one that shadows a built-in), then with all names known.
+    {fns, pos} =
+      if fn_keyword?(query, pos) do
+        {names, _} = parse_fn_defs(query, pos, %{ctx | fns: :any}, %{})
+        {defs, pos} = parse_fn_defs(query, pos, %{ctx | fns: names}, %{})
+        check_fn_cycles!(defs)
+        {defs, pos}
+      else
+        {nil, pos}
+      end
 
+    ctx = %{ctx | fns: fns && Map.new(fns, fn {key, _} -> {key, true} end)}
     {node, pos, fail_pos} = parse_expr(query, pos, 0, ctx)
     pos = skip_ws(query, pos)
 
@@ -129,6 +139,8 @@ defmodule Barkpark.Groq.Parser do
       at_pos = if fail_pos, do: max(fail_pos - 1, 0), else: pos
       throw({:groq_parse_error, "unexpected input after the end of the expression", at_pos})
     end
+
+    node = if fns, do: inline_fns(node, fns), else: node
 
     {:ok, node |> validate() |> memoize_closed()}
   catch
@@ -140,6 +152,365 @@ defmodule Barkpark.Groq.Parser do
     {:groq_parse_error, message, start, stop} ->
       {:error, %{description: message, start: start, end: stop}}
   end
+
+  # ── Custom functions (task-13790b478beeee4d) ─────────────────────────────
+  #
+  # `fn ns::name($p) = body;`, as Sanity's API takes them (ecu57yeh, 26 Oct):
+  # one parameter; a body that is a projection of the parameter (`$p{…}`,
+  # `$p->{…}`, `$p[]{…}`), uses it once and reads no `^`; calls to other
+  # functions in any order; the last definition of a name wins; a cycle is
+  # refused. A call is replaced by its body before evaluation, and one query
+  # may expand at most `@max_fn_calls` calls, so functions that call each
+  # other twice per level cannot grow the tree without bound.
+
+  @max_fn_calls 1_000
+
+  defp fn_keyword?(s, pos),
+    do: at(s, pos) == ?f and at(s, pos + 1) == ?n and not ident_char?(at(s, pos + 2))
+
+  # `{%{"ns::name" => true | {param_less_body}}, pos}`. With `ctx.fns == :any`
+  # (the first read) any call that is not a built-in reads as a custom call,
+  # and only the names are returned.
+  defp parse_fn_defs(s, pos, ctx, acc) do
+    if fn_keyword?(s, pos) do
+      {key, param, body_start} = parse_fn_header(s, pos)
+      Process.put(:groq_fn_arg_uses, 0)
+      {body, p, _} = parse_expr(s, body_start, 0, %{ctx | fn_param: param})
+      uses = Process.delete(:groq_fn_arg_uses)
+      p = skip_ws(s, p)
+
+      if at(s, p) != ?;,
+        do: throw({:groq_parse_error, "expected ';' at the end of function definition", p})
+
+      value = if ctx.fns == :any, do: true, else: check_fn_body!(body, uses, body_start, p)
+      parse_fn_defs(s, skip_ws(s, p + 1), ctx, Map.put(acc, key, value))
+    else
+      {acc, pos}
+    end
+  end
+
+  defp parse_fn_header(s, pos) do
+    p = skip_ws(s, pos + 2)
+    n = ident_len(s, p)
+
+    unless n > 0 and at(s, p + n) == ?: and at(s, p + n + 1) == ?: do
+      throw({:groq_parse_error, "expected '::' followed by a function name", p, p + max(n, 1)})
+    end
+
+    ns = binary_part(s, p, n)
+    np = p + n + 2
+    m = ident_len(s, np)
+    if m == 0, do: throw({:groq_parse_error, "expected a function name", np})
+    name = binary_part(s, np, m)
+
+    open = skip_ws(s, np + m)
+
+    if at(s, open) != ?(,
+      do: throw({:groq_parse_error, "expected '(' after the function name", open})
+
+    dollar = skip_ws(s, open + 1)
+    k = if at(s, dollar) == ?$, do: ident_len(s, dollar + 1), else: 0
+    if k == 0, do: throw({:groq_parse_error, "expected parameter name", dollar})
+    param = binary_part(s, dollar + 1, k)
+
+    close = skip_ws(s, dollar + 1 + k)
+
+    if at(s, close) != ?),
+      do: throw({:groq_parse_error, "expected ')' following function arguments", close})
+
+    eq = skip_ws(s, close + 1)
+    if at(s, eq) != ?=, do: throw({:groq_parse_error, "expected '=' after the parameters", eq})
+
+    {"#{ns}::#{name}", param, skip_ws(s, eq + 1)}
+  end
+
+  defp check_fn_body!(body, uses, start, stop) do
+    base =
+      case body do
+        {:projection, base, _obj} ->
+          base
+
+        {:map, base, {:projection, inner, _obj}} when inner in [{:this}, {:deref, {:this}}] ->
+          base
+
+        _ ->
+          throw({:groq_parse_error, "function body is not of type ast.Projection", start, stop})
+      end
+
+    unless base in [{:fn_arg}, {:deref, {:fn_arg}}, {:array_coerce, {:fn_arg}}] do
+      throw({:groq_parse_error, "unexpected function body", start, stop})
+    end
+
+    # `^` may climb only scopes the body opens itself, never to the caller's.
+    unless parents_inside?(body, 0) do
+      throw({:groq_parse_error, "parent usage is invalid", start, stop})
+    end
+
+    if uses > 1 do
+      throw(
+        {:groq_parse_error,
+         "the function argument cannot be used more than once in the function body", start, stop}
+      )
+    end
+
+    body
+  end
+
+  # `depth` counts the scopes opened inside the body: a projection's object,
+  # a filter's condition, a map's expression and an order's terms each run one
+  # scope down from their base.
+  defp parents_inside?({:parent, n}, depth), do: n < depth
+  defp parents_inside?({:value, _}, _depth), do: true
+
+  defp parents_inside?({kind, base, inner}, depth)
+       when kind in [:projection, :filter, :map, :flat_map],
+       do: parents_inside?(base, depth) and parents_inside?(inner, depth + 1)
+
+  defp parents_inside?({:pipe, base, _name, args}, depth),
+    do: parents_inside?(base, depth) and Enum.all?(args, &parents_inside?(&1, depth + 1))
+
+  defp parents_inside?(node, depth) when is_tuple(node),
+    do: node |> Tuple.to_list() |> tl() |> Enum.all?(&parents_inside?(&1, depth))
+
+  defp parents_inside?(list, depth) when is_list(list),
+    do: Enum.all?(list, &parents_inside?(&1, depth))
+
+  defp parents_inside?(_other, _depth), do: true
+
+  defp user_fn?(nil, _ns, _name), do: false
+  defp user_fn?(:any, ns, name), do: not builtin?(ns, name)
+  defp user_fn?(fns, ns, name), do: Map.has_key?(fns, "#{ns}::#{name}")
+
+  defp builtin?(ns, name),
+    do: (ns == "global" and name == "select") or Map.has_key?(Map.get(@functions, ns, %{}), name)
+
+  defp fn_namespace?(fns, ns) when is_map(fns),
+    do: Enum.any?(Map.keys(fns), &String.starts_with?(&1, ns <> "::"))
+
+  defp fn_namespace?(_fns, _ns), do: false
+
+  # Sanity's wording: `cyclic dependency detected in function definition "ex::a"
+  # detected: ex::a -> ex::b -> ex::a`. One depth-first walk over every
+  # definition (white, on the path, done), so many definitions stay linear.
+  defp check_fn_cycles!(defs) do
+    graph = Map.new(defs, fn {key, body} -> {key, body |> fn_calls() |> Enum.uniq()} end)
+
+    Enum.reduce(Enum.sort(Map.keys(graph)), MapSet.new(), fn key, done ->
+      fn_walk(graph, key, [], done)
+    end)
+
+    :ok
+  end
+
+  defp fn_walk(graph, key, path, done) do
+    cond do
+      MapSet.member?(done, key) ->
+        done
+
+      key in path ->
+        cycle = Enum.reverse([key | Enum.take_while(path, &(&1 != key))] ++ [key])
+
+        throw(
+          {:groq_parse_error,
+           "cyclic dependency detected in function definition \"#{key}\" detected: " <>
+             Enum.join(cycle, " -> "), 0}
+        )
+
+      true ->
+        graph
+        |> Map.get(key, [])
+        |> Enum.reduce(done, fn callee, done -> fn_walk(graph, callee, [key | path], done) end)
+        |> MapSet.put(key)
+    end
+  end
+
+  defp fn_calls({:fn_call, key, arg}), do: [key | fn_calls(arg)]
+  defp fn_calls({:value, _}), do: []
+
+  defp fn_calls(node) when is_tuple(node),
+    do: node |> Tuple.to_list() |> tl() |> Enum.flat_map(&fn_calls/1)
+
+  defp fn_calls(list) when is_list(list), do: Enum.flat_map(list, &fn_calls/1)
+  defp fn_calls(_), do: []
+
+  # Each call becomes its body, the parameter replaced by the (inlined)
+  # argument; the count stops a query past `@max_fn_calls` while it is built.
+  defp inline_fns(node, defs) do
+    Process.put(:groq_fn_calls, 0)
+    inline(node, defs)
+  after
+    Process.delete(:groq_fn_calls)
+  end
+
+  defp inline({:fn_call, key, arg}, defs) do
+    calls = Process.get(:groq_fn_calls, 0) + 1
+
+    if calls > @max_fn_calls do
+      throw(
+        {:groq_parse_error,
+         "too many function calls in this query (more than #{@max_fn_calls} after expansion)", 0}
+      )
+    end
+
+    Process.put(:groq_fn_calls, calls)
+    arg = inline(arg, defs)
+    defs |> Map.fetch!(key) |> put_fn_arg(arg) |> inline(defs)
+  end
+
+  defp inline({:value, _} = node, _defs), do: node
+  defp inline(node, defs) when is_tuple(node), do: map_children(node, &inline(&1, defs))
+  defp inline(list, defs) when is_list(list), do: Enum.map(list, &inline(&1, defs))
+  defp inline(other, _defs), do: other
+
+  defp put_fn_arg({:fn_arg}, arg), do: arg
+  defp put_fn_arg({:value, _} = node, _arg), do: node
+  defp put_fn_arg(node, arg) when is_tuple(node), do: map_children(node, &put_fn_arg(&1, arg))
+  defp put_fn_arg(list, arg) when is_list(list), do: Enum.map(list, &put_fn_arg(&1, arg))
+  defp put_fn_arg(other, _arg), do: other
+
+  # ── diff:: selectors (task-13790b478beeee4d) ─────────────────────────────
+  #
+  # The third argument of `diff::changedAny` / `diff::changedOnly` is a
+  # selector, not an expression: `a`, `a.b`, `a.(b, c)`, `(a, b).c`, `a[]`,
+  # `a[cond]`, `anywhere(cond)`. Anything else is Sanity's "invalid selector".
+  # A selector may hold at most `@max_selector_steps` steps.
+
+  @max_selector_steps 100
+
+  defp parse_diff_call(s, name, start, open, ctx) do
+    if at(s, skip_ws(s, open + 1)) == ?),
+      do: throw({:groq_parse_error, "three arguments expected", start, open})
+
+    {lhs, p, _} = parse_expr(s, skip_ws(s, open + 1), 0, ctx)
+    p = expect_diff_comma!(s, skip_ws(s, p), start, open)
+    {rhs, p, _} = parse_expr(s, p, 0, ctx)
+    p = expect_diff_comma!(s, skip_ws(s, p), start, open)
+
+    Process.put(:groq_selector_steps, 0)
+    {sel, p} = parse_selector(s, p, ctx)
+    Process.delete(:groq_selector_steps)
+    p = skip_ws(s, p)
+
+    case at(s, p) do
+      ?) -> {{:func, "diff", name, [lhs, rhs, {:selector, sel}]}, p + 1}
+      ?, -> throw({:groq_parse_error, "three arguments expected", start, open})
+      _ -> throw({:groq_parse_error, "invalid selector", p, p + 1})
+    end
+  end
+
+  defp expect_diff_comma!(s, p, start, open) do
+    if at(s, p) == ?,,
+      do: skip_ws(s, p + 1),
+      else: throw({:groq_parse_error, "three arguments expected", start, open})
+  end
+
+  defp parse_selector(s, p, ctx) do
+    {first, p} = selector_component(s, skip_ws(s, p), ctx)
+    selector_postfix(s, p, ctx, [first])
+  end
+
+  defp selector_step!(step) do
+    n = Process.get(:groq_selector_steps, 0) + 1
+
+    if n > @max_selector_steps do
+      throw(
+        {:groq_parse_error, "selector is too large (more than #{@max_selector_steps} steps)", 0}
+      )
+    end
+
+    Process.put(:groq_selector_steps, n)
+    step
+  end
+
+  defp selector_component(s, p, ctx) do
+    case at(s, p) do
+      ?( ->
+        selector_group(s, p, ctx)
+
+      c ->
+        n = if c && ident_start?(c), do: ident_len(s, p), else: 0
+        if n == 0, do: throw({:groq_parse_error, "invalid selector", p, p + 1})
+        name = binary_part(s, p, n)
+        open = skip_ws(s, p + n)
+
+        if name == "anywhere" and at(s, open) == ?( do
+          {cond_expr, q, _} = parse_expr(s, skip_ws(s, open + 1), 0, ctx)
+          q = skip_ws(s, q)
+          if at(s, q) != ?), do: throw({:groq_parse_error, "invalid selector", q, q + 1})
+          {selector_step!({:anywhere, cond_expr}), q + 1}
+        else
+          {selector_step!({:key, name}), p + n}
+        end
+    end
+  end
+
+  defp selector_group(s, p, ctx) do
+    q = skip_ws(s, p + 1)
+
+    if at(s, q) == ?) do
+      throw({:groq_parse_error, "unexpected token \")\", expected expression", q, q + 1})
+    end
+
+    {sels, q} = selector_list(s, q, ctx, [])
+    {selector_step!({:group, sels}), q}
+  end
+
+  defp selector_list(s, p, ctx, acc) do
+    {sel, q} = parse_selector(s, p, ctx)
+    q = skip_ws(s, q)
+
+    case at(s, q) do
+      ?, -> selector_list(s, skip_ws(s, q + 1), ctx, [sel | acc])
+      ?) -> {Enum.reverse([sel | acc]), q + 1}
+      _ -> throw({:groq_parse_error, "invalid selector", q, q + 1})
+    end
+  end
+
+  defp selector_postfix(s, p, ctx, steps) do
+    q = skip_ws(s, p)
+
+    case at(s, q) do
+      ?. ->
+        r = skip_ws(s, q + 1)
+
+        {step, r} =
+          case at(s, r) do
+            ?( ->
+              selector_group(s, r, ctx)
+
+            c ->
+              n = if c && ident_start?(c), do: ident_len(s, r), else: 0
+              if n == 0, do: throw({:groq_parse_error, "invalid selector", r, r + 1})
+              {selector_step!({:key, binary_part(s, r, n)}), r + n}
+          end
+
+        selector_postfix(s, r, ctx, [step | steps])
+
+      ?[ ->
+        r = skip_ws(s, q + 1)
+
+        if at(s, r) == ?] do
+          selector_postfix(s, r + 1, ctx, [selector_step!(:each) | steps])
+        else
+          {cond_expr, e, _} = parse_expr(s, r, 0, ctx)
+          e = skip_ws(s, e)
+
+          if at(s, e) != ?] or index_like?(cond_expr),
+            do: throw({:groq_parse_error, "invalid selector", r, e + 1})
+
+          selector_postfix(s, e + 1, ctx, [selector_step!({:filter, cond_expr}) | steps])
+        end
+
+      _ ->
+        {Enum.reverse(steps), p}
+    end
+  end
+
+  # `a[0]` and `a[0..2]` index an array; a selector only filters it.
+  defp index_like?({:value, n}) when is_number(n), do: true
+  defp index_like?({sign, {:value, n}}) when sign in [:neg, :pos] and is_number(n), do: true
+  defp index_like?({:range, _, _, _}), do: true
+  defp index_like?(_), do: false
 
   # ── Expressions ──────────────────────────────────────────────────────────
 
@@ -192,15 +563,22 @@ defmodule Barkpark.Groq.Parser do
           n ->
             name = binary_part(s, pos + 1, n)
 
-            case Map.fetch(ctx.params, name) do
-              {:ok, value} ->
-                {{:value, value}, pos + 1 + n}
+            # Inside a function body its parameter is the call's argument.
+            if name == ctx.fn_param do
+              Process.put(:groq_fn_arg_uses, Process.get(:groq_fn_arg_uses, 0) + 1)
+              {{:fn_arg}, pos + 1 + n}
+            else
+              case Map.fetch(ctx.params, name) do
+                {:ok, value} ->
+                  {{:value, value}, pos + 1 + n}
 
-              :error ->
-                # Sanity's span: from the `$` for the name's length.
-                throw(
-                  {:groq_parse_error, "param $#{name} referenced, but not provided", pos, pos + n}
-                )
+                :error ->
+                  # Sanity's span: from the `$` for the name's length.
+                  throw(
+                    {:groq_parse_error, "param $#{name} referenced, but not provided", pos,
+                     pos + n}
+                  )
+              end
             end
         end
 
@@ -268,6 +646,8 @@ defmodule Barkpark.Groq.Parser do
     end
   end
 
+  @int64_max 9_223_372_036_854_775_807
+
   defp parse_number(s, pos) do
     int_len = digits_len(s, pos)
     p = pos + int_len
@@ -296,12 +676,20 @@ defmodule Barkpark.Groq.Parser do
 
     value =
       case kind do
+        # Sanity reads an integer literal into an int64, clamping one past
+        # its range to the bound (task-f5fecd9690f62a7e). A literal is never
+        # negative here: the minus is its own operator.
         :integer ->
-          text |> String.to_integer() |> Barkpark.Groq.Values.num()
+          text |> String.to_integer() |> min(@int64_max) |> Barkpark.Groq.Values.num()
 
         _ ->
-          {f, ""} = Float.parse(normalize_float_text(text))
-          f
+          # Past the double range (`1e400`) Float.parse refuses the text;
+          # JavaScript reads Infinity, which GROQ answers as null
+          # (task-97b8d14ea3d44330).
+          case Float.parse(normalize_float_text(text)) do
+            {f, ""} -> f
+            _ -> nil
+          end
       end
 
     {{:value, value}, p}
@@ -568,7 +956,7 @@ defmodule Barkpark.Groq.Parser do
 
     arg_ctx = if name == "score", do: %{ctx | allow_boost: true}, else: ctx
     {args, p} = parse_args(s, p, arg_ctx)
-    check_arity!(name, arity, length(args), ipos)
+    check_arity!("pipe", name, arity, length(args), ipos)
 
     args = if name == "order", do: args, else: Enum.map(args, &reject_marks!(&1, ipos))
 
@@ -606,23 +994,48 @@ defmodule Barkpark.Groq.Parser do
     end
   end
 
-  defp parse_func_call(s, namespace, name, start, open, ctx) do
+  defp parse_func_call(s, "diff", name, start, open, ctx)
+       when name in ["changedAny", "changedOnly"] do
+    if user_fn?(ctx.fns, "diff", name),
+      do: parse_call_args(s, "diff", name, start, open, ctx),
+      else: parse_diff_call(s, name, start, open, ctx)
+  end
+
+  defp parse_func_call(s, namespace, name, start, open, ctx),
+    do: parse_call_args(s, namespace, name, start, open, ctx)
+
+  defp parse_call_args(s, namespace, name, start, open, ctx) do
     {args, p} = parse_args(s, open, ctx)
 
     cond do
+      user_fn?(ctx.fns, namespace, name) ->
+        case args do
+          [arg] ->
+            {{:fn_call, "#{namespace}::#{name}", arg}, p}
+
+          _ ->
+            throw(
+              {:groq_parse_error,
+               "expected a single argument for function call, got #{length(args)}", start, p}
+            )
+        end
+
       namespace == "global" and name == "select" ->
         {build_select(args, start), p}
 
       true ->
         funcs =
           Map.get(@functions, namespace) ||
-            throw({:groq_parse_error, "undefined namespace: #{namespace}", start, open})
+            if(fn_namespace?(ctx.fns, namespace),
+              do: throw({:groq_parse_error, undefined_function(namespace, name), start, open}),
+              else: throw({:groq_parse_error, "undefined namespace: #{namespace}", start, open})
+            )
 
         arity =
           Map.get(funcs, name) ||
             throw({:groq_parse_error, undefined_function(namespace, name), start, open})
 
-        check_arity!(name, arity, length(args), start)
+        check_arity!(namespace, name, arity, length(args), start)
 
         if namespace == "global" and name == "boost" and not ctx.allow_boost do
           throw(
@@ -687,7 +1100,23 @@ defmodule Barkpark.Groq.Parser do
     end
   end
 
-  defp check_arity!(name, arity, count, pos) do
+  # Sanity words a wrong argument count per function (ecu57yeh, 27 Oct;
+  # task-3f83a5527aa535fa): most say `Incorrect number of arguments to
+  # function "name"`, these few their own sentence.
+  @arity_messages %{
+    {"global", "defined"} => "single argument expected",
+    {"global", "references"} => "arguments expected",
+    {"media", "aspect"} => "two arguments expected",
+    {"sanity", "versionOf"} => "one argument expected",
+    {"sanity", "partOfRelease"} => "one argument expected",
+    {"documents", "get"} => "one argument expected",
+    {"releases", "all"} => "zero arguments expected",
+    {"user", "attributes"} => "zero arguments expected",
+    {"pipe", "order"} => "argument expected",
+    {"pipe", "score"} => "argument expected"
+  }
+
+  defp check_arity!(namespace, name, arity, count, pos) do
     ok? =
       case arity do
         :any -> true
@@ -697,7 +1126,14 @@ defmodule Barkpark.Groq.Parser do
       end
 
     unless ok? do
-      throw({:groq_parse_error, "incorrect number of arguments to function #{name}()", pos})
+      message =
+        Map.get(
+          @arity_messages,
+          {namespace, name},
+          ~s|Incorrect number of arguments to function "#{name}"|
+        )
+
+      throw({:groq_parse_error, message, pos})
     end
   end
 
