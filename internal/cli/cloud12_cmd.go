@@ -1709,7 +1709,7 @@ func runInstance(out *writer, g globals, args []string) int {
 	}
 
 	if len(args) == 0 {
-		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance backup | bp instance restore <dir>", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance backup | bp instance restore <dir> | bp instance init | bp instance check", exitUsage)
 	}
 
 	switch args[0] {
@@ -1721,6 +1721,10 @@ func runInstance(out *writer, g globals, args []string) int {
 		return runInstanceBackup(out, args[1:])
 	case "restore":
 		return runInstanceRestore(out, args[1:])
+	case "init":
+		return runInstanceInit(out, args[1:])
+	case "check":
+		return runInstanceCheck(out, args[1:])
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown instance verb %q — try: bp instance credentials <id> or bp instance admin-token <id>", args[0]), exitUsage)
 	}
@@ -1851,6 +1855,9 @@ USAGE
                                (--install | --out <path> | --reveal) [--team <t>]
   bp instance backup  --database-url <url> --media-dir <dir> --out <dir>
   bp instance restore <dir> --database-url <url> --media-dir <dir>
+  bp instance init  [--out <file>] [--target containerapps|vm]
+  bp instance check [--env-file <file>] [--target containerapps|vm]
+                    [--skip database,media,url]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
@@ -1878,6 +1885,18 @@ WHAT IT DOES
                and an empty media directory. Checks both checksums first, then
                after pg_restore compares every media file and per-type document
                count with the manifest and exits 1 on any difference.
+  init         write a new env file, barkpark.env by default, with mode 600:
+               the required settings, generated secrets and the recommended
+               Pensum settings for --target (containerapps by default, or vm).
+               Refuses to replace an existing file and never prints a secret.
+  check        read --env-file, or the environment, and print one line per
+               problem with a doc link: missing required settings, misspelled
+               BARKPARK_* names, weak or malformed secrets, database reachable
+               with DATABASE_SSL and the extensions citext, pg_trgm and
+               pgcrypto, a writable BARKPARK_MEDIA_DIR, the TLS certificate of
+               https://PHX_HOST, and the recommended Pensum settings. Exits 1
+               on any problem. --skip leaves out the database, the local files
+               (media dir, CA file) or the url. init and check need no server.
 
 FLAGS
   --team <t>   read credentials in an explicit team context (a team slug or id
