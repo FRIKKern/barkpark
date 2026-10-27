@@ -55,7 +55,7 @@ defmodule Barkpark.SchemaOwnership do
     saml_assertion_replays saml_connections scheduled_publishes schema_definitions schema_migrations
     scim_groups scim_tokens search_intel_crystals search_intel_events
     search_intel_merge_patterns search_refresh_pending search_surface_config search_synonyms secrets
-    secrets_audit share_links shares social_identities social_providers
+    secrets_audit share_links shares social_identities social_providers sso_flows
     status_incidents sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs task_edges token_sessions user_email_tokens
     user_prefs user_sessions users webauthn_challenge_replays webauthn_credentials webhook_deliveries webhooks
