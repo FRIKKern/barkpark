@@ -1572,6 +1572,10 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token_or_login_session])
 
     get("/token", TokenSelfController, :show)
+    # The Studio's BARKPARK_TOKEN: a read token with a member seat, for a
+    # workspace owner or admin (login session or API token) or the instance
+    # admin token (task-7855ed1481992cf6). `bp instance studio-token`.
+    post("/studio-tokens", StudioTokenController, :create)
   end
 
   # ── dwb-7: login-ticket mint (api_token bearer) ─────────────────────────

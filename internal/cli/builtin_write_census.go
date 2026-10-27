@@ -274,6 +274,13 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"`permissions` and `workspace` before anything is written to a sink or the config — a body that names " +
 			"none of them cannot install a credential or print a receipt.",
 	},
+	{
+		File: "internal/cli/instance_studio_token_cmd.go", Func: "studioTokenMint", Sites: 1,
+		Endpoint: "POST /v1/auth/studio-tokens", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx runs through screenBuiltinWriteReceipt, then parseTokenMintReceipt REQUIRES the server's `token`, " +
+			"`permissions` and `workspace` before the BARKPARK_TOKEN line prints.",
+	},
 	// ---- task create -----------------------------------------------------
 	{
 		File: "internal/cli/tasks_create_cmd.go", Func: "sendTaskMutations", Sites: 1,

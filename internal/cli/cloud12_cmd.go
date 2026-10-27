@@ -1709,7 +1709,7 @@ func runInstance(out *writer, g globals, args []string) int {
 	}
 
 	if len(args) == 0 {
-		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance backup | bp instance restore <dir> | bp instance init | bp instance check", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance studio-token --workspace <ws> | bp instance backup | bp instance restore <dir> | bp instance init | bp instance check", exitUsage)
 	}
 
 	switch args[0] {
@@ -1717,6 +1717,8 @@ func runInstance(out *writer, g globals, args []string) int {
 		return runInstanceCredentials(out, args[1:])
 	case "admin-token":
 		return runInstanceAdminToken(out, g, args[1:])
+	case "studio-token":
+		return runInstanceStudioToken(out, g, args[1:])
 	case "backup":
 		return runInstanceBackup(out, args[1:])
 	case "restore":
@@ -1853,6 +1855,7 @@ USAGE
   bp instance credentials <id> [--team <slug|id>]
   bp instance admin-token <id> [--label <l>] [--expires-in <d> | --no-expiry]
                                (--install | --out <path> | --reveal) [--team <t>]
+  bp instance studio-token --workspace <ws> [--dataset <d>] [--label <l>]
   bp instance backup  --database-url <url> --media-dir <dir> --out <dir>
   bp instance restore <dir> --database-url <url> --media-dir <dir>
   bp instance init  [--out <file>] [--target containerapps|vm] [--host <h>]
@@ -1875,6 +1878,12 @@ WHAT IT DOES
                you name: --install saves it as this server's token in your bp
                config (as 'bp login' does), --out writes a new 0600 file, --reveal
                prints it. With none of them nothing is requested.
+  studio-token mint the Studio's BARKPARK_TOKEN on this server: a read token
+               with a member seat in <ws>. Allowed for an owner or admin of <ws>
+               signed in with a login session, and for the instance admin
+               token; anyone else gets 403 and nothing is minted. Prints the
+               BARKPARK_TOKEN= line once on stdout; the server keeps only its
+               hash.
   backup       write a self-hosted instance to <dir>: a pg_dump custom-format
                db.dump, media.tar.gz and manifest.json with the Postgres major,
                document counts per type and sha256 of every file. Reads from one
