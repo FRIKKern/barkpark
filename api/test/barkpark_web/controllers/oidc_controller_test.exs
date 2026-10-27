@@ -282,7 +282,7 @@ defmodule BarkparkWeb.OidcControllerTest do
     end
 
     defp exchange(audience, ticket, verifier \\ @verifier) do
-      build_conn()
+      scoped_conn()
       |> put_req_header("content-type", "application/json")
       |> post(
         "/v1/auth/sso/exchange",
@@ -303,12 +303,12 @@ defmodule BarkparkWeb.OidcControllerTest do
             "https://studio.example.com/cb#x",
             "/studio"
           ] do
-        refused = get(build_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(to))
+        refused = get(scoped_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(to))
         assert json_response(refused, 400)["error"]["code"] == "malformed"
       end
 
       Application.delete_env(:barkpark, :studio_sso_origins)
-      refused = get(build_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/cb"))
+      refused = get(scoped_conn(), "/v1/auth/oidc/octrl/start?" <> start_query(@studio <> "/cb"))
       assert json_response(refused, 400)
     end
 
@@ -339,7 +339,7 @@ defmodule BarkparkWeb.OidcControllerTest do
     test "the Cloud exchange does not take an SSO ticket", %{conn: conn} do
       %{"ticket" => ticket} = studio_callback(conn)
 
-      assert build_conn()
+      assert scoped_conn()
              |> put_req_header("content-type", "application/json")
              |> post(
                "/v1/auth/login-tickets/exchange",

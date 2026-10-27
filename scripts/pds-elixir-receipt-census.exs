@@ -1198,6 +1198,9 @@ defmodule PDS.Census do
     {:post, "/v1/auth/mfa/enroll", "BarkparkWeb.AuthController", :mfa_enroll, :status_only_receipt},
     {:post, "/v1/auth/register", "BarkparkWeb.AuthController", :register, :status_only_receipt},
     {:post, "/v1/auth/saml/:org_slug/slo", "BarkparkWeb.SamlController", :slo, :status_only_receipt},
+    # Studio SSO return (task-8bdf1b15305af840): the receipt is the login session
+    # itself ({token, user}), the same shape as /v1/auth/login-tickets/exchange.
+    {:post, "/v1/auth/sso/exchange", "BarkparkWeb.OidcController", :exchange, :status_only_receipt},
     {:post, "/v1/auth/sso/route", "BarkparkWeb.SsoRoutingController", :route, :status_only_receipt},
     {:post, "/v1/auth/tokens", "BarkparkWeb.AuthController", :create_token, :status_only_receipt},
     {:post, "/v1/auth/webauthn/login", "BarkparkWeb.WebauthnController", :login, :status_only_receipt},
@@ -2684,12 +2687,13 @@ defmodule PDS.Census do
       verdict: "UNJUDGED", basis: :stub_mapping_only, evidence:
         {"api/test/barkpark_web/controllers/github_webhook_controller_test.exs",
          ~S|test "opened issue forwards the payload to Intake and answers 200" do|}},
-    # barkpark_web/controllers/oidc_controller.ex:82
+    # barkpark_web/controllers/oidc_controller.ex:253
+    # The browser sign-in receipt moved out of callback/2 into signed_in/3 when the
+    # callback learned to return a sign-in to a Studio (task-8bdf1b15305af840). The
+    # receipt expression is unchanged (expr_fp 73996638); the row is re-keyed to the
+    # new site and stays UNJUDGED until someone judges it.
     %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
-            "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
-      stale_ack: %{recorded: {"55913437", "73996638"}, current: {"91406491", "73996638"},
-        why:
-          "KNOWN-STALE BASIS, NOT A WRONG HASH: head_hash moved 55913437 -> 91406491; expr_fp 73996638 is unmoved, so the enclosing def's HEAD was re-shaped and the receipt expression was not. Transcribed from a run of this census at 9b5dc6c35 (BASIS-STALE DEMOTIONS), never re-typed from a comment. The row is NOT re-derived: rewriting the recorded key to match a body nobody re-read would re-adopt a bought verdict for changed code. It stands demoted to UNJUDGED / basis_stale until someone re-JUDGES it, and this ack expires the moment the current pair moves again."},
+            "BarkparkWeb.OidcController.signed_in/3", "117255419", "73996638"},
       verdict: "UNJUDGED", basis: :unexamined},
     # barkpark_web/controllers/plugin_settings_controller.ex — update/2 LEFT THIS
     # REGISTER at the wave-39-residue repair (pds-w39-literal-receipt-residue).
