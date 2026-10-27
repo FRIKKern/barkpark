@@ -505,6 +505,16 @@ func TestInstanceInitValueFlags(t *testing.T) {
 	if e4["BARKPARK_STUDIO_SSO_ORIGINS"] != "https://studio.example.com" || e4["BARKPARK_ALWAYS_ALLOWED_ORIGINS"] != "https://cms.example.com,https://studio.example.com" {
 		t.Fatalf("studio origin not normalised: %q, %q", e4["BARKPARK_STUDIO_SSO_ORIGINS"], e4["BARKPARK_ALWAYS_ALLOWED_ORIGINS"])
 	}
+	// A Studio on the instance's own origin is not listed a second time.
+	p5 := path + "5"
+	if _, stderr, code := runInstanceVerb(t, "init", "--out", p5, "--target", "vm", "--host", "cms.example.com", "--studio-origin", "https://cms.example.com/studio"); code != exitOK {
+		t.Fatalf("init exit %d: %s", code, stderr)
+	}
+	b5, _ := os.ReadFile(p5)
+	e5, _ := parseInstanceEnv(bytes.NewReader(b5))
+	if e5["BARKPARK_ALWAYS_ALLOWED_ORIGINS"] != "https://cms.example.com" || e5["BARKPARK_STUDIO_SSO_ORIGINS"] != "https://cms.example.com" {
+		t.Fatalf("instance origin repeated: %q, %q", e5["BARKPARK_ALWAYS_ALLOWED_ORIGINS"], e5["BARKPARK_STUDIO_SSO_ORIGINS"])
+	}
 	if problems, _ := instanceCheck(context.Background(), e4, instanceCheckOpts{target: instanceTargetVM, studioURL: "https://studio.example.com", skip: map[string]bool{"database": true, "media": true, "url": true}}); len(problems) != 0 {
 		for _, p := range problems {
 			if strings.Contains(p.Setting, "STUDIO_SSO") {
