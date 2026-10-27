@@ -47,11 +47,13 @@ defmodule Barkpark.Search.HitPreview do
       PreviewText.targets(rows, &targets(&1, dataset, scope_opts, schema_fun, caller_context))
 
     deref = &Map.get(targets, &1)
+    # `|type` shows a type name by its schema title.
+    fmt = [type_title: &type_title(schema_fun.(&1))]
 
     Enum.map(documents, fn doc ->
       case Map.get(specs, type_of(doc), %{}) do
         spec when map_size(spec) == 0 -> doc
-        spec -> put_preview(doc, preview(spec, doc, deref))
+        spec -> put_preview(doc, preview(spec, doc, deref, fmt))
       end
     end)
   end
@@ -61,15 +63,15 @@ defmodule Barkpark.Search.HitPreview do
   defp put_preview(doc, preview) when map_size(preview) == 0, do: doc
   defp put_preview(doc, preview), do: Map.put(doc, "_preview", preview)
 
-  defp preview(spec, doc, deref) do
+  defp preview(spec, doc, deref, fmt) do
     for {key, s} <- spec,
-        {out, value} = text(key, s, doc, deref),
+        {out, value} = text(key, s, doc, deref, fmt),
         is_binary(value),
         into: %{},
         do: {out, value}
   end
 
-  defp text("media", spec, doc, deref) do
+  defp text("media", spec, doc, deref, _fmt) do
     case PreviewText.media_item(spec, doc, deref) do
       {:icon, name} -> {"icon", name}
       {:url, url} -> {"media", url}
@@ -77,7 +79,11 @@ defmodule Barkpark.Search.HitPreview do
     end
   end
 
-  defp text(key, spec, doc, deref), do: {key, PreviewText.format(spec, doc, deref)}
+  defp text(key, spec, doc, deref, fmt), do: {key, PreviewText.format(spec, doc, deref, fmt)}
+
+  defp type_title(%{title: title}) when is_binary(title), do: title
+  defp type_title(%{"title" => title}) when is_binary(title), do: title
+  defp type_title(_), do: nil
 
   defp specs(%{list_preview: %{} = lp}), do: Map.take(lp, @keys) |> reject_nil()
   defp specs(%{"list_preview" => %{} = lp}), do: Map.take(lp, @keys) |> reject_nil()

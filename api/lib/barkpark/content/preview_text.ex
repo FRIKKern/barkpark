@@ -22,7 +22,15 @@ defmodule Barkpark.Content.PreviewText do
     * a path, optionally ending in modifiers: `|date` shows a date or
       date-time as `dd.mm.yyyy`, the day it is in UTC; `|lower` and `|upper`
       change the case; `|count` shows the number of items in a list, and `0`
-      when the path holds nothing (`"{questions|count} questions"`);
+      when the path holds nothing (`"{questions|count} questions"`); `|type`
+      shows a type name (`linkedDocument._type|type`) by its schema title,
+      through `opts[:type_title]`, or as stored; `|text` shows the text of a
+      Portable Text value, its blocks that hold text joined by a space (a
+      string is its own text), `|text:line` its first block or line that holds
+      text, and `|text:heading` its first heading block (style `h1` to `h6`)
+      that holds text, both trimmed; `|max:N` cuts a text longer than N
+      characters to its first N and adds `...` (`|max:N:…` adds `…` instead,
+      and `|max:N:` nothing), after any other modifier and before the case;
     * a template, text with `{path}` slots (`"{name} ({role.title|lower})"`),
       shown only when every slot has a value;
     * a list of parts, the first that has a value;
@@ -118,7 +126,8 @@ defmodule Barkpark.Content.PreviewText do
   # `opts`: `date_time: fun` formats a date-time a `|date` part shows, given
   # its `DateTime` in UTC. The default shows the UTC day as `dd.mm.yyyy`. The
   # LiveView Studio passes `date_time_marker/1`, and the browser shows the day
-  # in the workspace time zone (`BarkparkWeb.PreviewDay`).
+  # in the workspace time zone (`BarkparkWeb.PreviewDay`). `type_title: fun`
+  # gives a type name's schema title (or nil) for a `|type` part.
   @spec format(spec() | nil, map(), deref(), keyword()) :: String.t() | nil
   def format(spec, root, deref, opts \\ [])
 
@@ -401,13 +410,110 @@ defmodule Barkpark.Content.PreviewText do
       cond do
         "count" in mods -> count(value)
         "date" in mods -> day(value, o)
+        "type" in mods -> type_title(value, o)
+        mode = text_mode(mods) -> portable_text(value, mode)
         true -> scalar(value)
       end
 
     text
     |> blank_to_nil()
+    |> max_cut(mods)
     |> case_mods(mods)
   end
+
+  defp type_title(v, o) when is_binary(v) do
+    case Keyword.get(o, :type_title) do
+      fun when is_function(fun, 1) -> blank_to_nil(fun.(v)) || v
+      _ -> v
+    end
+  end
+
+  defp type_title(_, _o), do: nil
+
+  defp text_mode(mods) do
+    Enum.find_value(mods, fn
+      "text" -> :all
+      "text:line" -> :line
+      "text:heading" -> :heading
+      "text:" <> _ -> :unknown
+      _ -> nil
+    end)
+  end
+
+  # `|text`: a Portable Text value (a list of blocks, or one block) as text.
+  # A block is a map with `children`, its `_type` "block" or none; its text
+  # is its children's `text` joined.
+  defp portable_text(v, :all) when is_binary(v), do: v
+
+  defp portable_text(v, :line) when is_binary(v),
+    do: v |> String.split("\n") |> Enum.map(&String.trim/1) |> Enum.find(&(&1 != ""))
+
+  defp portable_text(v, mode) when is_map(v), do: portable_text([v], mode)
+
+  defp portable_text(blocks, :all) when is_list(blocks) do
+    blocks
+    |> Enum.map(&spans/1)
+    |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
+    |> Enum.join(" ")
+  end
+
+  defp portable_text(blocks, mode) when is_list(blocks) and mode in [:line, :heading] do
+    blocks
+    |> Enum.filter(&(mode == :line or heading?(&1)))
+    |> Enum.find_value(fn block ->
+      case spans(block) do
+        t when is_binary(t) -> blank_to_nil(String.trim(t))
+        _ -> nil
+      end
+    end)
+  end
+
+  defp portable_text(_, _mode), do: nil
+
+  defp spans(%{"children" => children} = block) when is_list(children) do
+    if Map.get(block, "_type", "block") == "block",
+      do:
+        Enum.map_join(children, fn
+          %{"text" => t} when is_binary(t) -> t
+          _ -> ""
+        end),
+      else: nil
+  end
+
+  defp spans(_), do: nil
+
+  defp heading?(%{"style" => style}) when is_binary(style), do: style =~ ~r/^h[1-6]$/
+  defp heading?(_), do: false
+
+  # `|max:N`: a text longer than N characters (code points) cut to its first
+  # N, and `...` after it, or the end the modifier names (`|max:80:…`).
+  defp max_cut(nil, _mods), do: nil
+
+  defp max_cut(text, mods) do
+    case Enum.find_value(mods, &max_mod/1) do
+      {n, ending} ->
+        chars = String.codepoints(text)
+        if length(chars) > n, do: Enum.join(Enum.take(chars, n)) <> ending, else: text
+
+      nil ->
+        text
+    end
+  end
+
+  defp max_mod("max:" <> rest) do
+    {n, ending} =
+      case String.split(rest, ":", parts: 2) do
+        [n] -> {n, "..."}
+        [n, ending] -> {n, ending}
+      end
+
+    case Integer.parse(n) do
+      {n, ""} when n > 0 -> {n, ending}
+      _ -> nil
+    end
+  end
+
+  defp max_mod(_), do: nil
 
   defp case_mods(nil, _), do: nil
 
