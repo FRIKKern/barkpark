@@ -46,7 +46,7 @@ The `profile` scope gives Barkpark `preferred_username`, which the UPN match bel
 
 ## Entra MFA counts as Barkpark MFA
 
-`bp org oidc-update <org> --trust_idp_mfa` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add the optional claim `amr` to the ID token under Token configuration. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
+`bp org oidc-update <org> --trust_idp_mfa` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
 
 
 ## The bootstrap owner
@@ -77,7 +77,7 @@ The script's default, `--group-claims application`, avoids this. Entra then puts
 When the Azure CLI is not available, do the same in the Entra admin center:
 
 1. App registrations, New registration. Accounts in this organizational directory only. Redirect URI platform Web, with the URI above.
-2. Token configuration. Add groups claim, Groups assigned to the application, or Security groups without P1, emitted as Group ID. Add optional claims, ID token, `email` and `amr`.
+2. Token configuration. Add groups claim, Groups assigned to the application, or Security groups without P1, emitted as Group ID. Add optional claim, ID token, `email`. In Manifest, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken`.
 3. API permissions. Microsoft Graph delegated `openid`, `profile` and `email`, then Grant admin consent.
 4. Certificates and secrets. New client secret. Copy the value once and note the expiry date.
 5. Groups. Create the owners security group and add the owner. Under Enterprise applications, Users and groups, assign the group to the app.
