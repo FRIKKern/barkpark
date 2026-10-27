@@ -1,11 +1,30 @@
 <!-- doc-tier: human | canonical-for: self-host-operations | budget: 2500tok -->
-# Operate a container instance
+# Operate a Barkpark instance
 
-This page continues [SELF-HOST.md](SELF-HOST.md) for an instance on Azure Container Apps with PostgreSQL Flexible Server, media on Azure Files and keys in Key Vault. The command reference for backups is [instance-backup.md](../ops/instance-backup.md).
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves and key rotation for both paths. The command reference for backups is [instance-backup.md](../ops/instance-backup.md).
+
+## Scheduled backups and the restore drill
+
+Barkpark schedules no backup. On a single VM, run `bp instance backup` from a daily cron job and copy the directory off the host. The database is local and media is in `/opt/barkpark/api/uploads` unless `BARKPARK_MEDIA_DIR` is set:
+
+```bash
+bp instance backup --database-url "postgresql://barkpark:<password from .env>@localhost/barkpark_prod" \
+  --media-dir /opt/barkpark/api/uploads --out /var/backups/barkpark/$(date +%F)
+```
+
+The backup holds no key. Keep a copy of the keys in `/opt/barkpark/.env` in a password manager, apart from the backups.
+
+On Azure, the platform does it:
+
+- Flexible Server automated backups give point-in-time restore within the retention period, 7 to 35 days, set with `az postgres flexible-server update --backup-retention`.
+- Azure Backup takes scheduled snapshots of the Azure Files share that holds media.
+- Key Vault keeps the keys. Turn on soft delete and purge protection.
+
+Once a month, restore a `bp instance backup` of the live instance into a scratch PostgreSQL of the same major with the extensions allowed. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, backup and restore times and the result against the RTO, then delete the scratch server.
 
 ## Moving an instance
 
-The backup holds the database and media but no key. The keys move once, by hand, into the target's Key Vault. Run `scripts/instance-move-rehearsal.sh` to rehearse the steps below on one machine. It restores into a Postgres that only accepts verified TLS, boots the prod build, and passes when `/readyz` answers 200 and an encrypted field and a TOTP user read back.
+The backup holds the database and media but no key. The keys move once, by hand, into the target's Key Vault. The steps below move an instance, such as a single VM, onto Container Apps. Run `scripts/instance-move-rehearsal.sh` to rehearse the steps below on one machine. It restores into a Postgres that only accepts verified TLS, boots the prod build, and passes when `/readyz` answers 200 and an encrypted field and a TOTP user read back.
 
 1. On Flexible Server, allow the extensions the dump creates before the restore. Create an empty database for Barkpark.
 
@@ -15,7 +34,7 @@ The backup holds the database and media but no key. The keys move once, by hand,
 
 2. Freeze writes. Barkpark has no read-only switch, so stop every writer, such as editors and integrations with write tokens, or stop the source app. Writes after the backup starts are not in it.
 3. Back up the source with `bp instance backup`, using client tools for the source's Postgres major. The target must run the same major.
-4. Copy each key that `manifest.json` lists under `secrets.keys` from the source's environment into Key Vault: `SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET`, `BARKPARK_INGEST_TOKEN`, `BARKPARK_KEK`, and `BARKPARK_KEK_PREVIOUS` if the source sets it. Reference them from the Container App as [the key rotation section](#rotate-keys-held-in-azure-key-vault) shows, and set `BARKPARK_KEK_VERSION` to the source's value. A new key makes encrypted fields and TOTP sign-in unreadable.
+4. Copy each key that `manifest.json` lists under `secrets.keys` from the source's environment, on a VM `/opt/barkpark/.env`, into Key Vault: `SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET`, `BARKPARK_INGEST_TOKEN`, `BARKPARK_KEK`, and `BARKPARK_KEK_PREVIOUS` if the source sets it. Reference them from the Container App as [the key rotation section](#rotate-keys) shows, and set `BARKPARK_KEK_VERSION` to the source's value. A new key makes encrypted fields and TOTP sign-in unreadable.
 5. Restore into the empty database over TLS. The restore checks every per-type count and media checksum against the manifest and exits 1 on any difference.
 
    ```bash
@@ -26,54 +45,9 @@ The backup holds the database and media but no key. The keys move once, by hand,
 6. Start the app with `DATABASE_SSL=verify-full`. Wait for `/readyz` to answer 200, then sign in once with TOTP and open a document with an encrypted field.
 7. Repoint DNS to the Container App and change the clients' Barkpark URL. API tokens move with the database. Keep `PHX_HOST` on the same host name, or registered passkeys stop working.
 
-## Scheduled backups and the restore drill
+## Rotate keys
 
-Barkpark schedules no backup. On Azure, the platform does:
-
-- Flexible Server automated backups give point-in-time restore within the retention period, 7 to 35 days, set with `az postgres flexible-server update --backup-retention`.
-- Azure Backup takes scheduled snapshots of the Azure Files share that holds media.
-- Key Vault keeps the keys. Turn on soft delete and purge protection.
-
-Once a month, restore a `bp instance backup` of the live instance into a scratch Flexible Server of the same major with the extensions allowed. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`, as in step 6. Record the date, backup and restore times and the result against the RTO, then delete the scratch server.
-
-## SSO with Entra ID
-
-Set the instance up with the settings in [the next section](#recommended-settings-for-a-pensum-instance). Register an Entra app with the redirect URI `https://$PHX_HOST/v1/auth/oidc/<org>/callback` and a groups claim, then run these as an operator:
-
-```bash
-bp org create gyldendal Gyldendal
-bp org attach-workspace gyldendal default
-bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$CLIENT_SECRET" \
-  --tenant_id "$TENANT" --strict_validation --trust_idp_mfa \
-  --set group_role_mappings:='{"<owners group id>":"owner","<editors group id>":"member"}'
-bp org domain-add gyldendal gyldendal.no      # publish the TXT record it prints
-bp org domain-verify gyldendal gyldendal.no
-bp org auth-methods gyldendal sso
-```
-
-`tenant_id` refuses tokens whose `tid` differs. `strict_validation` checks token times and links the Entra `oid`, so an account survives an email change. `trust_idp_mfa` counts Entra MFA as Barkpark MFA. The keys of the mapping are Entra group object ids. Each sign-in sets the role from the user's groups and can lower it, so map a group that holds the owner to `owner`, or the first sign-in demotes the owner. `bp org oidc-update` takes the same flags.
-
-## Recommended settings for a Pensum instance
-
-```bash
-DATABASE_SSL=verify-full DATABASE_SSL_CA_FILE=<Flexible Server CA bundle>
-BARKPARK_SELF_UPDATE_CHECK=off BARKPARK_RETIRE_SSE_ON_SIGTERM=1
-BARKPARK_ALWAYS_ALLOWED_ORIGINS=<Pensum's browser origins, comma-separated>
-BARKPARK_PLUGINS=media BARKPARK_TMUX_CONSOLE=off
-BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
-BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner>          # first boot only
-BARKPARK_OPERATOR_EMAILS=<operators> BARKPARK_OPERATOR_FAIL_CLOSED=1
-BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1 BARKPARK_CLOUD_HANDOFF=off
-BARKPARK_BREAKGLASS_EMAILS=<break-glass account> BARKPARK_TOKEN_EXPIRY_WARNINGS=on
-```
-
-`BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats that email as owner of the default workspace while the instance has no users. With `BARKPARK_OPERATOR_FAIL_CLOSED=1`, the operator routes refuse every caller while both `BARKPARK_OPERATOR_EMAILS` and `BARKPARK_OPERATOR_TOKEN_IDS` are empty. `BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1` also applies the org's sign-in policy to API token paste and the Cloud handoff. `BARKPARK_CLOUD_HANDOFF=off` turns off the Barkpark Cloud ticket and deprovisioning routes. A break-glass account signs in with a password and TOTP while SSO is down. Keep its password and TOTP secret in Key Vault.
-
-A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its origin in the comma-separated `BARKPARK_STUDIO_SSO_ORIGINS`, or the instance will not return a sign-in to it.
-
-## Rotate keys held in Azure Key Vault
-
-`api/config/runtime.exs` reads the keys below. Keep each in Key Vault behind a Container Apps secret reference, and use a versioned secret URI. A versionless URI restarts the replica on its own within 30 minutes of a new version, which breaks the KEK order below. A versioned URI changes only when you point it at a new version and restart:
+`api/config/runtime.exs` reads the keys below. On a single VM they live in `/opt/barkpark/.env`. Where the steps below add a Key Vault version and restart, change the value in that file and run `sudo systemctl restart barkpark`. On Container Apps, keep each in Key Vault behind a Container Apps secret reference, and use a versioned secret URI. A versionless URI restarts the replica on its own within 30 minutes of a new version, which breaks the KEK order below. A versioned URI changes only when you point it at a new version and restart:
 
 ```bash
 az containerapp secret set -g "$RG" -n "$APP" \
@@ -102,6 +76,8 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
    az containerapp exec -g "$RG" -n "$APP" --command /bin/bash
    bin/barkpark rpc 'IO.inspect(Barkpark.Crypto.DataKeys.rewrap_all())'
    ```
+
+   On a single VM, run `sudo /opt/barkpark/api/start.sh mix run -e 'IO.inspect(Barkpark.Crypto.DataKeys.rewrap_all())'`.
 
    `{:ok, n}` means all `n` data keys use the new KEK. `{:error, {:unwrap_failed, id}}` rolls back the run and names a key neither KEK opens. Stop there and keep both keys.
 4. Remove `BARKPARK_KEK_PREVIOUS` and restart. Disable the old Key Vault version. Purge it only after a backup taken after step 3 has been restored once.
