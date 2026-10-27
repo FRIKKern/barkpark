@@ -16,8 +16,12 @@
 #   BARKPARK_CLI_RELEASE_BASE  base URL to fetch the binary from; overrides
 #                              BARKPARK_CLI_VERSION
 #                              (default: GitHub latest release assets)
-#   BARKPARK_BIN_DIR           install dir (default: /usr/local/bin,
-#                              falls back to ~/.local/bin if not writable)
+#   BARKPARK_BIN_DIR           install dir. When set, bp goes there or the
+#                              install stops; it never falls back. When unset:
+#                              the directory of the bp already on PATH if it is
+#                              writable, else /usr/local/bin, else ~/.local/bin.
+#
+# After the install it warns when another bp comes first on PATH.
 set -eu
 
 REPO_URL="https://github.com/FRIKKern/barkpark"
@@ -44,7 +48,8 @@ else
     RELEASE_BASE="${REPO_URL}/releases/latest/download"
   fi
 fi
-BIN_DIR="${BARKPARK_BIN_DIR:-/usr/local/bin}"
+BIN_DIR="${BARKPARK_BIN_DIR:-}"
+BIN_DIR_SOURCE="BARKPARK_BIN_DIR"
 
 err() { echo "install-cli: $*" >&2; }
 die() { err "$*"; exit 1; }
@@ -78,7 +83,6 @@ else
 fi
 
 # ── Resolve a writable install dir ───────────────────────────────────────────
-# Use the requested BIN_DIR when writable; otherwise fall back to ~/.local/bin.
 ensure_writable_dir() {
   if [ -d "$1" ] && [ -w "$1" ]; then
     return 0
@@ -89,12 +93,27 @@ ensure_writable_dir() {
   return 1
 }
 
-if ! ensure_writable_dir "$BIN_DIR"; then
-  fallback="${HOME}/.local/bin"
-  err "'$BIN_DIR' is not writable; falling back to '$fallback'"
-  mkdir -p "$fallback" || die "could not create fallback dir '$fallback'"
-  BIN_DIR="$fallback"
+# The bp a new shell runs today, if any. Installing next to it replaces it,
+# so `bp` runs the new version instead of an older copy earlier on PATH.
+existing_bp="$(command -v bp 2>/dev/null || true)"
+case "$existing_bp" in /*) ;; *) existing_bp="" ;; esac
+
+if [ -n "$BIN_DIR" ]; then
+  # An explicit setting is honoured or the install stops. A silent fallback
+  # put bp somewhere the caller did not ask for.
+  ensure_writable_dir "$BIN_DIR" || die "BARKPARK_BIN_DIR='$BIN_DIR' is not writable. Fix its permissions, run with sudo, or unset BARKPARK_BIN_DIR."
+elif [ -n "$existing_bp" ] && ensure_writable_dir "$(dirname "$existing_bp")"; then
+  BIN_DIR="$(dirname "$existing_bp")"
+  BIN_DIR_SOURCE="the bp already on PATH"
+elif ensure_writable_dir /usr/local/bin; then
+  BIN_DIR=/usr/local/bin
+  BIN_DIR_SOURCE="the default"
+else
+  BIN_DIR="${HOME}/.local/bin"
+  BIN_DIR_SOURCE="the fallback, because /usr/local/bin is not writable"
+  mkdir -p "$BIN_DIR" || die "could not create fallback dir '$BIN_DIR'"
 fi
+echo "install-cli: installing into ${BIN_DIR} (${BIN_DIR_SOURCE})"
 
 dest="${BIN_DIR%/}/bp"
 tmp="$(mktemp "${TMPDIR:-/tmp}/bp-install.XXXXXX")"
@@ -173,15 +192,21 @@ case "$login_shell_name" in
     ;;
 esac
 
-# Does a fresh login shell resolve bp? BIN_DIR is scrubbed from the handed-in
+# Which bp does a fresh login shell run? BIN_DIR is scrubbed from the handed-in
 # PATH, so the only ways bp can resolve are (a) a system dir already on PATH
 # (login init / path_helper) or (b) the rc file's export — exactly what the
 # user's next terminal sees. $1 = rc file to source (may be empty/absent).
-probe_resolves_bp() {
+# Prints the path, or nothing.
+fresh_shell_bp() {
   env -i HOME="${HOME}" PATH="$(path_without_bindir)" \
     "$probe_shell" $probe_login -c \
-    '[ -n "${1:-}" ] && [ -r "$1" ] && . "$1"; command -v bp >/dev/null 2>&1' \
-    bp-probe "${1:-}"
+    '[ -n "${1:-}" ] && [ -r "$1" ] && . "$1"; command -v bp 2>/dev/null' \
+    bp-probe "${1:-}" 2>/dev/null | tail -n 1
+}
+
+# True when a fresh shell runs the bp this script just installed.
+probe_resolves_bp() {
+  [ "$(fresh_shell_bp "${1:-}")" = "$dest" ]
 }
 
 # Map the login shell to the rc file a new interactive terminal reads.
@@ -209,15 +234,27 @@ patch_rc_file() {
 
 rc_file="$(rc_file_for_shell "$login_shell_name")"
 if probe_resolves_bp "$rc_file"; then
-  : # a fresh shell already resolves bp (system dir on PATH, or rc already set)
+  : # a fresh shell already runs this bp (system dir on PATH, or rc already set)
+elif patch_rc_file "$rc_file" && probe_resolves_bp "$rc_file"; then
+  echo "install-cli: added ${BIN_DIR} to PATH in ${rc_file} (new terminals will find bp)"
 else
-  if patch_rc_file "$rc_file" && probe_resolves_bp "$rc_file"; then
-    echo "install-cli: added ${BIN_DIR} to PATH in ${rc_file} (new terminals will find bp)"
+  shadow="$(fresh_shell_bp "$rc_file")"
+  if [ -n "$shadow" ]; then
+    shadow_ver="$("$shadow" version </dev/null 2>/dev/null | sed -n 's/.*"cli_version"[: ]*"\([^"]*\)".*/\1/p' || true)"
+    err "WARNING — another bp comes first on PATH: ${shadow}${shadow_ver:+ (version ${shadow_ver})}."
+    err "          A new terminal runs that one, not ${dest}. Remove it, or rerun with"
+    err "          BARKPARK_BIN_DIR=$(dirname "$shadow") to replace it."
   else
     err "NOTE — ${BIN_DIR} is not on your PATH and a fresh shell still can't"
     err "       resolve bp. Add it manually:"
     err "         export PATH=\"${BIN_DIR}:\$PATH\""
   fi
+fi
+# This shell's PATH can differ from a new terminal's. Name a shadowing bp here
+# too, since the next command in this shell runs it.
+current_bp="$(command -v bp 2>/dev/null || true)"
+if [ -n "$current_bp" ] && [ "$current_bp" != "$dest" ] && [ "$current_bp" != "${shadow:-}" ]; then
+  err "WARNING — in this shell, bp runs ${current_bp}, not ${dest}. Remove it or put ${BIN_DIR} first on PATH."
 fi
 
 # GUI-agent stale-PATH caveat: a Cursor / Claude Desktop / VS Code process

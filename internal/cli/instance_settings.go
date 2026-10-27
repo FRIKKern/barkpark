@@ -93,7 +93,9 @@ func (v instanceInitValues) value(name string) string {
 			return ""
 		}
 		origins := "https://" + v.host
-		if v.studioOrigin != "" {
+		// A Studio served by the instance itself has the instance's origin,
+		// which is already first in the list.
+		if v.studioOrigin != "" && !strings.EqualFold(v.studioOrigin, origins) {
 			origins += "," + v.studioOrigin
 		}
 		return origins
