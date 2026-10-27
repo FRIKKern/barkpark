@@ -2409,6 +2409,8 @@ defmodule BarkparkWeb.Router do
     post("/magic-login", AuthController, :magic_login)
     # Pre-login SSO routing: email → its org's SSO start URL (verified domains).
     post("/sso/route", SsoRoutingController, :route)
+    # A Studio's server trades the ticket the OIDC callback sent it (OidcController).
+    post("/sso/exchange", OidcController, :exchange)
 
     # Passkey (WebAuthn) sign-in — usernameless login factor.
     post("/webauthn/login/challenge", WebauthnController, :login_challenge)

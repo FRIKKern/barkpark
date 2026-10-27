@@ -355,6 +355,76 @@ defmodule Barkpark.Auth do
 
   def consume_exchange_ticket(_, _, _), do: {:error, :invalid}
 
+  @doc """
+  Mint an SSO ticket: the instance's own OIDC callback hands a Studio the login
+  session it just minted for `email` (task-8bdf1b15305af840). The ticket binds
+  that session bearer, the Studio origin (`audience`) and the Studio server's
+  PKCE S256 `code_challenge`, and lives 60 s like every login ticket.
+
+  `purpose: "sso"` keeps it out of both other doors: the browser consume takes
+  only purpose-less tickets and `consume_exchange_ticket/3` only "exchange", so
+  an SSO ticket never reaches the Cloud handoff's seating.
+  """
+  @spec mint_sso_ticket(binary(), binary(), binary(), binary()) ::
+          {:ok, binary()} | {:error, :invalid_exchange}
+  def mint_sso_ticket(session_token, email, audience, code_challenge) do
+    raw_ticket = "bplt_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+    %LoginTicket{}
+    |> LoginTicket.changeset(%{
+      ticket_hash: hash_ticket(raw_ticket),
+      api_token: session_token,
+      user_email: email,
+      purpose: "sso",
+      audience: audience,
+      code_challenge: code_challenge,
+      expires_at: DateTime.add(DateTime.utc_now(), @login_ticket_ttl_seconds)
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _ticket} -> {:ok, raw_ticket}
+      {:error, _changeset} -> {:error, :invalid_exchange}
+    end
+  end
+
+  @doc """
+  Consume an SSO ticket (`mint_sso_ticket/4`) for its login session. The same
+  single-use claim as `consume_exchange_ticket/3`, restricted to
+  `purpose = 'sso'`. A wrong `audience` or `code_verifier` burns the ticket
+  AND revokes the session it carried, so a refused exchange leaves no live
+  session behind. Every failure is `{:error, :invalid}`.
+  """
+  @spec consume_sso_ticket(term(), term(), term()) ::
+          {:ok, {binary(), binary()}} | {:error, :invalid}
+  def consume_sso_ticket(raw_ticket, audience, code_verifier)
+      when is_binary(raw_ticket) and is_binary(audience) and is_binary(code_verifier) do
+    hash = hash_ticket(raw_ticket)
+    now = DateTime.utc_now()
+
+    query =
+      from t in LoginTicket,
+        where:
+          t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now and
+            t.purpose == "sso",
+        select: {t.api_token, t.user_email, t.audience, t.code_challenge}
+
+    case Repo.delete_all(query) do
+      {1, [{session, email, bound_audience, challenge}]} ->
+        if Plug.Crypto.secure_compare(bound_audience, audience) and
+             Plug.Crypto.secure_compare(challenge, pkce_s256(code_verifier)) do
+          {:ok, {session, email}}
+        else
+          Barkpark.Accounts.revoke_user_session_token(session)
+          {:error, :invalid}
+        end
+
+      _ ->
+        {:error, :invalid}
+    end
+  end
+
+  def consume_sso_ticket(_, _, _), do: {:error, :invalid}
+
   defp pkce_s256(verifier),
     do: Base.url_encode64(:crypto.hash(:sha256, verifier), padding: false)
 

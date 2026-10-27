@@ -69,6 +69,8 @@ BARKPARK_BREAKGLASS_EMAILS=<break-glass account> BARKPARK_TOKEN_EXPIRY_WARNINGS=
 
 `BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats that email as owner of the default workspace while the instance has no users. With `BARKPARK_OPERATOR_FAIL_CLOSED=1`, the operator routes refuse every caller while both `BARKPARK_OPERATOR_EMAILS` and `BARKPARK_OPERATOR_TOKEN_IDS` are empty. `BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1` also applies the org's sign-in policy to API token paste and the Cloud handoff. `BARKPARK_CLOUD_HANDOFF=off` turns off the Barkpark Cloud ticket and deprovisioning routes. A break-glass account signs in with a password and TOTP while SSO is down. Keep its password and TOTP secret in Key Vault.
 
+A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its origin in the comma-separated `BARKPARK_STUDIO_SSO_ORIGINS`, or the instance will not return a sign-in to it.
+
 ## Rotate keys held in Azure Key Vault
 
 `api/config/runtime.exs` reads the keys below. Keep each in Key Vault behind a Container Apps secret reference, and use a versioned secret URI. A versionless URI restarts the replica on its own within 30 minutes of a new version, which breaks the KEK order below. A versioned URI changes only when you point it at a new version and restart:

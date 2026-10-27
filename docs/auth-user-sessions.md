@@ -165,8 +165,10 @@ An external Studio (barkpark-studio) signs in the same way server-side: Cloud's
 `/studio-signin` checks team membership and an exact callback allowlist
 (`bp barkparks studio-callback add`), the box mints a `purpose: "exchange"`
 ticket (audience + PKCE S256), and the Studio's server trades it at
-`POST /v1/auth/login-tickets/exchange` for a login session. Neither door takes
-the other's ticket; only the Default workspace is ever seated.
+`POST /v1/auth/login-tickets/exchange` for a login session. No door takes
+another's ticket; only the Default workspace is ever seated.
+Or the instance's OIDC: a start with `return_to` on a `BARKPARK_STUDIO_SSO_ORIGINS`
+origin, `state` and PKCE gets a `purpose: "sso"` ticket for `/v1/auth/sso/exchange`.
 
 ### Org-wide required MFA (opt-in overlay)
 

@@ -93,6 +93,8 @@ services:
       - BARKPARK_OPERATOR_FAIL_CLOSED
       - BARKPARK_OPERATOR_EMAILS
       - BARKPARK_OPERATOR_TOKEN_IDS
+      # Studio origins the OIDC callback may return a sign-in to (api/config/runtime.exs)
+      - BARKPARK_STUDIO_SSO_ORIGINS
       # Strict OIDC ID token checks for every connection (read in api/config/runtime.exs)
       - BARKPARK_OIDC_STRICT_VALIDATION
       # Sign-in policy on token paste and the Cloud handoff; Cloud handoff

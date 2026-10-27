@@ -977,6 +977,17 @@ for {env_name, config_key} <- [
   end
 end
 
+# Studio origins the OIDC callback may send a sign-in back to, comma-separated
+# (`https://studio.example.com`). Unset: the callback lands in /studio as before
+# and a start that names a return_to is refused (task-8bdf1b15305af840).
+studio_sso_origins =
+  System.get_env("BARKPARK_STUDIO_SSO_ORIGINS", "")
+  |> String.split(",")
+  |> Enum.map(&String.trim/1)
+  |> Enum.reject(&(&1 == ""))
+
+if studio_sso_origins != [], do: config(:barkpark, :studio_sso_origins, studio_sso_origins)
+
 # First owner on a fresh instance (task-2f87e451273f55cc). Unset by default.
 # With no users at boot, Barkpark.Accounts.BootstrapOwner seats this email as
 # owner of the default workspace; with any user present it does nothing.
