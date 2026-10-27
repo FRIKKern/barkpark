@@ -134,7 +134,7 @@ Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp o
 <!-- run -->
 ```bash
 curl -fsS https://<host>/readyz           # {"status":"ready",...}
-bp whoami | grep -x 'auth_tier: admin'
+bp whoami -o table | grep -x 'auth_tier: admin'
 ```
 
 Then sign in at `https://<host>/studio` through Entra ID. Continue with backups in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
