@@ -1,0 +1,13 @@
+#!/bin/sh
+# Server-side admin token recovery in the release (the container image):
+#   /app/bin/admin-token --label <label> [--file <path>] [--force]
+# Mints an admin token in the default workspace, writes it to <path> (mode
+# 0600) and its id to <path>.id, and prints only the id and the path.
+# `bin/barkpark eval` takes no arguments, so the arguments travel in one
+# environment variable, one per line.
+set -eu
+
+cd -P -- "$(dirname -- "$0")"
+BARKPARK_ADMIN_TOKEN_ARGV="$(printf '%s\n' "$@")"
+export BARKPARK_ADMIN_TOKEN_ARGV
+exec ./barkpark eval "Barkpark.Release.admin_token()"
