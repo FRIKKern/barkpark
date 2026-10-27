@@ -234,7 +234,7 @@ func TestRunCloudUpdatePinnedConflict(t *testing.T) {
 // 409 paused. The sentence says the update was refused, offers --force for one
 // run and resume for good, and exits at the conflict code.
 func TestRunCloudUpdatePausedConflict(t *testing.T) {
-	newSelfUpdateServer(t, 409, `{"error":{"code":"paused"}}`)
+	newSelfUpdateServer(t, 409, `{"error":"paused"}`)
 
 	stdout, stderr, code := runUpdate(t, "table", testInstanceID)
 	if code != exitConflict {
