@@ -16,7 +16,7 @@ Barkpark answers GROQ on Sanity's query API URLs, so a `@sanity/client` or `next
 | `returnQuery` | `false` leaves `query` out |
 | `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
-Any `apiVersion`. Auth, tenancy and shares: the scoped document reads' ([api-v1.md](../api-v1.md) §2). A caller pinned to published reads (a share, `public-read`) gets `published`. No token, unshared dataset: 403 (Sanity: 200, empty). POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
+Any `apiVersion`. Auth, tenancy and shares: the scoped document reads' ([api-v1.md](../api-v1.md) §2). A share or `public-read` caller gets `published`. No token, unshared dataset: 403 (Sanity: 200, empty). POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
 
 Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` too.
 
@@ -62,9 +62,9 @@ Top-level conditions of each `*[...]` become SQL, `^` included: `_type`, `_id`, 
 
 ## Moving from Sanity
 
-Supported: GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance|contains|intersects` (unlike Sanity: 1000 positions/shape; 5M pairs a pass, 1M a listen event), `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps). Sanity's GROQ suite: 7731/7731 (`groq/conformance_test.exs`).
+Supported: GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, `| order()`, `| score()`, `select()`, ranges, `match`, `in`, arithmetic) and functions `coalesce`, `count`, `dateTime`, `defined`, `identity`, `length`, `lower`, `upper`, `now`, `path`, `references`, `round`, `string`, `string::split`, `string::startsWith`, `array::join`, `array::compact`, `array::unique`, `array::intersects`, `math::min|max|sum|avg`, `dateTime::now`, `pt::text`, `sanity::projectId|dataset|versionOf|partOfRelease`, `releases::all`, `documents::get` (own dataset), `geo::latLng|distance|contains|intersects` (unlike Sanity: 1000 positions/shape; 5M pairs a pass, 1M a listen event), `fn` (400 on a cycle or over 1000 calls expanded), `diff::changedAny|changedOnly` (≤ 100 selector steps), `user::attributes` (null). Sanity's GROQ suite: 7731/7731 (`groq/conformance_test.exs`).
 
-Not yet: `text::query`, other `documents::`, `delta::`, `user::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
+Not yet: `text::query`, other `documents::`, `delta::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 

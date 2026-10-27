@@ -588,6 +588,11 @@ defmodule Barkpark.Groq.Evaluator do
   defp func("global", "defined", [arg], scope, ctx), do: eval(arg, scope, ctx) != nil
   defp func("global", "identity", [], _scope, ctx), do: ctx.identity || "anonymous"
 
+  # Sanity reads a member's parameterized-role attributes; a robot token or no
+  # token gets null. Barkpark has seats and roles, not attributes, so every
+  # caller gets null (task-de59c528ba98db66, /papers/groq-user-attributes-design).
+  defp func("user", "attributes", [], _scope, _ctx), do: nil
+
   defp func("global", "length", [arg], scope, ctx) do
     case eval(arg, scope, ctx) do
       s when is_binary(s) -> utf16_length(s)
