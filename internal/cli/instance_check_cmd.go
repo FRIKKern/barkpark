@@ -113,6 +113,7 @@ func runInstanceInit(out *writer, args []string) int {
 		path = "barkpark.env"
 	}
 	vals := instanceInitValues{
+		target:          target,
 		host:            strings.TrimSpace(a.val("host")),
 		studioOrigin:    strings.TrimSpace(a.val("studio-origin")),
 		ownerEmail:      strings.TrimSpace(a.val("owner-email")),
@@ -277,6 +278,8 @@ func instanceCheck(ctx context.Context, env map[string]string, opts instanceChec
 		switch {
 		case !set(r.name) && instanceDeployOwns(opts.target, r.name):
 			notes = append(notes, instanceProblem{Setting: r.name, Problem: fmt.Sprintf("%s is not set here. deploy.sh sets it on the VM.", r.name), Doc: r.doc})
+		case !set(r.name) && instanceTemplateOwns(opts.target, r.name):
+			notes = append(notes, instanceProblem{Setting: r.name, Problem: fmt.Sprintf("%s is not set here, so main.bicep sets it to the app's Container Apps address. %s", r.name, instanceHostOutputHint), Doc: instanceDocHost})
 		case !set(r.name):
 			add(r.name, r.doc, "%s is not set. The server does not start without it.", r.name)
 		case isPlaceholder(env[r.name]):
@@ -348,6 +351,8 @@ func instanceCheck(ctx context.Context, env map[string]string, opts instanceChec
 		}
 		v := env[r.name]
 		switch {
+		case !set(r.name) && instanceTemplateOwns(opts.target, r.name):
+			// main.bicep sets it to the instance's own origin.
 		case !set(r.name):
 			if r.value != "" {
 				add(r.name, instanceDocRecommended, "%s is not set; the recommended value is %s.", r.name, r.value)

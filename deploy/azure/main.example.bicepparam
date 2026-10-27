@@ -18,8 +18,11 @@ param image = 'ghcr.io/frikkern/barkpark:sha-cdc555eb413b'
 // acrResourceGroup when the registry sits in another resource group.
 param acrName = ''
 
-// Set when a custom domain points at the app.
-param publicHost = ''
+// PHX_HOST in barkpark.env, from `bp instance init --host`, is your own
+// domain. Without it the app uses its Container Apps address. Set
+// bindCustomDomain to true once the dnsRecords output exists in DNS.
+param customDomain = contains(env.?PHX_HOST ?? '', '<') ? '' : env.?PHX_HOST ?? ''
+param bindCustomDomain = false
 
 // An address for alert mail: /readyz down, a failed backup, repeated
 // restarts. Empty deploys no alerts.
