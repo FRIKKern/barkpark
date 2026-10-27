@@ -40,6 +40,6 @@ defmodule Barkpark.Groq.UserAttributesTest do
 
   test "it takes no arguments" do
     assert {:error, %{description: description}} = Parser.parse("user::attributes(1)")
-    assert description =~ "incorrect number of arguments"
+    assert description == "zero arguments expected"
   end
 end

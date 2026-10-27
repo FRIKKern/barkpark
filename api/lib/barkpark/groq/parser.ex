@@ -71,8 +71,8 @@ defmodule Barkpark.Groq.Parser do
     "diff" => %{"changedAny" => 3, "changedOnly" => 3},
     "media" => %{"aspect" => 2},
     "sanity" => %{
-      "projectId" => :any,
-      "dataset" => :any,
+      "projectId" => 0,
+      "dataset" => 0,
       "versionOf" => 1,
       "partOfRelease" => 1
     },
@@ -82,7 +82,7 @@ defmodule Barkpark.Groq.Parser do
     "text" => %{"query" => 1, "semanticSimilarity" => 1},
     "geo" => %{"latLng" => 2, "contains" => 2, "intersects" => 2, "distance" => 2},
     "documents" => %{
-      "get" => :any,
+      "get" => 1,
       "incomingRefCount" => :any,
       "incomingGlobalDocumentReferenceCount" => :any
     },
@@ -378,6 +378,9 @@ defmodule Barkpark.Groq.Parser do
   @max_selector_steps 100
 
   defp parse_diff_call(s, name, start, open, ctx) do
+    if at(s, skip_ws(s, open + 1)) == ?),
+      do: throw({:groq_parse_error, "three arguments expected", start, open})
+
     {lhs, p, _} = parse_expr(s, skip_ws(s, open + 1), 0, ctx)
     p = expect_diff_comma!(s, skip_ws(s, p), start, open)
     {rhs, p, _} = parse_expr(s, p, 0, ctx)
@@ -953,7 +956,7 @@ defmodule Barkpark.Groq.Parser do
 
     arg_ctx = if name == "score", do: %{ctx | allow_boost: true}, else: ctx
     {args, p} = parse_args(s, p, arg_ctx)
-    check_arity!(name, arity, length(args), ipos)
+    check_arity!("pipe", name, arity, length(args), ipos)
 
     args = if name == "order", do: args, else: Enum.map(args, &reject_marks!(&1, ipos))
 
@@ -1032,7 +1035,7 @@ defmodule Barkpark.Groq.Parser do
           Map.get(funcs, name) ||
             throw({:groq_parse_error, undefined_function(namespace, name), start, open})
 
-        check_arity!(name, arity, length(args), start)
+        check_arity!(namespace, name, arity, length(args), start)
 
         if namespace == "global" and name == "boost" and not ctx.allow_boost do
           throw(
@@ -1097,7 +1100,23 @@ defmodule Barkpark.Groq.Parser do
     end
   end
 
-  defp check_arity!(name, arity, count, pos) do
+  # Sanity words a wrong argument count per function (ecu57yeh, 27 Oct;
+  # task-3f83a5527aa535fa): most say `Incorrect number of arguments to
+  # function "name"`, these few their own sentence.
+  @arity_messages %{
+    {"global", "defined"} => "single argument expected",
+    {"global", "references"} => "arguments expected",
+    {"media", "aspect"} => "two arguments expected",
+    {"sanity", "versionOf"} => "one argument expected",
+    {"sanity", "partOfRelease"} => "one argument expected",
+    {"documents", "get"} => "one argument expected",
+    {"releases", "all"} => "zero arguments expected",
+    {"user", "attributes"} => "zero arguments expected",
+    {"pipe", "order"} => "argument expected",
+    {"pipe", "score"} => "argument expected"
+  }
+
+  defp check_arity!(namespace, name, arity, count, pos) do
     ok? =
       case arity do
         :any -> true
@@ -1107,7 +1126,14 @@ defmodule Barkpark.Groq.Parser do
       end
 
     unless ok? do
-      throw({:groq_parse_error, "incorrect number of arguments to function #{name}()", pos})
+      message =
+        Map.get(
+          @arity_messages,
+          {namespace, name},
+          ~s|Incorrect number of arguments to function "#{name}"|
+        )
+
+      throw({:groq_parse_error, message, pos})
     end
   end
 
