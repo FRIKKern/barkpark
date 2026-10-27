@@ -274,10 +274,35 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
       # cloud's own vocabulary so one grep for `platform_operator` finds both
       # halves of the tier.
       |> Map.put(:required, "platform_operator")
+      # The code-keyed default hint tells the caller to use a workspace member
+      # token, which cannot pass this gate. Say what can: the caller's own token
+      # id on BARKPARK_OPERATOR_TOKEN_IDS, or its owner's email on
+      # BARKPARK_OPERATOR_EMAILS. The id is not a secret, and naming it here
+      # means an operator never needs SQL to find it.
+      |> Map.put(:message, "platform operator access required")
+      |> Map.put(:hint, grant_hint(conn.assigns[:api_token]))
 
     conn
     |> put_status(env.status)
     |> Phoenix.Controller.json(%{error: body})
     |> halt()
+  end
+
+  @doc false
+  # The 403's `hint`: how to grant platform operator access to this caller.
+  @spec grant_hint(term()) :: String.t()
+  def grant_hint(token) do
+    who =
+      case token && Map.get(token, :id) do
+        id when is_binary(id) ->
+          "add this token's id #{id} to #{@ids_env}"
+
+        _ ->
+          "add the token's id to #{@ids_env}"
+      end
+
+    "This route needs platform operator access. To grant it, #{who}, " <>
+      "or add the token owner's email to #{@emails_env}, then restart the server. " <>
+      "A token with no owner user can only be granted by its id."
   end
 end

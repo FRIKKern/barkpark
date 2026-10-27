@@ -64,6 +64,9 @@ type Envelope struct {
 	Hint      string          `json:"hint"`
 	RequestID string          `json:"request_id"`
 	Details   json.RawMessage `json:"details"`
+	// Required names the access tier a 403 required, when the server says.
+	// RequirePlatformOperator sends "platform_operator".
+	Required string `json:"required"`
 }
 
 // Parse reads the canonical {"error":{…}} envelope out of a response body.

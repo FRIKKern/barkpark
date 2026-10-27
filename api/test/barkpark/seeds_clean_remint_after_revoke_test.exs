@@ -142,4 +142,16 @@ defmodule Barkpark.SeedsCleanRemintAfterRevokeTest do
     {:ok, token} = Auth.verify_token(fresh)
     assert Auth.has_permission?(token, "admin")
   end
+
+  # The pinned token has no owner user, so the operator email list can never
+  # match it. The seed prints its row id next to the env var that admits it, so
+  # an operator does not need SQL to find it. The raw token is still not echoed.
+  test "the mint prints the token id and BARKPARK_OPERATOR_TOKEN_IDS, never the raw token" do
+    output = run_clean()
+    row = pinned_row()
+
+    assert output =~ "Admin token id: #{row.id}"
+    assert output =~ "BARKPARK_OPERATOR_TOKEN_IDS"
+    refute output =~ @pinned_raw
+  end
 end
