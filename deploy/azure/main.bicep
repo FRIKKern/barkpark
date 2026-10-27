@@ -1,10 +1,18 @@
 // Barkpark on Azure Container Apps with one replica.
 //
 // One `az deployment group create` creates the whole setup in an empty
-// resource group: Log Analytics, a Container Apps environment, the app,
-// PostgreSQL Flexible Server 17, an Azure Files share for media, a Key Vault
-// with the app's secrets and the user-assigned identity that reads them.
-// main.example.bicepparam lists the parameters and how to generate each secret.
+// resource group: a virtual network, Log Analytics, a Container Apps
+// environment, the app, two jobs, PostgreSQL Flexible Server 17, Azure Files
+// shares for media and backups, a Key Vault with the app's secrets and the
+// user-assigned identity that reads them. main.example.bicepparam reads the
+// secrets and settings from the barkpark.env that bp instance init writes.
+//
+// Postgres has no public endpoint. It sits on a delegated subnet and answers
+// only inside the virtual network, the way it listens only on localhost on a
+// single VM. The Key Vault and the storage account accept the app subnet and
+// the addresses in operatorIpRanges and refuse everyone else. Backup, restore
+// and `bp instance check` run in the jobs barkpark-backup and barkpark-ops
+// inside the same network.
 
 targetScope = 'resourceGroup'
 
@@ -44,6 +52,33 @@ param postgresStorageGb int = 32
 
 param postgresAdminLogin string = 'barkpark'
 
+@description('Address space of the virtual network the template creates. Ignored when both subnet IDs below are set.')
+param vnetAddressPrefix string = '10.40.0.0/16'
+
+@description('Optional. An existing subnet for the Container Apps environment, at least /27, delegated to Microsoft.App/environments, with the Microsoft.Storage and Microsoft.KeyVault service endpoints. Set it together with postgresSubnetId.')
+param appsSubnetId string = ''
+
+@description('Optional. An existing empty subnet in the same virtual network, delegated to Microsoft.DBforPostgreSQL/flexibleServers.')
+param postgresSubnetId string = ''
+
+@description('Optional. An existing private DNS zone whose name ends in .postgres.database.azure.com and that is linked to the virtual network. Leave empty to create one here.')
+param postgresPrivateDnsZoneId string = ''
+
+@description('Non-secret settings for the app and the jobs, such as the Pensum settings. main.example.bicepparam reads them from barkpark.env. Names the template sets itself are ignored.')
+param settings object = {}
+
+@description('Public IP addresses or CIDR ranges allowed through the Key Vault and storage firewalls, for an operator who sets secrets or copies backups from a laptop. Postgres never gets one.')
+param operatorIpRanges array = []
+
+@description('The bp CLI release the jobs install. 1.26.2 and newer restore into a newer Postgres major.')
+param bpCliVersion string = '1.26.2'
+
+@description('Daily backup time for the job barkpark-ops, as a UTC cron expression.')
+param backupCron string = '30 2 * * *'
+
+@description('Days to keep backups on the backups share.')
+param backupRetentionDays int = 14
+
 @secure()
 @description('Postgres admin password. Generate with: openssl rand -hex 24')
 param postgresAdminPassword string
@@ -67,6 +102,17 @@ param previewJwtSecret string
 @secure()
 @description('At least 32 bytes. A migration refuses to run without it. Generate with: openssl rand -base64 32')
 param releaseCaptureHmacSecret string
+
+@secure()
+@description('Optional. The previous KEK of a moved instance whose data keys are still wrapped under it. Set BARKPARK_KEK_VERSION in settings to match the source.')
+param kekPrevious string = ''
+
+@secure()
+@description('Optional. BARKPARK_INGEST_TOKEN of a moved instance.')
+param ingestToken string = ''
+
+@description('Deploy everything except the app, so barkpark-ops can restore a backup into the empty database before the first boot migrates it. Deploy again with false to start the app.')
+param restoreMode bool = false
 
 @secure()
 @description('The first admin API token. Without it the first boot prints a generated token to the logs, which Log Analytics keeps. Generate with: echo "bp_admin_$(openssl rand -hex 24)"')
@@ -95,6 +141,64 @@ resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   }
 }
 
+// ── Network ─────────────────────────────────────────────────────────────────
+
+var useExistingNetwork = !empty(appsSubnetId) && !empty(postgresSubnetId)
+
+resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = if (!useExistingNetwork) {
+  name: 'vnet-barkpark-${nameSuffix}'
+  location: location
+  properties: {
+    addressSpace: { addressPrefixes: [vnetAddressPrefix] }
+    subnets: [
+      {
+        // A workload profiles environment needs at least /27, delegated to
+        // Microsoft.App/environments. /24 leaves room for job replicas.
+        name: 'apps'
+        properties: {
+          addressPrefix: cidrSubnet(vnetAddressPrefix, 24, 0)
+          delegations: [
+            { name: 'apps', properties: { serviceName: 'Microsoft.App/environments' } }
+          ]
+          serviceEndpoints: [
+            { service: 'Microsoft.Storage' }
+            { service: 'Microsoft.KeyVault' }
+          ]
+        }
+      }
+      {
+        name: 'postgres'
+        properties: {
+          addressPrefix: cidrSubnet(vnetAddressPrefix, 27, 8)
+          delegations: [
+            { name: 'postgres', properties: { serviceName: 'Microsoft.DBforPostgreSQL/flexibleServers' } }
+          ]
+        }
+      }
+    ]
+  }
+}
+
+var appsSubnet = useExistingNetwork ? appsSubnetId : '${vnet.id}/subnets/apps'
+var postgresSubnet = useExistingNetwork ? postgresSubnetId : '${vnet.id}/subnets/postgres'
+// A subnet ID is the virtual network ID plus /subnets/<name>.
+var vnetId = join(take(split(appsSubnet, '/'), 9), '/')
+
+resource postgresDns 'Microsoft.Network/privateDnsZones@2024-06-01' = if (empty(postgresPrivateDnsZoneId)) {
+  name: 'barkpark-${nameSuffix}.private.postgres.database.azure.com'
+  location: 'global'
+}
+
+resource postgresDnsLink 'Microsoft.Network/privateDnsZones/virtualNetworkLinks@2024-06-01' = if (empty(postgresPrivateDnsZoneId)) {
+  parent: postgresDns
+  name: 'barkpark'
+  location: 'global'
+  properties: {
+    registrationEnabled: false
+    virtualNetwork: { id: vnetId }
+  }
+}
+
 // ── Postgres ────────────────────────────────────────────────────────────────
 
 resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
@@ -114,8 +218,16 @@ resource postgres 'Microsoft.DBforPostgreSQL/flexibleServers@2024-08-01' = {
       geoRedundantBackup: 'Disabled'
     }
     highAvailability: { mode: 'Disabled' }
-    network: { publicNetworkAccess: 'Enabled' }
+    // Private access: the server gets an address on the delegated subnet and
+    // an A record in the private zone. The public name is a CNAME into that
+    // zone, which resolves only inside the linked network.
+    network: {
+      publicNetworkAccess: 'Disabled'
+      delegatedSubnetResourceId: postgresSubnet
+      privateDnsZoneArmResourceId: empty(postgresPrivateDnsZoneId) ? postgresDns.id : postgresPrivateDnsZoneId
+    }
   }
+  dependsOn: [postgresDnsLink]
 }
 
 // Azure refuses CREATE EXTENSION for anything not on this list. The first
@@ -140,18 +252,6 @@ resource postgresDatabase 'Microsoft.DBforPostgreSQL/flexibleServers/databases@2
   dependsOn: [postgresExtensions]
 }
 
-// 0.0.0.0 is Azure's marker for "connections from Azure services". The
-// consumption environment has no fixed outbound address to list instead.
-resource postgresFirewall 'Microsoft.DBforPostgreSQL/flexibleServers/firewallRules@2024-08-01' = {
-  parent: postgres
-  name: 'AllowAzureServices'
-  properties: {
-    startIpAddress: '0.0.0.0'
-    endIpAddress: '0.0.0.0'
-  }
-  dependsOn: [postgresDatabase]
-}
-
 // ── Media share ─────────────────────────────────────────────────────────────
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
@@ -163,6 +263,12 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     minimumTlsVersion: 'TLS1_2'
     allowBlobPublicAccess: false
     supportsHttpsTrafficOnly: true
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+      virtualNetworkRules: [{ id: appsSubnet, action: 'Allow' }]
+      ipRules: [for ip in operatorIpRanges: { value: ip, action: 'Allow' }]
+    }
   }
 }
 
@@ -180,6 +286,16 @@ resource mediaShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-
   }
 }
 
+// bp instance backup writes here, one directory per run.
+resource backupShare 'Microsoft.Storage/storageAccounts/fileServices/shares@2023-05-01' = {
+  parent: fileService
+  name: 'backups'
+  properties: {
+    shareQuota: 100
+    accessTier: 'TransactionOptimized'
+  }
+}
+
 // ── Secrets ─────────────────────────────────────────────────────────────────
 
 resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
@@ -191,23 +307,34 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
     enableRbacAuthorization: true
     enableSoftDelete: true
     softDeleteRetentionInDays: 7
+    networkAcls: {
+      defaultAction: 'Deny'
+      bypass: 'AzureServices'
+      virtualNetworkRules: [{ id: appsSubnet, ignoreMissingVnetServiceEndpoint: false }]
+      ipRules: [for ip in operatorIpRanges: { value: ip }]
+    }
   }
 }
 
-var secretValues = {
-  'database-url': 'ecto://${postgresAdminLogin}:${uriComponent(postgresAdminPassword)}@${postgres.name}.postgres.database.azure.com/${databaseName}'
-  'secret-key-base': secretKeyBase
-  'cloak-key': cloakKey
-  kek: kek
-  'preview-jwt-secret': previewJwtSecret
-  'seed-admin-token': seedAdminToken
-  'release-capture-hmac-secret': releaseCaptureHmacSecret
-}
+// Each secret lives in Key Vault and reaches the containers through a secret
+// reference. Optional ones are left out when empty.
+var secretTable = [
+  { env: 'DATABASE_URL', name: 'database-url', value: 'ecto://${postgresAdminLogin}:${uriComponent(postgresAdminPassword)}@${postgres.name}.postgres.database.azure.com/${databaseName}' }
+  { env: 'SECRET_KEY_BASE', name: 'secret-key-base', value: secretKeyBase }
+  { env: 'BARKPARK_CLOAK_KEY', name: 'cloak-key', value: cloakKey }
+  { env: 'BARKPARK_KEK', name: 'kek', value: kek }
+  { env: 'BARKPARK_KEK_PREVIOUS', name: 'kek-previous', value: kekPrevious }
+  { env: 'PREVIEW_JWT_SECRET', name: 'preview-jwt-secret', value: previewJwtSecret }
+  { env: 'BARKPARK_SEED_ADMIN_TOKEN', name: 'seed-admin-token', value: seedAdminToken }
+  { env: 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET', name: 'release-capture-hmac-secret', value: releaseCaptureHmacSecret }
+  { env: 'BARKPARK_INGEST_TOKEN', name: 'ingest-token', value: ingestToken }
+]
+var secretItems = filter(secretTable, item => !empty(item.value))
 
 resource vaultSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = [
-  for item in items(secretValues): {
+  for item in secretItems: {
     parent: vault
-    name: item.key
+    name: item.name
     properties: { value: item.value }
   }
 ]
@@ -237,12 +364,34 @@ resource environment 'Microsoft.App/managedEnvironments@2024-03-01' = {
   name: 'cae-barkpark-${nameSuffix}'
   location: location
   properties: {
+    // The Consumption profile bills like a consumption-only environment and
+    // has no management charge. It is what lets the environment join a /27.
+    workloadProfiles: [
+      { name: 'Consumption', workloadProfileType: 'Consumption' }
+    ]
+    vnetConfiguration: {
+      infrastructureSubnetId: appsSubnet
+      internal: false
+    }
     appLogsConfiguration: {
       destination: 'log-analytics'
       logAnalyticsConfiguration: {
         customerId: logs.properties.customerId
         sharedKey: logs.listKeys().primarySharedKey
       }
+    }
+  }
+}
+
+resource environmentBackups 'Microsoft.App/managedEnvironments/storages@2024-03-01' = {
+  parent: environment
+  name: 'backups'
+  properties: {
+    azureFile: {
+      accountName: storage.name
+      accountKey: storage.listKeys().keys[0].value
+      shareName: backupShare.name
+      accessMode: 'ReadWrite'
     }
   }
 }
@@ -262,7 +411,44 @@ resource environmentMedia 'Microsoft.App/managedEnvironments/storages@2024-03-01
 
 var host = empty(publicHost) ? '${appName}.${environment.properties.defaultDomain}' : publicHost
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = {
+var appSecrets = [
+  for item in secretItems: {
+    name: item.name
+    // vaultUri is only known after deployment, and a for-body needs a value now.
+    keyVaultUrl: 'https://${vault.name}${az.environment().suffixes.keyvaultDns}/secrets/${item.name}'
+    identity: identity.id
+  }
+]
+
+// Settings the template owns. A copy in `settings` is dropped, because a name
+// may appear only once in a container's environment.
+var ownedSettings = concat(map(secretTable, item => item.env), [
+  'DATABASE_SSL'
+  'BARKPARK_SHAPE'
+  'PHX_HOST'
+  'PHX_SCHEME'
+  'BARKPARK_MEDIA_DIR'
+])
+
+var settingsEnv = map(
+  filter(items(settings), kv => !contains(ownedSettings, kv.key)),
+  kv => { name: kv.key, value: string(kv.value) }
+)
+
+var appEnv = concat(settingsEnv, map(secretItems, item => { name: item.env, secretRef: item.name }), [
+  // Azure Postgres requires TLS. The image carries the CA roots.
+  { name: 'DATABASE_SSL', value: 'verify-full' }
+  { name: 'BARKPARK_SHAPE', value: 'solo' }
+  { name: 'PHX_HOST', value: host }
+  { name: 'PHX_SCHEME', value: 'https' }
+  { name: 'BARKPARK_MEDIA_DIR', value: mediaPath }
+])
+
+// SMB has no POSIX owners. These options make every file and directory owned
+// by the app user and writable by it.
+var mediaMountOptions = 'uid=${mediaUid},gid=${mediaUid},dir_mode=0770,file_mode=0660,mfsymlinks,nobrl'
+
+resource app 'Microsoft.App/containerApps@2024-03-01' = if (!restoreMode) {
   name: appName
   location: location
   identity: {
@@ -271,6 +457,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
   }
   properties: {
     environmentId: environment.id
+    workloadProfileName: 'Consumption'
     configuration: {
       // One revision at a time: two live revisions would be two replicas.
       activeRevisionsMode: 'Single'
@@ -286,13 +473,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           identity: identity.id
         }
       ]
-      secrets: [
-        for item in items(secretValues): {
-          name: item.key
-          keyVaultUrl: '${vault.properties.vaultUri}secrets/${item.key}'
-          identity: identity.id
-        }
-      ]
+      secrets: appSecrets
     }
     template: {
       containers: [
@@ -303,21 +484,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json(cpu)
             memory: memory
           }
-          env: [
-            { name: 'DATABASE_URL', secretRef: 'database-url' }
-            // Azure Postgres requires TLS. The image carries the CA roots.
-            { name: 'DATABASE_SSL', value: 'verify-full' }
-            { name: 'SECRET_KEY_BASE', secretRef: 'secret-key-base' }
-            { name: 'BARKPARK_CLOAK_KEY', secretRef: 'cloak-key' }
-            { name: 'BARKPARK_KEK', secretRef: 'kek' }
-            { name: 'PREVIEW_JWT_SECRET', secretRef: 'preview-jwt-secret' }
-            { name: 'BARKPARK_SEED_ADMIN_TOKEN', secretRef: 'seed-admin-token' }
-            { name: 'BARKPARK_RELEASE_CAPTURE_HMAC_SECRET', secretRef: 'release-capture-hmac-secret' }
-            { name: 'BARKPARK_SHAPE', value: 'solo' }
-            { name: 'PHX_HOST', value: host }
-            { name: 'PHX_SCHEME', value: 'https' }
-            { name: 'BARKPARK_MEDIA_DIR', value: mediaPath }
-          ]
+          env: appEnv
           volumeMounts: [
             { volumeName: 'media', mountPath: mediaPath }
           ]
@@ -351,12 +518,10 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'media'
           storageType: 'AzureFile'
           storageName: environmentMedia.name
-          // SMB has no POSIX owners. These options make every file and
-          // directory owned by the app user and writable by it.
-          mountOptions: 'uid=${mediaUid},gid=${mediaUid},dir_mode=0770,file_mode=0660,mfsymlinks,nobrl'
+          mountOptions: mediaMountOptions
         }
       ]
-      // Barkpark runs on exactly one replica. See the README.
+      // Barkpark runs on exactly one replica. See docs/setup/SELF-HOST.md, Path B.
       scale: {
         minReplicas: 1
         maxReplicas: 1
@@ -367,12 +532,133 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = {
     identityReadsSecrets
     identityPullsImages
     vaultSecrets
-    postgresFirewall
+    postgresDatabase
   ]
 }
+
+// ── Operations jobs ─────────────────────────────────────────────────────────
+
+// Two jobs run bp and the Postgres 17 client tools inside the network, with
+// the app's settings, the media share at the same path and the backups share
+// at /backups. barkpark-backup runs `backup` on backupCron and on demand.
+// barkpark-ops runs only when started and takes its operation from its args:
+//   backup | check | list | restore <backup dir> [<database> [<media dir>]]
+// Set them with `az containerapp job update --args`. An override on
+// `az containerapp job start` replaces the whole container and drops the
+// command, settings and mounts. SELF-HOST-OPERATIONS.md has the commands.
+var opsScript = '''
+set -eu
+apk add --no-cache -q postgresql17-client curl >/dev/null
+curl -fsSL "https://raw.githubusercontent.com/FRIKKern/barkpark/cli-v$BP_CLI_VERSION/scripts/install-cli.sh" \
+  | BARKPARK_CLI_VERSION="$BP_CLI_VERSION" BARKPARK_BIN_DIR=/usr/local/bin sh >/dev/null
+# DATABASE_URL is ecto://user:pass@host/db. libpq wants postgresql:// and the TLS mode.
+base="postgresql://${DATABASE_URL#ecto://}"
+base="${base%/*}"
+url() { echo "$base/$1?sslmode=verify-full&sslrootcert=system"; }
+op="${1:-backup}"
+case "$op" in
+  backup)
+    out="/backups/$(date -u +%Y%m%dT%H%M%SZ)"
+    bp instance backup --database-url "$(url barkpark)" --media-dir "$BARKPARK_MEDIA_DIR" --out "$out"
+    find /backups -mindepth 1 -maxdepth 1 -type d -mtime "+$BACKUP_RETENTION_DAYS" -exec rm -rf {} +
+    ;;
+  restore)
+    bp instance restore "/backups/$2" --database-url "$(url "${3:-barkpark}")" --media-dir "${4:-$BARKPARK_MEDIA_DIR}"
+    ;;
+  check) bp instance check --target containerapps ;;
+  list) ls -l /backups ;;
+  *) echo "unknown operation $op: use backup, check, list or restore" >&2; exit 2 ;;
+esac
+'''
+
+var jobs = [
+  {
+    name: '${appName}-backup'
+    args: ['backup']
+    triggerType: 'Schedule'
+    scheduleTriggerConfig: {
+      cronExpression: backupCron
+      parallelism: 1
+      replicaCompletionCount: 1
+    }
+    manualTriggerConfig: null
+  }
+  {
+    name: '${appName}-ops'
+    args: ['check']
+    triggerType: 'Manual'
+    scheduleTriggerConfig: null
+    manualTriggerConfig: {
+      parallelism: 1
+      replicaCompletionCount: 1
+    }
+  }
+]
+
+resource opsJobs 'Microsoft.App/jobs@2024-03-01' = [for job in jobs: {
+  name: job.name
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${identity.id}': {} }
+  }
+  properties: {
+    environmentId: environment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: job.triggerType
+      scheduleTriggerConfig: job.scheduleTriggerConfig
+      manualTriggerConfig: job.manualTriggerConfig
+      replicaTimeout: 3600
+      replicaRetryLimit: 0
+      secrets: appSecrets
+    }
+    template: {
+      containers: [
+        {
+          name: 'ops'
+          image: 'public.ecr.aws/docker/library/alpine:3.22'
+          command: ['/bin/sh', '-c', opsScript, 'ops']
+          args: job.args
+          resources: {
+            cpu: json('0.5')
+            memory: '1Gi'
+          }
+          env: concat(appEnv, [
+            { name: 'BP_CLI_VERSION', value: bpCliVersion }
+            { name: 'BACKUP_RETENTION_DAYS', value: string(backupRetentionDays) }
+          ])
+          volumeMounts: [
+            { volumeName: 'media', mountPath: mediaPath }
+            { volumeName: 'backups', mountPath: '/backups' }
+          ]
+        }
+      ]
+      volumes: [
+        {
+          name: 'media'
+          storageType: 'AzureFile'
+          storageName: environmentMedia.name
+          mountOptions: mediaMountOptions
+        }
+        {
+          name: 'backups'
+          storageType: 'AzureFile'
+          storageName: environmentBackups.name
+          mountOptions: mediaMountOptions
+        }
+      ]
+    }
+  }
+  dependsOn: [
+    identityReadsSecrets
+    vaultSecrets
+  ]
+}]
 
 output url string = 'https://${host}'
 output defaultHost string = '${appName}.${environment.properties.defaultDomain}'
 output postgresHost string = postgres.properties.fullyQualifiedDomainName
+output storageAccountName string = storage.name
 output keyVaultName string = vault.name
 output identityClientId string = identity.properties.clientId

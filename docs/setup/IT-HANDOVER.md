@@ -9,14 +9,17 @@ This page is for the IT department of an organisation that will own and run one 
 
 | Resource | Size in the template |
 |---|---|
-| Container App `barkpark` in a consumption environment | 1 vCPU, 2 GiB, exactly one replica |
+| Container App `barkpark` in an environment on the virtual network | 1 vCPU, 2 GiB, exactly one replica |
+| Jobs `barkpark-backup` and `barkpark-ops` for backup, restore and checks | A daily backup, kept 14 days |
+| Virtual network with a subnet for the environment and one for Postgres | 10.40.0.0/16 by default |
+| Private DNS zone for Postgres, linked to the virtual network | |
 | PostgreSQL Flexible Server 17 | Standard_B1ms, 32 GB, 7 days of backups |
-| Storage account with an Azure Files share for media | 100 GB quota |
+| Storage account with Azure Files shares for media and backups | 100 GB quota each |
 | Key Vault with the instance keys | RBAC, soft delete for 7 days |
 | Log Analytics workspace for app logs | 30 days |
 | User-assigned identity that reads the Key Vault secrets | |
 
-The template creates no private network and no alert.
+Postgres has no public endpoint and answers only inside the virtual network. The Key Vault and the storage account accept the environment's subnet and the addresses in `operatorIpRanges`. Only the app's HTTPS ingress is public. The template creates no alert.
 
 ## What you create
 
@@ -31,7 +34,7 @@ The template creates no private network and no alert.
 ## What you decide
 
 - **Region.** Norway East offers Flexible Server on Standard_B1ms and Container Apps consumption.
-- **Network.** The template uses public endpoints with TLS. A private network or an existing VNet to join needs changes to the template.
+- **Network.** The template creates its own virtual network. To join an existing one, pass `appsSubnetId` and `postgresSubnetId`, and `postgresPrivateDnsZoneId` for a central DNS zone. `deploy/azure/main.bicep` lists the size, delegation and service endpoints each subnet needs. Choose the addresses for `operatorIpRanges`.
 - **Owners.** Name the people in the owners group. Each sign-in sets the role from the user's groups.
 - **Conditional Access and MFA.** Require MFA for the app with a Conditional Access policy. Barkpark then counts Entra MFA as its own, as [ENTRA.md](ENTRA.md#entra-mfa-counts-as-barkpark-mfa) describes.
 - **Group claims.** Groups assigned to the app need Entra ID P1. Without P1, run the script with `--group-claims security`.
@@ -40,7 +43,7 @@ The template creates no private network and no alert.
 
 ## What it costs
 
-The monthly cost in Norway East at the template's sizes is about USD 46 to 100. The [cost table](SELF-HOST-OPERATIONS.md#container-apps-cost) breaks it down. The Container App is most of the range, from 24 idle to 73 busy. The cost rises with a larger database size, high availability, geo-redundant backups, more log volume, Azure Backup for the share and a private network.
+The monthly cost in Norway East at the template's sizes is about USD 47 to 101. The [cost table](SELF-HOST-OPERATIONS.md#container-apps-cost) breaks it down. The Container App is most of the range, from 24 idle to 73 busy. The cost rises with a larger database size, high availability, geo-redundant backups, more log volume, and Azure Backup for the shares.
 
 ## Who does what after go-live
 
@@ -50,6 +53,6 @@ The monthly cost in Norway East at the template's sizes is about USD 46 to 100. 
 | Roll back | Run the same command with the old tag. If the old image does not start on the migrated database, restore the database to the time you noted. |
 | Entra client secret | It expires after 1 or 2 years, and the script prints the date. Sign-ins stop on that date. Put the date in your calendar and rotate it before then with `--rotate-secret` and `bp org oidc-rotate-secret`. |
 | Barkpark keys | Keep a copy in a password manager, apart from the backups. Rotate them as [the key rotation section](SELF-HOST-OPERATIONS.md#rotate-keys) describes. Never change `BARKPARK_CLOAK_KEY`. |
-| Backups | Flexible Server keeps point-in-time restore for the retention period. Turn on purge protection on the Key Vault. |
+| Backups | `barkpark-backup` runs `bp instance backup` every day. Flexible Server also keeps point-in-time restore for the retention period. Turn on purge protection on the Key Vault. |
 | Restore drill | Once a month, run [the restore drill](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill) and record the result. |
 | Who to call | Your IT runs Azure, Entra, DNS, backups and alerts. The app team runs Barkpark settings, organisations and roles. Report a Barkpark bug as an issue on the Barkpark repository. Send a security problem to the app team, not to a public issue. |
