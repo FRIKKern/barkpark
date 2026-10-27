@@ -18,7 +18,7 @@ dump come from one snapshot, so the instance can stay up. Add
 `?sslmode=require` to the URL for TLS. Keys are never in the backup: the
 manifest lists the ones the target must load from the secret store.
 
-Restore refuses a different Postgres major, a database with tables and a
+Restore refuses an older Postgres major, a database with tables and a
 non-empty media directory. It checks both member checksums first, and after
 `pg_restore` compares every media file and per-type count with the manifest.
 Any difference exits 1. Extensions the dump creates must be allowed on a
