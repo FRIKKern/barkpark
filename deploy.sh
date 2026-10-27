@@ -307,6 +307,9 @@ done
 # in the file drives the firewall and the health probe. Values are never
 # printed, only key names. Variables passed on the command line and persisted
 # below (BARKPARK_PLUGINS, BARKPARK_SHAPE, BARKPARK_CLOUD_URL) win over the file.
+# deploy.sh owns DATABASE_URL and the generated keys (DEPLOY_OWNED_KEYS): the
+# file cannot replace them, so an env file from an older `bp instance init`
+# cannot point the server at a database or password that does not exist here.
 if [ -n "${BARKPARK_ENV_FILE:-}" ]; then
   if [ ! -r "$BARKPARK_ENV_FILE" ]; then
     echo "deploy.sh: BARKPARK_ENV_FILE=$BARKPARK_ENV_FILE is not a readable file on this server." >&2
@@ -317,12 +320,15 @@ if [ -n "${BARKPARK_ENV_FILE:-}" ]; then
     echo "deploy.sh: BARKPARK_ENV_FILE has lines that are not KEY=VALUE: line(s) $_bad" >&2
     exit 2
   fi
+  DEPLOY_OWNED_KEYS="DATABASE_URL SECRET_KEY_BASE BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK BARKPARK_RELEASE_CAPTURE_HMAC_SECRET"
+  _kept="$(awk -v owned=" $DEPLOY_OWNED_KEYS " '/^[[:space:]]*(#|$)/{next} {sub(/^[[:space:]]*export[[:space:]]+/, ""); sub(/=.*/, ""); if (index(owned, " " $0 " ") && !seen[$0]++) printf "%s ", $0}' "$BARKPARK_ENV_FILE")"
   _merged="$(mktemp)"
-  awk '
+  awk -v owned=" $DEPLOY_OWNED_KEYS " '
     FNR==NR {
       if ($0 ~ /^[[:space:]]*(#|$)/) next
       line=$0; sub(/^[[:space:]]*export[[:space:]]+/, "", line)
       k=substr(line, 1, index(line, "=")-1)
+      if (index(owned, " " k " ")) next
       if (!(k in val)) order[++n]=k
       val[k]=line; next
     }
@@ -336,7 +342,10 @@ if [ -n "${BARKPARK_ENV_FILE:-}" ]; then
   # cat into the existing file keeps its owner and mode.
   cat "$_merged" > "$APP_DIR/.env"
   rm -f "$_merged"
-  echo ">> Merged settings from $BARKPARK_ENV_FILE into .env: $(awk '/^[[:space:]]*(#|$)/{next} {sub(/^[[:space:]]*export[[:space:]]+/, ""); sub(/=.*/, ""); if (!seen[$0]++) printf "%s ", $0}' "$BARKPARK_ENV_FILE")"
+  echo ">> Merged settings from $BARKPARK_ENV_FILE into .env: $(awk -v owned=" $DEPLOY_OWNED_KEYS " '/^[[:space:]]*(#|$)/{next} {sub(/^[[:space:]]*export[[:space:]]+/, ""); sub(/=.*/, ""); if (!index(owned, " " $0 " ") && !seen[$0]++) printf "%s ", $0}' "$BARKPARK_ENV_FILE")"
+  if [ -n "$_kept" ]; then
+    echo ">> Kept deploy.sh's own values, ignored the file's: $_kept"
+  fi
 fi
 
 # Re-derive the port from the .env that is actually on disk — the file
