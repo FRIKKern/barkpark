@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-operations | budget: 2500tok -->
 # Operate a Barkpark instance
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves, key rotation and Container Apps cost. The command reference for backups is [instance-backup.md](../ops/instance-backup.md).
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves, key rotation and Container Apps cost. The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md).
 
 ## Scheduled backups and the restore drill
 
