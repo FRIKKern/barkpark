@@ -587,7 +587,7 @@ defmodule BarkparkWeb.OidcControllerTest do
       sign_in_token(nonce)
 
       body =
-        build_conn()
+        scoped_conn()
         |> get("/v1/auth/oidc/octrl/callback?code=abc&state=#{state}")
         |> json_response(400)
 

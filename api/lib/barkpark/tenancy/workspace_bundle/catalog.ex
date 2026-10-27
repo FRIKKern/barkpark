@@ -207,7 +207,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     paper_events_dataset_rescope_backup plugin_settings plugin_settings_audit
     pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
     scim_groups search_refresh_pending scim_tokens social_identities
-    social_providers status_incidents user_email_tokens user_sessions users
+    social_providers sso_flows status_incidents user_email_tokens user_sessions users
     webauthn_challenge_replays webauthn_credentials
   )
 
