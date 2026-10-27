@@ -65,7 +65,7 @@ cat /tmp/admin-token
 rm /tmp/admin-token /tmp/admin-token.id
 ```
 
-Connect with `bp setup --target connect` and the new token. When `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED` is set, add the id to `BARKPARK_OPERATOR_TOKEN_IDS` and restart, or `bp org` refuses the token. Once connected, `bp token ls -p default` lists the lost token. Revoke it with `bp token revoke <old id> -p default`.
+Connect with `bp setup --target connect` and the new token. When `BARKPARK_OPERATOR_EMAILS` or `BARKPARK_OPERATOR_FAIL_CLOSED` is set, add the id to `BARKPARK_OPERATOR_TOKEN_IDS`, or `bp org` refuses the token. On a VM, edit `/opt/barkpark/.env` and restart. On Container Apps, edit `barkpark.env` and deploy again. Once connected, `bp token ls -p default` lists the lost token. Revoke it with `bp token revoke <old id> -p default`.
 
 ## Rotate the OIDC client secret
 
