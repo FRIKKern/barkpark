@@ -99,6 +99,8 @@ services:
       - BARKPARK_STUDIO_SSO_ORIGINS
       # Strict OIDC ID token checks for every connection (read in api/config/runtime.exs)
       - BARKPARK_OIDC_STRICT_VALIDATION
+      # Keep an owner through OIDC group mappings (read in api/config/runtime.exs)
+      - BARKPARK_OIDC_KEEP_OWNER
       # Sign-in policy on token paste and the Cloud handoff; Cloud handoff
       # switch (both read in api/config/runtime.exs)
       - BARKPARK_SIGN_IN_POLICY_ALL_ROUTES
