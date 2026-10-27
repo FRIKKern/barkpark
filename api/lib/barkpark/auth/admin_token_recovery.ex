@@ -26,8 +26,11 @@ defmodule Barkpark.Auth.AdminTokenRecovery do
   """
 
   alias Barkpark.{Audit, Auth, Repo, Tenancy}
-  alias Barkpark.Seeds.Shared
 
+  # The clean seed's dataset (`Barkpark.Seeds.Shared.dataset/0`). Written as a
+  # literal so auth does not depend on seeds; the boundary baseline has no
+  # auth>seeds edge.
+  @dataset "production"
   @default_file "/etc/barkpark/admin-token"
   @permissions ["read", "write", "admin"]
 
@@ -134,7 +137,7 @@ defmodule Barkpark.Auth.AdminTokenRecovery do
   defp insert(raw, label, file, workspace) do
     Repo.transaction(fn ->
       with {:ok, token} <-
-             Auth.create_token(raw, label, Shared.dataset(), @permissions, workspace.id),
+             Auth.create_token(raw, label, @dataset, @permissions, workspace.id),
            {:ok, _event} <-
              Audit.emit(%{
                category: "token",
