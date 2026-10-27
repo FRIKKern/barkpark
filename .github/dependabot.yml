@@ -197,6 +197,18 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
+  # tooling/entra-signin — package-lock.json. The headless Entra sign-in
+  # harness (Playwright); not a pnpm workspace member.
+  - package-ecosystem: "npm"
+    directory: "/tooling/entra-signin"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-and-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
   # web — pnpm-lock.yaml. The Next.js demo/finder app.
   - package-ecosystem: "npm"
     directory: "/web"
