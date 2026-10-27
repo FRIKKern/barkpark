@@ -72,6 +72,10 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
 
 `Barkpark.Vault` configures one AES-GCM cipher and no retired cipher, and no command re-encrypts Cloak fields. Keep `BARKPARK_CLOAK_KEY` unchanged. After a change, every row sealed under the old key fails to load, including the user row of anyone with TOTP. Recovering from a leaked Cloak key therefore means clearing each Cloak column and entering the secrets again, and no tool does that today.
 
+## VM size and region
+
+Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. Before creating the VM, `az vm list-skus --location <region> --size Standard_D2 -o table` shows restrictions and `az vm list-usage --location <region> -o table` shows quota.
+
 ## Database TLS
 
 `DATABASE_SSL` sets TLS from Barkpark to PostgreSQL:

@@ -176,6 +176,23 @@ apt-get install -y -qq --no-install-recommends \
   libssl-dev autoconf m4 libncurses-dev \
   inotify-tools ufw
 
+# ── 1b. Swap on small VMs ───────────────────────────────────────────────────
+# A clean MIX_ENV=prod `mix compile` of the API peaked at 0.95 GB resident
+# (measured 2026-10-27), and an update compiles next to the running server and
+# Postgres. A VM under 4 GiB with no swap gets a 2 GiB /swapfile so the build
+# is slow instead of killed. The limit is 3500000 kB because a 4 GiB VM reports
+# a little under 4 GiB in MemTotal. A failed swap step warns and goes on.
+MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
+if [ "${MEM_KB:-0}" -gt 0 ] && [ "$MEM_KB" -lt 3500000 ] && [ -z "$(swapon --noheadings 2>/dev/null)" ]; then
+  echo ">> Swap: ${MEM_KB} kB memory and no swap, adding a 2 GiB /swapfile..."
+  if { [ -f /swapfile ] || { { fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none; } \
+      && chmod 600 /swapfile && mkswap /swapfile >/dev/null; }; } && swapon /swapfile; then
+    grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  else
+    echo "   WARNING: could not add swap; the build may run out of memory on this VM." >&2
+  fi
+fi
+
 # ── 2. PostgreSQL ────────────────────────────────────────────────────────────
 echo ">> PostgreSQL..."
 apt-get install -y -qq --no-install-recommends postgresql postgresql-contrib
