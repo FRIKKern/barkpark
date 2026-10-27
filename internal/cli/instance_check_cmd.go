@@ -6,6 +6,7 @@ package cli
 //	                  [--studio-origin <o>] [--owner-email <e>]
 //	                  [--operator-emails <e,...>] [--breakglass-email <e>]
 //	bp instance check [--env-file <file>] [--target containerapps|vm] [--skip database,media,url]
+//	                  [--studio-url <url>]
 //
 // init writes a complete env file with generated secrets and the recommended
 // Pensum settings. check reads that file, or the process environment, and
@@ -40,8 +41,9 @@ func (p instanceProblem) String() string {
 }
 
 type instanceCheckOpts struct {
-	target string
-	skip   map[string]bool
+	target    string
+	skip      map[string]bool
+	studioURL string // --studio-url: check the Studio sign-in settings for it
 }
 
 // instanceRequiredExtensions are the extensions the migrations create.
@@ -158,8 +160,8 @@ func writeNewPrivateFile(path, body string) error {
 }
 
 func runInstanceCheck(out *writer, args []string) int {
-	const usage = "bp instance check [--env-file <file>] [--target containerapps|vm] [--skip database,media,url]"
-	a, err := parseHzArgs(args, []string{"env-file", "target", "skip"}, nil, usage)
+	const usage = "bp instance check [--env-file <file>] [--target containerapps|vm] [--skip database,media,url] [--studio-url <url>]"
+	a, err := parseHzArgs(args, []string{"env-file", "target", "skip", "studio-url"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
 	}
@@ -169,6 +171,11 @@ func runInstanceCheck(out *writer, args []string) int {
 	opts := instanceCheckOpts{skip: map[string]bool{}}
 	if opts.target, err = instanceTargetFlag(a); err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
+	}
+	if opts.studioURL = strings.TrimSpace(a.val("studio-url")); opts.studioURL != "" {
+		if _, err := instanceStudioOrigin(opts.studioURL); err != nil {
+			return useError(out, "usage", err.Error(), exitUsage)
+		}
 	}
 	for _, s := range a.list("skip") {
 		for _, part := range strings.Split(s, ",") {
@@ -396,6 +403,11 @@ func instanceCheck(ctx context.Context, env map[string]string, opts instanceChec
 				}
 			}
 		}
+	}
+
+	if opts.studioURL != "" {
+		p, n := instanceStudioCheck(env, opts.studioURL)
+		problems, notes = append(problems, p...), append(notes, n...)
 	}
 
 	// Public URL and its TLS certificate.
