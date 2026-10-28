@@ -132,7 +132,7 @@ func TestRunCommandRefusesUnreadableWriteReceipt(t *testing.T) {
 //	{"ok":true}                          auth_controller.ex verify_email/2
 //	{key,raw,quickstart}                 ticket_keys_controller.ex:44 (201 mint)
 //	{workspace,deleted:true}             workspace_controller.ex:112 (delete)
-//	{"result":{transactionId,results}}   mutate_controller.ex:24
+//	{"result":{transactionId,results}}   MutateController.mutate/2
 //	{"ok":false,"reason":"no_ready"}     the tasks queue on an empty queue (2xx)
 //	{"ok":true,"doc":{doc_id,claim}}     the claim receipt
 //	{"accepted":true}                    ChatController.create_message/2 (202)
