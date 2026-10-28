@@ -114,6 +114,7 @@ defmodule Barkpark.Groq.Pushdown do
           | {:views, :views_7d | :views_30d | :score, String.t(), number()}
           | {:timestamp, :inserted_at | :updated_at, String.t(), String.t()}
           | {:id_path, String.t()}
+          | {:references, [String.t()]}
   @type scalar :: String.t() | number() | boolean()
   @type order_key ::
           {:path, [String.t()]}
@@ -159,12 +160,39 @@ defmodule Barkpark.Groq.Pushdown do
   def exact(expr, resolve \\ nil) do
     expr
     |> conjuncts()
-    |> Enum.reduce_while({:ok, empty()}, fn node, {:ok, acc} ->
-      case exact_conjunct(node, acc, resolve) do
-        {:ok, acc} -> {:cont, {:ok, acc}}
-        :error -> map_member_conjunct(node, acc, resolve)
-      end
+    |> Enum.reduce_while({:ok, empty()}, &exact_step(&1, &2, resolve))
+  end
+
+  @doc """
+  `exact/2` for a count (task-2094ccab724a05b2): a top-level `references()`
+  conjunct also qualifies, as the check `{:references, ids}`. Only a count
+  reads it. The source answers it in SQL only when it can match exactly what
+  the evaluator matches, and counts by loading otherwise.
+  """
+  @spec exact_count(tuple(), (tuple() -> term()) | nil) :: {:ok, t()} | :error
+  def exact_count(expr, resolve \\ nil) do
+    expr
+    |> conjuncts()
+    |> Enum.reduce_while({:ok, empty()}, fn
+      {:func, "global", "references", _args} = node, {:ok, acc} ->
+        case probes(node, resolve) do
+          {:ok, [{:refs, ids}]} -> {:cont, {:ok, add_check(acc, {:references, ids})}}
+          :never -> {:cont, {:ok, add_check(acc, {:references, []})}}
+          _ -> {:halt, :error}
+        end
+
+      node, acc ->
+        exact_step(node, acc, resolve)
     end)
+  end
+
+  defp add_check(acc, check), do: %{acc | checks: [check | acc.checks]}
+
+  defp exact_step(node, {:ok, acc}, resolve) do
+    case exact_conjunct(node, acc, resolve) do
+      {:ok, acc} -> {:cont, {:ok, acc}}
+      :error -> map_member_conjunct(node, acc, resolve)
+    end
   end
 
   # `"x" in a[].b` narrows a read, and a `||` branch, as a containment probe

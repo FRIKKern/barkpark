@@ -212,6 +212,10 @@ defmodule Barkpark.Groq.DocumentSource do
       not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state)) ->
         :error
 
+      references?(constraints) and
+          not Enum.all?(constraints.types, &renders_everything?(&1, state)) ->
+        :error
+
       true ->
         key = cache_key(constraints)
 
@@ -220,18 +224,21 @@ defmodule Barkpark.Groq.DocumentSource do
             case Process.get(:groq_src_mode) do
               :direct ->
                 load_counts(state, [key])
-                {:ok, Process.get({:groq_src_count, key})}
+                count_result(Process.get({:groq_src_count, key}))
 
               _ ->
                 record_missing(:counts, key)
                 {:ok, 0}
             end
 
-          n ->
-            {:ok, n}
+          found ->
+            count_result(found)
         end
     end
   end
+
+  defp count_result(:inexact), do: :error
+  defp count_result(n), do: {:ok, n}
 
   # A count whose filter SQL cannot match exactly reads the rows SQL narrows
   # to in chunks of `@scan_chunk` and keeps only the running total, so it is
@@ -447,7 +454,8 @@ defmodule Barkpark.Groq.DocumentSource do
       plain
       |> Enum.reject(
         &(match?({:views, _column, _op, _n}, &1) or match?({:timestamp, _, _, _}, &1) or
-            match?({:id_path, _}, &1))
+            match?({:id_path, _}, &1) or match?({:references, _, _}, &1) or
+            match?({:references, _}, &1))
       )
       |> Enum.map(&check_path/1)
 
@@ -577,14 +585,24 @@ defmodule Barkpark.Groq.DocumentSource do
   defp load_counts(state, keys) do
     keys = Enum.with_index(keys)
 
-    [first | rest] =
-      Enum.map(keys, fn {{types, ids, eq, _any, checks}, i} ->
-        state
-        |> counted_rows()
-        |> maybe_where_types(types)
-        |> where_keys([{types, ids, eq, [], checks}], :exact, state.perspective)
-        |> select([d], %{i: type(^i, :integer), n: count(d.id)})
+    # A `references()` count also counts, under index -1 - i, the rows whose
+    # match SQL may see where the evaluator does not (`references_guard/2`).
+    # Any such row and the count is left to the evaluator.
+    counted =
+      Enum.flat_map(keys, fn {{types, ids, eq, _any, checks}, i} ->
+        guards = Enum.map(checks, &guard_check/1)
+        sets = [{i, checks} | if(guards == checks, do: [], else: [{-1 - i, guards}])]
+
+        Enum.map(sets, fn {j, checks} ->
+          state
+          |> counted_rows()
+          |> maybe_where_types(types)
+          |> where_keys([{types, ids, eq, [], checks}], :exact, state.perspective)
+          |> select([d], %{i: type(^j, :integer), n: count(d.id)})
+        end)
       end)
+
+    [first | rest] = counted
 
     counts =
       rest
@@ -593,7 +611,8 @@ defmodule Barkpark.Groq.DocumentSource do
       |> Map.new(&{&1.i, &1.n})
 
     Enum.each(keys, fn {{types, ids, _eq, _any, _checks} = key, i} ->
-      Process.put({:groq_src_count, key}, Map.get(counts, i, 0))
+      n = if Map.get(counts, -1 - i, 0) > 0, do: :inexact, else: Map.get(counts, i, 0)
+      Process.put({:groq_src_count, key}, n)
       touch_scope(types, ids)
     end)
   end
@@ -826,6 +845,10 @@ defmodule Barkpark.Groq.DocumentSource do
       |> Enum.reduce(fn c, acc -> dynamic(^acc or ^c) end)
     end
   end
+
+  defp check_narrowing({kind, ids, bare}, _perspective)
+       when kind in [:references, :references_guard],
+       do: references_narrowing(ids, bare)
 
   defp check_narrowing(_check, _perspective), do: nil
 
@@ -1425,6 +1448,159 @@ defmodule Barkpark.Groq.DocumentSource do
     )
   end
 
+  # ── references() in a SQL count (task-2094ccab724a05b2) ─────────────────
+  #
+  # `Pushdown.exact_count/2` reads a top-level `references(ids)` as the check
+  # `{:references, ids}`; `widen/2` adds, per type in scope, the containment
+  # maps of the ids at that type's declared reference positions (read
+  # compat), as `{:references, ids, bare}`. SQL then matches what the
+  # evaluator's `references?/3` matches on a rendered document:
+  #
+  #   * an object whose `_ref` is one of the ids, at any depth;
+  #   * a PortableDoc wikilink whose `docId`, else (no, null or false
+  #     `docId`) whose `target`, is one of the ids;
+  #   * a bare id at a declared reference position of the row's type.
+  #
+  # Two things differ, and the count leaves them to the evaluator: the
+  # evaluator does not look inside a reference object or a wikilink that
+  # names a target, and an object that is both counts by its `_ref` only.
+  # `references_guard/2` counts the rows with such a shape among the matches;
+  # any one and `load_counts/2` stores `:inexact`. The caller must also see
+  # every field of each type (`renders_everything?/2`), as rendering would
+  # otherwise hide a link SQL sees. The rows are `counted_rows/1`'s, so
+  # dataset, workspace, owner, grants, preview ids, visible types and the
+  # perspective are the same as for any read.
+  @ref_match "lax $.** ? (@._ref.type() == \"string\" && @._ref == $ids[*])"
+
+  @wikilink_match "lax $.** ? (@.type.type() == \"string\" && @.type == \"wikilink\" && " <>
+                    "((@.docId.type() == \"string\" && @.docId == $ids[*]) || " <>
+                    "((!exists(@.docId) || @.docId == null || @.docId == false) && " <>
+                    "@.target.type() == \"string\" && @.target == $ids[*])))"
+
+  @link_stop "(@._ref.type() == \"string\" && @._ref != \"\") || " <>
+               "(@.type.type() == \"string\" && @.type == \"wikilink\" && " <>
+               "((@.docId.type() == \"string\" && @.docId != \"\") || " <>
+               "((!exists(@.docId) || @.docId == null || @.docId == false) && " <>
+               "@.target.type() == \"string\" && @.target != \"\")))"
+
+  @link_nested "lax $.** ? (" <>
+                 @link_stop <>
+                 ").*.** ? (exists(@._ref) || @.type == \"wikilink\")"
+
+  @link_both "lax $.** ? (@._ref.type() == \"string\" && @._ref != \"\" && @.type == \"wikilink\")"
+
+  defp references?(constraints),
+    do:
+      Enum.any?(
+        constraints.checks,
+        &(match?({:references, _}, &1) or match?({:references, _, _}, &1))
+      )
+
+  defp renders_everything?(type, state) do
+    schema = schema_for(type, state)
+
+    not Envelope.drops_ciphertext?(schema, state.caller_context) and
+      Envelope.renders_all_fields?(schema, state.caller_context)
+  end
+
+  defp widen_references(%{checks: checks} = constraints, state) do
+    if Enum.any?(checks, &match?({:references, _}, &1)) do
+      positions = shape_positions(state, constraints.types)
+
+      checks =
+        Enum.map(checks, fn
+          {:references, ids} ->
+            ids = Enum.reject(ids, &(&1 == ""))
+
+            bare =
+              for {type, path, "reference"} <- positions, id <- ids, reduce: %{} do
+                acc -> Map.update(acc, type, [probe_map(path, id)], &[probe_map(path, id) | &1])
+              end
+
+            {:references, ids,
+             bare |> Enum.map(fn {t, maps} -> {t, Enum.sort(maps)} end) |> Enum.sort()}
+
+          check ->
+            check
+        end)
+
+      %{constraints | checks: checks}
+    else
+      constraints
+    end
+  end
+
+  defp guard_check({:references, ids, bare}), do: {:references_guard, ids, bare}
+  defp guard_check(check), do: check
+
+  defp references_match([], _bare), do: dynamic(false)
+
+  defp references_match(ids, bare) do
+    vars = Jason.encode!(%{"ids" => ids})
+
+    Enum.reduce(
+      bare,
+      dynamic(
+        [bp_content: c],
+        fragment(
+          "jsonb_path_exists(?, CAST(? AS jsonpath), CAST(? AS jsonb), true)",
+          c.content,
+          type(^@ref_match, :string),
+          type(^vars, :string)
+        ) or
+          fragment(
+            "jsonb_path_exists(?, CAST(? AS jsonpath), CAST(? AS jsonb), true)",
+            c.content,
+            type(^@wikilink_match, :string),
+            type(^vars, :string)
+          )
+      ),
+      fn {type, maps}, acc ->
+        json = Enum.map(maps, &Jason.encode!/1)
+
+        dynamic(
+          [d, bp_content: c],
+          ^acc or
+            (d.type == ^type and
+               fragment("? @> ANY(CAST(? AS jsonb[]))", c.content, type(^json, {:array, :string})))
+        )
+      end
+    )
+  end
+
+  defp references_guard do
+    dynamic(
+      [bp_content: c],
+      fragment(
+        "jsonb_path_exists(?, CAST(? AS jsonpath), '{}'::jsonb, true)",
+        c.content,
+        type(^@link_nested, :string)
+      ) or
+        fragment(
+          "jsonb_path_exists(?, CAST(? AS jsonpath), '{}'::jsonb, true)",
+          c.content,
+          type(^@link_both, :string)
+        )
+    )
+  end
+
+  # The index-backed superset on the stored row: the `_ref` and wikilink arms
+  # of `references_any/1` and the bare ids at each type's positions.
+  defp references_narrowing([], _bare), do: dynamic(false)
+
+  defp references_narrowing(ids, bare) do
+    Enum.reduce(bare, stored_probes([{:refs, ids}], :published), fn {type, maps}, acc ->
+      json = Enum.map(maps, &Jason.encode!/1)
+
+      dynamic(
+        [d],
+        ^acc or
+          (d.type == ^type and
+             fragment("? @> ANY(CAST(? AS jsonb[]))", d.content, type(^json, {:array, :string})))
+      )
+    end)
+  end
+
   # Each expression is the one its index is built on, word for word; Postgres
   # uses an expression index only for that exact expression, and plans the OR
   # as a BitmapOr of the two:
@@ -1476,6 +1652,11 @@ defmodule Barkpark.Groq.DocumentSource do
     regex = id_path_regex(pattern)
     dynamic(fragment("? ~ ?", ^id_expr(perspective), ^regex))
   end
+
+  defp check_condition({:references, ids, bare}, _perspective), do: references_match(ids, bare)
+
+  defp check_condition({:references_guard, ids, bare}, _perspective),
+    do: dynamic(^references_match(ids, bare) and ^references_guard())
 
   defp check_condition(check, _perspective), do: check_condition(check)
 
@@ -2276,7 +2457,9 @@ defmodule Barkpark.Groq.DocumentSource do
         |> widen_refs(positions)
       end
 
-    widen_item_types(constraints, state)
+    constraints
+    |> widen_item_types(state)
+    |> widen_references(state)
   end
 
   # `order(slug.current)` / `order(author._ref)` on a field every type in

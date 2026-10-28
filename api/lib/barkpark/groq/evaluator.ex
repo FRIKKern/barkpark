@@ -934,7 +934,7 @@ defmodule Barkpark.Groq.Evaluator do
   defp source_count(_arg, _scope, _ctx, _cache), do: :error
 
   defp exact_count(expr, resolve, ctx) do
-    case Pushdown.exact(expr, resolve) do
+    case Pushdown.exact_count(expr, resolve) do
       {:ok, constraints} -> Source.count(ctx.source, constraints)
       :error -> :error
     end
