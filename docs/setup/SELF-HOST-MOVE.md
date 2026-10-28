@@ -36,3 +36,4 @@ bp -s <target> -w <ws> -d production import backup.ndjson --media media
 - The import writes each document as exported. The target adds no schema initial values and derives no title. A target older than this answers with a warning, and its creates still add them.
 - A batch the target cannot finish in time is sent again at half its documents, down to one. The report names the size it ended with. A stopped import prints `--from-line N`. A re-run with `--media` uploads nothing twice.
 - An older target ignores `mediaFileId` and stores a new id. The import then stops at the first file, before any document.
+- Media file ids are unique per instance. An import with `--media` into a second dataset on the same instance is refused with 409 at the first file, so copy media to another instance.
