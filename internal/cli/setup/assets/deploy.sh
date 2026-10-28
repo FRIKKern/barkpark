@@ -78,7 +78,7 @@ install_caddy_pkg() {
 
 # Barkpark — Server deployment
 #
-# Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL directly on the server.
+# Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL 17 directly on the server.
 # Works on both ARM64 (Hetzner cax*) and x86_64 (Hetzner cpx*/ccx*).
 #
 # Usage:
@@ -194,8 +194,29 @@ if [ "${MEM_KB:-0}" -gt 0 ] && [ "$MEM_KB" -lt 3500000 ] && [ -z "$(swapon --noh
 fi
 
 # ── 2. PostgreSQL ────────────────────────────────────────────────────────────
+# PostgreSQL 17 from the PostgreSQL apt repository (PGDG), the major that
+# deploy/azure/main.bicep runs on Flexible Server, so a backup restores on
+# either path. Ubuntu's own package is 14 on 22.04 and 16 on 24.04. A box that
+# already has a cluster keeps it and its major: a second major would start a
+# second cluster on port 5433 while the database stays on the first.
+# postgresql-17 carries citext, pg_trgm and pgcrypto, which the migrations need.
+PG_MAJOR=17
 echo ">> PostgreSQL..."
-apt-get install -y -qq --no-install-recommends postgresql postgresql-contrib
+if command -v pg_lsclusters >/dev/null 2>&1 && [ -n "$(pg_lsclusters -h 2>/dev/null)" ]; then
+  echo "   Keeping the existing cluster: $(pg_lsclusters -h | awk '{print $1 "/" $2}' | tr '\n' ' ')"
+else
+  . /etc/os-release
+  install -d /usr/share/postgresql-common/pgdg
+  curl -fsSL --retry 3 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    https://www.postgresql.org/media/keys/ACCC4CF8.asc
+  echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+  apt-get update -qq
+  if ! apt-get install -y -qq --no-install-recommends "postgresql-$PG_MAJOR"; then
+    echo "!! PostgreSQL: could not install postgresql-$PG_MAJOR from apt.postgresql.org for $VERSION_CODENAME" >&2
+    exit 1
+  fi
+fi
 systemctl enable postgresql
 systemctl start postgresql
 

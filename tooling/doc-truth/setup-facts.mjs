@@ -20,7 +20,9 @@
 //          and anchor that exist
 //   number a default or number in the self-host docs, such as a retention,
 //          a schedule, a size or a version, equals the value in the Bicep
-//          template, deploy.sh, a script or the Elixir code (NUMBER_FACTS)
+//          template, deploy.sh, a script or the Elixir code (NUMBER_FACTS),
+//          and deploy.sh, the Bicep server and its jobs' client run one
+//          PostgreSQL major (PG_MAJOR_SOURCES)
 //
 // Scope: docs/setup/*.md, the setup sections of README.md, and every doc a Go
 // string in internal/ or cmd/ links to.
@@ -739,6 +741,7 @@ export async function runCheck(root) {
   const findings = [];
   for (const [rel, inScope] of docs) findings.push(...checkDocText(ctx, rel, ctx.repo.read(rel) || "", inScope));
   findings.push(...checkNumberFacts(ctx.repo));
+  findings.push(...checkPgMajors(ctx.repo));
   for (const l of codeLinks) {
     const r = checkLink(ctx.repo, "", l.target, ctx.anchorCache);
     if (r) findings.push({ kind: "link", file: l.file, line: l.line, value: l.target, why: `doc link constant: ${r.why}`, nearest: r.nearest });
@@ -799,6 +802,7 @@ export const NUMBER_SOURCES = {
   appMemoryGiB: { file: BICEP, re: /param memory string = '(\d+)Gi'/ },
   postgresVersion: { file: BICEP, re: /\bversion: '(\d+)'/ },
   postgresClient: { file: BICEP, re: /\bpostgresql(\d+)-client\b/ },
+  deployPgMajor: { file: "deploy.sh", re: /^PG_MAJOR=(\d+)$/m },
   postgresSku: { file: BICEP, re: /param postgresSku string = '(\w+)'/ },
   postgresStorageGb: { file: BICEP, re: /param postgresStorageGb int = (\d+)/ },
   postgresBackupDays: { file: BICEP, re: /\bbackupRetentionDays: (\d+)/ },
@@ -873,12 +877,26 @@ export const NUMBER_FACTS = [
   [IT, /It expires after (\d+ or \d+) years/, "secretYears"],
   [MOVE, /The job installs bp ([\d.]+)/, "bpCliVersion"],
   [MOVE, /The template runs (\d+)\./, "postgresVersion"],
+  [MOVE, /A VM from `deploy\.sh` runs (\d+) too/, "deployPgMajor"],
+  ["docs/setup/SELF-HOST.md", /with local PostgreSQL (\d+) and Caddy/, "deployPgMajor"],
+  ["docs/setup/SELF-HOST.md", /PostgreSQL Flexible Server (\d+), Azure Files/, "postgresVersion"],
   ["docs/setup/ENTRA.md", /get a mail (\d+, \d+ and \d+) days ahead/, "secretWarnDays"],
   ["docs/setup/ENTRA-ACCESS.md", /by default (\d+) days after sign-in/, "sessionDays"],
   ["docs/setup/media-object-storage.md", /BARKPARK_S3_REGION=(\w+)/, "s3Region"],
   ["docs/setup/media-object-storage.md", /BARKPARK_S3_PRESIGN_TTL=(\d+)/, "s3PresignTtl"],
   ["docs/setup/media-object-storage.md", /existing\s+(\d+) MB request cap/, "bodyCapMb"],
 ];
+
+// The single VM and Container Apps run one PostgreSQL major, so a backup
+// restores on either path.
+export const PG_MAJOR_SOURCES = ["deployPgMajor", "postgresVersion", "postgresClient"];
+
+export function checkPgMajors(repo, sources = NUMBER_SOURCES) {
+  const got = PG_MAJOR_SOURCES.map((name) => ({ name, ...readNumberSource(repo, name, sources) }));
+  if (got.some((g) => g.why) || new Set(got.map((g) => g.value)).size === 1) return [];
+  const all = got.map((g) => `${g.name} ${g.value} (${g.at})`).join(", ");
+  return got.map((g) => ({ kind: "number", file: g.at.replace(/:\d+$/, ""), line: Number(g.at.split(":").pop()), value: g.name, why: `the self-host paths run different PostgreSQL majors: ${all}`, nearest: null }));
+}
 
 // Read one NUMBER_SOURCES value. Returns { value, at } or { why }.
 export function readNumberSource(repo, name, sources = NUMBER_SOURCES) {

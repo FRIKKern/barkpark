@@ -5,8 +5,8 @@ This guide takes you from an Azure subscription to Pensum sign-in, in run order.
 
 | Path | What runs | Where the settings live |
 |---|---|---|
-| [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu server, with local PostgreSQL and Caddy for TLS. | `/opt/barkpark/.env` |
-| [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
+| [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu server, with local PostgreSQL 17 and Caddy for TLS. | `/opt/barkpark/.env` |
+| [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server 17, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
 
 ## Before you start on Azure
 
