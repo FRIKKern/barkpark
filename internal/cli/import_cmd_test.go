@@ -37,6 +37,9 @@ type importFakeServer struct {
 	// failOn makes the mutate request with this 1-based index answer 422 and
 	// apply nothing, as the server's single transaction does.
 	failOn int
+	// oldServer answers as a server that does not read `restore`: the batch
+	// applies and the response names the key in a mutate.unknown_key warning.
+	oldServer bool
 }
 
 type importFakeRequest struct {
@@ -178,7 +181,11 @@ func (f *importFakeServer) mutate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.docs = next
-	_ = json.NewEncoder(w).Encode(map[string]any{"transactionId": "tx", "results": results})
+	resp := map[string]any{"transactionId": "tx", "results": results}
+	if f.oldServer {
+		resp["warnings"] = []map[string]string{{"code": "mutate.unknown_key", "message": "ignored unknown top-level key(s): restore"}}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // importExportTo runs `bp export --out` against srv and returns the file path.
@@ -557,5 +564,52 @@ func TestRunImportHelpAndUsage(t *testing.T) {
 	se.Reset()
 	if code := runImport(newWriter(&so, &se), globals{}, manifest.Context{}, nil); code != exitUsage {
 		t.Errorf("no file: exit = %d, want %d", code, exitUsage)
+	}
+}
+
+// RESTORE (task-419052f535f92f4b). Every mutate body asks the server to write
+// the documents as exported, and a server that does not read the flag is named
+// once on stderr.
+func TestRunImportSendsRestoreAndNotesAnOldServer(t *testing.T) {
+	src := newImportFakeServer(t)
+	seedRoundTripSource(src)
+	backup := importExportTo(t, src)
+
+	dst := newImportFakeServer(t)
+	code, _, stderr := runImportForTest(t, dst.ctx(), globals{}, backup)
+	if code != exitOK {
+		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
+	}
+	var body struct {
+		Restore *bool `json:"restore"`
+	}
+	if err := json.Unmarshal(dst.requests[0].body, &body); err != nil || body.Restore == nil || !*body.Restore {
+		t.Fatalf("mutate body = %s, want restore: true", dst.requests[0].body)
+	}
+	if strings.Contains(stderr, "does not read `restore`") {
+		t.Errorf("stderr names an old server for a current one: %s", stderr)
+	}
+
+	// Three documents of about 600 bytes each, so a 1024-byte cap sends three
+	// batches.
+	big := filepath.Join(t.TempDir(), "big.ndjson")
+	var lines []string
+	for i := 1; i <= 3; i++ {
+		lines = append(lines, fmt.Sprintf(`{"_id":"big-%d","_type":"post","title":%q}`, i, strings.Repeat("x", 600)))
+	}
+	if err := os.WriteFile(big, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := newImportFakeServer(t)
+	old.oldServer = true
+	code, _, stderr = runImportForTest(t, old.ctx(), globals{}, big, "--batch-bytes", "1024")
+	if code != exitOK {
+		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
+	}
+	if len(old.requests) < 2 {
+		t.Fatalf("mutate requests = %d, want several for the note to be shown once", len(old.requests))
+	}
+	if n := strings.Count(stderr, "does not read `restore`"); n != 1 {
+		t.Errorf("old-server note shown %d times, want 1; stderr=%s", n, stderr)
 	}
 }

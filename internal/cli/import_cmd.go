@@ -36,6 +36,13 @@ const importDefaultBatchBytes = 30_000_000
 // `bp export --help` deleted with jq.
 var importServerOwnedKeys = []string{"_rev", "_draft", "_publishedId", "_createdAt", "_updatedAt"}
 
+// importBodyPrefix opens every mutate body. `restore: true`
+// (task-419052f535f92f4b) asks the server to write each created document as
+// exported: no schema initial values, no layout scaffold and no derived title.
+// A server older than the flag ignores it and names it in a
+// mutate.unknown_key warning, which importWriteBatch reports.
+const importBodyPrefix = `{"restore":true,"mutations":[`
+
 // importRow is one document line of the NDJSON backup.
 type importRow struct {
 	Line   int    // 1-based physical line in the file
@@ -68,6 +75,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		usageImport(out, true)
 		return exitOK
 	}
+	importRestoreWarned = false
 	var path string
 	overwrite := false
 	dryRun := g.dryRun
@@ -467,7 +475,7 @@ func importBatches(rows []*importRow, maxBytes int) ([]importBatch, error) {
 	var batches []importBatch
 	var cur importBatch
 	curBytes := 0
-	const envelope = len(`{"mutations":[]}`)
+	const envelope = len(importBodyPrefix + `]}`)
 	for _, r := range rows {
 		if r.Action == "skip" {
 			continue
@@ -506,7 +514,7 @@ func importBatches(rows []*importRow, maxBytes int) ([]importBatch, error) {
 
 func importBatchBody(rows []*importRow) []byte {
 	var buf bytes.Buffer
-	buf.WriteString(`{"mutations":[`)
+	buf.WriteString(importBodyPrefix)
 	n := 0
 	write := func(m []byte) {
 		if n > 0 {
@@ -562,6 +570,10 @@ func importWriteBatch(out *writer, u string, ctx manifest.Context, b importBatch
 		}
 		return rc, true
 	}
+	if !importRestoreWarned && bytes.Contains(respBody, []byte("mutate.unknown_key")) && bytes.Contains(respBody, []byte("restore")) {
+		importRestoreWarned = true
+		out.errf("import: this server does not read `restore`, so it may add schema initial values and derived titles to the documents it creates. Upgrade the server for an exact restore.")
+	}
 	written, werr := migrateBatchWritten(respBody)
 	if werr != nil {
 		useError(out, "unreadable_write_receipt", "import: "+werr.Error(), exitGeneric)
@@ -574,6 +586,9 @@ func importWriteBatch(out *writer, u string, ctx manifest.Context, b importBatch
 	}
 	return exitOK, false
 }
+
+// importRestoreWarned keeps the old-server note to one line per run.
+var importRestoreWarned bool
 
 func importActionCounts(rows []*importRow) map[string]int {
 	counts := map[string]int{"create": 0, "overwrite": 0, "skip": 0}
@@ -641,6 +656,8 @@ func usageImport(out *writer, toStdout bool) {
 	p("Published rows are applied first, so a draft lands on top of its published twin.")
 	p("The server-owned keys _rev, _draft, _publishedId, _createdAt and _updatedAt are")
 	p("dropped. When <file>.meta exists, the file must match it or nothing is written.")
+	p("Each document is written as exported: the server adds no schema initial values")
+	p("and derives no title (the mutate door's restore flag).")
 	p("")
 	p("flags:")
 	p("  --dry-run          report per document whether it would be created, overwritten")
