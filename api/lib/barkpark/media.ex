@@ -78,6 +78,12 @@ defmodule Barkpark.Media do
       same dataset and workspace already carries it, the upload returns
       `{:existing, file}` and stores nothing, so a re-run import is
       idempotent. A dedupe hit with no `source_id` of its own takes this one.
+    * `:id` — the id the new row takes, so a copy from another instance keeps
+      its asset ids and the `asset-<id>` documents that reference them
+      (task-fa5aedea4a584d34). Byte dedupe and the `source_id` lookup are
+      skipped. A row that already has this id answers `{:existing, file}`
+      when its dataset, workspace and bytes match, so a re-run is idempotent,
+      and `{:error, :conflict}` otherwise.
 
   Every new row stores the SHA-1 of its bytes in `sha1`.
   """
@@ -164,10 +170,13 @@ defmodule Barkpark.Media do
                source_id: Keyword.get(opts, :source_id)
              },
              opts
-           ) do
-      case find_by_source_id(attrs) ||
-             (Keyword.get(opts, :dedupe, false) && find_duplicate(attrs)) do
-        %MediaFile{} = existing ->
+           ),
+         {:ok, attrs, found} <- find_existing(attrs, Keyword.get(opts, :id), opts) do
+      case {found, Map.has_key?(attrs, :id)} do
+        {%MediaFile{} = existing, true} ->
+          {:existing, existing}
+
+        {%MediaFile{} = existing, false} ->
           {:existing, adopt_source_id(existing, attrs.source_id)}
 
         _ ->
@@ -266,6 +275,30 @@ defmodule Barkpark.Media do
           end)
 
         backfill_sha1_from(List.last(files).id, batch, acc)
+    end
+  end
+
+  # The row an upload answers with instead of storing. With no `:id` it is the
+  # `source_id` match or, when `dedupe` is on, the first file with the same
+  # bytes. With an `:id` it is only that row, and only when it is the same file
+  # in the same dataset and workspace.
+  defp find_existing(attrs, nil, opts) do
+    {:ok, attrs,
+     find_by_source_id(attrs) || (Keyword.get(opts, :dedupe, false) && find_duplicate(attrs))}
+  end
+
+  defp find_existing(attrs, id, _opts) when is_binary(id) do
+    case Repo.get(MediaFile, id) do
+      nil ->
+        {:ok, Map.put(attrs, :id, id), nil}
+
+      %MediaFile{} = file ->
+        same =
+          from(m in MediaFile, where: m.id == ^id and m.sha1 == ^attrs.sha1, select: m.id)
+          |> same_dataset_and_workspace(attrs)
+          |> Repo.one()
+
+        if same, do: {:ok, Map.put(attrs, :id, id), file}, else: {:error, :conflict}
     end
   end
 
@@ -379,7 +412,9 @@ defmodule Barkpark.Media do
   end
 
   defp insert_uploaded_row(attrs, relative_path, dataset, asset_metadata, meta) do
-    %MediaFile{}
+    # `id` is not cast: only `upload/3`'s `:id` option sets it, and nil
+    # leaves it to autogenerate.
+    %MediaFile{id: Map.get(attrs, :id)}
     |> MediaFile.changeset(attrs)
     |> Repo.insert()
     |> case do
