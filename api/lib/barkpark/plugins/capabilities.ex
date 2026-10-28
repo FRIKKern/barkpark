@@ -126,6 +126,46 @@ defmodule Barkpark.Plugins.Capabilities do
     end
   end
 
+  # Nouns whose help bp carries in its binary, so `bp org --help` works with no
+  # server. Only core nouns an operator needs before the server is up.
+  @offline_help_nouns ~w(org)
+
+  @doc """
+  The manifest bp embeds for offline help: the admin view of the
+  `#{Enum.join(@offline_help_nouns, ", ")}` noun, with a fixed server block
+  and time so the bytes depend only on the command definitions.
+
+  `mix barkpark.offline_help` writes it to
+  `internal/cli/offline_help_manifest.json`, and a test fails when the
+  committed file differs.
+  """
+  @spec offline_help_manifest() :: map()
+  def offline_help_manifest do
+    full =
+      manifest("admin",
+        server: %{
+          "name" => "barkpark",
+          "version" => "offline-help",
+          "base_url" => "http://localhost:4000",
+          "api_version" => "1",
+          "min_cli" => "1.0.0"
+        },
+        generated_at: "1970-01-01T00:00:00Z"
+      )
+
+    keep? = &(&1 in @offline_help_nouns)
+
+    %{
+      "manifest_version" => full["manifest_version"],
+      "server" => full["server"],
+      "auth_tier" => full["auth_tier"],
+      "generated_at" => full["generated_at"],
+      "etag" => "offline-help",
+      "nouns" => Enum.filter(full["nouns"], &keep?.(&1["name"])),
+      "commands" => Enum.filter(full["commands"], &keep?.(&1["noun"]))
+    }
+  end
+
   @doc """
   PURE existence-hiding projection: `(manifest_map, caller_tier) -> manifest_map`.
 

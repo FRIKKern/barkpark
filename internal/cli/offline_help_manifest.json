@@ -1,0 +1,411 @@
+{
+  "auth_tier": "admin",
+  "commands": [
+    {
+      "args": [
+        {
+          "name": "slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "name",
+          "required": false,
+          "summary": "Display name (the slug when absent).",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/admin/orgs"
+      },
+      "id": "org.create",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Create an organization (instance-operator only).",
+      "verb": "create",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "workspace_slug",
+          "required": true,
+          "summary": "Workspace slug.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/admin/orgs/:org_slug/workspaces/:workspace_slug"
+      },
+      "id": "org.attach-workspace",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Attach a workspace to an organization.",
+      "verb": "attach-workspace",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "methods",
+          "required": false,
+          "summary": "Comma-separated: password, magic_link, passkey, sso, social.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "set",
+          "repeatable": true,
+          "summary": "Field key=value (repeatable; key:=json for typed values).",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/admin/orgs/:org_slug/auth-methods"
+      },
+      "id": "org.auth-methods",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Set the sign-in methods an organization allows, e.g. sso. --set methods:=null clears the policy.",
+      "verb": "auth-methods",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "issuer",
+          "required": true,
+          "summary": "Issuer URL, e.g. https://login.microsoftonline.com/<tenant>/v2.0.",
+          "type": "string"
+        },
+        {
+          "name": "client_id",
+          "required": true,
+          "summary": "Client (application) id.",
+          "type": "string"
+        },
+        {
+          "name": "client_secret",
+          "required": true,
+          "summary": "Client secret. Give - to read it from stdin, such as - < ./client-secret. Stored encrypted, never shown again.",
+          "type": "secret"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "scopes",
+          "summary": "Space-separated scopes (default \"openid email\").",
+          "type": "string"
+        },
+        {
+          "name": "token_endpoint_auth_method",
+          "summary": "client_secret_post (default) or client_secret_basic.",
+          "type": "string"
+        },
+        {
+          "name": "tenant_id",
+          "summary": "Entra tenant id. Sign-in requires a matching tid claim.",
+          "type": "string"
+        },
+        {
+          "name": "strict_validation",
+          "summary": "Turn on the stricter ID token and subject checks.",
+          "type": "boolean"
+        },
+        {
+          "name": "trust_idp_mfa",
+          "summary": "Count the identity provider's MFA as Barkpark MFA.",
+          "type": "boolean"
+        },
+        {
+          "name": "mfa_acr",
+          "summary": "acr value that also counts as MFA when trust_idp_mfa is on.",
+          "type": "string"
+        },
+        {
+          "name": "require_group_match",
+          "summary": "Refuse a sign-in whose groups match no mapping, and remove the user's seats.",
+          "type": "boolean"
+        },
+        {
+          "name": "client_secret_expires_at",
+          "summary": "When the client secret expires, ISO 8601 date or time. Barkpark warns 30, 14 and 7 days ahead.",
+          "type": "string"
+        },
+        {
+          "name": "set",
+          "repeatable": true,
+          "summary": "Field key=value (repeatable; key:=json for typed values).",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/admin/orgs/:org_slug/oidc"
+      },
+      "id": "org.oidc-create",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Create the organization's OIDC connection from the issuer's discovery document. Map groups to roles with --set group_role_mappings:='<JSON object>'.",
+      "verb": "oidc-create",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "scopes",
+          "summary": "Space-separated scopes (default \"openid email\").",
+          "type": "string"
+        },
+        {
+          "name": "token_endpoint_auth_method",
+          "summary": "client_secret_post (default) or client_secret_basic.",
+          "type": "string"
+        },
+        {
+          "name": "tenant_id",
+          "summary": "Entra tenant id. Sign-in requires a matching tid claim.",
+          "type": "string"
+        },
+        {
+          "name": "strict_validation",
+          "summary": "Turn on the stricter ID token and subject checks.",
+          "type": "boolean"
+        },
+        {
+          "name": "trust_idp_mfa",
+          "summary": "Count the identity provider's MFA as Barkpark MFA.",
+          "type": "boolean"
+        },
+        {
+          "name": "mfa_acr",
+          "summary": "acr value that also counts as MFA when trust_idp_mfa is on.",
+          "type": "string"
+        },
+        {
+          "name": "require_group_match",
+          "summary": "Refuse a sign-in whose groups match no mapping, and remove the user's seats.",
+          "type": "boolean"
+        },
+        {
+          "name": "client_secret_expires_at",
+          "summary": "When the client secret expires, ISO 8601 date or time. Barkpark warns 30, 14 and 7 days ahead.",
+          "type": "string"
+        },
+        {
+          "name": "set",
+          "repeatable": true,
+          "summary": "Field key=value (repeatable; key:=json for typed values).",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "PATCH",
+        "path_template": "/v1/admin/orgs/:org_slug/oidc"
+      },
+      "id": "org.oidc-update",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Change the OIDC connection's client id, groups claim, group mappings, active flag, client secret expiry date or Entra ID settings.",
+      "verb": "oidc-update",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "client_secret",
+          "required": true,
+          "summary": "New client secret. Give - to read it from stdin, such as - < ./client-secret. Stored encrypted, never shown again.",
+          "type": "secret"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [
+        {
+          "name": "client_secret_expires_at",
+          "summary": "When the new secret expires, ISO 8601 date or time. Without it the stored date is cleared.",
+          "type": "string"
+        }
+      ],
+      "http": {
+        "method": "PUT",
+        "path_template": "/v1/admin/orgs/:org_slug/oidc/client-secret"
+      },
+      "id": "org.oidc-rotate-secret",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Replace the OIDC connection's client secret.",
+      "verb": "oidc-rotate-secret",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "DELETE",
+        "path_template": "/v1/admin/orgs/:org_slug/oidc"
+      },
+      "id": "org.oidc-delete",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Delete the organization's OIDC connection.",
+      "verb": "oidc-delete",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "domain",
+          "required": true,
+          "summary": "Email domain, e.g. example.com.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/admin/orgs/:org_slug/domains"
+      },
+      "id": "org.domain-add",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Claim an email domain for SSO routing and get the DNS TXT record to publish.",
+      "verb": "domain-add",
+      "writes": true
+    },
+    {
+      "args": [
+        {
+          "name": "org_slug",
+          "required": true,
+          "summary": "Organization slug.",
+          "type": "string"
+        },
+        {
+          "name": "domain",
+          "required": true,
+          "summary": "Email domain.",
+          "type": "string"
+        }
+      ],
+      "auth_tier": "admin",
+      "batch": false,
+      "default_output": "json",
+      "dry_run": false,
+      "flags": [],
+      "http": {
+        "method": "POST",
+        "path_template": "/v1/admin/orgs/:org_slug/domains/:domain/verify"
+      },
+      "id": "org.domain-verify",
+      "noun": "org",
+      "paginated": false,
+      "source": "core",
+      "summary": "Check the domain's DNS TXT record. Only a verified domain routes sign-ins.",
+      "verb": "domain-verify",
+      "writes": true
+    }
+  ],
+  "etag": "offline-help",
+  "generated_at": "1970-01-01T00:00:00Z",
+  "manifest_version": "1",
+  "nouns": [],
+  "server": {
+    "api_version": "1",
+    "base_url": "http://localhost:4000",
+    "min_cli": "1.0.0",
+    "name": "barkpark",
+    "version": "offline-help"
+  }
+}

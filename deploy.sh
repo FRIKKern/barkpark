@@ -579,6 +579,10 @@ Requires=postgresql.service
 Type=simple
 User=root
 ExecStart=$APP_DIR/api/start.sh
+# SIGTERM to the BEAM only. It stops its own port programs (memsup, disksup,
+# cpu_sup) in order; signalling the whole cgroup killed them first and logged
+# three errors on every clean stop. Leftovers get SIGKILL after the BEAM exits.
+KillMode=mixed
 Restart=on-failure
 RestartSec=5
 
