@@ -579,6 +579,21 @@ func Execute(args []string) int {
 	// Acquire the manifest (override file > cache/fetch).
 	m, err := loadManifest(g, ctx)
 	if err != nil {
+		// Help for a noun bp carries in its binary (offline_help.go) renders
+		// without a server: an operator reads the `bp org` flags before the
+		// instance is up. The note says where the page came from.
+		helpNoun := ""
+		if g.help {
+			helpNoun = noun
+		} else if noun == "help" {
+			helpNoun = verb
+		}
+		if om := offlineHelpManifest(helpNoun); om != nil {
+			out.errf("note: no server answered, so this help comes from bp %s itself. The server's own may differ.", cliVersion)
+			m, err = om, nil
+		}
+	}
+	if err != nil {
 		out.userErr("%v", err)
 		// A HELP REQUEST THAT DIES HERE NEEDS A DIFFERENT SENTENCE
 		// (task-23c76938811ff2db). `bp <noun> <verb> --help` renders the
