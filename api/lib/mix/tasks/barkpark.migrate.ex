@@ -45,11 +45,37 @@ defmodule Mix.Tasks.Barkpark.Migrate do
   @spec run([String.t()], ([String.t()] -> term()), keyword()) :: term()
   def run(args, ecto_migrate, opts \\ []) when is_function(ecto_migrate, 1) do
     Mix.Task.run("app.config", args)
+    apply_configured_log_level(args)
     migrate_args = migrate_args(args, opts)
 
     Barkpark.Release.with_statement_timeout_lifted(Mix.Ecto.parse_repo(args), fn ->
       ecto_migrate.(migrate_args)
     end)
+  end
+
+  @doc """
+  Sets Logger to the configured `:logger` level unless `args` give
+  `--log-level`.
+
+  `ecto.migrate` does not start the application, so the configured level
+  never applies and Logger stays at `:debug`. A prod migration then printed
+  every SQL query, and the free-disk probe in
+  `20261013180000_add_documents_groq_pushdown_indexes.exs` printed
+  `[debug] QUERY ERROR ... SHOW data_directory` on every fresh install: a
+  non-superuser role may not read that setting, the migration falls back to
+  `/var/lib/postgresql`, and the line only reads like a failure.
+  """
+  @spec apply_configured_log_level([String.t()]) :: :ok
+  def apply_configured_log_level(args) do
+    given? = Enum.any?(args, &(&1 == "--log-level" or String.starts_with?(&1, "--log-level=")))
+
+    case Application.get_env(:logger, :level) do
+      level when is_atom(level) and not is_nil(level) and not given? ->
+        Logger.configure(level: level)
+
+      _ ->
+        :ok
+    end
   end
 
   @doc """
