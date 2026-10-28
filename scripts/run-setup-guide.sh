@@ -41,6 +41,7 @@
 # because work/ holds the generated settings file with its keys.
 # It stops on the first failure and prints the step, the doc line, the exit
 # code and the end of the masked log. <run dir>/steps.tsv holds seconds per step.
+# Log a run with the template in docs/setup/SETUP-RUN-LOG.md.
 set -uo pipefail
 
 # The regex below holds a "<(" token. Refuse sh and POSIX mode so the census
@@ -238,7 +239,7 @@ mask() {
     s/^(\s*(?:export\s+)?[A-Z0-9_]*(?:SECRET|_KEY|KEY_|TOKEN|PASSWORD|_KEK|CLOAK)[A-Z0-9_]*=).+/$1<masked>/;
     s/(--token[= ]+)("[^"]*"|\S+)/$1<masked>/g;
     s/(Bearer\s+)\S+/$1<masked>/g;
-    s{(://[^:/\s@]+:)[^@\s]+@}{$1<masked>@}g;
+    s{(://[^:/\s@,]+:)[^@\s/,]+@}{$1<masked>@}g;
   '
 }
 
