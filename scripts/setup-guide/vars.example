@@ -1,7 +1,9 @@
 # Vars for scripts/run-setup-guide.sh on docs/setup/SELF-HOST.md, Path A.
 # Copy this directory out of the repository, fill it in, and run:
 #   scripts/run-setup-guide.sh --path a --vars <copy>/vars
+#   scripts/setup-guide/azure.sh entra "$RG" <org> --host <host> --secret-file <file>
 #   scripts/setup-guide/azure.sh down "$RG"
+# Log the run with docs/setup/SETUP-RUN-LOG.md.
 # <name> in the guide takes the value of key name. A value that starts with
 # $( runs once, when a step first needs it. Keys holding SECRET, TOKEN,
 # PASSWORD or KEY are masked in all output.
