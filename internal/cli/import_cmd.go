@@ -83,6 +83,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	yes := g.yes
 	fromLine := 0
 	batchBytes := importDefaultBatchBytes
+	mediaDir := ""
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -108,6 +109,13 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			}
 			fromLine = n
 			i = ni
+		case "--media":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--media")
+			if err != nil {
+				return usageErrf(out, func() { usageImport(out, false) }, "%v", err)
+			}
+			mediaDir = v
+			i = ni
 		case "--batch-bytes":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--batch-bytes")
 			if err != nil {
@@ -122,7 +130,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		default:
 			if strings.HasPrefix(a, "-") && a != "-" {
 				return usageErrf(out, func() { usageImport(out, false) },
-					"unknown import flag %q (want --dry-run / --overwrite / --from-line / --batch-bytes / --yes)", a)
+					"unknown import flag %q (want --dry-run / --overwrite / --from-line / --batch-bytes / --media / --yes)", a)
 			}
 			if path != "" {
 				return usageErrf(out, func() { usageImport(out, false) }, "import takes one file; got %q and %q", path, a)
@@ -164,6 +172,18 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		return code
 	}
 
+	var media *importMedia
+	if mediaDir != "" {
+		if sanity != nil {
+			return usageErrf(out, nil, "--media reads a `bp export --media` directory and cannot be combined with a Sanity tarball")
+		}
+		m, err := readImportMedia(mediaDir)
+		if err != nil {
+			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
+		}
+		media = m
+	}
+
 	rows, err := importReadRows(src)
 	if err != nil {
 		return useError(out, "validation_failed", fmt.Sprintf("import: %s: %v. Nothing was written.", path, err), exitValidation)
@@ -202,7 +222,11 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 		if importCollides(r, existing) {
 			r.Action = "overwrite"
-			collisions = append(collisions, r.ID)
+			// The asset document of a file this import uploads is created by
+			// the upload, so it is overwritten on every run, not refused.
+			if media == nil || !media.owns(r) {
+				collisions = append(collisions, r.ID)
+			}
 		} else {
 			r.Action = "create"
 		}
@@ -220,6 +244,9 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		var refusedIDs []string
 		if refused {
 			refusedIDs = collisions
+		}
+		if media != nil && !out.machineOut() {
+			out.outf("dry run: %d media file(s) from %s would be uploaded with their asset ids", len(media.assets), mediaDir)
 		}
 		importRenderPlan(out, path, scope, ordered, len(batches), refusedIDs, sanity)
 		if refused {
@@ -254,6 +281,18 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 					err, path, sanityAssetsSuffix), exitGeneric)
 		}
 		sanity.resolve(ordered)
+		if batches, err = importBatches(ordered, batchBytes, 0); err != nil {
+			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
+		}
+	}
+	if media != nil {
+		if err := media.upload(out, ctx, dataset); err != nil {
+			return useError(out, "request_failed",
+				fmt.Sprintf("import: %v. No document was written; run the import again to resume, the files already uploaded are kept.", err), exitGeneric)
+		}
+		if err := media.resolve(ordered); err != nil {
+			return useError(out, "validation_failed", fmt.Sprintf("import: %v. No document was written.", err), exitValidation)
+		}
 		if batches, err = importBatches(ordered, batchBytes, 0); err != nil {
 			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
 		}
@@ -312,8 +351,14 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	if sanity != nil {
 		payload["sanity"] = sanity.summary()
 	}
+	if media != nil {
+		payload["media"] = len(media.assets)
+	}
 	if out.emitStructured(payload) {
 		return exitOK
+	}
+	if media != nil {
+		out.outf("uploaded %d media file(s) with their asset ids", len(media.assets))
 	}
 	out.outf("imported %d documents into %s from %s (%d created, %d overwritten, %d skipped) in %d batch(es)",
 		applied, scope, path, counts["create"], counts["overwrite"], counts["skip"], sent)
@@ -698,7 +743,7 @@ func usageImport(out *writer, toStdout bool) {
 	if toStdout {
 		p = out.outf
 	}
-	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--yes]")
+	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--media <dir>] [--yes]")
 	p("")
 	p("Restore a `bp export` NDJSON backup into the active dataset (set it with -d).")
 	p("")
@@ -719,6 +764,10 @@ func usageImport(out *writer, toStdout bool) {
 	p("                     on line N. A failed batch prints the line to resume from")
 	p("  --batch-bytes N    request body cap (default 30000000, the server default for")
 	p("                     /v1/data). Lower it for a server with a smaller document cap")
+	p("  --media <dir>      upload the files a `bp export --media <dir>` wrote, with their")
+	p("                     asset ids, before the documents. The mediaAsset rows then")
+	p("                     overwrite the asset documents the uploads made, with fileInfo")
+	p("                     pointing at the target's copy. Run it again to resume")
 	p("  --yes              skip the confirmation for a production target")
 	p("")
 	p("A batch holds at most 1000 mutations and is applied by the server as one")

@@ -20,3 +20,19 @@ These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backu
 6. Set `restoreMode = false`, remove that address from `operatorIpRanges` and deploy again. The app starts on the restored database. API tokens move with the database, so the VM's admin token still works and the target skips its seed token.
 7. Wait for `/readyz` to answer 200. `/v1/auth/oidc/<org>/start` answers 302 only when the cloak key opens the SSO secret. Open a document with an encrypted field, and compare `bp schema ls` with the source.
 8. Repoint DNS. Keep `PHX_HOST`, or passkeys and the Entra redirect URI stop working. Container Apps takes a custom domain only after a TXT record `asuid.<host>`, so a VM on a `cloudapp.azure.com` name needs your own domain before the move.
+
+## Copy one dataset over the API
+
+Use this when you cannot reach the source's database. It needs a token with read access on the source and write access on the target, and no server access.
+
+```bash
+bp -s <source> -w <ws> -d production export --out backup.ndjson --media media
+bp -s <target> -w <ws> -d production import backup.ndjson --media media --dry-run
+bp -s <target> -w <ws> -d production import backup.ndjson --media media
+```
+
+- `export --media <dir>` writes every media file to `<dir>/files/<id>` and lists ids and SHA-1s in `<dir>/media.json`. Run it again to resume. It skips files already there with the right SHA-1.
+- `import --media <dir>` uploads each file with `mediaFileId`, so the target keeps the asset id, the SHA-1 and each `asset-<id>` document. Byte duplicates keep their own ids. The exported `mediaAsset` rows then replace the documents the uploads made, with `fileInfo.path` pointing at the target's copy. A `/media/files/<path>` URL stored in other content still names the source's path.
+- The import writes each document as exported. The target adds no schema initial values and derives no title. A target older than this answers with a warning, and its creates still add them.
+- A batch the target cannot finish in time is sent again at half its documents, down to one. The report names the size it ended with. A stopped import prints `--from-line N`. A re-run with `--media` uploads nothing twice.
+- An older target ignores `mediaFileId` and stores a new id. The import then stops at the first file, before any document.
