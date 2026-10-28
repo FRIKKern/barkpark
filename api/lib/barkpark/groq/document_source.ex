@@ -70,9 +70,11 @@ defmodule Barkpark.Groq.DocumentSource do
   alias Barkpark.Content
   alias Barkpark.Content.{Document, DraftId, Envelope, Schema, Scope}
   alias Barkpark.Content.WriteScope
-  alias Barkpark.Groq.{Evaluator, LimitError, Pushdown}
+  alias Barkpark.Groq.{Evaluator, LimitError, Pushdown, VirtualAsset}
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
   alias Barkpark.Search.Views
+  alias Barkpark.Tenancy
 
   @max_rounds 8
   @scan_chunk 500
@@ -144,7 +146,13 @@ defmodule Barkpark.Groq.DocumentSource do
   defp run_rounds(tree, state, eval_opts, round) do
     mode = if round > @max_rounds, do: :direct, else: :collect
     Process.put(:groq_src_mode, mode)
-    Process.put(:groq_src_missing, %{ids: MapSet.new(), keys: MapSet.new(), counts: MapSet.new()})
+
+    Process.put(:groq_src_missing, %{
+      ids: MapSet.new(),
+      keys: MapSet.new(),
+      counts: MapSet.new(),
+      assets: MapSet.new()
+    })
 
     result = Evaluator.evaluate(tree, Keyword.put(eval_opts, :source, {__MODULE__, state}))
     missing = Process.get(:groq_src_missing)
@@ -154,13 +162,14 @@ defmodule Barkpark.Groq.DocumentSource do
         result
 
       MapSet.size(missing.ids) == 0 and MapSet.size(missing.keys) == 0 and
-          MapSet.size(missing.counts) == 0 ->
+        MapSet.size(missing.counts) == 0 and MapSet.size(missing.assets) == 0 ->
         result
 
       true ->
         load_counts(state, MapSet.to_list(missing.counts))
         load_keys(state, MapSet.to_list(missing.keys))
         load_ids(state, MapSet.to_list(missing.ids))
+        load_assets(state, MapSet.to_list(missing.assets))
         run_rounds(tree, state, eval_opts, round + 1)
     end
   end
@@ -453,13 +462,13 @@ defmodule Barkpark.Groq.DocumentSource do
   def get(state, id) do
     case Process.get({:groq_src_doc, id}) do
       :none ->
-        nil
+        with_asset(state, id, nil)
 
       nil ->
         case Process.get(:groq_src_mode) do
           :direct ->
             load_ids(state, [id])
-            get_cached(id)
+            with_asset(state, id, get_cached(id))
 
           _ ->
             record_missing(:ids, id)
@@ -468,9 +477,41 @@ defmodule Barkpark.Groq.DocumentSource do
 
       doc ->
         touch(doc)
-        doc
+        with_asset(state, id, doc)
     end
   end
+
+  # A `->` to an asset reference (`Barkpark.Groq.VirtualAsset`) that finds no
+  # document answers the Sanity asset document; one that finds the
+  # `mediaAsset` gains the Sanity keys it lacks, its own keys kept. Any other
+  # stored document wins as it is.
+  defp with_asset(state, id, doc) do
+    if asset_target?(id, doc) do
+      case Process.get({:groq_src_asset, id}) do
+        nil ->
+          if Process.get(:groq_src_mode) == :direct do
+            load_assets(state, [id])
+            with_asset(state, id, doc)
+          else
+            record_missing(:assets, id)
+            doc
+          end
+
+        :none ->
+          doc
+
+        {anchor_id, asset} ->
+          touch(%{"_id" => anchor_id, "_type" => "mediaAsset"})
+          if doc, do: Map.merge(asset, doc), else: asset
+      end
+    else
+      doc
+    end
+  end
+
+  defp asset_target?(id, nil), do: VirtualAsset.ref(id) != nil
+  defp asset_target?(id, %{"_type" => "mediaAsset"}), do: VirtualAsset.ref(id) != nil
+  defp asset_target?(_id, _doc), do: false
 
   defp get_cached(id) do
     case Process.get({:groq_src_doc, id}) do
@@ -1853,6 +1894,116 @@ defmodule Barkpark.Groq.DocumentSource do
     Enum.each(ids, fn id ->
       if Process.get({:groq_src_doc, id}) == nil, do: Process.put({:groq_src_doc, id}, :none)
     end)
+
+    # The asset references among them load now rather than in another round.
+    load_assets(
+      state,
+      Enum.filter(ids, fn id ->
+        case Process.get({:groq_src_doc, id}) do
+          :none -> asset_target?(id, nil)
+          doc -> asset_target?(id, doc)
+        end
+      end)
+    )
+  end
+
+  # ── Virtual assets (task-63d414ef90e9f409) ───────────────────────────────
+  #
+  # Only a caller who may read every type gets them (Sanity's are public in a
+  # public dataset; whether Barkpark's are is an owner decision), and only
+  # when that caller can read the file's `mediaAsset` document through
+  # `base_query/2` in any perspective: the same dataset, workspace, owner,
+  # grant and preview-token guards as every other read. The media file is
+  # read in the same workspace and dataset.
+  defp load_assets(_state, []), do: :ok
+
+  defp load_assets(state, refs) do
+    refs = Enum.filter(refs, &(Process.get({:groq_src_asset, &1}) == nil))
+
+    found =
+      if refs != [] and Schema.bypasses_visibility_gate?(state.caller_context),
+        do: virtual_assets(state, refs),
+        else: %{}
+
+    Enum.each(refs, &Process.put({:groq_src_asset, &1}, Map.get(found, &1, :none)))
+  end
+
+  defp virtual_assets(state, refs) do
+    parsed =
+      Enum.flat_map(refs, &List.wrap(with r when r != nil <- VirtualAsset.ref(&1), do: {&1, r}))
+
+    file_ids = for {_, {:file_id, uuid}} <- parsed, do: uuid
+    sanity_ids = for {id, {:sanity_id, _}} <- parsed, do: id
+    sha1s = for {_, {:sanity_id, sha1}} <- parsed, do: sha1
+
+    files =
+      if parsed == [] do
+        []
+      else
+        MediaFile
+        |> where([m], m.dataset == ^state.dataset)
+        |> Scope.scope_to_workspace(
+          Keyword.get(state.opts, :workspace_id),
+          Keyword.get(state.opts, :project_id)
+        )
+        |> where(
+          [m],
+          m.id in ^file_ids or m.source_id in ^sanity_ids or m.sha1 in ^sha1s
+        )
+        |> order_by([m], asc: m.inserted_at, asc: m.id)
+        |> Repo.all()
+      end
+
+    anchors = asset_anchors(state, files)
+    base = asset_base(state)
+
+    Enum.reduce(parsed, %{}, fn {id, ref}, acc ->
+      with %{} = file <- asset_file(files, id, ref),
+           %{} = anchor <- Map.get(anchors, file.id),
+           asset = VirtualAsset.build(file, anchor, state.dataset, base),
+           true <- match?({:file_id, _}, ref) or asset["_id"] == id do
+        count_loaded!(state, 1)
+        Map.put(acc, id, {"asset-" <> file.id, asset})
+      else
+        _ -> acc
+      end
+    end)
+  end
+
+  defp asset_file(files, _id, {:file_id, uuid}), do: Enum.find(files, &(&1.id == uuid))
+
+  defp asset_file(files, id, {:sanity_id, sha1}),
+    do: Enum.find(files, &(&1.source_id == id)) || Enum.find(files, &(&1.sha1 == sha1))
+
+  # Each file's `mediaAsset` document as the caller may read it. Drafts sort
+  # first, so a published one replaces its draft in the map.
+  defp asset_anchors(_state, []), do: %{}
+
+  defp asset_anchors(state, files) do
+    raw = %{state | perspective: :raw}
+    ids = Enum.flat_map(files, &["asset-" <> &1.id, @drafts_prefix <> "asset-" <> &1.id])
+
+    raw
+    |> base_query()
+    |> where([d], d.type == "mediaAsset" and d.doc_id in ^ids)
+    |> select_rendered()
+    |> Repo.all()
+    |> render(raw)
+    |> Enum.sort_by(&String.starts_with?(&1["_id"], @drafts_prefix), :desc)
+    |> Map.new(&{&1["_id"] |> DraftId.published_id() |> String.replace_prefix("asset-", ""), &1})
+  end
+
+  # The workspace's Sanity routes, `{url prefix, project slug}`; nil without
+  # a workspace and project in scope.
+  defp asset_base(state) do
+    with ws_id when is_binary(ws_id) <- Keyword.get(state.opts, :workspace_id),
+         proj_id when is_binary(proj_id) <- Keyword.get(state.opts, :project_id),
+         %{slug: ws} when is_binary(ws) <- Tenancy.get_workspace_by_id(ws_id),
+         %{slug: proj} when is_binary(proj) <- Tenancy.get_project_by_id(proj_id) do
+      {BarkparkWeb.Endpoint.url() <> "/w/#{ws}/p/#{proj}", proj}
+    else
+      _ -> nil
+    end
   end
 
   defp cache_doc(%{"_id" => id} = doc), do: Process.put({:groq_src_doc, id}, doc)
