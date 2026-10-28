@@ -861,6 +861,14 @@ defmodule Barkpark.Content.Errors do
       details: %{field: "dryRun"}
     }
 
+  defp build({:error, {:invalid_restore, value}}),
+    do: %{
+      code: "malformed",
+      message: "restore must be true or false, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "restore"}
+    }
+
   defp build({:error, {:malformed_blocks, details}}),
     do: %{
       code: "malformed",
