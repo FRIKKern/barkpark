@@ -18,11 +18,12 @@ defmodule BarkparkCloud.SitesBoxRelayRollbackDeadlineTest do
   PROCESS, so the fake keeps its script and its poll tally in this test's own
   process dictionary — no Agent, no cross-process ambiguity.
   """
-  use ExUnit.Case, async: false
+  use BarkparkCloud.DataCase, async: false
+
+  alias BarkparkCloud.{Accounts, Registry}
 
   import ExUnit.CaptureLog
 
-  alias BarkparkCloud.Registry.Barkpark
   alias BarkparkCloud.Sites.BoxRelay
   alias BarkparkCloud.Registry.Vault
 
@@ -125,11 +126,22 @@ defmodule BarkparkCloud.SitesBoxRelayRollbackDeadlineTest do
     end
   end
 
+  # A persisted row that owns its url host: `Registry.reveal_admin_token/1`
+  # decrypts only for such a row, so a hand-built struct would get no token.
   defp bp do
-    %Barkpark{
-      url: "https://box.example",
-      admin_token_encrypted: Vault.encrypt("instance-admin-token")
-    }
+    n = System.unique_integer([:positive])
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+
+    {:ok, bp} =
+      Registry.register_barkpark(team, %{
+        name: "BP #{n}",
+        slug: "bp-#{n}",
+        url: "https://box-#{n}.example"
+      })
+
+    bp
+    |> Ecto.Changeset.change(admin_token_encrypted: Vault.encrypt("instance-admin-token"))
+    |> Repo.update!()
   end
 
   defp restore(key, nil), do: Application.delete_env(:barkpark_cloud, key)

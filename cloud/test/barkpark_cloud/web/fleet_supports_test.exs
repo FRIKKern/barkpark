@@ -90,6 +90,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       bootstrap_workspace: "acme"
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # A LIVE support: the shape `provision_support` leaves behind (PDF-D83) — a
@@ -117,6 +118,7 @@ defmodule BarkparkCloud.Web.FleetSupportsTest do
       host: "203.0.113.#{rem(n, 200) + 10}"
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # A support row already bound under a fresh in-team main, plus the team's user

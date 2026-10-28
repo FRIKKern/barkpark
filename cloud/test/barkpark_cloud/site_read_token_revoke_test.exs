@@ -71,6 +71,7 @@ defmodule BarkparkCloud.SiteReadTokenRevokeTest do
       })
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp bound_site(bp, attrs \\ %{}) do

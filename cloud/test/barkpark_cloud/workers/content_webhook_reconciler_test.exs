@@ -38,6 +38,7 @@ defmodule BarkparkCloud.Workers.ContentWebhookReconcilerTest do
       admin_token_encrypted: Vault.encrypt("instance-admin-token")
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp bound_site(bp, attrs \\ %{}) do
@@ -216,7 +217,11 @@ defmodule BarkparkCloud.Workers.ContentWebhookReconcilerTest do
       StudioLinkFakeHttpClient.program([])
       site = bound_site(bp)
 
-      bp |> Ecto.Changeset.change(url: nil) |> Repo.update!()
+      bp
+      |> Ecto.Changeset.change(url: nil)
+      |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
+
       StudioLinkFakeHttpClient.program(box_listing([]))
 
       assert {:ok, tally} = perform_job(ContentWebhookReconciler, %{})

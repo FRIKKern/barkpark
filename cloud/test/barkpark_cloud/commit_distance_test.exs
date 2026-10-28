@@ -68,6 +68,7 @@ defmodule BarkparkCloud.CommitDistanceTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   describe "verdict/2 — the four compare statuses, from ONE call" do

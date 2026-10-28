@@ -176,6 +176,7 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest do
       admin_token_encrypted: Vault.encrypt(@old)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp rotate(id, token) do

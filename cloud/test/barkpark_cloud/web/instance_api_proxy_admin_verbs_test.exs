@@ -66,6 +66,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyAdminVerbsTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp token(user) do

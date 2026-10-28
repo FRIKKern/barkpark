@@ -62,6 +62,7 @@ defmodule BarkparkCloud.Web.RouterSitesDestroyFailuresTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp static_site(bp) do

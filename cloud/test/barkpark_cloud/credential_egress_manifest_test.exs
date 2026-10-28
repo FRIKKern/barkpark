@@ -385,6 +385,7 @@ defmodule BarkparkCloud.CredentialEgressManifestTest do
       bootstrap_read_token_encrypted: Vault.encrypt("bootstrap-read-token")
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp session_token(user) do

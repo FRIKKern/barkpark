@@ -95,6 +95,7 @@ defmodule BarkparkCloud.Web.RouterSiteUrlSuspendedTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # The billing verdict exactly as `Billing.cancel_subscription/1` writes it.

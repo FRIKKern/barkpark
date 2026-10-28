@@ -67,6 +67,7 @@ defmodule BarkparkCloud.ContentSecretMintTest do
       admin_token_encrypted: Vault.encrypt("instance-admin-token")
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp bound_site(bp, attrs \\ %{}) do
@@ -350,7 +351,11 @@ defmodule BarkparkCloud.ContentSecretMintTest do
     site = secretless_site(bp)
     operator = operator_fixture()
 
-    bp |> Ecto.Changeset.change(url: nil) |> Repo.update!()
+    bp
+    |> Ecto.Changeset.change(url: nil)
+    |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
+
     StudioLinkFakeHttpClient.program(box_listing([]))
 
     conn = mint_via_route(operator)

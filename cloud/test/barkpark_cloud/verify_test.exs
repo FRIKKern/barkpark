@@ -106,6 +106,7 @@ defmodule BarkparkCloud.VerifyTest do
       admin_token_encrypted: Vault.encrypt(@admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # The all-green box: capabilities 200, login 401 (auth answered), /studio 302 →
@@ -335,6 +336,7 @@ defmodule BarkparkCloud.VerifyTest do
         |> barkpark_fixture()
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       assert Verify.run(bp) == {:error, :no_admin_token}
     end
@@ -759,6 +761,7 @@ defmodule BarkparkCloud.VerifyTest do
         |> barkpark_fixture()
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       conn = call(:post, "/v1/barkparks/#{bp.id}/verify", session_token(user))
       assert conn.status == 404

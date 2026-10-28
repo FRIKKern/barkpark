@@ -42,6 +42,7 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   describe "next_autoupdate_candidate/0" do
@@ -443,5 +444,10 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
     end
   end
 
-  defp unset_url(bp), do: bp |> Ecto.Changeset.change(url: nil, host: "") |> Repo.update!()
+  defp unset_url(bp),
+    do:
+      bp
+      |> Ecto.Changeset.change(url: nil, host: "")
+      |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 end
