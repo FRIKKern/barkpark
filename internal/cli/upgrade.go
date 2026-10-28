@@ -74,9 +74,9 @@ var upgradeExecutable = func() (string, error) {
 // findable) and falls back to the /releases/latest redirect only when the API
 // call fails. The API is preferred because this repo ALSO cuts build-<sha>
 // server-artifact releases that carry no bp assets — one of those can own the
-// releases/latest slot and 404 every unpinned resolve. install-cli.sh:27-38
-// learned the same lesson; this mirrors it so `bp upgrade` and the installer
-// resolve the same version.
+// releases/latest slot and 404 every unpinned resolve. The cli_tag lookup in
+// install-cli.sh learned the same lesson; this mirrors it so `bp upgrade` and
+// the installer resolve the same version.
 func latestReleaseVersion(base string) (string, error) {
 	if ver, err := latestReleaseVersionAPI(base); err == nil {
 		return ver, nil
