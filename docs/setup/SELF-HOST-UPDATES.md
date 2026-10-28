@@ -72,7 +72,7 @@ sudo /opt/barkpark/api/start.sh admin-token --label "admin (recovered)"
 
 A `deploy.sh` re-run on a box with no token file runs the same command.
 
-**On Container Apps.** The app runs as uid 10001, so name a file under `/tmp`. Open a shell in the app, mint, copy the token and delete the files:
+**On Container Apps.** The app runs as uid 10001, so name a file under `/tmp`. Images before 0.2.30 lack the script. Open a shell in the app, mint, copy the token and delete the files:
 
 ```bash
 az containerapp exec -g "$RG" -n "$APP" --command /bin/bash
