@@ -160,7 +160,18 @@ RUN set -e; for f in \
     done
 
 RUN mix compile
-RUN mix release
+
+# `mix release` reads rel/env.sh.eex and copies rel/overlays/ into the release
+# root, so rel/overlays/bin/admin-token and rel/overlays/bin/migrate become
+# /app/bin/admin-token and /app/bin/migrate. Without this COPY the image had
+# only /app/bin/barkpark, and the Container Apps admin token recovery in
+# docs/setup/SELF-HOST-UPDATES.md failed. The test after the release keeps a
+# missing overlay from shipping again.
+COPY api/rel rel
+RUN mix release \
+  && for f in barkpark admin-token migrate; do \
+       [ -x "_build/prod/rel/barkpark/bin/$f" ] || { echo "release is missing bin/$f"; exit 1; }; \
+     done
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 
