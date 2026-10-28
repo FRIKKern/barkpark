@@ -37,5 +37,8 @@ When the run is done, store the log as one task row under the goal's run-log row
 
 ```bash
 bp task create "Run <n> log: <what>" --publish --description "$(cat run-<n>-log.md)" \
-  --set parent_id=<run-log row> --set 'labels:=["run-log"]'
+  --set parent_id=<run-log row> --set 'labels:=["run-log"]' --set main_tag=docs \
+  --set 'tags:=[{"tag":"docs","strength":80,"rationale":"Setup run log stored under the goal"}]'
 ```
+
+The row is a record, not work. Claim it with `--set criteria_unstated_override="a run log is a record"`, then close it done with a reason that names the PR the run tested.

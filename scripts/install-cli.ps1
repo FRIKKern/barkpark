@@ -34,13 +34,16 @@ if ($env:BARKPARK_CLI_RELEASE_BASE) {
   # releases/latest: the repo also publishes build-<sha> server-artifact
   # releases (no bp assets), and one of those holding "latest" 404s every
   # unpinned install. The [0-9.]+ pattern skips prereleases (cli-v*-rc.*),
-  # matching the old releases/latest rule.
+  # matching the old releases/latest rule. The highest version wins, not the
+  # first listed: on 2026-10-28 the API listed cli-v1.26.9 before cli-v1.26.11.
+  # per_page=100, as in install-cli.sh: build-<sha> releases crowd a page of 30.
   $releaseBase = "$RepoUrl/releases/latest/download"
   try {
-    $apiUrl = 'https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30'
+    $apiUrl = 'https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=100'
     $releases = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
-    $cliTag = ($releases | Where-Object { $_.tag_name -match '^cli-v[0-9.]+$' } |
-               Select-Object -First 1).tag_name
+    $cliTag = ($releases | Where-Object { $_.tag_name -match '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' } |
+               Sort-Object { [version]($_.tag_name -replace '^cli-v', '') } |
+               Select-Object -Last 1).tag_name
     if ($cliTag) { $releaseBase = "$RepoUrl/releases/download/$cliTag" }
   } catch {
     Note "GitHub API unreachable; falling back to releases/latest"

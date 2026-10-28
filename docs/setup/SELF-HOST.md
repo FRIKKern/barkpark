@@ -24,11 +24,11 @@ Check VM sizes and quota with `az vm list-skus --location <region> --size Standa
 
 ## Decide the host name and the org slug
 
-The host name becomes `PHX_HOST`, and passkeys stop working if it changes later. It must be a DNS name; with `PHX_SCHEME=https` the server refuses an IP address. The Entra ID redirect URI contains the org slug, so fix the slug before you register the app. See [the sign-in URL section](ENTRA.md#sign-in-url-and-redirect-uri).
+The host name becomes `PHX_HOST`, and passkeys stop working if it changes. It must be a DNS name; with `PHX_SCHEME=https` the server refuses an IP address. The Entra ID redirect URI contains the org slug, so fix the slug before you register the app. See [the sign-in URL section](ENTRA.md#sign-in-url-and-redirect-uri).
 
 ## Write and check the settings file
 
-On your machine, install `bp` 1.26.7 or newer and write a settings file:
+On your machine, install `bp` 1.26.11 or newer and write a settings file:
 
 <!-- run -->
 ```bash
