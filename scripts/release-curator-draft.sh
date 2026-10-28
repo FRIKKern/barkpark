@@ -73,6 +73,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SLUG="${RELEASE_CURATOR_REPO:-FRIKKern/barkpark}"
 REF="${RELEASE_CURATOR_REF:-origin/main}"
 SCAN="${RELEASE_CURATOR_SCAN:-$HERE/release-scan.sh}"
+MIGRATIONS="$HERE/release-migrations.sh"
 
 OUTDIR="${RELEASE_CURATOR_OUTDIR:-}"
 if [ -z "$OUTDIR" ]; then
@@ -160,6 +161,15 @@ TITLE="Barkpark $version (candidate)"
   emit_group "Performance"   '^perf(\(|!|:)'
   emit_group "Under the hood" '^(chore|refactor|docs|test|ci|build|style)(\(|!|:)'
   emit_group "Uncategorised" '^(?!(feat|fix|perf|chore|refactor|docs|test|ci|build|style)(\(|!|:))'
+  # Every migration file the range adds, marked expand or contract
+  # (scripts/release-migrations.sh says how). A range git cannot read still
+  # gets a section, so a draft never looks like it has no migrations.
+  printf '\n'
+  if ! bash "$MIGRATIONS" "$last_tag" "$head_sha" 2>"$OUTDIR/migrations.err"; then
+    printf '### Migrations\n\nNOT LISTED: %s. List them by hand with `bash scripts/release-migrations.sh %s %s`.\n' \
+      "$(head -1 "$OUTDIR/migrations.err" | cut -c1-200)" "$last_tag" "$head_sha"
+    echo "::warning::release-curator-draft could not list migrations for $last_tag..$head_sha" >&2
+  fi
   printf '\n---\n\nFull range: `%s..%s`\n' "${last_tag:-<root>}" "$head_sha"
 } >"$NOTES" || cannot_read "the notes file could not be written to $NOTES"
 

@@ -158,6 +158,7 @@ run_case() {
   local d="$TMP/$1" scan_exit="$2" scan_json="$3" gh_exit="$4" view="$5" subj="${6:-$SUBJECT}"
   rm -rf "$d"; mk_repo "$d"; mk_bin "$d" "$gh_exit" "$view"
   cp "$subj" "$d/work/scripts/release-curator-draft.sh"
+  cp "$HERE/release-migrations.sh" "$d/work/scripts/release-migrations.sh"
   mk_scan "$d/scan.sh" "$scan_exit" "$scan_json"
   OUT="$(cd "$d/work" && PATH="$d/bin:$PATH" \
         RELEASE_CURATOR_REPO=o/r RELEASE_CURATOR_REF=HEAD \
@@ -187,6 +188,10 @@ assert_contains "A10 the run asserts the no-tag invariant out loud" "NO TAG: git
 assert_contains "A11 the ls-remote assertion actually ran" "ls-remote --tags origin refs/tags/v0.2.26" "$GIT_ARGV"
 assert_contains "A12 the notes carry the DRAFT — not blessed banner" "DRAFT — not blessed" "$(cat "$CASE_DIR/out/notes.md")"
 assert_contains "A13 the notes group the feat commit" "- feat: a thing (#100)" "$(cat "$CASE_DIR/out/notes.md")"
+
+# Neither v0.2.25 nor the scanned head 1111... exists in the fixture repo, so the notes
+# say the migrations were not listed instead of leaving the section out.
+assert_contains "A14 an unreadable range still gets a Migrations section" "NOT LISTED: release-migrations: v0.2.25 does not resolve" "$(cat "$CASE_DIR/out/notes.md")"
 
 # B — an existing DRAFT for the same candidate: edit, never a second create.
 run_case B 0 "$GREEN_JSON" 0 '{"isDraft":true,"url":"https://example/rel"}'
@@ -246,6 +251,27 @@ OUT="$(cd "$CASE_DIR/work" && PATH="$CASE_DIR/bin:$PATH" \
       bash "$CASE_DIR/work/scripts/release-curator-draft.sh" 2>&1)"; RC=$?
 assert_eq       "J1 exit 4 when a tag exists for the candidate" "4" "$RC"
 assert_contains "J2 the violation is named, not summarised" "INVARIANT VIOLATED: refs/tags/v0.2.26 EXISTS on origin" "$OUT"
+
+# K — the range adds two migrations. Each is listed and marked; a `drop` in
+# `def down` alone does not make a migration contract, a `remove` in `change` does.
+run_case K 0 "$GREEN_JSON" 0 ""
+W="$CASE_DIR/work"; M="$W/api/priv/repo/migrations"
+"$REAL_GIT" -C "$W" tag v0.2.25
+mkdir -p "$M"
+printf 'defmodule A do\n  use Ecto.Migration\n\n  def up do\n    create table(:things) do\n      add :name, :text, null: false\n    end\n  end\n\n  def down do\n    drop table(:things)\n  end\nend\n' >"$M/20990101000000_create_things.exs"
+printf 'defmodule B do\n  use Ecto.Migration\n\n  def change do\n    alter table(:things) do\n      remove :name, :text\n    end\n  end\nend\n' >"$M/20990102000000_drop_thing_name.exs"
+"$REAL_GIT" -C "$W" add api >/dev/null; "$REAL_GIT" -C "$W" commit -qm "feat: things"
+K_HEAD="$("$REAL_GIT" -C "$W" rev-parse HEAD)"
+mk_scan "$CASE_DIR/scan.sh" 0 "$(printf '%s' "$GREEN_JSON" | jq -c --arg h "$K_HEAD" '.head_sha = $h')"
+OUT="$(cd "$W" && PATH="$CASE_DIR/bin:$PATH" \
+      RELEASE_CURATOR_REPO=o/r RELEASE_CURATOR_REF=HEAD \
+      RELEASE_CURATOR_SCAN="$CASE_DIR/scan.sh" RELEASE_CURATOR_OUTDIR="$CASE_DIR/out2" \
+      bash "$W/scripts/release-curator-draft.sh" 2>&1)"; RC=$?
+K_NOTES="$(cat "$CASE_DIR/out2/notes.md" 2>/dev/null)"
+assert_eq       "K1 exit 0 with migrations in the range" "0" "$RC"
+assert_contains "K2 the notes count the new migration files" "2 new file(s) under \`api/priv/repo/migrations\`" "$K_NOTES"
+assert_contains "K3 a create-only migration is expand" "- \`20990101000000_create_things.exs\`: expand" "$K_NOTES"
+assert_contains "K4 a column remove is contract, with its line" "- \`20990102000000_drop_thing_name.exs\`: contract (line 6, \`remove :name, :text\`)" "$K_NOTES"
 
 # ── MUTATION M1b: the subject's own one-door guard ───────────────────────────
 # Strip `--draft` from the create call in a COPY of the subject and re-run
