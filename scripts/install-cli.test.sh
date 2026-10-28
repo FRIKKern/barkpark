@@ -225,7 +225,21 @@ check_eq "(g) the bp already on PATH is byte-identical" "$old5_sha" "$old5_after
 check "(g) it prints how to put the dir on this shell's PATH" \
   "grep -qF 'export PATH=\"$H5/.local/bin:\$PATH\"' '$TMP/out5.txt'"
 check "(g) the script has no default that writes /usr/local/bin" \
-  "! grep -v '^ *#' '$HERE/install-cli.sh' | grep -v 'only when' | grep -qF '/usr/local/bin'"
+  "! grep -v '^ *#' '$HERE/install-cli.sh' | grep -v 'only when' | grep -vF 'BARKPARK_BIN_DIR=/usr/local/bin' | grep -qF '/usr/local/bin'"
+
+echo "== under sudo with no BARKPARK_BIN_DIR the install stops before it downloads =="
+H10="$TMP/home10"; FAKEID="$TMP/fakeid"
+mkdir -p "$H10" "$FAKEID"
+printf '#!/bin/sh\necho 0\n' > "$FAKEID/id"; chmod +x "$FAKEID/id"
+: > "$DANGER_LOG"
+env -i PATH="$FAKEID:$FAKE:/usr/bin:/bin" HOME="$H10" SHELL="/bin/bash" SUDO_USER=someone \
+  DANGER_LOG="$DANGER_LOG" BARKPARK_CLI_RELEASE_BASE="https://example.invalid/rel" \
+  /bin/sh "$HERE/install-cli.sh" > "$TMP/out10.txt" 2>&1
+rc=$?
+check "(l) installer exits non-zero" "[ '$rc' != 0 ]"
+check "(l) it names the sudo env BARKPARK_BIN_DIR form" \
+  "grep -qF 'sudo env BARKPARK_BIN_DIR=/usr/local/bin sh' '$TMP/out10.txt'"
+check "(l) nothing was downloaded or installed" "[ ! -s '$DANGER_LOG' ] && [ ! -e '$H10/.local/bin/bp' ]"
 
 echo "== a bp already at the target: old and new versions are printed before the replace =="
 H7="$TMP/home7"; BIN7="$TMP/bin7"
@@ -292,6 +306,12 @@ check "(e) ps1 rebuilds PATH from the registry (Machine + User), not \$env:Path"
   "grep -qF \"GetEnvironmentVariable('Path', 'Machine')\" '$PS1'"
 check "(e) ps1 runs the probe in a -NoProfile child host" \
   "grep -qF -e '-NoProfile -NonInteractive' '$PS1'"
+check "(e) ps1 answers -Help with usage before any download" \
+  "[ \"\$(grep -n 'Write-Host \$Usage; exit 0' '$PS1' | cut -d: -f1)\" -lt \"\$(grep -n 'Invoke-WebRequest -Uri \$url' '$PS1' | cut -d: -f1)\" ]"
+check "(e) ps1 prints the old and new version before it replaces bp.exe" \
+  "grep -qF 'Note \"replacing \${dest}: bp \$oldVer -> bp \$newVer\"' '$PS1'"
+check "(e) ps1 is ASCII only (Windows PowerShell 5.1 misreads UTF-8 without a BOM)" \
+  "! LC_ALL=C grep -q '[^ -~	]' '$PS1'"
 check "(e) ps1 prints the GUI-agent stale-PATH caveat" \
   "grep -qF \"already-running agent won't see bp\" '$PS1'"
 

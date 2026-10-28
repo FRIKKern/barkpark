@@ -27,8 +27,9 @@ Environment:
                              created when missing. The install stops when the
                              directory is not writable. It never falls back.
                              The installer writes /usr/local/bin only when
-                             this variable names it.
-  BARKPARK_CLI_VERSION       Release to install, such as 1.26.10. Default: the
+                             this variable names it. Under sudo it is
+                             required: ... | sudo env BARKPARK_BIN_DIR=<dir> sh
+  BARKPARK_CLI_VERSION       Release to install, such as 1.26.11. Default: the
                              newest cli-v release.
   BARKPARK_CLI_RELEASE_BASE  URL of a directory with the bp-<os>-<arch> assets
                              and checksums.txt. Overrides BARKPARK_CLI_VERSION.
@@ -126,6 +127,11 @@ else
   # directory of another bp on PATH: setup run 6 (2026-10-28) overwrote two
   # bp binaries outside its HOME under the old rule.
   [ -n "${HOME:-}" ] || die "HOME is not set. Set HOME, or set BARKPARK_BIN_DIR."
+  # Under sudo the default would land in root's home, which the calling user's
+  # shell never searches. Older `bp upgrade` builds print `| sudo sh`.
+  if [ -n "${SUDO_USER:-}" ] && [ "$(id -u)" = 0 ]; then
+    die "running under sudo with no BARKPARK_BIN_DIR, so bp would go to ${HOME}/.local/bin. Name the directory, such as: curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sudo env BARKPARK_BIN_DIR=/usr/local/bin sh"
+  fi
   BIN_DIR="${HOME}/.local/bin"
   BIN_DIR_SOURCE="the default; set BARKPARK_BIN_DIR for another directory"
   ensure_writable_dir "$BIN_DIR" || die "cannot create or write '$BIN_DIR'. Set BARKPARK_BIN_DIR to a writable directory."
