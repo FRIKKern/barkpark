@@ -79,6 +79,7 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp call(method, path, token \\ nil) do
@@ -225,6 +226,7 @@ defmodule BarkparkCloud.Web.RouterStudioLinkTest do
         bp
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       {:ok, token} = Accounts.create_user_session_token(user)
 

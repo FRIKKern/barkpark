@@ -56,6 +56,7 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp check_body(state) do
@@ -85,8 +86,11 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
     # written by its own row, not overwritten on a shared one.
     bp =
       live_barkpark(team_fixture())
-      |> Ecto.Changeset.change(url: "#{@instance_url}/#{System.unique_integer([:positive])}")
+      |> Ecto.Changeset.change(
+        url: "https://u#{System.unique_integer([:positive])}.barkpark.cloud"
+      )
       |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
     StudioLinkFakeHttpClient.program([response])
     _ = Registry.refresh_update_status(bp)
@@ -144,6 +148,7 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
         |> barkpark_fixture()
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       StudioLinkFakeHttpClient.program([])
 
@@ -264,6 +269,7 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
         |> barkpark_fixture()
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       StudioLinkFakeHttpClient.program([])
 
@@ -286,6 +292,7 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
           admin_token_encrypted: "not-a-ciphertext"
         )
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       StudioLinkFakeHttpClient.program([])
 
@@ -357,7 +364,12 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       assert %DateTime{} = honest_clock = checked.update_checked_at
 
       # The box loses its url — the plane can no longer ask.
-      dark = checked |> Ecto.Changeset.change(url: nil) |> Repo.update!()
+      dark =
+        checked
+        |> Ecto.Changeset.change(url: nil)
+        |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
+
       assert {:error, :not_live} = Registry.refresh_update_status(dark)
 
       reloaded = Repo.get!(Barkpark, bp.id)
@@ -394,8 +406,11 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
     defp persisted_arming(body) do
       bp =
         live_barkpark(team_fixture())
-        |> Ecto.Changeset.change(url: "#{@instance_url}/#{System.unique_integer([:positive])}")
+        |> Ecto.Changeset.change(
+          url: "https://u#{System.unique_integer([:positive])}.barkpark.cloud"
+        )
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: body}}])
       _ = Registry.refresh_update_status(bp)
@@ -598,9 +613,13 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       bp =
         live_barkpark(team_fixture())
         |> Ecto.Changeset.change(
-          Map.merge(%{url: "#{@instance_url}/#{System.unique_integer([:positive])}"}, overrides)
+          Map.merge(
+            %{url: "https://u#{System.unique_integer([:positive])}.barkpark.cloud"},
+            overrides
+          )
         )
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: body}}])
       _ = Registry.refresh_update_status(bp)
@@ -651,10 +670,11 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       bp =
         live_barkpark(team_fixture())
         |> Ecto.Changeset.change(
-          url: "#{@instance_url}/#{System.unique_integer([:positive])}",
+          url: "https://u#{System.unique_integer([:positive])}.barkpark.cloud",
           autoupdate_enabled: true
         )
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       for _ <- 1..2 do
         StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: arming_body(false)}}])
@@ -671,10 +691,11 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       bp =
         live_barkpark(team_fixture())
         |> Ecto.Changeset.change(
-          url: "#{@instance_url}/#{System.unique_integer([:positive])}",
+          url: "https://u#{System.unique_integer([:positive])}.barkpark.cloud",
           autoupdate_enabled: true
         )
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       {:ok, _} = Registry.enqueue_enable_apply_job(bp)
 
@@ -709,8 +730,11 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
 
     defp fresh_box do
       live_barkpark(team_fixture())
-      |> Ecto.Changeset.change(url: "#{@instance_url}/#{System.unique_integer([:positive])}")
+      |> Ecto.Changeset.change(
+        url: "https://u#{System.unique_integer([:positive])}.barkpark.cloud"
+      )
       |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
     end
 
     defp refresh_with(bp, body) do

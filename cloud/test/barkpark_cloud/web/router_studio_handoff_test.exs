@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Web.RouterStudioHandoffTest do
       studio_callback_urls: callbacks
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp call(method, path, body, token) do

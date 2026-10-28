@@ -82,6 +82,7 @@ defmodule BarkparkCloud.Web.SupportBoxCapTest do
       admin_token_encrypted: Vault.encrypt("admin-secret-#{n}")
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp call(method, path, body, token) do

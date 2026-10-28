@@ -85,6 +85,7 @@ defmodule BarkparkCloud.Push.PushRelayProvisionTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp provision(session, bp_id, body \\ %{}) do
