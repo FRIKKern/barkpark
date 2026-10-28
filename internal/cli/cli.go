@@ -762,6 +762,11 @@ func Execute(args []string) int {
 		return runTaskLanded(out, g, ctx, m, *cmd, tail)
 	}
 
+	// `bp auth logout` revokes the session it sends. See authLogoutContext.
+	if noun == "auth" && verb == "logout" {
+		ctx = authLogoutContext(g, ctx)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
@@ -777,6 +782,21 @@ func Execute(args []string) int {
 // Defaults layer where it belongs. A var the operator DID set still wins over the
 // config, exactly as documented. The TUI's apiclient.ConfigFromEnv contract is
 // untouched (this is a CLI-local read).
+// authLogoutContext picks the token `bp auth logout` revokes. `-s <saved
+// server>` carries that entry's token above the env layer, so
+// `BARKPARK_TOKEN=<session> bp -s <server> auth logout` sent the saved token
+// and revoked nothing. A session token exported in this shell is the one the
+// operator means to end, so it wins here unless --token names another.
+func authLogoutContext(g globals, ctx manifest.Context) manifest.Context {
+	if g.token != "" {
+		return ctx
+	}
+	if env := firstEnv(TokenEnvNames...); env != "" {
+		ctx.Token = env
+	}
+	return ctx
+}
+
 func resolveContext(g globals) manifest.Context {
 	ctx, _ := resolveContextProv(g)
 	return ctx

@@ -733,16 +733,37 @@ func signupTransportRecoveryMessage(email, base, transportErr string) string {
 // exits 0. -o json/yaml emits a receipt envelope; the human path prints a
 // one-line confirmation.
 func runLogout(out *writer, g globals, args []string) int {
-	for _, a := range args {
-		if a == "-h" || a == "--help" {
+	// --help is a global flag, so it arrives as g.help, not in args.
+	if g.help {
+		printLogoutHelp(out)
+		return exitOK
+	}
+	tokenFile := ""
+	for i := 0; i < len(args); i++ {
+		switch a := args[i]; {
+		case a == "-h" || a == "--help":
 			printLogoutHelp(out)
 			return exitOK
+		case a == "--token-file" && i+1 < len(args):
+			tokenFile = args[i+1]
+			i++
+		case strings.HasPrefix(a, "--token-file="):
+			tokenFile = strings.TrimPrefix(a, "--token-file=")
+		default:
+			return useError(out, "usage", "bp logout takes --all, --token-file <file> and -s <server>; got "+a, exitUsage)
 		}
 	}
 
 	cfg, err := LoadConfig()
 	if err != nil {
 		return useError(out, "failed", "read config: "+err.Error(), exitGeneric)
+	}
+
+	// A session token given with --token-file or --token is revoked on the
+	// resolved server. This ends a session that bp did not save, such as one
+	// tooling/entra-signin saved with --save-token.
+	if tokenFile != "" || g.token != "" {
+		return logoutGivenSession(out, g, cfg, tokenFile)
 	}
 
 	wasLoggedIn := cfg.HasCloudToken()
@@ -788,6 +809,13 @@ func runLogout(out *writer, g globals, args []string) int {
 		receipt["sso_server"] = ssoServer
 		receipt["sso_session_revoked"] = ssoRevoked
 	}
+	nothingHint := ""
+	if !wasLoggedIn && ssoServer == "" && !tokenCleared {
+		server := resolveContext(g).Server
+		nothingHint = "No session is saved in bp config for " + server +
+			". To end a session saved in a file, run: bp logout -s " + server + " --token-file <file>"
+		receipt["hint"] = nothingHint
+	}
 	if out.emitStructured(receipt) {
 		return exitOK
 	}
@@ -810,10 +838,71 @@ func runLogout(out *writer, g globals, args []string) int {
 		out.outf("✓ logged out")
 	default:
 		out.outf("already logged out")
+		if nothingHint != "" {
+			out.errf("%s", nothingHint)
+		}
 	}
 	if tokenCleared {
 		out.outf("  content token cleared")
 	}
+	return exitOK
+}
+
+// logoutGivenSession revokes the session token in tokenFile, or the --token
+// value, on the resolved server. A config entry that holds the same token loses
+// it, so bp stops sending a dead token. It exits 1 when the server counts no
+// revoked session.
+func logoutGivenSession(out *writer, g globals, cfg *Config, tokenFile string) int {
+	token := strings.TrimSpace(g.token)
+	if tokenFile != "" {
+		raw, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return useError(out, "usage", "read --token-file: "+err.Error(), exitUsage)
+		}
+		token = strings.TrimSpace(string(raw))
+	}
+	if token == "" {
+		return useError(out, "usage", "the session token is empty", exitUsage)
+	}
+	server := strings.TrimRight(resolveContext(g).Server, "/")
+	revokeErr := ssoLogout(server, token)
+
+	changed := false
+	if cfg.Token == token {
+		cfg.Token = ""
+		changed = true
+	}
+	if entry, ok := cfg.FindServer(server); ok && entry.Token == token {
+		entry.Token = ""
+		entry.SSOOrg = ""
+		cfg.replaceKnownServer(entry)
+		changed = true
+	}
+	if changed {
+		if serr := SaveConfig(cfg); serr != nil {
+			return useError(out, "failed", "save config: "+serr.Error(), exitGeneric)
+		}
+	}
+
+	receipt := map[string]any{
+		"ok":                  revokeErr == nil,
+		"server":              server,
+		"session_revoked":     revokeErr == nil,
+		"removed_from_config": changed,
+	}
+	if revokeErr != nil {
+		receipt["error"] = revokeErr.Error()
+	}
+	if out.emitStructured(receipt) {
+		if revokeErr != nil {
+			return exitGeneric
+		}
+		return exitOK
+	}
+	if revokeErr != nil {
+		return useError(out, "failed", "the session was not revoked on "+server+": "+revokeErr.Error(), exitGeneric)
+	}
+	out.outf("Signed out of %s. The server revoked the session.", server)
 	return exitOK
 }
 
@@ -1681,6 +1770,7 @@ func printLogoutHelp(out *writer) {
 
 USAGE
   bp logout [--all]
+  bp logout -s <server> --token-file <file>
 
 WHAT IT DOES
   removes the stored control-plane session (cloud url + token + team) from your
@@ -1690,9 +1780,14 @@ WHAT IT DOES
   A session 'bp login --sso' saved for the server (-s, else the active one) is
   revoked on that server and removed from config.
 
+  With --token-file or --token, bp revokes that session token on the server
+  instead, such as one tooling/entra-signin saved with --save-token. It exits 1
+  when the server revokes no session.
+
 FLAGS
-  --all             also clear the ACTIVE content-server token
-  -o json           emit one machine-readable JSON object on stdout`
+  --all               also clear the ACTIVE content-server token
+  --token-file <file> revoke the session token in this file
+  -o json             emit one machine-readable JSON object on stdout`
 	out.outf("%s", help)
 }
 
