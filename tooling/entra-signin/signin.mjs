@@ -321,6 +321,8 @@ async function main() {
       if (ex.status !== 201 || !body.token) throw new Error(`ticket exchange answered ${ex.status}`);
       Object.assign(result, await readSeats(a.host, body.token));
       result.session = "signed in";
+      // true when Barkpark counted the Entra MFA for this session (trust_idp_mfa).
+      result.idp_mfa = body.idp_mfa === true;
       if (a.saveToken) {
         fs.writeFileSync(a.saveToken, body.token + "\n", { mode: 0o600 });
         result.saved_token = a.saveToken;
