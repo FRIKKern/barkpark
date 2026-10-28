@@ -11,7 +11,32 @@ defmodule Barkpark.MixProject do
       aliases: aliases(),
       deps: deps(),
       listeners: [Phoenix.CodeReloader],
-      releases: releases()
+      releases: releases(),
+      hex: [ignore_advisories: ignored_advisories()]
+    ]
+  end
+
+  # Hex advisory exceptions. `mix deps.get`, `mix deps.update` and
+  # `mix hex.audit` (Hex 2.6+) skip these ids, and scripts/hex-audit-oracle.sh
+  # reads this list too. Add an id only when no fixed release exists or the
+  # advisory does not apply, with the reason. Remove it when a fix ships.
+  defp ignored_advisories do
+    [
+      # cloak 1.1.4, no fix. Barkpark.Vault uses only Cloak.Ciphers.AES.GCM.
+      "EEF-CVE-2026-95105",
+      # cloak_ecto 1.3.0, no fix. Barkpark has no Cloak.Ecto.PBKDF2 field.
+      "EEF-CVE-2026-94206",
+      # cowlib 2.21.0, no fix. Bandit serves HTTP; no cowboy listener runs
+      # and nothing calls cow_http_struct_hd.
+      "EEF-CVE-2026-43966",
+      # esaml 4.6.0, no fix for any of the four. Barkpark.Sso.Saml decodes
+      # SAMLResponse and SAMLRequest itself, refuses any DOCTYPE and parses
+      # with entities off. It never calls esaml_binding:decode_response or
+      # esaml_sp:validate_logout_response.
+      "EEF-CVE-2026-28809",
+      "EEF-CVE-2026-93471",
+      "EEF-CVE-2026-86696",
+      "EEF-CVE-2026-105270"
     ]
   end
 

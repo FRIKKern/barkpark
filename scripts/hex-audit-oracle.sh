@@ -108,23 +108,27 @@ AKA = re.compile(r"^\s*aka: (.+?)\s*$")
 CLEAN_LINE = "No retired or security advisory packages found"
 clean_report = any(l.strip() == CLEAN_LINE for l in text.splitlines())
 
-readable = ("Advisories:" in text) or ("Retired:" in text) or clean_report
+# Hex 2.6+ prints the ids a project lists under `hex: [ignore_advisories: …]`
+# in its own "Ignored advisories:" section and exits 0 when that is all there
+# is. That section is a readable report, and its entries are ignored ones,
+# never counted toward the verdict.
+SECTIONS = {"Advisories:": "adv", "Ignored advisories:": "ign",
+            "Retired:": None, "Ignored retired:": None}
+readable = any(l.strip() in SECTIONS for l in text.splitlines()) or clean_report
 
 entries, cur = [], None
-in_adv = False
+section = None
 for line in text.splitlines():
-    if line.strip() == "Advisories:":
-        in_adv = True
+    if line.strip() in SECTIONS:
+        section = SECTIONS[line.strip()]
         continue
-    if line.strip() == "Retired:":
-        in_adv = False
-        continue
-    if not in_adv:
+    if section is None:
         continue
     m = HEAD.match(line)
     if m:
         cur = {"pkg": m.group(1), "ver": m.group(2), "id": m.group(3),
-               "sev": (m.group(4) or "UNKNOWN").upper(), "aka": []}
+               "sev": (m.group(4) or "UNKNOWN").upper(), "aka": [],
+               "hex_ignored": section == "ign"}
         entries.append(cur)
         continue
     m = AKA.match(line)
@@ -134,7 +138,7 @@ for line in text.splitlines():
 kept, skipped = [], []
 for e in entries:
     names = {e["id"], *e["aka"]}
-    (skipped if (names & ignores) else kept).append(e)
+    (skipped if (e["hex_ignored"] or (names & ignores)) else kept).append(e)
 
 order = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
 counts = {s: sum(1 for e in kept if e["sev"] == s) for s in order}
@@ -177,6 +181,15 @@ summarise() {
     return 0
   fi
   read -r R_READABLE R_TOTAL R_HIGH <<<"$m"
+}
+
+# mixexs_ignores <mix.exs> -> the advisory ids in its `defp ignored_advisories`
+# list (the one `hex: [ignore_advisories: …]` reads), one per line. A missing
+# file or list prints nothing.
+mixexs_ignores() {
+  [ -f "$1" ] || return 0
+  sed -n '/defp ignored_advisories do/,/^  end/p' "$1" \
+    | sed 's/#.*//' | grep -oE '"(EEF-CVE|CVE|GHSA)-[A-Za-z0-9-]+"' | tr -d '"' || true
 }
 
 # ── the baseline ratchet ───────────────────────────────────────────────────
@@ -283,6 +296,41 @@ FIX
   summarise "$T/high.txt" fix; [ "$R_HIGH" = 0 ] && ok "--ignore matches the primary id" || no "id-ignore gave high=$R_HIGH"
   IGNORES=("EEF-CVE-1999-99999")
   summarise "$T/high.txt" fix; [ "$R_HIGH" = 1 ] && ok "CONTROL: an --ignore that matches nothing changes nothing" || no "no-match ignore gave high=$R_HIGH"
+  IGNORES=()
+  # Hex 2.6 output for a lock whose only advisory is in mix.exs ignore_advisories.
+  # Its mutant is high.txt: the same HIGH entry under "Advisories:".
+  cat >"$T/hexignored.txt" <<'FIX'
+Ignored advisories:
+  bandit 1.12.0 - EEF-CVE-2026-65623 (HIGH)
+    aka: CVE-2026-65623, GHSA-vg8x-66vg-5pxh
+    Quadratic CPU blow-up reassembling fragmented WebSocket messages in Bandit
+FIX
+  cat >"$T/mixed.txt" <<'FIX'
+Advisories:
+  swoosh 1.26.2 - EEF-CVE-2026-54893 (LOW)
+    aka: CVE-2026-54893
+
+Ignored advisories:
+  bandit 1.12.0 - EEF-CVE-2026-65623 (HIGH)
+    aka: CVE-2026-65623
+FIX
+  summarise "$T/hexignored.txt" fix; [ "$R_READABLE" = 1 ] && [ "$R_TOTAL" = 0 ] && [ "$R_HIGH" = 0 ] && ok "an 'Ignored advisories:' section alone is READABLE and its HIGH is not counted" || no "hexignored gave readable=$R_READABLE total=$R_TOTAL high=$R_HIGH"
+  summarise "$T/mixed.txt" fix; [ "$R_TOTAL" = 1 ] && [ "$R_HIGH" = 0 ] && ok "entries after 'Ignored advisories:' leave the open section's count alone (total=1 high=0)" || no "mixed gave total=$R_TOTAL high=$R_HIGH"
+  cat >"$T/mix.exs" <<'FIX'
+  defp ignored_advisories do
+    [
+      # cloak, no fix
+      "EEF-CVE-2026-65623",
+      # "EEF-CVE-2026-00001" commented out
+      "GHSA-vg8x-66vg-5pxh"
+    ]
+  end
+
+  defp other, do: ["EEF-CVE-2026-99999"]
+FIX
+  got="$(mixexs_ignores "$T/mix.exs" | tr '\n' ' ')"
+  [ "$got" = "EEF-CVE-2026-65623 GHSA-vg8x-66vg-5pxh " ] && ok "mixexs_ignores reads the list ids only, not comments or other functions" || no "mixexs_ignores gave '$got'"
+  [ -z "$(mixexs_ignores "$T/no-such-mix.exs")" ] && ok "mixexs_ignores on a missing mix.exs prints nothing" || no "mixexs_ignores invented ids for a missing file"
 
   # ── the ratchet's own arms, driven over the same code CI runs ────────────
   printf 'EEF-CVE-2026-65623 bandit 1.12.0 HIGH\n# a comment\nEEF-CVE-2026-54893 swoosh\n' >"$T/base.txt"
@@ -296,8 +344,13 @@ FIX
   baseline_verdict "$T/base.txt" "$T/seen.fewer.txt" >/dev/null
   [ "$B_NEW" = 0 ] && [ "$B_CLEARED" = 1 ] && ok "RATCHET OTHER DIRECTION: a cleared id is a notice (new=0 cleared=1), never a red" || no "fewer gave new=$B_NEW cleared=$B_CLEARED"
   if [ -f "$ROOT/.github/hex-audit-baseline.txt" ]; then
+    # Since 2026-10-28 both locks carry no recorded advisory, so the committed
+    # baseline is header comments only and every reported id is NEW, which is
+    # the intent. What must hold is that every non-comment line is a
+    # `<lock>:<id>` record; a stray line would silently become a recorded id.
     n="$(baseline_ids "$ROOT/.github/hex-audit-baseline.txt" | wc -l | tr -d ' ')"
-    [ "$n" -gt 0 ] && ok "the committed baseline parses to $n ids (a baseline that reads as EMPTY would make every id NEW)" || no "the committed baseline parsed to 0 ids"
+    bad="$(baseline_ids "$ROOT/.github/hex-audit-baseline.txt" | grep -vcE '^(api|cloud):(EEF-CVE|CVE|GHSA)-' || true)"
+    [ "$bad" = 0 ] && ok "the committed baseline parses to $n ids, every one a <lock>:<id> record" || no "the committed baseline has $bad line(s) that are not <lock>:<id> records"
   else
     no "the committed baseline .github/hex-audit-baseline.txt is missing"
   fi
@@ -339,6 +392,13 @@ STUB
   e2e "hex's clean-lock report is GREEN, not CANNOT READ" 0 "$T/hexclean.txt"
   e2e "hex's clean-lock report under the ratchet: nothing NEW" 0 "$T/hexclean.txt" --baseline "$T/e2e-base.txt"
   e2e "a lock with a known HIGH advisory still reds" 1 "$T/high.txt"
+  e2e "Hex 2.6 report with the HIGH under 'Ignored advisories:' is GREEN" 0 "$T/hexignored.txt"
+  # Older Hex shape (the id under "Advisories:") with the id in the lock's
+  # mix.exs list: green. The same report without the list is the red arm above.
+  cp "$T/mix.exs" "$T/root/fake/mix.exs"
+  e2e "HIGH listed in the lock's mix.exs ignored_advisories is GREEN on any Hex" 0 "$T/high.txt"
+  rm -f "$T/root/fake/mix.exs"
+  e2e "MUTANT: the same report once mix.exs is gone reds again" 1 "$T/high.txt"
 
   rm -rf "$T"
   echo
@@ -399,7 +459,12 @@ for d in "${DIRS[@]}"; do
   echo "ORACLE 2 — mix hex.audit (Hex/OSV feed) — exit $o2rc"
   sed 's/^/  /' "$o2"
   echo
+  # The lock's own exceptions list, so a Hex older than 2.6 that does not
+  # apply `ignore_advisories` still gets the same verdict.
+  SAVED_IGNORES=("${IGNORES[@]+"${IGNORES[@]}"}")
+  while IFS= read -r id; do [ -n "$id" ] && IGNORES+=("$id"); done < <(mixexs_ignores "$dir/mix.exs")
   summarise "$o2" "$d"
+  IGNORES=("${SAVED_IGNORES[@]+"${SAVED_IGNORES[@]}"}")
   if [ "$R_READABLE" != "1" ]; then
     echo "CANNOT READ [$d]: mix hex.audit exited $o2rc without producing an advisory report."
     echo "  Causes: no network, hex.pm unreachable, or the project failed to load."
