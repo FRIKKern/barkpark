@@ -540,6 +540,97 @@ defmodule Barkpark.Sso.OidcTest do
     end
   end
 
+  describe "require_group_match" do
+    defp strict_groups_org(extra \\ %{}) do
+      {:ok, org} = Tenancy.create_organization(%{slug: "matchorg", name: "Match Org"})
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "match-ws", name: "WS"})
+      {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+      {:ok, c} =
+        Oidc.create_connection(
+          Map.merge(
+            %{
+              organization_id: org.id,
+              issuer: @issuer,
+              client_id: @client_id,
+              client_secret: "s",
+              authorization_endpoint: @issuer <> "/authorize",
+              token_endpoint: @issuer <> "/token",
+              jwks_uri: @issuer <> "/jwks",
+              group_role_mappings: %{"editors" => "admin"},
+              require_group_match: true
+            },
+            extra
+          )
+        )
+
+      {org, ws, c}
+    end
+
+    defp seat(ws_id, user_id) do
+      Barkpark.Repo.one(
+        from m in Barkpark.Tenancy.Membership,
+          where:
+            m.workspace_id == ^ws_id and m.principal_type == "user" and
+              m.principal_id == ^user_id,
+          select: m.role
+      )
+    end
+
+    test "is off by default" do
+      {_org, c} = connection()
+      refute c.require_group_match
+    end
+
+    test "a user removed from every mapped group is refused and loses the seat and sessions" do
+      {_org, ws, c} = strict_groups_org()
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, user, _} = callback(c)
+      assert seat(ws.id, user.id) == "admin"
+      {:ok, _token} = Accounts.create_user_session_token(user)
+
+      mock_op(claims(%{"groups" => ["other"]}))
+      assert {:error, :no_mapped_group} = callback(c)
+      assert seat(ws.id, user.id) == nil
+      assert Accounts.list_user_sessions(user) == []
+    end
+
+    test "a new user in no mapped group is refused and gets no seat" do
+      {_org, ws, c} = strict_groups_org()
+      mock_op(claims(%{"email" => "new@oidcorg.com"}))
+
+      assert {:error, :no_mapped_group} = callback(c)
+      user = Accounts.get_user_by_email("new@oidcorg.com")
+      assert user == nil or seat(ws.id, user.id) == nil
+    end
+
+    test "a seat with a role the connection does not grant stays" do
+      {org, ws, c} = strict_groups_org()
+      verify_domain!(org, "oidcorg.com")
+
+      {:ok, owner} =
+        Accounts.register_user(%{email: "sso@oidcorg.com", password: "correct horse ok"})
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, owner.id, "owner", "user")
+
+      mock_op(claims(%{"groups" => []}))
+      assert {:error, :no_mapped_group} = callback(c)
+      assert seat(ws.id, owner.id) == "owner"
+    end
+
+    test "with the setting off, an unmapped sign-in keeps the role as before" do
+      {_org, ws, c} = strict_groups_org(%{require_group_match: false})
+
+      mock_op(claims(%{"groups" => ["editors"]}))
+      assert {:ok, user, _} = callback(c)
+
+      mock_op(claims(%{"groups" => ["other"]}))
+      assert {:ok, ^user, _} = callback(c)
+      assert seat(ws.id, user.id) == "admin"
+    end
+  end
+
   describe "the bootstrap owner signs in through Entra" do
     setup do
       Barkpark.Repo.delete_all(Barkpark.Accounts.User)

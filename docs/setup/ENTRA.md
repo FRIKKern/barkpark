@@ -63,7 +63,7 @@ Turn `trust_idp_mfa` on after a test sign-in with MFA. Entra lists it under Sign
 
 ## Removed users
 
-[ENTRA-ACCESS.md](ENTRA-ACCESS.md#removed-users) says what stops a removed user and what does not.
+[ENTRA-ACCESS.md](ENTRA-ACCESS.md#removed-users) says what stops a removed user, including `require_group_match`.
 
 ## The bootstrap owner
 

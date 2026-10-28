@@ -256,6 +256,35 @@ defmodule BarkparkWeb.OidcControllerTest do
            )
   end
 
+  test "require_group_match refuses an unmapped sign-in with no_mapped_group", %{org: org} do
+    Barkpark.Sso.OidcConnection
+    |> Repo.get_by!(organization_id: org.id)
+    |> Ecto.Changeset.change(require_group_match: true, group_role_mappings: %{"eds" => "member"})
+    |> Repo.update!()
+
+    mock_op(%{
+      "iss" => @issuer,
+      "aud" => @client_id,
+      "exp" => System.system_time(:second) + 300,
+      "nonce" => "n1",
+      "email" => "gone@octrl.com",
+      "groups" => ["other"]
+    })
+
+    body =
+      scoped_conn()
+      |> init_test_session(%{oidc_state: "s1", oidc_nonce: "n1", oidc_verifier: "v1"})
+      |> get("/v1/auth/oidc/octrl/callback?code=abc&state=s1")
+      |> json_response(403)
+
+    assert body["error"]["code"] == "no_mapped_group"
+
+    assert Repo.exists?(
+             from e in Barkpark.Audit.Event,
+               where: e.action == "sso_login_failed" and e.metadata["reason"] == "no_mapped_group"
+           )
+  end
+
   describe "a Studio signs in through the instance's SSO (task-8bdf1b15305af840)" do
     @studio "https://studio.example.com"
     @verifier String.duplicate("v", 43)
