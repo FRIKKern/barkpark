@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: media-image-transforms | budget: 1300tok -->
 # Image transforms
 
-Barkpark stores an image once and makes each size, crop and format on first request, cached on disk, as Sanity and `next/image` do.
+Barkpark stores an image once and makes each size, crop and format on first request, cached on disk, like Sanity.
 
 ## Upload
 
@@ -13,7 +13,7 @@ Barkpark stores an image once and makes each size, crop and format on first requ
 GET /media/files/<path>?w=800&h=450&fit=crop&fp-x=0.3&fp-y=0.4&auto=format&q=70
 ```
 
-`<path>` is the asset's `path` (in `url`, `originalUrl`); `/w/:ws/p/:proj/media/files/<path>` is the same. No parameters: the original bytes.
+`<path>` is the asset's `path` (in `url`, `originalUrl`), also under `/w/:ws/p/:proj`. No parameters: the original bytes. Outputs keep an ICC profile, no EXIF (so no GPS); JPEGs get optimised Huffman tables.
 
 Sanity CDN URLs from `@sanity/image-url` take the same parameters: [SANITY-IMAGE-URLS.md](SANITY-IMAGE-URLS.md).
 
@@ -55,7 +55,7 @@ A Sanity-shaped image value stores `crop` `{top, bottom, left, right}` and `hots
 
 ## Caching and limits
 
-- The cache key is a SHA-256 of the normalised parameters, the chosen format, the watermark profile and the focal point. An AVIF key adds the encoder settings, so changing them renders new files. The file lives at `_renditions/<asset id>/t/<hash>.<fm>` and is deleted with the asset.
+- The cache key is a SHA-256 of the normalised parameters, the chosen format, the watermark profile and the focal point. An AVIF key adds the encoder settings. Files live at `_renditions/<asset id>/t/<hash>.<fm>`, deleted with the asset.
 - Concurrent first requests for one key render once.
 - A public asset answers `Cache-Control: public, max-age=2592000`, a strong `ETag`, `304` on `If-None-Match`, and `Vary: Accept`. A non-public asset answers `no-store`.
 - `w`, `h` cap at 4096; above 100 they round up to a multiple of 10. An asset keeps at most 100 cached transforms; past that a new one is 429 `transform_variant_limit`. Config: `Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).

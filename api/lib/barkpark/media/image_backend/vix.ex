@@ -418,14 +418,32 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   end
 
   # `fm` picks the encoder; the caller already gave `dest` the matching
-  # extension. Every output drops EXIF and other metadata (`strip`), which also
-  # keeps camera GPS tags off public derivatives.
+  # extension. Every output drops EXIF, XMP and IPTC, which also keeps camera
+  # GPS tags off public derivatives, and keeps an ICC profile so a wide-gamut
+  # photo keeps its colours. `Image.write/3`'s `strip_metadata` dropped
+  # nothing: it sends libvips `strip`, which 8.15 replaced with `keep`. A JPEG
+  # gets optimised Huffman tables, as Sanity's CDN writes it: the same pixels
+  # in about 40% fewer bytes (8,460 to 5,203 B, Sanity's size to the byte, for
+  # the e2e-local 640x400 fixture at q 75).
   defp write_image(image, dest, plan) do
-    case Image.write(image, dest, write_options(plan.fm, plan.q)) do
-      {:ok, _} -> :ok
-      error -> error
-    end
+    Elixir.Vix.Vips.Image.write_to_file(image, dest, saver_options(plan.fm, plan.q))
   end
+
+  @doc "The libvips saver options `transform/4` writes a format and URL `q` with."
+  @spec saver_options(String.t(), pos_integer()) :: keyword()
+  def saver_options("png", _q), do: [keep: [:VIPS_FOREIGN_KEEP_ICC]]
+  def saver_options("webp", q), do: [Q: q, keep: [:VIPS_FOREIGN_KEEP_ICC]]
+
+  def saver_options("avif", q) do
+    [
+      Q: Transform.avif_quality(q),
+      effort: Transform.avif_effort(),
+      compression: :VIPS_FOREIGN_HEIF_COMPRESSION_AV1,
+      keep: [:VIPS_FOREIGN_KEEP_ICC]
+    ]
+  end
+
+  def saver_options(_jpg, q), do: [Q: q, "optimize-coding": true, keep: [:VIPS_FOREIGN_KEEP_ICC]]
 
   @doc """
   The `Image.write/3` options for a format and URL `q`.
