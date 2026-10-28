@@ -1,0 +1,638 @@
+{
+ "source": "Answers from groq-js 2.0.1 on groq_conformance_docs.json, written by groq_conformance_gen.mjs.",
+ "cases": [
+  {
+   "name": "pt_text",
+   "query": "*[_id == \"article-1\"][0]{\"text\": pt::text(body)}",
+   "expected": {
+    "text": "Morning at the pond\n\nThe ducks were very loud. See the garden notes and this page.\n\nA thermos of tea\n\nRead kettle care\n\nA block with no markDefs key."
+   }
+  },
+  {
+   "name": "pt_text_block",
+   "query": "pt::text(*[_id == \"article-1\"][0].body[1])",
+   "expected": "The ducks were very loud. See the garden notes and this page."
+  },
+  {
+   "name": "pt_text_empty",
+   "query": "pt::text(*[_id == \"article-2\"][0].body)",
+   "expected": null
+  },
+  {
+   "name": "count_blocks",
+   "query": "count(*[_id == \"article-1\"][0].body[_type == \"block\"])",
+   "expected": 5
+  },
+  {
+   "name": "count_blocks_projection",
+   "query": "*[_id == \"article-1\"][0]{\"blocks\": count(body[_type == \"block\"])}",
+   "expected": {
+    "blocks": 5
+   }
+  },
+  {
+   "name": "children_marks",
+   "query": "*[_id == \"article-1\"][0].body[].children[].marks",
+   "expected": [
+    [],
+    [],
+    [
+     "strong",
+     "em"
+    ],
+    [],
+    [
+     "m1"
+    ],
+    [],
+    [
+     "m2",
+     "strong"
+    ],
+    [],
+    null,
+    [],
+    [],
+    [
+     "m3"
+    ],
+    null,
+    []
+   ]
+  },
+  {
+   "name": "markdefs_deref",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"].markDefs[]{..., \"to\": internalLink->}",
+   "expected": [
+    {
+     "_type": "linkAnnotation",
+     "_key": "m1",
+     "linkType": "internal",
+     "internalLink": {
+      "_type": "reference",
+      "_ref": "page-garden"
+     },
+     "to": {
+      "_id": "page-garden",
+      "_type": "ptpage",
+      "title": "Garden notes"
+     }
+    },
+    {
+     "_type": "link",
+     "_key": "m2",
+     "href": "https://example.com/ducks",
+     "to": null
+    },
+    {
+     "_type": "linkAnnotation",
+     "_key": "m3",
+     "linkType": "internal",
+     "internalLink": {
+      "_type": "reference",
+      "_ref": "page-kettle"
+     },
+     "to": {
+      "_id": "page-kettle",
+      "_type": "ptpage",
+      "title": "Kettle care"
+     }
+    },
+    null
+   ]
+  },
+  {
+   "name": "markdefs_deref_title",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"].markDefs[]{_key, \"to\": internalLink->title}",
+   "expected": [
+    {
+     "_key": "m1",
+     "to": "Garden notes"
+    },
+    {
+     "_key": "m2",
+     "to": null
+    },
+    {
+     "_key": "m3",
+     "to": "Kettle care"
+    },
+    null
+   ]
+  },
+  {
+   "name": "markdefs_flat",
+   "query": "*[_id == \"article-1\"][0].body[].markDefs[]",
+   "expected": [
+    {
+     "_type": "linkAnnotation",
+     "_key": "m1",
+     "linkType": "internal",
+     "internalLink": {
+      "_type": "reference",
+      "_ref": "page-garden"
+     }
+    },
+    {
+     "_type": "link",
+     "_key": "m2",
+     "href": "https://example.com/ducks"
+    },
+    null,
+    {
+     "_type": "linkAnnotation",
+     "_key": "m3",
+     "linkType": "internal",
+     "internalLink": {
+      "_type": "reference",
+      "_ref": "page-kettle"
+     }
+    },
+    null
+   ]
+  },
+  {
+   "name": "markdefs_blocks_only",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"].markDefs[]",
+   "expected": [
+    {
+     "_type": "linkAnnotation",
+     "_key": "m1",
+     "linkType": "internal",
+     "internalLink": {
+      "_type": "reference",
+      "_ref": "page-garden"
+     }
+    },
+    {
+     "_type": "link",
+     "_key": "m2",
+     "href": "https://example.com/ducks"
+    },
+    {
+     "_type": "linkAnnotation",
+     "_key": "m3",
+     "linkType": "internal",
+     "internalLink": {
+      "_type": "reference",
+      "_ref": "page-kettle"
+     }
+    },
+    null
+   ]
+  },
+  {
+   "name": "markdefs_unflattened",
+   "query": "*[_id == \"article-1\"][0].body[].markDefs",
+   "expected": [
+    [],
+    [
+     {
+      "_type": "linkAnnotation",
+      "_key": "m1",
+      "linkType": "internal",
+      "internalLink": {
+       "_type": "reference",
+       "_ref": "page-garden"
+      }
+     },
+     {
+      "_type": "link",
+      "_key": "m2",
+      "href": "https://example.com/ducks"
+     }
+    ],
+    null,
+    [],
+    [
+     {
+      "_type": "linkAnnotation",
+      "_key": "m3",
+      "linkType": "internal",
+      "internalLink": {
+       "_type": "reference",
+       "_ref": "page-kettle"
+      }
+     }
+    ],
+    null
+   ]
+  },
+  {
+   "name": "markdefs_keys",
+   "query": "*[_id == \"article-1\"][0].body[].markDefs[]._key",
+   "expected": [
+    "m1",
+    "m2",
+    null,
+    "m3",
+    null
+   ]
+  },
+  {
+   "name": "references_markdef",
+   "query": "*[_type == \"ptarticle\" && references(\"page-garden\")]._id",
+   "expected": [
+    "article-1"
+   ]
+  },
+  {
+   "name": "references_markdef_kettle",
+   "query": "*[_type == \"ptarticle\" && references(\"page-kettle\")]._id",
+   "expected": [
+    "article-1"
+   ]
+  },
+  {
+   "name": "references_none",
+   "query": "*[_type == \"ptarticle\" && references(\"page-missing\")]._id",
+   "expected": []
+  },
+  {
+   "name": "references_param_list",
+   "query": "*[_type == \"ptpage\" && count(*[_type == \"ptarticle\" && references(^._id)]) > 0]._id",
+   "expected": [
+    "page-garden",
+    "page-kettle"
+   ]
+  },
+  {
+   "name": "defined_list_item",
+   "query": "*[_id == \"article-1\"][0].body[defined(listItem)]._key",
+   "expected": [
+    "b3",
+    "b4"
+   ]
+  },
+  {
+   "name": "not_defined_list_item",
+   "query": "*[_id == \"article-1\"][0].body[!defined(listItem)]._key",
+   "expected": [
+    "b1",
+    "b2",
+    "c1",
+    "b5"
+   ]
+  },
+  {
+   "name": "list_levels",
+   "query": "*[_id == \"article-1\"][0].body[defined(listItem)]{listItem, level}",
+   "expected": [
+    {
+     "listItem": "bullet",
+     "level": 1
+    },
+    {
+     "listItem": "bullet",
+     "level": 2
+    }
+   ]
+  },
+  {
+   "name": "slice_exclusive",
+   "query": "*[_id == \"article-1\"][0].body[0...2]._key",
+   "expected": [
+    "b1",
+    "b2"
+   ]
+  },
+  {
+   "name": "slice_inclusive",
+   "query": "*[_id == \"article-1\"][0].body[1..3]._key",
+   "expected": [
+    "b2",
+    "c1",
+    "b3"
+   ]
+  },
+  {
+   "name": "slice_negative",
+   "query": "*[_id == \"article-1\"][0].body[-2..-1]._key",
+   "expected": [
+    "b4",
+    "b5"
+   ]
+  },
+  {
+   "name": "slice_after_filter",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"][1...3]._key",
+   "expected": [
+    "b2",
+    "b3"
+   ]
+  },
+  {
+   "name": "slice_index",
+   "query": "*[_id == \"article-1\"][0].body[2]._type",
+   "expected": "callout"
+  },
+  {
+   "name": "slice_pt_text",
+   "query": "pt::text(*[_id == \"article-1\"][0].body[0...2])",
+   "expected": "Morning at the pond\n\nThe ducks were very loud. See the garden notes and this page."
+  },
+  {
+   "name": "styles",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"].style",
+   "expected": [
+    "h2",
+    "normal",
+    "normal",
+    "normal",
+    "normal"
+   ]
+  },
+  {
+   "name": "custom_blocks",
+   "query": "*[_id == \"article-1\"][0].body[_type != \"block\"]{_type, _key}",
+   "expected": [
+    {
+     "_type": "callout",
+     "_key": "c1"
+    }
+   ]
+  },
+  {
+   "name": "inline_objects",
+   "query": "*[_id == \"article-1\"][0].body[].children[_type != \"span\"]{_type, label}",
+   "expected": [
+    null,
+    {
+     "_type": "chip",
+     "label": "new"
+    }
+   ]
+  },
+  {
+   "name": "span_text_with_mark",
+   "query": "*[_id == \"article-1\"][0].body[].children[\"strong\" in marks].text",
+   "expected": [
+    "very",
+    "this page",
+    null
+   ]
+  },
+  {
+   "name": "marks_flat",
+   "query": "*[_id == \"article-1\"][0].body[].children[].marks[]",
+   "expected": [
+    "strong",
+    "em",
+    "m1",
+    "m2",
+    "strong",
+    null,
+    "m3",
+    null
+   ]
+  },
+  {
+   "name": "count_children",
+   "query": "count(*[_id == \"article-1\"][0].body[].children[])",
+   "expected": 14
+  },
+  {
+   "name": "pt_text_custom_only",
+   "query": "pt::text(*[_id == \"article-1\"][0].body[_type == \"callout\"])",
+   "expected": null
+  },
+  {
+   "name": "pt_text_filtered_blocks",
+   "query": "pt::text(*[_id == \"article-1\"][0].body[defined(listItem)])",
+   "expected": "A thermos of tea\n\nRead kettle care"
+  },
+  {
+   "name": "markdefs_filter_type",
+   "query": "*[_id == \"article-1\"][0].body[].markDefs[_type == \"link\"].href",
+   "expected": [
+    "https://example.com/ducks",
+    null,
+    null
+   ]
+  },
+  {
+   "name": "markdefs_internal_titles",
+   "query": "*[_id == \"article-1\"][0].body[].markDefs[defined(internalLink)].internalLink->title",
+   "expected": [
+    "Garden notes",
+    null,
+    "Kettle care",
+    null
+   ]
+  },
+  {
+   "name": "markdefs_deref_flat",
+   "query": "*[_id == \"article-1\"][0].body[].markDefs[].internalLink->title",
+   "expected": [
+    "Garden notes",
+    null,
+    null,
+    "Kettle care",
+    null
+   ]
+  },
+  {
+   "name": "nested_projection_links",
+   "query": "*[_type == \"ptarticle\"]{_id, \"links\": body[].markDefs[defined(internalLink)]{_key, \"page\": internalLink->{_id, title}}}",
+   "expected": [
+    {
+     "_id": "article-1",
+     "links": [
+      {
+       "_key": "m1",
+       "page": {
+        "_id": "page-garden",
+        "title": "Garden notes"
+       }
+      },
+      null,
+      {
+       "_key": "m3",
+       "page": {
+        "_id": "page-kettle",
+        "title": "Kettle care"
+       }
+      },
+      null
+     ]
+    },
+    {
+     "_id": "article-2",
+     "links": []
+    }
+   ]
+  },
+  {
+   "name": "slice_last",
+   "query": "*[_id == \"article-1\"][0].body[-1]._key",
+   "expected": "b5"
+  },
+  {
+   "name": "slice_past_end",
+   "query": "*[_id == \"article-1\"][0].body[4...99]._key",
+   "expected": [
+    "b4",
+    "b5"
+   ]
+  },
+  {
+   "name": "slice_empty_body",
+   "query": "*[_id == \"article-2\"][0].body[0...2]",
+   "expected": []
+  },
+  {
+   "name": "first_span_text",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"][1].children[0].text",
+   "expected": "The ducks were "
+  },
+  {
+   "name": "block_projection_spread",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"][0]{..., \"plain\": pt::text(@)}",
+   "expected": {
+    "_type": "block",
+    "_key": "b1",
+    "style": "h2",
+    "markDefs": [],
+    "children": [
+     {
+      "_type": "span",
+      "_key": "b1s1",
+      "text": "Morning at the pond",
+      "marks": []
+     }
+    ],
+    "plain": "Morning at the pond"
+   }
+  },
+  {
+   "name": "pt_text_projection_each",
+   "query": "*[_id == \"article-1\"][0].body[]{_key, \"t\": pt::text(@)}",
+   "expected": [
+    {
+     "_key": "b1",
+     "t": "Morning at the pond"
+    },
+    {
+     "_key": "b2",
+     "t": "The ducks were very loud. See the garden notes and this page."
+    },
+    {
+     "_key": "c1",
+     "t": null
+    },
+    {
+     "_key": "b3",
+     "t": "A thermos of tea"
+    },
+    {
+     "_key": "b4",
+     "t": "Read kettle care"
+    },
+    {
+     "_key": "b5",
+     "t": "A block with no markDefs key."
+    }
+   ]
+  },
+  {
+   "name": "count_empty_body",
+   "query": "count(*[_id == \"article-2\"][0].body[_type == \"block\"])",
+   "expected": 0
+  },
+  {
+   "name": "body_defined_on_empty",
+   "query": "defined(*[_id == \"article-2\"][0].body)",
+   "expected": true
+  },
+  {
+   "name": "list_item_select",
+   "query": "*[_id == \"article-1\"][0].body[]{_key, \"kind\": select(defined(listItem) => \"list\", _type == \"block\" => \"text\", \"object\")}",
+   "expected": [
+    {
+     "_key": "b1",
+     "kind": "text"
+    },
+    {
+     "_key": "b2",
+     "kind": "text"
+    },
+    {
+     "_key": "c1",
+     "kind": "object"
+    },
+    {
+     "_key": "b3",
+     "kind": "list"
+    },
+    {
+     "_key": "b4",
+     "kind": "list"
+    },
+    {
+     "_key": "b5",
+     "kind": "text"
+    }
+   ]
+  },
+  {
+   "name": "references_array",
+   "query": "*[_type == \"ptarticle\" && references([\"page-missing\", \"page-kettle\"])]._id",
+   "expected": [
+    "article-1"
+   ]
+  },
+  {
+   "name": "order_by_level",
+   "query": "*[_id == \"article-1\"][0].body[defined(level)] | order(level desc)._key",
+   "expected": [
+    "b4",
+    "b3"
+   ]
+  },
+  {
+   "name": "level_compare",
+   "query": "*[_id == \"article-1\"][0].body[level > 1]._key",
+   "expected": [
+    "b4"
+   ]
+  },
+  {
+   "name": "in_marks_member",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\" && \"m1\" in children[].marks[]]._key",
+   "expected": [
+    "b2"
+   ]
+  },
+  {
+   "name": "markdef_keys_used",
+   "query": "*[_id == \"article-1\"][0].body[_type == \"block\"]{_key, \"used\": markDefs[_key in ^.children[].marks[]]._key}",
+   "expected": [
+    {
+     "_key": "b1",
+     "used": []
+    },
+    {
+     "_key": "b2",
+     "used": [
+      "m1",
+      "m2"
+     ]
+    },
+    {
+     "_key": "b3",
+     "used": []
+    },
+    {
+     "_key": "b4",
+     "used": [
+      "m3"
+     ]
+    },
+    {
+     "_key": "b5",
+     "used": null
+    }
+   ]
+  }
+ ]
+}
