@@ -34,14 +34,16 @@ else
   # Resolve the newest cli-v* release via the GitHub API instead of trusting
   # `releases/latest`: this repo also publishes build-<sha> server-artifact
   # releases (no bp assets), and one of those holding "latest" 404s every
-  # unpinned install. The API lists newest-first; the [0-9.]* charset skips
-  # prereleases like cli-v1.2.0-rc.1 (matching the old releases/latest rule).
+  # unpinned install. The [0-9.]* charset skips prereleases like cli-v1.2.0-rc.1
+  # (matching the old releases/latest rule). The highest version wins, not the
+  # first listed: on 2026-10-28 the API listed cli-v1.26.9 before cli-v1.26.11.
   # per_page=100 is the API maximum. release-artifact.yml cuts several build-<sha>
   # releases a day, so a page of 30 can hold no cli-v release at all, and the
   # install then falls back to releases/latest.
   api_url="https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=100"
   cli_tag="$( { curl -fsSL "$api_url" 2>/dev/null || wget -qO- "$api_url" 2>/dev/null || true; } \
-    | sed -n 's/.*"tag_name"[: ]*"\(cli-v[0-9.]*\)".*/\1/p' | head -n 1 )"
+    | sed -n 's/.*"tag_name"[: ]*"\(cli-v[0-9.]*\)".*/\1/p' \
+    | sort -t . -k 1.6,1n -k 2,2n -k 3,3n | tail -n 1 )"
   if [ -n "$cli_tag" ]; then
     RELEASE_BASE="${REPO_URL}/releases/download/${cli_tag}"
   else
