@@ -287,8 +287,9 @@ defmodule Barkpark.Sso do
   user's seats in the org's workspaces whose role the connection grants: a
   mapped role, or the `member` default. Other seats stay, and so does a
   workspace's last owner, as in `Tenancy.Members.remove_member/3`. When a seat
-  was removed, the user's live sessions are revoked. Returns the number of
-  seats removed.
+  was removed, the user's live sessions are revoked. Each removed seat gets a
+  `membership`/`sso_seat_removed` audit row in its workspace. Returns the
+  number of seats removed.
   """
   @spec remove_unmapped_user(struct(), User.t()) :: non_neg_integer()
   def remove_unmapped_user(%{organization_id: org_id} = c, %User{id: uid} = user)
@@ -303,11 +304,27 @@ defmodule Barkpark.Sso do
           where:
             m.principal_type == "user" and m.principal_id == ^uid and
               m.workspace_id in ^(ws_ids -- kept) and m.role in ^roles,
-          select: m.workspace_id
+          select: {m.workspace_id, m.role}
         )
       )
 
-    Enum.each(removed, &Tenancy.Members.announce_seats_changed/1)
+    Enum.each(removed, fn {ws_id, role} ->
+      Tenancy.Members.announce_seats_changed(ws_id)
+
+      Barkpark.Audit.emit(%{
+        category: "membership",
+        action: "sso_seat_removed",
+        subject: uid,
+        actor_type: "system",
+        workspace_id: ws_id,
+        metadata: %{
+          "organization_id" => org_id,
+          "connection_id" => c.id,
+          "role" => role,
+          "reason" => "no_mapped_group"
+        }
+      })
+    end)
 
     if n > 0 do
       {:ok, revoked} = Accounts.revoke_all_user_sessions(user)
