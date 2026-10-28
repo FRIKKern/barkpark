@@ -114,7 +114,7 @@ Stamp at three moments: **claim** sets `branch`+`worktree`, **PR-open** appends 
 
 In `/studio` → **Tasks ✅**: you (form) flip `lifecycle_status`/`priority`/`assignee` and edit titles/descriptions; the agent (API) claims/closes with fencing, adds edges, relabels, links papers. The TUI edits flat fields; composites (`acceptance_criteria`) are Studio/API-only — the API single-writes structured values. Live over PubSub.
 
-**`/admin/projects`** (`:ops` admin-gated) is a live kanban over the same docs: five realtime columns — open · ready · in_progress · blocked · done (cancelled → tally). **Drag** restages through the fenced `claim`/`close` primitives (a foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived — no drop). **Group**/**filter** via URL chips (`?group=&goal=&priority=&label=&worker=`).
+**`/admin/projects`** (`:ops` admin-gated) is a live kanban over the same docs: 7 live columns — open · ready · in_progress · blocked · done · considering · researching (cancelled → tally). **Drag** restages through the fenced `claim`/`close` primitives (a foreign-held card refuses, as does a `done` drop over unmet criteria; `ready` is derived — no drop). **Group**/**filter** via URL chips (`?group=&goal=&priority=&label=&worker=`).
 
 ## Goals and phases
 

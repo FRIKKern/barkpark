@@ -811,7 +811,7 @@ so its verdict is unaffected.) In workflow order:
 | 28 | Charter-corpus marker hygiene | `scripts/charter-corpus-hygiene-check.sh` (`--selftest`, then the check) over the `.claude/workflows/*-charter.md` corpus |
 | 29 | Charter adoption census | `deploy/charter-adoption-check.sh` (`--selftest`, then the check; the deploy-reliability charter's declared adoption set vs the set derived from `.github/workflows/`, red in both directions — D620) |
 | 30 | bp-command doc parse over docs/cli | `node tooling/doc-truth/verify-bp-commands.mjs` (`--selftest`, then the gate over `docs/cli/*.md`; the step carries its own glob FLOOR of 3 files, so a glob that expands to nothing FAILS and can never read as a pass) |
-| 31 | Setup doc fact check | `node tooling/doc-truth/setup-facts.mjs` (`node --test tooling/doc-truth/setup-facts.test.mjs`, then the check; env names, bp commands and flags in the setup docs, looked up in the server, deploy and CLI code) |
+| 31 | Setup doc fact check | `node tooling/doc-truth/setup-facts.mjs` (`node --test tooling/doc-truth/setup-facts.test.mjs`, then the check; env names, bp commands and flags in the setup docs, looked up in the server, deploy and CLI code; the defaults and numbers in its `NUMBER_FACTS` table, read from the Bicep template, deploy.sh, scripts and Elixir code) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s

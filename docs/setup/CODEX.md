@@ -201,7 +201,7 @@ epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
 
 `--tools all` (`args = ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as `bp_<noun>_<verb>`, auto-derived from live capabilities, so a
-new plugin's verbs appear with zero config change — ~107 tools. Keep the default
+new plugin's verbs appear with zero config change — over 200 tools. Keep the default
 `tasks` unless you know the handful you need.
 
 ## Troubleshooting

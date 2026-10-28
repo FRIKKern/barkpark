@@ -38,7 +38,7 @@ Postgres has no public endpoint and answers only inside the virtual network. The
 - **Owners.** Name the people in the owners group. Each sign-in sets the role from the user's groups.
 - **Conditional Access and MFA.** Require MFA for the app with a Conditional Access policy. Barkpark then counts Entra MFA as its own, as [ENTRA.md](ENTRA.md#entra-mfa-counts-as-barkpark-mfa) describes.
 - **Group claims.** Groups assigned to the app need Entra ID P1. Without P1, run the script with `--group-claims security`.
-- **Backup retention.** Choose 7 to 35 days for the database. Decide whether Azure Backup takes snapshots of the media share.
+- **Backup retention.** The template keeps 7 days for the database, and Azure allows up to 35. Decide whether Azure Backup takes snapshots of the media share.
 - **Alerts.** Name the address that receives them. Add Azure Monitor alerts for the database if you need them.
 
 ## What it costs

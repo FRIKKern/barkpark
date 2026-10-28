@@ -177,7 +177,7 @@ claim-first contract in its own description:
 
 Adding `"--tools", "all"` to `args` exposes **every** manifest verb as a tool
 (`bp_<noun>_<verb>`), auto-derived from the live capabilities — a new plugin's
-verbs appear with zero code changes. The full Barkpark manifest is ~107
+verbs appear with zero code changes. The full manifest is 200+
 commands, which floods the agent's tool list and dilutes tool selection. Keep
 the default `tasks` unless you know exactly which handful you need.
 
@@ -214,7 +214,7 @@ list, each item verified against the shipped code.
 2. **Barkpark auth is two steps, not one.** `bp login` writes ONLY the three
    cloud keys (`cloud_url`, `cloud_token`, `cloud_team`). The tail that would
    also connect you to a content server (the `server` + `token` keys) is
-   TTY-gated (`internal/cli/cloud12_cmd.go:261`) — on a headless or agent
+   TTY-gated (`finishLoginConnect` in `cloud12_cmd.go`) — on a headless or agent
    machine it silently never runs. So also point `bp` at a server:
 
    ```bash

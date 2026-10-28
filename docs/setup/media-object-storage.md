@@ -65,7 +65,7 @@ Object keys are the existing relative paths (`YYYY/MM/slug-rand.ext`), so
 migration is a plain copy — no DB changes:
 
 ```bash
-rclone copy /opt/barkpark/uploads r2:barkpark-media \
+rclone copy /opt/barkpark/api/uploads r2:barkpark-media \
   --exclude "_renditions/**"
 ```
 
