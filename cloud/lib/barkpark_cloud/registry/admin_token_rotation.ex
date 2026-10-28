@@ -11,7 +11,7 @@ defmodule BarkparkCloud.Registry.AdminTokenRotation do
       4. store:  the successor, Vault-encrypted, replaces the held ciphertext
                  (compare-and-set on the old ciphertext), read back and compared
       5. revoke: DELETE <url>/w/<ws>/p/default/v1/tokens/<old id> (old token)
-      6. check:  GET  <url>/v1/capabilities (old token) -> the status, 401 expected
+      6. check:  GET  <url>/v1/tokens/current (old token) -> the status, 401 expected
 
   The old token revokes itself in step 5. The box lets an actor revoke a
   token only when the actor administers every workspace that token is seated
@@ -212,8 +212,11 @@ defmodule BarkparkCloud.Registry.AdminTokenRotation do
 
   # ── 6. what the old token gets now ────────────────────────────────────────
 
+  # `/v1/tokens/current` and not `/v1/capabilities`: capabilities answers 200
+  # to any bearer, a dead one included (it reads as a public caller), so only
+  # a route that requires a token can show the 401.
   defp probe_status(base, token) do
-    case request(base, :get, "/v1/capabilities", token) do
+    case request(base, :get, "/v1/tokens/current", token) do
       {:ok, status, _} -> status
       {:error, :unreachable} -> nil
     end

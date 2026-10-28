@@ -33,9 +33,18 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest.FakeBox do
 
   defp handle(%{live: live} = s, route, bearer) do
     cond do
-      not Map.has_key?(live, bearer) -> {reply(401, %{error: "unauthorized"}), s}
-      s.fail == route -> {reply(500, %{error: "boom"}), s}
-      true -> act(s, route, bearer)
+      # As on a real box: capabilities answers any bearer, a dead one as public.
+      route == :capabilities and not Map.has_key?(live, bearer) ->
+        {reply(200, %{auth_tier: "public"}), s}
+
+      not Map.has_key?(live, bearer) ->
+        {reply(401, %{error: "unauthorized"}), s}
+
+      s.fail == route ->
+        {reply(500, %{error: "boom"}), s}
+
+      true ->
+        act(s, route, bearer)
     end
   end
 
