@@ -191,4 +191,22 @@ defmodule Barkpark.PortableDoc.FieldVocabularyTest do
                }
              ])
   end
+
+  describe "Portable Text spellings (task-9296af21cac3f813)" do
+    test "a declared strike-through decorator admits the strikethrough inline" do
+      vocab = V.from_field(put_in(@agency, ["blocks", "marks"], ["strong", "strike-through"]))
+
+      assert "strikethrough" in vocab.marks
+      assert "strikethrough" in V.allowed_inline_types(vocab)
+
+      struck = [%{"type" => "strikethrough", "children" => [%{"type" => "text", "value" => "x"}]}]
+      assert :ok == V.validate(vocab, [p(nil, struck)])
+    end
+
+    test "an annotation's declared fields are kept by name" do
+      vocab = V.from_field(@agency)
+      assert vocab.annotations == ["link"]
+      assert vocab.annotation_fields == %{"link" => [%{"name" => "href", "type" => "string"}]}
+    end
+  end
 end

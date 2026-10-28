@@ -18,8 +18,10 @@ defmodule Barkpark.Content.ShapeMigrations.HtmlRichText do
       bin/barkpark eval 'IO.inspect(Barkpark.Content.ShapeMigrations.HtmlRichText.run(apply: true))'
 
   Checkout form: `mix barkpark.shape.html_rich_text [--apply]`. Top-level
-  plain `richText` fields only; the PortableDoc body region (`body`,
-  `blocks`) and fields using the block editor are not part of #44.
+  `richText` fields whose format is Portable Text only
+  (`Barkpark.Content.RichTextFormat`); the legacy PortableDoc body region
+  (`body`, `blocks` with no declared format) and PortableDoc fields are not
+  part of #44.
   Plugin-owned types are skipped (`Barkpark.Content.CanonicalShapes`). An
   applied row gets new content and a new `_rev`, with no history revision or
   mutation event (`FieldScan`).
@@ -33,8 +35,7 @@ defmodule Barkpark.Content.ShapeMigrations.HtmlRichText do
     name = f["name"] || f[:name]
 
     if (f["type"] || f[:type]) == "richText" and is_binary(name) and
-         name not in ["body", "blocks"] and
-         not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(stringify(f)),
+         Barkpark.Content.RichTextFormat.portable_text?(stringify(f)),
        do: :html
   end
 
