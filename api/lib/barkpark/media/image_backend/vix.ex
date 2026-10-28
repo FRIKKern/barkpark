@@ -78,6 +78,7 @@ defmodule Barkpark.Media.ImageBackend.Vix do
          geometry = Transform.geometry(plan, src_w, src_h),
          {:ok, image} <- shape(src, geometry),
          {:ok, image} <- crop(image, geometry.crop),
+         {:ok, image} <- alpha_for_bg(image, Map.get(plan, :bg), plan.fm),
          {:ok, image} <- pad(image, geometry.pad, Map.get(plan, :bg)),
          {:ok, image} <- effects(image, plan),
          {:ok, stamped} <- maybe_watermark(image, watermark) do
@@ -272,6 +273,14 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     embed(image, x, y, w, h, bg)
   end
 
+  # A translucent `bg` keeps its alpha where the format can hold one (not
+  # JPEG), as on Sanity's CDN: the image gets an opaque alpha band first.
+  defp alpha_for_bg(image, {_r, _g, _b, a}, fm) when a < 255 and fm in ["png", "webp", "avif"] do
+    if Image.has_alpha?(image), do: {:ok, image}, else: Image.add_alpha(image, 255)
+  end
+
+  defp alpha_for_bg(image, _bg, _fm), do: {:ok, image}
+
   # `bg` ({r, g, b, a}) for the fill; white without one. An image without an
   # alpha band takes the colour's RGB only.
   defp embed(image, x, y, w, h, bg) do
@@ -280,7 +289,7 @@ defmodule Barkpark.Media.ImageBackend.Vix do
         {nil, bands} -> List.duplicate(255, bands)
         {{r, g, b, a}, 4} -> [r, g, b, a]
         {{r, g, b, _a}, 3} -> [r, g, b]
-        {{r, g, b, _a}, 2} -> [round((r + g + b) / 3), 255]
+        {{r, g, b, a}, 2} -> [round((r + g + b) / 3), a]
         {{r, g, b, _a}, bands} -> List.duplicate(round((r + g + b) / 3), bands)
       end
 

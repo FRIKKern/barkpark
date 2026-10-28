@@ -168,6 +168,29 @@ defmodule Barkpark.Media.TransformTest do
                max * max
     end
 
+    test "pad sits inside w and h, as on Sanity's CDN; without them it is added around" do
+      # Sanity, 640x400 source: w=200&pad=10 is 200x132, w=200&h=200&fit=fill&pad=20
+      # is 200x200, pad=10 alone is 660x420.
+      assert Transform.geometry(plan!(%{"w" => "200", "pad" => "10"}), 640, 400).resize ==
+               {180, 113}
+
+      g =
+        Transform.geometry(
+          plan!(%{"w" => "200", "h" => "200", "fit" => "fill", "pad" => "20"}),
+          640,
+          400
+        )
+
+      assert {g.resize, g.pad} == {{160, 100}, {160, 160}}
+
+      assert Transform.output_pixels(
+               plan!(%{"w" => "200", "h" => "200", "fit" => "fill", "pad" => "20"}),
+               {640, 400}
+             ) == 200 * 200
+
+      assert Transform.output_pixels(plan!(%{"pad" => "10"}), {640, 400}) == 660 * 420
+    end
+
     test "fit=scale stretches to the box; fit=fillmax fills it without scaling up" do
       assert Transform.geometry(plan!(%{"w" => "100", "h" => "100", "fit" => "scale"}), 600, 400).resize ==
                {100, 100}
