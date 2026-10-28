@@ -27,6 +27,11 @@ defmodule Barkpark.Sso.OidcConnection do
     field :groups_claim, :string, default: "groups"
     field :group_role_mappings, :map, default: %{}
 
+    # Refuse a sign-in whose groups match no mapping, and remove the seats the
+    # connection gave that user (`Barkpark.Sso.Oidc.handle_callback/3`). Off by
+    # default.
+    field :require_group_match, :boolean, default: false
+
     # Entra ID settings. Empty endpoints are read from the issuer's discovery
     # document. `strict_validation` turns on the stricter ID token checks and
     # subject matching in `Barkpark.Sso.Oidc`; `tenant_id` pins Entra's `tid`.
@@ -64,6 +69,7 @@ defmodule Barkpark.Sso.OidcConnection do
       :jwks_uri,
       :groups_claim,
       :group_role_mappings,
+      :require_group_match,
       :scopes,
       :token_endpoint_auth_method,
       :tenant_id,

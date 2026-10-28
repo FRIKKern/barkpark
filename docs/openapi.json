@@ -170,6 +170,7 @@
                   "mfa_required",
                   "missing_slug",
                   "missing_source",
+                  "no_mapped_group",
                   "no_user_identity",
                   "not_acceptable",
                   "not_found",

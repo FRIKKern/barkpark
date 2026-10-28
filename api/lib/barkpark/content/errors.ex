@@ -272,6 +272,10 @@ defmodule Barkpark.Content.Errors do
                          # require_org_mfa_enrolment.ex (an SDK must branch on these)
                          "mfa_required",
                          "mfa_enrolment_required",
+                         # OIDC callback (oidc_controller.ex): the connection has
+                         # require_group_match on and the user's groups match no
+                         # mapping (403).
+                         "no_mapped_group",
                          # Workspace bundle merge-import (PDS W1) —
                          # v1/workspace_controller.ex: import disabled by the
                          # fail-closed guard (403), an unknown import mode (422),

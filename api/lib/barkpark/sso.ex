@@ -281,6 +281,46 @@ defmodule Barkpark.Sso do
     n
   end
 
+  @doc """
+  Take away what an OIDC connection gave `user` after a sign-in whose groups
+  match no mapping, on a connection with `require_group_match` on. Removes the
+  user's seats in the org's workspaces whose role the connection grants: a
+  mapped role, or the `member` default. Other seats stay, and so does a
+  workspace's last owner, as in `Tenancy.Members.remove_member/3`. When a seat
+  was removed, the user's live sessions are revoked. Returns the number of
+  seats removed.
+  """
+  @spec remove_unmapped_user(struct(), User.t()) :: non_neg_integer()
+  def remove_unmapped_user(%{organization_id: org_id} = c, %User{id: uid} = user)
+      when is_binary(org_id) do
+    ws_ids = Repo.all(from w in Workspace, where: w.organization_id == ^org_id, select: w.id)
+    roles = Enum.uniq([@default_role | Map.values(c.group_role_mappings || %{})])
+    kept = sole_owner_workspaces(ws_ids, uid)
+
+    {n, removed} =
+      Repo.delete_all(
+        from(m in Tenancy.Membership,
+          where:
+            m.principal_type == "user" and m.principal_id == ^uid and
+              m.workspace_id in ^(ws_ids -- kept) and m.role in ^roles,
+          select: m.workspace_id
+        )
+      )
+
+    Enum.each(removed, &Tenancy.Members.announce_seats_changed/1)
+
+    if n > 0 do
+      {:ok, revoked} = Accounts.revoke_all_user_sessions(user)
+
+      Logger.info(
+        "[Sso] removed #{n} seat(s) in org #{org_id} from user #{uid}: no mapped group; " <>
+          "revoked #{revoked} session(s)"
+      )
+    end
+
+    n
+  end
+
   @doc "Is `BARKPARK_OIDC_KEEP_OWNER` on? Off by default."
   @spec keep_owner?() :: boolean()
   def keep_owner?, do: Application.get_env(:barkpark, :oidc_keep_owner, false) == true

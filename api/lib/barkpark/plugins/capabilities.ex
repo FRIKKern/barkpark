@@ -5050,7 +5050,12 @@ defmodule Barkpark.Plugins.Capabilities do
       flag("tenant_id", "string", "Entra tenant id. Sign-in requires a matching tid claim."),
       flag("strict_validation", "boolean", "Turn on the stricter ID token and subject checks."),
       flag("trust_idp_mfa", "boolean", "Count the identity provider's MFA as Barkpark MFA."),
-      flag("mfa_acr", "string", "acr value that also counts as MFA when trust_idp_mfa is on.")
+      flag("mfa_acr", "string", "acr value that also counts as MFA when trust_idp_mfa is on."),
+      flag(
+        "require_group_match",
+        "boolean",
+        "Refuse a sign-in whose groups match no mapping, and remove the user's seats."
+      )
     ]
 
   defp flag(name, type, summary, opts \\ []) do

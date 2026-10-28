@@ -228,7 +228,9 @@ defmodule Barkpark.Sso.Oidc do
   @doc """
   Complete the callback: exchange `code`, verify the id_token, find-or-create the
   user. `opts` carries `:redirect_uri`, `:code_verifier`, and `:nonce` (from the
-  start step). Returns `{:ok, user, claims}` or `{:error, reason}`.
+  start step). Returns `{:ok, user, claims}` or `{:error, reason}`. With
+  `require_group_match` on, groups that match no mapping give
+  `{:error, :no_mapped_group}`.
   """
   @spec handle_callback(OidcConnection.t(), String.t(), keyword()) ::
           {:ok, User.t(), map()} | {:error, term()}
@@ -245,17 +247,23 @@ defmodule Barkpark.Sso.Oidc do
       # (era-w3-jit). When the id_token's groups resolve through the
       # admin-configured group→role mappings (era-w7), that role wins — for
       # new AND existing memberships (authoritative, mirroring SCIM group
-      # sync). An absent/unmapped groups claim leaves existing roles alone.
+      # sync). An absent/unmapped groups claim leaves existing roles alone,
+      # unless `require_group_match` is on: then the sign-in is refused and
+      # the seats the connection gave are removed.
       case Barkpark.Sso.resolve_group_role(c, claims) do
+        nil when c.require_group_match ->
+          Barkpark.Sso.remove_unmapped_user(c, user)
+          {:error, :no_mapped_group}
+
         nil ->
           Barkpark.Sso.jit_provision(c.organization_id, user)
+          {:ok, user, claims}
 
         role ->
           Barkpark.Sso.jit_provision(c.organization_id, user, role)
           Barkpark.Sso.set_org_member_role(c.organization_id, user.id, role)
+          {:ok, user, claims}
       end
-
-      {:ok, user, claims}
     else
       {:ok, %{}} -> {:error, :no_id_token}
       {:error, _} = err -> err
