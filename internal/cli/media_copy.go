@@ -243,6 +243,12 @@ func (m *importMedia) uploadOne(u string, ctx manifest.Context, a mediaCopyAsset
 	if err != nil {
 		return "", err
 	}
+	if status == 409 {
+		// A re-run in the same dataset answers 2xx, so a 409 means another
+		// dataset on this instance already holds the id.
+		ae := classifyError(status, body)
+		return "", fmt.Errorf("the server answered 409: %s. Media file ids are unique per instance, so this instance already holds %s in another dataset. Import into a different instance; see docs/setup/SELF-HOST-MOVE.md#copy-one-dataset-over-the-api", ae.errorMessage(), a.ID)
+	}
 	if status < 200 || status >= 300 {
 		ae := classifyError(status, body)
 		return "", fmt.Errorf("the server answered %d: %s", status, ae.errorMessage())

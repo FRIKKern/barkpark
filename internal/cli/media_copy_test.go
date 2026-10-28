@@ -25,6 +25,7 @@ type mediaFakeServer struct {
 	*importFakeServer
 	srv    *httptest.Server
 	prefix string // the path prefix this instance stores files under
+	taken  bool   // every upload answers 409, as when another dataset holds the id
 
 	mu    sync.Mutex
 	files map[string]mediaCopyAsset
@@ -90,6 +91,11 @@ func (m *mediaFakeServer) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		data, _ := io.ReadAll(file)
 		id := r.FormValue("mediaFileId")
+		if m.taken {
+			w.WriteHeader(http.StatusConflict)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "conflict", "message": "document already exists"}})
+			return
+		}
 		if id == "" {
 			id = fmt.Sprintf("new-%d", len(m.files)+1)
 		}
@@ -188,5 +194,31 @@ func TestImportMediaRerunIsNotACollision(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, mediaCopyManifest)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Media file ids are unique per instance, so an import into a second dataset
+// on the same instance is refused 409. The error names that cause and the
+// SELF-HOST-MOVE.md section.
+func TestImportMediaSameInstanceConflictNamesCause(t *testing.T) {
+	src := newMediaFakeServer(t, "d/source")
+	src.store("55555555-5555-5555-5555-555555555555", "c.png", []byte("c"))
+	dir := t.TempDir()
+	backup := filepath.Join(dir, "backup.ndjson")
+	var so, se strings.Builder
+	if code := runExport(newWriter(&so, &se), globals{}, src.ctx(), []string{"--out", backup, "--media", dir}); code != exitOK {
+		t.Fatalf("export exit = %d; stderr=%s", code, se.String())
+	}
+	dst := newMediaFakeServer(t, "d/target")
+	dst.taken = true
+	code, stdout, stderr := runImportForTest(t, dst.ctx(), globals{}, backup, "--media", dir)
+	if code == exitOK {
+		t.Fatalf("import exit = 0, want a refusal; stdout=%s", stdout)
+	}
+	all := stdout + stderr
+	for _, want := range []string{"unique per instance", "SELF-HOST-MOVE.md#copy-one-dataset-over-the-api"} {
+		if !strings.Contains(all, want) {
+			t.Errorf("import output lacks %q: %s", want, all)
+		}
 	}
 }
