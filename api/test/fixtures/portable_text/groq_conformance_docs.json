@@ -1,0 +1,105 @@
+{
+  "source": "Made-up documents for the stored Portable Text GROQ conformance test. Expected answers come from groq-js 2.0.1 on the same documents.",
+  "documents": [
+    {
+      "_id": "page-garden",
+      "_type": "ptpage",
+      "title": "Garden notes"
+    },
+    {
+      "_id": "page-kettle",
+      "_type": "ptpage",
+      "title": "Kettle care"
+    },
+    {
+      "_id": "article-1",
+      "_type": "ptarticle",
+      "title": "A walk by the pond",
+      "body": [
+        {
+          "_type": "block",
+          "_key": "b1",
+          "style": "h2",
+          "markDefs": [],
+          "children": [
+            {"_type": "span", "_key": "b1s1", "text": "Morning at the pond", "marks": []}
+          ]
+        },
+        {
+          "_type": "block",
+          "_key": "b2",
+          "style": "normal",
+          "markDefs": [
+            {
+              "_type": "linkAnnotation",
+              "_key": "m1",
+              "linkType": "internal",
+              "internalLink": {"_type": "reference", "_ref": "page-garden"}
+            },
+            {"_type": "link", "_key": "m2", "href": "https://example.com/ducks"}
+          ],
+          "children": [
+            {"_type": "span", "_key": "b2s1", "text": "The ducks were ", "marks": []},
+            {"_type": "span", "_key": "b2s2", "text": "very", "marks": ["strong", "em"]},
+            {"_type": "span", "_key": "b2s3", "text": " loud. See the ", "marks": []},
+            {"_type": "span", "_key": "b2s4", "text": "garden notes", "marks": ["m1"]},
+            {"_type": "span", "_key": "b2s5", "text": " and ", "marks": []},
+            {"_type": "span", "_key": "b2s6", "text": "this page", "marks": ["m2", "strong"]},
+            {"_type": "span", "_key": "b2s7", "text": ".", "marks": []}
+          ]
+        },
+        {
+          "_type": "callout",
+          "_key": "c1",
+          "tone": "info",
+          "text": "Bring bread for the ducks."
+        },
+        {
+          "_type": "block",
+          "_key": "b3",
+          "style": "normal",
+          "listItem": "bullet",
+          "level": 1,
+          "markDefs": [],
+          "children": [
+            {"_type": "span", "_key": "b3s1", "text": "A thermos of tea", "marks": []}
+          ]
+        },
+        {
+          "_type": "block",
+          "_key": "b4",
+          "style": "normal",
+          "listItem": "bullet",
+          "level": 2,
+          "markDefs": [
+            {
+              "_type": "linkAnnotation",
+              "_key": "m3",
+              "linkType": "internal",
+              "internalLink": {"_type": "reference", "_ref": "page-kettle"}
+            }
+          ],
+          "children": [
+            {"_type": "span", "_key": "b4s1", "text": "Read ", "marks": []},
+            {"_type": "span", "_key": "b4s2", "text": "kettle care", "marks": ["m3"]},
+            {"_type": "chip", "_key": "b4i1", "label": "new"}
+          ]
+        },
+        {
+          "_type": "block",
+          "_key": "b5",
+          "style": "normal",
+          "children": [
+            {"_type": "span", "_key": "b5s1", "text": "A block with no markDefs key.", "marks": []}
+          ]
+        }
+      ]
+    },
+    {
+      "_id": "article-2",
+      "_type": "ptarticle",
+      "title": "Empty",
+      "body": []
+    }
+  ]
+}
