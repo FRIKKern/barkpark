@@ -234,13 +234,40 @@ defmodule Barkpark.Mailer do
             {:error, {:not_deliverable, adapter, reason}}
 
           match?({:ok, _}, result) ->
+            record_send(:ok)
             :ok
 
           true ->
+            record_send({:error, result})
             result
         end
     end
   end
+
+  @last_send_key {__MODULE__, :last_send}
+
+  @doc """
+  The outcome of the last send through a configured relay since this node
+  booted: `:ok`, `{:error, at, reason}` or `nil` when nothing was sent yet.
+
+  The `/status.json` `mail` component reads it, so a relay that refuses mail
+  shows as degraded while a box with no relay at all does not.
+  """
+  @spec last_send() :: :ok | {:error, DateTime.t(), term()} | nil
+  def last_send, do: :persistent_term.get(@last_send_key, nil)
+
+  # Written only when the outcome changes. A persistent_term write costs a
+  # global scan, and a steady stream of good sends would otherwise pay it each time.
+  defp record_send(:ok) do
+    if last_send() != :ok, do: :persistent_term.put(@last_send_key, :ok)
+  end
+
+  defp record_send({:error, result}) do
+    :persistent_term.put(@last_send_key, {:error, DateTime.utc_now(), result})
+  end
+
+  @doc false
+  def reset_last_send, do: :persistent_term.erase(@last_send_key)
 
   @doc """
   Log the undeliverable-mail banner once at boot when this node cannot send.
@@ -249,7 +276,7 @@ defmodule Barkpark.Mailer do
   configuration — every `mix phx.server` on a laptop is one — so refusing the
   node would make the honest signal unshippable. The counterpart is that the
   condition is never merely implicit: it is stated at boot, restated on every
-  send that hits it, and queryable at `/status.json` as a degraded `mail`
+  send that hits it, and queryable at `/status.json` as a note on the `mail`
   component. Contrast `from/0`, which DOES raise: a malformed
   `MAIL_FROM_ADDRESS` is always a typo, never a deployment style.
 

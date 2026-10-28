@@ -824,6 +824,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # …plus the dwb-4/5 bootstrap outputs site-url needs to find the

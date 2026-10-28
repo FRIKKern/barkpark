@@ -2127,7 +2127,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # external Studio): the new internal/cloudclient/studio_callbacks.go decodes
   # `StudioCallbacks.Callbacks`: ONE new NAME (`studio_callbacks`). MEASURED by
   # the PIN CO-EDIT arm ("416 -> 417").
-  @go_tag_pinned 417
+  # 417 -> 422 (task-1d2936aa15f96bc2, rotate the admin token Cloud holds):
+  # the new internal/cloudclient/admin_token_rotate.go decodes
+  # `AdminTokenRotation`: FIVE new NAMES (`rotated`, `old_token_id`,
+  # `new_token_id`, `seats_not_carried`, `old_token_status`). `barkpark_id`,
+  # `label` and `workspace` ride existing names and move the SITE register.
+  # MEASURED by the PIN CO-EDIT arm.
+  @go_tag_pinned 422
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2218,7 +2224,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # AdoptResult / AdoptStep, the POST /v1/barkparks/adopt envelope).
     # NEWLY DUPLICATED, 1 -> 2: `AdoptResult.Barkpark`, the adopted row.
     "barkpark" => 2,
-    "barkpark_id" => 4,
+    "barkpark_id" => 5,
     # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
     "basis" => 7,
     "became_live_at" => 2,
@@ -2405,7 +2411,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # `SiteDoctorSubstrate.Key` joins the single existing declaration.
     "key" => 2,
     "kind" => 5,
-    "label" => 6,
+    "label" => 7,
     "last_seen_at" => 2,
     "live" => 2,
     # dr-w16-bl-live-per-attempt-reaches-the-site-owner: NEWLY DUPLICATED, 1 -> 2.
@@ -2610,7 +2616,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the number it denominates, so it is declared a third time.
     "window" => 3,
     # task-5283ad9f9238f7fe: 2 -> 3, `AdoptResult.Adopted.Workspace` (internal/cloudclient/adopt.go).
-    "workspace" => 3
+    "workspace" => 4
   }
 
   # The SITE arm's corpus, pinned. `Go.source/1` globs `*.go` and drops
@@ -2647,7 +2653,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go tokens.go)
+  @cloudclient_sources ~w(admin_token_rotate.go adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go studio_callbacks.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was

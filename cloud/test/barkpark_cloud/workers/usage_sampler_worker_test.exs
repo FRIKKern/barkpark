@@ -61,6 +61,7 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp ok_json(status, body), do: {:ok, %{status: status, body: body}}
@@ -123,6 +124,34 @@ defmodule BarkparkCloud.Workers.UsageSamplerWorkerTest do
     assert %DateTime{} = sample.measured_at
     # A not-live box never called upstream.
     assert Fake.requests() == []
+  end
+
+  test "a box whose url host it does not own gets no request and no token" do
+    team = team_fixture()
+    n = System.unique_integer([:positive])
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+
+    # Checkable and token-bearing, but nothing claims the url host for this row.
+    bp =
+      bp
+      |> Ecto.Changeset.change(
+        host: "203.0.113.#{rem(n, 250) + 1}",
+        url: "https://unowned-#{n}.barkpark.cloud",
+        admin_token_encrypted: Vault.encrypt(@admin_token)
+      )
+      |> Repo.update!()
+
+    Fake.program([])
+
+    {result, log} = with_log(fn -> tick() end)
+    assert {:ok, _} = result
+
+    assert Fake.requests() == []
+    assert log =~ "WITHHELD"
+    refute log =~ @admin_token
+
+    assert [sample] = samples_for(bp)
+    assert sample.envelope["meters"]["documents"]["value"] == "unmetered"
   end
 
   test "does NOT sample a hostless or suspended box" do

@@ -94,6 +94,27 @@ defmodule BarkparkWeb.StatusControllerTest do
     end
   end
 
+  test "GET /status.json reports the pinned image, and null when BARKPARK_IMAGE is unset",
+       %{conn: conn} do
+    prev = Application.get_env(:barkpark, :image)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :image, prev),
+        else: Application.delete_env(:barkpark, :image)
+    end)
+
+    Application.delete_env(:barkpark, :image)
+    body = conn |> get("/status.json") |> json_response(200)
+    assert Map.has_key?(body, "image"), "image must be SURFACED as null, never omitted"
+    assert body["image"] == nil
+
+    Application.put_env(:barkpark, :image, "ghcr.io/frikkern/barkpark:0.2.28")
+
+    assert scoped_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("image") ==
+             "ghcr.io/frikkern/barkpark:0.2.28"
+  end
+
   test "an underivable sha renders \"unknown\" rather than dropping the key" do
     # BuildInfo freezes its sha at compile time, so the fallback is proven
     # through Status.commit/1's injectable resolver — the same code path
@@ -241,22 +262,29 @@ defmodule BarkparkWeb.StatusControllerTest do
   describe "mail deliverability component" do
     setup do
       original = Application.get_env(:barkpark, Barkpark.Mailer)
-      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Mailer, original) end)
+      Barkpark.Mailer.reset_last_send()
+
+      on_exit(fn ->
+        Application.put_env(:barkpark, Barkpark.Mailer, original)
+        Barkpark.Mailer.reset_last_send()
+      end)
+
       :ok
     end
 
-    test "a node whose mailer discards every message reports mail degraded", %{conn: conn} do
-      # The queryable half of the fix. Password reset and magic-link sign-in
-      # answer 200 for anti-enumeration reasons, so an operator or an uptime
-      # monitor has nowhere else to see that identity mail is dead.
+    test "a node with no relay reports mail operational with a note", %{conn: conn} do
+      # Mail is optional. Password reset and magic-link sign-in answer 200 for
+      # anti-enumeration reasons, so the note is where an operator sees that
+      # no mail goes out. It must not turn a healthy install degraded.
       Application.put_env(:barkpark, Barkpark.Mailer, adapter: Swoosh.Adapters.Local)
 
       body = conn |> get("/status.json") |> json_response(200)
       mail = Enum.find(body["components"], &(&1["name"] == "mail"))
 
       assert mail, "the status payload must carry a mail component"
-      assert mail["status"] == "degraded"
-      refute body["status"] == "operational"
+      assert mail["status"] == "operational"
+      assert mail["detail"] =~ "SMTP_HOST"
+      refute Enum.any?(body["components"], &(&1["status"] == "degraded" and &1["name"] == "mail"))
     end
 
     test "a node with a real relay reports mail operational", %{conn: conn} do
@@ -266,6 +294,31 @@ defmodule BarkparkWeb.StatusControllerTest do
       mail = Enum.find(body["components"], &(&1["name"] == "mail"))
 
       assert mail["status"] == "operational"
+      refute Map.has_key?(mail, "detail")
+    end
+
+    test "a configured relay whose last send failed reports mail degraded", %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Mailer, adapter: Barkpark.StatusFailingMailAdapter)
+
+      email =
+        Swoosh.Email.new(to: "a@example.com", from: "b@example.com", subject: "s", text_body: "t")
+
+      assert {:error, _} = Barkpark.Mailer.deliver_checked(email)
+
+      body = conn |> get("/status.json") |> json_response(200)
+      mail = Enum.find(body["components"], &(&1["name"] == "mail"))
+
+      assert mail["status"] == "degraded"
+      assert mail["detail"] =~ "last send through SMTP_HOST failed"
+      refute body["status"] == "operational"
     end
   end
+end
+
+defmodule Barkpark.StatusFailingMailAdapter do
+  @moduledoc false
+  use Swoosh.Adapter
+
+  @impl true
+  def deliver(_email, _config), do: {:error, :relay_refused}
 end

@@ -78,7 +78,7 @@ install_caddy_pkg() {
 
 # Barkpark — Server deployment
 #
-# Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL directly on the server.
+# Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL 17 directly on the server.
 # Works on both ARM64 (Hetzner cax*) and x86_64 (Hetzner cpx*/ccx*).
 #
 # Usage:
@@ -194,8 +194,29 @@ if [ "${MEM_KB:-0}" -gt 0 ] && [ "$MEM_KB" -lt 3500000 ] && [ -z "$(swapon --noh
 fi
 
 # ── 2. PostgreSQL ────────────────────────────────────────────────────────────
+# PostgreSQL 17 from the PostgreSQL apt repository (PGDG), the major that
+# deploy/azure/main.bicep runs on Flexible Server, so a backup restores on
+# either path. Ubuntu's own package is 14 on 22.04 and 16 on 24.04. A box that
+# already has a cluster keeps it and its major: a second major would start a
+# second cluster on port 5433 while the database stays on the first.
+# postgresql-17 carries citext, pg_trgm and pgcrypto, which the migrations need.
+PG_MAJOR=17
 echo ">> PostgreSQL..."
-apt-get install -y -qq --no-install-recommends postgresql postgresql-contrib
+if command -v pg_lsclusters >/dev/null 2>&1 && [ -n "$(pg_lsclusters -h 2>/dev/null)" ]; then
+  echo "   Keeping the existing cluster: $(pg_lsclusters -h | awk '{print $1 "/" $2}' | tr '\n' ' ')"
+else
+  . /etc/os-release
+  install -d /usr/share/postgresql-common/pgdg
+  curl -fsSL --retry 3 -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    https://www.postgresql.org/media/keys/ACCC4CF8.asc
+  echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
+    > /etc/apt/sources.list.d/pgdg.list
+  apt-get update -qq
+  if ! apt-get install -y -qq --no-install-recommends "postgresql-$PG_MAJOR"; then
+    echo "!! PostgreSQL: could not install postgresql-$PG_MAJOR from apt.postgresql.org for $VERSION_CODENAME" >&2
+    exit 1
+  fi
+fi
 systemctl enable postgresql
 systemctl start postgresql
 
@@ -558,6 +579,10 @@ Requires=postgresql.service
 Type=simple
 User=root
 ExecStart=$APP_DIR/api/start.sh
+# SIGTERM to the BEAM only. It stops its own port programs (memsup, disksup,
+# cpu_sup) in order; signalling the whole cgroup killed them first and logged
+# three errors on every clean stop. Leftovers get SIGKILL after the BEAM exits.
+KillMode=mixed
 Restart=on-failure
 RestartSec=5
 
@@ -823,6 +848,9 @@ else
 fi
 echo ""
 SSH_LOGIN="${SUDO_USER:-root}@$IP"
+# The ssh form from docs/setup/SELF-HOST.md Path A, whose step 1 makes the key
+# ~/.ssh/barkpark on the operator's machine. Printed literally, unexpanded.
+SSH_CMD="ssh -i ~/.ssh/barkpark $SSH_LOGIN"
 if [ -n "$ADMIN_TOKEN" ]; then
   echo "  Admin token: saved to $ADMIN_TOKEN_FILE (root only, mode 0600)."
   if [ -s "${ADMIN_TOKEN_ID_FILE:-}" ]; then
@@ -837,14 +865,14 @@ if [ -n "$ADMIN_TOKEN" ]; then
   else
     _server="http://$IP:$APP_PORT"
   fi
-  echo "    bp setup --target connect --server $_server --token \"\$(ssh $SSH_LOGIN sudo cat $ADMIN_TOKEN_FILE)\""
+  echo "    bp setup --target connect --server $_server --token \"\$($SSH_CMD sudo cat $ADMIN_TOKEN_FILE)\""
   echo ""
 fi
 echo "  For a separate Studio, a workspace owner or admin gets its BARKPARK_TOKEN line with:"
 echo "    bp instance studio-token --workspace default"
 echo ""
 echo "  SSH workflow:"
-echo "    ssh $SSH_LOGIN"
+echo "    $SSH_CMD"
 echo "    sudo -i"
 echo "    cd $APP_DIR"
 echo "    make rebuild   # after code changes"

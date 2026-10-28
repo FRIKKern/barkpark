@@ -13059,3 +13059,48 @@ msgstr "Velg fil"
 #, elixir-autogen, elixir-format
 msgid "No file chosen"
 msgstr "Ingen fil valgt"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Insert inline"
+msgstr "Sett inn i linjen"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Insert inline…"
+msgstr "Sett inn i linjen…"
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Inserting…"
+msgstr "Setter inn…"
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "Save annotation"
+msgstr "Lagre merknad"
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "Save item"
+msgstr "Lagre element"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This annotation cannot be opened in a form."
+msgstr "Denne merknaden kan ikke åpnes i et skjema."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This annotation cannot be added here."
+msgstr "Denne merknaden kan ikke legges til her."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This item cannot be opened in a form."
+msgstr "Dette elementet kan ikke åpnes i et skjema."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This item cannot be inserted here."
+msgstr "Dette elementet kan ikke settes inn her."

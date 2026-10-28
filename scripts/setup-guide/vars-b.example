@@ -9,9 +9,9 @@
 RG=rg-barkpark-guide-b1
 resource_group=rg-barkpark-guide-b1
 target=containerapps
-# The template sets PHX_HOST to the app's address. This name only feeds
-# BARKPARK_ALWAYS_ALLOWED_ORIGINS.
-host=bp-guide-b.example.com
+# Empty: init writes no PHX_HOST and main.bicep sets it to the app's
+# Container Apps address. A domain here becomes PHX_HOST and customDomain.
+host=
 alert_email=owner@example.com
 
 # Values bp instance init writes into barkpark.env.

@@ -215,6 +215,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"decodes a non-empty result.assetDocId; that id is what the imported documents reference, so an empty " +
 			"or HTML 200 refuses the import before any document is written.",
 	},
+	{
+		File: "internal/cli/media_copy.go", Func: "uploadOne", Sites: 1,
+		Endpoint: "POST /v1/media/:dataset/upload (one file of a bp import --media)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx goes through builtinWriteReceiptErr, and the file counts as uploaded only when the receipt " +
+			"decodes result.id equal to the exported asset id and result.sha1 equal to the exported SHA-1, so an " +
+			"empty or HTML 200 refuses the import before any document is written.",
+	},
 	// ---- migrate ---------------------------------------------------------
 	{
 		File: "internal/cli/migrate_cmd.go", Func: "migrateSchemas", Sites: 1,

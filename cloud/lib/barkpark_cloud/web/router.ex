@@ -112,6 +112,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/autoupdate operator  fleet-autoupdate policy snapshot (console read)
       POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
       POST    /v1/operator/barkparks/:id/enable-apply operator  re-run the enable-apply job on one ARMED box (re-arms + restores box-side go.mod/go.sum churn; consent-gated on autoupdate_enabled)
+      POST    /v1/operator/barkparks/:id/admin-token/rotate operator  replace the admin token Cloud holds for one box: mint a successor, store it, check it, then revoke the old one (no secret returned)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
@@ -324,6 +325,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.Accounts.{Authz, Erasure, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
+  alias BarkparkCloud.Registry.AdminTokenRotation
   alias BarkparkCloud.Registry.Adoption
   alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
@@ -5036,6 +5038,14 @@ defmodule BarkparkCloud.Web.Router do
       {:error, :pinned} ->
         json(conn, 409, %{error: %{code: "pinned", pinned_release: bp.pinned_release}})
 
+      # PAUSE HONESTY: `bp cloud autoupdate pause` promises no update until
+      # resume, so an unforced trigger on a paused box is a 409, never a run.
+      # `force: true` overrides it for one run, like the pin. Flat on purpose:
+      # the error-envelope census pins the nested set (the console and the
+      # CLI read both shapes).
+      {:error, :paused} ->
+        json(conn, 409, %{error: "paused"})
+
       {:ok, 202, _body} ->
         # OC24: the run started on the box — record the operator
         # trigger (and whether the pin was force-overridden).
@@ -5631,6 +5641,128 @@ defmodule BarkparkCloud.Web.Router do
         end
     end
   end
+
+  # POST /v1/operator/barkparks/:id/admin-token/rotate → 200 {ok, rotated:
+  # {old_token_id, new_token_id, label, workspace, seats_carried,
+  # old_token_status}} — replace the admin token Cloud holds for one box
+  # (task-1d2936aa15f96bc2). Cloud mints a successor on the box with the held
+  # token, seated in every workspace the old token is (task-86e3a3a0c885097a),
+  # stores it, checks it, and only then revokes the old one;
+  # `Registry.AdminTokenRotation` owns the steps and the undo. Operator only,
+  # across teams, like enable-apply above. No secret is returned. Refusals: 404
+  # not_found, 409 not_live, 404 no_admin_token, 500 decrypt_failed, 502
+  # box_unreachable, 502 not_box_admin (the box refused the held token), 409
+  # box_too_old (also when the box did not carry every seat, with
+  # `seats_not_carried`), 502 mint_refused, 502 minted_token_not_admin, 500
+  # record_failed (the store step), 502 revoke_refused. On every refusal the old
+  # token is still stored and live.
+  post "/v1/operator/barkparks/:id/admin-token/rotate" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      true ->
+        case Registry.get_barkpark(id) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          %Barkpark{} = bp ->
+            case AdminTokenRotation.rotate(bp) do
+              {:ok, bp, receipt} ->
+                case Accounts.record_audit(%{
+                       team_id: bp.team_id,
+                       actor_user_id: conn.assigns.current_user.id,
+                       action: "barkpark.admin_token_rotated",
+                       target_type: "barkpark",
+                       target_id: bp.id,
+                       metadata: %{
+                         old_token_id: receipt.old_token_id,
+                         new_token_id: receipt.new_token_id,
+                         box_workspace: receipt.workspace,
+                         seats_carried: receipt.seats_carried,
+                         old_token_status: receipt.old_token_status
+                       }
+                     }) do
+                  {:ok, _} ->
+                    :ok
+
+                  {:error, reason} ->
+                    Logger.warning("rotate: audit row for #{bp.id} failed: #{inspect(reason)}")
+                end
+
+                push_event(bp.team_id, "audit")
+                json(conn, 200, %{ok: true, barkpark_id: bp.id, rotated: receipt})
+
+              {:error, refusal} ->
+                rotate_refusal(conn, refusal)
+            end
+        end
+    end
+  end
+
+  defp rotate_refusal(conn, :not_live), do: json(conn, 409, %{error: "not_live"})
+  defp rotate_refusal(conn, :no_admin_token), do: json(conn, 404, %{error: "no_admin_token"})
+  defp rotate_refusal(conn, :decrypt_failed), do: json(conn, 500, %{error: "decrypt_failed"})
+
+  defp rotate_refusal(conn, :store_failed),
+    do:
+      json(conn, 500, %{
+        error: "record_failed",
+        detail:
+          "Cloud could not store the successor. It kept the old token and revoked the successor."
+      })
+
+  defp rotate_refusal(conn, :unreachable),
+    do: json(conn, 502, %{error: "box_unreachable", detail: "Nothing changed."})
+
+  defp rotate_refusal(conn, {:held_token_refused, status}),
+    do:
+      json(conn, 502, %{
+        error: "not_box_admin",
+        box_status: status,
+        detail: "The box refused the token Cloud holds. Nothing changed."
+      })
+
+  defp rotate_refusal(conn, {:box_too_old, route}),
+    do: json(conn, 409, %{error: "box_too_old", missing: route, detail: "Update the box first."})
+
+  defp rotate_refusal(conn, {:seats_not_carried, missing}),
+    do:
+      json(conn, 409, %{
+        error: "box_too_old",
+        missing: "POST /v1/tokens/elevated workspaces",
+        seats_not_carried: missing,
+        detail:
+          "The box did not seat the successor in every workspace the old token is seated in. " <>
+            "Cloud kept the old token and revoked the successor. Update the box first."
+      })
+
+  defp rotate_refusal(conn, {:mint_refused, status, reason}),
+    do:
+      json(conn, 502, %{
+        error: "mint_refused",
+        box_status: status,
+        reason: reason,
+        detail: "The box refused to mint the successor. Nothing changed."
+      })
+
+  defp rotate_refusal(conn, :minted_token_not_admin),
+    do:
+      json(conn, 502, %{
+        error: "minted_token_not_admin",
+        detail: "The successor did not read as admin and was revoked. The old token is kept."
+      })
+
+  defp rotate_refusal(conn, {:revoke_refused, status}),
+    do:
+      json(conn, 502, %{
+        error: "revoke_refused",
+        box_status: status,
+        detail:
+          "The box refused to revoke the old token. Cloud kept the old token and revoked the successor."
+      })
 
   post "/v1/operator/autoupdate/resume" do
     conn = Auth.require_platform_operator(conn, [])

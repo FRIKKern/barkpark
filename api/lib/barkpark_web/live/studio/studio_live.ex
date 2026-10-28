@@ -548,6 +548,14 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # The Classic rich-text editor's block dialog (task-19392d1e6fc661e6).
   def handle_event("pt-block-open", params, socket), do: ObjectBlocks.open(params, socket)
   def handle_event("pt-block-insert", params, socket), do: ObjectBlocks.insert(params, socket)
+  def handle_event("pt-def-open", params, socket), do: ObjectBlocks.open_def(params, socket)
+  def handle_event("pt-def-insert", params, socket), do: ObjectBlocks.insert_def(params, socket)
+  def handle_event("pt-inline-open", params, socket), do: ObjectBlocks.open_inline(params, socket)
+
+  def handle_event("pt-inline-insert", params, socket),
+    do: ObjectBlocks.insert_inline(params, socket)
+
+  def handle_event("object-dialog-remove", _params, socket), do: ObjectBlocks.remove(socket)
 
   def handle_event("object-dialog-change", params, socket),
     do: ObjectBlocks.change(params, socket)

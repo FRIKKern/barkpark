@@ -42,6 +42,7 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   describe "next_autoupdate_candidate/0" do
@@ -276,6 +277,38 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
       assert req.url =~ "/v1/admin/self-update"
     end
 
+    test "a paused instance rejects an unforced trigger with :paused and sends nothing" do
+      bp =
+        behind_barkpark(%{
+          autoupdate_paused: true,
+          admin_token_encrypted: Vault.encrypt(@admin_token)
+        })
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 202, body: ~s({"ok":true})}}])
+
+      assert Registry.trigger_self_update(bp) == {:error, :paused}
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "force: true overrides the pause for one run" do
+      bp =
+        behind_barkpark(%{
+          autoupdate_paused: true,
+          admin_token_encrypted: Vault.encrypt(@admin_token)
+        })
+
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 202, body: ~s({"ok":true})}}])
+
+      assert {:ok, 202, _} = Registry.trigger_self_update(bp, force: true)
+      [req] = StudioLinkFakeHttpClient.requests()
+      assert req.url =~ "/v1/admin/self-update"
+    end
+
+    test "a pinned AND paused instance still answers :pinned" do
+      bp = behind_barkpark(%{pinned_release: "v0.2.24", autoupdate_paused: true})
+      assert Registry.trigger_self_update(bp) == {:error, :pinned}
+    end
+
     test "an UNpinned instance is unaffected by the pin gate" do
       bp = behind_barkpark() |> unset_url()
       # no pin → straight to the live guard (url-less → :not_live), never :pinned
@@ -411,5 +444,10 @@ defmodule BarkparkCloud.RegistryAutoupdateTest do
     end
   end
 
-  defp unset_url(bp), do: bp |> Ecto.Changeset.change(url: nil, host: "") |> Repo.update!()
+  defp unset_url(bp),
+    do:
+      bp
+      |> Ecto.Changeset.change(url: nil, host: "")
+      |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 end

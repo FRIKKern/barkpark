@@ -13,6 +13,11 @@
 // the addresses in operatorIpRanges and refuse everyone else. Backup, restore
 // and `bp instance check` run in the jobs barkpark-backup and barkpark-ops
 // inside the same network.
+//
+// PHX_HOST is the app's Container Apps address, set in the same deployment,
+// or customDomain from the first deployment on. The output dnsRecords lists
+// the CNAME and asuid TXT records the domain needs; with bindCustomDomain the
+// next deployment binds it with a managed certificate.
 
 targetScope = 'resourceGroup'
 
@@ -32,8 +37,11 @@ param acrName string = ''
 @description('Resource group of that registry. Defaults to this resource group.')
 param acrResourceGroup string = resourceGroup().name
 
-@description('Public host name. Leave empty to use the Container Apps default host name.')
-param publicHost string = ''
+@description('Optional. Your own subdomain for the app, such as barkpark.example.com. It becomes PHX_HOST from the first deployment. The deployment prints the two DNS records it needs in the output dnsRecords.')
+param customDomain string = ''
+
+@description('Set true once the dnsRecords exist, and keep it. The deployment then binds customDomain with a free managed certificate.')
+param bindCustomDomain bool = false
 
 @description('vCPU for the app container.')
 param cpu string = '1.0'
@@ -71,9 +79,9 @@ param settings object = {}
 param operatorIpRanges array = []
 
 @description('The bp CLI release the jobs install. 1.26.2 and newer restore into a newer Postgres major.')
-param bpCliVersion string = '1.26.2'
+param bpCliVersion string = '1.26.10'
 
-@description('Daily backup time for the job barkpark-ops, as a UTC cron expression.')
+@description('Daily backup time for the job barkpark-backup, as a UTC cron expression.')
 param backupCron string = '30 2 * * *'
 
 @description('Days to keep backups on the backups share.')
@@ -419,7 +427,23 @@ resource environmentMedia 'Microsoft.App/managedEnvironments/storages@2024-03-01
   }
 }
 
-var host = empty(publicHost) ? '${appName}.${environment.properties.defaultDomain}' : publicHost
+// PHX_HOST is the custom domain when set, else the app's default address,
+// which Azure knows once the environment exists in this same deployment.
+// main.example.bicepparam reads customDomain from PHX_HOST in barkpark.env.
+var defaultHost = '${appName}.${environment.properties.defaultDomain}'
+// A name under azurecontainerapps.io is Azure's own address, not a custom domain.
+var hasCustomDomain = !empty(customDomain) && !endsWith(toLower(customDomain), '.azurecontainerapps.io')
+var host = hasCustomDomain ? toLower(customDomain) : defaultHost
+// The address that serves HTTPS now: the custom domain only once it is bound.
+var liveHost = hasCustomDomain && bindCustomDomain ? host : defaultHost
+
+// The instance's own origin goes first on BARKPARK_ALWAYS_ALLOWED_ORIGINS,
+// followed by the origins in barkpark.env, so the list follows PHX_HOST.
+var extraOrigins = filter(
+  map(split(string(settings.?BARKPARK_ALWAYS_ALLOWED_ORIGINS ?? ''), ','), o => trim(o)),
+  o => !empty(o) && o != 'https://${host}'
+)
+var allowedOrigins = join(concat(['https://${host}'], extraOrigins), ',')
 
 var appSecrets = [
   for item in secretItems: {
@@ -435,9 +459,11 @@ var appSecrets = [
 var ownedSettings = concat(map(secretTable, item => item.env), [
   'DATABASE_SSL'
   'BARKPARK_SHAPE'
+  'BARKPARK_IMAGE'
   'PHX_HOST'
   'PHX_SCHEME'
   'BARKPARK_MEDIA_DIR'
+  'BARKPARK_ALWAYS_ALLOWED_ORIGINS'
 ])
 
 var settingsEnv = map(
@@ -449,16 +475,19 @@ var appEnv = concat(settingsEnv, map(secretItems, item => { name: item.env, secr
   // Azure Postgres requires TLS. The image carries the CA roots.
   { name: 'DATABASE_SSL', value: 'verify-full' }
   { name: 'BARKPARK_SHAPE', value: 'solo' }
+  // /status.json reports it as `image`, so the pinned tag is visible.
+  { name: 'BARKPARK_IMAGE', value: image }
   { name: 'PHX_HOST', value: host }
   { name: 'PHX_SCHEME', value: 'https' }
   { name: 'BARKPARK_MEDIA_DIR', value: mediaPath }
+  { name: 'BARKPARK_ALWAYS_ALLOWED_ORIGINS', value: allowedOrigins }
 ])
 
 // SMB has no POSIX owners. These options make every file and directory owned
 // by the app user and writable by it.
 var mediaMountOptions = 'uid=${mediaUid},gid=${mediaUid},dir_mode=0770,file_mode=0660,mfsymlinks,nobrl'
 
-resource app 'Microsoft.App/containerApps@2024-03-01' = if (!restoreMode) {
+resource app 'Microsoft.App/containerApps@2025-07-01' = if (!restoreMode) {
   name: appName
   location: location
   identity: {
@@ -476,6 +505,11 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!restoreMode) {
         targetPort: 4000
         transport: 'auto'
         allowInsecure: false
+        // Auto binds the managed certificate below once it is issued. Adding
+        // the name fails until the CNAME and asuid TXT records resolve.
+        customDomains: hasCustomDomain && bindCustomDomain ? [
+          { name: host, bindingType: 'Auto' }
+        ] : []
       }
       registries: empty(acrName) ? [] : [
         {
@@ -531,7 +565,7 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!restoreMode) {
           mountOptions: mediaMountOptions
         }
       ]
-      // Barkpark runs on exactly one replica. See docs/setup/SELF-HOST.md, Path B.
+      // Barkpark runs on exactly one replica. See docs/setup/SELF-HOST-UPDATES.md#container-apps.
       scale: {
         minReplicas: 1
         maxReplicas: 1
@@ -543,6 +577,21 @@ resource app 'Microsoft.App/containerApps@2024-03-01' = if (!restoreMode) {
     identityPullsImages
     vaultSecrets
     postgresDatabase
+  ]
+}
+
+// A free certificate from DigiCert, validated through the CNAME. It renews
+// itself while the CNAME points at the app and the app runs.
+resource certificate 'Microsoft.App/managedEnvironments/managedCertificates@2025-07-01' = if (hasCustomDomain && bindCustomDomain && !restoreMode) {
+  parent: environment
+  name: 'mc-${appName}-${nameSuffix}'
+  location: location
+  properties: {
+    subjectName: host
+    domainControlValidation: 'CNAME'
+  }
+  dependsOn: [
+    app
   ]
 }
 
@@ -677,7 +726,7 @@ module monitor 'monitor.bicep' = if (!empty(alertEmail) && !restoreMode) {
     nameSuffix: nameSuffix
     logAnalyticsWorkspaceId: logs.id
     containerAppId: app.id
-    publicHost: host
+    publicHost: liveHost
     backupJobName: jobs[0].name
     alertEmail: alertEmail
     availabilityFrequencySeconds: availabilityFrequencySeconds
@@ -687,8 +736,15 @@ module monitor 'monitor.bicep' = if (!empty(alertEmail) && !restoreMode) {
   ]
 }
 
+// PHX_HOST. The Entra redirect URI is https://<host>/v1/auth/oidc/<org>/callback.
+output host string = host
 output url string = 'https://${host}'
-output defaultHost string = '${appName}.${environment.properties.defaultDomain}'
+output defaultHost string = defaultHost
+// The records to create at your DNS provider before bindCustomDomain=true.
+output dnsRecords array = hasCustomDomain ? [
+  { type: 'CNAME', name: host, value: defaultHost }
+  { type: 'TXT', name: 'asuid.${host}', value: environment.properties.customDomainConfiguration.customDomainVerificationId }
+] : []
 output postgresHost string = postgres.properties.fullyQualifiedDomainName
 output storageAccountName string = storage.name
 output keyVaultName string = vault.name

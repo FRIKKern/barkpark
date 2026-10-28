@@ -321,6 +321,13 @@ on:
       # TestCaddyInstallFunc_OneInstallerEverywhere asserts it carries the
       # install_caddy_pkg block byte-identical to deploy.sh's (task-16e58856f0182596).
       - "deploy/azure-base-install.sh"
+      # deploy/azure/main.example.bicepparam: internal/cli/instance_check_cmd_test.go
+      # checks that the init file holds every secret the Container Apps parameter
+      # file names.
+      - "deploy/azure/main.example.bicepparam"
+      # deploy/azure/main.bicep: internal/cli/instance_check_cmd_test.go's
+      # TestInstanceInitContainerAppsHost checks the template sets PHX_HOST.
+      - "deploy/azure/main.bicep"
       # Starter manifests: internal/template/template_test.go's TestRealManifests
       # loads and validates every checked-in barkpark.template.json and asserts
       # its referenced schema/seed paths exist. templates/place-directory is

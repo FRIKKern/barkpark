@@ -178,16 +178,7 @@ func Execute(args []string) int {
 		// `bp login` — authenticate to the Barkpark Cloud control plane and store
 		// the session token (cloud-12). Replaces the v1 token-stub. Its own flags
 		// (--email/--password/--url) are not globals, so they arrive in rest.
-		if g.help {
-			printLoginHelp(out)
-			return exitOK
-		}
-		// `bp login --sso --org <slug>` signs in to a self-hosted instance
-		// through its org's SSO instead (login_sso.go).
-		if wantsSSOLogin(rest[1:]) {
-			return runLoginSSO(out, g, rest[1:])
-		}
-		return runLoginCloud(out, rest[1:])
+		return runLogin(out, g, rest[1:])
 	case "signup":
 		// `bp signup` — create a Barkpark Cloud account and log in (cloud-12). The
 		// registration sibling of `bp login`. Its flags (--email/--team/--password/
@@ -588,6 +579,21 @@ func Execute(args []string) int {
 	// Acquire the manifest (override file > cache/fetch).
 	m, err := loadManifest(g, ctx)
 	if err != nil {
+		// Help for a noun bp carries in its binary (offline_help.go) renders
+		// without a server: an operator reads the `bp org` flags before the
+		// instance is up. The note says where the page came from.
+		helpNoun := ""
+		if g.help {
+			helpNoun = noun
+		} else if noun == "help" {
+			helpNoun = verb
+		}
+		if om := offlineHelpManifest(helpNoun); om != nil {
+			out.errf("note: no server answered, so this help comes from bp %s itself. The server's own may differ.", cliVersion)
+			m, err = om, nil
+		}
+	}
+	if err != nil {
 		out.userErr("%v", err)
 		// A HELP REQUEST THAT DIES HERE NEEDS A DIFFERENT SENTENCE
 		// (task-23c76938811ff2db). `bp <noun> <verb> --help` renders the
@@ -771,6 +777,11 @@ func Execute(args []string) int {
 		return runTaskLanded(out, g, ctx, m, *cmd, tail)
 	}
 
+	// `bp auth logout` revokes the session it sends. See authLogoutContext.
+	if noun == "auth" && verb == "logout" {
+		ctx = authLogoutContext(g, ctx)
+	}
+
 	return runCommand(out, g, ctx, m, *cmd, tail)
 }
 
@@ -786,6 +797,21 @@ func Execute(args []string) int {
 // Defaults layer where it belongs. A var the operator DID set still wins over the
 // config, exactly as documented. The TUI's apiclient.ConfigFromEnv contract is
 // untouched (this is a CLI-local read).
+// authLogoutContext picks the token `bp auth logout` revokes. `-s <saved
+// server>` carries that entry's token above the env layer, so
+// `BARKPARK_TOKEN=<session> bp -s <server> auth logout` sent the saved token
+// and revoked nothing. A session token exported in this shell is the one the
+// operator means to end, so it wins here unless --token names another.
+func authLogoutContext(g globals, ctx manifest.Context) manifest.Context {
+	if g.token != "" {
+		return ctx
+	}
+	if env := firstEnv(TokenEnvNames...); env != "" {
+		ctx.Token = env
+	}
+	return ctx
+}
+
 func resolveContext(g globals) manifest.Context {
 	ctx, _ := resolveContextProv(g)
 	return ctx

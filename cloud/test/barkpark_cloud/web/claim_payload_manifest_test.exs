@@ -518,6 +518,7 @@ defmodule BarkparkCloud.Web.ClaimPayloadManifestTest do
         bootstrap_workspace: "acme"
       )
       |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
     {:ok, main} = main |> Barkpark.fleet_changeset(%{fleet_role: "main"}) |> Repo.update()
 

@@ -75,6 +75,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # A LIVE box under a BILLING suspension (cch-w57-s4) — everything the proxy
@@ -462,6 +463,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
         |> barkpark_fixture()
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       Fake.program([])
       conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks", token: session_token(user))
@@ -483,6 +485,7 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
           admin_token_encrypted: Base.encode64("not-real-ciphertext-material")
         )
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       Fake.program([])
       conn = call(:get, "/v1/barkparks/#{bp.id}/api/webhooks", token: session_token(user))
@@ -490,6 +493,34 @@ defmodule BarkparkCloud.Web.InstanceApiProxyTest do
       assert conn.status == 500
       assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "decrypt_failed"}}
       assert Fake.requests() == []
+    end
+
+    test "a url host the row does not own → the token is not sent, upstream never called" do
+      {user, team} = user_with_team()
+
+      # The /succeed shape, but the url host carries no claim held by this row.
+      bp =
+        team
+        |> barkpark_fixture()
+        |> Ecto.Changeset.change(
+          url: "https://unowned-#{System.unique_integer([:positive])}.barkpark.cloud",
+          host: "203.0.113.10",
+          admin_token_encrypted: Vault.encrypt(@instance_admin_token)
+        )
+        |> Repo.update!()
+
+      Fake.program([])
+
+      {conn, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          call(:get, "/v1/barkparks/#{bp.id}/api/webhooks", token: session_token(user))
+        end)
+
+      assert conn.status == 500
+      assert json_body(conn) == %{"ok" => false, "error" => %{"code" => "decrypt_failed"}}
+      assert Fake.requests() == []
+      refute conn.resp_body =~ @instance_admin_token
+      assert log =~ "reason=unclaimed"
     end
 
     test "a transport failure → 502 instance_unreachable with reachable:false" do

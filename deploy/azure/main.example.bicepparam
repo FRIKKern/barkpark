@@ -12,14 +12,17 @@ using 'main.bicep'
 var lines = filter(split(loadTextContent('barkpark.env'), '\n'), l => !startsWith(trim(l), '#') && contains(l, '='))
 var env = toObject(lines, l => trim(split(l, '=')[0]), l => trim(substring(l, indexOf(l, '=') + 1)))
 
-param image = 'ghcr.io/frikkern/barkpark:0.2.28'
+param image = 'ghcr.io/frikkern/barkpark:sha-cdc555eb413b'
 
 // Set when the image lives in an Azure Container Registry. Add
 // acrResourceGroup when the registry sits in another resource group.
 param acrName = ''
 
-// Set when a custom domain points at the app.
-param publicHost = ''
+// PHX_HOST in barkpark.env, from `bp instance init --host`, is your own
+// domain. Without it the app uses its Container Apps address. Set
+// bindCustomDomain to true once the dnsRecords output exists in DNS.
+param customDomain = contains(env.?PHX_HOST ?? '', '<') ? '' : env.?PHX_HOST ?? ''
+param bindCustomDomain = false
 
 // An address for alert mail: /readyz down, a failed backup, repeated
 // restarts. Empty deploys no alerts.

@@ -898,6 +898,8 @@ const PIN = [
   { key: "FN|updateConflictCopy|b4c2aa5e", verdict: "UNREVIEWED", copy: "Autoupdate is frozen" },
   { key: "FN|updateConflictCopy|6fc4cebc", verdict: "UNREVIEWED", copy: ". Pinning holds an instance at or above its" },
   { key: "FN|updateConflictCopy|49c1af1a", verdict: "UNREVIEWED", copy: "current version; it does not roll back. Update anyway to ov..." },
+  { key: "FN|updateConflictCopy|6800a958", verdict: "UNREVIEWED", copy: "Autoupdate is paused on this instance" },
+  { key: "FN|updateConflictCopy|5b2c33c8", verdict: "UNREVIEWED", copy: "A paused instance does not update until it is resumed. Updat..." },
   { key: "FN|updateConflictCopy|0064f9e5", verdict: "UNREVIEWED", copy: "An update is already running" },
   { key: "FN|updateConflictCopy|7f909935", verdict: "UNREVIEWED", copy: "Give it a moment to finish." },
   { key: "FN|updateConflictCopy|a91cd5d2", verdict: "UNREVIEWED", copy: "Self-update is not enabled on this instance" },

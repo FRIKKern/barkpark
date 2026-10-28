@@ -58,7 +58,7 @@ type exportMeta struct {
 // NDJSON body, not the single JSON the generic command path decodes.
 func runExport(out *writer, g globals, ctx manifest.Context, args []string) int {
 	if g.help {
-		out.outf("usage: bp export [--type <t>] [--perspective <p>] [--out <file>]")
+		out.outf("usage: bp export [--type <t>] [--perspective <p>] [--out <file>] [--media <dir>]")
 		out.outf("       bp export --verify <file>")
 		out.outf("")
 		out.outf("Stream the active dataset as NDJSON (one document per line) for backup:")
@@ -85,10 +85,14 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("A published row becomes createOrReplace + publish and a draft row stays a")
 		out.outf("draft. An id that already exists in the target is refused unless you pass")
 		out.outf("--overwrite. See `bp import --help` for batching and --from-line.")
+		out.outf("")
+		out.outf("--media <dir> also writes every media file of the dataset to <dir>/files/<id>")
+		out.outf("with a <dir>/media.json list of ids and SHA-1s. `bp import <file> --media <dir>`")
+		out.outf("uploads them with the same asset ids. Run it again to resume a stopped export.")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts
-	var outPath, verifyPath string
+	var outPath, verifyPath, mediaDir string
 	i := 0
 	for i < len(args) {
 		a := args[i]
@@ -100,6 +104,13 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 				return usageErrf(out, nil, "%v", err)
 			}
 			outPath = v
+			i = ni
+		case "--media":
+			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--media")
+			if err != nil {
+				return usageErrf(out, nil, "%v", err)
+			}
+			mediaDir = v
 			i = ni
 		case "--verify":
 			v, ni, err := flagValue(args, i, inlineVal, hasInline, "--verify")
@@ -126,7 +137,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			}
 			i = ni
 		default:
-			return usageErrf(out, nil, "unknown export flag %q (want --type / --perspective / --out / --verify)", a)
+			return usageErrf(out, nil, "unknown export flag %q (want --type / --perspective / --out / --media / --verify)", a)
 		}
 	}
 
@@ -134,8 +145,8 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// it with the streaming flags would silently ignore one half of the command,
 	// so say so instead.
 	if verifyPath != "" {
-		if outPath != "" || opts.Type != "" || opts.Perspective != "" {
-			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --perspective")
+		if outPath != "" || opts.Type != "" || opts.Perspective != "" || mediaDir != "" {
+			return usageErrf(out, nil, "--verify checks an existing artifact and cannot be combined with --out / --type / --perspective / --media")
 		}
 		return runExportVerify(out, verifyPath)
 	}
@@ -263,6 +274,13 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	if outPath != "" {
 		out.errf("wrote %s and its sidecar %s — verify it later with: bp export --verify %s",
 			outPath, outPath+exportMetaSuffix, outPath)
+	}
+	if mediaDir != "" {
+		dataset := ctx.Dataset
+		if dataset == "" {
+			dataset = "production"
+		}
+		return exportMedia(out, ctx, dataset, mediaDir)
 	}
 	return exitOK
 }

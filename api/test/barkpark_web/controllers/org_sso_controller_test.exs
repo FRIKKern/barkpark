@@ -197,15 +197,18 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
       updated =
         req(ctx.bearer, :patch, "/v1/admin/orgs/#{slug}/oidc", %{
           mfa_acr: "possessionorinherence",
-          token_endpoint_auth_method: "client_secret_basic"
+          token_endpoint_auth_method: "client_secret_basic",
+          require_group_match: true
         })
         |> json_response(200)
+
+      assert %{"require_group_match" => true} = updated
 
       refute inspect(updated) =~ "entra-secret"
       c = Oidc.connection_for_org_slug(slug)
 
-      assert {c.mfa_acr, c.token_endpoint_auth_method} ==
-               {"possessionorinherence", "client_secret_basic"}
+      assert {c.mfa_acr, c.token_endpoint_auth_method, c.require_group_match} ==
+               {"possessionorinherence", "client_secret_basic", true}
 
       refute Repo.all(from e in Event, select: e.metadata) |> inspect() =~ "entra-secret"
 
@@ -220,7 +223,7 @@ defmodule BarkparkWeb.OrgSsoControllerTest do
 
       for {_id, names} <- flags,
           name <-
-            ~w(tenant_id strict_validation trust_idp_mfa mfa_acr scopes token_endpoint_auth_method),
+            ~w(tenant_id strict_validation trust_idp_mfa mfa_acr scopes token_endpoint_auth_method require_group_match),
           do: assert(name in names)
     end
 

@@ -241,6 +241,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "null_column",
              "observed_epoch_required",
              "password_invalid",
+             "paused",
              "plan_invalid",
              "portal_failed",
              "prebuilt_not_enabled",

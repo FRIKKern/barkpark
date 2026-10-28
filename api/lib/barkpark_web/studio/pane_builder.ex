@@ -1024,6 +1024,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       preview_targets(docs, [subtitle, description, media_spec, title_spec], dataset, opts)
 
     deref = fn id -> Map.get(targets, id) end
+    fmt = [type_title: type_titles([subtitle, description, title_spec], targets, dataset, opts)]
     type_icon = BarkparkWeb.Icons.row_icon(schema_icon(schema))
 
     Enum.map(docs, fn doc ->
@@ -1051,7 +1052,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # preview row with no media, and the document icon when the type has
         # none.
         type_icon: row_icon,
-        title: row_title(doc, schema, deref),
+        title: row_title(doc, schema, deref, fmt),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
         badge: preview_value(doc, Map.get(preview, "badge")),
@@ -1060,9 +1061,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # subtitle fallback so a row is never a bare mono id; the render picks
         # `meta || updated`. Threading updated_at only READS a field already on
         # every Document — no /v1/structure wire change.
-        meta: preview_line(doc, subtitle, deref) || row_meta(doc, Map.get(preview, "meta")),
+        meta: preview_line(doc, subtitle, deref, fmt) || row_meta(doc, Map.get(preview, "meta")),
         # A second line under the subtitle: Sanity's `description`.
-        description: preview_line(doc, description, deref),
+        description: preview_line(doc, description, deref, fmt),
         updated: relative_updated(doc)
       }
     end)
@@ -1115,10 +1116,13 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # (`"{title} ({code})"`), or `parts`. Sanity's `prepare` sets the row title
   # this way, so the spec wins over the stored title, and the row falls back
   # to the rule above only when the spec shows nothing.
-  defp row_title(doc, schema, deref \\ fn _ -> nil end) do
+  defp row_title(doc, schema, deref \\ fn _ -> nil end, fmt \\ []) do
     case title_spec(schema_list_preview(schema)) do
-      nil -> stored_row_title(doc, schema)
-      spec -> PreviewText.format(spec, preview_root(doc), deref) || stored_row_title(doc, schema)
+      nil ->
+        stored_row_title(doc, schema)
+
+      spec ->
+        PreviewText.format(spec, preview_root(doc), deref, fmt) || stored_row_title(doc, schema)
     end
   end
 
@@ -1276,23 +1280,53 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # `list_preview.subtitle` (task-f3203617ae4cf03e): a path, `ref.field` through
   # references, `|date`, and parts with a fallback — `PreviewText`. The
   # referenced documents of a whole page load in one scoped read per depth.
-  defp preview_line(_doc, nil, _deref), do: nil
+  defp preview_line(_doc, nil, _deref, _fmt), do: nil
   # A date-time a `|date` part shows rides as a marker, and the row draws it as
   # a `<time>` the browser shows as its day in the workspace time zone
   # (task-ecaaa898e346dc73; `BarkparkWeb.PreviewDay`).
-  defp preview_line(doc, spec, deref),
+  defp preview_line(doc, spec, deref, fmt),
     do:
-      PreviewText.format(spec, preview_root(doc), deref,
-        date_time: &PreviewText.date_time_marker/1
+      PreviewText.format(
+        spec,
+        preview_root(doc),
+        deref,
+        [date_time: &PreviewText.date_time_marker/1] ++ fmt
       )
 
+  # A `|type` part shows a type name by its schema title. Only a page whose
+  # specs hold one reads the schemas: of the referenced documents' types.
+  defp type_titles(specs, targets, dataset, opts) do
+    if Jason.encode!(specs) =~ "|type" do
+      types = for %{"_type" => t} when is_binary(t) <- Map.values(targets), uniq: true, do: t
+
+      titles =
+        for type <- types,
+            {:ok, schema} <- [Content.resolve_schema(type, dataset, scope(opts))],
+            title = schema_title(schema),
+            is_binary(title),
+            into: %{},
+            do: {type, title}
+
+      &Map.get(titles, &1)
+    else
+      fn _ -> nil end
+    end
+  end
+
   # The map a preview path starts from: the content, with the title column as
-  # `title` (a titled type keeps its title there, not in content).
+  # `title` (a titled type keeps its title there, not in content) and the type
+  # as `_type`, so `linkedDocument._type` reads a referenced document's type.
   defp preview_root(doc) do
     content =
       case Map.get(doc, :content) do
         %{} = c -> c
         _ -> %{}
+      end
+
+    content =
+      case Map.get(doc, :type) do
+        t when is_binary(t) -> Map.put_new(content, "_type", t)
+        _ -> content
       end
 
     case Map.get(doc, :title) do

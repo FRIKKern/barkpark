@@ -442,6 +442,9 @@ defmodule Barkpark.Content.ValidationFindingsTest do
                  list_not_unique number_too_small number_too_large
                  string_too_short string_too_long portable_text_not_portabledoc custom
                  cross_validation unknown_desk_icon unknown_desk_preset
+                 pt_shape pt_type_missing pt_key_missing pt_key_duplicate pt_span_text
+                 pt_mark_undeclared pt_style_undeclared pt_list_undeclared pt_level_shape
+                 pt_block_type_undeclared pt_inline_type_undeclared pt_annotation_undeclared
                )a)
     end
   end

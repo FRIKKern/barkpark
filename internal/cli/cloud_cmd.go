@@ -38,6 +38,9 @@ func runBarkparks(out *writer, args []string) int {
 	if len(args) > 0 && args[0] == "adopt" {
 		return runBarkparksAdopt(out, args[1:])
 	}
+	if len(args) > 0 && args[0] == "rotate-admin-token" {
+		return runBarkparksRotateAdminToken(out, args[1:])
+	}
 	// "studio-origin" is the name the owner first asked for; both reach the same verb.
 	if len(args) > 0 && (args[0] == "studio-callback" || args[0] == "studio-origin") {
 		return runBarkparksStudioCallback(out, args[1:])
@@ -518,6 +521,7 @@ USAGE
   bp barkparks adopt --url https://<box> --host <public-ip> --name <name>
                      [--slug <slug>] (--token-file <path> | --token-from-config)
   bp barkparks studio-callback ls|add|rm <instance> [<callback-url>]
+  bp barkparks rotate-admin-token <instance>
 
 WHAT IT SHOWS
   with a saved Cloud session, bare bp barkparks queries the current team's
@@ -537,6 +541,13 @@ ADOPT
   labelled "barkpark cloud admin", stores that one, and arms self-update the way
   it does for boxes it provisioned. Your token is never stored and never rides
   argv. A box without /v1/tokens/elevated is refused: update it first.
+
+ROTATE-ADMIN-TOKEN
+  platform operators only. Replaces the admin token Cloud holds for one box:
+  Cloud mints a successor on the box with the token it holds, stores it, checks
+  that it reads as admin, and only then revokes the old token. If a step fails,
+  Cloud keeps the old token. Prints token ids, never a secret. Exits 1 unless
+  the old token now gets HTTP 401.
 
 STUDIO-CALLBACK
   the "Sign in with Barkpark Cloud" allowlist for a Studio deployed apart from

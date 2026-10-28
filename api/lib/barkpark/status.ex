@@ -34,7 +34,7 @@ defmodule Barkpark.Status do
       check(:database, &database_ok?/0),
       component(:migrations, if(migrations.pending == 0, do: :operational, else: :degraded), nil),
       component(:plugins, if(is_list(plugins), do: :operational, else: :degraded), nil),
-      check(:mail, &mail_deliverable?/0),
+      mail_component(),
       codelists_component(),
       kek_previous_component()
     ]
@@ -48,6 +48,7 @@ defmodule Barkpark.Status do
       open_incidents: length(incidents),
       version: safe(fn -> Barkpark.BuildInfo.version() end, "unknown"),
       commit: commit(),
+      image: Application.get_env(:barkpark, :image),
       shape: Barkpark.Shape.current(),
       authoring_wall: Barkpark.Content.AuthoringWall.enabled?(),
       migrations: migrations,
@@ -258,15 +259,31 @@ defmodule Barkpark.Status do
     }
   end
 
-  # A node whose mailer discards every message is NOT operational: password
-  # reset and magic-link sign-in are down, and because those endpoints answer
-  # 200 for anti-enumeration reasons, this probe is the only place a human or an
-  # uptime monitor can see it. `drops_mail?/0` deliberately does not count the
-  # test-capture adapter, so this stays green under MIX_ENV=test rather than
-  # dyeing every suite degraded. Reports `:degraded`, never an outage tone — the
-  # rest of the API is genuinely serving.
-  defp mail_deliverable? do
-    not Barkpark.Mailer.drops_mail?()
+  # Mail is optional. A node with no relay (no SMTP_HOST) is operational and
+  # says so in `detail`, because password reset and sign-in links answer 200
+  # for anti-enumeration reasons and this note is the only place an operator
+  # sees that they are not sent. A relay that is configured and refused the
+  # last message is degraded. Never an outage tone: the API is serving.
+  @mail_off_note "not configured: sign-in links, password resets and invitations are not sent. Set SMTP_HOST to send mail."
+
+  @doc false
+  @spec mail_component() :: map()
+  def mail_component do
+    if safe(&Barkpark.Mailer.drops_mail?/0, false) do
+      component(:mail, :operational, @mail_off_note)
+    else
+      case safe(&Barkpark.Mailer.last_send/0, nil) do
+        {:error, at, _} ->
+          component(
+            :mail,
+            :degraded,
+            "the last send through SMTP_HOST failed at #{DateTime.to_iso8601(at)}"
+          )
+
+        _ ->
+          component(:mail, :operational, nil)
+      end
+    end
   end
 
   # Worst component status wins.

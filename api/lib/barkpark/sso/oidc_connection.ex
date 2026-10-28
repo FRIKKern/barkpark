@@ -27,6 +27,11 @@ defmodule Barkpark.Sso.OidcConnection do
     field :groups_claim, :string, default: "groups"
     field :group_role_mappings, :map, default: %{}
 
+    # Refuse a sign-in whose groups match no mapping, and remove the seats the
+    # connection gave that user (`Barkpark.Sso.Oidc.handle_callback/3`). Off by
+    # default.
+    field :require_group_match, :boolean, default: false
+
     # Entra ID settings. Empty endpoints are read from the issuer's discovery
     # document. `strict_validation` turns on the stricter ID token checks and
     # subject matching in `Barkpark.Sso.Oidc`; `tenant_id` pins Entra's `tid`.
@@ -64,6 +69,7 @@ defmodule Barkpark.Sso.OidcConnection do
       :jwks_uri,
       :groups_claim,
       :group_role_mappings,
+      :require_group_match,
       :scopes,
       :token_endpoint_auth_method,
       :tenant_id,
@@ -76,6 +82,7 @@ defmodule Barkpark.Sso.OidcConnection do
     |> reset_expiry_warning()
     |> validate_required([:organization_id, :issuer, :client_id])
     |> validate_inclusion(:token_endpoint_auth_method, ~w(client_secret_post client_secret_basic))
+    |> validate_change(:client_secret, &refuse_stdin_marker/2)
     |> validate_change(:group_role_mappings, fn :group_role_mappings, map ->
       if is_map(map) and Enum.all?(map, fn {k, v} -> is_binary(k) and is_binary(v) end) do
         []
@@ -86,6 +93,16 @@ defmodule Barkpark.Sso.OidcConnection do
     |> assoc_constraint(:organization)
     |> unique_constraint(:organization_id)
   end
+
+  # bp reads a client secret given as "-" from stdin. A bp older than that
+  # sends the "-" itself, which would store a secret that never works.
+  defp refuse_stdin_marker(:client_secret, "-"),
+    do: [
+      client_secret:
+        "is \"-\". An older bp sends the dash instead of reading the secret from stdin. Upgrade bp"
+    ]
+
+  defp refuse_stdin_marker(:client_secret, _), do: []
 
   # A new expiry date, or a cleared one, starts the warning steps again.
   defp reset_expiry_warning(changeset) do

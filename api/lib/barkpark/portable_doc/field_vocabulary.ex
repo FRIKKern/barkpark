@@ -25,7 +25,11 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
                       (`text` is always allowed)
     * `annotations` → inline `link`; a declared `internalLink` (Sanity's link
                       to a document) also admits portable-doc's `wikilink`,
-                      the document link stored as `target` + `docId`
+                      the document link stored as `target` + `docId`. An
+                      entry may carry `fields` (`{"name": "link", "fields":
+                      [...]}`); they are kept as `annotation_fields`
+    * `strike-through` in `marks` (Portable Text's spelling) is read as
+                      portable-doc's `strikethrough`
     * `of`          → extra block types (`image`, `divider`, `code`, `diagram`),
                       or a custom object block `{"name": "callout", "fields": […]}`
                       whose fields every block of that type must satisfy
@@ -127,9 +131,10 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
     %{
       styles: list_of_strings(v["styles"]),
       lists: list_of_strings(v["lists"]),
-      marks: list_of_strings(v["marks"]),
+      marks: v["marks"] |> list_of_strings() |> Enum.map(&mark_alias/1) |> Enum.uniq(),
       annotations:
         v["annotations"] |> List.wrap() |> Enum.map(&annotation_name/1) |> Enum.reject(&is_nil/1),
+      annotation_fields: annotation_fields(v["annotations"]),
       of: list_of_strings(v["of"]) ++ Map.keys(Validation.object_block_types(%{"blocks" => v})),
       objects: Validation.object_block_types(%{"blocks" => v}),
       inline_objects: inline_object_types(v["inline"])
@@ -161,6 +166,26 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
     do: map_size(inline_object_types(list)) > 0
 
   def declares_inline?(_), do: false
+
+  # Portable Text spells the decorator `strike-through`; portable-doc's inline
+  # node is `strikethrough`. A Sanity-shaped declaration names the first, so
+  # it is read as the second here.
+  @mark_aliases %{"strike-through" => "strikethrough"}
+
+  @doc "The portable-doc name of a declared decorator (`strike-through` is `strikethrough`)."
+  @spec mark_alias(String.t()) :: String.t()
+  def mark_alias(mark), do: Map.get(@mark_aliases, mark, mark)
+
+  # A declared annotation's `fields` by name (`{"name": "link", "fields":
+  # [...]}`), so a caller can check an annotation's own fields. A bare name
+  # declares no fields.
+  defp annotation_fields(list) when is_list(list) do
+    for %{"name" => n} = entry <- list, is_binary(n), into: %{} do
+      {n, Enum.filter(List.wrap(entry["fields"]), &is_map/1)}
+    end
+  end
+
+  defp annotation_fields(_), do: %{}
 
   defp annotation_name(%{"name" => n}) when is_binary(n), do: n
   defp annotation_name(n) when is_binary(n), do: n

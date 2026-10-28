@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-operations | budget: 2500tok -->
 # Operate a Barkpark instance
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md). It covers backups, moves, key rotation, database TLS, media on Azure Files and Container Apps cost. The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md). Updates, rollbacks and token and secret rotation are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md).
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md). The command reference for backups is [instance-backup.md](../ops/instance-backup.md). What your IT department creates, decides and pays for is in [IT-HANDOVER.md](IT-HANDOVER.md). Updates, rollbacks and token and secret rotation are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md).
 
 ## Scheduled backups and the restore drill
 
@@ -23,9 +23,9 @@ az containerapp job start -g <rg> -n barkpark-ops
 az containerapp job execution list -g <rg> -n barkpark-ops -o table
 ```
 
-Set arguments with `job update`. Overrides on `job start` drop the job's settings and mounts. The output is in Log Analytics, table `ContainerAppConsoleLogs_CL`. To copy backups to or from your machine, add your address to `operatorIpRanges`, redeploy and use `az storage file download-batch` or `upload-batch` on the `backups` share. Flexible Server also keeps point-in-time restore for 7 to 35 days. Turn on purge protection on the Key Vault.
+Set arguments with `job update`. Overrides on `job start` drop the job's settings and mounts. The output and the app's logs are in Log Analytics, table `ContainerAppConsoleLogs_CL`. To copy backups to or from your machine, add your address to `operatorIpRanges`, redeploy and use `az storage file download-batch` or `upload-batch` on the `backups` share. Flexible Server also keeps point-in-time restore for 7 days, which Azure lets you raise to 35. Turn on purge protection on the Key Vault.
 
-Once a month, restore a `bp instance backup` of the live instance into a scratch database of the same major with the extensions allowed. On Container Apps, create it with `az postgres flexible-server db create -g <rg> --server-name <server> -n barkpark_restore` and run the restore above. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, backup and restore times and the result against the RTO, then delete the scratch server.
+Once a month, restore a `bp instance backup` of the live instance into a scratch database of the same major with the extensions allowed. On Container Apps, create it with `az postgres flexible-server db create -g <rg> --server-name <server> -n barkpark_restore` and run the restore above. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, the times and the result against the RTO, then delete the scratch server.
 
 ## Moving an instance
 
@@ -39,14 +39,14 @@ The backup holds the database and media but no key, so the keys move by hand. [S
 |---|---|---|---|
 | `BARKPARK_KEK` with `BARKPARK_KEK_PREVIOUS` and `BARKPARK_KEK_VERSION` | Wraps the per-workspace data keys in the `data_keys` table. Those data keys encrypt workspace secrets and fields marked `encrypted: true`. | Nothing, when you follow the steps below | `Barkpark.Crypto.DataKeys.rewrap_all()` |
 | `BARKPARK_CLOAK_KEY` | Cloak fields: TOTP secrets, SSO and social sign-in client secrets, plugin settings, instance-wide secrets, login tickets, token sign-in sessions and started SSO sign-ins | Every value above. Rows sealed under the old key no longer load. | None. See below. |
-| `SECRET_KEY_BASE` | Session cookies, LiveView and `Phoenix.Token` signatures, and media signed URLs unless `MEDIA_SIGNING_SECRET` is set | Every browser session, so editors sign in again. A passkey ceremony in progress fails. Signed media URLs stop working. | None needed |
+| `SECRET_KEY_BASE` | Session cookies, LiveView and `Phoenix.Token` signatures, and media signed URLs unless `MEDIA_SIGNING_SECRET` is set | Every browser session, so editors sign in again. Signed media URLs stop working. | None needed |
 | `PREVIEW_JWT_SECRET` | Draft preview tokens (JWTs), not the stored `/preview-links` | Preview tokens issued before the change. They last `PREVIEW_JWT_TTL_SECONDS`, 600 seconds by default. | None needed |
 
-To rotate `SECRET_KEY_BASE` or `PREVIEW_JWT_SECRET`, set a new value and restart. Set `MEDIA_SIGNING_SECRET` if signed media URLs must survive a `SECRET_KEY_BASE` rotation. API tokens are stored as SHA-256 hashes and survive every rotation. Passkeys depend on `PHX_HOST`, not on a key. A passkey registered under one host stops working when `PHX_HOST` changes to another domain.
+To rotate `SECRET_KEY_BASE` or `PREVIEW_JWT_SECRET`, set a new value and restart. Set `MEDIA_SIGNING_SECRET` if signed media URLs must survive a `SECRET_KEY_BASE` rotation. API tokens are stored as SHA-256 hashes and survive every rotation. Passkeys depend on `PHX_HOST`, not on a key.
 
 ### Rotate the KEK
 
-The KEK wraps the data keys, not the content, so a rotation re-wraps those keys and re-encrypts no content. Run the steps in order, so every restart can still read every data key.
+The KEK wraps the data keys, not the content, so a rotation re-encrypts no content. Run the steps in order, so every restart can still read every data key.
 
 1. Set `BARKPARK_KEK_PREVIOUS` to the current KEK and restart. `/status.json` must show the `kek_previous` component as `operational`. A malformed entry shows as `degraded`.
 2. Set `BARKPARK_KEK` to the value from `openssl rand -base64 32`, raise `BARKPARK_KEK_VERSION` by one, and restart. Old data keys still unwrap with the previous key.
@@ -68,7 +68,7 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
 
 ## VM size and region
 
-Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. Before creating the VM, `az vm list-skus --location <region> --size Standard_D2 -o table` shows restrictions and `az vm list-usage --location <region> -o table` shows quota.
+Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) shows how to check sizes and quota first.
 
 ## Database TLS
 
@@ -76,38 +76,40 @@ Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 
 
 | Value | Effect |
 |---|---|
-| unset or `off` | No TLS. The single VM uses this, since its PostgreSQL is local. |
+| unset or `off` | No TLS, for the single VM's local PostgreSQL. |
 | `verify-full` | Verified TLS. The server certificate must chain to a trusted CA and match the host in `DATABASE_URL`. |
 
 Any other value stops the boot. With `verify-full`, the CA comes from the OS trust store, or from `DATABASE_SSL_CA_FILE` when set, which must name a file. The image's trust store holds the Azure Flexible Server roots, so Path B needs no CA file.
 
 ## Media on Azure Files
 
-The image runs as uid and gid 10001, and its entrypoint refuses to start when `/app/uploads` is not writable by that user. Mount the Azure Files share at `/app/uploads` with `uid=10001,gid=10001,dir_mode=0770,file_mode=0660,mfsymlinks,nobrl`. `deploy/azure/main.bicep` sets these options and `BARKPARK_MEDIA_DIR`.
+The image runs as uid and gid 10001, and its entrypoint stops when that user cannot write `/app/uploads`. Mount the Azure Files share at `/app/uploads` with `uid=10001,gid=10001,dir_mode=0770,file_mode=0660,mfsymlinks,nobrl`. `deploy/azure/main.bicep` sets these options and `BARKPARK_MEDIA_DIR`.
 
 ## Container Apps cost
 
-Monthly cost in Norway East at the sizes in `deploy/azure/main.bicep`, as of 2026-10-27, is about USD 47 to 101:
+Monthly list prices in USD for Norway East at the sizes in `deploy/azure/main.bicep`, from the Azure retail prices API on 2026-10-28. The total is about 43 to 95, plus Azure Files storage:
 
-| Item | USD per month |
-|---|---|
-| Container App, 1 vCPU and 2 GiB | 24 idle to 73 busy |
-| PostgreSQL Flexible Server, Standard_B1ms | 16 |
-| Storage account | 5 |
-| Azure Files shares for media and backups | 2 |
-| Private DNS zone for Postgres | 0.50 |
-| Backup and operations jobs, about 1 minute a day | 0 inside the monthly free grant |
-| Log Analytics | 0 to 3 |
-| Key Vault | under 0.10 |
+| Item | Size | USD per month |
+|---|---|---|
+| Container App | 1 vCPU, 2 GiB, one replica | 22 idle to 73 busy, after the free grant |
+| PostgreSQL Flexible Server | Standard_B1ms | 16 |
+| PostgreSQL storage | 32 GiB | 4.83 |
+| PostgreSQL backups | 7 days | 0 up to 32 GB |
+| Storage account | Standard_LRS, StorageV2 | 0 apart from its shares |
+| Azure Files shares `media` and `backups` | Transaction optimized, 100 GiB quota each | 0.066 per GiB stored, 13.20 when both are full |
+| Private DNS zone for Postgres | 1 zone | 0.50 |
+| Backup and operations jobs | About 1 minute a day | 0 inside the free grant |
+| Log Analytics | 30 days, 1 GB a day cap | 0 up to 5 GB, then 3.29 per GB |
+| Key Vault | Standard | 0.03 per 10,000 operations |
 
-The environment runs only the Consumption workload profile, which has no environment management charge. The virtual network and its service endpoints have no charge.
+The environment runs only the Consumption workload profile, which has no management charge. The virtual network has none either.
 
 ## Container Apps alerts
 
-`deploy/azure/main.bicep` deploys three alerts from `monitor.bicep` when `alertEmail` is set, and mails them to that address. A deployment with `restoreMode=true` leaves them out.
+`deploy/azure/main.bicep` deploys three alerts from `monitor.bicep` when `alertEmail` is set and mails them there. A deployment with `restoreMode=true` leaves them out.
 
 - `/readyz` failed two checks in a row. An Application Insights standard test requests `https://<host>/readyz` every 5 minutes from North Europe. In a test the mail went out 8 minutes after the app stopped.
 - An execution of the `barkpark-backup` job failed.
 - The app restarted 3 times within 30 minutes.
 
-Azure keeps the state of a changed alert rule. After you change a rule, delete it and deploy again, or it may not fire. The app's logs are in the Log Analytics workspace, in `ContainerAppConsoleLogs_CL`. Monitoring costs about USD 6.60 a month, mostly the 8,800 test runs at USD 0.000715 each. `availabilityFrequencySeconds=900` brings it to about USD 2.40 and alerts after about 30 minutes.
+Azure keeps the state of a changed alert rule. After you change a rule, delete it and deploy again, or it may not fire. Monitoring costs about USD 6.60 a month, mostly the 8,800 test runs at USD 0.000715 each. `availabilityFrequencySeconds=900` brings it to about USD 2.40 and alerts after about 30 minutes.

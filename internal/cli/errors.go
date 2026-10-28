@@ -88,6 +88,9 @@ var codeExit = map[string]int{
 	"share_expired": exitNotFound, // 410, bucketed as gone/not-found
 	"unauthorized":  exitAuth,
 	"forbidden":     exitAuth,
+	// 403 from POST /v1/auth/studio-tokens: the caller may not mint that
+	// workspace's Studio token.
+	"studio_token_forbidden": exitAuth,
 	// A filter/order over a field the caller may not read — semantically a
 	// permission denial (use a token that can read the field), so the auth
 	// bucket, even though the HTTP status is 422. Added when QueryController /
@@ -334,6 +337,7 @@ var codeExit = map[string]int{
 	"mfa_enrolment_required": exitAuth, // 403, require_org_mfa_enrolment.ex:73
 	"workspace_suspended":    exitAuth, // 403, errors.ex:348
 	"bundle_import_disabled": exitAuth, // 403, workspace_controller.ex:450
+	"no_mapped_group":        exitAuth, // 403, oidc_controller.ex:235
 
 	// 403, chat_controller.ex host_refused/1: a host turn, :global chat or the host
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).

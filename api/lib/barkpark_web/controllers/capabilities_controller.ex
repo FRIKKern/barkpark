@@ -48,7 +48,7 @@ defmodule BarkparkWeb.CapabilitiesController do
   end
 
   defp respond(conn, params, view) do
-    caller_tier = Capabilities.tier_for_token(conn.assigns[:api_token])
+    caller_tier = caller_tier(conn)
     # ?build=1 opts in to the "build" identity key. Opt-in (never default):
     # released bp binaries strict-decode the manifest and reject unknown
     # root keys, so old clients must keep receiving the exact old shape.
@@ -98,7 +98,6 @@ defmodule BarkparkWeb.CapabilitiesController do
         include_bpml: include_bpml,
         include_token: include_token,
         public_read: BarkparkWeb.Plugs.PublicRead.public_read_token?(conn),
-        session: login_session_bearer?(conn),
         server: server
       )
 
@@ -131,12 +130,21 @@ defmodule BarkparkWeb.CapabilitiesController do
     end
   end
 
-  # A bearer that is not an API token but a live login session (the token
-  # `POST /v1/auth/login` answers). Its tier is "none", but the session-gated
-  # auth verbs take exactly this credential, so the manifest keeps them.
+  # A live login session (the token `POST /v1/auth/login` or the SSO exchange
+  # answers) is a bearer on the scoped data API and the only credential the
+  # session-gated `auth` verbs take, but `tier_for_token/1` ranks API tokens and
+  # answers "none" for it. bp reads "none" with a token present as a refused
+  # credential, so `bp auth mfa-enroll` with a session failed. A session is
+  # echoed as "read"; the routes still check the user's seats.
+  defp caller_tier(conn) do
+    case conn.assigns[:api_token] do
+      nil -> if login_session_bearer?(conn), do: "read", else: "none"
+      token -> Capabilities.tier_for_token(token)
+    end
+  end
+
   defp login_session_bearer?(conn) do
-    with nil <- conn.assigns[:api_token],
-         ["Bearer " <> token | _] <- get_req_header(conn, "authorization"),
+    with ["Bearer " <> token | _] <- get_req_header(conn, "authorization"),
          {%Barkpark.Accounts.User{}, _session} <- Barkpark.Accounts.verify_user_session(token) do
       true
     else

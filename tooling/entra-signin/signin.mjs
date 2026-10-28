@@ -219,6 +219,17 @@ async function main() {
         break;
       }
 
+      // An Entra error page with an AADSTS code, such as AADSTS50105 for a
+      // user the app is not assigned to.
+      const aadsts = url.hostname === "login.microsoftonline.com" && (await bodyText()).match(/AADSTS(\d+): ([^\n]{0,300})/);
+      if (aadsts && !(await visible("input[name=passwd], input[name=otc], input[name=loginfmt]"))) {
+        result.entra_code = `AADSTS${aadsts[1]}`;
+        result.entra_error = aadsts[2];
+        step(`Entra error: ${result.entra_code}`);
+        await snap("entra-error");
+        outcome = "refused";
+        break;
+      }
       // Entra error pages: disabled account, wrong password, blocked sign-in.
       const err = page.locator("#usernameError, #passwordError, #idTD_Error, #service_exception_message, .error.ext-error").first();
       if (await err.isVisible().catch(() => false)) {
@@ -310,6 +321,8 @@ async function main() {
       if (ex.status !== 201 || !body.token) throw new Error(`ticket exchange answered ${ex.status}`);
       Object.assign(result, await readSeats(a.host, body.token));
       result.session = "signed in";
+      // true when Barkpark counted the Entra MFA for this session (trust_idp_mfa).
+      result.idp_mfa = body.idp_mfa === true;
       if (a.saveToken) {
         fs.writeFileSync(a.saveToken, body.token + "\n", { mode: 0o600 });
         result.saved_token = a.saveToken;

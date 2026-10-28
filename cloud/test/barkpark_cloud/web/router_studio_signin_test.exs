@@ -86,6 +86,7 @@ defmodule BarkparkCloud.Web.RouterStudioSigninTest do
       ] ++ Keyword.take(opts, [:custom_host])
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp signin(host, token) do
@@ -353,6 +354,7 @@ defmodule BarkparkCloud.Web.RouterStudioSigninTest do
         bp
         |> Ecto.Changeset.change(url: "https://no-token-#{n}.barkpark.cloud")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       {:ok, token} = Accounts.create_user_session_token(user)
 

@@ -52,6 +52,9 @@ defmodule BarkparkWeb.StatusController do
       # The sha is the identity; `version`'s trailing segment is only a
       # commits-since-tag distance. Public + unauthenticated on purpose.
       commit: health.commit,
+      # The image reference the installer pinned (BARKPARK_IMAGE), so an
+      # operator can see the tag, not only the commit. null when unset.
+      image: health.image,
       # cloud | solo | app as the installing door declared it (BARKPARK_SHAPE,
       # `Barkpark.Shape`); null when no door declared one. Never guessed.
       shape: health.shape,

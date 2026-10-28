@@ -158,6 +158,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # The mutate door's `dryRun` was neither true nor false
       # (task-ca600d55736bc9ca): refused, never read as a real write.
       {"invalid_dry_run", {:error, {:invalid_dry_run, "yes"}}, "malformed", 400, [:details]},
+      # The mutate door's `restore` was neither true nor false
+      # (task-419052f535f92f4b).
+      {"invalid_restore", {:error, {:invalid_restore, "yes"}}, "malformed", 400, [:details]},
       # Direct publish (task-6e2552cdeb223fa2): a type that keeps its own door,
       # and a `publish` flag that is not a boolean.
       {"direct_publish_unsupported", {:error, {:direct_publish_unsupported, "task"}},

@@ -115,6 +115,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> BarkparkCloud.Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # A content-bound static site with its read token already at rest (the mint is

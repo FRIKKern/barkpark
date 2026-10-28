@@ -93,6 +93,7 @@ defmodule BarkparkCloud.Web.RouterAutoupdateTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # GET /v1/admin/self-update as the box answers it, with the #12995

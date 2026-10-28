@@ -478,7 +478,8 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
     with :ok <- require_write(conn),
-         {:ok, source_id} <- source_id_param(params) do
+         {:ok, source_id} <- source_id_param(params),
+         {:ok, id} <- media_file_id_param(params) do
       metadata = upload_metadata(params)
 
       case Media.upload(
@@ -488,6 +489,7 @@ defmodule BarkparkWeb.V1.MediaController do
                dedupe: true,
                asset_metadata: metadata,
                source_id: source_id,
+               id: id,
                meta: meta_param(params)
              ] ++
                scope_opts(conn)
@@ -630,6 +632,28 @@ defmodule BarkparkWeb.V1.MediaController do
         if MediaFile.valid_source_id?(value),
           do: {:ok, value},
           else: {:error, invalid_source_id_changeset(value)}
+    end
+  end
+
+  # `mediaFileId` (task-fa5aedea4a584d34): the id the new file takes, so a
+  # copy from another instance keeps its asset ids. Off unless sent. A UUID,
+  # or the upload is refused before anything is stored.
+  defp media_file_id_param(params) do
+    case blank_to_nil(params["mediaFileId"]) do
+      nil ->
+        {:ok, nil}
+
+      value ->
+        case Ecto.UUID.cast(value) do
+          {:ok, id} ->
+            {:ok, id}
+
+          :error ->
+            {:error,
+             %MediaFile{}
+             |> Ecto.Changeset.change()
+             |> Ecto.Changeset.add_error(:mediaFileId, "must be a UUID")}
+        end
     end
   end
 

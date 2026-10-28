@@ -24,6 +24,33 @@ function Note($msg) { Write-Host "install-cli: $msg" }
 
 $RepoUrl = 'https://github.com/FRIKKern/barkpark'
 
+# --- Help ---------------------------------------------------------------------
+# `irm | iex` passes no arguments. Saved as a file, `.\install-cli.ps1 -Help`
+# prints this and installs nothing, like `install-cli.sh --help`.
+$Usage = @'
+Usage: irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
+       .\install-cli.ps1 [-Help]
+
+Installs bp.exe for this arch, checked against the release's checksums.txt,
+and adds the install directory to the user PATH.
+
+Environment:
+  BARKPARK_BIN_DIR           Install directory. Default: %LOCALAPPDATA%\Barkpark\bin.
+  BARKPARK_CLI_VERSION       Release to install, such as 1.26.11. Default: the
+                             highest cli-v release.
+  BARKPARK_CLI_RELEASE_BASE  URL of a directory with the bp-windows-<arch>.exe
+                             assets and checksums.txt. Overrides BARKPARK_CLI_VERSION.
+
+When a bp.exe is already at the target, the installer prints its version and
+the new version before it replaces it.
+'@
+foreach ($a in $args) {
+  if ($a -in @('-Help', '--help', '-h', '/?')) { Write-Host $Usage; exit 0 }
+  Write-Error "install-cli: unknown argument '$a'"
+  Write-Host $Usage
+  exit 2
+}
+
 # --- Resolve release base -----------------------------------------------------
 if ($env:BARKPARK_CLI_RELEASE_BASE) {
   $releaseBase = $env:BARKPARK_CLI_RELEASE_BASE
@@ -34,13 +61,16 @@ if ($env:BARKPARK_CLI_RELEASE_BASE) {
   # releases/latest: the repo also publishes build-<sha> server-artifact
   # releases (no bp assets), and one of those holding "latest" 404s every
   # unpinned install. The [0-9.]+ pattern skips prereleases (cli-v*-rc.*),
-  # matching the old releases/latest rule.
+  # matching the old releases/latest rule. The highest version wins, not the
+  # first listed: on 2026-10-28 the API listed cli-v1.26.9 before cli-v1.26.11.
+  # per_page=100, as in install-cli.sh: build-<sha> releases crowd a page of 30.
   $releaseBase = "$RepoUrl/releases/latest/download"
   try {
-    $apiUrl = 'https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=30'
+    $apiUrl = 'https://api.github.com/repos/FRIKKern/barkpark/releases?per_page=100'
     $releases = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
-    $cliTag = ($releases | Where-Object { $_.tag_name -match '^cli-v[0-9.]+$' } |
-               Select-Object -First 1).tag_name
+    $cliTag = ($releases | Where-Object { $_.tag_name -match '^cli-v[0-9]+\.[0-9]+\.[0-9]+$' } |
+               Sort-Object { [version]($_.tag_name -replace '^cli-v', '') } |
+               Select-Object -Last 1).tag_name
     if ($cliTag) { $releaseBase = "$RepoUrl/releases/download/$cliTag" }
   } catch {
     Note "GitHub API unreachable; falling back to releases/latest"
@@ -114,12 +144,20 @@ if ($haveSums) {
   Note "WARNING: checksums.txt not found at $sumsUrl; skipping verification"
 }
 
-Move-Item -Force -Path $tmp -Destination $dest
+# Best-effort version readout (non-TTY `bp version` emits JSON).
+function Get-BpVersion($path) {
+  try { return (& $path version | ConvertFrom-Json).cli_version } catch { return $null }
+}
+$ver = Get-BpVersion $tmp
+if (Test-Path -LiteralPath $dest) {
+  $oldVer = Get-BpVersion $dest
+  if (-not $oldVer) { $oldVer = 'of unknown version' }
+  $newVer = $ver
+  if (-not $newVer) { $newVer = 'of unknown version' }
+  Note "replacing ${dest}: bp $oldVer -> bp $newVer"
+}
 
-# Best-effort installed-version readout (non-TTY `bp version` emits JSON).
-try {
-  $ver = (& $dest version | ConvertFrom-Json).cli_version
-} catch { $ver = $null }
+Move-Item -Force -Path $tmp -Destination $dest
 if ($ver) { Note "installed bp $ver -> $dest" } else { Note "installed bp -> $dest" }
 
 # --- Add bin dir to the user PATH (persistent + current session) --------------
