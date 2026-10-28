@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-updates | budget: 2500tok -->
 # Update an instance and rotate its credentials
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). It covers updates and rollbacks on a single VM and on Container Apps, API token rotation, a lost admin token and OIDC client secret rotation. The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
 
 ## Update and roll back a single VM
 
@@ -11,7 +11,7 @@ This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-
 sudo git -C /opt/barkpark rev-parse --short HEAD
 ```
 
-**Update.** Run `sudo git -C /opt/barkpark pull`. The post-merge hook runs `scripts/deploy-rebuild.sh`. It builds the new code in `api/_build_next` while the old code serves, runs the migrations, swaps the build in and restarts. A failed build or migration leaves the old build running with no restart. `sudo cat /opt/barkpark/.git/barkpark-deploy-outcome` prints `rebuilt` after a good update. An update took 3 to 4 minutes, and requests failed with 503 for 16 seconds during the restart. When the update adds a migration, `/readyz` also answers 503 from the pull until the migration has run, 175 seconds in the drill, because the running server counts the new migration file as pending. A load balancer that routes on `/readyz` sees that as downtime.
+**Update.** Run `sudo git -C /opt/barkpark pull`. The post-merge hook runs `scripts/deploy-rebuild.sh`. It builds in `api/_build_next` while the old code serves, runs the migrations, swaps the build in and restarts. A failed build or migration leaves the old build running. `sudo cat /opt/barkpark/.git/barkpark-deploy-outcome` prints `rebuilt` after a good update. An update took 3 to 19 minutes, with 16 to 27 seconds of failed requests at the restart. When it adds a migration, `/readyz` answers 503 from the pull until the migration has run, because the server counts the new file as pending, on staging for the whole build. A load balancer that routes on `/readyz` sees that as downtime.
 
 **Roll back.** Move the checkout back and rebuild:
 
@@ -20,7 +20,7 @@ sudo git -C /opt/barkpark reset --hard <previous commit>
 sudo make -C /opt/barkpark rebuild
 ```
 
-The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay applied. The drill's migration added two columns, and the older code ran with them. When an update has a migration that changes or removes data, roll back the code and restore the backup taken before the update. Do not use `git checkout <commit>`, which detaches the checkout so the next `git pull` fails. After a rollback, `git pull` updates to `main` again.
+The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay applied. The drill's migration added two columns, and the older code ran with them. When an update has a migration that changes or removes data, roll back the code and restore the backup taken before the update. Do not use `git checkout <commit>`, which detaches the checkout so the next `git pull` fails. After a rollback, `git pull` updates to `main` again. To pin a release, run `sudo git -C /opt/barkpark fetch --tags` and the two commands above with a tag such as `v0.2.29`.
 
 ## Container Apps
 
