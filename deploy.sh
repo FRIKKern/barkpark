@@ -848,6 +848,9 @@ else
 fi
 echo ""
 SSH_LOGIN="${SUDO_USER:-root}@$IP"
+# The ssh form from docs/setup/SELF-HOST.md Path A, whose step 1 makes the key
+# ~/.ssh/barkpark on the operator's machine. Printed literally, unexpanded.
+SSH_CMD="ssh -i ~/.ssh/barkpark $SSH_LOGIN"
 if [ -n "$ADMIN_TOKEN" ]; then
   echo "  Admin token: saved to $ADMIN_TOKEN_FILE (root only, mode 0600)."
   if [ -s "${ADMIN_TOKEN_ID_FILE:-}" ]; then
@@ -862,14 +865,14 @@ if [ -n "$ADMIN_TOKEN" ]; then
   else
     _server="http://$IP:$APP_PORT"
   fi
-  echo "    bp setup --target connect --server $_server --token \"\$(ssh $SSH_LOGIN sudo cat $ADMIN_TOKEN_FILE)\""
+  echo "    bp setup --target connect --server $_server --token \"\$($SSH_CMD sudo cat $ADMIN_TOKEN_FILE)\""
   echo ""
 fi
 echo "  For a separate Studio, a workspace owner or admin gets its BARKPARK_TOKEN line with:"
 echo "    bp instance studio-token --workspace default"
 echo ""
 echo "  SSH workflow:"
-echo "    ssh $SSH_LOGIN"
+echo "    $SSH_CMD"
 echo "    sudo -i"
 echo "    cd $APP_DIR"
 echo "    make rebuild   # after code changes"

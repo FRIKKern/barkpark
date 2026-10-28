@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: entra-app-registration | budget: 2500tok -->
 # Sign in with Microsoft Entra ID
 
-This guide registers the Entra app that a Barkpark organization signs in through, and connects it to Barkpark. The instance setup is in [SELF-HOST.md](SELF-HOST.md#sign-in-with-entra-id).
+This guide registers the Entra app an organization signs in through and connects it to Barkpark. The instance setup is in [SELF-HOST.md](SELF-HOST.md#sign-in-with-entra-id).
 
 ## Sign-in URL and redirect URI
 
@@ -27,7 +27,7 @@ The script does these steps and is safe to run again:
 2. It turns on the `groups` claim with group object ids, adds the optional `email` and `amr` claims to the ID token, and adds the Microsoft Graph delegated permissions `openid`, `profile` and `email`. It then grants admin consent itself and retries until the tenant-wide consent holds all three scopes. It stops with an error after about a minute.
 3. It creates the service principal, which is the enterprise app that users sign in to.
 4. It creates the owners security group and adds each `--add-owner` user to it.
-5. It creates a client secret only when the app has none or with `--rotate-secret`, and writes it to `--secret-file` with mode 600. The secret is never printed. Without the secret file it prints the expiry date of each existing secret instead. Entra never shows a secret again, so keep the file from the first run.
+5. It creates a client secret only when the app has none or with `--rotate-secret`, and writes it to `--secret-file` with mode 600. The secret is never printed. Without the secret file it prints the expiry date of each existing secret. Entra never shows a secret again, so keep the file from the first run.
 
 At the end it prints the ids, the secret expiry date, the sign-in URL and the `bp org` commands to run next. Sign-ins stop on the expiry date. The printed commands store it with `--client_secret_expires_at`, and with `BARKPARK_TOKEN_EXPIRY_WARNINGS=on` the operators get a mail 30, 14 and 7 days ahead. Rotate the secret as [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#rotate-the-oidc-client-secret) describes.
 
@@ -58,11 +58,11 @@ bp org oidc-update gyldendal --scopes "openid profile email" --yes
 
 ## Entra MFA counts as Barkpark MFA
 
-`bp org oidc-update <org> --trust_idp_mfa --yes` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
+`bp org oidc-update <org> --trust_idp_mfa --yes` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it, and [portal step 2](#portal-steps) does the same. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
 
 Conditional Access needs Entra ID P1. Without P1, security defaults make each user register an authenticator at the first sign-in but do not ask for it at every sign-in. With `trust_idp_mfa` on a connection that has `--tenant_id`, Barkpark asks Entra for MFA with the OIDC `claims` parameter. On 2026-10-27, on a tenant with security defaults and no P1, Entra then asked a non-admin user for the code at every sign-in.
 
-Turn `trust_idp_mfa` on once a test sign-in works. Sign in again and check under Sign-in logs that Entra asked for the code. [tooling/entra-signin](../../tooling/entra-signin/README.md) signs a test user in headless and prints the role.
+Turn `trust_idp_mfa` on once a test sign-in works, then sign in again. A `TOTP code` step in the [tooling/entra-signin](../../tooling/entra-signin/README.md) output shows Entra asked for the code, and `idp_mfa: true` shows Barkpark counted it. [bp login --sso](#sign-the-bp-cli-in-with-sso) shows `idp_mfa` too. Neither needs P1 or the portal's Sign-in logs.
 
 ## Removed users
 
@@ -70,7 +70,7 @@ Turn `trust_idp_mfa` on once a test sign-in works. Sign in again and check under
 
 ## The bootstrap owner
 
-`BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats the first owner on a fresh instance. Barkpark matches a sign-in to that owner on the ID token's `email` claim, ignoring case. Entra leaves out `email` for an account with no mailbox address. Set `BARKPARK_OIDC_EMAIL_FROM_UPN=on` so Barkpark matches on `preferred_username`, the UPN, when `email` is absent. The connection needs the `profile` scope for that claim.
+`BARKPARK_BOOTSTRAP_OWNER_EMAIL` seats the first owner on a fresh instance. Barkpark matches a sign-in to that owner on the ID token's `email` claim, ignoring case. Entra leaves out `email` for an account with no mailbox address. Set `BARKPARK_OIDC_EMAIL_FROM_UPN=on` so Barkpark matches on `preferred_username`, the UPN, when `email` is absent.
 
 The bootstrap owner does not need domain verification. The owner holds a seat in the default workspace, and that seat lets the organization's connection sign the owner in.
 
@@ -86,7 +86,7 @@ An owner who signs in only through Entra signs bp in on their own machine:
 bp login --sso --org gyldendal -s https://<host>
 ```
 
-bp opens the sign-in URL and waits for the answer on a random port on 127.0.0.1. The instance accepts that loopback return without `BARKPARK_STUDIO_SSO_ORIGINS`. bp saves the session as its token for that server and prints the email and the expiry. `--no-browser` prints the URL to open on the same machine. Commands such as `bp instance studio-token --workspace default` then run as the owner. `bp logout -s https://<host>` revokes that session.
+bp opens the sign-in URL and waits for the answer on a random port on 127.0.0.1. The instance accepts that loopback return without `BARKPARK_STUDIO_SSO_ORIGINS`. bp saves the session as its token for that server and prints the email and the expiry, with `idp_mfa` under `-o json`. `--no-browser` prints the URL to open on the same machine. Commands such as `bp instance studio-token --workspace default` then run as the owner. `bp logout -s https://<host>` revokes that session.
 
 ## Domain verification
 
@@ -105,7 +105,7 @@ Entra puts at most 200 groups in a token. A user in more groups gets an overage 
 
 ## Portal steps
 
-When the Azure CLI is not available, do the same in the Entra admin center:
+Without the Azure CLI, do the same in the Entra admin center:
 
 1. App registrations, New registration. Accounts in this organizational directory only. Redirect URI platform Web, with the URI above.
 2. Token configuration. Add groups claim, Groups assigned to the application, or Security groups without P1, emitted as Group ID. Add optional claim, ID token, `email`. In Manifest, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken`.

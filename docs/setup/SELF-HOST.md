@@ -10,7 +10,7 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 
 ## Before you start on Azure
 
-A new subscription has no resource providers. Register these and rerun the loop until each line says `Registered`:
+A new subscription has no resource providers. Run this loop until each line says `Registered`:
 
 <!-- run -->
 ```bash
@@ -67,7 +67,7 @@ It exits 1 on any problem. `--skip` leaves out server probes, which `deploy.sh` 
    az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900
    ```
 
-2. The host name is then `<dns label>.swedencentral.cloudapp.azure.com`. For your own domain, create a DNS A record to the VM's public IP instead. Caddy needs one of them for a certificate.
+2. `<ip>` is the `publicIpAddress` from `az vm create`. The host name is `<dns label>.swedencentral.cloudapp.azure.com`, or your own domain with a DNS A record to `<ip>`. Caddy needs it for a certificate.
 3. Copy the file and run `deploy.sh` over ssh. It keeps its own `DATABASE_URL` and keys, and deletes the copy once merged. `accept-new` trusts a new host key once:
 
    <!-- run -->
@@ -78,7 +78,7 @@ It exits 1 on any problem. `--skip` leaves out server probes, which `deploy.sh` 
    ssh "${o[@]}" azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env` in about 10 minutes. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). Once HTTPS answers it runs `bp instance check` and prints the result.
+   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into its `.env` in about 10 minutes. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). Once HTTPS answers it runs `bp instance check` and prints the result.
 4. <!-- run --> In the same shell, run `bp setup --target connect --server https://<host> --token "$(ssh "${o[@]}" azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`. It becomes the active server.
 
 To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. Updates and rollback are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
@@ -133,20 +133,20 @@ BARKPARK_OIDC_EMAIL_FROM_UPN=on
 BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 ```
 
-- `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server.
+- `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, as Pensum calls Barkpark from its server.
 - [ENTRA.md](ENTRA.md#the-bootstrap-owner) explains the last three.
 - `BARKPARK_BREAKGLASS_EMAILS` lets the [break-glass account](ENTRA.md#break-glass-account) sign in while the org allows only SSO.
 - Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
 
 ### Operator access
 
-Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it.
+Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner.
 
 **Mail.** Without `SMTP_HOST`, no sign-in links, password resets or invitations go out. SSO with a break-glass account needs no mail.
 
 ## Sign in with Entra ID
 
-Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token. Once a test sign-in works, turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Sign in again and check that Entra asked for it. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its origin in `BARKPARK_STUDIO_SSO_ORIGINS` with no path or trailing slash and run `bp instance check --env-file <file> --studio-url <studio url>`. `bp instance studio-token --workspace <ws>` prints its `BARKPARK_TOKEN` line.
+Register and connect the app as [ENTRA.md](ENTRA.md) describes, with the operator token for the printed `bp org` commands. Once a test sign-in works, turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Sign in again. A `TOTP code` step or `idp_mfa: true` in the sign-in tool output shows Entra asked for it. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its origin in `BARKPARK_STUDIO_SSO_ORIGINS` with no path or trailing slash and run `bp instance check --env-file <file> --studio-url <studio url>`. `bp instance studio-token --workspace <ws>` prints its `BARKPARK_TOKEN` line.
 
 ## Check the instance
 

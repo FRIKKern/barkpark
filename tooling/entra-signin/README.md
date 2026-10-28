@@ -19,6 +19,6 @@ It opens `/v1/auth/oidc/<org>/start` with a `return_to` on `--studio-origin` (de
 
 The password and the base32 TOTP secret are read from files and never printed. When Entra asks a new user to register MFA, `--enroll-totp` picks "Set up a different authentication app", stores the secret in `--totp-file` with mode 600 and confirms a code. Microsoft Graph cannot register a software TOTP method for another user, so registration goes through the user's own sign-in.
 
-The output is one JSON object: `outcome` (`ok`, `refused` or `error`), the steps taken, the seats, or the Entra or Barkpark refusal text. Exit codes are 0, 2 and 1. `--save-token` keeps the session token (mode 600) so a later `--check-token` run shows whether that session still works.
+The output is one JSON object: `outcome` (`ok`, `refused` or `error`), the steps taken, the seats, `idp_mfa`, or the Entra or Barkpark refusal text. A `TOTP code` step means Entra asked for MFA. `idp_mfa: true` means Barkpark counted it for the session. Exit codes are 0, 2 and 1. `--save-token` keeps the session token (mode 600) so a later `--check-token` run shows whether that session still works.
 
 With bp 1.26.9 or newer, end a saved session with `bp logout -s https://<host> --token-file <file>`. It exits 1 when the server revoked no session. `--check-token` then reports a refusal. `--logout` ends the session right after the sign-in instead.
