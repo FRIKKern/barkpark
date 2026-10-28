@@ -30,11 +30,17 @@
 # xml_builder 2.4.1, swoosh 1.28.1, lazy_html 0.1.13, phoenix_live_view 1.1.33.
 # `mix hex.audit` in api/ then reports exactly the 3 records below (no upstream
 # fix for any of them); the 14 other api records were CLEARED and removed.
-api:EEF-CVE-2026-43966  cowlib 2.20.0  MEDIUM  (no fixed version published)
-api:EEF-CVE-2026-43969  cowlib 2.20.0  LOW  (no fixed version published)
-api:EEF-CVE-2026-28809  esaml 4.6.0  MEDIUM  (no upstream fix; mitigated by OTP 27+)
+# API TRIM 2026-10-28 (task-f8066c020443b32e): Hex 2.6.0 reported 31 api
+# advisories. bandit 1.14.0, jose 1.11.13, decimal 3.1.2 and cowlib 2.21.0 fixed
+# 24 of them (EEF-CVE-2026-43969 among them). The 7 with no fix, or that do not
+# apply, are in the `ignored_advisories` list in api/mix.exs with a reason each.
+# Hex prints those under "Ignored advisories:" and this oracle reads the same
+# list, so they are no longer records here. api carries no recorded advisory.
 # CLOUD TRIM 2026-10-02 (task-5a0545cb11c0ee83, run-4 lane D): cloud/mix.lock
 # carries bandit 1.12.5, mint 1.11.0, plug 1.20.3, postgrex 0.22.4,
 # swoosh 1.28.1; `mix hex.audit` in cloud/ prints "No retired or security
 # advisory packages found" (exit 0). All 13 cloud records were CLEARED and
 # removed; cloud carries no recorded advisory, so any cloud id is NEW.
+# CLOUD 2026-10-28 (task-f8066c020443b32e): cloud/mix.lock moved to bandit 1.14.0
+# and decimal 3.1.2 (#24592); `mix hex.audit` in cloud/ with Hex 2.6.0 prints
+# "No retired or security advisory packages found" again.
