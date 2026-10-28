@@ -94,6 +94,27 @@ defmodule BarkparkWeb.StatusControllerTest do
     end
   end
 
+  test "GET /status.json reports the pinned image, and null when BARKPARK_IMAGE is unset",
+       %{conn: conn} do
+    prev = Application.get_env(:barkpark, :image)
+
+    on_exit(fn ->
+      if prev,
+        do: Application.put_env(:barkpark, :image, prev),
+        else: Application.delete_env(:barkpark, :image)
+    end)
+
+    Application.delete_env(:barkpark, :image)
+    body = conn |> get("/status.json") |> json_response(200)
+    assert Map.has_key?(body, "image"), "image must be SURFACED as null, never omitted"
+    assert body["image"] == nil
+
+    Application.put_env(:barkpark, :image, "ghcr.io/frikkern/barkpark:0.2.28")
+
+    assert scoped_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("image") ==
+             "ghcr.io/frikkern/barkpark:0.2.28"
+  end
+
   test "an underivable sha renders \"unknown\" rather than dropping the key" do
     # BuildInfo freezes its sha at compile time, so the fallback is proven
     # through Status.commit/1's injectable resolver — the same code path
