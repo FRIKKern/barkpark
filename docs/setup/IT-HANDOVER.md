@@ -43,7 +43,7 @@ Postgres has no public endpoint and answers only inside the virtual network. The
 
 ## What it costs
 
-The monthly cost in Norway East at the template's sizes is about USD 47 to 101. The [cost table](SELF-HOST-OPERATIONS.md#container-apps-cost) breaks it down. The Container App is most of the range, from 24 idle to 73 busy. The cost rises with a larger database size, high availability, geo-redundant backups, more log volume, and Azure Backup for the shares.
+The monthly cost in Norway East at the template's sizes is about USD 43 to 95, plus Azure Files storage, at list prices on 2026-10-28. The [cost table](SELF-HOST-OPERATIONS.md#container-apps-cost) breaks it down. The Container App is most of the range, from 22 idle to 73 busy. The cost rises with a larger database size, high availability, geo-redundant backups, more log volume, and Azure Backup for the shares.
 
 ## Who does what after go-live
 

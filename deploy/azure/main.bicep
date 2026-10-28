@@ -565,7 +565,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = if (!restoreMode) {
           mountOptions: mediaMountOptions
         }
       ]
-      // Barkpark runs on exactly one replica. See docs/setup/SELF-HOST.md, Path B.
+      // Barkpark runs on exactly one replica. See docs/setup/SELF-HOST-UPDATES.md#container-apps.
       scale: {
         minReplicas: 1
         maxReplicas: 1

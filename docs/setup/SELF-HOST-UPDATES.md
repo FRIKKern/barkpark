@@ -27,10 +27,10 @@ The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay 
 `deploy/azure/main.bicep` sets every non-key line of `barkpark.env` on the app and both jobs, and keeps the keys in Key Vault. Change a setting or a key by editing `barkpark.env` and running the same `az deployment group create` again. A change made with `az containerapp update` is lost at the next deployment.
 
 - **Update.** Set a new `image` in `main.bicepparam` and deploy. Pin a release or `sha-<12>` tag, not `latest`.
-- **Replicas.** The template pins the app to exactly one replica, min and max.
+- **Replicas.** The template pins the app to exactly one replica, min and max. Listen streams, LiveView pages and task events get their updates through `Phoenix.PubSub`, which reaches other replicas only over an Erlang cluster, and Container Apps replicas form none. A second replica would miss events and keep its own caches.
 - **Health.** `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise.
 - **Listen streams.** They last at most 30 minutes behind the Container Apps ingress; clients resume with `Last-Event-ID`.
-- **Jobs.** Set job arguments with `az containerapp job update -g <rg> -n barkpark-ops --args ...`, then run `az containerapp job start`. Arguments on `job start` replace the whole container and drop the command, settings and mounts. A deployment resets the arguments.
+- **Jobs.** Set job arguments with `az containerapp job update -g <rg> -n barkpark-ops --args ...`, then run `az containerapp job start`. Arguments on `job start` replace the whole container and drop the command, settings and mounts. A deployment resets the arguments. Once, a new environment's first execution got no node and no pod events for 10 minutes. If an execution has no replica after 2 minutes, stop it with `az containerapp job stop` and start it again.
 - **Redeploy after deleting.** A deleted resource group leaves its Key Vault soft-deleted for 7 days. Run `az keyvault purge -n <vault> -l norwayeast` before deploying again into a group with the same name.
 - **Cost.** See [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-cost).
 

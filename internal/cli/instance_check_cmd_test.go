@@ -412,6 +412,14 @@ func TestParseInstanceExtensions(t *testing.T) {
 	if !exts[0].Installed || !exts[1].Allowed || exts[2].Allowed {
 		t.Fatalf("exts = %+v", exts)
 	}
+	// Azure Flexible Server reports the list as main.bicep wrote it.
+	exts, err = parseInstanceExtensions("citext|false|true|CITEXT,PG_TRGM,PGCRYPTO\npg_trgm|false|true|CITEXT, PG_TRGM\npgcrypto|false|true|CITEXT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exts[0].Allowed || !exts[1].Allowed || exts[2].Allowed {
+		t.Fatalf("upper-case azure.extensions: exts = %+v", exts)
+	}
 }
 
 // TestInstanceKnownSettingsList keeps instance_known_settings.txt current.
