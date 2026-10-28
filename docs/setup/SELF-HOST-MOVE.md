@@ -16,7 +16,7 @@ These steps move a VM from `deploy.sh` onto `deploy/azure/main.bicep`. The backu
    az containerapp job execution list -g "$RG" -n barkpark-ops -o table
    ```
 
-   The job installs bp 1.26.6, the template's `bpCliVersion`, which restores into the same or a newer PostgreSQL major. The template runs 17. A VM from `deploy.sh` runs 17 too, and a VM built before 2026-10-28 keeps Ubuntu's 14 on 22.04 or 16 on 24.04.
+   The job installs bp 1.26.10, the template's `bpCliVersion`, which restores into the same or a newer PostgreSQL major. The template runs 17. A VM from `deploy.sh` runs 17 too, and a VM built before 2026-10-28 keeps Ubuntu's 14 on 22.04 or 16 on 24.04.
 6. Set `restoreMode = false`, remove that address from `operatorIpRanges` and deploy again. The app starts on the restored database. API tokens move with the database, so the VM's admin token still works and the target skips its seed token.
 7. Wait for `/readyz` to answer 200. `/v1/auth/oidc/<org>/start` answers 302 only when the cloak key opens the SSO secret. Open a document with an encrypted field, and compare `bp schema ls` with the source.
 8. Repoint DNS. Keep `PHX_HOST`, or passkeys and the Entra redirect URI stop working. Container Apps takes a custom domain only after a TXT record `asuid.<host>`, so a VM on a `cloudapp.azure.com` name needs your own domain before the move.
