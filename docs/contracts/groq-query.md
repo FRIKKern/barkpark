@@ -16,13 +16,13 @@ Barkpark answers GROQ on Sanity's query API URLs, so a `@sanity/client` or `next
 | `returnQuery` | `false` leaves `query` out |
 | `resultSourceMap` | `true`/`withKeyArraySelector`: Sanity's map, pass-through functions too |
 
-Any `apiVersion`. Auth, tenancy and shares: the scoped document reads' ([api-v1.md](../api-v1.md) §2). A share or `public-read` caller gets `published`. No token, unshared dataset: 403 (Sanity: 200, empty). POST bills the read bucket. GET over 32,753 bytes: 414, use POST.
+Any `apiVersion`. Auth, tenancy, shares: as scoped document reads ([api-v1.md](../api-v1.md) §2). Share or `public-read` caller: `published`. No token, unshared dataset: 403 (Sanity: 200, empty). POST bills the read bucket. GET > 32,753 bytes: 414.
 
-Response: `{"query", "result", "ms", "syncTags"}`. Documents carry `_id`, `_type`, `_rev`, `_createdAt`, `_updatedAt`, `title` and content at the top level, field-redacted. No title, no `title` key. `drafts` overlays a draft on its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` too.
+Response: `{"query", "result", "ms", "syncTags"}`. Documents: system fields, `title` when set, and content at the top level, field-redacted. `drafts` lays a draft over its published twin (`_id` published, plus `_originalId`); `raw` returns `drafts.<id>` too.
 
 Writes: [sanity-mutate.md](sanity-mutate.md). `GET …/v{apiVersion}/data/doc/:dataset/:id[,id…]` (`getDocument(s)`) is `*[_id in ids]` as `raw`: `{"documents", "omitted"}`, a missing id omitted (`existence`).
 
-Errors keep Barkpark's envelope plus Sanity's `description`, `statusCode` and `message`, and `type`: `queryParseError` (400 `malformed`, plus `query`, `start`, `end`), `queryLimitError` or `queryEvaluationError` (422 `bad_request`), `queryBusyError` (503, `Retry-After`). A missing parameter is a syntax error, as on Sanity.
+Errors: Barkpark's envelope plus Sanity's `description`, `statusCode`, `message` and `type`: `queryParseError` (400 `malformed`, plus `query`, `start`, `end`), `queryLimitError` or `queryEvaluationError` (422 `bad_request`), `queryBusyError` (503, `Retry-After`).
 
 ## Client configuration
 
@@ -66,6 +66,6 @@ Supported: GROQ-1 grammar (filters, projections, `...`, `->`, `^`, `@`, slices, 
 
 Not yet: `text::query`, other `documents::`, `delta::`; releases. Before 2025-02-19 Sanity defaults to `raw`, Barkpark to `published`.
 
-`score()` weighs as groq-js; multi-term ranks can differ.
+`score()` weighs as groq-js; multi-term ranks may vary.
 
-Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()` (its wikilinks are not `references()` yet). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing.
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()`, and its wikilinks `references()`. `order()` is exact where every type in scope declares the field, else a bare value sorts as missing. An asset ref (`asset-<id>`, a Sanity id) with no document derefs to a virtual `sanity.imageAsset`/`fileAsset`; a `mediaAsset` gains its keys; full-read only.

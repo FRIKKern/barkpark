@@ -1152,20 +1152,44 @@ defmodule Barkpark.Groq.Evaluator do
   defp has_reference?(%{"_ref" => ref}, ids) when is_binary(ref) and ref != "",
     do: MapSet.member?(ids, ref)
 
+  defp has_reference?(%{"type" => "wikilink"} = link, ids) do
+    case wikilink_target(link) do
+      nil -> Enum.any?(link, fn {_k, v} -> has_reference?(v, ids) end)
+      target -> MapSet.member?(ids, target)
+    end
+  end
+
   defp has_reference?(%{} = map, ids),
     do: Enum.any?(map, fn {_k, v} -> has_reference?(v, ids) end)
 
   defp has_reference?(_, _ids), do: false
 
   # Mirrors has_reference?/2: an object with a truthy `_ref` contributes that
-  # ref and is not descended into.
+  # ref and is not descended into. A PortableDoc wikilink is the body link
+  # Sanity stores as a markDef `_ref`, so it counts the same way
+  # (task-b1eb62967525ad1b), by `docId`, else its raw `target`, as the content
+  # graph's edge extractor reads it.
   defp collect_refs(list, acc) when is_list(list), do: Enum.reduce(list, acc, &collect_refs/2)
 
   defp collect_refs(%{"_ref" => ref}, acc) when is_binary(ref) and ref != "",
     do: MapSet.put(acc, ref)
 
+  defp collect_refs(%{"type" => "wikilink"} = link, acc) do
+    case wikilink_target(link) do
+      nil -> Enum.reduce(link, acc, fn {_k, v}, a -> collect_refs(v, a) end)
+      target -> MapSet.put(acc, target)
+    end
+  end
+
   defp collect_refs(%{} = map, acc),
     do: Enum.reduce(map, acc, fn {_k, v}, a -> collect_refs(v, a) end)
 
   defp collect_refs(_, acc), do: acc
+
+  defp wikilink_target(link) do
+    case link["docId"] || link["target"] do
+      t when is_binary(t) and t != "" -> t
+      _ -> nil
+    end
+  end
 end
