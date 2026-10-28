@@ -46,6 +46,18 @@ defmodule Barkpark.Content.PortableText do
   internal and an `internalLink` reference in any value
   (task-088575052b459f3e).
 
+  A field that declares its annotations (`blocks.annotations`, or a
+  `format: "portableText"` field whose `blocks` take Sanity's default) passes
+  itself as `from_html/3`'s `:field` (stage S3 of the Portable Text plan).
+  The object dialog edits its mark definitions, so a `data-pt-def` link keeps
+  its stored def whatever its `href` says, and a bare `<a href>` becomes the
+  declared `link`, else `linkAnnotation`, else the first declared annotation
+  with an `href` or `url` field, shaped by the declared fields. The
+  `linkAnnotation` guess of `link_dialect/2` is only for a field with no
+  declaration. `:defs` and `:objects` name a mark definition or inline object
+  the dialog has just made, by `_key`. `editor_vocabulary/2` is what the
+  toolbar offers.
+
   Keys are derived from position (`"b0"`, `"b0s1"`, `"b0m0"`), so converting
   the same HTML twice gives the same blocks. That is what lets an untouched
   field keep its stored value byte for byte. An edited field keeps it per
@@ -101,6 +113,193 @@ defmodule Barkpark.Content.PortableText do
 
   defp node?(_), do: false
 
+  # ── The editor's vocabulary ─────────────────────────────────────────────
+
+  @editor_styles ~w(normal h1 h2 h3 h4 h5 h6 blockquote)
+  @editor_lists ~w(bullet number)
+
+  @doc """
+  What the Classic editor's toolbar offers for a field, read from the field's
+  declared `blocks` vocabulary (`Content.PortableTextValidation.vocabulary/1`),
+  as the map the editor reads from `data-vocabulary`:
+
+      %{"styles" => ["normal", "h2"], "lists" => ["bullet"],
+        "decorators" => ["strong", "em"],
+        "annotations" => [%{"name" => "docLink", "title" => "Link"}],
+        "inline" => [%{"name" => "docBreak", "title" => "docBreak"}]}
+
+  A kind the field leaves open is left out, and the editor shows today's
+  buttons for it. A field with no vocabulary is `nil`: the editor is the one it
+  was before the declaration existed. Styles and lists the HTML bridge cannot
+  write (a custom style) are left out. `dialogs: false` (an editor with no
+  dialog host, such as a richText inside a composite) offers no annotation or
+  inline object.
+  """
+  @spec editor_vocabulary(map() | nil, keyword()) :: map() | nil
+  def editor_vocabulary(field, opts \\ [])
+
+  def editor_vocabulary(%{} = field, opts) do
+    case Barkpark.Content.PortableTextValidation.vocabulary(field) do
+      %{} = v ->
+        dialogs? = Keyword.get(opts, :dialogs, true)
+        blocks = Map.get(field, "blocks") || %{}
+
+        %{}
+        |> put_kind("styles", v.styles, &Enum.filter(&1, fn s -> s in @editor_styles end))
+        |> put_kind("lists", v.lists, &Enum.filter(&1, fn l -> l in @editor_lists end))
+        |> put_kind(
+          "decorators",
+          v.decorators,
+          &Enum.uniq(Enum.map(&1, fn d -> mark_name(d) end))
+        )
+        |> put_kind("annotations", v.annotations, fn names ->
+          if dialogs?, do: entries_in_order(blocks["annotations"], names), else: []
+        end)
+        |> put_kind("inline", v.inline, fn names ->
+          if dialogs?, do: entries_in_order(blocks["inline"], names), else: []
+        end)
+
+      _ ->
+        nil
+    end
+  end
+
+  def editor_vocabulary(_field, _opts), do: nil
+
+  defp put_kind(map, _key, :any, _fun), do: map
+  defp put_kind(map, key, value, fun), do: Map.put(map, key, fun.(value))
+
+  # Portable Text spells the decorator `strike-through`.
+  defp mark_name("strikethrough"), do: "strike-through"
+  defp mark_name(name), do: name
+
+  # Declared entries as `%{"name", "title"}` in declaration order; names the
+  # declaration leaves out (Sanity's default `link`) come last.
+  defp entries_in_order(declared, names) do
+    names = Map.keys(names)
+
+    from_declared =
+      for entry <- List.wrap(declared),
+          name = entry_name(entry),
+          name in names,
+          do: %{"name" => name, "title" => entry_title(entry) || name}
+
+    seen = Enum.map(from_declared, & &1["name"])
+
+    (from_declared ++
+       for(name <- Enum.sort(names), name not in seen, do: %{"name" => name, "title" => name}))
+    |> Enum.uniq_by(& &1["name"])
+  end
+
+  defp entry_name(%{"name" => n}) when is_binary(n) and n != "", do: n
+  defp entry_name(n) when is_binary(n) and n != "", do: n
+  defp entry_name(_), do: nil
+
+  defp entry_title(%{"title" => t}) when is_binary(t) and t != "", do: t
+  defp entry_title(_), do: nil
+
+  # ── Mark definitions and inline objects by `_key` ──────────────────────────
+
+  @doc "The first mark definition with this `_key` in any block, or nil."
+  @spec find_def([map()], String.t()) :: map() | nil
+  def find_def(blocks, key) when is_list(blocks) do
+    Enum.find_value(blocks, fn
+      %{"markDefs" => defs} when is_list(defs) -> Enum.find(defs, &match?(%{"_key" => ^key}, &1))
+      _ -> nil
+    end)
+  end
+
+  def find_def(_blocks, _key), do: nil
+
+  @doc "Every mark definition with this `_key` replaced by `def`, in every block."
+  @spec put_def([map()], String.t(), map()) :: [map()]
+  def put_def(blocks, key, def) when is_list(blocks) do
+    Enum.map(blocks, fn
+      %{"markDefs" => defs} = b when is_list(defs) ->
+        %{b | "markDefs" => Enum.map(defs, &if(match?(%{"_key" => ^key}, &1), do: def, else: &1))}
+
+      b ->
+        b
+    end)
+  end
+
+  @doc """
+  The mark definition with this `_key` removed from every block, and the mark
+  from every span that carries it. The text stays.
+  """
+  @spec drop_def([map()], String.t()) :: [map()]
+  def drop_def(blocks, key) when is_list(blocks) do
+    Enum.map(blocks, fn
+      %{"markDefs" => defs} = b when is_list(defs) ->
+        if Enum.any?(defs, &match?(%{"_key" => ^key}, &1)) do
+          children =
+            Enum.map(b["children"] || [], fn
+              %{"marks" => marks} = span when is_list(marks) ->
+                %{span | "marks" => List.delete(marks, key)}
+
+              child ->
+                child
+            end)
+
+          %{
+            b
+            | "markDefs" => Enum.reject(defs, &match?(%{"_key" => ^key}, &1)),
+              "children" => children
+          }
+        else
+          b
+        end
+
+      b ->
+        b
+    end)
+  end
+
+  @doc "The inline object with this `_key` in any block, or nil."
+  @spec find_inline([map()], String.t()) :: map() | nil
+  def find_inline(blocks, key) when is_list(blocks) do
+    Enum.find_value(blocks, fn
+      %{"_type" => "block", "children" => children} when is_list(children) ->
+        Enum.find(children, &match?(%{"_type" => t, "_key" => ^key} when t != "span", &1))
+
+      _ ->
+        nil
+    end)
+  end
+
+  def find_inline(_blocks, _key), do: nil
+
+  @doc "The inline object with this `_key` replaced by `object`, in every block."
+  @spec put_inline([map()], String.t(), map()) :: [map()]
+  def put_inline(blocks, key, object) when is_list(blocks) do
+    Enum.map(blocks, fn
+      %{"_type" => "block", "children" => children} = b when is_list(children) ->
+        children =
+          Enum.map(children, fn
+            %{"_type" => t, "_key" => ^key} when t != "span" -> object
+            child -> child
+          end)
+
+        %{b | "children" => children}
+
+      b ->
+        b
+    end)
+  end
+
+  @doc "The editor HTML of one inline object: the inert span `from_html/3` reads back."
+  @spec inline_html(map()) :: String.t()
+  def inline_html(%{} = object), do: spans_html(%{"children" => [object]})
+
+  @doc """
+  The address a link-like mark definition shows in the editor (`href`, a
+  `linkAnnotation` target), or nil.
+  """
+  @spec def_href(map()) :: String.t() | nil
+  def def_href(%{"href" => href}) when is_binary(href), do: href
+  def def_href(%{"_type" => "linkAnnotation"} = def), do: link_def_href(def)
+  def def_href(_def), do: nil
+
   # ── HTML → blocks ────────────────────────────────────────────────────────
 
   @token ~r/<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>|([^<]+)|(<)/
@@ -109,11 +308,14 @@ defmodule Barkpark.Content.PortableText do
   Convert the editor's HTML to Portable Text blocks. `stored` is the field's
   current value: its mark definitions are what a `data-pt-def` span names, and
   a rebuilt block that renders to the same HTML as a stored one is that stored
-  block.
+  block. `opts`: `:field` (the field map, whose declared annotations decide
+  what a link is), `:defs` and `:objects` (new mark definitions and inline
+  objects by `_key`).
   """
-  @spec from_html(String.t(), [map()]) :: [map()]
-  def from_html(html, stored \\ []) when is_binary(html) do
+  @spec from_html(String.t(), [map()], keyword()) :: [map()]
+  def from_html(html, stored \\ [], opts \\ []) when is_binary(html) do
     stored = if value?(stored), do: stored, else: []
+    annotations = declared_annotations(Keyword.get(opts, :field))
 
     # The inline objects the stored blocks hold, by `_key`. The editor HTML only
     # NAMES an object (its `_key` in `data-pt-object`); the object itself is
@@ -126,6 +328,10 @@ defmodule Barkpark.Content.PortableText do
           t != "span",
           into: %{},
           do: {k, o}
+
+    # An inline object the Studio has just made (`:objects`, by `_key`): the
+    # editor names it like a stored one.
+    stored_objects = Map.merge(stored_objects, Map.new(Keyword.get(opts, :objects, %{})))
 
     # The custom blocks (a `mediaModule`, a `quote`) the stored value holds, by
     # `_key`. The editor shows each as an inert `<div data-pt-block="key">`;
@@ -148,7 +354,7 @@ defmodule Barkpark.Content.PortableText do
       keep_empty: stored != [],
       objects: stored_objects,
       stored_blocks: stored_blocks,
-      link_type: link_dialect(stored, html)
+      link_type: link_type(annotations, stored, html)
     }
 
     stored_defs =
@@ -157,6 +363,10 @@ defmodule Barkpark.Content.PortableText do
           %{"_key" => k} = d <- defs,
           into: %{},
           do: {k, d}
+
+    # A mark definition the Studio has just made (`:defs`, by `_key`), from
+    # the annotation dialog: the editor names it like a stored one.
+    stored_defs = Map.merge(stored_defs, Map.new(Keyword.get(opts, :defs, %{})))
 
     # Each token's byte range rides along, so a block knows the HTML it was
     # read from (`:src`), which `keep_stored/2` compares with a stored block.
@@ -175,8 +385,47 @@ defmodule Barkpark.Content.PortableText do
     final.blocks
     |> Enum.reverse()
     |> Enum.with_index()
-    |> Enum.map(fn {block, i} -> finalize(block, i, stored_defs, final.link_type) end)
+    |> Enum.map(fn {block, i} ->
+      finalize(block, i, stored_defs, {final.link_type, annotations})
+    end)
     |> keep_stored(stored)
+  end
+
+  # The annotations the field declares, as `%{name => fields}`, or `:open`
+  # when it declares none (no `blocks`, or `blocks` without annotations and
+  # without a declared format). An open field keeps the link row and the
+  # `link_dialect/2` rule it had before the declaration existed.
+  defp declared_annotations(%{} = field) do
+    case Barkpark.Content.PortableTextValidation.vocabulary(field) do
+      %{annotations: %{} = annotations} -> annotations
+      _ -> :open
+    end
+  end
+
+  defp declared_annotations(_field), do: :open
+
+  defp link_type(:open, stored, html), do: link_dialect(stored, html)
+  defp link_type(annotations, _stored, _html), do: declared_link_type(annotations)
+
+  # The type a bare `<a href>` becomes in a field that declares its
+  # annotations: `link`, else `linkAnnotation`, else the first declared
+  # annotation with an `href` or `url` field. `nil` when none can hold an
+  # address: the link is dropped and its text kept.
+  defp declared_link_type(annotations) do
+    cond do
+      is_map_key(annotations, "link") ->
+        "link"
+
+      is_map_key(annotations, "linkAnnotation") ->
+        "linkAnnotation"
+
+      true ->
+        annotations
+        |> Enum.sort()
+        |> Enum.find_value(fn {name, fields} ->
+          if Enum.any?(fields, &(&1["name"] in ["href", "url"])), do: name
+        end)
+    end
   end
 
   # The mark definition type a new link gets. A value whose stored links are
@@ -711,9 +960,9 @@ defmodule Barkpark.Content.PortableText do
     if to > from, do: binary_part(html, from, to - from), else: ""
   end
 
-  defp finalize({:block_object, object}, _i, _stored_defs, _link_type), do: {object, nil}
+  defp finalize({:block_object, object}, _i, _stored_defs, _links), do: {object, nil}
 
-  defp finalize(cur, i, stored_defs, link_type) do
+  defp finalize(cur, i, stored_defs, {link_type, annotations}) do
     key = "b#{i}"
     spans = cur.spans |> Enum.reverse() |> trim_edges()
 
@@ -728,7 +977,17 @@ defmodule Barkpark.Content.PortableText do
           {marks, defs} =
             Enum.map_reduce(span.marks, defs, fn
               {:link, href, extra}, defs ->
-                new_link(key, href, extra, defs, link_type)
+                new_link(key, href, extra, defs, link_type, annotations)
+
+              # In a field that declares its annotations, the annotation
+              # dialog edits a mark definition, never the link's HTML: the
+              # stored def is kept as it is.
+              {:link_def, k, _href, _extra}, defs when is_map(annotations) ->
+                cond do
+                  Enum.any?(defs, &(&1["_key"] == k)) -> {k, defs}
+                  def = stored_defs[k] -> {k, defs ++ [def]}
+                  true -> {nil, defs}
+                end
 
               {:link_def, k, href, extra}, defs ->
                 cond do
@@ -740,7 +999,7 @@ defmodule Barkpark.Content.PortableText do
                     {k, defs ++ [def |> edited_link_def(href, extra) |> with_link_extra(extra)]}
 
                   true ->
-                    new_link(key, href, extra, defs, link_type)
+                    new_link(key, href, extra, defs, link_type, annotations)
                 end
 
               {:def, k}, defs ->
@@ -777,13 +1036,27 @@ defmodule Barkpark.Content.PortableText do
     {block, cur[:src]}
   end
 
-  defp new_link(key, href, extra, defs, link_type) do
-    # A document link and a file link have no `link` form: each is a
-    # `linkAnnotation` in any value.
-    link_type =
-      if internal_href?(href) or dam?(extra), do: "linkAnnotation", else: link_type
+  # A field that declares its annotations and none can hold an address: the
+  # link's text is kept without a mark.
+  defp new_link(_key, _href, _extra, defs, nil, %{}), do: {nil, defs}
 
-    candidate = link_type |> new_link_def("", href, extra) |> with_link_extra(extra)
+  defp new_link(key, href, extra, defs, link_type, annotations) do
+    # A document link and a file link have no `link` form: each is a
+    # `linkAnnotation` in any value whose annotations are not declared.
+    link_type =
+      if annotations == :open and (internal_href?(href) or dam?(extra)),
+        do: "linkAnnotation",
+        else: link_type
+
+    candidate =
+      case annotations do
+        :open ->
+          link_type |> new_link_def("", href, extra) |> with_link_extra(extra)
+
+        %{} ->
+          declared_link_def(link_type, Map.get(annotations, link_type, []), href, extra)
+      end
+
     same = Map.delete(candidate, "_key")
 
     case Enum.find(defs, &(Map.delete(&1, "_key") == same)) do
@@ -793,6 +1066,27 @@ defmodule Barkpark.Content.PortableText do
       nil ->
         k = free_key(key, defs)
         {k, defs ++ [Map.put(candidate, "_key", k)]}
+    end
+  end
+
+  # A new link in a field that declares its annotations, shaped by the
+  # declared fields: an `href` field holds the address (Sanity's `link`); a
+  # `url` or `internalLink` field takes the `linkAnnotation` target fields.
+  # A declared type with no fields is Sanity's default `link` (`href`).
+  defp declared_link_def(type, fields, href, extra) do
+    names = Enum.map(fields, & &1["name"])
+
+    cond do
+      "href" in names or names == [] ->
+        %{"_type" => type, "_key" => "", "href" => href}
+
+      Enum.any?(names, &(&1 in ["url", "internalLink", "email", "damFileUrl"])) ->
+        %{"_type" => type, "_key" => ""}
+        |> Map.merge(annotation_target(href, extra))
+        |> Map.take(["_type", "_key" | names])
+
+      true ->
+        %{"_type" => type, "_key" => ""}
     end
   end
 

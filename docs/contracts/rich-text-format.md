@@ -42,6 +42,10 @@ The structural findings (codes `pt_*`) are warnings. On a dataset listed in `BAR
 
 Keyed patch paths address any node: `body[_key=="b"].children[_key=="s"].text`, `body[_key=="b"].markDefs[_key=="m"]`, `insert` `after` `body[_key=="b"]`.
 
+## Classic editor
+
+A Portable Text field with `blocks` gets `data-vocabulary` on its editor (`PortableText.editor_vocabulary/2`). The toolbar then offers only the declared styles, lists and decorators; a field with only `normal` shows no style button. Each declared annotation has a button, and the declared inline objects an "Insert inline" menu. Both open the object dialog, built from the entry's `fields` (a `link` with none gets `href`), else from the named object type. Nothing in it is required. The editor makes the new `_key`; the HTML names a mark definition and an inline object by key, and `from_html/3` keeps the stored one. A field without `blocks`, or whose `blocks` leave annotations open, keeps the link row and its `link`/`linkAnnotation` guess. A richText inside a composite has no dialog host, so it gets the toolbar part only.
+
 ## Code anchors
 
 - `api/lib/barkpark/content/rich_text_format.ex` — `format/1`, `normalise_fields/1`, `format_problems/2`
@@ -49,3 +53,5 @@ Keyed patch paths address any node: `body[_key=="b"].children[_key=="s"].text`, 
 - `api/lib/barkpark/content/validation.ex` — the richText clause of the field walk
 - `api/lib/barkpark/content/schema.ex` — `inline_vocabulary/3`
 - `api/lib/barkpark/content/forms.ex` — `plain_rich_text?/1`
+- `api/lib/barkpark/content/portable_text.ex` — `editor_vocabulary/2`, `from_html/3`
+- `api/lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex` — `insert_def/2`, `insert_inline/2`

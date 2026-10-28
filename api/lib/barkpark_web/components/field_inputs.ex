@@ -733,13 +733,23 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # so a re-render never resets what the author is typing
   # (task-19392d1e6fc661e6). `data-block-types` lists the custom blocks the
   # field's `blocks.of` declares, for the toolbar's "Insert block" menu.
+  #
+  # `data-vocabulary` is what the field's declared `blocks` vocabulary lets the
+  # toolbar offer (`PortableText.editor_vocabulary/1`): its styles, lists and
+  # decorators, and its annotations and inline objects, each edited in the
+  # object dialog. A field that declares none renders without it, as before.
   defp rich_text_editor(assigns) do
     assigns =
       assign(assigns,
         block_types:
           assigns.field
           |> BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks.insertable_types()
-          |> Jason.encode!()
+          |> Jason.encode!(),
+        vocabulary:
+          case Barkpark.Content.PortableText.editor_vocabulary(assigns.field) do
+            nil -> nil
+            v -> Jason.encode!(v)
+          end
       )
 
     ~H"""
@@ -754,6 +764,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
           data-media-strings={if @link_types != [], do: BarkparkWeb.StudioLocale.component_strings(:media)}
           data-token={if @link_types != [], do: @api_token_raw}
           data-block-types={@block_types}
+          data-vocabulary={@vocabulary}
         ></bp-rich-text-editor>
       </div>
     </div>

@@ -366,7 +366,7 @@ defmodule Barkpark.Content.Forms do
       # a mark the editor has no UI for survives. A plugin-owned type
       # (`@keep_shape`) posts HTML that was not coerced; it gets blocks too.
       portable_text_field?(field, stored) and is_binary(posted) and String.trim(posted) != "" ->
-        PortableText.from_html(posted, stored)
+        PortableText.from_html(posted, stored, field: field)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
         restore_composite(field, coerced, stored, posted)
@@ -809,7 +809,7 @@ defmodule Barkpark.Content.Forms do
   defp coerce_field_value(%{"type" => "richText"} = field, val)
        when is_binary(val) and not is_map_key(field, @keep_shape) do
     if plain_rich_text?(field) and String.trim(val) != "",
-      do: PortableText.from_html(val),
+      do: PortableText.from_html(val, [], field: field),
       else: val
   end
 

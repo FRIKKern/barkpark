@@ -3728,6 +3728,9 @@
     .bp-rte-body .bp-pt-block strong { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-xs); }
     /* A block box opens its fields on click or Enter (task-19392d1e6fc661e6). */
     .bp-rte-body .bp-pt-block[data-pt-decorated] { cursor: pointer; }
+    .bp-rte-body span[data-pt-def] { text-decoration: underline dotted; text-underline-offset: 2px; }
+    .bp-rte-body [data-pt-object] { display: inline-block; padding: 0 4px; border: 1px solid var(--input); border-radius: 4px; font-size: var(--text-xs); color: var(--fg-muted); cursor: pointer; }
+    .bp-rte-annot-name { font-size: var(--text-xs); }
     .bp-rte-body .bp-pt-block[data-pt-decorated]:hover { border-color: var(--primary); color: var(--fg); }
     .bp-rte-body .bp-pt-block[data-pt-decorated]:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
     .bp-rte-body .bp-pt-pending { opacity: 0.6; }
@@ -6791,6 +6794,8 @@
     // (`bp-pt-block-insert`) asks it for a new block at the caret. The server
     // answers `bp:pt-block-ready` (put the new block's box where the
     // placeholder is) and `bp:pt-block-update` (redraw a saved block's box).
+    // A field that declares its vocabulary also opens and adds annotations
+    // (`bp-pt-def-*`) and inline objects (`bp-pt-inline-*`) the same way.
     Hooks.BarkparkPtBlocks = {
       mounted() {
         const field = this.el.dataset.field;
@@ -6805,6 +6810,26 @@
         };
         this.el.addEventListener("bp-pt-block-open", this._onOpen);
         this.el.addEventListener("bp-pt-block-insert", this._onInsert);
+        this._forward = {
+          "bp-pt-def-open": "pt-def-open",
+          "bp-pt-def-insert": "pt-def-insert",
+          "bp-pt-inline-open": "pt-inline-open",
+          "bp-pt-inline-insert": "pt-inline-insert",
+        };
+        this._onForward = (e) => {
+          const d = e.detail || {};
+          this.pushEvent(this._forward[e.type], { field, key: d.key, type: d.type, html: d.html });
+        };
+        for (const name of Object.keys(this._forward)) this.el.addEventListener(name, this._onForward);
+        const call = (method, ...args) => {
+          const ed = editor();
+          if (ed && ed[method]) ed[method](...args);
+        };
+        this.handleEvent("bp:pt-def-ready", (p) => { if (p.field === field) call("ptDefReady", p.key, p.ok); });
+        this.handleEvent("bp:pt-def-update", (p) => { if (p.field === field) call("ptDefUpdate", p.key, p.href); });
+        this.handleEvent("bp:pt-def-remove", (p) => { if (p.field === field) call("ptDefRemove", p.key); });
+        this.handleEvent("bp:pt-inline-ready", (p) => { if (p.field === field) call("ptInlineReady", p.key, p.html); });
+        this.handleEvent("bp:pt-inline-update", (p) => { if (p.field === field) call("ptInlineUpdate", p.key, p.html); });
         this.handleEvent("bp:pt-block-ready", (p) => {
           const ed = editor();
           if (p.field === field && ed && ed.ptBlockReady) ed.ptBlockReady(p.pending, p.key, p.html);
@@ -6817,6 +6842,7 @@
       destroyed() {
         this.el.removeEventListener("bp-pt-block-open", this._onOpen);
         this.el.removeEventListener("bp-pt-block-insert", this._onInsert);
+        for (const name of Object.keys(this._forward || {})) this.el.removeEventListener(name, this._onForward);
       },
     };
 
