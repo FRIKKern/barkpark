@@ -32,13 +32,13 @@ Anonymous reads need the scope's `:media` share: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.
 
 Fit modes:
 
-- `clip` fits inside the box, keeps the aspect ratio, may scale up; `max` does not.
-- `crop` scales to cover the box, then cuts it to exactly `w` x `h`.
-- `fill` is `clip`, then pads to `w` x `h` with `bg` (white); `fillmax` does not scale up.
-- `scale` stretches to exactly `w` x `h`.
+- `clip` fits inside the box, keeps the aspect, may scale up; `max` does not.
+- `crop` scales to cover the box, then cuts it to `w` x `h`.
+- `fill` is `clip`, padded to `w` x `h` with `bg` (white); `fillmax` does not scale up.
+- `scale` stretches to `w` x `h`.
 - `min` is `crop` without scaling up: a smaller source is cut to the box's aspect at its own size.
 
-Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits); `pad` px per side; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns the result; `invert`; `sat=-100` grayscale, else ignored; `sharp` ignored; `quality` is `q`.
+Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits; JPEG drops alpha); `pad` px a side, inside `w`/`h`; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns the result; `invert`; `sat=-100` grayscale, else ignored; `sharp` ignored; `quality` is `q`.
 
 ## AVIF
 
@@ -65,6 +65,6 @@ Errors: 400 `invalid_transform_param` (`details.param`), 400 `not_transformable`
 
 ## Named presets
 
-`/media/renditions/<id>/<preset>` (`thumb`, `preview`, `hero`, `og`, `lqip`) runs a fixed plan through the same pipeline (`ImageBackend.Vix.render/4`), cached as `_renditions/<id>/<preset>.<ext>`.
+`/media/renditions/<id>/<preset>` (`thumb`, `preview`, `hero`, `og`, `lqip`) runs a fixed plan through one pipeline (`ImageBackend.Vix.render/4`), cached as `_renditions/<id>/<preset>.<ext>`.
 
 Code: `Barkpark.Media.Transform` (parameters, cache key, geometry), `Barkpark.Media.Renditions.transform/3` (cache, lock), `BarkparkWeb.MediaController.serve/2`.

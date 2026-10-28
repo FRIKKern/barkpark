@@ -242,7 +242,9 @@ defmodule Barkpark.Media.Transform do
     [
       Map.get(plan, :blur) && "blur=#{plan.blur}",
       Map.get(plan, :bg) && "bg=#{format_bg(plan.bg)}",
-      Map.get(plan, :pad, 0) > 0 && "pad=#{plan.pad}",
+      # `pad-in`: the padding sits inside `w`/`h` since task-da6a60b6d5e649f8,
+      # so a padded URL cached before it renders anew.
+      Map.get(plan, :pad, 0) > 0 && "pad-in=#{plan.pad}",
       Map.get(plan, :flip) && "flip=#{plan.flip}",
       Map.get(plan, :orient, 0) != 0 && "or=#{plan.orient}",
       Map.get(plan, :invert) == true && "invert",
@@ -346,6 +348,7 @@ defmodule Barkpark.Media.Transform do
   """
   @spec geometry(plan(), pos_integer(), pos_integer()) :: map()
   def geometry(plan, src_w, src_h) when src_w > 0 and src_h > 0 do
+    plan = inset(plan)
     rect = clamp_rect(plan.rect, src_w, src_h)
 
     {sw, sh} =
@@ -359,6 +362,15 @@ defmodule Barkpark.Media.Transform do
   end
 
   # ── geometry ──────────────────────────────────────────────────────────────
+
+  # `pad` sits inside the requested size, as on Sanity's CDN: `w=200&pad=10`
+  # is 200 px wide, the image 180 of it. Without `w` or `h` the padding is
+  # added around the image.
+  defp inset(%{pad: p} = plan) when is_integer(p) and p > 0 do
+    %{plan | w: plan.w && max(plan.w - 2 * p, 1), h: plan.h && max(plan.h - 2 * p, 1)}
+  end
+
+  defp inset(plan), do: plan
 
   # No target size: only rect and format apply.
   defp fit_geometry(%{w: nil, h: nil}, _sw, _sh), do: %{}
