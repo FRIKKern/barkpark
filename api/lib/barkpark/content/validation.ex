@@ -124,6 +124,7 @@ defmodule Barkpark.Content.Validation do
 
   require Logger
 
+  alias Barkpark.Content.{PortableTextValidation, RichTextFormat}
   alias Barkpark.Content.SchemaDefinition
   alias Barkpark.Content.SchemaDefinition.{Field, Parsed}
   alias Barkpark.PortableDoc.FieldVocabulary
@@ -147,6 +148,9 @@ defmodule Barkpark.Content.Validation do
     list_not_unique number_too_small number_too_large
     string_too_short string_too_long portable_text_not_portabledoc custom
     cross_validation unknown_desk_icon unknown_desk_preset
+    pt_shape pt_type_missing pt_key_missing pt_key_duplicate pt_span_text
+    pt_mark_undeclared pt_style_undeclared pt_list_undeclared pt_level_shape
+    pt_block_type_undeclared pt_inline_type_undeclared pt_annotation_undeclared
   )a
 
   @doc "The fixed set of codes `check_findings/3` can ever emit. See the moduledoc."
@@ -448,8 +452,10 @@ defmodule Barkpark.Content.Validation do
   def leaf_count(_), do: 0
 
   defp run_tree(content, title, schema, level) do
-    schema = schema_map(schema)
+    with_pt_level(schema, fn -> do_run_tree(content, title, schema_map(schema), level) end)
+  end
 
+  defp do_run_tree(content, title, schema, level) do
     if flat_mode?(schema) do
       run(content, title, schema, level)
     else
@@ -515,8 +521,10 @@ defmodule Barkpark.Content.Validation do
   # `required` warns and an error-level `required` blocks, from the same
   # field, in two independent passes.
   defp run(content, title, schema, level) do
-    schema = schema_map(schema)
+    with_pt_level(schema, fn -> do_run(content, title, schema_map(schema), level) end)
+  end
 
+  defp do_run(content, title, schema, level) do
     result =
       if flat_mode?(schema) do
         validate_flat(content, title, schema, level)
@@ -533,8 +541,10 @@ defmodule Barkpark.Content.Validation do
   # `check_findings/3`'s own pass — mirrors `run/4` exactly, but flattens to
   # `finding()` maps instead of collapsing into the field-keyed string tree.
   defp run_findings(content, title, schema, level) do
-    schema = schema_map(schema)
+    with_pt_level(schema, fn -> do_run_findings(content, title, schema_map(schema), level) end)
+  end
 
+  defp do_run_findings(content, title, schema, level) do
     if flat_mode?(schema) do
       flat_findings(content, title, schema, level)
     else
@@ -590,7 +600,14 @@ defmodule Barkpark.Content.Validation do
           []
         end
 
-      own ++ pt
+      structure =
+        field
+        |> flat_structure_findings(value, top_path, level)
+        |> Enum.map(fn {path, msg, code, params} ->
+          %{path: path, message: format_msg(top_path, path, msg), code: code, params: params}
+        end)
+
+      own ++ pt ++ structure
     end)
   end
 
@@ -674,6 +691,43 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
+  # The level a Portable Text STRUCTURAL finding rides
+  # (`PortableTextValidation`): a warning by default, an error on a dataset
+  # that enforces its schema (`enforce?/1`), so a stored body with a stray
+  # key never blocks a Studio publish on an advising dataset. The walk below
+  # has no dataset in hand, so the pass's level is set for the duration of
+  # one validation call and read where a richText field is walked.
+  @pt_level_key {__MODULE__, :portable_text_level}
+
+  defp with_pt_level(schema, fun) do
+    level = if enforce?(schema_dataset(schema)), do: :error, else: :warning
+    previous = Process.put(@pt_level_key, level)
+
+    try do
+      fun.()
+    after
+      if previous, do: Process.put(@pt_level_key, previous), else: Process.delete(@pt_level_key)
+    end
+  end
+
+  defp pt_level, do: Process.get(@pt_level_key, :warning)
+
+  defp schema_dataset(%SchemaDefinition{dataset: d}), do: d
+  defp schema_dataset(%{"dataset" => d}), do: d
+  defp schema_dataset(%{dataset: d}), do: d
+  defp schema_dataset(_), do: nil
+
+  # Portable Text findings for a richText field (string-keyed raw map) whose
+  # stored value is Portable Text, by declaration or (a legacy `body`) by its
+  # value. `[]` for any other field.
+  defp portable_text_structure(raw, value, path, level) do
+    raw = stringify_keys(raw || %{})
+
+    if is_list(value) and RichTextFormat.stores_portable_text?(raw, value),
+      do: PortableTextValidation.findings(raw, value, path, level, pt_level()),
+      else: []
+  end
+
   # A stored `%SchemaDefinition{}` (what `Content.get_schema/2` and the
   # Studio's `editor_schema` carry) is read as the plain map the parser
   # expects. Before this (Gyldendal parity E1.11) the struct reached
@@ -721,6 +775,7 @@ defmodule Barkpark.Content.Validation do
           |> validate_field(rules, field)
           |> Enum.map(fn {msg, _code, _params} -> msg end)
           |> Kernel.++(flat_portable_text_messages(field, value, level))
+          |> Kernel.++(flat_structure_messages(field, value, level))
 
         if field_errors == [] do
           acc
@@ -746,6 +801,20 @@ defmodule Barkpark.Content.Validation do
   # SCHEMA holding one (not just the richText field itself — `flat_mode?`
   # is whole-schema) onto the heavier v2 walker for every OTHER field in it
   # too, a much wider behavior change than this task asks for.
+  defp flat_structure_messages(field, value, level) do
+    top_path = "/" <> to_string(get_in_field(field, "name"))
+
+    field
+    |> flat_structure_findings(value, top_path, level)
+    |> Enum.map(fn {path, msg, _code, _params} -> format_msg(top_path, path, msg) end)
+  end
+
+  defp flat_structure_findings(field, value, top_path, level) do
+    if get_in_field(field, "type") == "richText",
+      do: portable_text_structure(field, value, top_path, level),
+      else: []
+  end
+
   defp flat_portable_text_messages(field, value, level) do
     if get_in_field(field, "type") == "richText" and portable_doc_field?(field) do
       value
@@ -1003,6 +1072,17 @@ defmodule Barkpark.Content.Validation do
   # subfield already does (see the "composite" clause above, which passes
   # `level` the same way with no gate at all).
   defp walk_field(%Field{type: "richText", raw: raw} = f, value, path, level) do
+    if is_list(value) and RichTextFormat.stores_portable_text?(stringify_keys(raw || %{}), value),
+      do: walk_leaf(f, value, path, level) ++ portable_text_structure(raw, value, path, level),
+      else: walk_rich_text(f, value, path, level)
+  end
+
+  # primitive leaf — apply v1-style rules from raw["validation"]
+  defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
+
+  # A richText field whose value is not Portable Text: PortableDoc blocks
+  # (the block editor), or a legacy `body`/`blocks` that holds them.
+  defp walk_rich_text(%Field{raw: raw} = f, value, path, level) do
     # task-2d96f71d3fe52ee7 — a Sanity Portable Text array stores silently
     # and renders broken in Studio (PortableDoc blocks only). Scanned
     # unconditionally, before the object-block-vocabulary branch below:
@@ -1028,18 +1108,19 @@ defmodule Barkpark.Content.Validation do
           pt_findings ++
           (blocks
            |> Enum.with_index()
-           |> Enum.flat_map(fn
-             {%{"type" => t} = block, idx} when is_map_key(objects, t) ->
-               object_block_findings(Map.fetch!(objects, t), block, "#{path}/#{idx}", level)
+           |> Enum.flat_map(fn {block, idx} ->
+             # The node's own type key for this field's format: `type` on a
+             # PortableDoc block, `_type` on a legacy body's Portable Text
+             # node. Matching `type` alone missed a custom Portable Text
+             # block, whose own fields may include a `type`.
+             t = RichTextFormat.node_type(stringify_keys(raw), block)
 
-             _ ->
-               []
+             if is_binary(t) and is_map_key(objects, t),
+               do: object_block_findings(Map.fetch!(objects, t), block, "#{path}/#{idx}", level),
+               else: []
            end))
     end
   end
-
-  # primitive leaf — apply v1-style rules from raw["validation"]
-  defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
 
   # A richText field's block array, found whichever of its two LIVE shapes
   # `value` is holding (task-839f9bebf5628c03 — found live: barkpark-studio's

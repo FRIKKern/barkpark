@@ -203,7 +203,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     value = get_value(assigns.value, sub.name, nil)
 
     if Barkpark.Content.PortableText.value?(value) and
-         not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(Map.get(sub, :raw) || %{}) do
+         Barkpark.Content.RichTextFormat.format(Map.get(sub, :raw) || %{}) != :portable_doc do
       input_id = input_id(assigns.path, assigns.field.name, sub.name)
       owner_key = get_value(assigns.value, "_key", nil)
 
