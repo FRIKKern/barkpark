@@ -20,6 +20,15 @@
 // then debounces + serialises + pushes phx-change="autosave" exactly
 // as it would for any native input.
 //
+// A field that declares its Portable Text vocabulary gets data-vocabulary
+// (Barkpark.Content.PortableText.editor_vocabulary/2): the toolbar then offers
+// only the declared styles, lists and decorators, one button per declared
+// annotation and an "Insert inline" menu of the declared inline objects. An
+// annotation or inline object is edited in the server's object dialog: the
+// editor marks the text (or places the object) under a fresh _key and asks
+// the host (bp-pt-def-insert, bp-pt-inline-insert, and the -open events for
+// an existing one). Without data-vocabulary the toolbar is the one above.
+//
 // Contract: docs/studio/web-components.md
 // v2 plan: replace document.execCommand + plain contenteditable with a
 // vendored ProseMirror/TipTap engine and add a setValue(v) channel for
@@ -38,6 +47,14 @@ class BpRichTextEditor extends HTMLElement {
     if (this._editor) return; // double-mount guard
 
     const initial = this.getAttribute("value") || this.dataset.value || "";
+
+    // The field's declared vocabulary, or null: an undeclared field keeps the
+    // toolbar it always had.
+    this._vocab = null;
+    try {
+      const v = JSON.parse(this.getAttribute("data-vocabulary") || "null");
+      if (v && typeof v === "object" && !Array.isArray(v)) this._vocab = v;
+    } catch (_e) { this._vocab = null; }
 
     this._buildToolbar();
 
@@ -60,6 +77,12 @@ class BpRichTextEditor extends HTMLElement {
     // cannot edit. Clicking it, or Enter or Space on it, asks the host to open
     // its fields (task-19392d1e6fc661e6).
     this._onBlockClick = (e) => {
+      const inline = this._inlineDialogs() && e.target.closest && e.target.closest("[data-pt-object]");
+      if (inline && this._editor.contains(inline) && !inline.dataset.ptPending) {
+        e.preventDefault();
+        this._openInline(inline);
+        return;
+      }
       const box = e.target.closest && e.target.closest(".bp-pt-block[data-pt-block]");
       if (!box || !this._editor.contains(box) || box.dataset.ptPending) return;
       e.preventDefault();
@@ -216,6 +239,222 @@ class BpRichTextEditor extends HTMLElement {
     }
   }
 
+  // ── Declared annotations and inline objects ─────────────────────────────
+
+  _inlineDialogs() {
+    return !!(this._vocab && Array.isArray(this._vocab.inline) && this._vocab.inline.length);
+  }
+
+  // A fresh _key for an annotation or inline object the editor makes; the
+  // server refuses one the body already holds.
+  _newKey() {
+    const bytes = new Uint8Array(6);
+    if (globalThis.crypto && globalThis.crypto.getRandomValues) globalThis.crypto.getRandomValues(bytes);
+    else for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  // The selection inside the text, or the last one the author made there.
+  _textRange() {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && this._editor.contains(sel.getRangeAt(0).commonAncestorContainer)) {
+      return sel.getRangeAt(0);
+    }
+    return this._lastRange && this._editor.contains(this._lastRange.commonAncestorContainer) ? this._lastRange : null;
+  }
+
+  _topBlock(node) {
+    while (node && node.parentNode !== this._editor) node = node.parentNode;
+    return node;
+  }
+
+  // Wrap a selection inside one block in the element `make` returns. False
+  // when there is nothing to wrap, or the selection crosses blocks.
+  _wrapSelection(make) {
+    const range = this._textRange();
+    if (!range || range.collapsed) return null;
+    if (this._topBlock(range.startContainer) !== this._topBlock(range.endContainer)) return null;
+    const el = make();
+    el.appendChild(range.extractContents());
+    range.insertNode(el);
+    const sel = window.getSelection();
+    if (sel) {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      this._lastRange = r.cloneRange();
+    }
+    return el;
+  }
+
+  _unwrap(el) {
+    const parent = el.parentNode;
+    if (!parent) return;
+    while (el.firstChild) parent.insertBefore(el.firstChild, el);
+    parent.removeChild(el);
+  }
+
+  // The element at the selection that matches `selector`, if any.
+  _closestAtSelection(selector) {
+    const range = this._textRange();
+    let node = range ? range.startContainer : null;
+    while (node && node !== this._editor) {
+      if (node.nodeType === 1 && node.matches(selector)) return node;
+      node = node.parentNode;
+    }
+    return null;
+  }
+
+  // A decorator with no execCommand (code, a declared custom decorator):
+  // the selection is wrapped in its element, or unwrapped when it is in one.
+  _toggleMark(tag, mark) {
+    const selector = mark ? '[data-pt-mark="' + CSS.escape(mark) + '"]' : tag;
+    const current = this._closestAtSelection(selector);
+    if (current) {
+      this._unwrap(current);
+    } else if (!this._wrapSelection(() => {
+      const el = document.createElement(tag);
+      if (mark) el.setAttribute("data-pt-mark", mark);
+      return el;
+    })) {
+      return;
+    }
+    this._emit();
+  }
+
+  // An annotation button: the caret in an annotation opens it; a selection
+  // becomes a new annotation of `type`, which the host adds and opens.
+  _annotate(type) {
+    if (!this._editor) return;
+    const existing = this._closestAtSelection("[data-pt-def]");
+    if (existing) {
+      this.dispatchEvent(
+        new CustomEvent("bp-pt-def-open", {
+          bubbles: true,
+          composed: false,
+          detail: { key: existing.getAttribute("data-pt-def"), html: this._serialize() }
+        })
+      );
+      return;
+    }
+    const key = this._newKey();
+    const el = this._wrapSelection(() => {
+      const span = document.createElement("span");
+      span.setAttribute("data-pt-def", key);
+      return span;
+    });
+    if (!el) return;
+    this.dispatchEvent(
+      new CustomEvent("bp-pt-def-insert", {
+        bubbles: true,
+        composed: false,
+        detail: { type, key, html: this._serialize() }
+      })
+    );
+    this._emit();
+  }
+
+  _defs(key) {
+    return Array.from(this._editor.querySelectorAll('[data-pt-def="' + CSS.escape(key) + '"]'));
+  }
+
+  // The server's answer to a new annotation: refused, its mark comes off.
+  ptDefReady(key, accepted) {
+    if (!this._editor || accepted) return;
+    this._defs(key).forEach((el) => this._unwrap(el));
+    this._emit();
+  }
+
+  // A saved annotation: a link shows its new address.
+  ptDefUpdate(key, href) {
+    if (!this._editor) return;
+    for (const el of this._defs(key)) {
+      if (el.tagName === "A" && typeof href === "string") el.setAttribute("href", href);
+    }
+  }
+
+  // A removed annotation: its text stays, unmarked.
+  ptDefRemove(key) {
+    if (!this._editor) return;
+    this._defs(key).forEach((el) => this._unwrap(el));
+    this._emit();
+  }
+
+  _inlineKey(el) {
+    try {
+      const o = JSON.parse(el.getAttribute("data-pt-object") || "{}");
+      return o && typeof o._key === "string" ? o._key : null;
+    } catch (_e) {
+      return null;
+    }
+  }
+
+  _inlineByKey(key) {
+    return Array.from(this._editor.querySelectorAll("[data-pt-object]")).find((el) => this._inlineKey(el) === key) || null;
+  }
+
+  _openInline(el) {
+    this.dispatchEvent(
+      new CustomEvent("bp-pt-inline-open", {
+        bubbles: true,
+        composed: false,
+        detail: { key: this._inlineKey(el), html: this._serialize() }
+      })
+    );
+  }
+
+  // "Insert inline": a placeholder at the caret names the new object's _key;
+  // the host adds the object and the placeholder becomes its chip.
+  _insertInline(type) {
+    if (!this._editor) return;
+    const key = this._newKey();
+    const ph = document.createElement("span");
+    ph.setAttribute("data-pt-object", JSON.stringify({ _key: key }));
+    ph.setAttribute("contenteditable", "false");
+    ph.setAttribute("data-pt-pending", key);
+    ph.textContent = this._t("Inserting…");
+    const range = this._textRange();
+    if (range) {
+      const r = range.cloneRange();
+      r.collapse(false);
+      r.insertNode(ph);
+    } else {
+      let last = this._editor.lastElementChild;
+      if (!last || last.matches(".bp-pt-block, ul, ol")) {
+        last = document.createElement("p");
+        this._editor.appendChild(last);
+      }
+      last.appendChild(ph);
+    }
+    this.dispatchEvent(
+      new CustomEvent("bp-pt-inline-insert", {
+        bubbles: true,
+        composed: false,
+        detail: { type, key, html: this._serialize() }
+      })
+    );
+    this._emit();
+  }
+
+  _replaceInline(key, html) {
+    const old = this._inlineByKey(key);
+    if (!old) return;
+    const next = html ? this._boxFrom(html) : null;
+    if (next) old.replaceWith(next);
+    else old.remove();
+    this._emit();
+  }
+
+  // The server's answer to "Insert inline", and a saved inline object.
+  ptInlineReady(key, html) {
+    if (this._editor) this._replaceInline(key, html);
+  }
+
+  ptInlineUpdate(key, html) {
+    if (this._editor && html) this._replaceInline(key, html);
+  }
+
   // ── Toolbar (B / I / Link) ────────────────────────────────────────────
   // execCommand on the live selection; the link flow saves the Range
   // before the URL input steals focus and restores it before exec, so
@@ -237,21 +476,54 @@ class BpRichTextEditor extends HTMLElement {
       .map((x) => x.trim())
       .filter(Boolean);
     this._linkTypes = linkTypes;
+    const vocab = this._vocab;
+    const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    const btn = (attrs, title, label, glyph) =>
+      '<button type="button" class="bp-rte-btn" ' + attrs + ' title="' + title + '" aria-label="' + label + '"><span aria-hidden="true">' + glyph + "</span></button>";
     // Each glyph button is named by its word: the glyph alone read "B, button".
+    const decoratorButton = (d) => {
+      switch (d) {
+        case "strong": return '<button type="button" class="bp-rte-btn" data-cmd="bold" title="' + t("Bold (mod+B)") + '" aria-label="' + t("Bold") + '"><b aria-hidden="true">B</b></button>';
+        case "em": return '<button type="button" class="bp-rte-btn" data-cmd="italic" title="' + t("Italic (mod+I)") + '" aria-label="' + t("Italic") + '"><i aria-hidden="true">I</i></button>';
+        case "underline": return '<button type="button" class="bp-rte-btn" data-cmd="underline" title="' + t("Underline") + '" aria-label="' + t("Underline") + '"><u aria-hidden="true">U</u></button>';
+        case "strike-through": return '<button type="button" class="bp-rte-btn" data-cmd="strikeThrough" title="' + t("Strikethrough") + '" aria-label="' + t("Strikethrough") + '"><s aria-hidden="true">S</s></button>';
+        case "code": return btn('data-wrap="code"', t("Code"), t("Code"), "&lt;/&gt;");
+        default: return btn('data-wrap="span" data-mark="' + esc(d) + '"', esc(d), esc(d), esc(d));
+      }
+    };
+    const styleButton = (s) => {
+      if (s === "normal") return btn('data-cmd="formatBlock" data-arg="p"', t("Paragraph"), t("Paragraph"), "¶");
+      if (s === "blockquote") return btn('data-cmd="formatBlock" data-arg="blockquote"', t("Quote"), t("Quote"), "❝");
+      const m = /^h([1-6])$/.exec(s);
+      return m ? btn('data-cmd="formatBlock" data-arg="h' + m[1] + '"', t("Heading " + m[1]), t("Heading " + m[1]), "H" + m[1]) : "";
+    };
+    const listButton = (l) => {
+      if (l === "bullet") return btn('data-cmd="insertUnorderedList"', t("Bulleted list"), t("Bulleted list"), "•");
+      if (l === "number") return btn('data-cmd="insertOrderedList"', t("Numbered list"), t("Numbered list"), "1.");
+      return "";
+    };
+    // A kind the vocabulary leaves out has the buttons it always had. One
+    // style is no choice, so a field with only `normal` shows no style button.
+    const decorators = vocab && Array.isArray(vocab.decorators) ? vocab.decorators : ["strong", "em", "underline", "strike-through"];
+    const styles = vocab && Array.isArray(vocab.styles) ? vocab.styles : ["normal", "h2", "h3", "h4"];
+    const lists = vocab && Array.isArray(vocab.lists) ? vocab.lists : ["bullet", "number"];
+    // Declared annotations each get a button and the object dialog; with
+    // none declared the link row below stays.
+    const annotations = vocab && Array.isArray(vocab.annotations) ? vocab.annotations : null;
+    const group = (parts) => parts.filter(Boolean).join("");
+    const formatting = [
+      group(decorators.map(decoratorButton)),
+      group([styles.length > 1 ? group(styles.map(styleButton)) : "", group(lists.map(listButton))])
+    ].filter(Boolean).join('<span class="bp-rte-sep" aria-hidden="true"></span>');
+    const annotationButtons = annotations
+      ? annotations
+        .filter((a) => a && typeof a.name === "string")
+        .map((a) => '<button type="button" class="bp-rte-btn bp-rte-annot" data-annot="' + esc(a.name) + '" title="' + esc(a.title || a.name) + '" aria-label="' + esc(a.title || a.name) + '"><span aria-hidden="true">🔗</span> <span class="bp-rte-annot-name">' + esc(a.title || a.name) + "</span></button>")
+        .join("")
+      : '<button type="button" class="bp-rte-btn bp-rte-link" title="' + t("Link") + '" aria-label="' + t("Link") + '"><span aria-hidden="true">🔗</span></button>';
     bar.innerHTML =
-      '<button type="button" class="bp-rte-btn" data-cmd="bold" title="' + t("Bold (mod+B)") + '" aria-label="' + t("Bold") + '"><b aria-hidden="true">B</b></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="italic" title="' + t("Italic (mod+I)") + '" aria-label="' + t("Italic") + '"><i aria-hidden="true">I</i></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="underline" title="' + t("Underline") + '" aria-label="' + t("Underline") + '"><u aria-hidden="true">U</u></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="strikeThrough" title="' + t("Strikethrough") + '" aria-label="' + t("Strikethrough") + '"><s aria-hidden="true">S</s></button>' +
-      '<span class="bp-rte-sep" aria-hidden="true"></span>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="p" title="' + t("Paragraph") + '" aria-label="' + t("Paragraph") + '"><span aria-hidden="true">¶</span></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="h2" title="' + t("Heading 2") + '" aria-label="' + t("Heading 2") + '"><span aria-hidden="true">H2</span></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="h3" title="' + t("Heading 3") + '" aria-label="' + t("Heading 3") + '"><span aria-hidden="true">H3</span></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="formatBlock" data-arg="h4" title="' + t("Heading 4") + '" aria-label="' + t("Heading 4") + '"><span aria-hidden="true">H4</span></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="insertUnorderedList" title="' + t("Bulleted list") + '" aria-label="' + t("Bulleted list") + '"><span aria-hidden="true">•</span></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="insertOrderedList" title="' + t("Numbered list") + '" aria-label="' + t("Numbered list") + '"><span aria-hidden="true">1.</span></button>' +
-      '<span class="bp-rte-sep" aria-hidden="true"></span>' +
-      '<button type="button" class="bp-rte-btn bp-rte-link" title="' + t("Link") + '" aria-label="' + t("Link") + '"><span aria-hidden="true">🔗</span></button>' +
+      formatting +
+      (annotationButtons ? '<span class="bp-rte-sep" aria-hidden="true"></span>' + annotationButtons : "") +
       '<span class="bp-rte-linkrow' + (linkTypes.length ? " bp-rte-linkrow-kinds" : "") + '" hidden>' +
       (linkTypes.length
         ? '<span class="bp-rte-kinds" role="group" aria-label="' + t("Link type") + '">' +
@@ -288,8 +560,20 @@ class BpRichTextEditor extends HTMLElement {
     // menu (task-19392d1e6fc661e6). No declared block, no menu.
     let blockTypes = [];
     try { blockTypes = JSON.parse(this.getAttribute("data-block-types") || "[]") || []; } catch (_e) { blockTypes = []; }
+    // The declared inline objects (`blocks.inline`), as an "Insert inline"
+    // menu. None declared, no menu.
+    const inlineTypes = vocab && Array.isArray(vocab.inline) ? vocab.inline.filter((a) => a && typeof a.name === "string") : [];
+    if (inlineTypes.length) {
+      bar.insertAdjacentHTML(
+        "beforeend",
+        '<span class="bp-rte-sep" aria-hidden="true"></span>' +
+        '<select class="bp-rte-insert-inline" aria-label="' + t("Insert inline") + '">' +
+        '<option value="">' + t("Insert inline…") + "</option>" +
+        inlineTypes.map((b) => '<option value="' + esc(b.name) + '">' + esc(b.title || b.name) + "</option>").join("") +
+        "</select>"
+      );
+    }
     if (Array.isArray(blockTypes) && blockTypes.length) {
-      const esc = (v) => String(v).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
       bar.insertAdjacentHTML(
         "beforeend",
         '<span class="bp-rte-sep" aria-hidden="true"></span>' +
@@ -310,6 +594,16 @@ class BpRichTextEditor extends HTMLElement {
         if (type) this._insertBlock(type);
       });
       insertMenu.addEventListener("input", (e) => e.stopPropagation());
+    }
+    const inlineMenu = bar.querySelector(".bp-rte-insert-inline");
+    if (inlineMenu) {
+      inlineMenu.addEventListener("change", (e) => {
+        e.stopPropagation();
+        const type = inlineMenu.value;
+        inlineMenu.value = "";
+        if (type) this._insertInline(type);
+      });
+      inlineMenu.addEventListener("input", (e) => e.stopPropagation());
     }
 
     const exec = (cmd, arg) => {
@@ -365,6 +659,18 @@ class BpRichTextEditor extends HTMLElement {
       press(b, () => {
         reselect();
         exec(b.dataset.cmd, b.dataset.arg);
+      });
+    });
+    bar.querySelectorAll("[data-wrap]").forEach((b) => {
+      press(b, () => {
+        reselect();
+        this._toggleMark(b.dataset.wrap, b.dataset.mark || null);
+      });
+    });
+    bar.querySelectorAll(".bp-rte-annot").forEach((b) => {
+      press(b, () => {
+        reselect();
+        this._annotate(b.dataset.annot);
       });
     });
 
@@ -499,7 +805,8 @@ class BpRichTextEditor extends HTMLElement {
       return picker;
     };
 
-    press(bar.querySelector(".bp-rte-link"), () => {
+    const linkButton = bar.querySelector(".bp-rte-link");
+    if (linkButton) press(linkButton, () => {
       if (!linkRow.hidden) {
         close();
         return;

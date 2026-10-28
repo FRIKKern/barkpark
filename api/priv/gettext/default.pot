@@ -13056,3 +13056,48 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "No file chosen"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Insert inline"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Insert inline…"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex
+#, elixir-autogen, elixir-format
+msgid "Inserting…"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "Save annotation"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/object_form.ex
+#, elixir-autogen, elixir-format
+msgid "Save item"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This annotation cannot be opened in a form."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This annotation cannot be added here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This item cannot be opened in a form."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/object_blocks.ex
+#, elixir-autogen, elixir-format
+msgid "This item cannot be inserted here."
+msgstr ""
