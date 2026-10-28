@@ -206,7 +206,7 @@ defmodule Barkpark.Groq.DocumentSource do
   @impl true
   def count(state, constraints) do
     cond do
-      constraints.types == nil or "paper" in constraints.types ->
+      constraints.types == nil or "paper" in constraints.types or virtual_types?(constraints) ->
         :error
 
       not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state)) ->
@@ -240,6 +240,12 @@ defmodule Barkpark.Groq.DocumentSource do
   # this round counted without it, so its result is not kept.
   @impl true
   def scan_count(state, constraints, cache, keep?) do
+    if virtual_types?(constraints),
+      do: :error,
+      else: scan_count_stored(state, constraints, cache, keep?)
+  end
+
+  defp scan_count_stored(state, constraints, cache, keep?) do
     key = cache_key(constraints)
 
     case cache && Process.get({:groq_src_scan, key, cache}) do
@@ -269,7 +275,7 @@ defmodule Barkpark.Groq.DocumentSource do
     keys = shape_sort_keys(state, constraints.types, keys)
 
     cond do
-      constraints.ids != nil ->
+      constraints.ids != nil or virtual_types?(constraints) ->
         :error
 
       reads_no_content?(constraints, paths) ->
@@ -321,7 +327,8 @@ defmodule Barkpark.Groq.DocumentSource do
   @impl true
   def fetch_exact(state, constraints, fields) do
     cond do
-      constraints.ids != nil or constraints.types == nil or "paper" in constraints.types ->
+      constraints.ids != nil or constraints.types == nil or "paper" in constraints.types or
+          virtual_types?(constraints) ->
         :error
 
       not Enum.all?(constraints.types, &reads_filter_paths?(&1, constraints, state)) ->
@@ -378,6 +385,12 @@ defmodule Barkpark.Groq.DocumentSource do
       do: :error
 
   def scan_slice(state, constraints, cache, keep?, rank, take) do
+    if virtual_types?(constraints),
+      do: :error,
+      else: scan_slice_stored(state, constraints, cache, keep?, rank, take)
+  end
+
+  defp scan_slice_stored(state, constraints, cache, keep?, rank, take) do
     key = cache_key(constraints)
     slot = {:groq_src_scan_slice, key, cache}
 
@@ -1255,7 +1268,7 @@ defmodule Barkpark.Groq.DocumentSource do
 
     rows = if twins_needed?(state, keys), do: with_twins(rows, state, types), else: rows
 
-    docs = rows |> render(state) |> sort_by_id()
+    docs = rows |> render(state) |> with_virtual_assets(state, types) |> sort_by_id()
     count_loaded!(state, length(docs))
     Enum.each(docs, &cache_doc/1)
 
@@ -2005,6 +2018,77 @@ defmodule Barkpark.Groq.DocumentSource do
       _ -> nil
     end
   end
+
+  # `*[_type == "sanity.imageAsset"]` (or `sanity.fileAsset`) lists every
+  # media file of the dataset as the `->` above answers it, under the same
+  # guards (task-a6372a4ce0216c6c). Only a query that names the type lists
+  # them, so `*` and `count(*)` read as before. SQL cannot count or slice
+  # them, so such a read loads (`virtual_types?/1`). A stored document with
+  # the same `_id` wins.
+  defp virtual_types?(%{types: [_ | _] = types}),
+    do: Enum.any?(types, &(&1 in VirtualAsset.types()))
+
+  defp virtual_types?(_constraints), do: false
+
+  defp with_virtual_assets(docs, state, types) do
+    wanted = Enum.filter(List.wrap(types), &(&1 in VirtualAsset.types()))
+
+    if wanted == [] or not Schema.bypasses_visibility_gate?(state.caller_context) do
+      docs
+    else
+      stored = MapSet.new(docs, & &1["_id"])
+      touch_type("mediaAsset")
+
+      state
+      |> virtual_asset_list(wanted)
+      |> Enum.reject(&MapSet.member?(stored, &1["_id"]))
+      |> Enum.concat(docs)
+    end
+  end
+
+  defp virtual_asset_list(state, wanted) do
+    files =
+      MediaFile
+      |> where([m], m.dataset == ^state.dataset)
+      |> Scope.scope_to_workspace(
+        Keyword.get(state.opts, :workspace_id),
+        Keyword.get(state.opts, :project_id)
+      )
+      |> where_mime(wanted)
+      |> order_by([m], asc: m.inserted_at, asc: m.id)
+      |> limit(^(state.max_per_fetch + 1))
+      |> Repo.all()
+
+    if length(files) > state.max_per_fetch do
+      raise LimitError,
+        message:
+          "this dataset holds more than #{state.max_per_fetch} media files, the most one " <>
+            "*[...] may load at once."
+    end
+
+    anchors = asset_anchors(state, files)
+    base = asset_base(state)
+
+    files
+    |> Enum.flat_map(fn file ->
+      case Map.get(anchors, file.id) do
+        %{} = anchor -> [VirtualAsset.build(file, anchor, state.dataset, base)]
+        nil -> []
+      end
+    end)
+    |> Enum.filter(&(&1["_type"] in wanted))
+    # Two files with the same bytes share a Sanity id; the oldest answers it,
+    # as the image route does.
+    |> Enum.uniq_by(& &1["_id"])
+  end
+
+  defp where_mime(query, ["sanity.imageAsset"]),
+    do: where(query, [m], like(m.mime_type, "image/%"))
+
+  defp where_mime(query, ["sanity.fileAsset"]),
+    do: where(query, [m], fragment("coalesce(?, '') NOT LIKE 'image/%'", m.mime_type))
+
+  defp where_mime(query, _both), do: query
 
   defp cache_doc(%{"_id" => id} = doc), do: Process.put({:groq_src_doc, id}, doc)
 

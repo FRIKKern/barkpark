@@ -22,6 +22,11 @@ defmodule Barkpark.Groq.VirtualAsset do
   project, so `url` is absent on a read with no workspace and project in scope.
   """
 
+  @types ["sanity.imageAsset", "sanity.fileAsset"]
+
+  @doc "The document types this module answers."
+  def types, do: @types
+
   @uuid ~r/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/
   @image_id ~r/\Aimage-([0-9a-f]{40})-([1-9][0-9]*)x([1-9][0-9]*)-([a-z0-9]+)\z/
   @file_id ~r/\Afile-([0-9a-f]{40})-([a-z0-9]+)\z/
