@@ -40,6 +40,11 @@ type importFakeServer struct {
 	// oldServer answers as a server that does not read `restore`: the batch
 	// applies and the response names the key in a mutate.unknown_key warning.
 	oldServer bool
+	// slowOver makes a mutate request with more than this many mutations
+	// answer slowStatus with storage_unavailable and apply nothing, as a server
+	// that cannot finish the batch inside its connection checkout limit does.
+	slowOver   int
+	slowStatus int
 }
 
 type importFakeRequest struct {
@@ -130,6 +135,11 @@ func (f *importFakeServer) mutate(w http.ResponseWriter, r *http.Request) {
 	if len(req.Mutations) > importMaxMutations {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(`{"error":{"code":"batch_too_large","message":"too many mutations"}}`))
+		return
+	}
+	if f.slowOver > 0 && len(req.Mutations) > f.slowOver {
+		w.WriteHeader(f.slowStatus)
+		_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"storage is unavailable"}}`))
 		return
 	}
 	if f.failOn == len(f.requests) {
@@ -611,5 +621,61 @@ func TestRunImportSendsRestoreAndNotesAnOldServer(t *testing.T) {
 	}
 	if n := strings.Count(stderr, "does not read `restore`"); n != 1 {
 		t.Errorf("old-server note shown %d times, want 1; stderr=%s", n, stderr)
+	}
+}
+
+// SHRINK (task-b90ed463fad4488c). A batch the server cannot finish is sent
+// again at half its documents until it fits, the rest of the run keeps that
+// size, every document lands, and the report names the size it ended with.
+func TestRunImportHalvesABatchTheServerCannotFinish(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusRequestEntityTooLarge} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "backup.ndjson")
+			var b strings.Builder
+			for n := 0; n < 40; n++ {
+				fmt.Fprintf(&b, `{"_id":"p-%04d","_type":"post","title":"t"}`+"\n", n)
+			}
+			if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dst := newImportFakeServer(t)
+			// 10 published rows are 20 mutations: 40 and 20 rows fail, 10 fit.
+			dst.slowOver, dst.slowStatus = 20, status
+			code, stdout, stderr := runImportForTest(t, dst.ctx(), globals{}, path)
+			if code != exitOK {
+				t.Fatalf("import exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			if len(dst.docs) != 40 {
+				t.Fatalf("target holds %d documents, want 40", len(dst.docs))
+			}
+			for _, want := range []string{"Sending 20 documents per batch", "Sending 10 documents per batch"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr does not say %q:\n%s", want, stderr)
+				}
+			}
+			if !strings.Contains(stdout, "in 4 batch(es)") || !strings.Contains(stdout, "ended at 10 documents per batch") {
+				t.Errorf("stdout = %q, want 4 batches and the size it ended with", stdout)
+			}
+		})
+	}
+}
+
+// A single document the server still cannot finish stops the run with the
+// usual resume point, so the run stays resumable.
+func TestRunImportStopsWhenOneDocumentCannotFinish(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "backup.ndjson")
+	if err := os.WriteFile(path, []byte(`{"_id":"a","_type":"post"}`+"\n"+`{"_id":"b","_type":"post"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := newImportFakeServer(t)
+	dst.slowOver, dst.slowStatus = 1, http.StatusServiceUnavailable
+	code, _, stderr := runImportForTest(t, dst.ctx(), globals{}, path)
+	if code == exitOK {
+		t.Fatalf("import exited 0; stderr=%s", stderr)
+	}
+	if !strings.Contains(stderr, "Sending 1 documents per batch") || !strings.Contains(stderr, "--from-line 1") {
+		t.Errorf("stderr does not shrink to one and name the resume line:\n%s", stderr)
 	}
 }
