@@ -594,6 +594,19 @@ defmodule Barkpark.Sso.OidcTest do
       assert {:error, :no_mapped_group} = callback(c)
       assert seat(ws.id, user.id) == nil
       assert Accounts.list_user_sessions(user) == []
+
+      assert [event] =
+               Barkpark.Repo.all(
+                 from e in Barkpark.Audit.Event,
+                   where: e.action == "sso_seat_removed" and e.subject == ^user.id
+               )
+
+      assert event.category == "membership"
+      assert event.actor_type == "system"
+      assert event.workspace_id == ws.id
+      assert event.metadata["role"] == "admin"
+      assert event.metadata["connection_id"] == c.id
+      assert event.metadata["reason"] == "no_mapped_group"
     end
 
     test "a new user in no mapped group is refused and gets no seat" do
@@ -617,6 +630,11 @@ defmodule Barkpark.Sso.OidcTest do
       mock_op(claims(%{"groups" => []}))
       assert {:error, :no_mapped_group} = callback(c)
       assert seat(ws.id, owner.id) == "owner"
+
+      refute Barkpark.Repo.exists?(
+               from e in Barkpark.Audit.Event,
+                 where: e.action == "sso_seat_removed" and e.subject == ^owner.id
+             )
     end
 
     test "with the setting off, an unmapped sign-in keeps the role as before" do
