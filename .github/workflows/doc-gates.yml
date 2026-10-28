@@ -59,6 +59,11 @@ on:
       # in the extension triggers, so without this a PR could weaken the sweep or
       # rewrite lineref-baseline.json without this gate ever running.
       - "tooling/doc-truth/**"
+      # setup-facts.mjs NUMBER_SOURCES: the defaults the self-host docs quote
+      - "deploy.sh"
+      - "deploy/azure/**"
+      - "api/Dockerfile"
+      - "scripts/entra-app-register.sh"
       # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
       # already rides the `**` glob above; these two lines cover an edit to the
       # gate scripts themselves, which no other glob matches.
@@ -459,6 +464,11 @@ on:
       # in the extension triggers, so without this a PR could weaken the sweep or
       # rewrite lineref-baseline.json without this gate ever running.
       - "tooling/doc-truth/**"
+      # setup-facts.mjs NUMBER_SOURCES: the defaults the self-host docs quote
+      - "deploy.sh"
+      - "deploy/azure/**"
+      - "api/Dockerfile"
+      - "scripts/entra-app-register.sh"
       # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
       # already rides the `**` glob above; these two lines cover an edit to the
       # gate scripts themselves, which no other glob matches.

@@ -68,7 +68,7 @@ Caveats, stated honestly:
 
 The remote transport is **shipped, Go-side**: `bp mcp serve --http <addr>`
 serves Streamable HTTP from the exact same tool registration as stdio (the
-transport swap point is `internal/cli/mcp_serve.go:120`). Auth is
+swap point is `srv.Run` in `internal/cli/mcp_serve.go`). Auth is
 **forward-through**: each request's `Authorization: Bearer` is forwarded to
 the Barkpark API as that request's credential — the serving process holds no
 token, and a missing or bogus bearer fails closed with the API's own 401.

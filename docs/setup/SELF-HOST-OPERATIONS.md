@@ -23,7 +23,7 @@ az containerapp job start -g <rg> -n barkpark-ops
 az containerapp job execution list -g <rg> -n barkpark-ops -o table
 ```
 
-Set arguments with `job update`. Overrides on `job start` drop the job's settings and mounts. The output is in Log Analytics, table `ContainerAppConsoleLogs_CL`. To copy backups to or from your machine, add your address to `operatorIpRanges`, redeploy and use `az storage file download-batch` or `upload-batch` on the `backups` share. Flexible Server also keeps point-in-time restore for 7 to 35 days. Turn on purge protection on the Key Vault.
+Set arguments with `job update`. Overrides on `job start` drop the job's settings and mounts. The output is in Log Analytics, table `ContainerAppConsoleLogs_CL`. To copy backups to or from your machine, add your address to `operatorIpRanges`, redeploy and use `az storage file download-batch` or `upload-batch` on the `backups` share. Flexible Server also keeps point-in-time restore for 7 days, which Azure lets you raise to 35. Turn on purge protection on the Key Vault.
 
 Once a month, restore a `bp instance backup` of the live instance into a scratch database of the same major with the extensions allowed. On Container Apps, create it with `az postgres flexible-server db create -g <rg> --server-name <server> -n barkpark_restore` and run the restore above. The drill passes when `bp instance restore` exits 0, because that run has matched every per-type count and media checksum to the manifest. Point a scratch app with the live keys at it and check `/readyz`. Record the date, backup and restore times and the result against the RTO, then delete the scratch server.
 
@@ -68,7 +68,7 @@ The KEK wraps the data keys, not the content, so a rotation re-wraps those keys 
 
 ## VM size and region
 
-Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. Before creating the VM, `az vm list-skus --location <region> --size Standard_D2 -o table` shows restrictions and `az vm list-usage --location <region> -o table` shows quota.
+Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) shows how to check sizes and quota first.
 
 ## Database TLS
 

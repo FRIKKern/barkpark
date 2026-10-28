@@ -103,7 +103,7 @@ epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
 
 `--tools all` (`"args": ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as a tool (`bp_<noun>_<verb>`), auto-derived from the live
-capabilities. That's ~107 tools; keep the default `tasks` unless you know the
+capabilities. That's over 200 tools; keep the default `tasks` unless you know the
 handful you need.
 
 ## Troubleshooting

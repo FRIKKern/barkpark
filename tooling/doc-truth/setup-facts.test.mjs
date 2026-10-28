@@ -13,6 +13,7 @@ import {
   scanMarkdown, githubSlug, anchorsOf, setupSectionLines, extractFacts, routeMatches,
   parsePhoenixRouter, parsePlugRouter, codeDocLinks, parseAllow, applyAllow, nearest,
   editDistance, isOurHost, loadContext, checkDocText, formatFinding,
+  NUMBER_SOURCES, NUMBER_FACTS, readNumberSource, checkNumberFacts,
 } from "./setup-facts.mjs";
 
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: dirname(fileURLToPath(import.meta.url)) }).toString().trim();
@@ -221,4 +222,54 @@ test("findings name the nearest correct value", () => {
   assert.equal(by.cmd, "bp task claim");
   assert.equal(by.route, "/readyz");
   assert.match(formatFinding(found[0]), /^docs\/setup\/PLANTED\.md:1: \w+: .*; nearest: /);
+});
+
+// ── numbers ─────────────────────────────────────────────────────────────────
+
+const fakeRepo = (files) => ({ read: (rel) => (rel in files ? files[rel] : null) });
+const SRC = {
+  cron: { file: "main.bicep", re: /backupCron string = '(\d+ \d+) \* \* \*'/, fmt: (s) => { const [m, h] = s.split(" "); return `${h.padStart(2, "0")}:${m}`; } },
+  quota: { file: "main.bicep", re: /shareQuota: (\d+)/ },
+  steps: { file: "w.ex", re: /@steps \[([\d, ]+)\]/, norm: (s) => s.match(/\d+/g).sort().join() },
+  gone: { file: "main.bicep", re: /param nothingHere = (\d+)/ },
+};
+const SRC_FILES = { "main.bicep": "param backupCron string = '30 2 * * *'\nshareQuota: 100\nshareQuota: 50\n", "w.ex": "@steps [7, 14, 30]" };
+
+test("readNumberSource formats the capture and refuses two values", () => {
+  const repo = fakeRepo(SRC_FILES);
+  assert.deepEqual(readNumberSource(repo, "cron", SRC), { value: "02:30", at: "main.bicep:1" });
+  assert.match(readNumberSource(repo, "quota", SRC).why, /sets quota to 100 and 50/);
+  assert.match(readNumberSource(repo, "gone", SRC).why, /no longer matches/);
+  assert.match(readNumberSource(repo, "nope", SRC).why, /no source named nope/);
+});
+
+test("checkNumberFacts flags a wrong number, a lost phrase and a lost source", () => {
+  const docs = { "d.md": "Runs daily at 02:30 UTC.\nA mail 30, 14 and 7 days before.\nThen daily at 03:00 UTC again." };
+  const facts = [
+    ["d.md", /daily at (\d\d:\d\d) UTC/, "cron"],
+    ["d.md", /mail (\d+, \d+ and \d+) days/, "steps"],
+    ["d.md", /keeps (\d+) days/, "cron"],
+    ["d.md", /daily/, "gone"],
+  ];
+  const got = checkNumberFacts(fakeRepo(SRC_FILES), (rel) => docs[rel] ?? null, facts, SRC);
+  assert.deepEqual(got.map((f) => `${f.line} ${f.value} ${f.nearest}`), ["3 cron 02:30", "1 cron 02:30 (main.bicep:1)", "1 gone null"]);
+  assert.match(got[0].why, /the doc says 03:00, main\.bicep:1 says 02:30/);
+  assert.match(got[1].why, /update its NUMBER_FACTS row/);
+});
+
+test("every number source resolves in this repo", () => {
+  for (const name of Object.keys(NUMBER_SOURCES)) {
+    const r = readNumberSource(ctx.repo, name);
+    assert.ok(!r.why, `${name}: ${r.why}`);
+  }
+  for (const [doc, , name] of NUMBER_FACTS) assert.ok(NUMBER_SOURCES[name], `${doc} names unknown source ${name}`);
+  assert.equal(readNumberSource(ctx.repo, "backupCron").value.length, 5);
+});
+
+test("a planted drift in a setup doc fails the number check", () => {
+  const real = ctx.repo.read("docs/setup/IT-HANDOVER.md");
+  const planted = real.replace(/A daily backup, kept \d+ days/, "A daily backup, kept 99 days");
+  assert.notEqual(planted, real);
+  const got = checkNumberFacts(ctx.repo, (rel) => (rel === "docs/setup/IT-HANDOVER.md" ? planted : ctx.repo.read(rel)));
+  assert.deepEqual(got.map((f) => `${f.file} ${f.value} ${f.nearest}`), [`docs/setup/IT-HANDOVER.md backupRetentionDays ${readNumberSource(ctx.repo, "backupRetentionDays").value}`]);
 });
