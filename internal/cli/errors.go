@@ -337,6 +337,7 @@ var codeExit = map[string]int{
 	"mfa_enrolment_required": exitAuth, // 403, require_org_mfa_enrolment.ex:73
 	"workspace_suspended":    exitAuth, // 403, errors.ex:348
 	"bundle_import_disabled": exitAuth, // 403, workspace_controller.ex:450
+	"no_mapped_group":        exitAuth, // 403, oidc_controller.ex:235
 
 	// 403, chat_controller.ex host_refused/1: a host turn, :global chat or the host
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
