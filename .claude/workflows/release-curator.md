@@ -63,6 +63,11 @@ ratified (see the paper's open decisions).
    - Open with the one-line headline — the most significant thing that changed.
    - Group the rest by theme (Features / Fixes / Under the hood), each a short
      sentence a Studio admin understands, linking its PR (`#NNNN`).
+   - Keep the `### Migrations` section the draft job writes. It lists every
+     new file under `api/priv/repo/migrations` and marks it expand or contract
+     (`bash scripts/release-migrations.sh <last_tag> <head_sha>` prints it).
+     Check each contract line, and say in Upgrading what a contract
+     migration means for a running instance.
    - Trust `suggested_bump` but override it in the notes if the changes are
      bigger/smaller than the commit types imply (a `fix:` that's actually a
      breaking change is a real judgment call — that's why an agent does this).
