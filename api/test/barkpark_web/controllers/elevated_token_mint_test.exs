@@ -234,6 +234,138 @@ defmodule BarkparkWeb.ElevatedTokenMintTest do
     end
   end
 
+  describe "seats in more workspaces (task-86e3a3a0c885097a)" do
+    setup ctx do
+      other = create_workspace!("elev-other-#{System.unique_integer([:positive])}")
+      third = create_workspace!("elev-third-#{System.unique_integer([:positive])}")
+      {:ok, _} = TenancyAuth.create_membership(other.id, ctx.admin.id, "owner", "api_token")
+      {:ok, _} = TenancyAuth.create_membership(third.id, ctx.admin.id, "admin", "api_token")
+      %{other: other, third: third}
+    end
+
+    test "the new token is seated in every listed workspace the minter administers", ctx do
+      resp =
+        mint(ctx.admin_raw, ctx.ws, ctx.project, %{
+          label: "carried",
+          permissions: ["read", "write", "admin"],
+          workspaces: [ctx.other.slug, ctx.third.slug, ctx.ws.slug, ctx.other.slug]
+        })
+
+      assert resp.status == 201, resp.resp_body
+      body = Jason.decode!(resp.resp_body)
+      assert body["seats"] == [ctx.ws.slug, ctx.other.slug, ctx.third.slug]
+
+      assert Enum.sort(seats(body["id"])) ==
+               Enum.sort([{ctx.ws.id, "admin"}, {ctx.other.id, "admin"}, {ctx.third.id, "admin"}])
+
+      [event] =
+        Repo.all(
+          from e in Barkpark.Audit.Event,
+            where: e.action == "token_minted" and e.subject == ^body["id"]
+        )
+
+      assert Enum.sort(event.metadata["also_seated"]) == Enum.sort([ctx.other.id, ctx.third.id])
+
+      # The carried seat works: the new token is a workspace admin there.
+      assert TenancyAuth.workspace_admin?(body["id"], ctx.other.id)
+    end
+
+    test "a write token gets member seats, the role its permissions give", ctx do
+      resp =
+        mint(ctx.admin_raw, ctx.ws, ctx.project, %{
+          label: "carried-write",
+          permissions: ["read", "write"],
+          workspaces: [ctx.other.slug]
+        })
+
+      assert resp.status == 201, resp.resp_body
+      id = Jason.decode!(resp.resp_body)["id"]
+      assert Enum.sort(seats(id)) == Enum.sort([{ctx.ws.id, "member"}, {ctx.other.id, "member"}])
+    end
+
+    test "a workspace where the minter is only a member is refused, and nothing is minted",
+         ctx do
+      member_ws = create_workspace!("elev-member-#{System.unique_integer([:positive])}")
+      {:ok, _} = TenancyAuth.create_membership(member_ws.id, ctx.admin.id, "member", "api_token")
+
+      resp =
+        mint(ctx.admin_raw, ctx.ws, ctx.project, %{
+          label: "no-member-seat",
+          permissions: ["read", "write", "admin"],
+          workspaces: [ctx.other.slug, member_ws.slug]
+        })
+
+      assert resp.status == 403
+      assert error(resp)["reason"] == "not_workspace_admin"
+      assert error(resp)["message"] =~ member_ws.slug
+      assert labelled("no-member-seat") == 0
+    end
+
+    test "a workspace where the minter has no seat is refused, and nothing is minted", ctx do
+      foreign = create_workspace!("elev-foreign-#{System.unique_integer([:positive])}")
+
+      resp =
+        mint(ctx.admin_raw, ctx.ws, ctx.project, %{
+          label: "no-foreign-seat",
+          permissions: ["read", "write", "admin"],
+          workspaces: [foreign.slug]
+        })
+
+      assert resp.status == 403
+      assert error(resp)["reason"] == "not_workspace_admin"
+      assert labelled("no-foreign-seat") == 0
+      refute Repo.exists?(from m in Membership, where: m.workspace_id == ^foreign.id)
+    end
+
+    test "an unknown slug gets the same 403 as a workspace the minter lacks", ctx do
+      resp =
+        mint(ctx.admin_raw, ctx.ws, ctx.project, %{
+          label: "unknown-ws",
+          permissions: ["read", "write", "admin"],
+          workspaces: ["no-such-workspace-#{System.unique_integer([:positive])}"]
+        })
+
+      assert resp.status == 403
+      assert error(resp)["reason"] == "not_workspace_admin"
+      assert labelled("unknown-ws") == 0
+    end
+
+    test "a token without flat admin is refused admin_required before any seat check", ctx do
+      {raw, t} = seated!(ctx.ws, ["read", "write"], "admin")
+      {:ok, _} = TenancyAuth.create_membership(ctx.other.id, t.id, "admin", "api_token")
+
+      resp =
+        mint(raw, ctx.ws, ctx.project, %{
+          label: "write-carry",
+          permissions: ["read", "write"],
+          workspaces: ["no-such-workspace"]
+        })
+
+      assert resp.status == 403
+      assert error(resp)["reason"] == "admin_required"
+    end
+
+    test "workspaces that is not a list of strings is a 422", ctx do
+      resp =
+        mint(ctx.admin_raw, ctx.ws, ctx.project, %{
+          label: "bad-ws",
+          permissions: ["read"],
+          workspaces: [1, 2]
+        })
+
+      assert resp.status == 422
+      assert labelled("bad-ws") == 0
+    end
+
+    test "with no workspaces the token is seated in the URL's workspace alone", ctx do
+      resp = mint(ctx.admin_raw, ctx.ws, ctx.project, %{label: "home", permissions: ["read"]})
+      assert resp.status == 201
+      body = Jason.decode!(resp.resp_body)
+      assert body["seats"] == [ctx.ws.slug]
+      assert seats(body["id"]) == [{ctx.ws.id, "member"}]
+    end
+  end
+
   describe "the read-only mint is unchanged" do
     test "POST …/v1/tokens still refuses write/admin, even for an admin caller", ctx do
       resp =

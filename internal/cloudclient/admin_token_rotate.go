@@ -15,9 +15,9 @@ import (
 
 // AdminTokenRotation is the 200 envelope. Raw is the body verbatim for -o json.
 // OldTokenStatus is the HTTP status the old token got after the revoke; nil
-// when the box did not answer that check. SeatsNotCarried lists the
-// workspaces the old token was seated in that the successor is not: the box
-// seats a minted token only in the workspace it was minted in.
+// when the box did not answer that check. SeatsCarried lists the workspaces
+// the successor is seated in, every seat the old token had. A box that cannot
+// carry them all is refused before the old token is revoked.
 type AdminTokenRotation struct {
 	Raw        []byte `json:"-"`
 	BarkparkID string `json:"barkpark_id"`
@@ -26,7 +26,7 @@ type AdminTokenRotation struct {
 		NewTokenID      string   `json:"new_token_id"`
 		Label           string   `json:"label"`
 		Workspace       string   `json:"workspace"`
-		SeatsNotCarried []string `json:"seats_not_carried"`
+		SeatsCarried    []string `json:"seats_carried"`
 		OldTokenStatus  *int     `json:"old_token_status"`
 	} `json:"rotated"`
 }

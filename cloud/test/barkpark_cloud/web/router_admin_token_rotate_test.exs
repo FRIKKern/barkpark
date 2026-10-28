@@ -6,32 +6,52 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest.FakeBox do
   the old token gets after a rotation. `fail/1` makes one route answer 500;
   `{:revoke, id}` fails the revoke of that one id.
 
-  Seats follow the box's rule: a minted token is seated only in the mint's
-  workspace, and a revoke needs an actor seated in every workspace the target
-  is seated in (403 otherwise).
+  Seats follow the box's rule. A minted token is seated in the mint's
+  workspace and in each `workspaces` entry where the minter holds an admin
+  seat; a `workspaces` entry where it does not refuses the mint 403. A revoke
+  needs an actor seated in every workspace the target is seated in (403
+  otherwise). `old_box/0` makes the mint ignore `workspaces`, as a box from
+  before that field does.
   """
 
-  def start(tokens, seats),
+  def start(tokens, seats, roles \\ %{}),
     do:
-      Agent.start_link(fn -> %{live: tokens, seats: seats, n: 0, fail: nil} end,
+      Agent.start_link(
+        fn ->
+          %{live: tokens, seats: seats, roles: roles, n: 0, fail: nil, old_box: false, mints: []}
+        end,
         name: __MODULE__
       )
 
   def fail(route), do: Agent.update(__MODULE__, &%{&1 | fail: route})
+  def old_box, do: Agent.update(__MODULE__, &%{&1 | old_box: true})
   def live?(token), do: Agent.get(__MODULE__, &Map.has_key?(&1.live, token))
+  def seats(id), do: Agent.get(__MODULE__, &Map.get(&1.seats, id, []))
+  def mints, do: Agent.get(__MODULE__, & &1.mints)
 
-  def request(%{method: method, url: url, headers: headers}) do
+  def request(%{method: method, url: url, headers: headers} = req) do
     bearer =
       Enum.find_value(headers, fn {k, v} ->
         if String.downcase(k) == "authorization", do: String.replace_prefix(v, "Bearer ", "")
       end)
 
+    body =
+      case Jason.decode(req[:body] || "") do
+        {:ok, %{} = map} -> map
+        _ -> %{}
+      end
+
     Agent.get_and_update(__MODULE__, fn s ->
-      handle(s, route(method, URI.parse(url).path), bearer)
+      handle(s, route(method, URI.parse(url).path), bearer, body)
     end)
   end
 
-  defp handle(%{live: live} = s, route, bearer) do
+  defp handle(s, route, bearer, body) when route == :mint,
+    do: handle_gated(%{s | mints: s.mints ++ [body]}, route, bearer, body)
+
+  defp handle(s, route, bearer, body), do: handle_gated(s, route, bearer, body)
+
+  defp handle_gated(%{live: live} = s, route, bearer, body) do
     cond do
       # As on a real box: capabilities answers any bearer, a dead one as public.
       route == :capabilities and not Map.has_key?(live, bearer) ->
@@ -42,6 +62,9 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest.FakeBox do
 
       s.fail == route ->
         {reply(500, %{error: "boom"}), s}
+
+      route == :mint ->
+        mint(s, bearer, body)
 
       true ->
         act(s, route, bearer)
@@ -63,18 +86,9 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest.FakeBox do
          memberships:
            for(
              ws <- Map.get(s.seats, s.live[bearer], []),
-             do: %{workspace_slug: ws, role: "admin"}
+             do: %{workspace_slug: ws, role: role(s, s.live[bearer], ws)}
            )
        }), s}
-
-  defp act(s, :mint, _bearer) do
-    n = s.n + 1
-    raw = "successor-secret-#{n}"
-    id = "tok-successor-#{n}"
-
-    {reply(201, %{token: raw, id: id}),
-     %{s | n: n, live: Map.put(s.live, raw, id), seats: Map.put(s.seats, id, ["acme"])}}
-  end
 
   defp act(s, {:revoke, id}, bearer) do
     if Map.get(s.seats, id, []) -- Map.get(s.seats, s.live[bearer], []) == [] do
@@ -86,6 +100,29 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest.FakeBox do
   end
 
   defp act(s, _, _bearer), do: {reply(404, %{}), s}
+
+  defp role(s, id, ws), do: get_in(s.roles, [id, ws]) || "admin"
+
+  defp mint(s, bearer, body) do
+    actor = s.live[bearer]
+    also = if s.old_box, do: [], else: List.wrap(body["workspaces"]) -- ["acme"]
+
+    refused =
+      Enum.find(also, fn ws ->
+        ws not in Map.get(s.seats, actor, []) or role(s, actor, ws) not in ["owner", "admin"]
+      end)
+
+    if refused do
+      {reply(403, %{error: %{code: "forbidden", reason: "not_workspace_admin"}}), s}
+    else
+      n = s.n + 1
+      raw = "successor-secret-#{n}"
+      id = "tok-successor-#{n}"
+
+      {reply(201, %{token: raw, id: id}),
+       %{s | n: n, live: Map.put(s.live, raw, id), seats: Map.put(s.seats, id, ["acme" | also])}}
+    end
+  end
 
   defp reply(status, map), do: {:ok, %{status: status, body: Jason.encode!(map)}}
 end
@@ -113,8 +150,11 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest do
   `POST /v1/operator/barkparks/:id/admin-token/rotate` against a fake box that
   keeps a token table (`FakeBox` above), through the real router:
 
-    * success: the successor is stored, the old token gets 401 from the box,
-      the response carries ids and no secret, an audit row lands
+    * success: the successor is stored, seated in every workspace the old
+      token was, the old token gets 401 from the box, the response carries
+      ids and no secret, an audit row lands
+    * a box that does not carry every seat, or a seat the old token does not
+      administer, refuses the rotation and keeps the old token
     * a failure before the revoke completes (the mint, the successor's check,
       the revoke itself) leaves the old token stored and working, and no
       successor live
@@ -210,7 +250,7 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest do
                "new_token_id" => "tok-successor-1",
                "label" => "barkpark cloud admin",
                "workspace" => "acme",
-               "seats_not_carried" => ["other"],
+               "seats_carried" => ["acme", "other"],
                "old_token_status" => 401
              }
            } = Jason.decode!(conn.resp_body)
@@ -219,11 +259,46 @@ defmodule BarkparkCloud.Web.RouterAdminTokenRotateTest do
     refute FakeBox.live?(@old)
     assert FakeBox.live?("successor-secret-1")
 
+    # Every seat of the old token is carried, through the mint's `workspaces`.
+    assert Enum.sort(FakeBox.seats("tok-successor-1")) == ["acme", "other"]
+    assert [%{"workspaces" => ["other"]}] = FakeBox.mints()
+
     audit = Repo.get_by!(AuditEvent, target_id: bp.id, action: "barkpark.admin_token_rotated")
     assert audit.team_id == team.id
     assert audit.metadata["old_token_id"] == @old_id
     assert audit.metadata["new_token_id"] == "tok-successor-1"
+    assert audit.metadata["seats_carried"] == ["acme", "other"]
     refute inspect(audit.metadata) =~ "secret"
+  end
+
+  test "a box that does not carry the seats is refused, and the old token is kept" do
+    {team, token} = session(true)
+    bp = box(team)
+    FakeBox.old_box()
+
+    conn = rotate(bp.id, token)
+    assert conn.status == 409
+    assert Jason.decode!(conn.resp_body)["seats_not_carried"] == ["other"]
+    assert_old_kept(bp, conn, "box_too_old")
+    # The successor was minted, found short of a seat, and revoked.
+    assert FakeBox.seats("tok-successor-1") == ["acme"]
+  end
+
+  test "a seat the old token holds only as a member is not carried; the mint is refused" do
+    {team, token} = session(true)
+    bp = box(team)
+    Agent.stop(FakeBox)
+
+    {:ok, _} =
+      FakeBox.start(%{@old => @old_id}, %{@old_id => ["acme", "other"]}, %{
+        @old_id => %{"other" => "member"}
+      })
+
+    conn = rotate(bp.id, token)
+    assert conn.status == 502
+    assert Jason.decode!(conn.resp_body)["reason"] == "not_workspace_admin"
+    assert_old_kept(bp, conn, "mint_refused")
+    assert FakeBox.seats("tok-successor-1") == []
   end
 
   test "a refused mint keeps the old token stored and working" do

@@ -48,8 +48,8 @@ func runBarkparksRotateAdminToken(out *writer, args []string) int {
 	out.outf("Rotated the admin token Cloud holds for %s (%s).", ref, res.BarkparkID)
 	out.outf("  old token %s  revoked", r.OldTokenID)
 	out.outf("  new token %s  stored, label %q, workspace %s", r.NewTokenID, r.Label, r.Workspace)
-	if len(r.SeatsNotCarried) > 0 {
-		out.outf("  the new token is not seated in %s (the old one was)", strings.Join(r.SeatsNotCarried, ", "))
+	if len(r.SeatsCarried) > 0 {
+		out.outf("  seats carried to the new token: %s", strings.Join(r.SeatsCarried, ", "))
 	}
 	if r.OldTokenStatus == nil {
 		out.outf("  the box did not answer the check of the old token")
