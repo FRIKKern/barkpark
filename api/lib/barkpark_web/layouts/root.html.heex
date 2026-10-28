@@ -6825,7 +6825,7 @@
           const ed = editor();
           if (ed && ed[method]) ed[method](...args);
         };
-        this.handleEvent("bp:pt-def-ready", (p) => { if (p.field === field) call("ptDefReady", p.key, p.ok); });
+        this.handleEvent("bp:pt-def-ready", (p) => { if (p.field === field) call("ptDefReady", p.key, p.accepted); });
         this.handleEvent("bp:pt-def-update", (p) => { if (p.field === field) call("ptDefUpdate", p.key, p.href); });
         this.handleEvent("bp:pt-def-remove", (p) => { if (p.field === field) call("ptDefRemove", p.key); });
         this.handleEvent("bp:pt-inline-ready", (p) => { if (p.field === field) call("ptInlineReady", p.key, p.html); });

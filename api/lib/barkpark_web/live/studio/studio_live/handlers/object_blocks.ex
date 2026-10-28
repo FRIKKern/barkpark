@@ -161,7 +161,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks do
       socket =
         socket
         |> write_body(field, blocks)
-        |> push_event("bp:pt-def-ready", %{field: field, key: key, ok: true})
+        |> push_event("bp:pt-def-ready", %{field: field, key: key, accepted: true})
 
       case dialog_for(socket, field_def, :annotation, def) do
         {:ok, dialog} -> {:noreply, assign(socket, object_dialog: dialog)}
@@ -171,7 +171,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.ObjectBlocks do
       _ ->
         {:noreply,
          socket
-         |> push_event("bp:pt-def-ready", %{field: field, key: key, ok: false})
+         |> push_event("bp:pt-def-ready", %{field: field, key: key, accepted: false})
          |> put_flash(:error, gettext("This annotation cannot be added here."))}
     end
   end

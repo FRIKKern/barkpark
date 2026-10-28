@@ -224,6 +224,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
     pt-block-open pt-block-insert object-dialog-change object-dialog-array-op object-dialog-save
+    pt-def-open pt-def-insert pt-inline-open pt-inline-insert object-dialog-remove
     sidebar-description-change sidebar-label-add
     paper-insert-master paper-detach-master paper-pin-master
   )

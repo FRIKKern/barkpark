@@ -494,7 +494,7 @@ defmodule BarkparkWeb.Studio.StudioPortableTextVocabularyTest do
       "html" => html
     })
 
-    assert_push_event(view, "bp:pt-def-ready", %{key: ^key, ok: true})
+    assert_push_event(view, "bp:pt-def-ready", %{key: ^key, accepted: true})
     assert has_element?(view, ~s(#bp-object-dialog[data-object-key="#{key}"]))
   end
 
@@ -626,7 +626,7 @@ defmodule BarkparkWeb.Studio.StudioPortableTextVocabularyTest do
         "html" => html
       })
 
-      assert_push_event(view, "bp:pt-def-ready", %{key: "nope0001", ok: false})
+      assert_push_event(view, "bp:pt-def-ready", %{key: "nope0001", accepted: false})
       refute has_element?(view, "#bp-object-dialog")
     end
   end

@@ -360,8 +360,8 @@ class BpRichTextEditor extends HTMLElement {
   }
 
   // The server's answer to a new annotation: refused, its mark comes off.
-  ptDefReady(key, ok) {
-    if (!this._editor || ok) return;
+  ptDefReady(key, accepted) {
+    if (!this._editor || accepted) return;
     this._defs(key).forEach((el) => this._unwrap(el));
     this._emit();
   }
