@@ -1,11 +1,11 @@
 <!-- doc-tier: human | canonical-for: self-host-guide | budget: 2500tok -->
 # Set up a Barkpark instance for Pensum
 
-This guide takes you from an Azure subscription to Pensum sign-in, in run order, on two paths that share the settings. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
+This guide takes you from an Azure subscription to Pensum sign-in, in run order. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
 
 | Path | What runs | Where the settings live |
 |---|---|---|
-| [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu 22.04 or later server, with local PostgreSQL and Caddy for TLS. | `/opt/barkpark/.env` |
+| [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu server, with local PostgreSQL and Caddy for TLS. | `/opt/barkpark/.env` |
 | [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
 
 ## Before you start on Azure
@@ -38,9 +38,11 @@ bp instance init --target <target> --host "<host>" --studio-origin <studio origi
   --breakglass-email <breakglass email>
 ```
 
-`<target>` is `vm` for Path A and `containerapps` for Path B. On Path B, `<host>` is your own domain, or empty for the Container Apps address. Leave out `--studio-origin` unless you run a separate Studio; then give its origin. `--breakglass-email` is the real mailbox of a person outside SSO who holds a password and TOTP.
+`<target>` is `vm` for Path A and `containerapps` for Path B. On Path B, `<host>` is your own domain, or empty for the Container Apps address. Without a separate Studio, `<studio origin>` is `http://localhost:3000` for the [headless sign-in check](../../tooling/entra-signin/README.md).
 
-`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes new keys, a database password, `BARKPARK_RELEASE_CAPTURE_HMAC_SECRET` and the first admin token with its id on `BARKPARK_OPERATOR_TOKEN_IDS`. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
+The owner can be the only operator email. `--breakglass-email` is a separate admin mailbox outside SSO with a password and TOTP, not the owner's daily account.
+
+`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes the keys, a database password and the first admin token, with its id on `BARKPARK_OPERATOR_TOKEN_IDS`. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
 
 <!-- run -->
 ```bash
@@ -74,8 +76,8 @@ It exits 1 on any problem. `--skip` leaves out server probes, which `deploy.sh` 
    ssh -i ~/.ssh/barkpark azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env` in 7 to 8 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). Once HTTPS answers it runs `bp instance check` and prints the result.
-4. <!-- run --> On your machine, run `bp setup --target connect --server https://<host> --token "$(ssh -i ~/.ssh/barkpark azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`.
+   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into `/opt/barkpark/.env` in about 10 minutes on `Standard_D2als_v7`. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). Once HTTPS answers it runs `bp instance check` and prints the result.
+4. <!-- run --> On your machine, run `bp setup --target connect --server https://<host> --token "$(ssh -i ~/.ssh/barkpark azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`. It saves the server in `~/.config/barkpark/config.json` as the active server.
 
 To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. To update, run `sudo git -C /opt/barkpark pull`. A post-merge hook rebuilds and restarts. Rollback is in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
@@ -130,20 +132,19 @@ BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
 ```
 
 - `BARKPARK_ALWAYS_ALLOWED_ORIGINS` lists only the instance and Studio, because Pensum calls Barkpark from its server. Studio sign-in reads only `BARKPARK_STUDIO_SSO_ORIGINS`.
-- `BARKPARK_BOOTSTRAP_OWNER_EMAIL` makes that email the owner of the default workspace while the users table is empty.
-- [ENTRA.md](ENTRA.md#the-bootstrap-owner) explains `BARKPARK_OIDC_KEEP_OWNER` and `BARKPARK_OIDC_EMAIL_FROM_UPN`.
+- [ENTRA.md](ENTRA.md#the-bootstrap-owner) explains `BARKPARK_BOOTSTRAP_OWNER_EMAIL`, `BARKPARK_OIDC_KEEP_OWNER` and `BARKPARK_OIDC_EMAIL_FROM_UPN`.
 - `BARKPARK_BREAKGLASS_EMAILS` lets the [break-glass account](ENTRA.md#break-glass-account) sign in with a password and TOTP, or a passkey, while the org allows only SSO.
 - Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
 
 ### Operator access
 
-Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it. A 403 from `bp org` names the calling token's id in its hint.
+Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner, so only its id grants it.
 
 **Mail.** Optional. Without `SMTP_HOST`, no sign-in links, password resets or invitations go out. SSO with a break-glass account needs no mail.
 
 ## Sign in with Entra ID
 
-Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token. After a test sign-in, turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Once the break-glass account exists, run `bp org auth-methods <org> sso`. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List the Studio's origin in `BARKPARK_STUDIO_SSO_ORIGINS` with no path and no trailing slash, then run `bp instance check --env-file <file> --studio-url <studio url>`. A workspace owner or the admin token gets the Studio's `BARKPARK_TOKEN` line from `bp instance studio-token --workspace <ws>`.
+Register the app and connect it as [ENTRA.md](ENTRA.md) describes. Run the `bp org` commands the script prints with the operator token. Once a test sign-in works, turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). Under security defaults Entra may skip the code until then. Sign in again and check that Entra asked for it. Once the break-glass account exists, run `bp org auth-methods <org> sso`. A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its origin in `BARKPARK_STUDIO_SSO_ORIGINS` with no path or trailing slash and run `bp instance check --env-file <file> --studio-url <studio url>`. `bp instance studio-token --workspace <ws>` prints its `BARKPARK_TOKEN` line.
 
 ## Check the instance
 
