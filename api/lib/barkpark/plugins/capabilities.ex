@@ -3125,8 +3125,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg(
             "client_secret",
             true,
-            "string",
-            "Client secret. Stored encrypted, never shown again."
+            "secret",
+            "Client secret. Give - to read it from stdin, such as - < ./client-secret. Stored encrypted, never shown again."
           )
         ],
         flags:
@@ -3183,8 +3183,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg(
             "client_secret",
             true,
-            "string",
-            "New client secret. Stored encrypted, never shown again."
+            "secret",
+            "New client secret. Give - to read it from stdin, such as - < ./client-secret. Stored encrypted, never shown again."
           )
         ],
         flags: [

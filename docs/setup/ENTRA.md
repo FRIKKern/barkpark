@@ -39,10 +39,10 @@ Run the printed commands on your machine with an operator token. They look like 
 ```bash
 bp org create gyldendal Gyldendal --yes
 bp org attach-workspace gyldendal default --yes
-bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" "$(cat ./entra-client-secret)" \
+bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$CLIENT_ID" - \
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \
   --client_secret_expires_at <secret expiry date> \
-  --set group_role_mappings:='{"<owners group id>":"owner"}' --yes
+  --set group_role_mappings:='{"<owners group id>":"owner"}' --yes < ./entra-client-secret
 ```
 
 `Gyldendal` is the organization name Barkpark shows, from the script's `--org-name` or the slug. `--yes` answers bp's confirmation for a write to a remote server.
