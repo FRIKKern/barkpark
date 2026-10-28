@@ -34,7 +34,7 @@ defmodule BarkparkWeb.Integration.MediaUploadKeepsIdTest do
     file = %Plug.Upload{path: path, filename: "doc.pdf", content_type: "application/pdf"}
 
     resp =
-      build_conn()
+      scoped_conn()
       |> put_req_header("authorization", "Bearer #{ctx.raw}")
       |> post("#{ctx.base}/v1/media/production/upload", Map.put(extra, "file", file))
 
