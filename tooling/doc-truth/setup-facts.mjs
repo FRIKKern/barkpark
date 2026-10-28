@@ -824,7 +824,7 @@ export const NUMBER_SOURCES = {
   swapGiB: { file: "deploy.sh", re: /fallocate -l (\d+)G / },
   initFileMode: { file: "internal/cli/instance_check_cmd.go", re: /os\.O_EXCL, 0o(\d+)\)/ },
   secretYears: { file: ENTRA_SH, re: /case "\$YEARS" in ([\d|]+)\)/, norm: numbers },
-  secretWaitMinutes: { file: ENTRA_SH, re: /Store it in Barkpark (\d+) minutes after this line/ },
+  secretWaitMinutes: { file: ENTRA_SH, re: /READY_AT=\$\(date -u -d '\+(\d+) minutes'/ },
 };
 
 // One row per quote: the doc, a pattern with one capture group over its text,
@@ -856,7 +856,7 @@ export const NUMBER_FACTS = [
   [UPD, /soft-deleted for (\d+) days/, "vaultSoftDeleteDays"],
   [UPD, /The default file is `([^`]+)`/, "recoveryTokenFile"],
   [UPD, /The app runs as uid (\d+)/, "imageUid"],
-  [UPD, /Wait (\d+) minutes after the script/, "secretWaitMinutes"],
+  [UPD, /the script prints, (\d+) minutes after Entra accepts/, "secretWaitMinutes"],
   [UPD, /get a mail (\d+, \d+ and \d+) days before/, "secretWarnDays"],
   [IT, /\| (\d+) vCPU, \d+ GiB, exactly one replica/, "appCpu"],
   [IT, /\| \d+ vCPU, (\d+) GiB, exactly one replica/, "appMemoryGiB"],
