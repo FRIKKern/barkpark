@@ -92,7 +92,9 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
   # `deployment.cancelled` row, case-gated like the rest.
   # task-5283ad9f9238f7fe raised it 17 -> 18: `POST /v1/barkparks/adopt`'s
   # `barkpark.adopted` row, case-gated like the rest.
-  @router_call_sites 18
+  # task-1d2936aa15f96bc2 raised it 18 -> 19: the operator admin-token rotate
+  # route's `barkpark.admin_token_rotated` row, case-gated like the rest.
+  @router_call_sites 19
 
   defp lib_files, do: Path.wildcard(Path.join(@lib_root, "**/*.ex"))
 

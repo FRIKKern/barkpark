@@ -53,6 +53,7 @@
     { "verb": "barkpark.vercel_deploy_triggered", "label": "triggered a Vercel deploy" },
     { "verb": "barkpark.resurrected", "label": "resurrected a Barkpark" },
     { "verb": "barkpark.adopted", "label": "attached an existing Barkpark" },
+    { "verb": "barkpark.admin_token_rotated", "label": "rotated the admin token Cloud holds" },
     { "verb": "barkpark.push_relay_provisioned", "label": "provisioned a git push relay" },
     {
       "verb": "barkpark.credentials_refused",
