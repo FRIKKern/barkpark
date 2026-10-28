@@ -13,7 +13,7 @@ import {
   scanMarkdown, githubSlug, anchorsOf, setupSectionLines, extractFacts, routeMatches,
   parsePhoenixRouter, parsePlugRouter, codeDocLinks, parseAllow, applyAllow, nearest,
   editDistance, isOurHost, loadContext, checkDocText, formatFinding,
-  NUMBER_SOURCES, NUMBER_FACTS, readNumberSource, checkNumberFacts,
+  NUMBER_SOURCES, NUMBER_FACTS, readNumberSource, checkNumberFacts, checkPgMajors,
 } from "./setup-facts.mjs";
 
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: dirname(fileURLToPath(import.meta.url)) }).toString().trim();
@@ -272,4 +272,18 @@ test("a planted drift in a setup doc fails the number check", () => {
   assert.notEqual(planted, real);
   const got = checkNumberFacts(ctx.repo, (rel) => (rel === "docs/setup/IT-HANDOVER.md" ? planted : ctx.repo.read(rel)));
   assert.deepEqual(got.map((f) => `${f.file} ${f.value} ${f.nearest}`), [`docs/setup/IT-HANDOVER.md backupRetentionDays ${readNumberSource(ctx.repo, "backupRetentionDays").value}`]);
+});
+
+test("deploy.sh and main.bicep run one PostgreSQL major", () => {
+  assert.deepEqual(checkPgMajors(ctx.repo), []);
+  assert.equal(readNumberSource(ctx.repo, "deployPgMajor").value, readNumberSource(ctx.repo, "postgresVersion").value);
+  const files = { "deploy.sh": "PG_MAJOR=16\n", "main.bicep": "    version: '17'\napk add postgresql17-client\n" };
+  const src = {
+    deployPgMajor: { file: "deploy.sh", re: /^PG_MAJOR=(\d+)$/m },
+    postgresVersion: { file: "main.bicep", re: /\bversion: '(\d+)'/ },
+    postgresClient: { file: "main.bicep", re: /\bpostgresql(\d+)-client\b/ },
+  };
+  const got = checkPgMajors(fakeRepo(files), src);
+  assert.deepEqual(got.map((f) => `${f.file}:${f.line} ${f.value}`), ["deploy.sh:1 deployPgMajor", "main.bicep:1 postgresVersion", "main.bicep:2 postgresClient"]);
+  assert.match(got[0].why, /deployPgMajor 16 \(deploy\.sh:1\), postgresVersion 17/);
 });
