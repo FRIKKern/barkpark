@@ -79,7 +79,7 @@ param settings object = {}
 param operatorIpRanges array = []
 
 @description('The bp CLI release the jobs install. 1.26.2 and newer restore into a newer Postgres major.')
-param bpCliVersion string = '1.26.6'
+param bpCliVersion string = '1.26.10'
 
 @description('Daily backup time for the job barkpark-backup, as a UTC cron expression.')
 param backupCron string = '30 2 * * *'
