@@ -3,8 +3,13 @@
 
 `signin.mjs` signs an Entra test user in to a Barkpark organization's OIDC connection in headless Chromium and prints the user's seats. It runs without a person at a browser, so a lane can check group mappings, removed users and MFA on a live instance.
 
+Fetch the three files into a new directory. In a checkout of the repo, `cd tooling/entra-signin` instead.
+
 ```bash
-cd tooling/entra-signin && npm install && npx playwright install chromium-headless-shell
+mkdir entra-signin && cd entra-signin
+u=https://raw.githubusercontent.com/FRIKKern/barkpark/main/tooling/entra-signin
+for f in package.json package-lock.json signin.mjs; do curl -fsSLO "$u/$f"; done
+npm install && npx playwright install chromium-headless-shell
 node signin.mjs --host https://<host> --org <org> --user <upn> \
   --password-file <file> --totp-file <file> [--enroll-totp] [--save-token <file>]
 node signin.mjs --host https://<host> --check-token <file>

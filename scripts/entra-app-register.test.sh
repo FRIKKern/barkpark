@@ -24,7 +24,9 @@ bad() { FAIL=$((FAIL + 1)); echo "  FAIL $*" >&2; }
 
 BIN="$TMP/bin"; mkdir -p "$BIN"
 # The az stub answers a tenant with no app yet. SECRETS holds the number of
-# client secrets an existing app has, for the rotation case.
+# client secrets an existing app has, for the rotation case. REDIRECT_URIS is
+# that app's redirect URIs, one per line, and GROUP_EXISTS the id of a group
+# that already has the owners group name.
 cat >"$BIN/az" <<'EOF'
 #!/usr/bin/env bash
 echo "az $*" >>"$STUB_LOG"
@@ -33,13 +35,14 @@ case "$*" in
   "ad app list"*) [ "${SECRETS:-0}" = 0 ] && echo "" || echo app-1 ;;
   "ad app show"*"length(passwordCredentials)"*) echo "${SECRETS:-0}" ;;
   "ad app show"*"endDateTime"*) echo 2027-10-28T00:00:00Z ;;
-  "ad app show"*"web.redirectUris"*) echo "" ;;
+  "ad app show"*"displayName"*) echo "Barkpark pensum" ;;
+  "ad app show"*"web.redirectUris"*) printf "%b" "${REDIRECT_URIS:-}" ;;
   "ad app create"*) echo app-1 ;;
   "ad sp list"*) echo "" ;;
   "ad sp create"*) echo sp-1 ;;
   "ad sp show"*) echo graph-sp ;;
   "rest --method GET --uri https://graph.microsoft.com/v1.0/oauth2PermissionGrants"*) echo "openid profile email" ;;
-  "ad group list"*) echo "" ;;
+  "ad group list"*) echo "${GROUP_EXISTS:-}" ;;
   "ad group create"*) echo group-1 ;;
   "ad user show"*) echo user-1 ;;
   "ad group member check"*) echo false ;;
@@ -86,6 +89,49 @@ rc=$?
 [ "$rc" = 0 ] && ok "exits 0" || bad "exit $rc: $(cat "$TMP/err")"
 grep -q 'Store it in Barkpark after' "$TMP/err" \
   && ok "rotation waits before storing" || bad "rotation message: $(cat "$TMP/err")"
+
+echo "app found by name on another host"
+SECRETS=1 REDIRECT_URIS='https://other.example.com/v1/auth/oidc/pensum/callback\n' \
+  run --secret-file "$TMP/secret"
+rc=$?
+[ "$rc" = 1 ] && ok "exits 1" || bad "exit $rc, want 1: $(cat "$TMP/err")"
+grep -q 'has no redirect URI on barkpark.example.com' "$TMP/err" \
+  && ok "names the host mismatch" || bad "mismatch message: $(cat "$TMP/err")"
+grep -q 'https://other.example.com/v1/auth/oidc/pensum/callback' "$TMP/err" \
+  && ok "lists the app's redirect URIs" || bad "redirect URIs not listed"
+grep -q -- '--app-id app-1' "$TMP/err" && ok "names --app-id as the deliberate route" || bad "no --app-id hint"
+grep -Eq 'az ad (app (create|update|permission|credential)|sp create|group (create|member add))' "$STUB_LOG" \
+  && bad "changed something before stopping: $(grep -E 'create|update|add|reset' "$STUB_LOG")" \
+  || ok "changes nothing"
+
+echo "app found by name on this host"
+SECRETS=1 REDIRECT_URIS='https://other.example.com/v1/auth/oidc/pensum/callback\nhttps://barkpark.example.com/v1/auth/oidc/pensum/callback\n' \
+  run --secret-file "$TMP/secret"
+rc=$?
+[ "$rc" = 0 ] && ok "exits 0" || bad "exit $rc: $(cat "$TMP/err")"
+
+echo "app given by --app-id on another host"
+SECRETS=1 REDIRECT_URIS='https://other.example.com/v1/auth/oidc/pensum/callback\n' \
+  run --secret-file "$TMP/secret" --app-id app-1
+rc=$?
+[ "$rc" = 0 ] && ok "exits 0, --app-id is a deliberate choice" || bad "exit $rc: $(cat "$TMP/err")"
+
+echo "new app, owners group name taken"
+rm -f "$TMP/secret"
+SECRETS=0 GROUP_EXISTS=group-other run --secret-file "$TMP/secret"
+rc=$?
+[ "$rc" = 1 ] && ok "exits 1" || bad "exit $rc, want 1: $(cat "$TMP/err")"
+grep -q 'security group "Barkpark pensum owners" exists, but the app is new' "$TMP/err" \
+  && ok "names the taken group" || bad "group message: $(cat "$TMP/err")"
+grep -Eq 'az ad (app create|group create|group member add|app credential)' "$STUB_LOG" \
+  && bad "created something before stopping" || ok "creates nothing"
+[ -e "$TMP/secret" ] && bad "secret file written" || ok "no secret file"
+
+echo "new app, existing group named with --owners-group"
+SECRETS=0 GROUP_EXISTS=group-other run --secret-file "$TMP/secret" --owners-group "Barkpark pensum owners"
+rc=$?
+[ "$rc" = 0 ] && ok "exits 0" || bad "exit $rc: $(cat "$TMP/err")"
+grep -q '"group-other":"owner"' "$TMP/out" && ok "maps the named group" || bad "mapping: $(grep mappings "$TMP/out")"
 
 echo
 echo "passed $PASS, failed $FAIL"

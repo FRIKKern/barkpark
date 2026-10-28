@@ -6,6 +6,8 @@
 # Safe to run again. A second run finds the app by --app-id or by name, and the
 # service principal and group, and sets the same settings again. It creates a
 # client secret only when the app has none, or with --rotate-secret.
+# It stops before any change when the app it finds by name is on another host,
+# or when a new app would take over an existing owners group by default name.
 #
 # The client secret goes only to --secret-file, written with mode 600. It is
 # never printed.
@@ -27,11 +29,16 @@ Usage: scripts/entra-app-register.sh --host HOST --org SLUG [--secret-file PATH]
   --app-id APPID         Use this existing app registration (its Application
                          client id) instead of finding the app by --name. Use it
                          for an app made in the portal.
-  --name NAME            App display name. Default: "Barkpark <org>".
+  --name NAME            App display name. Default: "Barkpark <org>". An app
+                         found by name must have no redirect URI or one on
+                         --host. Otherwise the script stops, because the app
+                         may belong to another instance.
   --org-name NAME        Organization name Barkpark shows, used in the printed
                          `bp org create` command. Default: the org slug.
   --owners-group NAME    Security group mapped to owner. Default: "Barkpark <org> owners".
                          Give it with --app-id when the group has another name.
+                         When the app is new and a group with the default name
+                         exists, the script stops unless this names it.
   --add-owner UPN        Add this user to the owners group. Repeatable.
   --group-claims MODE    application or security. Default: application when the
                          tenant has Entra ID P1, else security. See ENTRA.md.
@@ -90,6 +97,8 @@ if [ "$ROTATE" = 1 ] && [ -z "$SECRET_FILE" ]; then
   exit 2
 fi
 
+GROUP_GIVEN=0
+[ -n "$GROUP_NAME" ] && GROUP_GIVEN=1
 GROUP_NAME="${GROUP_NAME:-Barkpark $ORG owners}"
 ORG_NAME="${ORG_NAME:-$ORG}"
 REDIRECT="https://$HOST/v1/auth/oidc/$ORG/callback"
@@ -128,7 +137,9 @@ case "${GROUP_CLAIMS:-application}" in
 esac
 
 # 1. App registration: Web platform, single tenant, the exact redirect URI.
+FOUND_BY_ID=""
 if [ -n "$APP_ID" ]; then
+  FOUND_BY_ID=1
   FOUND=$(az ad app show --id "$APP_ID" --query displayName -o tsv 2>/dev/null) || FOUND=""
   if [ -z "$FOUND" ]; then
     say "No app registration with application id $APP_ID in tenant $TENANT"
@@ -138,6 +149,41 @@ if [ -n "$APP_ID" ]; then
 else
   NAME="${NAME:-Barkpark $ORG}"
   APP_ID=$(az ad app list --display-name "$NAME" --query "[0].appId" -o tsv)
+fi
+
+# Another Barkpark instance in the same tenant can own an app or a group with
+# the default name. Setup run 6 (2026-10-28) found that risk. An app found by
+# name must already have a redirect URI on this host, or have none. A new app
+# must not take over an existing owners group unless --owners-group names it.
+if [ -n "$APP_ID" ] && [ -z "$FOUND_BY_ID" ]; then
+  OTHER_URIS=()
+  ON_HOST=0
+  while IFS= read -r uri; do
+    [ -n "$uri" ] || continue
+    case "$uri" in
+      "https://$HOST/"*) ON_HOST=1 ;;
+      *) OTHER_URIS+=("$uri") ;;
+    esac
+  done <<<"$(az ad app show --id "$APP_ID" --query "web.redirectUris[]" -o tsv)"
+  if [ "$ON_HOST" = 0 ] && [ "${#OTHER_URIS[@]}" -gt 0 ]; then
+    say "ERROR: the app registration \"$NAME\" ($APP_ID) has no redirect URI on $HOST."
+    say "Its redirect URIs are:"
+    printf '  %s\n' "${OTHER_URIS[@]}" >&2
+    say "It may belong to another Barkpark instance. Nothing was changed."
+    say "Pass --name with a name for this instance, such as \"Barkpark $ORG ($HOST)\","
+    say "and --owners-group with a group name of its own. To use this app on purpose,"
+    say "pass --app-id $APP_ID."
+    exit 1
+  fi
+fi
+EXISTING_GROUP_ID=$(az ad group list --display-name "$GROUP_NAME" --query "[0].id" -o tsv)
+if [ -z "$APP_ID" ] && [ -n "$EXISTING_GROUP_ID" ] && [ "$GROUP_GIVEN" = 0 ]; then
+  say "ERROR: the security group \"$GROUP_NAME\" exists, but the app is new."
+  say "The group may be the owners group of another Barkpark instance, and its"
+  say "members would become owners here. Nothing was changed. Pass --owners-group"
+  say "with a new name, such as \"Barkpark $ORG ($HOST) owners\", or pass"
+  say "--owners-group \"$GROUP_NAME\" to use the existing group on purpose."
+  exit 1
 fi
 
 # Decide on the client secret before changing anything. Entra never shows a

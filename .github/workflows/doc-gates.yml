@@ -64,6 +64,7 @@ on:
       - "deploy/azure/**"
       - "api/Dockerfile"
       - "scripts/entra-app-register.sh"
+      - "scripts/entra-app-register.test.sh"
       # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
       # already rides the `**` glob above; these two lines cover an edit to the
       # gate scripts themselves, which no other glob matches.
@@ -469,6 +470,7 @@ on:
       - "deploy/azure/**"
       - "api/Dockerfile"
       - "scripts/entra-app-register.sh"
+      - "scripts/entra-app-register.test.sh"
       # the two deploy.yml gates — their SUBJECT (.github/workflows/deploy.yml)
       # already rides the `**` glob above; these two lines cover an edit to the
       # gate scripts themselves, which no other glob matches.
@@ -2095,8 +2097,10 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           st_rc=0; node --test tooling/doc-truth/setup-facts.test.mjs || st_rc=$?
           gate_rc=0; node tooling/doc-truth/setup-facts.mjs || gate_rc=$?
-          echo "tests exit=$st_rc  gate exit=$gate_rc"
-          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+          # ENTRA.md documents what entra-app-register.sh prints and refuses.
+          entra_rc=0; bash scripts/entra-app-register.test.sh || entra_rc=$?
+          echo "tests exit=$st_rc  gate exit=$gate_rc  entra harness exit=$entra_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ] || [ "$entra_rc" -ne 0 ]; then exit 1; fi
 
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()

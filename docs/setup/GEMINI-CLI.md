@@ -24,7 +24,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
 ```
 
-If `bp: command not found` afterward, add the installer's fallback dir to your
+If `bp: command not found` afterward, add the installer's dir `~/.local/bin` to your
 `PATH` (`export PATH="$HOME/.local/bin:$PATH"`) and restart the Gemini CLI.
 
 ## 2. Authenticate

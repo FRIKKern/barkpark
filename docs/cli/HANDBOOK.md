@@ -12,13 +12,13 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp version   # -> barkpark <version>
 ```
 
-Detects OS (`darwin`/`linux`) + arch (`arm64`/`amd64`), installs to `/usr/local/bin` (fallback `~/.local/bin`), sha256-verifies against the release's `checksums.txt`. Wizard walkthrough: `docs/setup/QUICKSTART.md`.
+Detects OS (`darwin`/`linux`) + arch (`arm64`/`amd64`), installs to `~/.local/bin`, sha256-verifies against the release's `checksums.txt`. Wizard walkthrough: `docs/setup/QUICKSTART.md`.
 
 | Env | Effect |
 |---|---|
 | `BARKPARK_CLI_VERSION` | pin a release, e.g. `1.0.1` (installer only) |
 | `BARKPARK_CLI_RELEASE_BASE` | mirror override — asset DIR for the installer, release-tree ROOT for `bp upgrade` |
-| `BARKPARK_BIN_DIR` | install dir |
+| `BARKPARK_BIN_DIR` | install dir (default `~/.local/bin`) |
 
 `bp upgrade` self-updates from the latest `cli-v*` GitHub release: redirect-based latest detection (no API), sha256-verified, atomic same-dir rename; refuses on `dev` builds; on EACCES prints the sudo re-install one-liner. `bp upgrade --check` prints current vs latest — exit 1 when behind. After an eligible command bp may print one quiet **stderr** notice pointing at `bp upgrade` when a newer `cli-v*` release exists — checked at most once per interval, announced once per release, silent on any failure; never touches stdout or exit codes.
 
