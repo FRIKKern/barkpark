@@ -1694,9 +1694,17 @@ defmodule Barkpark.Auth do
   `opts`: `:label` (required), `:permissions` (required, a non-empty subset of
   `#{inspect(@delegable_permissions)}`), `:dataset` (default `"production"`),
   `:dataset_bound` (true when the request named `dataset` — see `create_token/6`),
-  `:expires_at` (`nil` → the class default, a `DateTime`, or `:no_expiry`).
+  `:expires_at` (`nil` → the class default, a `DateTime`, or `:no_expiry`),
+  `:also_seat` (workspace ids, default `[]`).
+
+  `:also_seat` seats the new token in more workspaces, with the same role as
+  its home seat, in the same transaction. The actor must be a workspace admin
+  in each of them, so a token never gains a seat its minter lacks. Barkpark
+  Cloud uses it to carry every seat of the admin token it rotates. The audit
+  row names those workspace ids as `also_seated`.
 
   Errors: `:admin_required` (no flat admin), `:not_workspace_admin`,
+  `{:not_workspace_admin, workspace_id}` (an `:also_seat` workspace),
   `{:invalid_permissions, bad}`, `{:escalation, perms}` (requested permissions
   the actor lacks), `:missing_label`, the `TokenExpiry` reasons, or a changeset.
   """
@@ -1707,9 +1715,11 @@ defmodule Barkpark.Auth do
     label = opts |> Keyword.get(:label) |> to_string() |> String.trim()
     perms = opts |> Keyword.get(:permissions, []) |> Enum.uniq()
     dataset = Keyword.get(opts, :dataset, "production")
+    also_seat = opts |> Keyword.get(:also_seat, []) |> Enum.uniq() |> List.delete(workspace_id)
 
     with :ok <- if(has_permission?(actor, "admin"), do: :ok, else: {:error, :admin_required}),
          :ok <- delegate_workspace_admin(actor, workspace_id),
+         :ok <- also_seat_admin(actor, also_seat),
          :ok <- delegable(perms),
          :ok <- within_actor(perms, actor),
          :ok <- if(label == "", do: {:error, :missing_label}, else: :ok) do
@@ -1723,7 +1733,8 @@ defmodule Barkpark.Auth do
 
       Repo.transaction(fn ->
         with {:ok, token} <- create_token(raw, label, dataset, perms, workspace_id, mint_opts),
-             {:ok, _event} <- audit_token_minted(token, actor) do
+             :ok <- seat_also(token, also_seat),
+             {:ok, _event} <- audit_token_minted(token, actor, also_seat) do
           token
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -1742,6 +1753,25 @@ defmodule Barkpark.Auth do
     if TenancyAuth.workspace_admin?(actor, workspace_id),
       do: :ok,
       else: {:error, :not_workspace_admin}
+  end
+
+  defp also_seat_admin(actor, workspace_ids) do
+    case Enum.find(workspace_ids, &(not TenancyAuth.workspace_admin?(actor, &1))) do
+      nil -> :ok
+      ws_id -> {:error, {:not_workspace_admin, ws_id}}
+    end
+  end
+
+  # The same role as the home seat `create_token/6` writes.
+  defp seat_also(%ApiToken{} = token, workspace_ids) do
+    role = TenancyAuth.role_for_permissions(token.permissions)
+
+    Enum.reduce_while(workspace_ids, :ok, fn ws_id, :ok ->
+      case TenancyAuth.create_membership(ws_id, token.id, role, "api_token") do
+        {:ok, _} -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   defp delegable([]), do: {:error, {:invalid_permissions, []}}
@@ -1764,22 +1794,27 @@ defmodule Barkpark.Auth do
   Write the `token_minted` audit row for `token`, naming `actor` (an
   `%ApiToken{}`, a `%User{}`, or `nil` for the instance itself). Ids, label,
   permissions and expiry only, never the secret. The delegated, read, chat and
-  fleet-support mints call this.
+  fleet-support mints call this. `also_seat` is the workspace ids the
+  delegated mint seated the token in besides its home workspace.
   """
-  @spec audit_token_minted(ApiToken.t(), ApiToken.t() | User.t() | nil) ::
+  @spec audit_token_minted(ApiToken.t(), ApiToken.t() | User.t() | nil, [binary()]) ::
           {:ok, term()} | {:error, term()}
-  def audit_token_minted(%ApiToken{} = token, actor) do
+  def audit_token_minted(%ApiToken{} = token, actor, also_seat \\ []) do
+    metadata = %{
+      "label" => token.label,
+      "permissions" => token.permissions,
+      "expires_at" => token.expires_at && DateTime.to_iso8601(token.expires_at)
+    }
+
+    metadata = if also_seat == [], do: metadata, else: Map.put(metadata, "also_seated", also_seat)
+
     Audit.emit(
       Map.merge(audit_actor(actor), %{
         category: "token",
         action: "token_minted",
         subject: token.id,
         workspace_id: token.workspace_id,
-        metadata: %{
-          "label" => token.label,
-          "permissions" => token.permissions,
-          "expires_at" => token.expires_at && DateTime.to_iso8601(token.expires_at)
-        }
+        metadata: metadata
       })
     )
   end

@@ -5643,16 +5643,19 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/operator/barkparks/:id/admin-token/rotate → 200 {ok, rotated:
-  # {old_token_id, new_token_id, label, workspace, old_token_status}} — replace
-  # the admin token Cloud holds for one box (task-1d2936aa15f96bc2). Cloud mints
-  # a successor on the box with the held token, stores it, checks it, and only
-  # then revokes the old one; `Registry.AdminTokenRotation` owns the steps and
-  # the undo. Operator only, across teams, like enable-apply above. No secret is
-  # returned. Refusals: 404 not_found, 409 not_live, 404 no_admin_token, 500
-  # decrypt_failed, 502 box_unreachable, 502 not_box_admin (the box refused the
-  # held token), 409 box_too_old, 502 mint_refused, 502 minted_token_not_admin,
-  # 500 record_failed (the store step), 502 revoke_refused. On every refusal the old token is
-  # still stored and live.
+  # {old_token_id, new_token_id, label, workspace, seats_carried,
+  # old_token_status}} — replace the admin token Cloud holds for one box
+  # (task-1d2936aa15f96bc2). Cloud mints a successor on the box with the held
+  # token, seated in every workspace the old token is (task-86e3a3a0c885097a),
+  # stores it, checks it, and only then revokes the old one;
+  # `Registry.AdminTokenRotation` owns the steps and the undo. Operator only,
+  # across teams, like enable-apply above. No secret is returned. Refusals: 404
+  # not_found, 409 not_live, 404 no_admin_token, 500 decrypt_failed, 502
+  # box_unreachable, 502 not_box_admin (the box refused the held token), 409
+  # box_too_old (also when the box did not carry every seat, with
+  # `seats_not_carried`), 502 mint_refused, 502 minted_token_not_admin, 500
+  # record_failed (the store step), 502 revoke_refused. On every refusal the old
+  # token is still stored and live.
   post "/v1/operator/barkparks/:id/admin-token/rotate" do
     conn = Auth.require_platform_operator(conn, [])
 
@@ -5678,6 +5681,7 @@ defmodule BarkparkCloud.Web.Router do
                          old_token_id: receipt.old_token_id,
                          new_token_id: receipt.new_token_id,
                          box_workspace: receipt.workspace,
+                         seats_carried: receipt.seats_carried,
                          old_token_status: receipt.old_token_status
                        }
                      }) do
@@ -5723,6 +5727,17 @@ defmodule BarkparkCloud.Web.Router do
 
   defp rotate_refusal(conn, {:box_too_old, route}),
     do: json(conn, 409, %{error: "box_too_old", missing: route, detail: "Update the box first."})
+
+  defp rotate_refusal(conn, {:seats_not_carried, missing}),
+    do:
+      json(conn, 409, %{
+        error: "box_too_old",
+        missing: "POST /v1/tokens/elevated workspaces",
+        seats_not_carried: missing,
+        detail:
+          "The box did not seat the successor in every workspace the old token is seated in. " <>
+            "Cloud kept the old token and revoked the successor. Update the box first."
+      })
 
   defp rotate_refusal(conn, {:mint_refused, status, reason}),
     do:
