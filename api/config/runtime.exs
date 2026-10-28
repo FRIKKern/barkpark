@@ -243,6 +243,18 @@ case System.get_env("BARKPARK_SHAPE") do
     :ok
 end
 
+# The container image reference the installer pinned, such as
+# ghcr.io/frikkern/barkpark:0.2.28. One image carries several tags, so the
+# image cannot know which one was pulled; deploy/azure/main.bicep passes its
+# `image` parameter. Reported in /status.json as `image`, null when unset.
+case System.get_env("BARKPARK_IMAGE") do
+  image when is_binary(image) and image != "" ->
+    config :barkpark, :image, String.trim(image)
+
+  _ ->
+    :ok
+end
+
 # Write admission for a dedicated managed instance (Barkdown migration, C083).
 # Both variables are required to enable it; a half-configured pair refuses the
 # boot rather than starting a server that silently admits every write.

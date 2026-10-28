@@ -90,6 +90,8 @@ services:
       - BARKPARK_BOOTSTRAP_OWNER_EMAIL
       # Match an OIDC sign-in on the UPN when email is absent (api/config/runtime.exs)
       - BARKPARK_OIDC_EMAIL_FROM_UPN
+      # Image reference reported in /status.json as `image` (api/config/runtime.exs)
+      - BARKPARK_IMAGE
       - BARKPARK_DB_STATEMENT_TIMEOUT
       - BARKPARK_INDX_STATE_DIR
       - BARKPARK_OPERATOR_FAIL_CLOSED

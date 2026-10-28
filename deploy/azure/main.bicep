@@ -459,6 +459,7 @@ var appSecrets = [
 var ownedSettings = concat(map(secretTable, item => item.env), [
   'DATABASE_SSL'
   'BARKPARK_SHAPE'
+  'BARKPARK_IMAGE'
   'PHX_HOST'
   'PHX_SCHEME'
   'BARKPARK_MEDIA_DIR'
@@ -474,6 +475,8 @@ var appEnv = concat(settingsEnv, map(secretItems, item => { name: item.env, secr
   // Azure Postgres requires TLS. The image carries the CA roots.
   { name: 'DATABASE_SSL', value: 'verify-full' }
   { name: 'BARKPARK_SHAPE', value: 'solo' }
+  // /status.json reports it as `image`, so the pinned tag is visible.
+  { name: 'BARKPARK_IMAGE', value: image }
   { name: 'PHX_HOST', value: host }
   { name: 'PHX_SCHEME', value: 'https' }
   { name: 'BARKPARK_MEDIA_DIR', value: mediaPath }

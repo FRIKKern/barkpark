@@ -48,6 +48,7 @@ defmodule Barkpark.Status do
       open_incidents: length(incidents),
       version: safe(fn -> Barkpark.BuildInfo.version() end, "unknown"),
       commit: commit(),
+      image: Application.get_env(:barkpark, :image),
       shape: Barkpark.Shape.current(),
       authoring_wall: Barkpark.Content.AuthoringWall.enabled?(),
       migrations: migrations,
