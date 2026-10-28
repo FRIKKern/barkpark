@@ -21,10 +21,9 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
 ```
 
-The installer drops `bp` in `/usr/local/bin`, or falls back to `~/.local/bin`
-when that isn't writable — and prints a `PATH` hint if the dir it chose isn't on
-your `PATH`. If `bp` isn't found afterward, add the fallback and restart your
-shell:
+The installer puts `bp` in `~/.local/bin`, or in `$BARKPARK_BIN_DIR` when
+set, and prints a `PATH` hint if that dir isn't on your `PATH`. If `bp` isn't
+found afterward, add the dir and restart your shell:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"

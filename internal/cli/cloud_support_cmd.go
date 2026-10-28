@@ -995,7 +995,7 @@ func (r *supportAddRun) stepDataset() (int, bool) {
 	if err := r.runner.Run(supportCtx(), supportEnsureBpStep()); err != nil {
 		return r.fail("dataset", "bp install on the box failed: "+err.Error(),
 			fmt.Sprintf("box %s bound at %s; bundle staged but not imported", r.host.Name, r.host.IP),
-			fmt.Sprintf("install bp by hand (`ssh root@%s 'sh /opt/barkpark/scripts/install-cli.sh'`), then re-run `bp cloud support add %s`", r.host.IP, r.name),
+			fmt.Sprintf("install bp by hand (`ssh root@%s 'BARKPARK_BIN_DIR=/usr/local/bin sh /opt/barkpark/scripts/install-cli.sh'`), then re-run `bp cloud support add %s`", r.host.IP, r.name),
 			exitGeneric)
 	}
 
@@ -1086,7 +1086,7 @@ func (r *supportAddRun) stepRuntime() (int, bool) {
 	if err := r.runner.Run(supportCtx(), supportEnsureBpStep()); err != nil {
 		return r.fail("runtime", "bp install on the box failed: "+err.Error(),
 			fmt.Sprintf("box %s bound at %s; the listener needs bp and it is absent", r.host.Name, r.host.IP),
-			fmt.Sprintf("install bp by hand (`ssh root@%s 'sh /opt/barkpark/scripts/install-cli.sh'`), then re-run `bp cloud support add %s`", r.host.IP, r.name),
+			fmt.Sprintf("install bp by hand (`ssh root@%s 'BARKPARK_BIN_DIR=/usr/local/bin sh /opt/barkpark/scripts/install-cli.sh'`), then re-run `bp cloud support add %s`", r.host.IP, r.name),
 			exitGeneric)
 	}
 	r.state("runtime", "writing fleet-run.sh + fleet-protocol.md + bp-read.sh at origin/main "+supportOr(sha, "(checkout fallback)"))
@@ -2010,7 +2010,7 @@ echo 'barkpark did not come back after restart' >&2; exit 1`
 func supportEnsureBpStep() cloud.CaddyStep {
 	script := `set -e
 command -v bp >/dev/null 2>&1 && exit 0
-sh /opt/barkpark/scripts/install-cli.sh`
+BARKPARK_BIN_DIR=/usr/local/bin sh /opt/barkpark/scripts/install-cli.sh`
 	return cloud.CaddyStep{
 		Title: "install the bp CLI on the box (scripts/install-cli.sh)",
 		Argv:  []string{"bash", "-lc", script},

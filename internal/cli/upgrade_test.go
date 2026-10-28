@@ -643,3 +643,22 @@ func TestRunUpgradeEndToEnd(t *testing.T) {
 		t.Errorf("exe content = %q, want %q", got, "new-binary")
 	}
 }
+
+// The installer's default dir is $HOME/.local/bin, so the sudo command bp
+// upgrade prints must name the running binary's dir, or sudo would install
+// into root's home and leave the old bp in place.
+func TestInstallerCommandForNamesTheBinaryDir(t *testing.T) {
+	for dir, want := range map[string]string{
+		"/usr/local/bin":    "| sudo env BARKPARK_BIN_DIR=/usr/local/bin sh",
+		"/opt/my tools/bin": "| sudo env BARKPARK_BIN_DIR='/opt/my tools/bin' sh",
+		"/opt/it's/bin":     `| sudo env BARKPARK_BIN_DIR='/opt/it'\''s/bin' sh`,
+	} {
+		got := installerCommandFor(dir)
+		if !strings.HasSuffix(got, want) {
+			t.Errorf("installerCommandFor(%q) = %q, want suffix %q", dir, got, want)
+		}
+		if !strings.HasPrefix(got, "curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh ") {
+			t.Errorf("installerCommandFor(%q) = %q, want the installer URL first", dir, got)
+		}
+	}
+}

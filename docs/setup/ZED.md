@@ -18,7 +18,7 @@ macOS / Linux:
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
 ```
 
-If `bp: command not found` afterward, the installer's fallback dir isn't on your
+If `bp: command not found` afterward, the installer's dir `~/.local/bin` isn't on your
 `PATH` — add it (`export PATH="$HOME/.local/bin:$PATH"`) and restart Zed so its
 child shell inherits it.
 

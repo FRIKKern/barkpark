@@ -1106,7 +1106,7 @@ echo 'barkpark did not come back after restart' >&2; exit 1`
 func supportEnsureBpStep() cloud.CaddyStep {
 	script := `set -e
 command -v bp >/dev/null 2>&1 && exit 0
-sh /opt/barkpark/scripts/install-cli.sh`
+BARKPARK_BIN_DIR=/usr/local/bin sh /opt/barkpark/scripts/install-cli.sh`
 	return cloud.CaddyStep{
 		Title: "install the bp CLI on the box (scripts/install-cli.sh)",
 		Argv:  []string{"bash", "-lc", script},

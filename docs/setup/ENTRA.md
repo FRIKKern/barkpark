@@ -14,11 +14,12 @@ Editors sign in at `https://<host>/v1/auth/oidc/<org>/start`. The script prints 
 Run the script with the Azure CLI, signed in with `az login` as a user who may create app registrations and groups:
 
 ```bash
-scripts/entra-app-register.sh --host barkpark.example.com --org gyldendal \
+curl -fsSLO https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/entra-app-register.sh
+bash entra-app-register.sh --host barkpark.example.com --org gyldendal \
   --secret-file ./entra-client-secret --add-owner owner@example.com --org-name Gyldendal
 ```
 
-The app's display name is `Barkpark <org>`; pass `--name <display name>` for another. For an app made in the portal, pass `--app-id <appId>` with its Application (client) ID, and `--owners-group <name>` when the owners group has another name than `Barkpark <org> owners`.
+The script finds the app by the name `Barkpark <org>` or `--name`, and the owners group by `Barkpark <org> owners` or `--owners-group`. Another instance in the tenant can own either. So the script stops when the app has no redirect URI on `--host`, or when a new app would reuse the group. Give a second instance names of its own. For an app made in the portal, pass `--app-id <appId>` with its Application (client) ID.
 
 The script does these steps and is safe to run again:
 
@@ -45,7 +46,7 @@ bp org oidc-create gyldendal "https://login.microsoftonline.com/$TENANT/v2.0" "$
   --set group_role_mappings:='{"<owners group id>":"owner"}' --yes < ./entra-client-secret
 ```
 
-`Gyldendal` is the organization name Barkpark shows, from the script's `--org-name` or the slug. `--yes` answers bp's confirmation for a write to a remote server.
+`Gyldendal` is the organization name Barkpark shows, from the script's `--org-name` or the slug.
 
 Add more groups to the mapping, such as an editors group mapped to `member`. The keys are group object ids. Each sign-in sets the role from the user's groups and can lower it, so always map the owners group to `owner`. With `BARKPARK_OIDC_KEEP_OWNER=on`, Barkpark refuses a mapping that maps no group to `owner` while the organization has an owner, and a sign-in never lowers a workspace's last owner.
 
@@ -59,7 +60,7 @@ bp org oidc-update gyldendal --scopes "openid profile email" --yes
 
 `bp org oidc-update <org> --trust_idp_mfa --yes` makes a sign-in count as MFA when the ID token's `amr` claim contains `mfa`. A v2.0 ID token carries `amr` only when the app requests it as an optional claim. The script adds it. In the portal, add `{"name": "amr", "essential": false}` to `optionalClaims.idToken` in the app's Manifest. Entra puts `mfa` in `amr` only when the user completed MFA in that sign-in, so require MFA for the app with a Conditional Access policy.
 
-Conditional Access needs Entra ID P1. Without P1, security defaults make each user register an authenticator at the first sign-in but do not ask for it at every sign-in. With `trust_idp_mfa` on a connection that has `--tenant_id`, Barkpark asks Entra for MFA with the OIDC `claims` parameter. On 2026-10-27, on a tenant with security defaults and no P1, Entra then asked a non-admin user for the code at every sign-in. Without the parameter it asked at none.
+Conditional Access needs Entra ID P1. Without P1, security defaults make each user register an authenticator at the first sign-in but do not ask for it at every sign-in. With `trust_idp_mfa` on a connection that has `--tenant_id`, Barkpark asks Entra for MFA with the OIDC `claims` parameter. On 2026-10-27, on a tenant with security defaults and no P1, Entra then asked a non-admin user for the code at every sign-in.
 
 Turn `trust_idp_mfa` on once a test sign-in works. Sign in again and check under Sign-in logs that Entra asked for the code. [tooling/entra-signin](../../tooling/entra-signin/README.md) signs a test user in headless and prints the role.
 
@@ -85,7 +86,7 @@ An owner who signs in only through Entra signs bp in on their own machine:
 bp login --sso --org gyldendal -s https://<host>
 ```
 
-bp opens the sign-in URL in the browser and waits for the answer on a random port on 127.0.0.1. The instance accepts that loopback return without `BARKPARK_STUDIO_SSO_ORIGINS`. bp saves the session as its token for that server and prints the email and the expiry. `--no-browser` prints the URL to open on the same machine. Commands such as `bp instance studio-token --workspace default` then run as the owner. `bp logout -s https://<host>` revokes that session. For a session in a file, such as from `signin.mjs --save-token`, run `bp logout -s https://<host> --token-file <file>`.
+bp opens the sign-in URL and waits for the answer on a random port on 127.0.0.1. The instance accepts that loopback return without `BARKPARK_STUDIO_SSO_ORIGINS`. bp saves the session as its token for that server and prints the email and the expiry. `--no-browser` prints the URL to open on the same machine. Commands such as `bp instance studio-token --workspace default` then run as the owner. `bp logout -s https://<host>` revokes that session.
 
 ## Domain verification
 

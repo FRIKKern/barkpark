@@ -24,7 +24,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
 ```
 
-If `bp: command not found` afterward, the installer's fallback dir isn't on your
+If `bp: command not found` afterward, the installer's dir `~/.local/bin` isn't on your
 `PATH` — add it (`export PATH="$HOME/.local/bin:$PATH"`) and restart Windsurf so
 Cascade's child shell inherits it.
 

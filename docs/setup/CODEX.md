@@ -19,8 +19,8 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
 ```
 
-The installer drops `bp` in `/usr/local/bin`, falling back to `~/.local/bin`
-when that isn't writable. If `bp: command not found`, add that fallback to your
+The installer puts `bp` in `~/.local/bin`, or in `$BARKPARK_BIN_DIR` when set.
+If `bp: command not found`, add that dir to your
 `PATH` (`export PATH="$HOME/.local/bin:$PATH"`) and restart Codex.
 
 ## 2. Authenticate
