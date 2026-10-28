@@ -68,4 +68,4 @@ Not yet: `text::query`, other `documents::`, `delta::`; releases. Before 2025-02
 
 `score()` weighs as groq-js; multi-term ranks can differ.
 
-Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()` (its wikilinks are not `references()` yet). `order()` is exact where every type in scope declares the field, else a bare value sorts as missing.
+Read compat (declared fields): a bare-id reference answers `->`, `_ref`, `_type`, `_weak`, `references()`; a slug string `.current`; an object-array item `_type` (stored, else `kind`, else member name); a richText body `pt::text()`, and its wikilinks `references()`. `order()` is exact where every type in scope declares the field, else a bare value sorts as missing.

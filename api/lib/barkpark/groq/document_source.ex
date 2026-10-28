@@ -801,6 +801,7 @@ defmodule Barkpark.Groq.DocumentSource do
             type(^Enum.map(maps, &Jason.encode!/1), {:array, :string})
           )
         ),
+      # The `_ref` and wikilink arms of `references_any/1`, on the stored row.
       refs != [] &&
         dynamic(
           [d],
@@ -808,7 +809,12 @@ defmodule Barkpark.Groq.DocumentSource do
             "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref') \\?| ?",
             d.content,
             type(^refs, {:array, :string})
-          )
+          ) or
+            fragment(
+              "jsonb_path_query_array(?, 'strict $.** \\? (@.type == \"wikilink\").keyvalue() \\? (@.key == \"docId\" || @.key == \"target\").value') \\?| ?",
+              d.content,
+              type(^refs, {:array, :string})
+            )
         ),
       ids != [] && ids_condition(ids, perspective)
     ]
@@ -1365,11 +1371,18 @@ defmodule Barkpark.Groq.DocumentSource do
     )
   end
 
-  # The expression is the one `documents_content_refs_idx` is built on, word
-  # for word; Postgres uses the index only for that exact expression. It
-  # collects the `_ref` of every object at any depth, which is a superset of
-  # what `references()` matches (it also descends into an object that has a
-  # `_ref`), so the evaluator's own check decides.
+  # Each expression is the one its index is built on, word for word; Postgres
+  # uses an expression index only for that exact expression, and plans the OR
+  # as a BitmapOr of the two:
+  #
+  #   * `documents_content_refs_idx`: the `_ref` of every object at any depth;
+  #   * `documents_content_wikilinks_idx`: the `docId` and `target` of every
+  #     PortableDoc wikilink, the body link Sanity stores as a markDef `_ref`
+  #     (task-b1eb62967525ad1b).
+  #
+  # Both collect a superset of what `references()` matches, in any field, so
+  # the evaluator's own check on the document the caller may read decides: a
+  # link in a field the caller cannot read never counts.
   defp references_any(ids) do
     dynamic(
       [bp_content: c],
@@ -1377,7 +1390,12 @@ defmodule Barkpark.Groq.DocumentSource do
         "jsonb_path_query_array(?, 'strict $.** \\? (exists(@._ref))._ref') \\?| ?",
         c.content,
         type(^ids, {:array, :string})
-      )
+      ) or
+        fragment(
+          "jsonb_path_query_array(?, 'strict $.** \\? (@.type == \"wikilink\").keyvalue() \\? (@.key == \"docId\" || @.key == \"target\").value') \\?| ?",
+          c.content,
+          type(^ids, {:array, :string})
+        )
     )
   end
 
