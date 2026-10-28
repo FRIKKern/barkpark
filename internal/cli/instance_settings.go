@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -82,7 +83,7 @@ var instanceRecommendedSettings = []instanceRecommended{
 // instanceInitValues are the operator's values init can write in place of a
 // placeholder. An empty field keeps the placeholder.
 type instanceInitValues struct {
-	host, studioOrigin, ownerEmail, operatorEmails, breakglassEmail string
+	target, host, studioOrigin, ownerEmail, operatorEmails, breakglassEmail string
 }
 
 // value returns the operator's value for a recommended setting, or "".
@@ -90,6 +91,10 @@ func (v instanceInitValues) value(name string) string {
 	switch name {
 	case "BARKPARK_ALWAYS_ALLOWED_ORIGINS":
 		if v.host == "" {
+			// On Container Apps the template adds the instance's own origin.
+			if v.target == instanceTargetContainerApps {
+				return v.studioOrigin
+			}
 			return ""
 		}
 		origins := "https://" + v.host
@@ -130,6 +135,16 @@ var instanceSecretNames = []string{"SECRET_KEY_BASE", "BARKPARK_CLOAK_KEY", "BAR
 // instanceDeployOwned are the settings deploy.sh generates on a single VM and
 // keeps when it merges BARKPARK_ENV_FILE. init leaves them out for --target vm.
 var instanceDeployOwned = append([]string{"DATABASE_URL"}, instanceSecretNames...)
+
+// instanceTemplateOwned are the settings deploy/azure/main.bicep sets on
+// Container Apps when barkpark.env leaves them out. PHX_HOST becomes the
+// app's default address, and the template puts the instance's own origin
+// first on BARKPARK_ALWAYS_ALLOWED_ORIGINS.
+var instanceTemplateOwned = []string{"PHX_HOST", "BARKPARK_ALWAYS_ALLOWED_ORIGINS"}
+
+func instanceTemplateOwns(target, name string) bool {
+	return target == instanceTargetContainerApps && slices.Contains(instanceTemplateOwned, name)
+}
 
 func instanceDeployOwns(target, name string) bool {
 	if target != instanceTargetVM {
@@ -234,9 +249,17 @@ func instanceEnvFile(target string, secrets map[string]string, vals instanceInit
 		line("# deploy/azure/main.bicep sets the database host and BARKPARK_MEDIA_DIR.")
 		line("DATABASE_URL=ecto://barkpark:%s@%s/barkpark", secrets["database_password"], instanceContainerAppsDatabaseHost)
 	}
-	if vals.host != "" {
+	switch {
+	case vals.host != "":
+		if target == instanceTargetContainerApps {
+			line("# Your own domain. main.bicep binds it once its DNS records exist.")
+		}
 		line("PHX_HOST=%s", vals.host)
-	} else {
+	case target == instanceTargetContainerApps:
+		line("# main.bicep sets PHX_HOST to the app's Container Apps address. For your")
+		line("# own domain, set it here before the first deployment:")
+		line("# PHX_HOST=<your domain, such as cms.example.com>")
+	default:
 		line("PHX_HOST=<public host name, such as cms.example.com>")
 	}
 	if target != instanceTargetVM {
@@ -257,6 +280,11 @@ func instanceEnvFile(target string, secrets map[string]string, vals instanceInit
 		v := r.value
 		if v == "" {
 			v = vals.value(r.name)
+		}
+		if v == "" && instanceTemplateOwns(target, r.name) {
+			line("# main.bicep puts the instance's own origin on %s. Other browser origins:", r.name)
+			line("# %s=%s", r.name, r.hint)
+			continue
 		}
 		if v == "" {
 			v = r.hint

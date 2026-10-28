@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorkerTest do
       )
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # The GET /v1/admin/self-update body carrying a `check.state`.

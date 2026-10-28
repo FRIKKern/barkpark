@@ -12,9 +12,12 @@ defmodule BarkparkWeb.MutateController do
   def mutate(conn, %{"dataset" => dataset, "mutations" => mutations}) when is_list(mutations) do
     with {:ok, dry_run} <- dry_run_flag(conn.params["dryRun"]),
          {:ok, visibility} <- visibility_flag(conn.params["visibility"]),
+         {:ok, restore} <- restore_flag(conn.params["restore"]),
          {:ok, mutations} <- apply_if_match_header(conn, mutations),
          {:ok, scope, resolved} <- resolve_write_scope(conn) do
-      opts = [source: :api, dry_run: dry_run, visibility: visibility] ++ exact_ids(conn) ++ scope
+      opts =
+        [source: :api, dry_run: dry_run, visibility: visibility, restore: restore] ++
+          exact_ids(conn) ++ scope
 
       # The advisory channel (authoring-excellence D5): the publish wall queues
       # non-blocking warnings ([{code, severity, message}]) while the batch
@@ -89,6 +92,15 @@ defmodule BarkparkWeb.MutateController do
   defp dry_run_flag(flag) when flag in [false, "false"], do: {:ok, false}
   defp dry_run_flag(other), do: {:error, {:invalid_dry_run, other}}
 
+  # `restore` (task-419052f535f92f4b), body field or query param, off by
+  # default. `bp import` sends it so a created document is written as it was
+  # exported: the writer adds no schema initial values, layout scaffold or
+  # derived title. Anything but a boolean is refused, as for `dryRun`.
+  defp restore_flag(nil), do: {:ok, false}
+  defp restore_flag(flag) when flag in [true, "true"], do: {:ok, true}
+  defp restore_flag(flag) when flag in [false, "false"], do: {:ok, false}
+  defp restore_flag(other), do: {:error, {:invalid_restore, other}}
+
   # `visibility` (task-6e2552cdeb223fa2), Sanity's name for it. `sync`, the
   # default, answers once the batch has committed AND its published documents'
   # graph edges are written. `async` answers once the batch has committed; the
@@ -104,7 +116,7 @@ defmodule BarkparkWeb.MutateController do
   # (task-778e3617070bce11). Named in a non-fatal warning, never refused: a
   # 400 here could break clients that send harmless extras.
   # `transactionId`: @sanity/client sends its own; Barkpark mints the id.
-  @known_body_keys ~w(mutations dryRun visibility transactionId)
+  @known_body_keys ~w(mutations dryRun visibility restore transactionId)
 
   defp warn_unknown_keys(%{} = body) do
     case body |> Map.keys() |> Enum.reject(&(&1 in @known_body_keys)) |> Enum.sort() do

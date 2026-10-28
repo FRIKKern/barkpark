@@ -150,6 +150,11 @@ defmodule Barkpark.Content.Errors do
                          # user in several workspaces must name the PAT's
                          # workspace (422, with the slugs listed).
                          "workspace_required",
+                         # studio_token_controller.ex create: POST
+                         # /v1/auth/studio-tokens refuses a caller with no owner
+                         # or admin seat in the named workspace, or an unknown
+                         # workspace (403). `bp instance studio-token` reads it.
+                         "studio_token_forbidden",
                          # Herd-s6 fenced state report (chat_host_controller.ex
                          # report_state): an off-vocabulary state or a
                          # missing/non-integer lease epoch — refused before the
@@ -267,6 +272,10 @@ defmodule Barkpark.Content.Errors do
                          # require_org_mfa_enrolment.ex (an SDK must branch on these)
                          "mfa_required",
                          "mfa_enrolment_required",
+                         # OIDC callback (oidc_controller.ex): the connection has
+                         # require_group_match on and the user's groups match no
+                         # mapping (403).
+                         "no_mapped_group",
                          # Workspace bundle merge-import (PDS W1) —
                          # v1/workspace_controller.ex: import disabled by the
                          # fail-closed guard (403), an unknown import mode (422),
@@ -850,6 +859,14 @@ defmodule Barkpark.Content.Errors do
       message: "dryRun must be true or false, got: #{inspect(value)}",
       status: 400,
       details: %{field: "dryRun"}
+    }
+
+  defp build({:error, {:invalid_restore, value}}),
+    do: %{
+      code: "malformed",
+      message: "restore must be true or false, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "restore"}
     }
 
   defp build({:error, {:malformed_blocks, details}}),

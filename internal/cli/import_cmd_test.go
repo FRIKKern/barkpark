@@ -37,6 +37,14 @@ type importFakeServer struct {
 	// failOn makes the mutate request with this 1-based index answer 422 and
 	// apply nothing, as the server's single transaction does.
 	failOn int
+	// oldServer answers as a server that does not read `restore`: the batch
+	// applies and the response names the key in a mutate.unknown_key warning.
+	oldServer bool
+	// slowOver makes a mutate request with more than this many mutations
+	// answer slowStatus with storage_unavailable and apply nothing, as a server
+	// that cannot finish the batch inside its connection checkout limit does.
+	slowOver   int
+	slowStatus int
 }
 
 type importFakeRequest struct {
@@ -129,6 +137,11 @@ func (f *importFakeServer) mutate(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":{"code":"batch_too_large","message":"too many mutations"}}`))
 		return
 	}
+	if f.slowOver > 0 && len(req.Mutations) > f.slowOver {
+		w.WriteHeader(f.slowStatus)
+		_, _ = w.Write([]byte(`{"error":{"code":"storage_unavailable","message":"storage is unavailable"}}`))
+		return
+	}
 	if f.failOn == len(f.requests) {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		_, _ = w.Write([]byte(`{"error":{"code":"validation_failed","message":"title is required"}}`))
@@ -178,7 +191,11 @@ func (f *importFakeServer) mutate(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	f.docs = next
-	_ = json.NewEncoder(w).Encode(map[string]any{"transactionId": "tx", "results": results})
+	resp := map[string]any{"transactionId": "tx", "results": results}
+	if f.oldServer {
+		resp["warnings"] = []map[string]string{{"code": "mutate.unknown_key", "message": "ignored unknown top-level key(s): restore"}}
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 // importExportTo runs `bp export --out` against srv and returns the file path.
@@ -557,5 +574,108 @@ func TestRunImportHelpAndUsage(t *testing.T) {
 	se.Reset()
 	if code := runImport(newWriter(&so, &se), globals{}, manifest.Context{}, nil); code != exitUsage {
 		t.Errorf("no file: exit = %d, want %d", code, exitUsage)
+	}
+}
+
+// RESTORE (task-419052f535f92f4b). Every mutate body asks the server to write
+// the documents as exported, and a server that does not read the flag is named
+// once on stderr.
+func TestRunImportSendsRestoreAndNotesAnOldServer(t *testing.T) {
+	src := newImportFakeServer(t)
+	seedRoundTripSource(src)
+	backup := importExportTo(t, src)
+
+	dst := newImportFakeServer(t)
+	code, _, stderr := runImportForTest(t, dst.ctx(), globals{}, backup)
+	if code != exitOK {
+		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
+	}
+	var body struct {
+		Restore *bool `json:"restore"`
+	}
+	if err := json.Unmarshal(dst.requests[0].body, &body); err != nil || body.Restore == nil || !*body.Restore {
+		t.Fatalf("mutate body = %s, want restore: true", dst.requests[0].body)
+	}
+	if strings.Contains(stderr, "does not read `restore`") {
+		t.Errorf("stderr names an old server for a current one: %s", stderr)
+	}
+
+	// Three documents of about 600 bytes each, so a 1024-byte cap sends three
+	// batches.
+	big := filepath.Join(t.TempDir(), "big.ndjson")
+	var lines []string
+	for i := 1; i <= 3; i++ {
+		lines = append(lines, fmt.Sprintf(`{"_id":"big-%d","_type":"post","title":%q}`, i, strings.Repeat("x", 600)))
+	}
+	if err := os.WriteFile(big, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := newImportFakeServer(t)
+	old.oldServer = true
+	code, _, stderr = runImportForTest(t, old.ctx(), globals{}, big, "--batch-bytes", "1024")
+	if code != exitOK {
+		t.Fatalf("import exit = %d; stderr=%s", code, stderr)
+	}
+	if len(old.requests) < 2 {
+		t.Fatalf("mutate requests = %d, want several for the note to be shown once", len(old.requests))
+	}
+	if n := strings.Count(stderr, "does not read `restore`"); n != 1 {
+		t.Errorf("old-server note shown %d times, want 1; stderr=%s", n, stderr)
+	}
+}
+
+// SHRINK (task-b90ed463fad4488c). A batch the server cannot finish is sent
+// again at half its documents until it fits, the rest of the run keeps that
+// size, every document lands, and the report names the size it ended with.
+func TestRunImportHalvesABatchTheServerCannotFinish(t *testing.T) {
+	for _, status := range []int{http.StatusServiceUnavailable, http.StatusGatewayTimeout, http.StatusRequestEntityTooLarge} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "backup.ndjson")
+			var b strings.Builder
+			for n := 0; n < 40; n++ {
+				fmt.Fprintf(&b, `{"_id":"p-%04d","_type":"post","title":"t"}`+"\n", n)
+			}
+			if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			dst := newImportFakeServer(t)
+			// 10 published rows are 20 mutations: 40 and 20 rows fail, 10 fit.
+			dst.slowOver, dst.slowStatus = 20, status
+			code, stdout, stderr := runImportForTest(t, dst.ctx(), globals{}, path)
+			if code != exitOK {
+				t.Fatalf("import exit = %d; stdout=%s stderr=%s", code, stdout, stderr)
+			}
+			if len(dst.docs) != 40 {
+				t.Fatalf("target holds %d documents, want 40", len(dst.docs))
+			}
+			for _, want := range []string{"Sending 20 documents per batch", "Sending 10 documents per batch"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr does not say %q:\n%s", want, stderr)
+				}
+			}
+			if !strings.Contains(stdout, "in 4 batch(es)") || !strings.Contains(stdout, "ended at 10 documents per batch") {
+				t.Errorf("stdout = %q, want 4 batches and the size it ended with", stdout)
+			}
+		})
+	}
+}
+
+// A single document the server still cannot finish stops the run with the
+// usual resume point, so the run stays resumable.
+func TestRunImportStopsWhenOneDocumentCannotFinish(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "backup.ndjson")
+	if err := os.WriteFile(path, []byte(`{"_id":"a","_type":"post"}`+"\n"+`{"_id":"b","_type":"post"}`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	dst := newImportFakeServer(t)
+	dst.slowOver, dst.slowStatus = 1, http.StatusServiceUnavailable
+	code, _, stderr := runImportForTest(t, dst.ctx(), globals{}, path)
+	if code == exitOK {
+		t.Fatalf("import exited 0; stderr=%s", stderr)
+	}
+	if !strings.Contains(stderr, "Sending 1 documents per batch") || !strings.Contains(stderr, "--from-line 1") {
+		t.Errorf("stderr does not shrink to one and name the resume line:\n%s", stderr)
 	}
 }

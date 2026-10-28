@@ -230,6 +230,23 @@ func TestRunCloudUpdatePinnedConflict(t *testing.T) {
 	}
 }
 
+// TestRunCloudUpdatePausedConflict: a paused box refuses an unforced trigger with
+// 409 paused. The sentence says the update was refused, offers --force for one
+// run and resume for good, and exits at the conflict code.
+func TestRunCloudUpdatePausedConflict(t *testing.T) {
+	newSelfUpdateServer(t, 409, `{"error":"paused"}`)
+
+	stdout, stderr, code := runUpdate(t, "table", testInstanceID)
+	if code != exitConflict {
+		t.Fatalf("exit = %d, want %d (409 → conflict)\nstdout:\n%s\nstderr:\n%s", code, exitConflict, stdout, stderr)
+	}
+	for _, want := range []string{"autoupdate paused", "--force", "autoupdate resume", "Nothing was started"} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("the pause refusal is missing %q:\n%s", want, stderr)
+		}
+	}
+}
+
 // TestRunCloudUpdateForceReachesTheWire: --force is a REAL server field, so it must
 // arrive as {"force":true} in the request BODY. A flag that only changes CLI copy
 // would be the same lie in a new place.

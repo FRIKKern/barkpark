@@ -66,7 +66,8 @@ cd api && MIX_ENV=prod nice -n 19 mix barkpark.edges.backfill  # dry run
 `MIX_BUILD_ROOT` must be the ACTIVE slot's warm root with the checkout at its
 sha, or mix recompiles under the serving BEAM; `nice` — that boot took the
 2-core box from load 1.9 to 6.3. No `.slots/`: `. ./.env` alone, default
-`_build`. Bare = dry run, `--apply` writes.
+`_build`. Bare = dry run, `--apply` writes. `mix barkpark.token_seat --token
+<id> --workspace <slug>` seats an existing API token where it lost a seat.
 
 ## Prod migrations
 

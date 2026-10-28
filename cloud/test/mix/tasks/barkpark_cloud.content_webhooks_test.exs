@@ -60,6 +60,7 @@ defmodule Mix.Tasks.BarkparkCloud.ContentWebhooksTest do
       admin_token_encrypted: Vault.encrypt("instance-admin-token")
     })
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp bound_site(bp) do

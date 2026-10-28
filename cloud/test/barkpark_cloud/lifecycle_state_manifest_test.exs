@@ -240,6 +240,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
       inserted_at: born
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # A box with NO admin token — minting fails before any producer runs, which is
@@ -251,6 +252,7 @@ defmodule BarkparkCloud.LifecycleStateManifestTest do
     bp
     |> Ecto.Changeset.change(url: "https://bp-#{n}.barkpark.cloud", host: "203.0.113.10")
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   # Seed the world each producer needs, and return {team, the box the producer

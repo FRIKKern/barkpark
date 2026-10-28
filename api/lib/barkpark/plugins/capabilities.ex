@@ -113,11 +113,6 @@ defmodule Barkpark.Plugins.Capabilities do
     * `:server` — override the `server` block (a map). Defaults to
       `default_server/0` (read from app config).
     * `:generated_at` — override the RFC-3339 timestamp string. Defaults to now.
-    * `:session` — `true` when the bearer is a login session rather than an
-      API token. A session's tier is `none` (`tier_of/1` ranks tokens), yet
-      the session-gated `auth` verbs (mfa-enroll, invitation-accept, logout …)
-      accept only a session. With this option they stay in the projection, so
-      `bp auth mfa-enroll` works with the token `bp auth login` printed.
   """
   @spec manifest(tier()) :: map()
   @spec manifest(tier(), keyword()) :: map()
@@ -125,10 +120,50 @@ defmodule Barkpark.Plugins.Capabilities do
     superset = build_superset(caller_tier, opts)
 
     if Keyword.get(opts, :project, true) do
-      project(superset, caller_tier, session: Keyword.get(opts, :session, false))
+      project(superset, caller_tier)
     else
       superset
     end
+  end
+
+  # Nouns whose help bp carries in its binary, so `bp org --help` works with no
+  # server. Only core nouns an operator needs before the server is up.
+  @offline_help_nouns ~w(org)
+
+  @doc """
+  The manifest bp embeds for offline help: the admin view of the
+  `#{Enum.join(@offline_help_nouns, ", ")}` noun, with a fixed server block
+  and time so the bytes depend only on the command definitions.
+
+  `mix barkpark.offline_help` writes it to
+  `internal/cli/offline_help_manifest.json`, and a test fails when the
+  committed file differs.
+  """
+  @spec offline_help_manifest() :: map()
+  def offline_help_manifest do
+    full =
+      manifest("admin",
+        server: %{
+          "name" => "barkpark",
+          "version" => "offline-help",
+          "base_url" => "http://localhost:4000",
+          "api_version" => "1",
+          "min_cli" => "1.0.0"
+        },
+        generated_at: "1970-01-01T00:00:00Z"
+      )
+
+    keep? = &(&1 in @offline_help_nouns)
+
+    %{
+      "manifest_version" => full["manifest_version"],
+      "server" => full["server"],
+      "auth_tier" => full["auth_tier"],
+      "generated_at" => full["generated_at"],
+      "etag" => "offline-help",
+      "nouns" => Enum.filter(full["nouns"], &keep?.(&1["name"])),
+      "commands" => Enum.filter(full["commands"], &keep?.(&1["noun"]))
+    }
   end
 
   @doc """
@@ -144,19 +179,17 @@ defmodule Barkpark.Plugins.Capabilities do
 
   No app, no DB, no registry access — safe to call on any plain map.
   """
-  @spec project(map(), tier(), keyword()) :: map()
-  def project(%{} = manifest, caller_tier, opts \\ []) when is_binary(caller_tier) do
+  @spec project(map(), tier()) :: map()
+  def project(%{} = manifest, caller_tier) when is_binary(caller_tier) do
     # The rank the caller is ranked by; the `+chat` capability (if any) rides
     # alongside and is consulted ONLY by the orthogonal chat side-branch.
     base = base_tier(caller_tier)
-    session? = Keyword.get(opts, :session, false)
     commands = Map.get(manifest, "commands", [])
     nouns = Map.get(manifest, "nouns", [])
 
     visible_commands =
       Enum.filter(commands, fn cmd ->
-        visible?(command_tier(cmd), base) or chat_visible?(cmd, caller_tier) or
-          (session? and session_auth_verb?(cmd))
+        visible?(command_tier(cmd), base) or chat_visible?(cmd, caller_tier)
       end)
 
     visible_noun_names =
@@ -605,10 +638,6 @@ defmodule Barkpark.Plugins.Capabilities do
   defp stringify_shallow(other), do: other
 
   # ── Field accessors (string-keyed wire shape) ─────────────────────────────
-
-  # The `auth` verbs a login session may call: the session-gated ones, which
-  # the manifest marks tier "read".
-  defp session_auth_verb?(cmd), do: command_noun(cmd) == "auth" and command_tier(cmd) == "read"
 
   defp command_tier(%{"auth_tier" => t}) when is_binary(t), do: t
   defp command_tier(_), do: "admin"
@@ -3136,8 +3165,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg(
             "client_secret",
             true,
-            "string",
-            "Client secret. Stored encrypted, never shown again."
+            "secret",
+            "Client secret. Give - to read it from stdin, such as - < ./client-secret. Stored encrypted, never shown again."
           )
         ],
         flags:
@@ -3194,8 +3223,8 @@ defmodule Barkpark.Plugins.Capabilities do
           arg(
             "client_secret",
             true,
-            "string",
-            "New client secret. Stored encrypted, never shown again."
+            "secret",
+            "New client secret. Give - to read it from stdin, such as - < ./client-secret. Stored encrypted, never shown again."
           )
         ],
         flags: [
@@ -5061,7 +5090,12 @@ defmodule Barkpark.Plugins.Capabilities do
       flag("tenant_id", "string", "Entra tenant id. Sign-in requires a matching tid claim."),
       flag("strict_validation", "boolean", "Turn on the stricter ID token and subject checks."),
       flag("trust_idp_mfa", "boolean", "Count the identity provider's MFA as Barkpark MFA."),
-      flag("mfa_acr", "string", "acr value that also counts as MFA when trust_idp_mfa is on.")
+      flag("mfa_acr", "string", "acr value that also counts as MFA when trust_idp_mfa is on."),
+      flag(
+        "require_group_match",
+        "boolean",
+        "Refuse a sign-in whose groups match no mapping, and remove the user's seats."
+      )
     ]
 
   defp flag(name, type, summary, opts \\ []) do

@@ -754,15 +754,15 @@ defmodule Barkpark.Content.Edges do
     content
     |> Map.get(field_name)
     |> BlockOps.field_blocks()
-    |> BodyWalk.collect(&richtext_node_targets(&1, objects))
+    |> BodyWalk.collect(&richtext_node_targets(&1, objects, field))
     |> Enum.map(fn {target, ref_type} -> {target, field_name, ref_type} end)
   end
 
   defp extract_field_edges(_field, _content), do: []
 
-  defp richtext_node_targets(node, objects) do
+  defp richtext_node_targets(node, objects, field) do
     Enum.map(structural_ref_targets(node), &{&1, nil}) ++
-      typed_block_field_targets(node, objects)
+      typed_block_field_targets(node, objects, field)
   end
 
   # Self-describing: a bare `_ref` map, wherever it occurs — a markDef, an
@@ -789,20 +789,30 @@ defmodule Barkpark.Content.Edges do
   # wrapper to self-describe it, so only the block's OWN schema (`objects`,
   # from `Validation.object_block_types/1`) can tell a reference field from
   # an ordinary string field of the same shape.
-  defp typed_block_field_targets(%{"type" => block_type} = node, objects)
-       when is_map_key(objects, block_type) do
-    objects
-    |> Map.fetch!(block_type)
-    |> Enum.filter(&(&1["type"] == "reference"))
-    |> Enum.flat_map(fn field_def ->
-      case node |> Map.get(field_def["name"]) |> reference_target() do
-        nil -> []
-        target -> [{target, dangling_ref_type(field_def)}]
-      end
-    end)
+  #
+  # The block's type is read with the key its field's format uses: `type` on
+  # a PortableDoc block, `_type` on a Portable Text custom block
+  # (`RichTextFormat.node_type/2`). Matching `type` alone never found a
+  # Portable Text block's reference field.
+  defp typed_block_field_targets(node, objects, field) when is_map(node) do
+    block_type = Barkpark.Content.RichTextFormat.node_type(field, node)
+
+    if is_binary(block_type) and is_map_key(objects, block_type) do
+      objects
+      |> Map.fetch!(block_type)
+      |> Enum.filter(&(&1["type"] == "reference"))
+      |> Enum.flat_map(fn field_def ->
+        case node |> Map.get(field_def["name"]) |> reference_target() do
+          nil -> []
+          target -> [{target, dangling_ref_type(field_def)}]
+        end
+      end)
+    else
+      []
+    end
   end
 
-  defp typed_block_field_targets(_node, _objects), do: []
+  defp typed_block_field_targets(_node, _objects, _field), do: []
 
   # The SHARED resolve-and-dangling helper (gap #2). TWO branches that MUST
   # agree on lens (:published) + scope so a typed and an untyped ref to the same

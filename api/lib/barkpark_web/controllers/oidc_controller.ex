@@ -227,6 +227,20 @@ defmodule BarkparkWeb.OidcController do
                 end
             end
 
+          {:error, :no_mapped_group} ->
+            Sso.record_login_failure("oidc", slug, :no_mapped_group)
+            Logger.warning("[OIDC] #{slug}: callback rejected: no mapped group")
+
+            SignInFailure.respond(conn, %{
+              status: 403,
+              code: "no_mapped_group",
+              message: "none of the user's groups is mapped to a role",
+              hint: "Ask your administrator to add you to a group that has access.",
+              page_message:
+                "Your account is not in a group that has access. Ask your administrator.",
+              start_path: start_path(slug)
+            })
+
           {:error, reason} ->
             # Failed token exchange / claim validation lands on the audit
             # trail (era-w8) — only successes audited before.

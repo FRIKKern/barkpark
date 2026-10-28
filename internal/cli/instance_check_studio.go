@@ -20,6 +20,14 @@ import (
 
 const instanceDocStudio = "docs/setup/SELF-HOST.md#sign-in-with-entra-id"
 
+// On Container Apps, main.bicep sets PHX_HOST and reports it as the output
+// host. scripts/entra-app-register.sh --resource-group reads the same output,
+// so the redirect URI it registers uses the host the app runs under.
+const (
+	instanceDocHost        = "docs/setup/SELF-HOST-UPDATES.md#host-name-on-container-apps"
+	instanceHostOutputHint = "Read it with az deployment group show -g <resource group> -n barkpark --query properties.outputs.host.value -o tsv; scripts/entra-app-register.sh --resource-group <resource group> registers https://<that host>/v1/auth/oidc/<org>/callback."
+)
+
 // instanceStudioOrigin returns the origin Barkpark compares for a Studio URL,
 // as the browser and the OIDC controller form it.
 func instanceStudioOrigin(raw string) (string, error) {

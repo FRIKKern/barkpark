@@ -19,28 +19,41 @@ defmodule BarkparkWeb.ElevatedTokenController do
   `label` and `permissions` are required. At most one of `expires_at` /
   `no_expiry`; neither → the configured api-class default.
 
+  `"workspaces": [slug]` (optional) seats the new token in those workspaces
+  too, with the same role as its seat in the URL's workspace. The caller must
+  be an owner or admin in every one, or nothing is minted (403
+  `not_workspace_admin`, naming the first workspace refused; an unknown slug
+  gets the same answer). Barkpark Cloud's admin-token rotation sends the old
+  token's seats here.
+
   201 → `{"token": raw, "id", "inserted_at", "label", "permissions",
-  "dataset", "workspace", "expires_at"}`. The raw token appears only here.
+  "dataset", "workspace", "seats", "expires_at"}`. `seats` lists every
+  workspace slug the token is seated in. The raw token appears only here.
   """
   use BarkparkWeb, :controller
 
   alias Barkpark.Auth
   alias Barkpark.Auth.TokenExpiry
+  alias Barkpark.Tenancy
   alias BarkparkWeb.ErrorResponse
 
   def create(conn, params) do
     actor = conn.assigns[:api_token]
+    home = conn.assigns[:current_workspace]
+    also_result = fetch_workspaces(params, home && home.slug)
 
-    with %{id: ws_id, slug: ws_slug} <- conn.assigns[:current_workspace],
+    with %{id: ws_id, slug: ws_slug} <- home,
          {:ok, perms} <- fetch_permissions(params),
          {:ok, expiry} <- fetch_expiry(params),
+         {:ok, also} <- also_result,
          {:ok, {raw, token}} <-
            Auth.mint_delegated_token(actor, ws_id,
              label: params["label"],
              permissions: perms,
              dataset: fetch_dataset(params),
              dataset_bound: dataset_named?(params),
-             expires_at: expiry
+             expires_at: expiry,
+             also_seat: Enum.map(also, & &1.id)
            ) do
       conn
       |> put_status(:created)
@@ -52,11 +65,19 @@ defmodule BarkparkWeb.ElevatedTokenController do
         permissions: token.permissions,
         dataset: token.dataset,
         workspace: ws_slug,
+        seats: [ws_slug | Enum.map(also, & &1.slug)],
         expires_at: token.expires_at
       })
     else
       nil ->
         unprocessable(conn, "workspace could not be resolved")
+
+      {:error, {:not_workspace_admin, also_id}} ->
+        {:ok, also} = also_result
+        not_admin_of(conn, Enum.find_value(also, &(&1.id == also_id and &1.slug)))
+
+      {:error, :invalid_workspaces} ->
+        unprocessable(conn, "workspaces must be a list of workspace slugs")
 
       {:error, :admin_required} ->
         forbidden(
@@ -111,6 +132,47 @@ defmodule BarkparkWeb.ElevatedTokenController do
         unprocessable(conn, "could not mint token")
     end
   end
+
+  defp not_admin_of(conn, slug) do
+    forbidden(
+      conn,
+      "not_workspace_admin",
+      "this token is not an owner or admin of workspace #{inspect(slug)}, " <>
+        "so it cannot seat the new token there",
+      nil
+    )
+  end
+
+  # The workspaces besides the URL's, deduplicated, as `%{id, slug}`. An
+  # unknown slug gets a fresh id that no workspace has, so the admin check in
+  # `Auth.mint_delegated_token/3` refuses it in order, the same way it refuses
+  # a workspace the caller does not administer. Nobody learns which slugs exist.
+  defp fetch_workspaces(%{"workspaces" => slugs}, home) when is_list(slugs) do
+    if Enum.all?(slugs, &is_binary/1) do
+      also =
+        slugs
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == "" or &1 == home))
+        |> Enum.uniq()
+        |> Enum.map(fn slug ->
+          case Tenancy.get_workspace_by_slug(slug) do
+            nil -> %{id: Ecto.UUID.generate(), slug: slug}
+            ws -> %{id: ws.id, slug: ws.slug}
+          end
+        end)
+
+      {:ok, also}
+    else
+      {:error, :invalid_workspaces}
+    end
+  end
+
+  defp fetch_workspaces(%{"workspaces" => slugs}, home) when is_binary(slugs),
+    do: fetch_workspaces(%{"workspaces" => String.split(slugs, ",", trim: true)}, home)
+
+  defp fetch_workspaces(%{"workspaces" => nil}, _home), do: {:ok, []}
+  defp fetch_workspaces(%{"workspaces" => _}, _home), do: {:error, :invalid_workspaces}
+  defp fetch_workspaces(_params, _home), do: {:ok, []}
 
   defp actor_permissions(%{permissions: perms}) when is_list(perms), do: perms
   defp actor_permissions(_), do: []

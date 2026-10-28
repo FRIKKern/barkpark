@@ -66,6 +66,7 @@ defmodule BarkparkCloud.Web.RouterSitesShippedCapabilityTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> BarkparkCloud.Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp login_token(user) do

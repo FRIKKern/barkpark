@@ -19,8 +19,8 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.ps1 | iex
 ```
 
-The installer drops `bp` in `/usr/local/bin`, falling back to `~/.local/bin`
-when that isn't writable. If `bp: command not found`, add that fallback to your
+The installer puts `bp` in `~/.local/bin`, or in `$BARKPARK_BIN_DIR` when set.
+If `bp: command not found`, add that dir to your
 `PATH` (`export PATH="$HOME/.local/bin:$PATH"`) and restart Codex.
 
 ## 2. Authenticate
@@ -201,7 +201,7 @@ epoch), `task_show`, `task_close` (epoch-CAS + criteria), `task_create`,
 
 `--tools all` (`args = ["mcp", "serve", "--tools", "all"]`) exposes **every**
 manifest verb as `bp_<noun>_<verb>`, auto-derived from live capabilities, so a
-new plugin's verbs appear with zero config change — ~107 tools. Keep the default
+new plugin's verbs appear with zero config change — over 200 tools. Keep the default
 `tasks` unless you know the handful you need.
 
 ## Troubleshooting

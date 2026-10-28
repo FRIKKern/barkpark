@@ -520,7 +520,13 @@ defmodule Barkpark.Content.Writer do
     attrs = from_envelope(attrs, declared_status_field?(type, attrs, dataset, opts))
     # Gyldendal parity E1.8 — a type with no `title` field fills the column from
     # `list_preview.title`; costs a schema read only when the title is blank.
-    attrs = TitleDerivation.maybe_derive(attrs, type, dataset, opts)
+    # A restore (`restore: true` on the mutate door) keeps the row's title as
+    # it was exported, so it derives none.
+    attrs =
+      if Keyword.get(opts, :restore, false),
+        do: attrs,
+        else: TitleDerivation.maybe_derive(attrs, type, dataset, opts)
+
     raw_id = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || generate_id(type)
     doc_id = DraftId.draft_id(raw_id)
 
@@ -1137,7 +1143,17 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
-  defp scaffold_or_initial_values(attrs, type, dataset, opts)
+  # A restore (`restore: true` on the mutate door, which `bp import` sends)
+  # writes the document as it was exported: no schema initial values, no
+  # layout scaffold and no projection. Block ids are still ensured, which is
+  # a no-op for blocks that already carry them. Off by default.
+  defp scaffold_or_initial_values(attrs, type, dataset, opts) do
+    if Keyword.get(opts, :restore, false),
+      do: maybe_ensure_block_ids(attrs, opts),
+      else: scaffold_or_apply_initial_values(attrs, type, dataset, opts)
+  end
+
+  defp scaffold_or_apply_initial_values(attrs, type, dataset, opts)
        when is_binary(type) and is_binary(dataset) do
     case schema_for_create(type, dataset, attrs) do
       {:ok, %SchemaDefinition{layout: layout} = schema}
@@ -1161,7 +1177,7 @@ defmodule Barkpark.Content.Writer do
     end
   end
 
-  defp scaffold_or_initial_values(attrs, type, dataset, opts),
+  defp scaffold_or_apply_initial_values(attrs, type, dataset, opts),
     do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset), opts)
 
   # Project-on-create, with one difference from a patch: a `body` the caller

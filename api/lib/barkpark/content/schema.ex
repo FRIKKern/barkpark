@@ -1266,6 +1266,7 @@ defmodule Barkpark.Content.Schema do
     cond do
       type == "composite" -> named_types_in(f["fields"] || [])
       type == "arrayOf" -> named_types_in(f["of"] || %{})
+      type == "richText" -> vocabulary_named_types(f["blocks"] || f[:blocks])
       builtin_type?(type) -> []
       true -> [type]
     end
@@ -1298,7 +1299,8 @@ defmodule Barkpark.Content.Schema do
 
     not builtin_type?(type) or
       (type == "composite" and Enum.any?(f["fields"] || [], &references_named_type?/1)) or
-      (type == "arrayOf" and references_named_type?(f["of"] || %{}))
+      (type == "arrayOf" and references_named_type?(f["of"] || %{})) or
+      (type == "richText" and vocabulary_named_types(f["blocks"] || f[:blocks]) != [])
   end
 
   # Several member types (`of: [...]`, Sanity's page-builder array).
@@ -1306,6 +1308,78 @@ defmodule Barkpark.Content.Schema do
     do: Enum.any?(list, &references_named_type?/1)
 
   defp references_named_type?(_), do: false
+
+  # A richText vocabulary's custom block (`of`) and inline object (`inline`)
+  # entries that name an object type and declare no fields of their own
+  # (`{"name": "mediaModule"}`, as the gyldendal.no twin's schemas carry).
+  # The inliner gives each the fields of its object type, so a stored block of
+  # that `_type` is checked against them (`PortableTextValidation`).
+  defp vocabulary_named_types(%{} = blocks) do
+    for key <- ["of", "inline"],
+        entry <- List.wrap(blocks[key]),
+        name = vocabulary_entry_named_type(entry),
+        is_binary(name),
+        do: name
+  end
+
+  defp vocabulary_named_types(_), do: []
+
+  defp vocabulary_entry_named_type(%{"name" => name} = entry) when is_binary(name) do
+    if List.wrap(entry["fields"]) == [] and not builtin_type?(name), do: name
+  end
+
+  defp vocabulary_entry_named_type(name) when is_binary(name) do
+    if builtin_type?(name), do: nil, else: name
+  end
+
+  defp vocabulary_entry_named_type(_), do: nil
+
+  # Inlined ONE level deep: a custom block's own fields are inlined, but a
+  # richText inside them keeps its vocabulary entries as names. The twin's
+  # section types each hold a body that offers the others, so inlining every
+  # level would grow the schema with every pairing of them.
+  @vocabulary_inlined :__vocabulary_inlined__
+
+  defp inline_vocabulary(blocks, resolved, visited) do
+    if MapSet.member?(visited, @vocabulary_inlined) do
+      blocks
+    else
+      Enum.reduce(["of", "inline"], blocks, fn key, acc ->
+        case acc[key] do
+          list when is_list(list) ->
+            Map.put(acc, key, Enum.map(list, &inline_vocabulary_entry(&1, resolved, visited)))
+
+          _ ->
+            acc
+        end
+      end)
+    end
+  end
+
+  defp inline_vocabulary_entry(entry, resolved, visited) do
+    name = vocabulary_entry_named_type(entry)
+
+    with true <- is_binary(name),
+         false <- MapSet.member?(visited, name),
+         {:ok, obj} <- Map.get(resolved, name, :error) do
+      inner =
+        inline_fields(
+          obj.fields || [],
+          resolved,
+          visited |> MapSet.put(name) |> MapSet.put(@vocabulary_inlined)
+        )
+
+      entry
+      |> case do
+        %{} = map -> map
+        bare -> %{"name" => bare}
+      end
+      |> Map.put("fields", inner)
+      |> Map.put("namedType", name)
+    else
+      _ -> entry
+    end
+  end
 
   defp inline_fields(fields, resolved, visited) when is_list(fields),
     do: Enum.map(fields, &inline_field(&1, resolved, visited))
@@ -1327,6 +1401,9 @@ defmodule Barkpark.Content.Schema do
 
       type == "arrayOf" ->
         Map.put(f, "of", inline_field(f["of"] || %{}, resolved, visited))
+
+      type == "richText" and is_map(f["blocks"]) ->
+        Map.put(f, "blocks", inline_vocabulary(f["blocks"], resolved, visited))
 
       builtin_type?(type) ->
         f

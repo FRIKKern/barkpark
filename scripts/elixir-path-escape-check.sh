@@ -438,6 +438,7 @@ deploy/site-deploy.sh
 docs/api-v1.md
 js/packages/react/src/client.ts
 internal/cli/capsbrief.go
+internal/cli/offline_help_manifest.json
 docs/api/error-codes.md
 docs/openapi.json
 internal/chat/testdata/**

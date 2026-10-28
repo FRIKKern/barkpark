@@ -57,6 +57,7 @@ defmodule BarkparkCloud.Web.RouterStudioSigninContestedHostTest do
         admin_token_encrypted: Vault.encrypt("customer-admin-token")
       )
       |> Repo.update!()
+      |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
     {ghost_user, ghost_team} = user_with_team()
 

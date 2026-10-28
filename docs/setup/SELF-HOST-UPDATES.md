@@ -1,7 +1,7 @@
 <!-- doc-tier: human | canonical-for: self-host-updates | budget: 2500tok -->
 # Update an instance and rotate its credentials
 
-This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). It covers updates and rollbacks on a single VM and on Container Apps, API token rotation, a lost admin token and OIDC client secret rotation. The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
+This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md). The times below come from a drill on `Standard_D2als_v7` on 2026-10-27.
 
 ## Update and roll back a single VM
 
@@ -11,7 +11,7 @@ This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-
 sudo git -C /opt/barkpark rev-parse --short HEAD
 ```
 
-**Update.** Run `sudo git -C /opt/barkpark pull`. The post-merge hook runs `scripts/deploy-rebuild.sh`. It builds the new code in `api/_build_next` while the old code serves, runs the migrations, swaps the build in and restarts. A failed build or migration leaves the old build running with no restart. `sudo cat /opt/barkpark/.git/barkpark-deploy-outcome` prints `rebuilt` after a good update. An update took 3 to 4 minutes, and requests failed with 503 for 16 seconds during the restart. When the update adds a migration, `/readyz` also answers 503 from the pull until the migration has run, 175 seconds in the drill, because the running server counts the new migration file as pending. A load balancer that routes on `/readyz` sees that as downtime.
+**Update.** Run `sudo git -C /opt/barkpark pull`. The post-merge hook runs `scripts/deploy-rebuild.sh`. It builds in `api/_build_next` while the old code serves, runs the migrations, swaps the build in and restarts. A failed build or migration leaves the old build running. `sudo cat /opt/barkpark/.git/barkpark-deploy-outcome` prints `rebuilt` after a good update. An update took 3 to 19 minutes, with 16 to 27 seconds of failed requests at the restart. When it adds a migration, `/readyz` answers 503 from the pull until the migration has run, because the server counts the new file as pending, on staging for the whole build. A load balancer that routes on `/readyz` sees that as downtime.
 
 **Roll back.** Move the checkout back and rebuild:
 
@@ -20,19 +20,35 @@ sudo git -C /opt/barkpark reset --hard <previous commit>
 sudo make -C /opt/barkpark rebuild
 ```
 
-The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay applied. The drill's migration added two columns, and the older code ran with them. When an update has a migration that changes or removes data, roll back the code and restore the backup taken before the update. Do not use `git checkout <commit>`, which detaches the checkout so the next `git pull` fails. After a rollback, `git pull` updates to `main` again.
+The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay applied. The drill's migration added two columns, and the older code ran with them. When an update has a migration that changes or removes data, roll back the code and restore the backup taken before the update. Do not use `git checkout <commit>`, which detaches the checkout so the next `git pull` fails. After a rollback, `git pull` updates to `main` again. To pin a release, run `sudo git -C /opt/barkpark fetch --tags` and the two commands above with a tag such as `v0.2.29`.
 
 ## Container Apps
 
 `deploy/azure/main.bicep` sets every non-key line of `barkpark.env` on the app and both jobs, and keeps the keys in Key Vault. Change a setting or a key by editing `barkpark.env` and running the same `az deployment group create` again. A change made with `az containerapp update` is lost at the next deployment.
 
-- **Update.** Set a new `image` in `main.bicepparam` and deploy. Pin a version, such as `ghcr.io/frikkern/barkpark:0.2.28`, not `latest`.
-- **Replicas.** The template pins the app to exactly one replica, min and max.
+- **Update.** Set a new `image` in `main.bicepparam` and deploy. Pin a release or `sha-<12>` tag, not `latest`.
+- **Replicas.** The template runs exactly one replica. Listen streams, LiveView pages and task events get their updates through `Phoenix.PubSub`, which reaches other replicas only over an Erlang cluster, and Container Apps replicas form none. A second replica would miss events and keep its own caches.
 - **Health.** `/livez` answers 200 while the server serves HTTP. `/readyz` answers 200 when the database answers, migrations are done and the job queue runs, and 503 otherwise.
-- **Listen streams.** They last at most 30 minutes behind the Container Apps ingress; clients resume with `Last-Event-ID`.
-- **Jobs.** Set job arguments with `az containerapp job update -g <rg> -n barkpark-ops --args ...`, then run `az containerapp job start`. Arguments on `job start` replace the whole container and drop the command, settings and mounts. A deployment resets the arguments.
+- **Streams.** The ingress ends an SSE stream after 30 minutes. A LiveView socket lasted 44 minutes. In a revision swap, traffic moves 30 s before the old revision stops and sends `retire`. SSE clients resume with `Last-Event-ID` and LiveView rejoins, so none of 100 writes was lost.
+- **Jobs.** Set job arguments with `az containerapp job update -g <rg> -n barkpark-ops --args ...`, then run `az containerapp job start`. Arguments on `job start` replace the whole container. A deployment resets the arguments. If an execution has no replica after 2 minutes, stop it with `az containerapp job stop` and start it again.
 - **Redeploy after deleting.** A deleted resource group leaves its Key Vault soft-deleted for 7 days. Run `az keyvault purge -n <vault> -l norwayeast` before deploying again into a group with the same name.
 - **Cost.** See [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#container-apps-cost).
+
+### Host name on Container Apps
+
+`main.bicep` sets `PHX_HOST` in the deployment that creates the app. Passkeys and the Entra redirect URI depend on it, so choose the final host before the first deployment.
+
+- **Default address.** Leave `PHX_HOST` out of `barkpark.env`. `PHX_HOST` is then `barkpark.` followed by the environment's domain, which Azure picks when it creates the environment. The first revision already has it.
+- **Your own domain.** Give a subdomain such as `cms.example.com` to `bp instance init --host`. `main.example.bicepparam` passes `PHX_HOST` as `customDomain`, so `PHX_HOST` is that domain from the first deployment. The template does not take an apex domain. Until the domain is bound, the app answers only on its default address.
+- **DNS records.** Print them after the first deployment:
+
+  ```bash
+  az deployment group show -g <rg> -n barkpark --query properties.outputs.dnsRecords.value -o table
+  ```
+
+  Create the CNAME from your domain to the app's default address, with no proxy or CDN in between, and the TXT record `asuid.<domain>`. When the parent domain has a CAA record, add `0 issue digicert.com`.
+- **Bind.** Once both records resolve, set `param bindCustomDomain = true` in `main.bicepparam` and deploy again. That deployment adds the domain to the app and creates a free managed certificate, which Azure renews while the CNAME points at the app. Keep the setting at `true`. Without the TXT record the deployment stops with `InvalidCustomHostNameValidation`, which names the record, and the app keeps running unchanged.
+- **Entra.** `scripts/entra-app-register.sh --resource-group <rg> --org <org>` reads the deployment output `host`, which is `PHX_HOST`, and registers `https://<host>/v1/auth/oidc/<org>/callback`. `bp instance check --target containerapps` names the same command when `barkpark.env` has no `PHX_HOST`.
 
 ## Rotate an API token
 
@@ -56,7 +72,7 @@ sudo /opt/barkpark/api/start.sh admin-token --label "admin (recovered)"
 
 A `deploy.sh` re-run on a box with no token file runs the same command.
 
-**On Container Apps.** The app runs as uid 10001, so name a file under `/tmp`. Open a shell in the app, mint, copy the token and delete the files:
+**On Container Apps.** The app runs as uid 10001, so name a file under `/tmp`. Images before 0.2.30 lack the script. Open a shell in the app, mint, copy the token and delete the files:
 
 ```bash
 az containerapp exec -g "$RG" -n "$APP" --command /bin/bash
@@ -72,7 +88,7 @@ Connect with `bp setup --target connect` and the new token. When `BARKPARK_OPERA
 Sign-ins through an organization's OIDC connection stop when its client secret expires. Entra ID keeps several secrets valid at once, so the old secret keeps sign-ins working while the new one spreads:
 
 1. Create a new secret and keep the old one. `scripts/entra-app-register.sh` with the same arguments, `--rotate-secret` and a new `--secret-file` adds one, prints its expiry date and waits until Entra accepts it. Entra refused a new secret for about 10 seconds after it was made, and then now and then for 9 more minutes. A sign-in that ends in such a refusal fails.
-2. Wait 10 minutes after the secret was made. Then store it with `bp org oidc-rotate-secret <org> "$(cat <secret file>)" --client_secret_expires_at <expiry date>`. The next sign-in uses it. Without `--client_secret_expires_at` the stored date is cleared.
+2. Wait until the UTC time the script prints, 10 minutes after Entra accepts the secret. Then store it with `bp org oidc-rotate-secret <org> - --client_secret_expires_at <expiry date> < <secret file>`. The next sign-in uses it. Without `--client_secret_expires_at` the stored date is cleared.
 3. Sign in once through the connection. Then delete the old secret with `az ad app credential delete --id <client id> --key-id <old key id>`. `az ad app credential list --id <client id>` lists the key ids and start dates.
 
 With `BARKPARK_TOKEN_EXPIRY_WARNINGS=on`, the operators on `BARKPARK_OPERATOR_EMAILS` and the owners and admins of the organization's workspaces get a mail 30, 14 and 7 days before the stored date. `bp instance check` prints the date for each connection when it can read the database, and fails once the date has passed. Set a date on an existing connection with `bp org oidc-update <org> --client_secret_expires_at <date>`.

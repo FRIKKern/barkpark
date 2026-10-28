@@ -223,6 +223,7 @@ release-scan-verdict scripts/release-scan.sh
 release-scan-verdict scripts/release-scan.test.sh
 release-curator-draft-guard scripts/release-curator-draft.sh
 release-curator-draft-guard scripts/release-curator-draft.test.sh
+release-curator-draft-guard scripts/release-migrations.sh
 release-curator-draft-guard .github/workflows/release-curator-draft.yml
 zero-criteria-census scripts/epic-zero-criteria-census.sh
 zero-criteria-census scripts/ledger-epic-roster.sh

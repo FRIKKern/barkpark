@@ -6,6 +6,8 @@
 # Safe to run again. A second run finds the app by --app-id or by name, and the
 # service principal and group, and sets the same settings again. It creates a
 # client secret only when the app has none, or with --rotate-secret.
+# It stops before any change when the app it finds by name is on another host,
+# or when a new app would take over an existing owners group by default name.
 #
 # The client secret goes only to --secret-file, written with mode 600. It is
 # never printed.
@@ -14,8 +16,12 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: scripts/entra-app-register.sh --host HOST --org SLUG [--secret-file PATH] [options]
+       scripts/entra-app-register.sh --resource-group RG --org SLUG [...]
 
   --host HOST            Public host name of the Barkpark instance, no scheme.
+  --resource-group RG    On Container Apps, read the host from the output host
+                         of the deployment barkpark in RG instead. It is the
+                         PHX_HOST the app runs under.
   --org SLUG             Barkpark organization slug. It is part of the redirect
                          URI, so choose it before you register the app.
   --secret-file PATH     File that receives the client secret, mode 600. Needed
@@ -23,9 +29,16 @@ Usage: scripts/entra-app-register.sh --host HOST --org SLUG [--secret-file PATH]
   --app-id APPID         Use this existing app registration (its Application
                          client id) instead of finding the app by --name. Use it
                          for an app made in the portal.
-  --name NAME            App display name. Default: "Barkpark <org>".
+  --name NAME            App display name. Default: "Barkpark <org>". An app
+                         found by name must have no redirect URI or one on
+                         --host. Otherwise the script stops, because the app
+                         may belong to another instance.
+  --org-name NAME        Organization name Barkpark shows, used in the printed
+                         `bp org create` command. Default: the org slug.
   --owners-group NAME    Security group mapped to owner. Default: "Barkpark <org> owners".
                          Give it with --app-id when the group has another name.
+                         When the app is new and a group with the default name
+                         exists, the script stops unless this names it.
   --add-owner UPN        Add this user to the owners group. Repeatable.
   --group-claims MODE    application or security. Default: application when the
                          tenant has Entra ID P1, else security. See ENTRA.md.
@@ -35,17 +48,19 @@ Usage: scripts/entra-app-register.sh --host HOST --org SLUG [--secret-file PATH]
 EOF
 }
 
-HOST="" ORG="" SECRET_FILE="" NAME="" GROUP_NAME="" GROUP_CLAIMS="" APP_ID=""
+HOST="" RG="" ORG="" SECRET_FILE="" NAME="" GROUP_NAME="" GROUP_CLAIMS="" APP_ID="" ORG_NAME=""
 YEARS=1 ROTATE=0
 OWNERS=()
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --host) HOST="${2:?}"; shift 2 ;;
+    --resource-group) RG="${2:?}"; shift 2 ;;
     --org) ORG="${2:?}"; shift 2 ;;
     --secret-file) SECRET_FILE="${2:?}"; shift 2 ;;
     --app-id) APP_ID="${2:?}"; shift 2 ;;
     --name) NAME="${2:?}"; shift 2 ;;
+    --org-name) ORG_NAME="${2:?}"; shift 2 ;;
     --owners-group) GROUP_NAME="${2:?}"; shift 2 ;;
     --add-owner) OWNERS+=("${2:?}"); shift 2 ;;
     --group-claims) GROUP_CLAIMS="${2:?}"; shift 2 ;;
@@ -56,6 +71,15 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+if [ -n "$RG" ] && [ -n "$HOST" ]; then
+  echo "give --host or --resource-group, not both" >&2
+  exit 2
+fi
+if [ -n "$RG" ]; then
+  # main.bicep sets PHX_HOST to this host, so the redirect URI matches it.
+  HOST=$(az deployment group show -g "$RG" -n barkpark --query properties.outputs.host.value -o tsv)
+  [ -n "$HOST" ] || { echo "the deployment barkpark in $RG has no output host; deploy the current main.bicep" >&2; exit 2; }
+fi
 if [ -z "$HOST" ] || [ -z "$ORG" ]; then
   usage >&2
   exit 2
@@ -73,7 +97,10 @@ if [ "$ROTATE" = 1 ] && [ -z "$SECRET_FILE" ]; then
   exit 2
 fi
 
+GROUP_GIVEN=0
+[ -n "$GROUP_NAME" ] && GROUP_GIVEN=1
 GROUP_NAME="${GROUP_NAME:-Barkpark $ORG owners}"
+ORG_NAME="${ORG_NAME:-$ORG}"
 REDIRECT="https://$HOST/v1/auth/oidc/$ORG/callback"
 GRAPH="00000003-0000-0000-c000-000000000000"
 # Microsoft Graph delegated scopes openid, profile and email.
@@ -110,7 +137,9 @@ case "${GROUP_CLAIMS:-application}" in
 esac
 
 # 1. App registration: Web platform, single tenant, the exact redirect URI.
+FOUND_BY_ID=""
 if [ -n "$APP_ID" ]; then
+  FOUND_BY_ID=1
   FOUND=$(az ad app show --id "$APP_ID" --query displayName -o tsv 2>/dev/null) || FOUND=""
   if [ -z "$FOUND" ]; then
     say "No app registration with application id $APP_ID in tenant $TENANT"
@@ -120,6 +149,41 @@ if [ -n "$APP_ID" ]; then
 else
   NAME="${NAME:-Barkpark $ORG}"
   APP_ID=$(az ad app list --display-name "$NAME" --query "[0].appId" -o tsv)
+fi
+
+# Another Barkpark instance in the same tenant can own an app or a group with
+# the default name. Setup run 6 (2026-10-28) found that risk. An app found by
+# name must already have a redirect URI on this host, or have none. A new app
+# must not take over an existing owners group unless --owners-group names it.
+if [ -n "$APP_ID" ] && [ -z "$FOUND_BY_ID" ]; then
+  OTHER_URIS=()
+  ON_HOST=0
+  while IFS= read -r uri; do
+    [ -n "$uri" ] || continue
+    case "$uri" in
+      "https://$HOST/"*) ON_HOST=1 ;;
+      *) OTHER_URIS+=("$uri") ;;
+    esac
+  done <<<"$(az ad app show --id "$APP_ID" --query "web.redirectUris[]" -o tsv)"
+  if [ "$ON_HOST" = 0 ] && [ "${#OTHER_URIS[@]}" -gt 0 ]; then
+    say "ERROR: the app registration \"$NAME\" ($APP_ID) has no redirect URI on $HOST."
+    say "Its redirect URIs are:"
+    printf '  %s\n' "${OTHER_URIS[@]}" >&2
+    say "It may belong to another Barkpark instance. Nothing was changed."
+    say "Pass --name with a name for this instance, such as \"Barkpark $ORG ($HOST)\","
+    say "and --owners-group with a group name of its own. To use this app on purpose,"
+    say "pass --app-id $APP_ID."
+    exit 1
+  fi
+fi
+EXISTING_GROUP_ID=$(az ad group list --display-name "$GROUP_NAME" --query "[0].id" -o tsv)
+if [ -z "$APP_ID" ] && [ -n "$EXISTING_GROUP_ID" ] && [ "$GROUP_GIVEN" = 0 ]; then
+  say "ERROR: the security group \"$GROUP_NAME\" exists, but the app is new."
+  say "The group may be the owners group of another Barkpark instance, and its"
+  say "members would become owners here. Nothing was changed. Pass --owners-group"
+  say "with a new name, such as \"Barkpark $ORG ($HOST) owners\", or pass"
+  say "--owners-group \"$GROUP_NAME\" to use the existing group on purpose."
+  exit 1
 fi
 
 # Decide on the client secret before changing anything. Entra never shows a
@@ -161,8 +225,11 @@ fi
 # 2. ID token claims: groups as object ids, email, amr for MFA, and the scopes.
 az ad app update --id "$APP_ID" --set "groupMembershipClaims=$CLAIMS_VALUE" \
   --optional-claims '{"idToken":[{"name":"email","essential":false},{"name":"amr","essential":false}],"accessToken":[],"saml2Token":[]}'
+# --only-show-errors hides the az hint to run `az ad app permission grant`.
+# This script grants admin consent itself below.
 # shellcheck disable=SC2086
-az ad app permission add --id "$APP_ID" --api "$GRAPH" --api-permissions $SCOPES >/dev/null
+az ad app permission add --id "$APP_ID" --api "$GRAPH" --api-permissions $SCOPES \
+  --only-show-errors >/dev/null
 
 # 3. Service principal, the enterprise app that users sign in to.
 SP_ID=$(az ad sp list --filter "appId eq '$APP_ID'" --query "[0].id" -o tsv)
@@ -262,9 +329,10 @@ case "$SECRET_ACTION" in
 esac
 # A new secret is refused (AADSTS7000215) for some seconds after Entra creates
 # it, and the 2026-10-27 drill saw refusals now and then for 9 minutes more.
-# Wait until the token endpoint accepts it three times in a row, then tell the
-# operator to wait 10 minutes before storing it in Barkpark. The secret goes to
-# curl from the file, never on argv.
+# Wait until the token endpoint accepts it three times in a row. A first secret
+# can go into Barkpark at once, because no sign-in depends on it yet. A rotated
+# secret replaces one that works, so the operator waits 10 minutes. The secret
+# goes to curl from the file, never on argv.
 secret_accepted() {
   curl -fsS -o /dev/null --max-time 15 -X POST \
     "https://login.microsoftonline.com/$TENANT/oauth2/v2.0/token" \
@@ -280,10 +348,14 @@ if [ "$SECRET_ACTION" = create ]; then
     [ "$ok" -ge 3 ] && break
     sleep 5
   done
-  if [ "$ok" -ge 3 ]; then
-    say "Entra accepts the new secret. It can still refuse it now and then for about"
-    say "10 minutes. Store it in Barkpark 10 minutes after this line, and keep the old"
-    say "secret until then."
+  READY_AT=$(date -u -d '+10 minutes' +%H:%M 2>/dev/null || date -u -v+10M +%H:%M)
+  if [ "$ok" -ge 3 ] && [ "$SECRET_COUNT" = 0 ]; then
+    say "Entra accepts the new secret. Run the bp org commands below now. Until"
+    say "$READY_AT UTC Entra can still refuse it now and then, so a test sign-in"
+    say "that fails with AADSTS7000215 before then works when you try again."
+  elif [ "$ok" -ge 3 ]; then
+    say "Entra accepts the new secret. It can still refuse it now and then until"
+    say "$READY_AT UTC. Store it in Barkpark after that, and keep the old secret until then."
   else
     say "Entra did not accept the new secret within 5 minutes. Keep the old secret"
     say "in Barkpark and run this check again before you store the new one."
@@ -296,10 +368,11 @@ else
   EXPIRES=$(az ad app show --id "$APP_ID" \
     --query "sort_by(passwordCredentials, &endDateTime)[-1].endDateTime" -o tsv)
 fi
+# bp reads a "-" secret from stdin, so the secret stays out of argv and history.
 if [ -n "$SECRET_FILE" ] && [ "$SECRET_ACTION" != existing ]; then
-  SECRET_ARG="\"\$(cat $SECRET_FILE)\""
+  SECRET_IN="< $SECRET_FILE"
 else
-  SECRET_ARG="\"<client secret>\""
+  SECRET_IN="< <file that holds the client secret>"
 fi
 
 MAPPING="{\"$GROUP_ID\":\"owner\"}"
@@ -319,24 +392,25 @@ date, and Barkpark warns 30, 14 and 7 days ahead when
 BARKPARK_TOKEN_EXPIRY_WARNINGS=on. Next, as a Barkpark operator. --yes answers
 bp's confirmation for a write to a server that is not on this machine:
 
-bp org create $ORG <display name> --yes
+bp org create $ORG "$ORG_NAME" --yes
 bp org attach-workspace $ORG default --yes
-bp org oidc-create $ORG "https://login.microsoftonline.com/$TENANT/v2.0" "$APP_ID" $SECRET_ARG \\
+bp org oidc-create $ORG "https://login.microsoftonline.com/$TENANT/v2.0" "$APP_ID" - \\
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \\
   --client_secret_expires_at "${EXPIRES:-<expiry date>}" \\
-  --set group_role_mappings:='$MAPPING' --yes
+  --set group_role_mappings:='$MAPPING' --yes $SECRET_IN
 
 When the connection already exists, set the scopes and the mapping with:
 
 bp org oidc-update $ORG --scopes "openid profile email" --set group_role_mappings:='$MAPPING' --yes
 
-After a test sign-in with MFA at the sign-in URL, count Entra MFA as Barkpark MFA:
+Once a test sign-in at the sign-in URL works, count Entra MFA as Barkpark MFA.
+Then sign in again and check that Entra asked for the authenticator code:
 
 bp org oidc-update $ORG --trust_idp_mfa --yes
 
 After a new secret, store it with:
 
-bp org oidc-rotate-secret $ORG $SECRET_ARG --client_secret_expires_at "${EXPIRES:-<expiry date>}" --yes
+bp org oidc-rotate-secret $ORG - --client_secret_expires_at "${EXPIRES:-<expiry date>}" --yes $SECRET_IN
 
 Instance settings that go with this connection, described in docs/setup/ENTRA.md:
 BARKPARK_OIDC_KEEP_OWNER=on BARKPARK_OIDC_EMAIL_FROM_UPN=on

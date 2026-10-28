@@ -46,6 +46,7 @@ defmodule BarkparkCloud.MemberRemovalInstanceDeprovisionTest do
       admin_token_encrypted: Vault.encrypt(@admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   describe "Accounts.remove_member/2" do

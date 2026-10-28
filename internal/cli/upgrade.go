@@ -28,9 +28,21 @@ const defaultReleaseRepo = "https://github.com/FRIKKern/barkpark"
 // numeric overflow rather than silently coercing it during comparison.
 const maxStableVersionComponent = 1<<32 - 1
 
-// installerOneLiner is printed when the install dir is not writable. Never
-// escalate from inside the binary — the user re-runs the installer with sudo.
-const installerOneLiner = "curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sudo sh"
+// installerCommandFor is printed when the install dir is not writable. Never
+// escalate from inside the binary: the user re-runs the installer with sudo.
+// The installer's default dir is $HOME/.local/bin, so the command names the
+// running binary's dir in BARKPARK_BIN_DIR. Without it, sudo would install
+// into root's home and leave this bp as it was.
+func installerCommandFor(dir string) string {
+	quoted := dir
+	if strings.ContainsFunc(dir, func(r rune) bool {
+		return !(r == '/' || r == '.' || r == '_' || r == '-' || r == '+' ||
+			(r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9'))
+	}) {
+		quoted = "'" + strings.ReplaceAll(dir, "'", `'\''`) + "'"
+	}
+	return "curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sudo env BARKPARK_BIN_DIR=" + quoted + " sh"
+}
 
 // releaseRepoBase resolves the release REPO ROOT. BARKPARK_CLI_RELEASE_BASE
 // here names a GitHub-shaped release tree root — `<base>/releases/latest`
@@ -62,9 +74,9 @@ var upgradeExecutable = func() (string, error) {
 // findable) and falls back to the /releases/latest redirect only when the API
 // call fails. The API is preferred because this repo ALSO cuts build-<sha>
 // server-artifact releases that carry no bp assets — one of those can own the
-// releases/latest slot and 404 every unpinned resolve. install-cli.sh:27-38
-// learned the same lesson; this mirrors it so `bp upgrade` and the installer
-// resolve the same version.
+// releases/latest slot and 404 every unpinned resolve. The cli_tag lookup in
+// install-cli.sh learned the same lesson; this mirrors it so `bp upgrade` and
+// the installer resolve the same version.
 func latestReleaseVersion(base string) (string, error) {
 	if ver, err := latestReleaseVersionAPI(base); err == nil {
 		return ver, nil
@@ -651,7 +663,7 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		if os.IsPermission(err) {
 			out.errf("bp upgrade: %s is not writable.", exePath)
 			out.errf("Re-run the installer with elevated rights:")
-			out.errf("  %s", installerOneLiner)
+			out.errf("  %s", installerCommandFor(filepath.Dir(exePath)))
 			return exitGeneric
 		}
 		out.errf("bp upgrade: %v", err)

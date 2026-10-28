@@ -4556,66 +4556,96 @@ defmodule BarkparkCloud.Registry do
 
   This list goes stale. Re-run the grep instead of trusting it.
 
-  ## A url host another box owns (task-0d75da311d16a94d)
+  ## Admin tokens are sent only to hosts the instance owns
 
-  Every caller above sends the bearer to `bp.url`. If `hostname_claims` says
-  that url's host belongs to a DIFFERENT barkpark, the host is someone else's
-  server, and the bearer must not leave. This is the live prod case
-  `dr-w24-bl-gyldendal-live-cross-tenant-escalation` measured: a ghost row's
-  url is the host another team attached as its custom_host, and the usage
-  sampler posted the ghost row's admin bearer there every 15 minutes. The
-  backfill gave the host to the customer's custom_host claim, so this check
-  sees the collision.
+  Every caller above sends the bearer to `bp.url`, or hands it to a worker
+  that does. So the token is decrypted only when the url host is a host this
+  row OWNS, and the proof of ownership is a `hostname_claims` row for that host
+  held by this barkpark:
 
-  Such a row answers `:error`, the fail-closed arm every caller already
-  handles, with an error log naming both rows and a
-  `[:barkpark_cloud, :registry, :admin_token_withheld]` event. A url host that
-  is unclaimed, claimed by this row, or claimed by a site is unchanged.
-  Healing the row (rotate the token, re-address it) stays an operator action.
+    * kind `"url"`: the managed hostname Cloud assigned at provisioning.
+      `insert_barkpark/2` writes it in the same transaction as the row, and
+      the `create_hostname_claims` backfill wrote it for older rows.
+    * kind `"custom_host"`: a custom host this row attached through
+      `set_custom_host/2`.
+
+  Anything else answers `:error`, the fail-closed arm every caller already
+  handles:
+
+    * the url host is claimed by a DIFFERENT barkpark or by a site
+      (task-0d75da311d16a94d);
+    * the url host has no claim at all. A url host nobody claims is a host
+      nobody proved, and DNS for it may point at any server;
+    * the row has no url, or the struct was never read from the database, so
+      there is no claim to check.
+
+  The agent token does not record a hostname, so it is not evidence here.
+
+  A refusal logs one error line naming the row, the host and the reason, and
+  emits `[:barkpark_cloud, :registry, :admin_token_withheld]` with
+  `%{barkpark_id:, host:, reason:, claimed_by:}`. Healing the row stays an
+  operator action: give the row a claim on its url host, or re-address it to a
+  host it owns. Rotation (`Registry.AdminTokenRotation`) reads through here
+  too, so it cannot run on a row that does not own its url host.
   """
   @spec reveal_admin_token(Barkpark.t()) :: {:ok, binary() | nil} | :error
   def reveal_admin_token(%Barkpark{admin_token_encrypted: nil}), do: {:ok, nil}
 
   def reveal_admin_token(%Barkpark{admin_token_encrypted: ciphertext} = bp) do
-    case url_host_owner_elsewhere(bp) do
-      nil ->
+    case url_host_ownership(bp) do
+      :owned ->
         Vault.decrypt(ciphertext)
 
-      {host, other_id} ->
+      {reason, host, claimed_by} ->
         Logger.error(
-          "[registry] admin token for barkpark #{bp.id} WITHHELD: its url host #{host} " <>
-            "is claimed by barkpark #{other_id}, so the bearer would go to another box. " <>
-            "Rotate this row's admin token and re-address it " <>
-            "(dr-w24-bl-gyldendal-live-cross-tenant-escalation)."
+          "[registry] admin token for barkpark #{bp.id} WITHHELD: url host " <>
+            "#{host || "(none)"} is not a host this row owns " <>
+            "(reason=#{reason}#{if claimed_by, do: ", claimed by #{claimed_by}", else: ""}). " <>
+            "Claim the host for this row, or re-address it to a host it owns."
         )
 
         :telemetry.execute([:barkpark_cloud, :registry, :admin_token_withheld], %{count: 1}, %{
           barkpark_id: bp.id,
-          claimed_by: other_id,
-          host: host
+          claimed_by: claimed_by,
+          host: host,
+          reason: reason
         })
 
         :error
     end
   end
 
-  # `{host, other_barkpark_id}` when the row's url host is claimed by a
-  # DIFFERENT barkpark, else nil. Only a row READ FROM THE DATABASE has claims
-  # to check. A hand-built struct (`:built`, as unit tests pass to the relay
-  # seams) has none, and it must not need a DB connection to reveal.
-  defp url_host_owner_elsewhere(%Barkpark{id: id, url: url} = bp) do
-    with :loaded <- Ecto.get_meta(bp, :state),
-         host when is_binary(host) <- hostname_claim_key(url),
-         other when is_binary(other) and other != id <-
-           Repo.one(
-             from(c in HostnameClaim,
-               where: c.host == ^host and not is_nil(c.barkpark_id),
-               select: c.barkpark_id
-             )
-           ) do
-      {host, other}
-    else
-      _ -> nil
+  @doc """
+  Does this row own the host of its `url`? `true` only when a `hostname_claims`
+  row for that host is held by this barkpark (see `reveal_admin_token/1`).
+  """
+  @spec owns_url_host?(Barkpark.t()) :: boolean()
+  def owns_url_host?(%Barkpark{} = bp), do: url_host_ownership(bp) == :owned
+
+  # `:owned`, or `{reason, host, claimed_by}` where reason is one of
+  # `:no_url_host`, `:not_persisted`, `:claimed_elsewhere`, `:unclaimed`.
+  defp url_host_ownership(%Barkpark{id: id, url: url} = bp) do
+    host = hostname_claim_key(url)
+
+    cond do
+      is_nil(host) ->
+        {:no_url_host, nil, nil}
+
+      Ecto.get_meta(bp, :state) != :loaded or is_nil(id) ->
+        {:not_persisted, host, nil}
+
+      true ->
+        case Repo.one(
+               from(c in HostnameClaim,
+                 where: c.host == ^host,
+                 select: {c.barkpark_id, c.site_id}
+               )
+             ) do
+          {^id, _} -> :owned
+          nil -> {:unclaimed, host, nil}
+          {other_bp, nil} -> {:claimed_elsewhere, host, other_bp}
+          {_, site_id} -> {:claimed_elsewhere, host, site_id}
+        end
     end
   end
 
@@ -6119,6 +6149,14 @@ defmodule BarkparkCloud.Registry do
   The rollout worker never hits this — it already excludes pinned rows from its
   candidate query — but the interactive relay must not silently no-op a pin.
 
+  PAUSE HONESTY: `bp cloud autoupdate pause` promises the instance "will not
+  update until resumed", so a paused instance refuses an unforced trigger with
+  `{:error, :paused}` exactly as a pin does. Before this clause the relay checked
+  only the pin, and on 2026-10-27 at 16:23:33Z an unforced
+  `barkpark.self_update_triggered` moved the paused `gyl` from 57e51415f to
+  main's tip. `force: true` overrides the pause for that one run. The pin clause
+  sits above this one, so a pinned and paused box still answers `:pinned`.
+
   IDENTITY REFUSAL (cch-w60-s4): a box whose last probe was refused
   (`update_unavailable_reason == "identity_refused"` — it answered our stored
   admin credential 401) returns `{:error, :identity_refused}` BEFORE the token
@@ -6135,6 +6173,7 @@ defmodule BarkparkCloud.Registry do
              | :decrypt_failed
              | :instance_error
              | :pinned
+             | :paused
              | :identity_refused}
   def trigger_self_update(bp, opts \\ [])
 
@@ -6144,6 +6183,14 @@ defmodule BarkparkCloud.Registry do
       do_trigger_self_update(bp)
     else
       {:error, :pinned}
+    end
+  end
+
+  def trigger_self_update(%Barkpark{autoupdate_paused: true} = bp, opts) do
+    if Keyword.get(opts, :force, false) do
+      do_trigger_self_update(bp)
+    else
+      {:error, :paused}
     end
   end
 

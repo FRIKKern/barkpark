@@ -366,7 +366,7 @@ defmodule Barkpark.Content.Forms do
       # a mark the editor has no UI for survives. A plugin-owned type
       # (`@keep_shape`) posts HTML that was not coerced; it gets blocks too.
       portable_text_field?(field, stored) and is_binary(posted) and String.trim(posted) != "" ->
-        PortableText.from_html(posted, stored)
+        PortableText.from_html(posted, stored, field: field)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
         restore_composite(field, coerced, stored, posted)
@@ -809,7 +809,7 @@ defmodule Barkpark.Content.Forms do
   defp coerce_field_value(%{"type" => "richText"} = field, val)
        when is_binary(val) and not is_map_key(field, @keep_shape) do
     if plain_rich_text?(field) and String.trim(val) != "",
-      do: PortableText.from_html(val),
+      do: PortableText.from_html(val, [], field: field),
       else: val
   end
 
@@ -883,12 +883,14 @@ defmodule Barkpark.Content.Forms do
     end
   end
 
-  # The fields #44 covers: `richText` without the block editor, and not the
-  # PortableDoc body region (`body` / `blocks`), whose stored list is
-  # PortableDoc blocks read by `Projection.read_blocks/1`, not Portable Text.
-  defp plain_rich_text?(%{"type" => "richText", "name" => name} = field)
-       when name not in ["body", "blocks"],
-       do: not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+  # The fields #44 covers: a `richText` whose format is Portable Text
+  # (`RichTextFormat`). That is a declared `"format": "portableText"`, or no
+  # format on a field without the block editor whose name is not `body` or
+  # `blocks` (the legacy PortableDoc body region, whose stored list is read by
+  # `Projection.read_blocks/1`). A new or empty field of this format saves the
+  # editor's HTML as a Portable Text array.
+  defp plain_rich_text?(%{"type" => "richText"} = field),
+    do: Barkpark.Content.RichTextFormat.portable_text?(field)
 
   defp plain_rich_text?(_), do: false
 
@@ -902,7 +904,7 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp portable_text_body?(%{"type" => "richText", "name" => "body"} = field),
-    do: not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+    do: Barkpark.Content.RichTextFormat.format(field) == :legacy
 
   defp portable_text_body?(_), do: false
 

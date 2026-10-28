@@ -96,10 +96,11 @@ defmodule BarkparkWeb.Components.Fields.ObjectForm do
 
   @doc """
   The dialog the Classic rich-text editor opens for a custom Portable Text
-  block (task-19392d1e6fc661e6): the block's fields in `object_form/1`, in a
-  form of its own, so its inputs never post with the document form. Save
-  writes the block back into the body by its `_key`; Cancel discards the
-  dialog's edits.
+  block (task-19392d1e6fc661e6), an annotation or an inline object: the
+  object's fields in `object_form/1`, in a form of its own, so its inputs
+  never post with the document form. Save writes the object back into the
+  body by its `_key`; Cancel discards the dialog's edits. An annotation's
+  dialog also has Remove, which takes the annotation off its text.
   """
   attr :dialog, :map, default: nil
   attr :dataset, :string, default: "production"
@@ -141,8 +142,15 @@ defmodule BarkparkWeb.Components.Fields.ObjectForm do
               />
             </div>
             <div class="modal-footer bp-object-dialog-actions">
+              <button
+                :if={Map.get(@dialog, :kind) == :annotation}
+                type="button"
+                class="btn btn-ghost"
+                phx-click="object-dialog-remove"
+                data-object-dialog-remove
+              ><%= gettext("Remove") %></button>
               <button type="button" class="btn btn-ghost" phx-click="object-dialog-close"><%= gettext("Cancel") %></button>
-              <button type="submit" class="btn btn-primary" data-object-dialog-save><%= gettext("Save block") %></button>
+              <button type="submit" class="btn btn-primary" data-object-dialog-save><%= save_label(@dialog) %></button>
             </div>
           </form>
         </div>
@@ -150,6 +158,10 @@ defmodule BarkparkWeb.Components.Fields.ObjectForm do
     <% end %>
     """
   end
+
+  defp save_label(%{kind: :annotation}), do: gettext("Save annotation")
+  defp save_label(%{kind: :inline}), do: gettext("Save item")
+  defp save_label(_dialog), do: gettext("Save block")
 
   @doc "True when the member declares fields the form can render."
   def editable?(%{type: "composite", fields: [_ | _]}), do: true

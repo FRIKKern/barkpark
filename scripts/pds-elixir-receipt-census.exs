@@ -1212,6 +1212,9 @@ defmodule PDS.Census do
     # itself ({token, user}), the same shape as /v1/auth/login-tickets/exchange.
     {:post, "/v1/auth/sso/exchange", "BarkparkWeb.OidcController", :exchange, :status_only_receipt},
     {:post, "/v1/auth/sso/route", "BarkparkWeb.SsoRoutingController", :route, :status_only_receipt},
+    # Studio read token (task-7855ed1481992cf6): the receipt is the minted token row
+    # itself (token, id, permissions, workspace), the same shape as /v1/auth/tokens.
+    {:post, "/v1/auth/studio-tokens", "BarkparkWeb.StudioTokenController", :create, :status_only_receipt},
     {:post, "/v1/auth/tokens", "BarkparkWeb.AuthController", :create_token, :status_only_receipt},
     {:post, "/v1/auth/webauthn/login", "BarkparkWeb.WebauthnController", :login, :status_only_receipt},
     {:post, "/v1/auth/webauthn/login/challenge", "BarkparkWeb.WebauthnController", :login_challenge, :status_only_receipt},

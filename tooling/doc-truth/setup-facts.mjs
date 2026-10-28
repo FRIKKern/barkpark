@@ -18,6 +18,11 @@
 //   link   every relative link and #anchor resolves, and every docs/*.md link
 //          in a Go or Elixir string, or in api/entrypoint.sh, points at a file
 //          and anchor that exist
+//   number a default or number in the self-host docs, such as a retention,
+//          a schedule, a size or a version, equals the value in the Bicep
+//          template, deploy.sh, a script or the Elixir code (NUMBER_FACTS),
+//          and deploy.sh, the Bicep server and its jobs' client run one
+//          PostgreSQL major (PG_MAJOR_SOURCES)
 //
 // Scope: docs/setup/*.md, the setup sections of README.md, and every doc a Go
 // string in internal/ or cmd/ links to.
@@ -735,13 +740,15 @@ export async function runCheck(root) {
   const { docs, codeLinks } = await collectScope(ctx.repo);
   const findings = [];
   for (const [rel, inScope] of docs) findings.push(...checkDocText(ctx, rel, ctx.repo.read(rel) || "", inScope));
+  findings.push(...checkNumberFacts(ctx.repo));
+  findings.push(...checkPgMajors(ctx.repo));
   for (const l of codeLinks) {
     const r = checkLink(ctx.repo, "", l.target, ctx.anchorCache);
     if (r) findings.push({ kind: "link", file: l.file, line: l.line, value: l.target, why: `doc link constant: ${r.why}`, nearest: r.nearest });
   }
   findings.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.kind.localeCompare(b.kind));
   const c = ctx;
-  return { ok: true, errors: [], findings, counts: { docs: docs.size, codeLinks: codeLinks.length, routes: c.rt.routes.length, env: c.env.size, nouns: c.cli.nouns.size, flags: c.cli.flags.size } };
+  return { ok: true, errors: [], findings, counts: { docs: docs.size, codeLinks: codeLinks.length, routes: c.rt.routes.length, env: c.env.size, nouns: c.cli.nouns.size, flags: c.cli.flags.size, numbers: NUMBER_FACTS.length } };
 }
 
 // Check one printed bp line: the noun, the verb and every --flag.
@@ -769,6 +776,170 @@ export function checkBpLine(line, cli, lib) {
       const vs = cli.verbs.get(noun) || new Set();
       if (vs.has(tok) || cli.lits.has(tok)) continue; // a verb, or a word the CLI spells (onramp targets, seed types)
       out.push({ kind: "cmd", value: `bp ${noun} ${tok}`, why: `bp ${noun} has no verb ${tok}`, nearest: vs.size ? `bp ${noun} ${nearest(tok, vs)}` : null });
+    }
+  }
+  return out;
+}
+
+// ── numbers: defaults the docs quote ────────────────────────────────────────
+
+// A default or number a setup doc quotes, read from the code that sets it.
+// NUMBER_SOURCES names each value: a file, a pattern with one capture group,
+// and an optional `fmt` that spells the capture the way the doc does. `norm`
+// applies to both sides before they are compared. A pattern that matches more
+// than once must capture the same value each time.
+const BICEP = "deploy/azure/main.bicep";
+const MONITOR = "deploy/azure/monitor.bicep";
+const ENTRA_SH = "scripts/entra-app-register.sh";
+const numbers = (s) => (s.match(/\d+/g) || []).map(Number).sort((a, b) => a - b).join(", ");
+const cronTime = (s) => { const [m, h] = s.split(" "); return `${h.padStart(2, "0")}:${m.padStart(2, "0")}`; };
+
+export const NUMBER_SOURCES = {
+  backupCron: { file: BICEP, re: /param backupCron string = '(\d+ \d+) \* \* \*'/, fmt: cronTime },
+  backupRetentionDays: { file: BICEP, re: /param backupRetentionDays int = (\d+)/ },
+  bpCliVersion: { file: BICEP, re: /param bpCliVersion string = '([\d.]+)'/ },
+  appCpu: { file: BICEP, re: /param cpu string = '(\d+)\.0'/ },
+  appMemoryGiB: { file: BICEP, re: /param memory string = '(\d+)Gi'/ },
+  postgresVersion: { file: BICEP, re: /\bversion: '(\d+)'/ },
+  postgresClient: { file: BICEP, re: /\bpostgresql(\d+)-client\b/ },
+  deployPgMajor: { file: "deploy.sh", re: /^PG_MAJOR=(\d+)$/m },
+  postgresSku: { file: BICEP, re: /param postgresSku string = '(\w+)'/ },
+  postgresStorageGb: { file: BICEP, re: /param postgresStorageGb int = (\d+)/ },
+  postgresBackupDays: { file: BICEP, re: /\bbackupRetentionDays: (\d+)/ },
+  shareQuotaGb: { file: BICEP, re: /\bshareQuota: (\d+)/ },
+  vaultSoftDeleteDays: { file: BICEP, re: /\bsoftDeleteRetentionInDays: (\d+)/ },
+  logRetentionDays: { file: BICEP, re: /param logRetentionDays int = (\d+)/ },
+  vnetPrefix: { file: BICEP, re: /param vnetAddressPrefix string = '([\d./]+)'/ },
+  mediaUid: { file: BICEP, re: /param mediaUid int = (\d+)/ },
+  readyzCheckMinutes: { file: BICEP, re: /param availabilityFrequencySeconds int = (\d+)/, fmt: (s) => String(Number(s) / 60) },
+  restartThreshold: { file: MONITOR, re: /param restartThreshold int = (\d+)/ },
+  restartWindowMinutes: { file: MONITOR, re: /param restartWindow string = 'PT(\d+)M'/ },
+  imageUid: { file: "api/Dockerfile", re: /useradd --system --uid (\d+)/ },
+  previewJwtTtl: { file: "api/config/runtime.exs", re: /"PREVIEW_JWT_TTL_SECONDS"\) \|\| "(\d+)"/ },
+  s3PresignTtl: { file: "api/config/runtime.exs", re: /"BARKPARK_S3_PRESIGN_TTL"\) \|\| "(\d+)"/ },
+  s3Region: { file: "api/config/runtime.exs", re: /"BARKPARK_S3_REGION"\) \|\| "(\w+)"/ },
+  bodyCapMb: { file: "api/lib/barkpark_web/endpoint.ex", re: /@general_body_length (\d+)_000_000\b/ },
+  sessionDays: { file: "api/lib/barkpark/accounts/user_session.ex", re: /@default_validity_days (\d+)/ },
+  graceMaxDays: { file: "api/lib/barkpark/auth.ex", re: /@rotation_max_grace (\d+) \* 24 \* 3600/ },
+  secretWarnDays: { file: "api/lib/barkpark/sso/oidc_secret_expiry_warning_worker.ex", re: /@steps \[([\d, ]+)\]/, norm: numbers },
+  recoveryTokenFile: { file: "api/lib/barkpark/auth/admin_token_recovery.ex", re: /@default_file "([^"]+)"/ },
+  deployTokenFile: { file: "deploy.sh", re: /BARKPARK_ADMIN_TOKEN_FILE:-([^}"]+)\}/ },
+  deployDbName: { file: "deploy.sh", re: /^DB_NAME="(\w+)"/m },
+  swapGiB: { file: "deploy.sh", re: /fallocate -l (\d+)G / },
+  initFileMode: { file: "internal/cli/instance_check_cmd.go", re: /os\.O_EXCL, 0o(\d+)\)/ },
+  secretYears: { file: ENTRA_SH, re: /case "\$YEARS" in ([\d|]+)\)/, norm: numbers },
+  secretWaitMinutes: { file: ENTRA_SH, re: /READY_AT=\$\(date -u -d '\+(\d+) minutes'/ },
+};
+
+// One row per quote: the doc, a pattern with one capture group over its text,
+// and the NUMBER_SOURCES name it must equal. A row whose pattern no longer
+// matches the doc fails too, so a reworded sentence updates its row here.
+const OPS = "docs/setup/SELF-HOST-OPERATIONS.md";
+const UPD = "docs/setup/SELF-HOST-UPDATES.md";
+const IT = "docs/setup/IT-HANDOVER.md";
+const MOVE = "docs/setup/SELF-HOST-MOVE.md";
+export const NUMBER_FACTS = [
+  ["docs/setup/SELF-HOST.md", /writes `barkpark\.env` with mode (\d+)/, "initFileMode"],
+  ["docs/setup/SELF-HOST.md", /writes the admin token to `([^`]+)`/, "deployTokenFile"],
+  [OPS, /@localhost\/(\w+)"/, "deployDbName"],
+  [OPS, /the Postgres (\d+) client tools/, "postgresClient"],
+  [OPS, /daily at (\d\d:\d\d) UTC/, "backupCron"],
+  [OPS, /daily at \d\d:\d\d UTC and keeps (\d+) days/, "backupRetentionDays"],
+  [OPS, /point-in-time restore for (\d+) days/, "postgresBackupDays"],
+  [OPS, /`PREVIEW_JWT_TTL_SECONDS`, (\d+) seconds by default/, "previewJwtTtl"],
+  [OPS, /adds a (\d+) GiB `\/swapfile`/, "swapGiB"],
+  [OPS, /runs as uid and gid (\d+)/, "imageUid"],
+  [OPS, /`uid=(\d+),gid=/, "mediaUid"],
+  [OPS, /\| Container App \| (\d+) vCPU, \d+ GiB/, "appCpu"],
+  [OPS, /\| Container App \| \d+ vCPU, (\d+) GiB/, "appMemoryGiB"],
+  [OPS, /\| PostgreSQL Flexible Server \| (Standard_\w+) \|/, "postgresSku"],
+  [OPS, /\| PostgreSQL storage \| (\d+) GiB \|/, "postgresStorageGb"],
+  [OPS, /\| PostgreSQL backups \| (\d+) days \|/, "postgresBackupDays"],
+  [OPS, /\| 0 up to (\d+) GB \|/, "postgresStorageGb"],
+  [OPS, /Transaction optimized, (\d+) GiB quota each/, "shareQuotaGb"],
+  [OPS, /\| Log Analytics \| (\d+) days/, "logRetentionDays"],
+  [OPS, /\/readyz` every (\d+) minutes/, "readyzCheckMinutes"],
+  [OPS, /restarted (\d+) times within \d+ minutes/, "restartThreshold"],
+  [OPS, /restarted \d+ times within (\d+) minutes/, "restartWindowMinutes"],
+  [UPD, /at most `(\d+)d`/, "graceMaxDays"],
+  [UPD, /soft-deleted for (\d+) days/, "vaultSoftDeleteDays"],
+  [UPD, /The default file is `([^`]+)`/, "recoveryTokenFile"],
+  [UPD, /The app runs as uid (\d+)/, "imageUid"],
+  [UPD, /the script prints, (\d+) minutes after Entra accepts/, "secretWaitMinutes"],
+  [UPD, /get a mail (\d+, \d+ and \d+) days before/, "secretWarnDays"],
+  [IT, /\| (\d+) vCPU, \d+ GiB, exactly one replica/, "appCpu"],
+  [IT, /\| \d+ vCPU, (\d+) GiB, exactly one replica/, "appMemoryGiB"],
+  [IT, /A daily backup, kept (\d+) days/, "backupRetentionDays"],
+  [IT, /\| ([\d.]+\/\d+) by default/, "vnetPrefix"],
+  [IT, /PostgreSQL Flexible Server (\d+) \|/, "postgresVersion"],
+  [IT, /\| (Standard_\w+), \d+ GB, \d+ days of backups/, "postgresSku"],
+  [IT, /\| Standard_\w+, (\d+) GB, \d+ days of backups/, "postgresStorageGb"],
+  [IT, /\| Standard_\w+, \d+ GB, (\d+) days of backups/, "postgresBackupDays"],
+  [IT, /\| (\d+) GB quota each/, "shareQuotaGb"],
+  [IT, /soft delete for (\d+) days/, "vaultSoftDeleteDays"],
+  [IT, /Log Analytics workspace for app logs \| (\d+) days/, "logRetentionDays"],
+  [IT, /The template keeps (\d+) days for the database/, "postgresBackupDays"],
+  [IT, /It expires after (\d+ or \d+) years/, "secretYears"],
+  [MOVE, /The job installs bp ([\d.]+)/, "bpCliVersion"],
+  [MOVE, /The template runs (\d+)\./, "postgresVersion"],
+  [MOVE, /A VM from `deploy\.sh` runs (\d+) too/, "deployPgMajor"],
+  ["docs/setup/SELF-HOST.md", /with local PostgreSQL (\d+) and Caddy/, "deployPgMajor"],
+  ["docs/setup/SELF-HOST.md", /PostgreSQL Flexible Server (\d+), Azure Files/, "postgresVersion"],
+  ["docs/setup/ENTRA.md", /get a mail (\d+, \d+ and \d+) days ahead/, "secretWarnDays"],
+  ["docs/setup/ENTRA-ACCESS.md", /by default (\d+) days after sign-in/, "sessionDays"],
+  ["docs/setup/media-object-storage.md", /BARKPARK_S3_REGION=(\w+)/, "s3Region"],
+  ["docs/setup/media-object-storage.md", /BARKPARK_S3_PRESIGN_TTL=(\d+)/, "s3PresignTtl"],
+  ["docs/setup/media-object-storage.md", /existing\s+(\d+) MB request cap/, "bodyCapMb"],
+];
+
+// The single VM and Container Apps run one PostgreSQL major, so a backup
+// restores on either path.
+export const PG_MAJOR_SOURCES = ["deployPgMajor", "postgresVersion", "postgresClient"];
+
+export function checkPgMajors(repo, sources = NUMBER_SOURCES) {
+  const got = PG_MAJOR_SOURCES.map((name) => ({ name, ...readNumberSource(repo, name, sources) }));
+  if (got.some((g) => g.why) || new Set(got.map((g) => g.value)).size === 1) return [];
+  const all = got.map((g) => `${g.name} ${g.value} (${g.at})`).join(", ");
+  return got.map((g) => ({ kind: "number", file: g.at.replace(/:\d+$/, ""), line: Number(g.at.split(":").pop()), value: g.name, why: `the self-host paths run different PostgreSQL majors: ${all}`, nearest: null }));
+}
+
+// Read one NUMBER_SOURCES value. Returns { value, at } or { why }.
+export function readNumberSource(repo, name, sources = NUMBER_SOURCES) {
+  const s = sources[name];
+  if (!s) return { why: `no source named ${name} in NUMBER_SOURCES` };
+  const text = repo.read(s.file);
+  if (text === null) return { why: `cannot read ${s.file}` };
+  const flags = s.re.flags.includes("g") ? s.re.flags : s.re.flags + "g";
+  const hits = [...text.matchAll(new RegExp(s.re.source, flags))];
+  if (!hits.length) return { why: `${s.file} no longer matches ${s.re}; update NUMBER_SOURCES.${name}` };
+  const values = new Set(hits.map((m) => (s.fmt ? s.fmt(m[1]) : m[1])));
+  if (values.size > 1) return { why: `${s.file} sets ${name} to ${[...values].join(" and ")}` };
+  const line = text.slice(0, hits[0].index).split("\n").length;
+  return { value: [...values][0], at: `${s.file}:${line}` };
+}
+
+// Check every NUMBER_FACTS row. `readDoc(rel)` returns a doc's text. Each
+// finding has kind `number` and the source name as its value.
+export function checkNumberFacts(repo, readDoc = (rel) => repo.read(rel), facts = NUMBER_FACTS, sources = NUMBER_SOURCES) {
+  const out = [];
+  const cache = new Map();
+  for (const [doc, re, name] of facts) {
+    if (!cache.has(name)) cache.set(name, readNumberSource(repo, name, sources));
+    const src = cache.get(name);
+    const text = readDoc(doc);
+    const base = { kind: "number", file: doc, value: name };
+    if (src.why) { out.push({ ...base, line: 1, why: src.why, nearest: null }); continue; }
+    if (text === null || text === undefined) { out.push({ ...base, line: 1, why: `cannot read ${doc}`, nearest: null }); continue; }
+    const norm = sources[name].norm || ((v) => v.trim());
+    const hits = [...text.matchAll(new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g"))];
+    if (!hits.length) {
+      out.push({ ...base, line: 1, why: `no text matches ${re}; the doc changed, so update its NUMBER_FACTS row`, nearest: `${src.value} (${src.at})` });
+      continue;
+    }
+    for (const m of hits) {
+      if (norm(m[1]) === norm(src.value)) continue;
+      const line = text.slice(0, m.index).split("\n").length;
+      out.push({ ...base, line, why: `the doc says ${m[1]}, ${src.at} says ${src.value}`, nearest: src.value });
     }
   }
   return out;
@@ -836,7 +1007,7 @@ async function main(argv) {
     return fresh.length ? 1 : 0;
   }
   const c = res.counts;
-  console.log(`setup-facts: ${c.docs} docs, ${c.codeLinks} doc link constants; checked against ${c.env} env names, ${c.nouns} bp nouns, ${c.flags} flags, ${c.routes} routes`);
+  console.log(`setup-facts: ${c.docs} docs, ${c.codeLinks} doc link constants; checked against ${c.env} env names, ${c.nouns} bp nouns, ${c.flags} flags, ${c.routes} routes; ${c.numbers} quoted numbers`);
   if (all) for (const f of allowed) console.log(`allowed (${f.task}): ${formatFinding(f)}`);
   else if (allowed.length) console.log(`${allowed.length} finding(s) match ${ALLOW_FILE}; --all prints them`);
   for (const e of stale) console.log(`note: ${ALLOW_FILE}:${e.at} no longer fails (${e.file} ${e.kind} ${e.value}); delete the line`);

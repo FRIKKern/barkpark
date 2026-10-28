@@ -81,6 +81,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
       admin_token_encrypted: Vault.encrypt(@instance_admin_token)
     )
     |> Repo.update!()
+    |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
   end
 
   defp session_token(user) do
@@ -545,6 +546,7 @@ defmodule BarkparkCloud.Web.UsageRouteTest do
         |> barkpark_fixture()
         |> Ecto.Changeset.change(url: @instance_url, host: "203.0.113.10")
         |> Repo.update!()
+        |> BarkparkCloud.UrlClaimFixtures.claim_url_host!()
 
       Fake.program([])
       conn = call(:get, "/v1/barkparks/#{bp.id}/usage", token: session_token(user))

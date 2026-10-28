@@ -38,7 +38,7 @@ The block is the single source of truth. Three teach wrappers **derive** from it
 | File | Framing | Its two lines |
 |---|---|---|
 | `.cursor/rules/barkpark-tasks.mdc` | `.mdc` front-matter | worker id `cursor-…` · footer → `CURSOR.md` |
-| `.claude/CLAUDE-BARKPARK.md` | `# Barkpark tasks` H1 | worker id `claude-…` · footer → `CLAUDE-CODE.md` |
+| `.claude/CLAUDE-BARKPARK.md` | `# Barkpark tasks (bp CLI)` H1 | worker id `claude-…` · footer → `CLAUDE-CODE.md` |
 | `CODEX.md` block | fenced `markdown` | the canonical `<tool>-…` rendering verbatim |
 
 Two Go gates read all three and fail if any stops embedding the canonical body or drops the doctrine (`TestOnrampAgentsMdWrapperParity`, `TestDoctrineOnEveryPrimingSurface`) — dedup is enforced, not hoped for.

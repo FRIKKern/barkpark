@@ -649,6 +649,29 @@ refused 409 `box_too_old`: update it first. Two gaps remain: no job installs
 `barkpark-agent` on a box Cloud did not provision (health stays `unknown`), and
 `enable_apply` needs the provisioner worker's SSH key on the box.
 
+### Rotating the admin token Cloud holds (`bp barkparks rotate-admin-token`)
+
+    bp barkparks rotate-admin-token <instance>
+
+`POST /v1/operator/barkparks/:id/admin-token/rotate` (platform operator) —
+`cloud/lib/barkpark_cloud/registry/admin_token_rotation.ex`. Cloud mints a
+successor on the box with the token it holds (`/v1/tokens/elevated`, same
+label), stores it encrypted, checks it reads admin, and then has the old token
+revoke itself. If any step fails, Cloud keeps the old token and revokes the
+successor. The mint names the old token's other workspaces (`workspaces`), and
+the box seats the successor there only where the old token is owner or admin.
+Cloud reads the successor's seats back; a box that did not carry every seat is
+refused 409 `box_too_old` with `seats_not_carried`, and the old token is kept.
+The receipt lists `seats_carried`. The receipt and the
+`barkpark.admin_token_rotated` audit row carry token ids, seats and the status
+the old token now gets, never a secret.
+
+A token that already lost a seat (gyl's successor before this change) gets it
+back from the box itself, as root, with the operator one-shot recipe in
+`docs/ops/PROD_OPS.md`: `mix barkpark.token_seat --token <id> --workspace <slug>`
+(dry run; `--apply` writes). It seats the token with the role its permissions
+give, and writes a `token_seated` audit row.
+
 ## Staging channel — prove a Barkpark build before the fleet gets it
 
 `staging.barkpark.cloud` is one disposable box that runs Barkpark **itself**, so a

@@ -9,7 +9,11 @@
 #   (b) the login rc file was patched (once) when bp started off-PATH;
 #   (c) re-running the installer does NOT double-append the rc stanza;
 #   (d) the GUI-agent stale-PATH caveat is printed;
-#   (e) the Windows mirror (install-cli.ps1) carries the same verify + caveat.
+#   (e) the Windows mirror (install-cli.ps1) carries the same verify + caveat;
+#   (g) with no BARKPARK_BIN_DIR, bp goes to $HOME/.local/bin and nowhere else;
+#   (i) replacing a bp prints the old and the new version first;
+#   (j) --help prints usage and installs nothing;
+#   (k) with no HOME and no BARKPARK_BIN_DIR the install stops.
 #
 # Templated on scripts/fetch-prebuilt.test.sh.
 set -uo pipefail
@@ -201,17 +205,84 @@ check "(f) it names BARKPARK_BIN_DIR" "grep -qF \"BARKPARK_BIN_DIR='$RO4/sub' is
 check "(f) nothing fell back to ~/.local/bin" "[ ! -e '$H4/.local/bin/bp' ]"
 chmod 755 "$RO4"
 
-echo "== with no BARKPARK_BIN_DIR, bp replaces the bp already on PATH =="
+echo "== with no BARKPARK_BIN_DIR, bp goes to \$HOME/.local/bin and the bp on PATH is left alone =="
 H5="$TMP/home5"; OLD5="$TMP/old5"
 mkdir -p "$H5" "$OLD5"
 printf '#!/bin/sh\necho old\n' > "$OLD5/bp"; chmod +x "$OLD5/bp"
+old5_sha="$(digest "$OLD5/bp")" || die_digest "old bp before install"
+old5_sha="${old5_sha%% *}"
 env -i PATH="$OLD5:$FAKE:/usr/bin:/bin" HOME="$H5" SHELL="/bin/bash" \
   DANGER_LOG="$DANGER_LOG" BARKPARK_CLI_RELEASE_BASE="https://example.invalid/rel" \
   /bin/sh "$HERE/install-cli.sh" > "$TMP/out5.txt" 2>&1
 rc=$?
 check "(g) installer exits 0" "[ '$rc' = 0 ]"
-check "(g) it installs into the existing bp's directory" "grep -qF 'installing into $OLD5 (the bp already on PATH)' '$TMP/out5.txt'"
-check "(g) the old bp was replaced" "! grep -qx 'echo old' '$OLD5/bp'"
+check "(g) it names \$HOME/.local/bin as the default" \
+  "grep -qF 'installing into $H5/.local/bin (the default; set BARKPARK_BIN_DIR' '$TMP/out5.txt'"
+check "(g) it created \$HOME/.local/bin and put bp there" "[ -x '$H5/.local/bin/bp' ]"
+old5_after="$(digest "$OLD5/bp")" || die_digest "old bp after install"
+old5_after="${old5_after%% *}"
+check_eq "(g) the bp already on PATH is byte-identical" "$old5_sha" "$old5_after"
+check "(g) it prints how to put the dir on this shell's PATH" \
+  "grep -qF 'export PATH=\"$H5/.local/bin:\$PATH\"' '$TMP/out5.txt'"
+check "(g) the script has no default that writes /usr/local/bin" \
+  "! grep -v '^ *#' '$HERE/install-cli.sh' | grep -v 'only when' | grep -vF 'BARKPARK_BIN_DIR=/usr/local/bin' | grep -qF '/usr/local/bin'"
+
+echo "== under sudo with no BARKPARK_BIN_DIR the install stops before it downloads =="
+H10="$TMP/home10"; FAKEID="$TMP/fakeid"
+mkdir -p "$H10" "$FAKEID"
+printf '#!/bin/sh\necho 0\n' > "$FAKEID/id"; chmod +x "$FAKEID/id"
+: > "$DANGER_LOG"
+env -i PATH="$FAKEID:$FAKE:/usr/bin:/bin" HOME="$H10" SHELL="/bin/bash" SUDO_USER=someone \
+  DANGER_LOG="$DANGER_LOG" BARKPARK_CLI_RELEASE_BASE="https://example.invalid/rel" \
+  /bin/sh "$HERE/install-cli.sh" > "$TMP/out10.txt" 2>&1
+rc=$?
+check "(l) installer exits non-zero" "[ '$rc' != 0 ]"
+check "(l) it names the sudo env BARKPARK_BIN_DIR form" \
+  "grep -qF 'sudo env BARKPARK_BIN_DIR=/usr/local/bin sh' '$TMP/out10.txt'"
+check "(l) nothing was downloaded or installed" "[ ! -s '$DANGER_LOG' ] && [ ! -e '$H10/.local/bin/bp' ]"
+
+echo "== a bp already at the target: old and new versions are printed before the replace =="
+H7="$TMP/home7"; BIN7="$TMP/bin7"
+mkdir -p "$H7" "$BIN7"
+printf '#!/bin/sh\necho "{\\"cli_version\\":\\"1.0.0\\"}"\n' > "$BIN7/bp"; chmod +x "$BIN7/bp"
+run_install "$H7" "$BIN7" "$TMP/out7.txt"
+rc=$?
+check "(i) installer exits 0" "[ '$rc' = 0 ]"
+check "(i) it prints the old and the new version" \
+  "grep -qF 'replacing $BIN7/bp: bp 1.0.0 -> bp 9.9.9-test' '$TMP/out7.txt'"
+check "(i) the replace line comes before the installed line" \
+  "[ \"\$(grep -n 'replacing ' '$TMP/out7.txt' | cut -d: -f1)\" -lt \"\$(grep -n 'installed bp' '$TMP/out7.txt' | cut -d: -f1)\" ]"
+check "(i) a fresh target prints no replace line" "! grep -qF 'replacing ' '$TMP/out1.txt'"
+
+echo "== --help prints usage and installs nothing =="
+H8="$TMP/home8"; mkdir -p "$H8"
+: > "$DANGER_LOG"
+env -i PATH="$FAKE:/usr/bin:/bin" HOME="$H8" SHELL="/bin/bash" DANGER_LOG="$DANGER_LOG" \
+  /bin/sh "$HERE/install-cli.sh" --help > "$TMP/out8.txt" 2>&1
+rc=$?
+check "(j) --help exits 0" "[ '$rc' = 0 ]"
+check "(j) --help prints usage" "grep -qF 'Usage:' '$TMP/out8.txt'"
+check "(j) --help names BARKPARK_BIN_DIR and the default" \
+  "grep -qF 'BARKPARK_BIN_DIR' '$TMP/out8.txt' && grep -qF 'Default: \$HOME/.local/bin' '$TMP/out8.txt'"
+check "(j) --help downloads nothing" "[ ! -s '$DANGER_LOG' ]"
+check "(j) --help creates no bin dir" "[ ! -e '$H8/.local' ]"
+env -i PATH="$FAKE:/usr/bin:/bin" HOME="$H8" SHELL="/bin/bash" DANGER_LOG="$DANGER_LOG" \
+  /bin/sh "$HERE/install-cli.sh" -h > "$TMP/out8h.txt" 2>&1
+check "(j) -h prints usage too" "grep -qF 'Usage:' '$TMP/out8h.txt'"
+env -i PATH="$FAKE:/usr/bin:/bin" HOME="$H8" SHELL="/bin/bash" DANGER_LOG="$DANGER_LOG" \
+  /bin/sh "$HERE/install-cli.sh" --bogus > "$TMP/out8b.txt" 2>&1
+rc=$?
+check "(j) an unknown argument exits 2" "[ '$rc' = 2 ]"
+check "(j) an unknown argument downloads nothing" "[ ! -s '$DANGER_LOG' ]"
+
+echo "== with no HOME and no BARKPARK_BIN_DIR the install stops =="
+: > "$DANGER_LOG"
+env -i PATH="$FAKE:/usr/bin:/bin" SHELL="/bin/bash" DANGER_LOG="$DANGER_LOG" \
+  BARKPARK_CLI_RELEASE_BASE="https://example.invalid/rel" \
+  /bin/sh "$HERE/install-cli.sh" > "$TMP/out9.txt" 2>&1
+rc=$?
+check "(k) installer exits non-zero" "[ '$rc' != 0 ]"
+check "(k) it says HOME is not set" "grep -qF 'HOME is not set' '$TMP/out9.txt'"
 
 echo "== a bp earlier on PATH than the new one is named in a warning =="
 H6="$TMP/home6"; OTHER6="$TMP/other6"; BIN6="$TMP/bin6"
@@ -235,6 +306,12 @@ check "(e) ps1 rebuilds PATH from the registry (Machine + User), not \$env:Path"
   "grep -qF \"GetEnvironmentVariable('Path', 'Machine')\" '$PS1'"
 check "(e) ps1 runs the probe in a -NoProfile child host" \
   "grep -qF -e '-NoProfile -NonInteractive' '$PS1'"
+check "(e) ps1 answers -Help with usage before any download" \
+  "[ \"\$(grep -n 'Write-Host \$Usage; exit 0' '$PS1' | cut -d: -f1)\" -lt \"\$(grep -n 'Invoke-WebRequest -Uri \$url' '$PS1' | cut -d: -f1)\" ]"
+check "(e) ps1 prints the old and new version before it replaces bp.exe" \
+  "grep -qF 'Note \"replacing \${dest}: bp \$oldVer -> bp \$newVer\"' '$PS1'"
+check "(e) ps1 is ASCII only (Windows PowerShell 5.1 misreads UTF-8 without a BOM)" \
+  "! LC_ALL=C grep -q '[^ -~	]' '$PS1'"
 check "(e) ps1 prints the GUI-agent stale-PATH caveat" \
   "grep -qF \"already-running agent won't see bp\" '$PS1'"
 

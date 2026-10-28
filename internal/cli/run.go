@@ -148,6 +148,12 @@ func buildManifestRequest(g globals, ctx manifest.Context, m *manifest.Manifest,
 		return nil, &dispatchError{msg: msg, withUsage: false, code: refusedCredentialCode, exit: exitAuth}
 	}
 
+	// A secret arg given as "-" reads stdin, so the value never sits in argv.
+	// After the refused-credential check, so a refused invocation reads nothing.
+	if err := readSecretArgsFromStdin(cmd, argMap, cmdFlags, ownsProcessStdin); err != nil {
+		return nil, &dispatchError{msg: err.Error(), withUsage: false}
+	}
+
 	needsPerspectiveAuth := nonPublishedPerspectiveRequiresAuth(cmd, cmdFlags)
 	needsDraftIDAuth := draftIDRequiresAuth(cmd, argMap)
 	if needsPerspectiveAuth && ctx.Token == "" {

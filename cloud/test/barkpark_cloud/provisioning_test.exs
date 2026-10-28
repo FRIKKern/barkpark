@@ -50,6 +50,10 @@ defmodule BarkparkCloud.ProvisioningTest do
     {user, team}
   end
 
+  # A row the way provisioning writes it: a url whose host the row claims.
+  # `Registry.reveal_admin_token/1` decrypts only for a row that owns its url host.
+  defp owned_url, do: "https://owned-#{System.unique_integer([:positive])}.barkpark.cloud"
+
   defp barkpark_fixture(team, attrs \\ %{}) do
     n = System.unique_integer([:positive])
 
@@ -521,7 +525,14 @@ defmodule BarkparkCloud.ProvisioningTest do
 
     test "instance-admin-token: persists the reported admin token ENCRYPTED at rest" do
       {_user, team} = user_with_team()
-      bp = barkpark_fixture(team, %{health_status: "unknown", agent_status: "offline"})
+
+      bp =
+        barkpark_fixture(team, %{
+          health_status: "unknown",
+          agent_status: "offline",
+          url: owned_url()
+        })
+
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
       token = "bp_admin_super-secret-instance-bearer"
@@ -1504,7 +1515,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
     test "instance-admin-token: {ip, admin_token} persists the token ENCRYPTED" do
       {_user, team} = user_with_team()
-      bp = barkpark_fixture(team)
+      bp = barkpark_fixture(team, %{url: owned_url()})
       {:ok, job} = Registry.enqueue_provision_job(bp)
       token = "bp_admin_http-reported-instance-token"
 
@@ -2105,7 +2116,7 @@ defmodule BarkparkCloud.ProvisioningTest do
         secondary = team_fixture()
         {:ok, _} = Accounts.add_member(secondary, user, unquote(role))
         {:ok, token} = Accounts.create_user_session_token(user)
-        bp = barkpark_fixture(secondary)
+        bp = barkpark_fixture(secondary, %{url: owned_url()})
         {:ok, job} = Registry.enqueue_provision_job(bp)
         {:ok, _} = Registry.succeed_job(job.id, "203.0.113.8", admin_token: "bp_admin_secondary")
 
@@ -2145,7 +2156,7 @@ defmodule BarkparkCloud.ProvisioningTest do
     test "team owner gets the decrypted admin token (show-to-owner)" do
       {owner, team} = user_with_team()
       {:ok, owner_token} = Accounts.create_user_session_token(owner)
-      bp = barkpark_fixture(team)
+      bp = barkpark_fixture(team, %{url: owned_url()})
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
       {:ok, _} =
@@ -2241,7 +2252,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   # A live box whose stored admin ciphertext decrypts to `token` — the one shape
   # every row of the root-PAT block needs before it can be refused or served.
   defp creds_bp(team, token) do
-    bp = barkpark_fixture(team)
+    bp = barkpark_fixture(team, %{url: owned_url()})
     {:ok, job} = Registry.enqueue_provision_job(bp)
     {:ok, _} = Registry.succeed_job(job.id, "203.0.113.20", admin_token: token)
     bp

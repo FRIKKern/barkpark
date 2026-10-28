@@ -92,7 +92,7 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   def changeset(schema_def, attrs) do
     schema_def
-    |> cast(alias_reader_writes(attrs), [
+    |> cast(attrs |> alias_reader_writes() |> normalise_rich_text_aliases(), [
       :name,
       :title,
       :icon,
@@ -122,6 +122,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_no_bare_required()
+    |> validate_rich_text_formats()
     |> validate_inline_field_names()
     |> validate_visible_when_scopes()
     |> validate_reference_filters()
@@ -1417,6 +1418,41 @@ defmodule Barkpark.Content.SchemaDefinition do
        do: Map.put(attrs, "reader_writes", rw)
 
   defp alias_reader_writes(attrs), do: attrs
+
+  # `{"type": "portableText"}` and Sanity's array of blocks are stored as
+  # `richText` with a declared `format` (owner decision D1,
+  # `Barkpark.Content.RichTextFormat`). Normalised before the cast, so the
+  # named-type check and every reader only ever see `richText`.
+  defp normalise_rich_text_aliases(%{"fields" => fields} = attrs) when is_list(fields),
+    do: Map.put(attrs, "fields", Barkpark.Content.RichTextFormat.normalise_fields(fields))
+
+  defp normalise_rich_text_aliases(%{fields: fields} = attrs) when is_list(fields),
+    do: Map.put(attrs, :fields, Barkpark.Content.RichTextFormat.normalise_fields(fields))
+
+  defp normalise_rich_text_aliases(attrs), do: attrs
+
+  # An unknown richText `format`, and `format: portableText` on a
+  # block-editor field, are refused. Only a CHANGED `fields` list is checked,
+  # like `validate_no_bare_required/1`.
+  defp validate_rich_text_formats(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        case Barkpark.Content.RichTextFormat.format_problems(fields) do
+          [] ->
+            changeset
+
+          problems ->
+            add_error(
+              changeset,
+              :fields,
+              Enum.map_join(problems, "; ", fn {path, msg} -> ~s("#{path}": #{msg}) end)
+            )
+        end
+
+      _ ->
+        changeset
+    end
+  end
 
   # `reader_writes` is an authorization grant, so its shape is strict: only the
   # two known keys, a boolean `create`, and a list of field names.
