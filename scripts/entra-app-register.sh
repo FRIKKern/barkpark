@@ -322,10 +322,11 @@ else
   EXPIRES=$(az ad app show --id "$APP_ID" \
     --query "sort_by(passwordCredentials, &endDateTime)[-1].endDateTime" -o tsv)
 fi
+# bp reads a "-" secret from stdin, so the secret stays out of argv and history.
 if [ -n "$SECRET_FILE" ] && [ "$SECRET_ACTION" != existing ]; then
-  SECRET_ARG="\"\$(cat $SECRET_FILE)\""
+  SECRET_IN="< $SECRET_FILE"
 else
-  SECRET_ARG="\"<client secret>\""
+  SECRET_IN="< <file that holds the client secret>"
 fi
 
 MAPPING="{\"$GROUP_ID\":\"owner\"}"
@@ -347,10 +348,10 @@ bp's confirmation for a write to a server that is not on this machine:
 
 bp org create $ORG "$ORG_NAME" --yes
 bp org attach-workspace $ORG default --yes
-bp org oidc-create $ORG "https://login.microsoftonline.com/$TENANT/v2.0" "$APP_ID" $SECRET_ARG \\
+bp org oidc-create $ORG "https://login.microsoftonline.com/$TENANT/v2.0" "$APP_ID" - \\
   --tenant_id "$TENANT" --scopes "openid profile email" --strict_validation \\
   --client_secret_expires_at "${EXPIRES:-<expiry date>}" \\
-  --set group_role_mappings:='$MAPPING' --yes
+  --set group_role_mappings:='$MAPPING' --yes $SECRET_IN
 
 When the connection already exists, set the scopes and the mapping with:
 
@@ -363,7 +364,7 @@ bp org oidc-update $ORG --trust_idp_mfa --yes
 
 After a new secret, store it with:
 
-bp org oidc-rotate-secret $ORG $SECRET_ARG --client_secret_expires_at "${EXPIRES:-<expiry date>}" --yes
+bp org oidc-rotate-secret $ORG - --client_secret_expires_at "${EXPIRES:-<expiry date>}" --yes $SECRET_IN
 
 Instance settings that go with this connection, described in docs/setup/ENTRA.md:
 BARKPARK_OIDC_KEEP_OWNER=on BARKPARK_OIDC_EMAIL_FROM_UPN=on
