@@ -526,6 +526,44 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
                  2
                )
     end
+
+    test "the same id deleted and created again is a plain create with no previousRev" do
+      {:ok, _} =
+        Content.create_document("post", %{"doc_id" => "drafts.fk2", "title" => "F"}, "test")
+
+      {:ok, published} = Content.publish_document("fk2", "post", "test")
+
+      {:ok, _} =
+        Content.apply_mutations(
+          [
+            %{"patch" => %{"id" => "fk2", "type" => "post", "set" => %{"body" => "x"}}},
+            %{"delete" => %{"id" => "fk2", "type" => "post"}}
+          ],
+          "test"
+        )
+
+      {:ok, _} =
+        Content.apply_mutations([%{"create" => %{"_id" => "fk2", "_type" => "post"}}], "test")
+
+      [fork, recreated] =
+        Repo.all(
+          from e in MutationEvent,
+            where: e.dataset == "test" and e.doc_id == "drafts.fk2" and e.mutation != "delete",
+            order_by: [desc: e.id],
+            limit: 2
+        )
+        |> Enum.reverse()
+
+      assert {fork.mutation, fork.previous_rev} == {"create", published.rev}
+      assert {recreated.mutation, recreated.previous_rev} == {"create", nil}
+
+      assert %{"mutation" => "create", "previousRev" => nil} =
+               recreated
+               |> ListenController.format_event("test")
+               |> String.split("data: ", parts: 2)
+               |> List.last()
+               |> Jason.decode!()
+    end
   end
 
   describe "POST .../rotate" do
