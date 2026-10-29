@@ -140,9 +140,9 @@ Flat: global `admin`. Scoped reads: member API token or seated login bearer; no 
 - `POST P/v1/schemas/:dataset` — upsert; 201 with the schema object.
 - `DELETE P/v1/schemas/:dataset/:name` → `{"deleted": "post"}`
 
-## 8a. Plugin HTTP surfaces — Tickets `/v1/tickets`, Sheets `POST /v1/plugins/sheets/:slug/ops`, Bulldocs paper ops
+## 8a. Plugin HTTP — Tickets `/v1/tickets`, Sheets, Bulldocs papers
 
-Contract: [plugin HTTP](contracts/plugin-http-api.md) covers ticket keys/limits, Sheets individual ops, Paper create-only `/papers/:slug/create` and paper ops; `/papers` remains upsert.
+[Contract](contracts/plugin-http-api.md): ticket keys and limits, Sheets and paper ops, create-only `/papers/:slug/create`.
 
 ## 8c. CycleFleet — `/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id` [token]
 
@@ -151,6 +151,10 @@ Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless leg
 ## 8d. Media — assets, `/v1/media/*` lists, image transforms
 
 [Envelope](contracts/media-http-envelope.md). `/media/files/<path>?w=…`: [transforms](media/IMAGE-TRANSFORMS.md). `GET /v1/i18n/paper_canvas`: [contract](contracts/paper-canvas-i18n.md).
+
+## 8f. Prefs `/w/…/p/…/v1/prefs/:dataset/:key` [token]
+
+[Per-account JSON, atomic list ops](contracts/user-prefs.md).
 
 ## 9. Error Codes
 

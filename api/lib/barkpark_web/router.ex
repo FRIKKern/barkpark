@@ -3731,6 +3731,7 @@ defmodule BarkparkWeb.Router do
 
     get("/v1/prefs/:dataset/:key", UserPrefController, :show)
     put("/v1/prefs/:dataset/:key", UserPrefController, :update)
+    patch("/v1/prefs/:dataset/:key", UserPrefController, :patch)
     delete("/v1/prefs/:dataset/:key", UserPrefController, :delete)
   end
 
