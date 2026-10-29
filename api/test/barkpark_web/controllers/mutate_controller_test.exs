@@ -1560,6 +1560,18 @@ defmodule BarkparkWeb.MutateControllerTest do
     assert Map.take(mutate_412_details(conn, [exact]), ~w(id actual)) ==
              %{"id" => "drafts.id412", "actual" => draft.rev}
 
+    patch = %{
+      "patch" => %{
+        "id" => "id412",
+        "type" => "post",
+        "set" => %{"title" => "v2"},
+        "ifRevisionID" => "stale"
+      }
+    }
+
+    assert mutate_412_details(conn, [patch]) ==
+             %{"index" => 0, "id" => "drafts.id412", "expected" => "stale", "actual" => draft.rev}
+
     ghost = %{
       "createOrReplace" => %{"_type" => "post", "_id" => "ghost412", "ifRevisionID" => "r"}
     }

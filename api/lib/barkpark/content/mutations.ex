@@ -496,7 +496,7 @@ defmodule Barkpark.Content.Mutations do
           {[], cache}
 
         {:error, reason} ->
-          Repo.rollback(name_failing_mutation(reason, m, index))
+          Repo.rollback(name_failing_mutation(reason, index))
       end
     end)
   end
@@ -504,19 +504,10 @@ defmodule Barkpark.Content.Mutations do
   # A batch fails whole, so a 412 names the mutation that failed and the row it
   # compared: the client resends that one, not the batch one by one
   # (task-38c5c28f0fcef9eb).
-  defp name_failing_mutation({:rev_mismatch, %{} = details}, m, index),
-    do:
-      {:rev_mismatch,
-       details |> Map.put(:index, index) |> Map.update(:id, named_id(m), &(&1 || named_id(m)))}
+  defp name_failing_mutation({:rev_mismatch, %{} = details}, index),
+    do: {:rev_mismatch, Map.put(details, :index, index)}
 
-  defp name_failing_mutation(reason, _m, _index), do: reason
-
-  defp named_id(m) do
-    Enum.find_value(m, fn
-      {_verb, %{} = op} -> op["id"] || op["_id"] || op["doc_id"]
-      _ -> nil
-    end)
-  end
+  defp name_failing_mutation(reason, _index), do: reason
 
   # ── Exact ids: Sanity's mutate semantics (task-c6cbf346a07ff01e) ───────────
   #
