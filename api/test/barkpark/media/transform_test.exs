@@ -173,6 +173,17 @@ defmodule Barkpark.Media.TransformTest do
                max * max
     end
 
+    test "a translucent bg fill takes the alpha Sanity's CDN draws it with" do
+      # Sanity, w=300&h=300&fit=fill&bg=AAff0000: 0x20 → 59, 0x40 → 111, 0x80 → 191, 0xc0 → 239.
+      assert Enum.map([0, 32, 64, 128, 192, 255], &Transform.fill_alpha/1) ==
+               [0, 59, 111, 191, 239, 255]
+
+      assert Transform.canonical(plan!(%{"w" => "100", "bg" => "80ff0000"})) =~
+               ~r/;bg=80ff0000~2/i
+
+      refute Transform.canonical(plan!(%{"w" => "100", "bg" => "ff0000"})) =~ "~2"
+    end
+
     test "fit=crop resizes to the rounded cover size, as Sanity's CDN does" do
       g =
         Transform.geometry(

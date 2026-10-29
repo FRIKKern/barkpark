@@ -41,7 +41,7 @@ defmodule Barkpark.Media.PadBgSanityTest do
 
     png = render!(Map.put(params, "fm", "png"))
     assert Image.bands(png) == 4
-    assert {:ok, [255, 0, 0, 128]} = Image.get_pixel(png, 1, 1)
+    assert {:ok, [255, 0, 0, 191]} = Image.get_pixel(png, 1, 1)
 
     jpg = render!(Map.put(params, "fm", "jpg"))
     assert Image.bands(jpg) == 3
@@ -60,6 +60,6 @@ defmodule Barkpark.Media.PadBgSanityTest do
       })
 
     assert Image.bands(png) == 4
-    assert {:ok, [255, 0, 0, 128]} = Image.get_pixel(png, 1, 1)
+    assert {:ok, [255, 0, 0, 191]} = Image.get_pixel(png, 1, 1)
   end
 end

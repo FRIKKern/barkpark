@@ -67,7 +67,7 @@ defmodule Barkpark.Media.ImageBackend do
 
   @doc """
   Read what Sanity keeps as an image asset's `metadata` from `src`
-  (task-fd05a9327034f89c): `has_alpha`, `is_opaque`, `blur_hash`, `palette`
+  (task-fd05a9327034f89c): `has_alpha`, `is_opaque`, `blur_hash`, `thumb_hash`, `palette`
   (`Barkpark.Media.Palette`), and, when `opts[:meta]` lists them, `exif` and
   `location`. Optional; a backend without it leaves those keys out.
   """

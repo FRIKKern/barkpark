@@ -5,7 +5,7 @@ Barkpark stores an image once and makes each size, crop and format on first requ
 
 ## Upload
 
-`POST /v1/media/:dataset/upload` stores the original and writes the `mediaAsset` document once: `fileInfo.width`, `height`, a 20 px `lqip`, `bp_processing_status` (`"failed"` when libvips cannot decode it) and Sanity's `metadata` (`dimensions`, `lqip`, `blurHash`, `hasAlpha`, `isOpaque`, `palette`; `exif`, `location` with `meta=exif,location`). No renditions. Code: `Barkpark.Plugins.Media.after_media_upload/1`, `Barkpark.Media.Processing`.
+`POST /v1/media/:dataset/upload` stores the original and writes the `mediaAsset` doc once: `fileInfo.width`, `height`, a 20 px `lqip`, `bp_processing_status` (`"failed"` if libvips can't decode it) and Sanity's `metadata` (`dimensions`, `lqip`, `blurHash`, `thumbHash`, `hasAlpha`, `isOpaque`, `palette`; `exif`, `location` with `meta=exif,location`). No renditions. Code: `Barkpark.Plugins.Media.after_media_upload/1`, `Barkpark.Media.Processing`.
 
 ## URL
 

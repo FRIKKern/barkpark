@@ -137,6 +137,7 @@ defmodule Barkpark.Media.Processing do
     }
     |> maybe_put("lqip", extracted.lqip)
     |> maybe_put("blurHash", a[:blur_hash])
+    |> maybe_put("thumbHash", a[:thumb_hash])
     |> maybe_put("palette", a[:palette])
     |> maybe_put("exif", a[:exif])
     |> maybe_put("location", a[:location])
