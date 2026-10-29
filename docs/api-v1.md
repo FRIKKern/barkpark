@@ -86,7 +86,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 **`deleteExactDraft`** — `{"id":"drafts.<id>","type","ifRevisionID"}`: exact id + rev (missing →404, stale →412); removes only that draft, keeping history. Lost reply: reconcile, never retry.
 
-**`create`** — new draft (`conflict` if one exists): `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
+**`create`** — new draft (`conflict` if one exists): `{"create":{"_type":"post","_id":"my-post","title":"New Post"}}`.
 
 **`createOrReplace`** — upserts the draft; **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
 
@@ -96,7 +96,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 The create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`), else a `create.forked_published` warning. `patch` edits a published task in place.
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set`. `ifRevisionID`: mismatch → `412` (`ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`; one doc's patches serialize.
+**`patch`** — `{"patch":{"id":"drafts.my-post","type":"post","set":{…},"ifRevisionID":"<rev>"}}` merges `set`. `ifRevisionID`: mismatch → `412` (`ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`; one doc's patches serialize.
 
 The next four take `{"<kind>":{"id":"my-post","type":"post"}}`; missing `id`/`type` → 422 (`delete`/`patch` read missing `type` from the row):
 
