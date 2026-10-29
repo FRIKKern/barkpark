@@ -176,8 +176,10 @@ import { searchEmoji } from "../emoji.js";
 // Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
 import { remoteSelections, setRemoteSelections as rsSet, pointsFromSelection } from "./remote-selections.js";
 import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsInSelection as crInSelection } from "./comment-ranges.js";
-// A document link's words painted live from the host's wikilinkTitle; see ./wikilink-titles.js.
+// A document link's words painted live from the host's wikilinkResolve; see ./wikilink-titles.js.
 import { wikilinkTitles, refreshWikilinkTitles, setWikilinkMissing, wikilinkInfo } from "./wikilink-titles.js";
+// A typed or pasted [[Title]] that names a known document becomes a link; see ./wikilink-input.js.
+import { wikilinkInput } from "./wikilink-input.js";
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
@@ -763,7 +765,8 @@ class BpPaperCanvas extends HTMLElement {
     this._linkPreview = null; // LinkPreview instance (hover card on links and wikilinks)
     this._composeEndEmit = null; // one-shot compositionend listener: an ops emit held back by an open IME composition
     this._linkPreviewSource = null; // injected async ({ kind, href, target, docId }) => { title, excerpt, href, missing }
-    this._wikilinkTitle = null; // injected async (docId) => title | { missing: true } | null
+    this._wikilinkResolve = null; // injected (docId) => { title?, missing? } | null, or a Promise of it
+    this._modEnterPending = false;
     this._debounceTimer = null;
     // Baseline captured when a local debounce window opens. Server broadcasts may
     // advance `_blocks` while that draft is waiting; the eventual diff must still
@@ -923,7 +926,7 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("mediaPicker");
     this._upgradeProperty("editBlockObject");
     this._upgradeProperty("linkPreviewSource");
-    this._upgradeProperty("wikilinkTitle");
+    this._upgradeProperty("wikilinkResolve");
 
     // Default true; only the literal string "false" disables editing. Mount-time
     // read is authoritative — attributeChangedCallback handles later toggles.
@@ -1136,6 +1139,7 @@ class BpPaperCanvas extends HTMLElement {
         // edits. See ./comment-ranges.js.
         commentRanges(this),
         wikilinkTitles(this),
+        wikilinkInput(this),
         // A hydrated run rests on a caret, not on an AllSelection a first keystroke would
         // replace wholesale. See ./resting-selection.js.
         RestingSelection,
@@ -1363,7 +1367,11 @@ class BpPaperCanvas extends HTMLElement {
         handleKeyDown: (_view, event) => this._onKeyDown(event),
         // ProseMirror prevents the default of every Escape. Hand a bare Escape
         // to the host instead, unless one of the canvas's menus is open to use it.
-        handleDOMEvents: { keydown: (view, event) => this._escapeForHost(view, event) },
+        // Mod+Enter goes to the host too, and edits nothing if the host leaves it.
+        handleDOMEvents: {
+          keydown: (view, event) => this._modEnterForHost(view, event) || this._escapeForHost(view, event),
+          beforeinput: (_view, event) => this._swallowModEnter(event),
+        },
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
         // The canvas's own copy carries the exact fragment, so its paste rebuilds
         // the very nodes copied instead of re-parsing their HTML. See
@@ -1924,6 +1932,23 @@ class BpPaperCanvas extends HTMLElement {
     const menuOpen = [this._palette, this._wikilink, this._emoji, this._tag, this._slash]
       .some((menu) => menu && menu.isOpen());
     return !menuOpen;
+  }
+
+  // Mod+Enter (1.17.0) is the host's, free: ProseMirror never sees it, so no hard break
+  // lands, and a host that leaves it alone gets no browser newline either.
+  _modEnterForHost(view, event) {
+    if (event.key !== "Enter" || !(event.metaKey || event.ctrlKey) || event.altKey || event.shiftKey) return false;
+    if (event.defaultPrevented || event.isComposing || view.composing) return false;
+    this._modEnterPending = true;
+    setTimeout(() => { this._modEnterPending = false; });
+    return true;
+  }
+
+  _swallowModEnter(event) {
+    if (!this._modEnterPending || !/^insert(Paragraph|LineBreak)$/.test(event.inputType)) return false;
+    this._modEnterPending = false;
+    event.preventDefault();
+    return true;
   }
 
   // A click on a document link: bp-canvas-wikilink-click (1.15.0), cancelable, so
@@ -3558,15 +3583,19 @@ class BpPaperCanvas extends HTMLElement {
     return this._linkPreviewSource;
   }
 
-  // ── live document-link titles (1.17.0): (docId) => title | { missing: true } | null ──
-  // Asked once per document id; setting it again (a rename) asks every link again.
-  set wikilinkTitle(fn) {
-    this._wikilinkTitle = typeof fn === "function" ? fn : null;
-    refreshWikilinkTitles(this._editor, !this._wikilinkTitle);
+  // ── live document-link titles (1.17.0): (docId) => { title?, missing? } | null ──
+  // Asked once per document id; refreshWikilinks() (a rename, a delete) asks every link again.
+  set wikilinkResolve(fn) {
+    this._wikilinkResolve = typeof fn === "function" ? fn : null;
+    refreshWikilinkTitles(this._editor, !this._wikilinkResolve);
   }
 
-  get wikilinkTitle() {
-    return this._wikilinkTitle;
+  get wikilinkResolve() {
+    return this._wikilinkResolve;
+  }
+
+  refreshWikilinks() {
+    refreshWikilinkTitles(this._editor, false);
   }
 
   // ── P4 `#` tag autocomplete ────────────────────────────────────────────────

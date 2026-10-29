@@ -1,15 +1,15 @@
 // wikilink-titles.js — a document link's words, painted live from the host (contract 1.17.0).
 //
 // A wikilink stores its words in the body, so renaming the target leaves stale text. The host's
-// `wikilinkTitle(docId)` answers the target's current title; an un-aliased link (no alias, and
+// `wikilinkResolve(docId)` answers `{ title }`, the target's current title; an un-aliased link (no alias, and
 // its words are its stored target, as a picker pick writes them) paints that title instead of
 // its words. Decorations only: the stored words stay in the document, hidden, so every save,
 // diff and round-trip carries them byte-identical. A painted link reads as one unit (arrows
 // step over it, Backspace and Delete at its edge remove it whole); a caret that lands inside it
 // anyway shows the stored words, so what the author edits is what is stored.
 //
-// A target the host says is gone (`{ missing: true }`, from wikilinkTitle or linkPreviewSource)
-// keeps its words and carries `data-wikilink-missing`, for the host to style.
+// A target the host says is gone (`{ missing: true }`, from wikilinkResolve or linkPreviewSource)
+// keeps its words and carries `data-missing`, for the host to style.
 
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -21,7 +21,6 @@ export const linkKey = (attrs) => (attrs && attrs.docId ? `id:${attrs.docId}` : 
 
 // A host answer as { title?, missing? }, or null for "paint the stored words".
 export function readAnswer(answer) {
-  if (typeof answer === "string") return answer ? { title: answer } : null;
   if (!answer || typeof answer !== "object") return null;
   if (answer.missing === true) return { missing: true };
   return typeof answer.title === "string" && answer.title ? { title: answer.title } : null;
@@ -78,7 +77,7 @@ function decorate(doc, known, inside) {
   for (const run of linkRuns(doc)) {
     const info = known.get(linkKey(run.mark.attrs));
     if (info && info.missing) {
-      decorations.push(Decoration.inline(run.from, run.to, { "data-wikilink-missing": "" }));
+      decorations.push(Decoration.inline(run.from, run.to, { "data-missing": "" }));
       continue;
     }
     const title = liveTitle(run, info);
@@ -129,7 +128,7 @@ function handleKey(view, event, editable) {
   return true;
 }
 
-// `host` is the canvas: `wikilinkTitle` is its callback, `_editable` its mode.
+// `host` is the canvas: `wikilinkResolve` is its callback, `_editable` its mode.
 export function wikilinkTitles(host) {
   const editable = () => !!(host && host._editable);
   return Extension.create({
@@ -159,7 +158,7 @@ export function wikilinkTitles(host) {
         view: (view) => {
           const asked = new Map();
           const ask = () => {
-            const source = host && host._wikilinkTitle;
+            const source = host && host._wikilinkResolve;
             if (typeof source !== "function") return;
             const { generation } = wikilinkTitlesKey.getState(view.state);
             for (const run of linkRuns(view.state.doc)) {

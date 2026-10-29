@@ -11,7 +11,7 @@ below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkTitle` callback (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-wikilink-missing`), and keeps the picker's footer on one line.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed or pasted `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line.
 
 ## The element
 
@@ -131,7 +131,7 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 | `wikilinkSource` | `(query) => [{ title, id, type }]` | the `[[` menu never opens |
 | `tagSource` | `(query) => [name, ...]` (strings) | the `#` menu never opens |
 | `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href?, subtitle?, badge?, missing? } \| null` | the hover card shows the address only |
-| `wikilinkTitle` | `(docId) => title \| { title?, missing? } \| null` (1.17.0) | a document link shows its stored words |
+| `wikilinkResolve` | `(docId) => { title?, missing? } \| null` (1.17.0) | a document link shows its stored words |
 | `mediaUploader` | `(file) => url \| { src?, url?, alt? }` | a pasted or dropped image shows `no media uploader is connected` |
 | `mediaPicker` | `({ kind: "insert" \| "replace", current: { src, alt } \| null }) => { src, alt?, width? } \| null` | an Image insert is the empty image block, and images offer no Select |
 | `editBlockObject` | `({ type, title, inline, fields, value, error }) => value \| null` | declared objects are edited in the canvas's own popover |
@@ -149,8 +149,8 @@ becomes the address `bp-canvas-open-link` reports. For a `wikilink`, a returned
 `subtitle` replaces the card's `[[target]]` line (an empty one hides it) and `badge`
 shows beside the title (the document's type). A wikilink's `missing: true` (1.17.0) says
 its target is gone: the card and the pill hide Open, and every link to that target
-(the same `docId`, or the same `target` when it has none) carries `data-wikilink-missing`
-until an answer object without it says the target is back; `null`, a throw or a
+(the same `docId`, or the same `target` when it has none) carries `data-missing` on its
+words until an answer object without it says the target is back; `null`, a throw or a
 rejection changes nothing. In edit mode the card's Remove drops
 the whole link (or document link) from its run, keeping the words. `mediaUploader` gets one
 `File` per image (`image/*` only); a result with no `src`/`url` (or a throw) marks
@@ -163,21 +163,31 @@ pick are one undo step. The `src` goes through the reader's URL allowlist (`safe
 http(s), mailto, tel, relative, `#`); one it refuses (`javascript:`, `data:`,
 protocol-relative), a blank `src`, `null` or a throw leaves the image as it was.
 
-`wikilinkTitle` (1.17.0) is the current title of a document link's target, asked once
-per `docId` in the run (and for each link added later). A link whose words are its
-stored `target` and that has no `alias` (as a `[[` pick writes it) shows the answered
-title in place of its words; an aliased link, or one over the author's own words,
-keeps them. The canvas paints the title and never writes it: the body, every op and
-every save keep the stored words byte-identical, and painting emits nothing. Setting
-the property again (the same function is fine) asks every link again, so a host repaints
-after a rename by re-assigning it; what is painted stays until each answer lands. A
-painted link reads as one unit in edit mode: an arrow steps over it, Backspace at its
-end or Delete at its start removes it whole (one undo step), and a caret that lands
-inside shows the stored words, which is what an edit there changes. `{ missing: true }`
-marks the link as `linkPreviewSource`'s does. A `null`, `""`, other value, throw or
-rejection shows the stored words; an answer to an older assignment is dropped; `null`
-as the property clears every painted title and mark. Find and `state()` read the
-stored words.
+`wikilinkResolve` (1.17.0) answers `{ title?, missing? }` for a document link's target. It
+is asked once per `docId` in the run (and for each link added later), and the canvas keeps
+each answer until `refreshWikilinks()` asks every link again. A link whose words are its
+stored `target` and that has no `alias` (as a `[[` pick writes it) shows the answered `title`
+in place of its words; an aliased link, or one over the author's own words, keeps them. The
+canvas paints the title and never writes it: the body, every op and every save keep the
+stored words byte-identical, and painting emits nothing. After a rename or a delete the host
+calls `refreshWikilinks()` (setting the property again does the same); what is painted stays
+until each answer lands. A painted link reads as one unit in edit mode: an arrow steps over
+it, Backspace at its end or Delete at its start removes it whole (one undo step), and a caret
+that lands inside shows the stored words, which is what an edit there changes.
+`{ missing: true }` marks the link as `linkPreviewSource`'s does. A bare string, `null`, an
+empty title, any other value, a throw or a rejection shows the stored words; an answer from
+before the last refresh is dropped; `null` as the property clears every painted title and
+mark. Find and `state()` read the stored words.
+
+A typed or pasted `[[Title]]` becomes a document link (1.17.0) only when `wikilinkSource(Title)`
+returns a row whose `title` equals `Title`, ignoring case, and that has an `id`. It is
+written as a `[[` pick writes it: the row's `title` as the words and `target`, its `id` as
+`docId`. Typing asks when the closing `]]` is typed; a paste asks once for each `[[Title]]` in
+the pasted text. Anything else leaves the text as it was: no matching row, a throw or a
+rejection, an edit to the brackets before the answer lands, text inside inline code or an
+existing link, and no `wikilinkSource`. Text that arrives any other way (`blocks`,
+`applyServerBlocks`, undo) is never asked about. The link is its own undo step, so Mod+Z
+brings back the typed brackets.
 
 `editBlockObject` is the host's own editor for an object the field declares (a
 block under `blocks.of`, an inline object under `blocks.inline`): set, every insert
@@ -234,6 +244,11 @@ host can act on it (leave the editor, close a pane). With a menu open the canvas
 closes it and prevents the default (1.15.0; before it, ProseMirror prevented every
 Escape).
 
+Mod+Enter (Cmd or Ctrl, 1.17.0): the canvas edits nothing. The keydown bubbles out with
+`defaultPrevented` false, so the host can act on it (follow the link under the caret); if the
+host leaves it alone, the browser's own newline is held back too. Before 1.17.0 it inserted a
+line break, saved as a `"\n"` in the text.
+
 `bp-canvas-mount-failed`: the editor is hidden, the run is painted read-only in a
 `.bp-canvas-mount-failed` fallback, the element gets `data-mount-failed="true"`,
 and it stays read-only. `blockIds` are the ids of the run it could not open.
@@ -271,6 +286,7 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `recoverySnapshot()` | the live document for a reconnect halt | `{ mode: "rich"\|"markdown", blocks?, raw_source?, raw_editor_document?, serialization_error? }` |
 | `focusBlock(id)` | place the caret in the top-level block `id`; an id not yet in the run is retried on the next external apply within 5s | `true` when placed |
 | `selectBlock(id)` | select the top-level image or object block `id` as a click on its card does (1.12.0); text typed onto a selected card on a `block-cards` canvas is dropped, Backspace/Delete still remove it | `true` when selected |
+| `refreshWikilinks()` | ask `wikilinkResolve` again for every document link, after a rename or a delete (1.17.0) | nothing |
 | `focusFirstBodyBlock()` | caret into the first unlocked block (editable only) | `true` when placed |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
 

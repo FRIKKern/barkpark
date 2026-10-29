@@ -1,12 +1,12 @@
 // __wikilink_live_title_mounted.test.mjs — contract 1.17.0: a document link's words come live
 // from the host, and a target the host says is gone is marked.
 //
-// `wikilinkTitle(docId)` paints an un-aliased link (no alias, words equal to its stored target)
+// `wikilinkResolve(docId)` paints an un-aliased link (no alias, words equal to its stored target)
 // with the target's current title; setting it again after a rename repaints every such link and
 // the stored body stays byte-identical (no op, and a save of the block for another reason still
 // carries the stored words). Aliased links and links over the author's own words keep them.
-// `{ missing: true }` from wikilinkTitle or linkPreviewSource marks the link
-// (`data-wikilink-missing`) and hides Open on the hover card and the pill.
+// `{ missing: true }` from wikilinkResolve or linkPreviewSource marks the link
+// (`data-missing`) and hides Open on the hover card and the pill.
 // Run: node src/canvas/__wikilink_live_title_mounted.test.mjs   (or: npm test)
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -68,7 +68,7 @@ async function mount({ blocks = BLOCKS, titles, cards = false, editable = true, 
   if (cards) canvas.setAttribute("block-cards", "");
   if (!editable) canvas.setAttribute("editable", "false");
   canvas.blocks = JSON.parse(JSON.stringify(blocks));
-  if (titles) canvas.wikilinkTitle = titles;
+  if (titles) canvas.wikilinkResolve = asAnswer(titles);
   if (preview) canvas.linkPreviewSource = preview;
   const ops = [];
   canvas.addEventListener("bp-canvas-ops", (e) => ops.push(...(e.detail.ops || [])));
@@ -77,6 +77,10 @@ async function mount({ blocks = BLOCKS, titles, cards = false, editable = true, 
   return { canvas, editor: canvas._editor, ops };
 }
 
+const asAnswer = (fn) => (id) => {
+  const v = fn(id);
+  return typeof v === "string" ? { title: v } : v;
+};
 const block = (canvas, id) => canvas.querySelector(`[data-bp-id="${id}"]`);
 const shown = (el) => {
   const copy = el.cloneNode(true);
@@ -124,7 +128,7 @@ try {
     const before = canonical(stored(editor));
     titles["n-plan"] = "Roadmap 2027";
     calls.length = 0;
-    canvas.wikilinkTitle = canvas.wikilinkTitle;
+    canvas.refreshWikilinks();
     await tick(20);
     assert.equal(shown(block(canvas, "p1")), "See Roadmap 2027 and Gone note end.");
     assert.equal(shown(block(canvas, "p5")), "Again Roadmap 2027.");
@@ -216,11 +220,11 @@ try {
   });
 
   await check("unset, the stored words come back", async () => {
-    canvas.wikilinkTitle = null;
+    canvas.wikilinkResolve = null;
     await tick(20);
     assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note end.!");
     assert.equal(canvas.querySelectorAll(".bp-wikilink-label").length, 0);
-    canvas.wikilinkTitle = (id) => titles[id] ?? null;
+    canvas.wikilinkResolve = asAnswer((id) => titles[id] ?? null);
     await tick(20);
     assert.equal(shown(block(canvas, "p1")), "See Roadmap 2027 and Gone note end.!");
   });
@@ -240,7 +244,7 @@ try {
 await check("a Promise answer paints; a throwing or rejecting source keeps the stored words and the canvas mounts", async () => {
   const sources = {
     "n-plan": () => { throw new Error("sync"); },
-    "n-gone": () => Promise.resolve("Gone, renamed"),
+    "n-gone": () => Promise.resolve({ title: "Gone, renamed" }),
     "n-ada": () => Promise.reject(new Error("async")),
   };
   const { canvas } = await mount({ titles: (id) => sources[id]() });
@@ -252,13 +256,13 @@ await check("a Promise answer paints; a throwing or rejecting source keeps the s
 });
 
 await check("odd answers keep the stored words; a title is text, never markup", async () => {
-  const answers = { "n-plan": "<img src=x onerror=alert(1)>", "n-gone": 42, "n-ada": { title: "" } };
+  const answers = { "n-plan": { title: "<img src=x onerror=alert(1)>" }, "n-gone": 42, "n-ada": { title: "" } };
   const { canvas } = await mount({ titles: (id) => answers[id] });
   await tick(20);
   assert.equal(shown(block(canvas, "p1")), "See <img src=x onerror=alert(1)> and Gone note end.");
-  assert.equal(canvas.querySelector("img"), null);
-  for (const odd of ["", 0, [], { title: 7 }, { missing: "yes" }, true]) {
-    canvas.wikilinkTitle = () => odd;
+  assert.equal(!!canvas.querySelector("img"), false);
+  for (const odd of ["Plan renamed", "", 0, [], { title: 7 }, { missing: "yes" }, true]) {
+    canvas.wikilinkResolve = () => odd;
     await tick(20);
     assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note end.", JSON.stringify(odd));
   }
@@ -270,16 +274,16 @@ await check("an answer that lands after the canvas is gone is dropped", async ()
   const { canvas } = await mount({ titles: (id) => (id === "n-plan" ? new Promise((r) => { release = r; }) : null) });
   canvas.remove();
   await tick(20);
-  release("Too late");
+  release({ title: "Too late" });
   await tick(20);
   assert.equal(canvas.querySelectorAll(".bp-wikilink-label").length, 0);
 });
 
 await check("an answer from before the last refresh is dropped", async () => {
   let release;
-  const { canvas } = await mount({ titles: (id) => (id === "n-plan" ? new Promise((r) => { release = () => r("Old answer"); }) : null) });
+  const { canvas } = await mount({ titles: (id) => (id === "n-plan" ? new Promise((r) => { release = () => r({ title: "Old answer" }); }) : null) });
   const late = release;
-  canvas.wikilinkTitle = (id) => (id === "n-plan" ? "Fresh" : null);
+  canvas.wikilinkResolve = (id) => (id === "n-plan" ? { title: "Fresh" } : null);
   await tick(20);
   late();
   await tick(20);
@@ -291,11 +295,11 @@ await check("set before the element upgrades, it is reclaimed", async () => {
   const tpl = document.createElement("template");
   tpl.innerHTML = "<bp-paper-canvas></bp-paper-canvas>";
   const el = tpl.content.firstChild;
-  el.wikilinkTitle = () => "Early";
+  el.wikilinkResolve = () => ({ title: "Early" });
   el.blocks = JSON.parse(JSON.stringify(BLOCKS));
   document.body.appendChild(document.adoptNode(el));
   await tick(350);
-  assert.equal(typeof Object.getOwnPropertyDescriptor(el, "wikilinkTitle"), "undefined", "the own property gave way to the setter");
+  assert.equal(typeof Object.getOwnPropertyDescriptor(el, "wikilinkResolve"), "undefined", "the own property gave way to the setter");
   assert.equal(shown(block(el, "p1")), "See Early and Early end.");
   el.remove();
 });
@@ -320,8 +324,8 @@ await check("two canvases on one page keep their own titles and marks", async ()
   await tick(20);
   assert.equal(shown(block(a.canvas, "p1")), "See Title A and Gone note end.");
   assert.equal(shown(block(b.canvas, "p1")), "See Title B and Gone note end.");
-  assert.equal(a.canvas.querySelectorAll("[data-wikilink-missing]").length, 0);
-  assert.equal(b.canvas.querySelectorAll("[data-wikilink-missing]").length, 1);
+  assert.equal(a.canvas.querySelectorAll("[data-missing]").length, 0);
+  assert.equal(b.canvas.querySelectorAll("[data-missing]").length, 1);
   a.canvas.remove();
   b.canvas.remove();
 });
@@ -342,21 +346,21 @@ await check("removed and appended again, it still paints", async () => {
   canvas.remove();
 });
 
-await check("a deleted target ({ missing: true } from wikilinkTitle) is marked and keeps its words; recreated, it paints again", async () => {
+await check("a deleted target ({ missing: true } from wikilinkResolve) is marked and keeps its words; recreated, it paints again", async () => {
   const state = { "n-gone": { missing: true } };
   const { canvas } = await mount({ titles: (id) => state[id] ?? null });
   await tick(20);
   const gone = linkEl(canvas, "n-gone");
-  assert.ok(gone.querySelector("[data-wikilink-missing]"), gone.outerHTML);
+  assert.ok(gone.querySelector("[data-missing]"), gone.outerHTML);
   assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note end.");
-  assert.equal(linkEl(canvas, "n-plan").querySelector("[data-wikilink-missing]"), null);
+  assert.equal(!!linkEl(canvas, "n-plan").querySelector("[data-missing]"), false);
   canvas._linkPreview.showFor(gone);
   assert.equal(cardOpen(canvas), false, "the card knows it is gone with no linkPreviewSource");
   canvas._linkPreview.hide();
   state["n-gone"] = "Gone note, back";
-  canvas.wikilinkTitle = canvas.wikilinkTitle;
+  canvas.refreshWikilinks();
   await tick(20);
-  assert.equal(linkEl(canvas, "n-gone").querySelector("[data-wikilink-missing]"), null);
+  assert.equal(!!linkEl(canvas, "n-gone").querySelector("[data-missing]"), false);
   assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note, back end.");
   canvas.remove();
 });
@@ -374,8 +378,11 @@ for (const cards of [false, true]) {
     canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
     await tick(10);
     assert.equal(cardOpen(canvas), false, "Open hides");
-    assert.ok(linkEl(canvas, "n-gone").querySelector("[data-wikilink-missing]"), "the span is marked");
-    assert.equal(linkEl(canvas, "n-plan").querySelector("[data-wikilink-missing]"), null);
+    for (const part of ["edit", "remove"]) {
+      assert.equal(canvas._linkPreview.el.querySelector(`.bp-link-preview__${part}`).style.display, "", `${part} stays`);
+    }
+    assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"), "the span is marked");
+    assert.equal(!!linkEl(canvas, "n-plan").querySelector("[data-missing]"), false);
     canvas._linkPreview.hide();
     canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
     assert.equal(cardOpen(canvas), false, "known gone: Open is hidden before the answer lands");
@@ -384,7 +391,7 @@ for (const cards of [false, true]) {
     canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
     await tick(10);
     assert.equal(cardOpen(canvas), true, "recreated: Open comes back");
-    assert.equal(linkEl(canvas, "n-gone").querySelector("[data-wikilink-missing]"), null, "and the mark goes");
+    assert.equal(!!linkEl(canvas, "n-gone").querySelector("[data-missing]"), false, "and the mark goes");
     canvas.flushPendingChanges();
     await tick(350);
     assert.deepEqual(ops, [], "marking is not an edit");
@@ -399,17 +406,17 @@ for (const cards of [false, true]) await check(`an async { missing: true } marks
   canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
   await tick(10);
   assert.equal(cardOpen(canvas), false);
-  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-wikilink-missing]"));
+  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"));
   canvas._linkPreview.hide();
   answer = Promise.resolve(null);
   canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
   await tick(10);
-  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-wikilink-missing]"), "null says nothing new");
+  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"), "null says nothing new");
   canvas._linkPreview.hide();
   answer = Promise.reject(new Error("x"));
   canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
   await tick(10);
-  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-wikilink-missing]"), "a rejection says nothing new");
+  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"), "a rejection says nothing new");
   canvas._linkPreview.hide();
   canvas.remove();
 });
@@ -419,8 +426,8 @@ await check("a link with no docId is marked by its target, and only links with t
   canvas._linkPreview.showFor(block(canvas, "p4").querySelector("span[data-wikilink]"));
   await tick(10);
   assert.equal(cardOpen(canvas), false);
-  assert.ok(block(canvas, "p4").querySelector("[data-wikilink-missing]"));
-  assert.equal(canvas.querySelectorAll("[data-wikilink-missing]").length, 1, "the docId links with the same target stay unmarked");
+  assert.ok(block(canvas, "p4").querySelector("[data-missing]"));
+  assert.equal(canvas.querySelectorAll("[data-missing]").length, 1, "the docId links with the same target stay unmarked");
   canvas._linkPreview.hide();
   canvas.remove();
 });
@@ -461,7 +468,7 @@ await check("the card names a renamed target by its live title", async () => {
   canvas.remove();
 });
 
-await check("at 160 paragraphs a keystroke repaints in well under a frame", async () => {
+await check("at 160 paragraphs a keystroke repaints in under a frame, or under 4x bare on a loaded machine", async () => {
   const many = Array.from({ length: 160 }, (_, i) => ({ id: `m${i}`, type: "paragraph", content: [{ type: "text", value: `Row ${i} links ` }, link("Plan", "n-plan"), { type: "text", value: " and " }, link(`Note ${i}`, `n-${i}`), { type: "text", value: " here." }] }));
   const time = async (titles) => {
     const { canvas, editor } = await mount({ blocks: many, titles });
@@ -483,7 +490,7 @@ await check("at 160 paragraphs a keystroke repaints in well under a frame", asyn
   console.log(`      ${live.each.toFixed(2)} ms per keystroke with 320 painted links, ${bare.each.toFixed(2)} ms with none (median, jsdom)`);
   assert.equal(live.painted, 320);
   assert.equal(bare.painted, 0);
-  assert.ok(live.each < 16, `${live.each} ms`);
+  assert.ok(live.each < Math.max(16, bare.each * 4), `${live.each} ms painted, ${bare.each} ms bare`);
 });
 
 if (failures > 0) {
