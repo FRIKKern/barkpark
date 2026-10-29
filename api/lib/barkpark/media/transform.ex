@@ -426,10 +426,15 @@ defmodule Barkpark.Media.Transform do
     {max(round(sw * s), 1), max(round(sh * s), 1)}
   end
 
+  # Scaled to cover the box, each side rounded as `contain/5` rounds it
+  # (task-7650ef5989e4063d): Sanity's CDN cuts its crop from that same
+  # rounded resize, so `w=210&h=110&fit=crop&crop=top` on a 640x400 image is
+  # rows 0-109 of the 210x131 `w=210` image. Rounding up made it 210x132, a
+  # stretch that moved every row (0.031 RMSE from Sanity, 0.0067 now).
   defp cover(plan, sw, sh, w, h) do
     s = max(w / sw, h / sh)
-    rw = max(ceil(sw * s), w)
-    rh = max(ceil(sh * s), h)
+    rw = max(round(sw * s), w)
+    rh = max(round(sh * s), h)
     %{resize: {rw, rh}, crop: crop_box(plan, rw, rh, w, h)}
   end
 
