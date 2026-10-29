@@ -287,9 +287,9 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     background =
       case {bg, Image.bands(image)} do
         {nil, bands} -> List.duplicate(255, bands)
-        {{r, g, b, a}, 4} -> [r, g, b, a]
+        {{r, g, b, a}, 4} -> [r, g, b, Transform.fill_alpha(a)]
         {{r, g, b, _a}, 3} -> [r, g, b]
-        {{r, g, b, a}, 2} -> [round((r + g + b) / 3), a]
+        {{r, g, b, a}, 2} -> [round((r + g + b) / 3), Transform.fill_alpha(a)]
         {{r, g, b, _a}, bands} -> List.duplicate(round((r + g + b) / 3), bands)
       end
 

@@ -245,7 +245,10 @@ defmodule Barkpark.Media.Transform do
     [
       Map.get(plan, :blur) && "blur=#{plan.blur}",
       Map.get(plan, :sharp) && "sharp=#{plan.sharp}",
-      Map.get(plan, :bg) && "bg=#{format_bg(plan.bg)}",
+      # A translucent bg renders with `fill_alpha/1` since task-d2d0a7f4bb37c627;
+      # `~2` gives those plans a new key so a file cached before is not served.
+      Map.get(plan, :bg) &&
+        "bg=#{format_bg(plan.bg)}#{if elem(plan.bg, 3) < 255, do: "~2"}",
       # `pad-in`: the padding sits inside `w`/`h` since task-da6a60b6d5e649f8,
       # so a padded URL cached before it renders anew.
       Map.get(plan, :pad, 0) > 0 && "pad-in=#{plan.pad}",
@@ -272,6 +275,15 @@ defmodule Barkpark.Media.Transform do
     Map.get(plan, :orient, 0) in [90, 270] and Map.get(plan, :pad, 0) == 0 and
       (is_integer(Map.get(plan, :w)) or is_integer(Map.get(plan, :h)))
   end
+
+  @doc """
+  The alpha a `bg` fill is drawn with, as Sanity's CDN draws it
+  (task-d2d0a7f4bb37c627): the colour laid over itself once more,
+  `floor(255 - (255 - a)^2 / 255)`. Measured on its e2e-local fixture with
+  `fit=fill`: 0x20 gives 59, 0x40 111, 0x80 191, 0xc0 239; 0 and 255 stay.
+  """
+  @spec fill_alpha(0..255) :: 0..255
+  def fill_alpha(a) when a in 0..255, do: div(255 * 255 - (255 - a) * (255 - a), 255)
 
   defp format_bg({r, g, b, a}),
     do: Enum.map_join([a, r, g, b], &String.pad_leading(Integer.to_string(&1, 16), 2, "0"))
