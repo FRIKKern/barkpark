@@ -423,6 +423,94 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert replay_json["previousRev"] == live_json["previousRev"]
   end
 
+  def forward_webhook_selection(_event, _measurements, metadata, pid),
+    do: send(pid, {:webhook_selected, metadata})
+
+  defp watch_webhook_selection do
+    id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      id,
+      [:barkpark, :webhooks, :fan_out, :selected],
+      &__MODULE__.forward_webhook_selection/4,
+      self()
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
+  # task-1bbff112e31873ff: a patch to a published doc with no draft writes the
+  # first `drafts.<id>` row. That row is new, but the patch is an edit of the
+  # published rev, so the frame is an `update` chained on that rev, on both legs.
+  # The webhook keeps the storage action, `create`: its `events` filter matches it.
+  test "a patch to a published doc emits update with the published rev as previousRev" do
+    {:ok, published} = Content.publish_document("l1", "post", @dataset)
+    watch_webhook_selection()
+
+    Phoenix.PubSub.subscribe(
+      Barkpark.PubSub,
+      Barkpark.Content.Broadcast.doc_topic("l1", "post", published.workspace_id, @dataset)
+    )
+
+    since = ListenController.replay_since(@dataset, 0) |> Enum.map(& &1.id) |> Enum.max()
+
+    {:ok, {_tx, [%{document: %{"_rev" => draft_rev}}]}} =
+      Content.apply_mutations(
+        [
+          %{
+            "patch" => %{
+              "id" => "l1",
+              "type" => "post",
+              "set" => %{"body" => "edited"},
+              "ifRevisionID" => published.rev
+            }
+          }
+        ],
+        @dataset
+      )
+
+    [ev] = ListenController.replay_since(@dataset, since) |> Enum.to_list()
+    replay = ev |> ListenController.format_event(@dataset) |> frame_data()
+
+    assert %{
+             "mutation" => "update",
+             "documentId" => "drafts.l1",
+             "rev" => ^draft_rev,
+             "previousRev" => prev
+           } = replay
+
+    assert prev == published.rev
+
+    assert_receive {:doc_updated, %{doc_id: "drafts.l1"} = msg}
+
+    live =
+      msg
+      |> ListenController.live_event(msg.document)
+      |> ListenController.format_event(@dataset)
+      |> frame_data()
+
+    assert Map.take(live, ~w(mutation rev previousRev)) ==
+             Map.take(replay, ~w(mutation rev previousRev))
+
+    assert_receive {:webhook_selected, %{dataset: @dataset, doc_id: "drafts.l1", event: "create"}}
+  end
+
+  test "a Studio save of a published doc chains its first draft on the published rev" do
+    {:ok, published} = Content.publish_document("l1", "post", @dataset)
+    since = ListenController.replay_since(@dataset, 0) |> Enum.map(& &1.id) |> Enum.max()
+
+    {:ok, draft, _errors} =
+      Content.upsert_draft(published, "post", nil, %{"body" => "studio edit"}, @dataset)
+
+    assert draft.doc_id == "drafts.l1"
+    [ev] = ListenController.replay_since(@dataset, since) |> Enum.to_list()
+
+    assert %{"mutation" => "update", "documentId" => "drafts.l1", "previousRev" => prev} =
+             ev |> ListenController.format_event(@dataset) |> frame_data()
+
+    assert prev == published.rev
+  end
+
   # task-0951e10cb60b409c: SSE syncTags carry the webhook's tag set, scoped and
   # flat, so a consumer that tags scoped reads can revalidate from the stream.
   test "syncTags match the webhook sync_tags for the same mutation, on both legs" do

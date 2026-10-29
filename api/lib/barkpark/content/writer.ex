@@ -1636,7 +1636,7 @@ defmodule Barkpark.Content.Writer do
                     dataset,
                     type,
                     "create",
-                    nil,
+                    Keyword.get(opts, :forked_from_rev),
                     Keyword.get(opts, :source, :api),
                     Keyword.get(opts, :user_id),
                     caller_context: Keyword.get(opts, :caller_context)
@@ -2688,7 +2688,7 @@ defmodule Barkpark.Content.Writer do
             {:error, :not_found}
 
           %Document{rev: actual} ->
-            {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+            {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: existing.doc_id}}}
         end
     end
   end

@@ -42,7 +42,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 **Query parameters:**
 
 | Param | Default | Notes |
-|-------|---------|-------|
+|---|---|---|
 | `perspective` | `published` | `published\|drafts\|raw`; unsupported → 400; tokenless pinned `published` |
 | `limit` | `100` | Int 1–1000, clamped; non-integer → 400 |
 | `offset` | `0` | Int, clamped; non-integer → 400 |
@@ -84,13 +84,13 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 ### Mutation kinds
 
-**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact id + rev (missing →404, stale →412); removes only that draft, keeping history. Lost reply: reconcile, never retry.
+**`deleteExactDraft`** — `{"id":"drafts.<id>","type","ifRevisionID"}`: exact id + rev (missing →404, stale →412); removes only that draft, keeping history. Lost reply: reconcile, never retry.
 
 **`create`** — new draft (`conflict` if one exists): `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
 **`createOrReplace`** — upserts the draft; **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
 
-**Direct publish** — `{ "createOrReplace": {…}, "publish": true }` is one write to `<id>` (one revision, event, audit row); publish gates run; drafts deleted; `ifRevisionID` checks `<id>`; `task`/`paper`/system types → 422.
+**Direct publish** — `{"createOrReplace":{…},"publish":true}` is one write to `<id>` (one revision, event, audit row); publish gates run; drafts deleted; `ifRevisionID` checks `<id>`; `task`/`paper`/system types → 422.
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
@@ -98,12 +98,12 @@ The create kinds write the **draft** row. On a **published `task`** id, `create`
 
 **`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set`. `ifRevisionID`: mismatch → `412` (`ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`; one doc's patches serialize.
 
-The next four take `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 (`delete`/`patch` read missing `type` from the row):
+The next four take `{"<kind>":{"id":"my-post","type":"post"}}`; missing `id`/`type` → 422 (`delete`/`patch` read missing `type` from the row):
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — deletes `<id>`; keeps `drafts.<id>`, else copies `<id>` there.
 - **`discardDraft`** — deletes `drafts.<id>` only.
-- **`delete`** — `<id>`: both rows; `drafts.<id>`: only the draft. Honors `ifRevisionID`.
+- **`delete`** — `<id>`: both rows, at either row's rev; `drafts.<id>`: only the draft, at its rev.
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. May add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
@@ -125,7 +125,7 @@ SSE: a `/w/…/p/…` URL streams a project, a flat URL a workspace.
 
 First frame: `event: welcome`. `?query=*[…]`: docs matching before/after, with `transition`; `includeResult=false` no result.
 
-**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
+**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`; first draft on a published doc: `update`, its rev), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
 
 **Closes:** a slow reader: `event: overloaded`; past 20 streams a credential+address, 100 in all: `event: disconnect`.
 
@@ -156,7 +156,7 @@ Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless leg
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`. §6 schema `validation_failed` adds `findings:[{path,message,code,params}]`.
 
-Core: `not_found` 404 · `unauthorized` 401 · `forbidden` 403 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `bad_request` 400/422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
+Core: `not_found` 404 · `unauthorized` 401 · `forbidden` 403 · `precondition_failed` 412 (`details.expected`/`.actual`; mutate: `.index`, row `.id`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `bad_request` 400/422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
 `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required`/`private_field_bound`/`searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` not an integer; absent = 0) · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`).
 

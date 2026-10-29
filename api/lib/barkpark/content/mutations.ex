@@ -414,7 +414,8 @@ defmodule Barkpark.Content.Mutations do
   defp apply_all(mutations, dataset, opts, caller) do
     {chunks_results, _cache} =
       mutations
-      |> Enum.chunk_by(&delete_mutation?/1)
+      |> Enum.with_index()
+      |> Enum.chunk_by(fn {m, _index} -> delete_mutation?(m) end)
       |> Enum.map_reduce(%{}, fn chunk, cache ->
         apply_chunk(chunk, dataset, opts, caller, cache)
       end)
@@ -454,11 +455,11 @@ defmodule Barkpark.Content.Mutations do
 
   defp publish_opts(_, opts, _), do: opts
 
-  defp apply_chunk([_, _ | _] = chunk, dataset, opts, caller, cache) do
-    if delete_mutation?(hd(chunk)) do
+  defp apply_chunk([{first, _}, _ | _] = chunk, dataset, opts, caller, cache) do
+    if delete_mutation?(first) do
       ids =
         chunk
-        |> Enum.map(fn %{"delete" => %{"id" => id}} -> DraftId.published_id(id) end)
+        |> Enum.map(fn {%{"delete" => %{"id" => id}}, _index} -> DraftId.published_id(id) end)
         |> Enum.uniq()
 
       precomputed = ReferenceIntegrity.referrers_for_ids(ids, dataset, opts)
@@ -474,7 +475,7 @@ defmodule Barkpark.Content.Mutations do
     do: apply_each(chunk, dataset, opts, caller, cache)
 
   defp apply_each(chunk, dataset, opts, caller, cache) do
-    Enum.map_reduce(chunk, cache, fn m, cache ->
+    Enum.map_reduce(chunk, cache, fn {m, index}, cache ->
       case with_exact_id(m, dataset, opts, fn m ->
              apply_one(m, dataset, publish_opts(m, opts, cache))
            end) do
@@ -495,10 +496,18 @@ defmodule Barkpark.Content.Mutations do
           {[], cache}
 
         {:error, reason} ->
-          Repo.rollback(reason)
+          Repo.rollback(name_failing_mutation(reason, index))
       end
     end)
   end
+
+  # A batch fails whole, so a 412 names the mutation that failed and the row it
+  # compared: the client resends that one, not the batch one by one
+  # (task-38c5c28f0fcef9eb).
+  defp name_failing_mutation({:rev_mismatch, %{} = details}, index),
+    do: {:rev_mismatch, Map.put(details, :index, index)}
+
+  defp name_failing_mutation(reason, _index), do: reason
 
   # ── Exact ids: Sanity's mutate semantics (task-c6cbf346a07ff01e) ───────────
   #
@@ -896,8 +905,11 @@ defmodule Barkpark.Content.Mutations do
     case existing do
       %_{} = doc ->
         case if_rev(attrs) do
-          nil -> {:error, :conflict}
-          expected -> {:error, {:rev_mismatch, %{expected: expected, actual: doc.rev}}}
+          nil ->
+            {:error, :conflict}
+
+          expected ->
+            {:error, {:rev_mismatch, %{expected: expected, actual: doc.rev, id: doc.doc_id}}}
         end
 
       _ ->
@@ -946,7 +958,7 @@ defmodule Barkpark.Content.Mutations do
         end
 
       with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
-           :ok <- ensure_rev(existing, expected),
+           :ok <- ensure_rev(existing, expected, id && DraftId.published_id(id)),
            :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
            :ok <-
              ensure_read_only_unchanged(
@@ -986,7 +998,7 @@ defmodule Barkpark.Content.Mutations do
     # (migration 20260528100000 seeds already-`done` rows) keeps working while
     # a write ONTO a live claimed/open task is fenced exactly like a patch.
     with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
-         :ok <- ensure_rev(existing, expected),
+         :ok <- ensure_rev(existing, expected, id && DraftId.draft_id(id)),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
@@ -1096,7 +1108,7 @@ defmodule Barkpark.Content.Mutations do
              do: {:ok, doc, "delete"}
 
       _ ->
-        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+        with :ok <- ensure_rev(nil, if_rev(op), id), do: {:error, :not_found}
     end
   end
 
@@ -1110,28 +1122,20 @@ defmodule Barkpark.Content.Mutations do
                do: {:ok, doc, "delete"}
 
         expected ->
-          # The guard must read the SAME row-set delete_document acts on. It removes
-          # BOTH the draft and published spellings, but get_document is an exact-id
-          # match with no draft/published fallback — so an unpublished doc (present
-          # only as drafts.<id>) guarded by its canonical id would miss the row and
-          # spuriously 412. Read the exact id first (preserves every working case),
-          # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
-          # rev_mismatch for a truly-absent doc — no regression on that path.
-          existing =
-            case Content.get_document(id, type, dataset, opts) do
-              {:ok, d} ->
-                d
+          # A bare id deletes both rows, and a client may hold either one's rev:
+          # the draft's from a drafts/raw read, the published one's from a
+          # published read. Either current rev passes; a stale one is refused
+          # with the draft's rev, as a patch would be (task-12ec0224cff960fe).
+          rows =
+            [DraftId.draft_id(id), DraftId.published_id(id)]
+            |> Enum.flat_map(fn v ->
+              case Content.get_document(v, type, dataset, opts) do
+                {:ok, d} -> [d]
+                _ -> []
+              end
+            end)
 
-              _ ->
-                Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
-                  case Content.get_document(v, type, dataset, opts) do
-                    {:ok, d} -> d
-                    _ -> nil
-                  end
-                end)
-            end
-
-          with :ok <- ensure_rev(existing, expected),
+          with :ok <- ensure_any_rev(rows, expected, id),
                {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
             {:ok, doc, "delete"}
           end
@@ -1151,7 +1155,7 @@ defmodule Barkpark.Content.Mutations do
         apply_one(%{mutation | "delete" => Map.put(op, "type", type)}, dataset, opts)
 
       :error ->
-        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+        with :ok <- ensure_rev(nil, if_rev(op), id), do: {:error, :not_found}
     end
   end
 
@@ -1259,7 +1263,12 @@ defmodule Barkpark.Content.Mutations do
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
-             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, fence_rev)),
+             Content.upsert_document(
+               type,
+               attrs,
+               dataset,
+               patch_write_opts(opts, fence_rev, existing)
+             ),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
@@ -1302,7 +1311,12 @@ defmodule Barkpark.Content.Mutations do
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
-             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, fence_rev)),
+             Content.upsert_document(
+               type,
+               attrs,
+               dataset,
+               patch_write_opts(opts, fence_rev, existing)
+             ),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
@@ -2439,6 +2453,16 @@ defmodule Barkpark.Content.Mutations do
 
   defp with_if_rev(opts, _expected), do: opts
 
+  # A patch whose base is the published row writes the first `drafts.<id>`: an
+  # INSERT, announced as an `update` from the published rev (task-1bbff112e31873ff).
+  defp patch_write_opts(opts, fence_rev, %{doc_id: base_id, rev: base_rev}) do
+    opts = with_if_rev(opts, fence_rev)
+
+    if DraftId.draft?(base_id),
+      do: opts,
+      else: Keyword.put(opts, :forked_from_rev, base_rev)
+  end
+
   # A patch's revision fence (task-61e9a7d8a8b51192). `ifRevisionID` alone is the whole
   # document's: any write since, to any field, refuses it (412). `"fence": "fields"` on the
   # patch narrows a stale `ifRevisionID` to the fields the patch touches: when each of them
@@ -2513,16 +2537,25 @@ defmodule Barkpark.Content.Mutations do
     |> Enum.uniq()
   end
 
-  defp ensure_rev(_doc, nil), do: :ok
-  defp ensure_rev(_doc, ""), do: :ok
+  defp ensure_any_rev(rows, expected, id) do
+    if Enum.any?(rows, &(&1.rev == expected)),
+      do: :ok,
+      else: ensure_rev(List.first(rows), expected, id)
+  end
 
-  defp ensure_rev(nil, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: nil}}}
+  # `missing_id` names the row that was looked up and not found, so a 412 on an
+  # absent row still says which row it compared (`details.id`, `actual: nil`).
+  defp ensure_rev(doc, expected, missing_id \\ nil)
+  defp ensure_rev(_doc, nil, _missing_id), do: :ok
+  defp ensure_rev(_doc, "", _missing_id), do: :ok
 
-  defp ensure_rev(%{rev: r}, r), do: :ok
+  defp ensure_rev(nil, expected, missing_id),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: nil, id: missing_id}}}
 
-  defp ensure_rev(%{rev: actual}, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+  defp ensure_rev(%{rev: r}, r, _missing_id), do: :ok
+
+  defp ensure_rev(%{rev: actual, doc_id: id}, expected, _missing_id),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
 
   # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create`
   # conflicts only with an existing DRAFT (docs/api-v1.md), so over an id whose

@@ -344,7 +344,7 @@ defmodule BarkparkWeb.ListenController do
     data =
       %{
         eventId: ev.id,
-        mutation: ev.mutation,
+        mutation: listen_mutation(ev.mutation, ev.previous_rev),
         type: ev.type,
         documentId: ev.doc_id,
         rev: ev.rev,
@@ -364,6 +364,9 @@ defmodule BarkparkWeb.ListenController do
 
     "id: #{ev.id}\nevent: mutation\ndata: #{data}\n\n"
   end
+
+  defp listen_mutation("create", previous_rev) when is_binary(previous_rev), do: "update"
+  defp listen_mutation(mutation, _previous_rev), do: mutation
 
   # Build the SSE event map for a LIVE broadcast `msg` (the same shape
   # `format_event/2` serializes for the replay path). `previous_rev` is carried
