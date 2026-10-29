@@ -173,6 +173,20 @@ defmodule Barkpark.Media.TransformTest do
                max * max
     end
 
+    test "fit=crop resizes to the rounded cover size, as Sanity's CDN does" do
+      g =
+        Transform.geometry(
+          plan!(%{"w" => "210", "h" => "110", "fit" => "crop", "crop" => "top"}),
+          640,
+          400
+        )
+
+      assert {g.resize, g.crop} == {{210, 131}, {0, 0, 210, 110}}
+
+      g = Transform.geometry(plan!(%{"w" => "210", "h" => "210", "fit" => "crop"}), 640, 400)
+      assert {g.resize, g.crop} == {{336, 210}, {63, 0, 210, 210}}
+    end
+
     test "pad sits inside w and h, as on Sanity's CDN; without them it is added around" do
       # Sanity, 640x400 source: w=200&pad=10 is 200x132, w=200&h=200&fit=fill&pad=20
       # is 200x200, pad=10 alone is 660x420.
