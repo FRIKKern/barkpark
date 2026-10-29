@@ -423,11 +423,29 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert replay_json["previousRev"] == live_json["previousRev"]
   end
 
+  def forward_webhook_selection(_event, _measurements, metadata, pid),
+    do: send(pid, {:webhook_selected, metadata})
+
+  defp watch_webhook_selection do
+    id = {__MODULE__, make_ref()}
+
+    :telemetry.attach(
+      id,
+      [:barkpark, :webhooks, :fan_out, :selected],
+      &__MODULE__.forward_webhook_selection/4,
+      self()
+    )
+
+    on_exit(fn -> :telemetry.detach(id) end)
+  end
+
   # task-1bbff112e31873ff: a patch to a published doc with no draft writes the
   # first `drafts.<id>` row. That row is new, but the patch is an edit of the
   # published rev, so the frame is an `update` chained on that rev, on both legs.
+  # The webhook keeps the storage action, `create`: its `events` filter matches it.
   test "a patch to a published doc emits update with the published rev as previousRev" do
     {:ok, published} = Content.publish_document("l1", "post", @dataset)
+    watch_webhook_selection()
 
     Phoenix.PubSub.subscribe(
       Barkpark.PubSub,
@@ -473,6 +491,8 @@ defmodule BarkparkWeb.ListenControllerTest do
 
     assert Map.take(live, ~w(mutation rev previousRev)) ==
              Map.take(replay, ~w(mutation rev previousRev))
+
+    assert_receive {:webhook_selected, %{dataset: @dataset, doc_id: "drafts.l1", event: "create"}}
   end
 
   # task-0951e10cb60b409c: SSE syncTags carry the webhook's tag set, scoped and

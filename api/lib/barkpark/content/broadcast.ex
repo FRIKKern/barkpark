@@ -164,11 +164,13 @@ defmodule Barkpark.Content.Broadcast do
   callers) leaves all three columns NULL — UNMEASURED, never `""`. Nothing a
   request BODY carries reaches this: the context is built from `conn.assigns`.
 
-  `opts[:event]` — `{mutation, previous_rev}` for the event, SSE frame and
-  webhook when they differ from the storage action: a patch that writes the
-  first `drafts.<id>` over a published row is an INSERT, but announced as an
+  `opts[:event]` — `{mutation, previous_rev}` for the mutation event and the
+  listen/SSE frames when they differ from the storage action: the first
+  `drafts.<id>` written over a published row is an INSERT, but announced as an
   `update` from the published rev, so a client chaining revs keeps its chain
-  (task-1bbff112e31873ff). The revision and audit rows keep `action`.
+  (task-1bbff112e31873ff). The revision, the audit row and the webhook keep
+  `action`: webhook `events` filters match the storage action (`Webhook`'s
+  `patch` note), so a `["create"]` subscription still fires on a draft fork.
   """
   def tap_broadcast(
         result,
@@ -243,7 +245,7 @@ defmodule Barkpark.Content.Broadcast do
 
         maybe_broadcast(doc_topic, {:doc_updated, msg})
 
-        maybe_dispatch_webhook(dataset, event_action, type, doc.doc_id, msg.document, ev.id,
+        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id,
           workspace_id: doc.workspace_id,
           project_id: doc.project_id
         )
