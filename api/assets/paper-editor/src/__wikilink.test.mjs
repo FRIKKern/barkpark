@@ -128,6 +128,11 @@ check("an address (`me@example`) does NOT open — the `@` is inside a word", ()
 check("`[[` still wins over an `@` inside it, and carries trigger '[['", () => {
   assert.deepEqual(parseOpenWikilink("[[a @b", 6), { query: "a @b", from: 0, to: 6, trigger: "[[" });
 });
+check("`{ mention: false }` keeps `@` shut and `[[` open (contract 1.16.0)", () => {
+  assert.equal(parseOpenWikilink("Ping @team about", 16, { mention: false }), null);
+  assert.equal(parseOpenWikilink("[[x]] @team", 11, { mention: false }), null);
+  assert.deepEqual(parseOpenWikilink("[[Road", 6, { mention: false }), { query: "Road", from: 0, to: 6, trigger: "[[" });
+});
 check("replace range for '@': caretPos 8, query 'Mult' => from 3 (the one `@`)", () => {
   assert.deepEqual(wikilinkReplaceRange(8, "Mult", "@"), { from: 3, to: 8 });
 });

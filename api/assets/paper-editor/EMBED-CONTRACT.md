@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.15.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.16.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.15.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.16.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`.
 
 ## The element
 
@@ -65,6 +65,23 @@ before the bundle to opt out and avoid doubled rules. The stylesheet ships a
 `:root, :host` fallback for all `--paper-*` tokens (light default; dark via
 `[data-theme="dark"]`), so it renders styled with no host theme.
 
+The `[[`, `@` and `#` picker is appended to `<body>`, outside any theme scope, so it
+carries its own colours. A host themes it by setting `--paper-picker-*` on `:root`
+(1.16.0); each one unset keeps the default (light, or dark under `[data-theme="dark"]`):
+
+| Property | Paints | Light / dark default |
+|---|---|---|
+| `--paper-picker-chrome-bg` | the menu | `#fefdf9` / `#221e1a` |
+| `--paper-picker-chrome-border` | its border | `rgba(31, 26, 20, 0.12)` / `rgba(236, 230, 220, 0.14)` |
+| `--paper-picker-shadow` | its shadow | `0 4px 16px rgba(0, 0, 0, 0.08)` |
+| `--paper-picker-ink` | a row's title | `#1f1a14` / `#ece6dc` |
+| `--paper-picker-ink-soft` | the type badge on the active row, key chips | `#5b524a` / `#b8ad9e` |
+| `--paper-picker-ink-faint` | label, type badge, empty row, footer | `#787067` / `#908679` |
+| `--paper-picker-accent-soft` | the active row | `rgba(162, 57, 37, 0.10)` / `rgba(217, 122, 95, 0.14)` |
+| `--paper-picker-bg` | key chips | `#fbfaf6` / `#1b1815` |
+| `--paper-picker-rule` / `--paper-picker-rule-soft` | key chip border / footer rule | `rgba(31, 26, 20, 0.08)` / `rgba(31, 26, 20, 0.04)`; dark `rgba(236, 230, 220, 0.10)` / `rgba(236, 230, 220, 0.05)` |
+| `--paper-picker-accent` | nothing yet; the picker's `--paper-accent` | `#a23925` / `#d97a5f` |
+
 A host whose column is the text, with no wider evidence band (it sets
 `--bp-evidence-width: 100%; --bp-evidence-pull: 0px`), sets `--bp-table-centre: 0`
 to start tables at the text's left edge instead of centred (default `1`: papers'
@@ -92,6 +109,8 @@ instance. Barkdown and Studio mount it.
 | `editable` attribute | default editable; only the literal string `"false"` mounts read-only. Observed: a later change calls `setEditable`. A run that failed to mount stays read-only whatever it says |
 | `format-bubble` attribute | `"off"` hides the floating format bubble, for a host that draws its own toolbar (Toolbar commands). Observed: setting or clearing it after mount drops or brings back the bubble. With it off, Mod+K and the link card's Edit fire `bp-canvas-link-request` instead |
 | `block-cards` attribute | present: an image block is a card, as Sanity's block object: its file name and a … menu (Edit opens its alt, URL and width; Remove takes the block out, one undo step) over the picture. Absent: the picture alone. CSS only, so setting it after mount works at once (1.11.0). A declared object block (a field vocabulary's `of`, e.g. a callout) is a card too: a 33 px tile with its icon, its preview title, and a … with Edit (its own dialog) and Remove (1.12.0)  From 1.14.0 the link card is Sanity's annotation pill there: it follows the caret (not the pointer), shows above the link, names the annotation by its schema title (`blocks.annotations[].title`; else "Link", or "Internal Link" for a document link), and offers Edit and Remove, plus Open for a document link only |
+| `mention-trigger` attribute | `"off"`: `@` stays plain text and only `[[` opens the `wikilinkSource` menu. Absent: `@` opens it too, at the block start or after a space or `(`/`[`, and the query runs to the caret across spaces (multi-word titles). Read on every keystroke, so setting it after mount works at once (1.16.0) |
+| `data-strings` attribute | on the canvas or an ancestor: a JSON map from the canvas's English words to the host's (`{"Link to page": "Link to note", "No matching pages": "No matching notes"}`); a word it leaves out stays English. Read when the canvas connects; one map serves the page. The picker's words are `Link to page` (its label, also the `#` menu's), `Searching…` and `No matching pages` |
 | `data-field-caps` attribute | the type's Expectation as JSON, `{fieldName: max | null}`: a bound field block (one carrying `fieldName`) shows its n/max badge (the blocks bound to that name / the max; `n` alone when null) and an unbind × that emits one `patch-block {fieldName: null}`, as LiveView Beta's Properties row. Absent: field blocks unchanged (1.13.0) |
 | `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
@@ -114,7 +133,10 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 | `mediaPicker` | `({ kind: "insert" \| "replace", current: { src, alt } \| null }) => { src, alt?, width? } \| null` | an Image insert is the empty image block, and images offer no Select |
 | `editBlockObject` | `({ type, title, inline, fields, value, error }) => value \| null` | declared objects are edited in the canvas's own popover |
 
-The menus drop a result that arrives after a newer query or after close. A
+The menus drop a result that arrives after a newer query or after close. Enter
+picks the highlighted row; once a result has come back empty it closes the menu and
+breaks the line as usual (1.16.0). While the first result is still coming, Enter
+waits with the menu. A
 `linkPreviewSource` that throws or rejects is ignored. For a `link`, `kind`/`href`
 are set; for a `wikilink`, `kind`/`target`/`docId`/`alias` are. A returned `href`
 becomes the address `bp-canvas-open-link` reports. For a `wikilink`, a returned

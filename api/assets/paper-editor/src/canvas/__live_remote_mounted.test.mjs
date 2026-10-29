@@ -96,8 +96,9 @@ async function blur(canvas) {
   await wait(30);
 }
 
-await check("contract version is 1.15.0", () => {
-  assert.equal(CONTRACT_VERSION, "1.15.0");
+await check("contract version is 1.15.0 or later", () => {
+  const [major, minor] = CONTRACT_VERSION.split(".").map(Number);
+  assert.ok(major > 1 || (major === 1 && minor >= 15), CONTRACT_VERSION);
 });
 
 await check("liveRemote: a remote edit to another block applies at once; caret, focus and history stay", async () => {

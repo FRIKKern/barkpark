@@ -113,6 +113,12 @@ export class WikilinkMenu {
     this._rowEls = [];
   }
 
+  // The results came back and nothing matched: Enter has nothing to pick, so the
+  // canvas closes the menu and lets Enter break the line (contract 1.16.0).
+  isEmpty() {
+    return this._open && this._resultsSet && this._results.length === 0;
+  }
+
   // Move the active selection by `delta`, wrapping at both ends. No-op when
   // there are no selectable rows (Searching…/No matching pages state).
   move(delta) {

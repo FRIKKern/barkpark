@@ -2826,6 +2826,12 @@ class BpPaperCanvas extends HTMLElement {
           this._wikilink.move(-1);
           return true;
         case "Enter":
+          if (this._wikilink.isEmpty()) {
+            this._closeWikilink();
+            return false;
+          }
+          this._wikilink.choose();
+          return true;
         case "Tab":
           this._wikilink.choose();
           return true;
@@ -2847,6 +2853,12 @@ class BpPaperCanvas extends HTMLElement {
           this._emoji.move(-1);
           return true;
         case "Enter":
+          if (this._emoji.isEmpty()) {
+            this._closeEmoji();
+            return false;
+          }
+          this._emoji.choose();
+          return true;
         case "Tab":
           this._emoji.choose();
           return true;
@@ -2870,6 +2882,12 @@ class BpPaperCanvas extends HTMLElement {
           this._tag.move(-1);
           return true;
         case "Enter":
+          if (this._tag.isEmpty()) {
+            this._closeTag();
+            return false;
+          }
+          this._tag.choose();
+          return true;
         case "Tab":
           this._tag.choose();
           return true;
@@ -3428,7 +3446,9 @@ class BpPaperCanvas extends HTMLElement {
     const $from = this._editor.state.selection.$from;
     const blockLocalText = $from.parent.textContent;
     const caretOffset = $from.parentOffset;
-    const hit = parseOpenWikilink(blockLocalText, caretOffset);
+    const hit = parseOpenWikilink(blockLocalText, caretOffset, {
+      mention: this.getAttribute("mention-trigger") !== "off",
+    });
     if (!hit) {
       this._closeWikilink();
       return false;

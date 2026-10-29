@@ -933,7 +933,9 @@ article code[style*="background:#f3f4f6"] {
  *
  * The --paper-* tokens are re-bound on the popup element directly (just like
  * .bp-slash-menu in root.html.heex) so the popup stays warm in both themes
- * even though it lives outside any .bp-paper-surface ancestor. */
+ * even though it lives outside any .bp-paper-surface ancestor. Each one reads
+ * --paper-picker-<name> first, so a host themes the picker from :root
+ * (contract 1.16.0); the values here are the defaults. */
 
 /* Pre-paint / no-theme fallback — warm light defaults. */
 /* A wikilink in the canvas reads as a link, like the reader's .bp-wikilink
@@ -946,16 +948,16 @@ article code[style*="background:#f3f4f6"] {
 }
 
 .bp-wikilink-menu {
-  --paper-bg:           #fbfaf6;
-  --paper-ink:          #1f1a14;
-  --paper-ink-soft:     #5b524a;
-  --paper-ink-faint:    #787067;
-  --paper-rule:         rgba(31, 26, 20, 0.08);
-  --paper-rule-soft:    rgba(31, 26, 20, 0.04);
-  --paper-accent:       #a23925;
-  --paper-accent-soft:  rgba(162, 57, 37, 0.10);
-  --paper-chrome-bg:    #fefdf9;
-  --paper-chrome-border: rgba(31, 26, 20, 0.12);
+  --paper-bg:           var(--paper-picker-bg, #fbfaf6);
+  --paper-ink:          var(--paper-picker-ink, #1f1a14);
+  --paper-ink-soft:     var(--paper-picker-ink-soft, #5b524a);
+  --paper-ink-faint:    var(--paper-picker-ink-faint, #787067);
+  --paper-rule:         var(--paper-picker-rule, rgba(31, 26, 20, 0.08));
+  --paper-rule-soft:    var(--paper-picker-rule-soft, rgba(31, 26, 20, 0.04));
+  --paper-accent:       var(--paper-picker-accent, #a23925);
+  --paper-accent-soft:  var(--paper-picker-accent-soft, rgba(162, 57, 37, 0.10));
+  --paper-chrome-bg:    var(--paper-picker-chrome-bg, #fefdf9);
+  --paper-chrome-border: var(--paper-picker-chrome-border, rgba(31, 26, 20, 0.12));
   --paper-font-sans:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --paper-font-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
@@ -966,23 +968,23 @@ article code[style*="background:#f3f4f6"] {
   background: var(--paper-chrome-bg);
   border: 1px solid var(--paper-chrome-border);
   border-radius: 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--paper-picker-shadow, 0 4px 16px rgba(0, 0, 0, 0.08));
   font-family: var(--paper-font-sans);
   animation: bp-wikilink-fade 0.12s ease-out;
 }
 /* Dark companion — keyed on the host's [data-theme="dark"]. */
 :root[data-theme="dark"] .bp-wikilink-menu,
 html[data-theme="dark"] .bp-wikilink-menu {
-  --paper-bg:           #1b1815;
-  --paper-ink:          #ece6dc;
-  --paper-ink-soft:     #b8ad9e;
-  --paper-ink-faint:    #908679;
-  --paper-rule:         rgba(236, 230, 220, 0.10);
-  --paper-rule-soft:    rgba(236, 230, 220, 0.05);
-  --paper-accent:       #d97a5f;
-  --paper-accent-soft:  rgba(217, 122, 95, 0.14);
-  --paper-chrome-bg:    #221e1a;
-  --paper-chrome-border: rgba(236, 230, 220, 0.14);
+  --paper-bg:           var(--paper-picker-bg, #1b1815);
+  --paper-ink:          var(--paper-picker-ink, #ece6dc);
+  --paper-ink-soft:     var(--paper-picker-ink-soft, #b8ad9e);
+  --paper-ink-faint:    var(--paper-picker-ink-faint, #908679);
+  --paper-rule:         var(--paper-picker-rule, rgba(236, 230, 220, 0.10));
+  --paper-rule-soft:    var(--paper-picker-rule-soft, rgba(236, 230, 220, 0.05));
+  --paper-accent:       var(--paper-picker-accent, #d97a5f);
+  --paper-accent-soft:  var(--paper-picker-accent-soft, rgba(217, 122, 95, 0.14));
+  --paper-chrome-bg:    var(--paper-picker-chrome-bg, #221e1a);
+  --paper-chrome-border: var(--paper-picker-chrome-border, rgba(236, 230, 220, 0.14));
 }
 @keyframes bp-wikilink-fade {
   from { opacity: 0; transform: translateY(-4px); }
