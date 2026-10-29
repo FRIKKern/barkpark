@@ -4388,14 +4388,28 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
 
     test "the diff engine is TextDiff — no second diff engine in api/lib" do
       # Guard against a copy-pasted Myers/LCS. TextDiff.diff_lines/2 is the ONE
-      # engine; only its own definition may mention myers_difference.
+      # engine; only its own definition may mention myers_difference. A middle-snake
+      # (`bisect` function) or half-match is a diff engine too.
+      #
+      # One exception: Barkpark.Content.DiffMatchPatch is a wire-compatible port of
+      # @sanity/diff-match-patch (Sanity's `diffMatchPatch` patch op); TextDiff
+      # cannot reproduce its UTF-16 offsets and placement, so it carries its own.
+      allowed = [
+        "lib/barkpark/content/diff_match_patch.ex",
+        "lib/barkpark/content/diff_match_patch/diff.ex"
+      ]
+
       hits =
         "lib"
         |> Path.join("**/*.ex")
         |> Path.wildcard()
-        |> Enum.filter(&(File.read!(&1) =~ "myers_difference"))
+        |> Enum.reject(&(&1 in allowed))
+        |> Enum.filter(&(File.read!(&1) =~ ~r/myers_difference|defp? bisect|half_match/))
 
       assert hits == [], "unexpected diff engine(s): #{inspect(hits)}"
+
+      assert Enum.all?(allowed, &(File.read!(&1) =~ "defmodule Barkpark.Content.DiffMatchPatch")),
+             "the allowlisted files are no longer Barkpark.Content.DiffMatchPatch"
     end
 
     test "replay parity: a reopened session with a persisted Edit row shows the same diff",
