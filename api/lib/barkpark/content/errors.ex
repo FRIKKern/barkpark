@@ -372,7 +372,8 @@ defmodule Barkpark.Content.Errors do
                          # errors, carried verbatim via emit_fields/3 (a map,
                          # not a string — emit_custom's `message` guard
                          # requires one). `bad_request` (422): the PUT body's
-                         # `value` key was missing or not an object.
+                         # `value` key was missing or not an object, or a PATCH
+                         # list op was malformed (task-f150278ead8dbfb3).
                          "no_user_identity",
                          "invalid_pref",
                          "bad_request"

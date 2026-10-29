@@ -55,6 +55,76 @@ defmodule Barkpark.UserPrefs do
     )
   end
 
+  @type list_op :: {:push_front | :add | :remove, String.t(), term(), pos_integer() | nil}
+
+  @doc """
+  Edit the list at `value[field]` in one transaction under a row lock, so
+  two tabs or devices editing the same key both land. A missing row or
+  field is an empty list; the rest of `value` is kept.
+
+    * `:push_front` — move `item` to the front, drop its other copies, keep
+      the first `max` (all when `nil`).
+    * `:add` — append `item` unless present.
+    * `:remove` — drop every copy of `item`.
+
+  Each op applied twice gives the result of applying it once, so a client
+  may replay a queued op. `{:error, :not_a_list}` when `value[field]` holds
+  anything else; `{:error, changeset}` past the size cap. Neither writes.
+  """
+  @spec apply_list_op(binary(), binary(), String.t(), String.t(), list_op()) ::
+          {:ok, UserPref.t()} | {:error, :not_a_list | Ecto.Changeset.t()}
+  def apply_list_op(user_id, workspace_id, dataset, key, {op, field, item, max}) do
+    Repo.transaction(fn ->
+      pref = lock!(user_id, workspace_id, dataset, key)
+
+      with {:ok, list} <- list_at(pref.value, field),
+           value = Map.put(pref.value, field, edit(op, list, item, max)),
+           {:ok, pref} <- pref |> UserPref.changeset(%{value: value}) |> Repo.update() do
+        pref
+      else
+        {:error, reason} -> Repo.rollback(reason)
+      end
+    end)
+  end
+
+  defp lock!(user_id, workspace_id, dataset, key) do
+    %UserPref{}
+    |> UserPref.changeset(%{
+      user_id: user_id,
+      workspace_id: workspace_id,
+      dataset: dataset,
+      key: key,
+      value: %{}
+    })
+    |> Repo.insert!(
+      on_conflict: :nothing,
+      conflict_target: [:user_id, :workspace_id, :dataset, :key]
+    )
+
+    Repo.one!(
+      from p in UserPref,
+        where:
+          p.user_id == ^user_id and p.workspace_id == ^workspace_id and p.dataset == ^dataset and
+            p.key == ^key,
+        lock: "FOR UPDATE"
+    )
+  end
+
+  defp list_at(value, field) do
+    case Map.get(value, field, []) do
+      list when is_list(list) -> {:ok, list}
+      _ -> {:error, :not_a_list}
+    end
+  end
+
+  defp edit(:push_front, list, item, max) do
+    kept = [item | Enum.reject(list, &(&1 === item))]
+    if max, do: Enum.take(kept, max), else: kept
+  end
+
+  defp edit(:add, list, item, _max), do: if(item in list, do: list, else: list ++ [item])
+  defp edit(:remove, list, item, _max), do: Enum.reject(list, &(&1 === item))
+
   @doc """
   Delete one named value. Idempotent — deleting an absent key is `{:ok, 0}`.
 

@@ -3030,6 +3030,24 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "pref.patch",
+        "pref",
+        "patch",
+        "Edit the list at value[field] of one per-account pref in one locked write, so two tabs or devices never overwrite each other. push_front moves item to the front, dedupes and keeps the first max (--set max:=20); add appends item unless present; remove drops it. Replaying an op changes nothing. 422 invalid_pref when value[field] is not a list.",
+        "PATCH",
+        "/v1/prefs/:dataset/:key",
+        "write",
+        args: [
+          arg("key", true, "string", "Pref name, e.g. recents."),
+          arg("op", true, "string", "push_front | add | remove"),
+          arg("field", true, "string", "Key in value that holds the list, e.g. ids."),
+          arg("item", true, "string", "The list element.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "pref.rm",
         "pref",
         "rm",
