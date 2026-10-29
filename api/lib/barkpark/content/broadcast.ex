@@ -163,6 +163,12 @@ defmodule Barkpark.Content.Broadcast do
   `%CallerContext{}` stamps; an absent one (system writes, jobs, legacy
   callers) leaves all three columns NULL — UNMEASURED, never `""`. Nothing a
   request BODY carries reaches this: the context is built from `conn.assigns`.
+
+  `opts[:event]` — `{mutation, previous_rev}` for the event, SSE frame and
+  webhook when they differ from the storage action: a patch that writes the
+  first `drafts.<id>` over a published row is an INSERT, but announced as an
+  `update` from the published rev, so a client chaining revs keeps its chain
+  (task-1bbff112e31873ff). The revision and audit rows keep `action`.
   """
   def tap_broadcast(
         result,
@@ -185,13 +191,14 @@ defmodule Barkpark.Content.Broadcast do
               do: raise(Ecto.InvalidChangesetError, action: :insert, changeset: changeset)
         end
 
-        ev = save_event(doc, type, dataset, action, prev_rev, source)
+        {event_action, prev_rev} = Keyword.get(opts, :event, {action, prev_rev})
+        ev = save_event(doc, type, dataset, event_action, prev_rev, source)
         emit_audit(doc, type, dataset, action, actor_user_id, source)
 
         msg = %{
           event_id: ev.id,
           type: type,
-          mutation: action,
+          mutation: event_action,
           action: :mutate,
           doc_id: doc.doc_id,
           rev: doc.rev,
@@ -236,7 +243,7 @@ defmodule Barkpark.Content.Broadcast do
 
         maybe_broadcast(doc_topic, {:doc_updated, msg})
 
-        maybe_dispatch_webhook(dataset, action, type, doc.doc_id, msg.document, ev.id,
+        maybe_dispatch_webhook(dataset, event_action, type, doc.doc_id, msg.document, ev.id,
           workspace_id: doc.workspace_id,
           project_id: doc.project_id
         )

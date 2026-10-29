@@ -1639,7 +1639,8 @@ defmodule Barkpark.Content.Writer do
                     nil,
                     Keyword.get(opts, :source, :api),
                     Keyword.get(opts, :user_id),
-                    caller_context: Keyword.get(opts, :caller_context)
+                    caller_context: Keyword.get(opts, :caller_context),
+                    event: fork_event(opts)
                   )
                 end)
               end
@@ -1650,6 +1651,13 @@ defmodule Barkpark.Content.Writer do
         else
           finish_deferred_after_save(result, payload)
         end
+    end
+  end
+
+  defp fork_event(opts) do
+    case Keyword.get(opts, :forked_from_rev) do
+      rev when is_binary(rev) -> {"update", rev}
+      _ -> {"create", nil}
     end
   end
 

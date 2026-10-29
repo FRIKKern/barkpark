@@ -42,7 +42,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 **Query parameters:**
 
 | Param | Default | Notes |
-|-------|---------|-------|
+|---|---|---|
 | `perspective` | `published` | `published\|drafts\|raw`; unsupported → 400; tokenless pinned `published` |
 | `limit` | `100` | Int 1–1000, clamped; non-integer → 400 |
 | `offset` | `0` | Int, clamped; non-integer → 400 |
@@ -84,7 +84,7 @@ Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true`
 
 ### Mutation kinds
 
-**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact id + rev (missing →404, stale →412); removes only that draft, keeping history. Lost reply: reconcile, never retry.
+**`deleteExactDraft`** — `{"id": "drafts.<id>", "type", "ifRevisionID"}`: exact id + rev (missing →404, stale →412); removes only that draft, keeping history. Lost reply: reconcile, never retry.
 
 **`create`** — new draft (`conflict` if one exists): `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
@@ -125,7 +125,7 @@ SSE: a `/w/…/p/…` URL streams a project, a flat URL a workspace.
 
 First frame: `event: welcome`. `?query=*[…]`: docs matching before/after, with `transition`; `includeResult=false` no result.
 
-**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
+**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`; a patch's draft fork: `update` from the published rev), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
 
 **Closes:** a slow reader: `event: overloaded`; past 20 streams a credential+address, 100 in all: `event: disconnect`.
 

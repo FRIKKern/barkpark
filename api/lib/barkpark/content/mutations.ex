@@ -1259,7 +1259,12 @@ defmodule Barkpark.Content.Mutations do
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
-             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, fence_rev)),
+             Content.upsert_document(
+               type,
+               attrs,
+               dataset,
+               patch_write_opts(opts, fence_rev, existing)
+             ),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
@@ -1302,7 +1307,12 @@ defmodule Barkpark.Content.Mutations do
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
            :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
-             Content.upsert_document(type, attrs, dataset, with_if_rev(opts, fence_rev)),
+             Content.upsert_document(
+               type,
+               attrs,
+               dataset,
+               patch_write_opts(opts, fence_rev, existing)
+             ),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
            do: {:ok, doc, "update"}
     end
@@ -2438,6 +2448,16 @@ defmodule Barkpark.Content.Mutations do
     do: Keyword.put(opts, :if_rev, expected)
 
   defp with_if_rev(opts, _expected), do: opts
+
+  # A patch whose base is the published row writes the first `drafts.<id>`: an
+  # INSERT, announced as an `update` from the published rev (task-1bbff112e31873ff).
+  defp patch_write_opts(opts, fence_rev, %{doc_id: base_id, rev: base_rev}) do
+    opts = with_if_rev(opts, fence_rev)
+
+    if DraftId.draft?(base_id),
+      do: opts,
+      else: Keyword.put(opts, :forked_from_rev, base_rev)
+  end
 
   # A patch's revision fence (task-61e9a7d8a8b51192). `ifRevisionID` alone is the whole
   # document's: any write since, to any field, refuses it (412). `"fence": "fields"` on the
