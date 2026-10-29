@@ -250,11 +250,27 @@ defmodule Barkpark.Media.Transform do
       # so a padded URL cached before it renders anew.
       Map.get(plan, :pad, 0) > 0 && "pad-in=#{plan.pad}",
       Map.get(plan, :flip) && "flip=#{plan.flip}",
-      Map.get(plan, :orient, 0) != 0 && "or=#{plan.orient}",
+      Map.get(plan, :orient, 0) != 0 && "or=#{plan.orient}#{if turn_crop?(plan), do: "sq"}",
       Map.get(plan, :invert) == true && "invert",
       Map.get(plan, :gray) == true && "gray"
     ]
     |> Enum.filter(&is_binary/1)
+  end
+
+  @doc """
+  Whether `or` 90 or 270 crops the turned image to a centred square of its
+  shorter side, as Sanity's CDN does (task-54a30eca3797a0e6): when the plan
+  sizes the image (`w` or `h`) and pads nothing. Measured on its e2e-local
+  640x400 fixture: `w=200&or=90` is 125x125, `h=100&or=90` 100x100,
+  `rect=0,0,320,200&w=160&or=270` 100x100, while `or=90` and
+  `rect=0,0,320,200&or=90` keep the whole turned image. With `pad` Sanity turns
+  before it sizes (`w=300&pad=10&or=90` is 300x468), which Barkpark does not
+  copy.
+  """
+  @spec turn_crop?(map()) :: boolean()
+  def turn_crop?(plan) do
+    Map.get(plan, :orient, 0) in [90, 270] and Map.get(plan, :pad, 0) == 0 and
+      (is_integer(Map.get(plan, :w)) or is_integer(Map.get(plan, :h)))
   end
 
   defp format_bg({r, g, b, a}),

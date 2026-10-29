@@ -25,8 +25,8 @@ Anonymous reads need the scope's `:media` share: [PUBLIC-MEDIA.md](PUBLIC-MEDIA.
 | `fit` | `clip` (default), `crop`, `fill`, `fillmax`, `max`, `min`, `scale` | How `w` x `h` is met; see below. |
 | `crop` | `center`, `focalpoint`, `top`, `bottom`, `left`, `right` (comma list), or `entropy`, `attention` | Which part `fit=crop` and `fit=min` keep. |
 | `rect` | `left,top,width,height` | Pixel area of the original to cut first. |
-| `fp-x`, `fp-y` | 0 to 1 | Focal point, as fractions of the image after `rect`. Implies `crop=focalpoint`. |
-| `fm` | `jpg` (`pjpg`), `png`, `webp`, `avif` | Output format. Default: the source format (`gif` gives `png`). |
+| `fp-x`, `fp-y` | 0 to 1 | Focal point, fractions of the image after `rect`. Implies `crop=focalpoint`. |
+| `fm` | `jpg` (`pjpg`), `png`, `webp`, `avif` | Output format. Default: the source's (`gif` gives `png`). |
 | `auto` | `format` | Serve AVIF or WebP when `Accept` allows it; see AVIF. |
 | `q` | 1 to 100 | Quality, default 75, rounded to a multiple of 5. |
 
@@ -36,9 +36,9 @@ Fit modes:
 - `crop` scales to cover the box, then cuts it to `w` x `h`.
 - `fill` is `clip`, padded to `w` x `h` with `bg` (white); `fillmax` does not scale up.
 - `scale` stretches to `w` x `h`.
-- `min` is `crop` without scaling up: a smaller source is cut to the box's aspect at its own size.
+- `min` is `crop` without scaling up: a smaller source is cut to the box's aspect as is.
 
-Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits; JPEG drops alpha); `pad` px a side, inside `w`/`h`; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns the result; `invert`; `sat=-100` grayscale, else ignored; `sharp` 13–100 sharpens (σ sharp/35); `quality` is `q`.
+Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits; JPEG drops alpha); `pad` px a side, inside `w`/`h`; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns it (sized 90/270: centred square); `invert`; `sat=-100` grayscale, else ignored; `sharp` 13–100 sharpens (σ sharp/35); `quality` is `q`.
 
 ## AVIF
 
