@@ -37,7 +37,7 @@ GET /w/:ws/p/:proj/files/<projectId>/<dataset>/<sha1>.<ext>[/<vanity>]
 - `projectId` is ignored. The workspace and project in the prefix name the tenant.
 - Access, share rules, `ETag` and `Cache-Control` are those of `/w/:ws/p/:proj/media/files/<path>`.
 - Images take the transform parameters `@sanity/image-url` sends: `w`, `h`, `rect`, `fit`, `crop`, `fp-x`, `fp-y`, `fm`, `auto`, `q`, and `dpr`, `blur`, `bg`, `pad`, `flip`, `or`, `invert`, `sat` ([IMAGE-TRANSFORMS.md](IMAGE-TRANSFORMS.md)). When the stored original is smaller than `<w>x<h>`, `rect` is scaled to it. An SVG answers `auto=format` and size or crop parameters with the stored SVG, as Sanity does. An explicit `fm` on an SVG answers 400 `not_transformable`. SVGs are served `image/svg+xml`, `nosniff`, CSP `script-src 'none'` and `sandbox`: no script runs.
-- `dl` downloads under the file's name, `dl=<name>` under that name.
+- Files are served inline under their name; `dl` downloads, `dl=x` as x.
 - An unknown asset, another dataset or a malformed name answers 404.
 
 ## Recording the Sanity id
