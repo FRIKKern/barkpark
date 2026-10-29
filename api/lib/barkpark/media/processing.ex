@@ -8,7 +8,7 @@ defmodule Barkpark.Media.Processing do
   What upload still needs is cheap and read once:
 
     * width and height from the file header (`Barkpark.Media.Probe`);
-    * the LQIP, a ≤ 24 px JPEG as a `data:` URI, rendered in memory. It is
+    * the LQIP, 20 px wide (PNG for a PNG source) as a `data:` URI, rendered in memory. It is
       also the decode check: a raster blob libvips cannot decode is marked
       `failed`, so a client never polls a `ready` asset whose every rendition
       would 404.
@@ -29,7 +29,7 @@ defmodule Barkpark.Media.Processing do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Media.{Blobstore, ImageBackend, Probe, Renditions}
+  alias Barkpark.Media.{Blobstore, ImageBackend, Probe, Renditions, Transform}
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Media.Delivery.{Cdn, Events}
   alias Barkpark.Plugins.Media.Assets
@@ -246,12 +246,18 @@ defmodule Barkpark.Media.Processing do
   # sobelow_skip ["Traversal.FileModule"]
   defp lqip(src, %MediaFile{} = file) do
     if Renditions.renderable?(file) do
-      tmp = Path.join(System.tmp_dir!(), "bp-lqip-#{System.unique_integer([:positive])}.jpg")
+      spec = Renditions.spec_for(file, "lqip")
+
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "bp-lqip-#{System.unique_integer([:positive])}.#{spec.format}"
+        )
 
       try do
-        with :ok <- ImageBackend.impl().render(src, tmp, Renditions.preset_spec("lqip"), nil),
+        with :ok <- ImageBackend.impl().render(src, tmp, spec, nil),
              {:ok, bytes} when byte_size(bytes) > 0 <- File.read(tmp) do
-          {"ready", "data:image/jpeg;base64," <> Base.encode64(bytes)}
+          {"ready", "data:#{Transform.mime(spec.format)};base64," <> Base.encode64(bytes)}
         else
           other ->
             Logger.warning(

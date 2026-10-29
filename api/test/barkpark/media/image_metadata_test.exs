@@ -115,7 +115,8 @@ defmodule Barkpark.Media.ImageMetadataTest do
       assert out["url"] == "/media/files/#{file.path}"
       assert out["width"] == 1600
       assert out["height"] == 2527
-      assert out["lqip"] == "data:image/jpeg;base64," <> Base.encode64("tiny-jpeg-bytes")
+      # A PNG source gets a PNG placeholder, as on Sanity (task-057b95c7e1bb58ff).
+      assert out["lqip"] == "data:image/png;base64," <> Base.encode64("tiny-jpeg-bytes")
       assert out["alt"] == "Cover"
       assert out["assetId"] == file.id
     end
