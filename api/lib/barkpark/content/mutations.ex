@@ -70,6 +70,7 @@ defmodule Barkpark.Content.Mutations do
     BoundFieldSync,
     Broadcast,
     CallerContext,
+    DiffMatchPatch,
     DraftId,
     Envelope,
     MutateDoorFences,
@@ -1215,7 +1216,7 @@ defmodule Barkpark.Content.Mutations do
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
               is_map_key(patch, "append") or is_map_key(patch, "prepend") or
-              is_map_key(patch, "insert") do
+              is_map_key(patch, "insert") or is_map_key(patch, "diffMatchPatch") do
     # [bare-id-refusal] task-eeaf3a622b6c74c7 — `id`/`_id` under set/setIfMissing
     # address nothing here; refuse BEFORE the read so the answer does not depend
     # on whether the document exists. See Writer.refuse_bare_id/2.
@@ -2097,6 +2098,7 @@ defmodule Barkpark.Content.Mutations do
     |> ok_then(&apply_array_op(&1, Map.get(patch, "append"), protected, :append))
     |> ok_then(&apply_array_op(&1, Map.get(patch, "prepend"), protected, :prepend))
     |> apply_insert(Map.get(patch, "insert"), protected)
+    |> path_ops(dmp_pairs(Map.get(patch, "diffMatchPatch")), protected, &dmp_fun/1, false)
     |> path_ops(Enum.map(unset_paths, &{&1, nil}), protected, &unset_fun/1, false)
     |> ok_then(&Map.drop(&1, unset_plain -- protected))
   end
@@ -2126,6 +2128,29 @@ defmodule Barkpark.Content.Mutations do
     fn
       :absent -> :keep
       {:ok, _} -> :delete
+    end
+  end
+
+  # Sanity's `diffMatchPatch` (task-88240409d3fc3c51): `{"<path>": "<patch_toText>"}`,
+  # applied to the string at each path as `Barkpark.Content.DiffMatchPatch`
+  # describes. A hunk that no longer matches is skipped; a path that holds no
+  # string, or a patch text that does not parse, leaves the value as it is.
+  defp dmp_pairs(%{} = fields),
+    do: fields |> Enum.filter(fn {_k, v} -> is_binary(v) end) |> Enum.sort()
+
+  defp dmp_pairs(_), do: []
+
+  defp dmp_fun(patch_text) do
+    fn
+      {:ok, current} when is_binary(current) ->
+        case DiffMatchPatch.apply(patch_text, current) do
+          {:ok, ^current, _applied} -> :keep
+          {:ok, text, _applied} -> {:put, text}
+          :error -> :keep
+        end
+
+      _ ->
+        :keep
     end
   end
 
@@ -2439,7 +2464,7 @@ defmodule Barkpark.Content.Mutations do
   # document with a block list, `blocks` too (a bound field writes through it).
   defp patch_fields(patch, content) do
     keyed =
-      ~w(set setIfMissing inc dec append prepend)
+      ~w(set setIfMissing inc dec append prepend diffMatchPatch)
       |> Enum.flat_map(fn op -> if is_map(patch[op]), do: Map.keys(patch[op]), else: [] end)
 
     unset = list_or_empty(patch["unset"])
