@@ -203,6 +203,22 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
       assert resp.resp_body == original
     end
 
+    test "Sanity's dl downloads the original and a transform", ctx do
+      sanity_sha = sha("5")
+      upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
+
+      for query <- ["dl=", "w=30&dl="] do
+        resp = as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", query))
+        assert resp.status == 200, resp.resp_body
+
+        assert get_resp_header(resp, "content-disposition") ==
+                 [~s<attachment; filename="two-tone.jpg"; filename*=UTF-8''two-tone.jpg>]
+      end
+
+      resp = as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", "w=30"))
+      assert get_resp_header(resp, "content-disposition") == ["inline"]
+    end
+
     test "accepts a vanity file name after the asset name", ctx do
       sanity_sha = sha("e")
       upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
@@ -250,17 +266,37 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
   end
 
   describe "GET /w/:ws/p/:proj/files/:project/:dataset/<sha1>.<ext>" do
-    test "resolves by sourceId and serves the bytes; query parameters are ignored", ctx do
+    test "resolves by sourceId and serves the bytes inline; other query parameters are ignored",
+         ctx do
       path = pdf_file()
       bytes = File.read!(path)
       sanity_sha = sha("3")
       upload(ctx, path, "doc.pdf", "application/pdf", %{"sourceId" => "file-#{sanity_sha}-pdf"})
 
       resp =
-        as(ctx.raw) |> get("#{ctx.base}/files/#{@project_id}/production/#{sanity_sha}.pdf?dl=")
+        as(ctx.raw) |> get("#{ctx.base}/files/#{@project_id}/production/#{sanity_sha}.pdf?x=1")
 
       assert resp.status == 200, resp.resp_body
       assert resp.resp_body == bytes
+      assert get_resp_header(resp, "content-disposition") == ["inline"]
+    end
+
+    test "Sanity's dl downloads under the original or the given file name", ctx do
+      sanity_sha = sha("4")
+
+      upload(ctx, pdf_file(), "Årsrapport.pdf", "application/pdf", %{
+        "sourceId" => "file-#{sanity_sha}-pdf"
+      })
+
+      url = "#{ctx.base}/files/#{@project_id}/production/#{sanity_sha}.pdf"
+      disposition = &get_resp_header(as(ctx.raw) |> get(url <> &1), "content-disposition")
+
+      original = ~s<attachment; filename="_rsrapport.pdf"; filename*=UTF-8''%C3%85rsrapport.pdf>
+      assert disposition.("?dl") == [original]
+      assert disposition.("?dl=") == [original]
+
+      assert disposition.("?dl=my%20%22file%22.pdf") ==
+               [~s<attachment; filename="my _file_.pdf"; filename*=UTF-8''my%20%22file%22.pdf>]
     end
 
     test "falls back to the sha1 of the stored bytes", ctx do
