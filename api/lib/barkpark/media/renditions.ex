@@ -40,16 +40,29 @@ defmodule Barkpark.Media.Renditions do
     # per-asset lookup. `crop: :attention` centres the crop on the salient region.
     "og" => %{max_width: 1200, max_height: 630, format: "jpg", quality: 85, crop: :attention},
     # `lqip` is the blur placeholder a schema `image` value carries as a data:
-    # URI (Gyldendal parity E1.7, Barkpark.Media.ImageMetadata): a ≤ 24 px
-    # JPEG, a few hundred bytes. Upload computes it once in memory and stores
-    # it on the asset (`fileInfo.lqip`, `Barkpark.Media.Processing`); this
-    # preset serves the file form on request.
-    "lqip" => %{max_width: 24, max_height: 24, format: "jpg", quality: 40}
+    # URI (Gyldendal parity E1.7, Barkpark.Media.ImageMetadata), a few hundred
+    # bytes. As Sanity's (task-057b95c7e1bb58ff): 20 px wide, a PNG for a PNG
+    # or GIF source (so transparency survives) and a JPEG otherwise
+    # (`spec_for/2`). Upload computes it once in memory and stores it on the
+    # asset (`fileInfo.lqip`, `Barkpark.Media.Processing`); this preset serves
+    # the file form on request. The height bound only stops a sliver image
+    # from making a tall placeholder.
+    "lqip" => %{max_width: 20, max_height: 200, format: "jpg", quality: 40}
   }
 
   @doc "The spec for a named preset, or nil."
   @spec preset_spec(String.t()) :: map() | nil
   def preset_spec(preset), do: Map.get(@presets, preset)
+
+  @doc """
+  The spec `preset` renders `file` with: the preset's own, except that the
+  `lqip` placeholder of a PNG or GIF is a PNG, as Sanity's is.
+  """
+  @spec spec_for(%MediaFile{}, String.t()) :: map() | nil
+  def spec_for(%MediaFile{mime_type: mime}, "lqip") when mime in ["image/png", "image/gif"],
+    do: %{Map.fetch!(@presets, "lqip") | format: "png"}
+
+  def spec_for(_file, preset), do: preset_spec(preset)
 
   @doc "All supported preset names."
   @spec presets() :: [String.t()]
@@ -66,7 +79,7 @@ defmodule Barkpark.Media.Renditions do
   @doc "Relative cache path for a preset, if it exists on disk."
   @spec relative_path(%MediaFile{}, String.t(), keyword()) :: String.t() | nil
   def relative_path(%MediaFile{} = file, preset, opts \\ []) do
-    case Map.get(@presets, preset) do
+    case spec_for(file, preset) do
       nil ->
         nil
 
@@ -106,7 +119,7 @@ defmodule Barkpark.Media.Renditions do
   @doc "Ensure a rendition exists on disk, generating if needed."
   @spec ensure(%MediaFile{}, String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   def ensure(%MediaFile{} = file, preset, opts \\ []) do
-    with spec when not is_nil(spec) <- Map.get(@presets, preset),
+    with spec when not is_nil(spec) <- spec_for(file, preset),
          profile = watermark_profile(opts),
          rel = cache_relative(file.id, preset, spec.format, profile),
          dest = Media.file_path(rel) do

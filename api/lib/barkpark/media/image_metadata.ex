@@ -30,7 +30,7 @@ defmodule Barkpark.Media.ImageMetadata do
   through `Barkpark.Media.asset_doc_for_file/3`; the blob itself via
   `Barkpark.Media.Probe` when `fileInfo` has no dimensions yet; and for
   `lqip` on an asset uploaded before upload stored it, the `"lqip"` rendition
-  preset (a ≤ 24 px JPEG, base64-encoded as a `data:` URI), generated on
+  preset (20 px wide, PNG or JPEG as the source, a `data:` URI), generated on
   demand through `Barkpark.Media.Renditions` — never fabricated.
 
   Lives under `Barkpark.Media` (not `Content`): it is the media concept that
@@ -283,7 +283,7 @@ defmodule Barkpark.Media.ImageMetadata do
     end
   end
 
-  # The blur placeholder: the `lqip` rendition (≤ 24 px JPEG) as a data: URI.
+  # The blur placeholder: the `lqip` rendition (20 px wide) as a data: URI.
   # Only when the rendition backend can decode the blob — Renditions gates on
   # the raster mime set and answers {:error, _} otherwise, which leaves `lqip`
   # unset rather than fabricated.
@@ -317,7 +317,7 @@ defmodule Barkpark.Media.ImageMetadata do
   def lqip_data_uri(file) do
     with {:ok, rel} <- Renditions.ensure(file, @lqip_preset),
          {:ok, bytes} when byte_size(bytes) > 0 <- File.read(Media.file_path(rel)) do
-      "data:image/jpeg;base64," <> Base.encode64(bytes)
+      "data:#{MIME.from_path(rel)};base64," <> Base.encode64(bytes)
     else
       _ -> nil
     end
