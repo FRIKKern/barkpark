@@ -114,6 +114,7 @@ defmodule Barkpark.Media.ImageBackend.Vix do
         has_alpha: has_alpha,
         is_opaque: not has_alpha or opaque?(srgb),
         blur_hash: blur_hash(srgb),
+        thumb_hash: thumb_hash(src),
         palette: Barkpark.Media.Palette.from_pixels(pixels, Image.bands(srgb))
       }
       |> maybe_put(:exif, "exif" in meta && exif(image))
@@ -122,6 +123,23 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     end
   rescue
     e -> {:error, {:analyze_failed, Exception.message(e)}}
+  end
+
+  # Sanity's thumbHash: the hash of the image thumbnailed to fit 100 x 100, as
+  # 8-bit sRGBA. Nil when the pixels are not that shape (a 16-bit source, say)
+  # rather than a wrong hash.
+  defp thumb_hash(src) do
+    with {:ok, small} <- Image.thumbnail(src, 100),
+         {:ok, srgb} <- Image.to_colorspace(small, :srgb),
+         {:ok, rgba} <-
+           if(Image.has_alpha?(srgb), do: {:ok, srgb}, else: Image.add_alpha(srgb, 255)),
+         {:ok, bin} <- Vix.Vips.Image.write_to_binary(rgba),
+         {w, h} = {Image.width(rgba), Image.height(rgba)},
+         true <- byte_size(bin) == w * h * 4 do
+      bin |> then(&Barkpark.Media.ThumbHash.encode(w, h, &1)) |> Base.encode64()
+    else
+      _ -> nil
+    end
   end
 
   # Opaque when no pixel's alpha is below full.
