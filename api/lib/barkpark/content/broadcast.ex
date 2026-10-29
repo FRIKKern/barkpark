@@ -164,13 +164,10 @@ defmodule Barkpark.Content.Broadcast do
   callers) leaves all three columns NULL — UNMEASURED, never `""`. Nothing a
   request BODY carries reaches this: the context is built from `conn.assigns`.
 
-  `opts[:event]` — `{mutation, previous_rev}` for the mutation event and the
-  listen/SSE frames when they differ from the storage action: the first
-  `drafts.<id>` written over a published row is an INSERT, but announced as an
-  `update` from the published rev, so a client chaining revs keeps its chain
-  (task-1bbff112e31873ff). The revision, the audit row and the webhook keep
-  `action`: webhook `events` filters match the storage action (`Webhook`'s
-  `patch` note), so a `["create"]` subscription still fires on a draft fork.
+  A `"create"` with a `prev_rev` is the first `drafts.<id>` forked from a
+  published row: every store and webhook keeps `"create"` (webhook `events`
+  filters match it), and the listen frame alone reads it as an `update` from
+  `prev_rev` (task-1bbff112e31873ff).
   """
   def tap_broadcast(
         result,
@@ -193,14 +190,13 @@ defmodule Barkpark.Content.Broadcast do
               do: raise(Ecto.InvalidChangesetError, action: :insert, changeset: changeset)
         end
 
-        {event_action, prev_rev} = Keyword.get(opts, :event, {action, prev_rev})
-        ev = save_event(doc, type, dataset, event_action, prev_rev, source)
+        ev = save_event(doc, type, dataset, action, prev_rev, source)
         emit_audit(doc, type, dataset, action, actor_user_id, source)
 
         msg = %{
           event_id: ev.id,
           type: type,
-          mutation: event_action,
+          mutation: action,
           action: :mutate,
           doc_id: doc.doc_id,
           rev: doc.rev,

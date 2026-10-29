@@ -10,10 +10,12 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
   import Ecto.Query
 
   alias Barkpark.Auth
-  alias Barkpark.Content.MutationEvent
+  alias Barkpark.Content
+  alias Barkpark.Content.{Broadcast, MutationEvent}
   alias Barkpark.Repo
   alias Barkpark.Webhooks
-  alias Barkpark.Webhooks.{Dispatcher, Webhook}
+  alias Barkpark.Webhooks.{Delivery, Dispatcher, PayloadRebuild, Webhook}
+  alias BarkparkWeb.ListenController
 
   # Records every outbound POST to the test process and returns 200 so a replay
   # can be observed (body + headers) without a real network call.
@@ -430,6 +432,99 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
 
       assert conn |> authed() |> post("#{base}/test/#{flat_wh.id}/rotate") |> Map.get(:status) ==
                404
+    end
+  end
+
+  # task-1bbff112e31873ff: a patch to a published doc forks `drafts.<id>`. The
+  # event row keeps the storage action, so every webhook path says `create`;
+  # only the listen frame reads it as an `update` chained on the published rev.
+  describe "a draft forked from a published doc" do
+    setup do
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [%{"name" => "body", "type" => "string"}]
+        },
+        "test"
+      )
+
+      :ok
+    end
+
+    test "webhooks say create on delivery, retry and replay; listen says update on both legs",
+         %{conn: conn} do
+      {:ok, _} =
+        Content.create_document("post", %{"doc_id" => "drafts.fk1", "title" => "F"}, "test")
+
+      {:ok, published} = Content.publish_document("fk1", "post", "test")
+      wh = make_webhook(conn, %{"events" => ["create"]})
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Broadcast.doc_topic("fk1", "post", published.workspace_id, "test")
+      )
+
+      {:ok, _} =
+        Content.apply_mutations(
+          [
+            %{
+              "patch" => %{
+                "id" => "fk1",
+                "type" => "post",
+                "set" => %{"body" => "edited"},
+                "ifRevisionID" => published.rev
+              }
+            }
+          ],
+          "test"
+        )
+
+      ev =
+        Repo.one!(
+          from e in MutationEvent,
+            where: e.dataset == "test" and e.doc_id == "drafts.fk1",
+            order_by: [desc: e.id],
+            limit: 1
+        )
+
+      assert {ev.mutation, ev.previous_rev} == {"create", published.rev}
+
+      assert_receive {:webhook_post, _, first, _}, 2_000
+      assert Jason.decode!(first)["event"] == "create"
+
+      {:ok, _, rebuilt} =
+        PayloadRebuild.rebuild(%Delivery{
+          source_kind: "document",
+          event_id: ev.id,
+          endpoint_id: wh.id
+        })
+
+      assert Jason.decode!(rebuilt)["event"] == "create"
+
+      resp = conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{ev.id}/replay")
+      assert resp.status == 200
+      assert_receive {:webhook_post, _, replayed, _}, 2_000
+      assert Jason.decode!(replayed)["event"] == "create"
+
+      assert_receive {:doc_updated, %{doc_id: "drafts.fk1"} = msg}
+
+      frames =
+        for e <- [ev, ListenController.live_event(msg, msg.document)] do
+          e
+          |> ListenController.format_event("test")
+          |> String.split("data: ", parts: 2)
+          |> List.last()
+          |> Jason.decode!()
+          |> Map.take(~w(mutation rev previousRev))
+        end
+
+      assert frames ==
+               List.duplicate(
+                 %{"mutation" => "update", "rev" => ev.rev, "previousRev" => published.rev},
+                 2
+               )
     end
   end
 
