@@ -352,6 +352,7 @@ defmodule BarkparkWeb.MediaController do
   """
   def serve_sanity_image(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
     params = conn.query_params
+    conn = put_sanity_name(conn, :image)
 
     with {:ok, ref} <- SanityAsset.parse_image(name),
          [] <- Transform.unsupported(params) do
@@ -372,17 +373,62 @@ defmodule BarkparkWeb.MediaController do
   def serve_sanity_image(conn, _params), do: not_found(conn, "not a Sanity image asset URL")
 
   @doc """
-  Serve a Sanity file URL from the Barkpark media file it maps to. Query
-  parameters, such as Sanity's `dl`, are ignored.
+  Serve a Sanity file URL from the Barkpark media file it maps to. Sanity's
+  `dl` makes it a download; other query parameters are ignored.
   """
   def serve_sanity_file(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
     case SanityAsset.parse_file(name) do
-      {:ok, ref} -> serve_file(conn, fn opts -> SanityAsset.find(ref, dataset, opts) end)
-      :error -> not_found(conn, "not a Sanity file asset URL")
+      {:ok, ref} ->
+        serve_file(put_sanity_name(conn, :file), fn opts ->
+          SanityAsset.find(ref, dataset, opts)
+        end)
+
+      :error ->
+        not_found(conn, "not a Sanity file asset URL")
     end
   end
 
   def serve_sanity_file(conn, _params), do: not_found(conn, "not a Sanity file asset URL")
+
+  # Sanity's `dl` and file names (task-2900dfa8af0906df). As on Sanity's CDN,
+  # `?dl` and `?dl=` download under the original file name, `?dl=<name>`
+  # under that name, and a file URL without `dl` names the file inline;
+  # `@sanity/image-url`'s `forceDownload` adds `dl`. Only the Sanity routes
+  # set this, so every other media URL keeps its disposition. A download is
+  # never weaker than the default: dangerous types are already `attachment`,
+  # and their type is still collapsed.
+  defp put_sanity_name(%Plug.Conn{query_params: %{"dl" => dl}} = conn, _route)
+       when is_binary(dl),
+       do: put_private(conn, :sanity_name, {:download, dl})
+
+  defp put_sanity_name(conn, :file), do: put_private(conn, :sanity_name, :inline)
+  defp put_sanity_name(conn, :image), do: conn
+
+  defp sanity_disposition(%Plug.Conn{private: %{sanity_name: name}}, file, default) do
+    case name do
+      {:download, ""} -> "attachment;" <> quoted_filename(original_name(file), true)
+      {:download, dl} -> "attachment;" <> quoted_filename(dl, false)
+      :inline -> default <> ";" <> quoted_filename(original_name(file), true)
+    end
+  end
+
+  defp sanity_disposition(_conn, _file, default), do: default
+
+  defp original_name(file), do: file.original_name || file.filename || Path.basename(file.path)
+
+  # Printable ASCII passes except `"`, `\` and `%`; everything else, CR and
+  # LF included, is percent-encoded, which is how Sanity writes a `dl` name.
+  # Sanity keeps a space in the stored name and encodes it in a `dl` one.
+  defp quoted_filename(name, keep_space?) do
+    encoded =
+      name
+      |> String.slice(0, 200)
+      |> URI.encode(fn c ->
+        (c in 0x21..0x7E and c not in [?", ?\\, ?%]) or (keep_space? and c == ?\s)
+      end)
+
+    ~s<filename="#{encoded}">
+  end
 
   # ── On-demand transforms (task-50cabce448b02af7, #23016) ──────────────────
   #
@@ -409,11 +455,14 @@ defmodule BarkparkWeb.MediaController do
          {:ok, relative} <-
            Renditions.transform(file, plan, watermark: Access.watermark_profile(doc)) do
       full_path = Media.file_path(relative)
+      mime = Transform.mime(plan.fm)
 
       conn
       |> put_resp_header("vary", "Accept")
       |> Delivery.put_transform_cache_headers(full_path, Access.visibility(doc))
-      |> maybe_send_file(full_path, Transform.mime(plan.fm))
+      |> maybe_send_file(full_path, mime,
+        disposition: sanity_disposition(conn, file, disposition(mime))
+      )
     else
       {:error, {:invalid_param, name, message}} ->
         bad_request(conn, "invalid_transform_param", "#{name} #{message}", %{param: name})
@@ -608,6 +657,8 @@ defmodule BarkparkWeb.MediaController do
             do: "attachment",
             else: "inline"
 
+        disposition = sanity_disposition(conn, file, disposition)
+
         conn
         |> Delivery.put_file_cache_headers(full_path, visibility)
         |> add_vary("Sec-Fetch-Dest")
@@ -619,15 +670,17 @@ defmodule BarkparkWeb.MediaController do
   end
 
   defp serve_blob(conn, file, mime, visibility) do
+    disposition = sanity_disposition(conn, file, disposition(mime))
+
     case Blobstore.serve_strategy(file,
            response_content_type: MediaFile.serve_content_type(mime),
-           response_content_disposition: disposition(mime),
+           response_content_disposition: disposition,
            response_cache_control: Delivery.file_cache_control(visibility)
          ) do
       {:file, full_path} ->
         conn
         |> Delivery.put_file_cache_headers(full_path, visibility)
-        |> maybe_send_file(full_path, mime)
+        |> maybe_send_file(full_path, mime, disposition: disposition)
 
       {:redirect, url} ->
         redirect_to_blob(conn, url)
@@ -737,7 +790,8 @@ defmodule BarkparkWeb.MediaController do
   # `svg: disposition` is the one exception to the collapse, set only by
   # `serve_svg/3`: the type stays `image/svg+xml`, the CSP below stops any
   # script in it from running, and the disposition is `inline` for an image and
-  # `attachment` for a page.
+  # `attachment` for a page. `disposition:` replaces the default for a Sanity
+  # `dl` download; the type is collapsed all the same.
   #
   # NO CHARSET on a binary type (task-701191424b8d15e8). `put_resp_content_type/2`
   # appends `; charset=utf-8` by default, which is wrong for image and other
@@ -747,7 +801,7 @@ defmodule BarkparkWeb.MediaController do
     {served_type, disposition} =
       if opts[:svg],
         do: {@svg_mime, opts[:svg]},
-        else: {MediaFile.serve_content_type(mime), disposition(mime)}
+        else: {MediaFile.serve_content_type(mime), opts[:disposition] || disposition(mime)}
 
     conn =
       conn

@@ -203,6 +203,22 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
       assert resp.resp_body == original
     end
 
+    test "Sanity's dl downloads the original and a transform", ctx do
+      sanity_sha = sha("5")
+      upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
+
+      for query <- ["dl=", "w=30&dl="] do
+        resp = as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", query))
+        assert resp.status == 200, resp.resp_body
+
+        assert get_resp_header(resp, "content-disposition") ==
+                 [~s<attachment;filename="two-tone.jpg">]
+      end
+
+      resp = as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", "w=30"))
+      assert get_resp_header(resp, "content-disposition") == ["inline"]
+    end
+
     test "accepts a vanity file name after the asset name", ctx do
       sanity_sha = sha("e")
       upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
@@ -250,17 +266,60 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
   end
 
   describe "GET /w/:ws/p/:proj/files/:project/:dataset/<sha1>.<ext>" do
-    test "resolves by sourceId and serves the bytes; query parameters are ignored", ctx do
+    test "resolves by sourceId and serves the bytes inline under the file name", ctx do
       path = pdf_file()
       bytes = File.read!(path)
       sanity_sha = sha("3")
-      upload(ctx, path, "doc.pdf", "application/pdf", %{"sourceId" => "file-#{sanity_sha}-pdf"})
+
+      upload(ctx, path, ~s<J54 "upload".pdf>, "application/pdf", %{
+        "sourceId" => "file-#{sanity_sha}-pdf"
+      })
 
       resp =
-        as(ctx.raw) |> get("#{ctx.base}/files/#{@project_id}/production/#{sanity_sha}.pdf?dl=")
+        as(ctx.raw) |> get("#{ctx.base}/files/#{@project_id}/production/#{sanity_sha}.pdf?x=1")
 
       assert resp.status == 200, resp.resp_body
       assert resp.resp_body == bytes
+
+      assert get_resp_header(resp, "content-disposition") ==
+               [~s<inline;filename="J54 %22upload%22.pdf">]
+    end
+
+    # Sanity's CDN answers exactly these, measured on ecu57yeh.
+    test "Sanity's dl downloads under the original or the given name, percent-encoded", ctx do
+      sanity_sha = sha("4")
+
+      upload(ctx, pdf_file(), "Årsrapport 2026.pdf", "application/pdf", %{
+        "sourceId" => "file-#{sanity_sha}-pdf"
+      })
+
+      url = "#{ctx.base}/files/#{@project_id}/production/#{sanity_sha}.pdf"
+      get_url = &(as(ctx.raw) |> get(url <> &1))
+      disposition = &get_resp_header(get_url.(&1), "content-disposition")
+
+      original = ~s<attachment;filename="%C3%85rsrapport 2026.pdf">
+      assert disposition.("?dl") == [original]
+      assert disposition.("?dl=") == [original]
+      assert disposition.("?dl=my%20file.pdf") == [~s<attachment;filename="my%20file.pdf">]
+      assert disposition.("?dl=50%25.pdf") == [~s<attachment;filename="50%25.pdf">]
+
+      hostile = get_url.("?dl=" <> URI.encode_www_form(~s<a"\\\r\nSet-Cookie: x=1.pdf>))
+      assert get_resp_header(hostile, "set-cookie") == []
+
+      assert get_resp_header(hostile, "content-disposition") ==
+               [~s<attachment;filename="a%22%5C%0D%0ASet-Cookie:%20x=1.pdf">]
+
+      encoded = get_url.("?dl=a%22%0D%0ASet-Cookie:%20x=1.pdf")
+      assert get_resp_header(encoded, "set-cookie") == []
+      assert [one] = get_resp_header(encoded, "content-disposition")
+      refute one =~ ~r/[\r\n]/
+
+      # Plug refuses invalid UTF-8 in the query with a 400 before the route
+      # runs (Sanity echoes it: filename="%FF.pdf").
+      assert_error_sent 400, fn -> get_url.("?dl=%FF") end
+
+      [long] = disposition.("?dl=" <> String.duplicate("x", 500))
+      assert byte_size(long) < 240
     end
 
     test "falls back to the sha1 of the stored bytes", ctx do
