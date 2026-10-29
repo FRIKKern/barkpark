@@ -495,6 +495,22 @@ defmodule BarkparkWeb.ListenControllerTest do
     assert_receive {:webhook_selected, %{dataset: @dataset, doc_id: "drafts.l1", event: "create"}}
   end
 
+  test "a Studio save of a published doc chains its first draft on the published rev" do
+    {:ok, published} = Content.publish_document("l1", "post", @dataset)
+    since = ListenController.replay_since(@dataset, 0) |> Enum.map(& &1.id) |> Enum.max()
+
+    {:ok, draft, _errors} =
+      Content.upsert_draft(published, "post", nil, %{"body" => "studio edit"}, @dataset)
+
+    assert draft.doc_id == "drafts.l1"
+    [ev] = ListenController.replay_since(@dataset, since) |> Enum.to_list()
+
+    assert %{"mutation" => "update", "documentId" => "drafts.l1", "previousRev" => prev} =
+             ev |> ListenController.format_event(@dataset) |> frame_data()
+
+    assert prev == published.rev
+  end
+
   # task-0951e10cb60b409c: SSE syncTags carry the webhook's tag set, scoped and
   # flat, so a consumer that tags scoped reads can revalidate from the stream.
   test "syncTags match the webhook sync_tags for the same mutation, on both legs" do

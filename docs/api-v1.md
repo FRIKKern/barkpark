@@ -125,7 +125,7 @@ SSE: a `/w/…/p/…` URL streams a project, a flat URL a workspace.
 
 First frame: `event: welcome`. `?query=*[…]`: docs matching before/after, with `transition`; `includeResult=false` no result.
 
-**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`; a patch's draft fork: `update`, published rev), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
+**Mutation frame:** `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (`drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`; first draft on a published doc: `update`, its rev), `result` (envelope), `syncTags`. `: keepalive` at 30 s idle.
 
 **Closes:** a slow reader: `event: overloaded`; past 20 streams a credential+address, 100 in all: `event: disconnect`.
 

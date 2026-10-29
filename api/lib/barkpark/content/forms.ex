@@ -1307,9 +1307,9 @@ defmodule Barkpark.Content.Forms do
   # refuses, and the merge is redone on top of it — so a concurrent change to a
   # field this save did not touch is never overwritten.
   defp upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts) do
-    current = current_doc(base_doc, type, dataset, opts)
+    {current, write_opts} = current_doc(base_doc, type, dataset, opts)
 
-    case upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
+    case upsert_draft_once(base_doc, current, type, schema, params, dataset, write_opts) do
       {:error, {:rev_mismatch, _}} when attempts > 1 ->
         upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
 
@@ -1346,22 +1346,28 @@ defmodule Barkpark.Content.Forms do
     end)
   end
 
+  # The first draft over a published row is announced as an `update` from that
+  # row's rev (`:forked_from_rev`), so a client chaining revs off the listen
+  # stream keeps its chain (task-1bbff112e31873ff).
   defp current_doc(base_doc, type, dataset, opts) do
     published = DraftId.published_id(base_doc.doc_id)
     read_opts = Keyword.take(opts, [:workspace_id, :project_id])
 
     case Content.get_document(DraftId.draft_id(published), type, dataset, read_opts) do
       {:ok, %Document{} = draft} ->
-        draft
+        {draft, opts}
 
       _ ->
         case Content.get_document(published, type, dataset, read_opts) do
-          {:ok, %Document{} = pub} -> Map.put(pub, :rev, nil)
-          _ -> Map.put(base_doc, :rev, nil)
+          {:ok, %Document{} = pub} ->
+            {Map.put(pub, :rev, nil), Keyword.put(opts, :forked_from_rev, pub.rev)}
+
+          _ ->
+            {Map.put(base_doc, :rev, nil), opts}
         end
     end
   rescue
-    _ -> Map.put(base_doc, :rev, nil)
+    _ -> {Map.put(base_doc, :rev, nil), opts}
   end
 
   # A row-level field the author did not change keeps what the store holds now.
