@@ -2696,7 +2696,7 @@ defmodule Barkpark.Content.Writer do
             {:error, :not_found}
 
           %Document{rev: actual} ->
-            {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+            {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: existing.doc_id}}}
         end
     end
   end

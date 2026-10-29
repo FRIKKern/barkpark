@@ -1504,6 +1504,70 @@ defmodule BarkparkWeb.MutateControllerTest do
     end
   end
 
+  defp mutate_412_details(conn, mutations) do
+    resp =
+      conn |> authed() |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
+
+    assert resp.status == 412
+    Jason.decode!(resp.resp_body)["error"]["details"]
+  end
+
+  test "a 412's index counts every mutation, across delete and non-delete runs", %{conn: conn} do
+    [a, b, c, d] =
+      for n <- 1..4 do
+        {:ok, doc} =
+          Content.create_document("post", %{"_id" => "mix412-#{n}", "title" => "v1"}, "test")
+
+        doc
+      end
+
+    set = fn doc, rev ->
+      %{
+        "patch" => %{
+          "id" => doc.doc_id,
+          "type" => "post",
+          "ifRevisionID" => rev,
+          "set" => %{"title" => "v2"}
+        }
+      }
+    end
+
+    del = fn doc -> %{"delete" => %{"id" => doc.doc_id, "type" => "post"}} end
+
+    assert %{"index" => 3, "id" => "drafts.mix412-4"} =
+             mutate_412_details(conn, [set.(a, a.rev), del.(b), del.(c), set.(d, "stale")])
+
+    assert %{"index" => 1, "id" => "drafts.mix412-1"} =
+             mutate_412_details(conn, [del.(b), set.(a, "stale")])
+
+    for doc <- [a, b, c, d],
+        do: assert({:ok, _} = Content.get_document(doc.doc_id, "post", "test"))
+  end
+
+  test "a 412's id names the row it compared, also when that row is missing", %{conn: conn} do
+    {:ok, draft} =
+      Content.create_document("post", %{"_id" => "id412", "title" => "v1"}, "test")
+
+    create = %{"create" => %{"_type" => "post", "_id" => "id412", "ifRevisionID" => "stale"}}
+
+    assert mutate_412_details(conn, [create]) ==
+             %{"index" => 0, "id" => "drafts.id412", "expected" => "stale", "actual" => draft.rev}
+
+    exact = %{
+      "deleteExactDraft" => %{"id" => "drafts.id412", "type" => "post", "ifRevisionID" => "stale"}
+    }
+
+    assert Map.take(mutate_412_details(conn, [exact]), ~w(id actual)) ==
+             %{"id" => "drafts.id412", "actual" => draft.rev}
+
+    ghost = %{
+      "createOrReplace" => %{"_type" => "post", "_id" => "ghost412", "ifRevisionID" => "r"}
+    }
+
+    assert mutate_412_details(conn, [ghost]) ==
+             %{"index" => 0, "id" => "drafts.ghost412", "expected" => "r", "actual" => nil}
+  end
+
   # Regression: a patch on a PUBLISHED id must target the draft (the row
   # Writer.upsert_document actually writes), not merge from the published row.
   # Reading the published row as merge base silently overwrites the newer draft

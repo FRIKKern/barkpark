@@ -505,7 +505,9 @@ defmodule Barkpark.Content.Mutations do
   # compared: the client resends that one, not the batch one by one
   # (task-38c5c28f0fcef9eb).
   defp name_failing_mutation({:rev_mismatch, %{} = details}, m, index),
-    do: {:rev_mismatch, details |> Map.put(:index, index) |> Map.put_new(:id, named_id(m))}
+    do:
+      {:rev_mismatch,
+       details |> Map.put(:index, index) |> Map.update(:id, named_id(m), &(&1 || named_id(m)))}
 
   defp name_failing_mutation(reason, _m, _index), do: reason
 
@@ -912,8 +914,11 @@ defmodule Barkpark.Content.Mutations do
     case existing do
       %_{} = doc ->
         case if_rev(attrs) do
-          nil -> {:error, :conflict}
-          expected -> {:error, {:rev_mismatch, %{expected: expected, actual: doc.rev}}}
+          nil ->
+            {:error, :conflict}
+
+          expected ->
+            {:error, {:rev_mismatch, %{expected: expected, actual: doc.rev, id: doc.doc_id}}}
         end
 
       _ ->
@@ -962,7 +967,7 @@ defmodule Barkpark.Content.Mutations do
         end
 
       with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
-           :ok <- ensure_rev(existing, expected),
+           :ok <- ensure_rev(existing, expected, id && DraftId.published_id(id)),
            :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
            :ok <-
              ensure_read_only_unchanged(
@@ -1002,7 +1007,7 @@ defmodule Barkpark.Content.Mutations do
     # (migration 20260528100000 seeds already-`done` rows) keeps working while
     # a write ONTO a live claimed/open task is fenced exactly like a patch.
     with :ok <- run_mutate_door_fences(:before_rev, type, existing, attrs, dataset, opts),
-         :ok <- ensure_rev(existing, expected),
+         :ok <- ensure_rev(existing, expected, id && DraftId.draft_id(id)),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
@@ -1112,7 +1117,7 @@ defmodule Barkpark.Content.Mutations do
              do: {:ok, doc, "delete"}
 
       _ ->
-        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+        with :ok <- ensure_rev(nil, if_rev(op), id), do: {:error, :not_found}
     end
   end
 
@@ -1139,7 +1144,7 @@ defmodule Barkpark.Content.Mutations do
               end
             end)
 
-          with :ok <- ensure_any_rev(rows, expected),
+          with :ok <- ensure_any_rev(rows, expected, id),
                {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
             {:ok, doc, "delete"}
           end
@@ -1159,7 +1164,7 @@ defmodule Barkpark.Content.Mutations do
         apply_one(%{mutation | "delete" => Map.put(op, "type", type)}, dataset, opts)
 
       :error ->
-        with :ok <- ensure_rev(nil, if_rev(op)), do: {:error, :not_found}
+        with :ok <- ensure_rev(nil, if_rev(op), id), do: {:error, :not_found}
     end
   end
 
@@ -2541,21 +2546,24 @@ defmodule Barkpark.Content.Mutations do
     |> Enum.uniq()
   end
 
-  defp ensure_any_rev(rows, expected) do
+  defp ensure_any_rev(rows, expected, id) do
     if Enum.any?(rows, &(&1.rev == expected)),
       do: :ok,
-      else: ensure_rev(List.first(rows), expected)
+      else: ensure_rev(List.first(rows), expected, id)
   end
 
-  defp ensure_rev(_doc, nil), do: :ok
-  defp ensure_rev(_doc, ""), do: :ok
+  # `missing_id` names the row that was looked up and not found, so a 412 on an
+  # absent row still says which row it compared (`details.id`, `actual: nil`).
+  defp ensure_rev(doc, expected, missing_id \\ nil)
+  defp ensure_rev(_doc, nil, _missing_id), do: :ok
+  defp ensure_rev(_doc, "", _missing_id), do: :ok
 
-  defp ensure_rev(nil, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: nil}}}
+  defp ensure_rev(nil, expected, missing_id),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: nil, id: missing_id}}}
 
-  defp ensure_rev(%{rev: r}, r), do: :ok
+  defp ensure_rev(%{rev: r}, r, _missing_id), do: :ok
 
-  defp ensure_rev(%{rev: actual, doc_id: id}, expected),
+  defp ensure_rev(%{rev: actual, doc_id: id}, expected, _missing_id),
     do: {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
 
   # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create`
