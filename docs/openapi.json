@@ -1742,7 +1742,7 @@
               }
             }
           },
-          "description": "Request body fields: op, field, item.",
+          "description": "Request body fields: op, field, item, max.",
           "required": true
         },
         "responses": {
@@ -1783,7 +1783,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit the list at value[field] of one per-account pref in one locked write, so two tabs or devices never overwrite each other. push_front moves item to the front, dedupes and keeps the first max (--set max:=20); add appends item unless present; remove drops it. Replaying an op changes nothing. 422 invalid_pref when value[field] is not a list.",
+        "summary": "Edit the list at value[field] of one per-account pref in one locked write, so two tabs or devices never overwrite each other. push_front moves item to the front, dedupes and keeps the first max; add appends item unless present; remove drops it and writes nothing on an absent key. Applying an op twice in a row changes nothing; a replay after other ops re-applies it. 422 invalid_pref when value[field] is not a list.",
         "tags": [
           "pref"
         ],
@@ -2349,7 +2349,7 @@
               }
             }
           },
-          "description": "Request body fields: op, field, item.",
+          "description": "Request body fields: op, field, item, max.",
           "required": true
         },
         "responses": {
@@ -2390,7 +2390,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit the list at value[field] of one per-account pref in one locked write, so two tabs or devices never overwrite each other. push_front moves item to the front, dedupes and keeps the first max (--set max:=20); add appends item unless present; remove drops it. Replaying an op changes nothing. 422 invalid_pref when value[field] is not a list.",
+        "summary": "Edit the list at value[field] of one per-account pref in one locked write, so two tabs or devices never overwrite each other. push_front moves item to the front, dedupes and keeps the first max; add appends item unless present; remove drops it and writes nothing on an absent key. Applying an op twice in a row changes nothing; a replay after other ops re-applies it. 422 invalid_pref when value[field] is not a list.",
         "tags": [
           "pref"
         ],

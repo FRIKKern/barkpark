@@ -64,8 +64,8 @@ defmodule BarkparkWeb.UserPrefController do
     with {:ok, user_id} <- resolve_user_id(conn),
          {:ws, %{id: ws_id}} <- {:ws, conn.assigns[:current_workspace]},
          {:ok, op} <- list_op(params),
-         {:ok, pref} <- UserPrefs.apply_list_op(user_id, ws_id, dataset, key, op) do
-      json(conn, %{ok: true, key: key, dataset: dataset, value: pref.value})
+         {:ok, value} <- UserPrefs.apply_list_op(user_id, ws_id, dataset, key, op) do
+      json(conn, %{ok: true, key: key, dataset: dataset, value: value})
     else
       {:ws, _} ->
         not_found(conn)
@@ -99,16 +99,25 @@ defmodule BarkparkWeb.UserPrefController do
 
   defp list_op(%{"op" => op, "field" => field, "item" => item} = params)
        when is_binary(field) and field != "" and not is_nil(item) do
-    case {Map.fetch(@list_ops, op), Map.get(params, "max")} do
-      {{:ok, op}, max} when is_nil(max) or (is_integer(max) and max > 0) ->
-        {:ok, {op, field, item, max}}
-
-      _ ->
-        {:error, :bad_op}
+    case {Map.fetch(@list_ops, op), cap(Map.get(params, "max"))} do
+      {{:ok, op}, {:ok, max}} -> {:ok, {op, field, item, max}}
+      _ -> {:error, :bad_op}
     end
   end
 
   defp list_op(_params), do: {:error, :bad_op}
+
+  defp cap(nil), do: {:ok, nil}
+  defp cap(max) when is_integer(max) and max > 0, do: {:ok, max}
+
+  defp cap(max) when is_binary(max) do
+    case Integer.parse(max) do
+      {max, ""} when max > 0 -> {:ok, max}
+      _ -> :error
+    end
+  end
+
+  defp cap(_max), do: :error
 
   def delete(conn, %{"dataset" => dataset, "key" => key}) do
     with {:ok, user_id} <- resolve_user_id(conn),

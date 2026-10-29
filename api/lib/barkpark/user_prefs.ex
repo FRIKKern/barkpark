@@ -60,54 +60,81 @@ defmodule Barkpark.UserPrefs do
   @doc """
   Edit the list at `value[field]` in one transaction under a row lock, so
   two tabs or devices editing the same key both land. A missing row or
-  field is an empty list; the rest of `value` is kept.
+  field is an empty list; the rest of `value` is kept. Answers the new
+  `value`.
 
     * `:push_front` — move `item` to the front, drop its other copies, keep
       the first `max` (all when `nil`).
     * `:add` — append `item` unless present.
-    * `:remove` — drop every copy of `item`.
+    * `:remove` — drop every copy of `item`. On an absent key or field it
+      writes nothing (`{:ok, nil}` for an absent key).
 
-  Each op applied twice gives the result of applying it once, so a client
-  may replay a queued op. `{:error, :not_a_list}` when `value[field]` holds
-  anything else; `{:error, changeset}` past the size cap. Neither writes.
+  Applying an op twice in a row gives the result of applying it once.
+  `{:error, :not_a_list}` when `value[field]` holds anything else;
+  `{:error, changeset}` for an over-long key or dataset or past the size cap.
+  None of these write.
   """
   @spec apply_list_op(binary(), binary(), String.t(), String.t(), list_op()) ::
-          {:ok, UserPref.t()} | {:error, :not_a_list | Ecto.Changeset.t()}
+          {:ok, map() | nil} | {:error, :not_a_list | Ecto.Changeset.t()}
   def apply_list_op(user_id, workspace_id, dataset, key, {op, field, item, max}) do
-    Repo.transaction(fn ->
-      pref = lock!(user_id, workspace_id, dataset, key)
+    scope = %{user_id: user_id, workspace_id: workspace_id, dataset: dataset, key: key}
 
-      with {:ok, list} <- list_at(pref.value, field),
-           value = Map.put(pref.value, field, edit(op, list, item, max)),
-           {:ok, pref} <- pref |> UserPref.changeset(%{value: value}) |> Repo.update() do
-        pref
+    Repo.transaction(fn ->
+      with {:ok, pref} <- locked_row(scope, op != :remove),
+           {:ok, value} <- change(pref, op, field, item, max) do
+        value
       else
         {:error, reason} -> Repo.rollback(reason)
       end
     end)
   end
 
-  defp lock!(user_id, workspace_id, dataset, key) do
+  defp locked_row(scope, create?) do
+    with :ok <- if(create?, do: insert_empty(scope), else: :ok) do
+      case Repo.one(
+             from p in UserPref,
+               where:
+                 p.user_id == ^scope.user_id and p.workspace_id == ^scope.workspace_id and
+                   p.dataset == ^scope.dataset and p.key == ^scope.key,
+               lock: "FOR UPDATE"
+           ) do
+        nil when create? -> locked_row(scope, create?)
+        pref -> {:ok, pref}
+      end
+    end
+  end
+
+  defp insert_empty(scope) do
     %UserPref{}
-    |> UserPref.changeset(%{
-      user_id: user_id,
-      workspace_id: workspace_id,
-      dataset: dataset,
-      key: key,
-      value: %{}
-    })
-    |> Repo.insert!(
+    |> UserPref.changeset(Map.put(scope, :value, %{}))
+    |> Repo.insert(
       on_conflict: :nothing,
       conflict_target: [:user_id, :workspace_id, :dataset, :key]
     )
+    |> case do
+      {:ok, _} -> :ok
+      error -> error
+    end
+  end
 
-    Repo.one!(
-      from p in UserPref,
-        where:
-          p.user_id == ^user_id and p.workspace_id == ^workspace_id and p.dataset == ^dataset and
-            p.key == ^key,
-        lock: "FOR UPDATE"
-    )
+  defp change(nil, _op, _field, _item, _max), do: {:ok, nil}
+
+  defp change(pref, op, field, item, max) do
+    with {:ok, list} <- list_at(pref.value, field) do
+      case edit(op, list, item, max) do
+        [] when not is_map_key(pref.value, field) ->
+          {:ok, pref.value}
+
+        edited ->
+          pref
+          |> UserPref.changeset(%{value: Map.put(pref.value, field, edited)})
+          |> Repo.update()
+          |> case do
+            {:ok, pref} -> {:ok, pref.value}
+            error -> error
+          end
+      end
+    end
   end
 
   defp list_at(value, field) do

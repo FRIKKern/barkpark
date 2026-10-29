@@ -279,7 +279,8 @@ defmodule BarkparkWeb.UserPrefControllerTest do
             %{op: "add", field: "ids"},
             %{op: "add", field: "", item: "a"},
             %{op: "push_front", field: "ids", item: "a", max: 0},
-            %{op: "push_front", field: "ids", item: "a", max: "3"}
+            %{op: "push_front", field: "ids", item: "a", max: "3x"},
+            %{op: "push_front", field: "ids", item: "a", max: -1}
           ] do
         assert list_op(raw, ws, project, body, 422)["error"]["code"] == "bad_request"
       end
@@ -289,6 +290,37 @@ defmodule BarkparkWeb.UserPrefControllerTest do
               |> json_response(200))[
                "value"
              ] == nil
+    end
+
+    test "max may be a digit string, as bp sends it", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      for id <- ~w(a b c), do: list_op(raw, ws, project, push_front(id, "2"))
+      assert list_op(raw, ws, project, push_front("d", "2"))["value"]["ids"] == ~w(d c)
+    end
+
+    test "remove on an absent key writes nothing", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      assert list_op(raw, ws, project, %{op: "remove", field: "ids", item: "a"})["value"] == nil
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))[
+               "value"
+             ] == nil
+    end
+
+    test "an over-long key is a 422 invalid_pref, as on PUT", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      path = prefs_path(ws, project, String.duplicate("k", 201))
+
+      for {method, body} <- [{:put, %{value: %{ids: []}}}, {:patch, push_front("a")}] do
+        resp =
+          bearer(raw)
+          |> dispatch(@endpoint, method, path, Jason.encode!(body))
+          |> json_response(422)
+
+        assert resp["error"]["code"] == "invalid_pref", "#{method}: #{inspect(resp)}"
+      end
     end
 
     test "a shared token with no owner is refused", %{ws: ws, project: project} do
