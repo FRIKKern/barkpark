@@ -33,6 +33,7 @@ export class WikilinkMenu {
     this._active = 0;       // index into the flat selectable results list
     this._results = [];     // current candidate list ({ title, id, type }[])
     this._resultsSet = false; // false → still "Searching…"; true → render results
+    this._settled = false;  // the latest open() has its results (Enter may close on none)
     this._query = "";       // live query (display only in the eyebrow)
     this._el = null;        // popup root element
     this._rowEls = [];      // parallel to this._results, for active styling
@@ -54,6 +55,7 @@ export class WikilinkMenu {
   open(rect, query = "") {
     if (!this._el) this._build();
     this._query = query || "";
+    this._settled = false;
     if (!this._open) {
       // FIRST open: start in the "Searching…" state until setResults() fires.
       // On a refresh-while-open (the query growing keystroke-by-keystroke) we
@@ -87,6 +89,7 @@ export class WikilinkMenu {
   // once its wikilinkSource promise resolves (zero or more times per open session).
   setResults(list) {
     this._resultsSet = true;
+    this._settled = true;
     this._results = Array.isArray(list) ? list : [];
     this._active = 0;
     this._render();
@@ -113,10 +116,11 @@ export class WikilinkMenu {
     this._rowEls = [];
   }
 
-  // The results came back and nothing matched: Enter has nothing to pick, so the
-  // canvas closes the menu and lets Enter break the line (contract 1.16.0).
+  // The results for the current query came back and nothing matched: Enter has
+  // nothing to pick, so the canvas closes the menu and lets Enter break the line
+  // (contract 1.16.0). A query still in flight is not empty yet.
   isEmpty() {
-    return this._open && this._resultsSet && this._results.length === 0;
+    return this._open && this._settled && this._results.length === 0;
   }
 
   // Move the active selection by `delta`, wrapping at both ends. No-op when

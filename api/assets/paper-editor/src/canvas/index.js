@@ -2853,12 +2853,6 @@ class BpPaperCanvas extends HTMLElement {
           this._emoji.move(-1);
           return true;
         case "Enter":
-          if (this._emoji.isEmpty()) {
-            this._closeEmoji();
-            return false;
-          }
-          this._emoji.choose();
-          return true;
         case "Tab":
           this._emoji.choose();
           return true;
@@ -3463,13 +3457,13 @@ class BpPaperCanvas extends HTMLElement {
     // Async source with a STALE GUARD: each open/keystroke bumps _wlSeq; a
     // resolved batch is dropped unless it is still the latest request AND the menu
     // is still open — so an out-of-order or post-close response is ignored.
+    // A source that throws or rejects reads as no match (contract 1.16.0).
     const seq = ++this._wlSeq;
-    Promise.resolve(this._wikilinkSource(hit.query))
+    const current = () => seq === this._wlSeq && this._wikilink && this._wikilink.isOpen();
+    new Promise((resolve) => resolve(this._wikilinkSource(hit.query)))
+      .catch(() => [])
       .then((list) => {
-        if (seq !== this._wlSeq || !this._wikilink || !this._wikilink.isOpen()) {
-          return;
-        }
-        this._wikilink.setResults(Array.isArray(list) ? list : []);
+        if (current()) this._wikilink.setResults(Array.isArray(list) ? list : []);
       })
       .catch(() => {});
     return true;
@@ -3587,7 +3581,8 @@ class BpPaperCanvas extends HTMLElement {
     // still the latest request AND the menu is still open. The source returns a
     // string[] of tag NAMES; adapt each to WikilinkMenu's row shape here.
     const seq = ++this._tagSeq;
-    Promise.resolve(this._tagSource(hit.query))
+    new Promise((resolve) => resolve(this._tagSource(hit.query)))
+      .catch(() => [])
       .then((list) => {
         if (seq !== this._tagSeq || !this._tag || !this._tag.isOpen()) {
           return;

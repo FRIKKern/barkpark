@@ -181,6 +181,102 @@ test("Enter while results are still coming stays with the picker", async () => {
   canvas.remove();
 });
 
+test("only the literal off turns @ off", async () => {
+  for (const value of ["OFF", "false", "", "no"]) {
+    const { canvas, editor, queries } = await mount({ attrs: { "mention-trigger": value }, source: everything });
+    await typed(editor, "@team");
+    assert.ok(openMenu(), `mention-trigger="${value}" keeps @ on`);
+    assert.equal(queries.at(-1), "team");
+    canvas.remove();
+  }
+});
+
+test("two canvases on one page: the opt-out is per element", async () => {
+  const off = await mount({ attrs: { "mention-trigger": "off" }, source: everything });
+  const on = await mount({ source: everything });
+  await typed(off.editor, "@team");
+  assert.equal(openMenu(), null);
+  on.editor.commands.focus();
+  await typed(on.editor, "@team");
+  assert.ok(openMenu(), "the other canvas keeps @");
+  assert.deepEqual(off.queries, []);
+  assert.equal(on.queries.at(-1), "team");
+  off.canvas.remove();
+  on.canvas.remove();
+});
+
+test("removed and appended again, the opt-out still holds", async () => {
+  const { canvas, queries } = await mount({ attrs: { "mention-trigger": "off" }, source: everything });
+  canvas.remove();
+  document.body.appendChild(canvas);
+  await settle();
+  const editor = canvas._editor;
+  editor.commands.setTextSelection(1);
+  await typed(editor, "@team");
+  assert.equal(openMenu(), null);
+  assert.deepEqual(queries, []);
+  pressEnter(editor);
+  assert.equal(lines(editor).length, 2, "Enter still breaks the line");
+  canvas.remove();
+});
+
+test("an empty batch for an older query does not let Enter close a newer one", async () => {
+  const source = (query) => (query === "zzqx" ? Promise.resolve([]) : new Promise(() => {}));
+  const { canvas, editor } = await mount({ source });
+  await typed(editor, "[[zzqx");
+  assert.ok(openMenu().querySelector(".bp-wikilink-empty")?.textContent === "No matching pages");
+  await typed(editor, "y");
+  pressEnter(editor);
+  assert.ok(openMenu(), "the zzqxy query is still in flight");
+  assert.deepEqual(lines(editor), ["[[zzqxy"]);
+  canvas.remove();
+});
+
+test("a batch that lands after Enter closed the picker is dropped", async () => {
+  let release;
+  const late = new Promise((resolve) => { release = resolve; });
+  const source = (query) => (query === "zzqx" ? Promise.resolve([]) : late);
+  const { canvas, editor } = await mount({ source });
+  await typed(editor, "[[zzqx");
+  pressEnter(editor);
+  assert.equal(openMenu(), null);
+  release([{ title: "Late", id: "late", type: "paper" }]);
+  await tick();
+  assert.equal(openMenu(), null, "still closed");
+  assert.equal(hasWikilink(editor), false);
+  assert.deepEqual(lines(editor), ["[[zzqx", ""]);
+  canvas.remove();
+});
+
+test("a source that rejects reads as no match", async () => {
+  const { canvas, editor } = await mount({ source: async () => { throw new Error("search down"); } });
+  await typed(editor, "[[Road");
+  assert.equal(openMenu().querySelector(".bp-wikilink-empty")?.textContent, "No matching pages");
+  pressEnter(editor);
+  assert.equal(openMenu(), null);
+  assert.deepEqual(lines(editor), ["[[Road", ""]);
+  canvas.remove();
+});
+
+test("a source that throws at once reads as no match and the editor keeps working", async () => {
+  const { canvas, editor } = await mount({ source: () => { throw new Error("bad source"); } });
+  await typed(editor, "[[Road");
+  assert.deepEqual(lines(editor), ["[[Road"], "every keystroke landed");
+  assert.equal(openMenu().querySelector(".bp-wikilink-empty")?.textContent, "No matching pages");
+  pressEnter(editor);
+  assert.deepEqual(lines(editor), ["[[Road", ""]);
+  canvas.remove();
+});
+
+test("a tag source that rejects reads as no match", async () => {
+  const { canvas, editor } = await mount({ tags: async () => { throw new Error("tags down"); } });
+  await typed(editor, "#road");
+  pressEnter(editor);
+  assert.equal(openMenu(), null);
+  assert.deepEqual(lines(editor), ["#road", ""]);
+  canvas.remove();
+});
+
 test("data-strings renames the picker's eyebrow and empty row", async () => {
   const strings = { "Link to page": "Link to note", "No matching pages": "No matching notes" };
   const { canvas, editor } = await mount({ attrs: { "data-strings": JSON.stringify(strings) } });
@@ -190,6 +286,20 @@ test("data-strings renames the picker's eyebrow and empty row", async () => {
   assert.equal(menu.querySelector(".bp-wikilink-empty").textContent, "No matching notes");
   assert.equal(menu.getAttribute("aria-label"), "Link to note");
   canvas.remove();
+});
+
+test("data-strings: the # menu shares the label, a word left out stays English, bad JSON is English", async () => {
+  const strings = { "Link to page": "Link to note" };
+  const slow = await mount({ attrs: { "data-strings": JSON.stringify(strings) }, tags: () => new Promise(() => {}) });
+  await typed(slow.editor, "#road");
+  assert.equal(openMenu().querySelector(".bp-wikilink-menu__eyebrow").textContent, "Link to note");
+  assert.equal(openMenu().querySelector(".bp-wikilink-empty").textContent, "Searching…");
+  slow.canvas.remove();
+  const bad = await mount({ attrs: { "data-strings": "{not json" } });
+  await typed(bad.editor, "[[zzqx");
+  assert.equal(openMenu().querySelector(".bp-wikilink-menu__eyebrow").textContent, "Link to page");
+  assert.equal(openMenu().querySelector(".bp-wikilink-empty").textContent, "No matching pages");
+  bad.canvas.remove();
 });
 
 test("the picker's colours are --paper-picker-* properties with today's values", () => {
@@ -222,6 +332,27 @@ test("the picker's colours are --paper-picker-* properties with today's values",
     }
   }
   assert.ok(light.includes("box-shadow: var(--paper-picker-shadow, 0 4px 16px rgba(0, 0, 0, 0.08));"));
+
+  const paints = {
+    "chrome-bg": [".bp-wikilink-menu", "background"],
+    "chrome-border": [".bp-wikilink-menu", "border"],
+    "ink": [".bp-wikilink-item", "color"],
+    "ink-soft": [".bp-wikilink-foot kbd", "color"],
+    "ink-faint": [".bp-wikilink-empty", "color"],
+    "accent-soft": [".bp-wikilink-item.is-active", "background"],
+    "bg": [".bp-wikilink-foot kbd", "background"],
+    "rule": [".bp-wikilink-foot kbd", "border"],
+    "rule-soft": [".bp-wikilink-foot", "border-top"],
+  };
+  for (const [name, [selector, property]] of Object.entries(paints)) {
+    const rules = block(selector);
+    assert.match(rules, new RegExp(`${property}: [^;]*var\\(--paper-${name}\\)`), `${selector} ${property} reads --paper-${name}`);
+  }
+  for (const selector of [".bp-wikilink-menu__eyebrow", ".bp-wikilink-type-badge", ".bp-wikilink-foot"]) {
+    assert.match(block(selector), /color: var\(--paper-ink-faint\)/, `${selector} is ink-faint`);
+  }
+  const pickerRules = css.slice(css.indexOf(".bp-wikilink-menu {"), css.indexOf("/* ── canvas callout node-view"));
+  assert.doesNotMatch(pickerRules, /var\(--paper-accent\)/, "nothing in the picker paints --paper-accent");
 });
 
 let failed = 0;

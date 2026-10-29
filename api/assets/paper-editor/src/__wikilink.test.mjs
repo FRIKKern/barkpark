@@ -122,6 +122,10 @@ check("`see @Mult` mid-prose opens (after whitespace)", () => {
 check("a bare `@` opens with an empty query", () => {
   assert.deepEqual(parseOpenWikilink("hi @", 4), { query: "", from: 3, to: 4, trigger: "@" });
 });
+check("`(@Mult` and `[@Mult` open (after an opening bracket)", () => {
+  assert.deepEqual(parseOpenWikilink("(@Mult", 6), { query: "Mult", from: 1, to: 6, trigger: "@" });
+  assert.deepEqual(parseOpenWikilink("[@Mult", 6), { query: "Mult", from: 1, to: 6, trigger: "@" });
+});
 check("an address (`me@example`) does NOT open — the `@` is inside a word", () => {
   assert.equal(parseOpenWikilink("me@example", 10), null);
 });
