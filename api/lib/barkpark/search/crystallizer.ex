@@ -549,14 +549,17 @@ defmodule Barkpark.Search.Crystallizer do
 
   defp analytics_eligible?(_), do: true
 
-  # W2 dual-write: resolve the crystal/merge-pattern `scope` STRING → its
-  # `dataset_id` (under the seeded Default project) and stamp it alongside
-  # `scope` so the flipped `(surface, dataset_id, …)` uniques stay meaningful.
-  # The `scope` string remains the mirror; no-ops when unresolvable.
-  defp put_dataset_id(attrs, scope) when is_binary(scope) do
+  # W2 dual-write: a GLOBAL crystal/merge-pattern (no workspace) resolves its
+  # `scope` STRING → the seeded Default project's `dataset_id` for its
+  # `null_ws_unique_idx`. A workspace row is found by workspace + scope in the
+  # upserts above and is not stamped: the Default project's dataset is not its
+  # dataset, and deleting that dataset must not cascade it.
+  defp put_dataset_id(%{workspace_id: nil} = attrs, scope) when is_binary(scope) do
     case Barkpark.Tenancy.default_project_dataset_id(scope) do
       id when is_binary(id) -> Map.put(attrs, :dataset_id, id)
       _ -> attrs
     end
   end
+
+  defp put_dataset_id(attrs, _scope), do: attrs
 end

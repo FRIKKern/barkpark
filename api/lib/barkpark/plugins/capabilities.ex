@@ -1328,6 +1328,22 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # task-a944250b938671bd. The dataset is the positional <name>, never the
+      # active -d: a delete that fell back to the ambient dataset could remove
+      # the wrong one. `production` answers 409 production_dataset_protected.
+      core_cmd(
+        "dataset.delete",
+        "dataset",
+        "delete",
+        "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
+        "DELETE",
+        "/v1/datasets/:dataset",
+        "scoped_admin",
+        args: [arg("dataset", true, "string", "Dataset slug, e.g. j10-20261029.")],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "data.counts",
         "data",

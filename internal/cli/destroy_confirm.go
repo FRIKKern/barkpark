@@ -138,6 +138,18 @@ var destroyTargets = map[string]destroyTarget{
 		lookupByRef: true,
 		previewCols: []string{"grantee_email", "capabilities", "workspace_id", "project_id", "dataset", "type", "doc_id", "single_use", "expires_at", "claimed_at", "revoked_at"},
 	},
+	// Irreversible: the dataset's documents, media, schemas and history go with
+	// it. The name is readable already; the preview's job is the id, so a typo
+	// that names a real neighbour (j10-1 vs j10-11) shows which row dies.
+	"dataset.delete": {
+		kind:        "dataset",
+		argName:     "dataset",
+		lookupNoun:  "workspace",
+		lookupVerb:  "dataset-ls",
+		lookupKey:   "datasets",
+		lookupMatch: []string{"slug"},
+		previewCols: []string{"slug", "name", "id"},
+	},
 	// Irreversible, and its own summary names the blast radius: a revoked
 	// ticket key is indistinguishable from a missing one, so every client
 	// holding it starts 401ing. Resolved through `ticket-key ls`.
@@ -154,7 +166,7 @@ var destroyTargets = map[string]destroyTarget{
 
 // destroyRefArgs re-resolves cmd's positional args so the gate can name the
 // same target the request will. It reports gated=false — and does no work —
-// for every command that is not in the registry, which is all but four of them.
+// for every command that is not in the registry, which is all but five of them.
 //
 // It re-runs splitArgs/bindArgs rather than threading the map out of
 // buildManifestRequest because both are PURE: they read only the declared arg

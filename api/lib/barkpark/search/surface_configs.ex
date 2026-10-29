@@ -317,6 +317,13 @@ defmodule Barkpark.Search.SurfaceConfigs do
   defp normalize_fields(fields) when is_list(fields), do: fields
   defp normalize_fields(_), do: []
 
+  @doc "Drop every cached config of `scope` in `workspace_id`, after its row is deleted."
+  def forget(workspace_id, scope) when is_binary(scope) do
+    ensure_cache()
+    :ets.match_delete(@cache, {{workspace_id, :_, scope}, :_})
+    :ok
+  end
+
   # A per-workspace upsert only touches its OWN key.
   defp invalidate(surface, scope, workspace_id) when not is_nil(workspace_id) do
     ensure_cache()
