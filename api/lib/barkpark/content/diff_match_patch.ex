@@ -14,23 +14,35 @@ defmodule Barkpark.Content.DiffMatchPatch do
   Each hunk is placed at its expected offset (moved by the hunks before it)
   when the text there still matches, else at the best fuzzy match nearby; a
   hunk that matches nowhere is skipped, so concurrent edits elsewhere in the
-  same string survive. Checked against @sanity/diff-match-patch on 870
-  generated cases: the same text and hunk results on every patch applied to
-  its own base, and on 618 of 635 applied to text another edit had changed.
-  The rest differ where a hunk lands on changed context: the diff that maps
-  the edit into that text is Myers' (`List.myers_difference/2`), not
-  diff-match-patch's own with its semantic clean-up, so the edit can land a
-  few characters away. Where @sanity/diff-match-patch throws on a header
-  offset after an earlier hunk's deletion, this applies the patch.
+  same string survive. When a hunk lands on text its context no longer
+  matches, the edit is mapped through diff-match-patch's own diff
+  (`Barkpark.Content.DiffMatchPatch.Diff`), so it lands where Sanity lands it.
+  Pinned to vectors made with @sanity/diff-match-patch (`makePatches`, then
+  `applyPatches` on text another edit had changed): the same text and hunk
+  results on every one it can apply. Where that library throws on a header
+  offset after an earlier hunk's deletion (its offset walker only moves
+  forward), this applies the patch.
   """
 
   import Bitwise
+
+  alias Barkpark.Content.DiffMatchPatch.Diff
 
   @margin 4
   @max_bits 32
   @threshold 0.5
   @distance 1000
   @delete_threshold 0.4
+
+  # One request must never hold a CPU (bitap is O(text x pattern) and the
+  # fuzzy diff O(n x d)). Measured at these limits on a 2026 laptop: 100
+  # hunks re-matched by bitap on a 20,000-unit text, about 0.3 s; a fuzzy
+  # diff over the full unit budget, see the test. Past one, `apply/2`
+  # answers `{:error, :limit, message}` and the mutate route a 422.
+  @max_patch_bytes 32_768
+  @max_hunks 100
+  @max_text_units 20_000
+  @max_fuzzy_units 2_000
 
   @type op :: :equal | :insert | :delete
   @type units :: [non_neg_integer()]
@@ -40,11 +52,36 @@ defmodule Barkpark.Content.DiffMatchPatch do
   boolean per hunk, or `:error` when the patch text does not parse or the
   result is not valid text.
   """
-  @spec apply(String.t(), String.t()) :: {:ok, String.t(), [boolean()]} | :error
+  @spec apply(String.t(), String.t()) ::
+          {:ok, String.t(), [boolean()]} | :error | {:error, :limit, String.t()}
   def apply(patch_text, text) when is_binary(patch_text) and is_binary(text) do
-    with {:ok, patches} <- from_text(patch_text),
-         {:ok, patches} <- to_unit_offsets(patches, text),
-         {:ok, units} <- to_units(text) do
+    if Process.get(:dmp_budget),
+      do: do_apply(patch_text, text),
+      else: with_budget(fn -> do_apply(patch_text, text) end)
+  end
+
+  def apply(_patch_text, _text), do: :error
+
+  defp do_apply(patch_text, text) do
+    with :ok <-
+           spend(
+             :bytes,
+             byte_size(patch_text),
+             @max_patch_bytes,
+             "the patch text is over #{@max_patch_bytes} bytes"
+           ),
+         {:ok, patches} <- from_text(patch_text),
+         :ok <-
+           spend(:hunks, length(patches), @max_hunks, "the patch has over #{@max_hunks} hunks"),
+         {:ok, units} <- to_units(text),
+         :ok <-
+           spend(
+             :units,
+             length(units),
+             @max_text_units,
+             "the text is over #{@max_text_units} UTF-16 units"
+           ),
+         {:ok, patches} <- to_unit_offsets(patches, text) do
       {result, applied} = patch_apply(patches, units)
 
       case from_units(result) do
@@ -52,9 +89,46 @@ defmodule Barkpark.Content.DiffMatchPatch do
         :error -> :error
       end
     end
+  catch
+    {:dmp_limit, message} -> {:error, :limit, message}
   end
 
-  def apply(_patch_text, _text), do: :error
+  @doc "The limits one `apply/2` call, or one `with_budget/1`, works within."
+  def limits,
+    do: %{
+      patch_bytes: @max_patch_bytes,
+      hunks: @max_hunks,
+      text_units: @max_text_units,
+      fuzzy_units: @max_fuzzy_units
+    }
+
+  @doc """
+  Run `fun` with one budget for every `apply/2` inside it: the patch bytes,
+  hunks, text units and long-hunk diff units of all of them count against the
+  limits of one call. The mutate route wraps all of a patch's
+  `diffMatchPatch` paths in it, so many paths cost no more than one.
+  """
+  def with_budget(fun) do
+    Process.put(:dmp_budget, %{bytes: 0, hunks: 0, units: 0, fuzzy: 0})
+
+    try do
+      fun.()
+    after
+      Process.delete(:dmp_budget)
+    end
+  end
+
+  defp spend(kind, n, max, message) do
+    budget = Process.get(:dmp_budget)
+    used = Map.fetch!(budget, kind) + n
+
+    if used <= max do
+      Process.put(:dmp_budget, Map.put(budget, kind, used))
+      :ok
+    else
+      {:error, :limit, message}
+    end
+  end
 
   # ── text as UTF-16 code units ──────────────────────────────────────────────
 
@@ -257,12 +331,29 @@ defmodule Barkpark.Content.DiffMatchPatch do
   end
 
   defp fuzzy_apply(patch, text, text1, text2, start_loc, delta) do
-    diffs = myers(text1, text2)
     len1 = length(text1)
+
+    # A hunk of up to 32 units diffs at most 64 units; a longer one (a
+    # deleted stretch past `split_max/1`) can diff thousands. Those count
+    # against one budget per call.
+    if len1 > @max_bits do
+      with {:error, :limit, message} <-
+             spend(
+               :fuzzy,
+               len1 + length(text2),
+               @max_fuzzy_units,
+               "re-placing a long hunk on changed text needs over #{@max_fuzzy_units} units of diff"
+             ),
+           do: throw({:dmp_limit, message})
+    end
+
+    diffs = Diff.diff(text1, text2)
 
     if len1 > @max_bits and levenshtein(diffs) / len1 > @delete_threshold do
       {text, delta, false}
     else
+      diffs = Diff.semantic_lossless(diffs)
+
       {text, _index1} =
         Enum.reduce(patch.diffs, {text, 0}, fn
           {:equal, data}, {text, index1} ->
@@ -280,15 +371,6 @@ defmodule Barkpark.Content.DiffMatchPatch do
 
       {text, delta, true}
     end
-  end
-
-  defp myers(a, b) do
-    List.myers_difference(a, b)
-    |> Enum.map(fn
-      {:eq, u} -> {:equal, u}
-      {:del, u} -> {:delete, u}
-      {:ins, u} -> {:insert, u}
-    end)
   end
 
   defp text1(diffs), do: Enum.flat_map(diffs, fn {op, u} -> if op == :insert, do: [], else: u end)

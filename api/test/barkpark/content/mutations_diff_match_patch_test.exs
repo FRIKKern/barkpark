@@ -1,10 +1,12 @@
 defmodule Barkpark.Content.MutationsDiffMatchPatchTest do
   @moduledoc """
-  task-88240409d3fc3c51: the mutate route takes Sanity's `diffMatchPatch` op,
+  task-81fdb9df6eb27d97: the mutate route takes Sanity's `diffMatchPatch` op,
   so two editors typing in one Portable Text span both keep their text. The
-  patch strings and expected results below were made with
-  @sanity/diff-match-patch 3.2.1 (`makePatches(base, mine)`, then
-  `applyPatches` on the text another editor had changed meanwhile).
+  patch strings and expected results here, and in
+  `test/fixtures/diff_match_patch/sanity_vectors.json` (115 cases: fuzzy
+  placement, failed hunks, emoji, pastes and long deletions), were made with
+  @sanity/diff-match-patch 3.2.1: `makePatches(base, mine)`, then
+  `applyPatches` on the text another editor had changed meanwhile.
   """
   use Barkpark.DataCase, async: true
 
@@ -36,6 +38,46 @@ defmodule Barkpark.Content.MutationsDiffMatchPatchTest do
     end
 
     assert DiffMatchPatch.apply("not a patch", "text") == :error
+  end
+
+  test "matches @sanity/diff-match-patch on every pinned vector" do
+    vectors =
+      "test/fixtures/diff_match_patch/sanity_vectors.json" |> File.read!() |> Jason.decode!()
+
+    assert length(vectors) > 100
+
+    for %{"patch" => patch, "current" => current, "result" => result, "applied" => applied} <-
+          vectors do
+      assert DiffMatchPatch.apply(patch, current) == {:ok, result, applied},
+             "patch #{inspect(patch)} on #{inspect(current)}"
+    end
+  end
+
+  test "work past the limits is refused, not done" do
+    %{patch_bytes: bytes, hunks: hunks, text_units: units, fuzzy_units: fuzzy} =
+      DiffMatchPatch.limits()
+
+    long = String.duplicate("ab", div(units, 2) + 1)
+    assert {:error, :limit, _} = DiffMatchPatch.apply("@@ -1,2 +1,3 @@\n ab\n+c\n", long)
+
+    big_patch = "@@ -1,2 +1,3 @@\n ab\n+" <> String.duplicate("c", bytes) <> "\n"
+    assert {:error, :limit, _} = DiffMatchPatch.apply(big_patch, "ab")
+
+    many = Enum.map_join(1..(hunks + 1), fn _ -> "@@ -1,2 +1,3 @@\n ab\n+c\n" end)
+    assert {:error, :limit, _} = DiffMatchPatch.apply(many, "ab")
+
+    # A long deletion whose text changed meanwhile: its diff is over budget.
+    base = for i <- 1..(fuzzy + 200), into: "", do: <<?a + rem(i * 7, 26)>>
+
+    changed =
+      base
+      |> String.graphemes()
+      |> Enum.with_index()
+      |> Enum.map_join(fn {c, i} -> if rem(i, 9) == 0, do: "Z", else: c end)
+
+    patch = "@@ -1,#{byte_size(base)} +1,0 @@\n-" <> base <> "\n"
+    assert {:error, :limit, message} = DiffMatchPatch.apply(patch, changed)
+    assert message =~ "units of diff"
   end
 
   describe "the mutate route" do
@@ -116,6 +158,32 @@ defmodule Barkpark.Content.MutationsDiffMatchPatchTest do
                )
 
       assert span_text(scope) == "The quick brown fox"
+    end
+
+    test "past a limit the batch answers 422 and the text stays", %{scope: scope} do
+      too_many = Enum.map_join(1..101, fn _ -> "@@ -1,2 +1,3 @@\n Th\n+X\n" end)
+
+      assert {:error, {:validation_failed, "diffMatchPatch", %{"diffMatchPatch" => [message]}, _}} =
+               mutate(%{"diffMatchPatch" => %{@span => too_many}}, scope)
+
+      assert message =~ "over 100 hunks"
+      assert span_text(scope) == "The quick brown fox"
+
+      assert {:error, {:validation_failed, "diffMatchPatch", _, _}} =
+               mutate(%{"diffMatchPatch" => %{@span => "not a patch"}}, scope)
+    end
+
+    test "with fence: fields a stale ifRevisionID still merges a diffMatchPatch-only patch",
+         %{scope: scope, rev: rev} do
+      assert {:ok, _} = mutate(%{"set" => %{@span => "The very quick brown fox"}}, scope)
+      patch = %{"diffMatchPatch" => %{@span => "@@ -12,8 +12,14 @@\n rown fox\n+ jumps\n"}}
+
+      assert {:error, {:rev_mismatch, _}} = mutate(Map.put(patch, "ifRevisionID", rev), scope)
+
+      assert {:ok, _} =
+               mutate(patch |> Map.put("ifRevisionID", rev) |> Map.put("fence", "fields"), scope)
+
+      assert span_text(scope) == "The very quick brown fox jumps"
     end
 
     test "ifRevisionID fences the patch", %{scope: scope, rev: rev} do
