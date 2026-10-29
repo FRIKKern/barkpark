@@ -1126,28 +1126,20 @@ defmodule Barkpark.Content.Mutations do
                do: {:ok, doc, "delete"}
 
         expected ->
-          # The guard must read the SAME row-set delete_document acts on. It removes
-          # BOTH the draft and published spellings, but get_document is an exact-id
-          # match with no draft/published fallback — so an unpublished doc (present
-          # only as drafts.<id>) guarded by its canonical id would miss the row and
-          # spuriously 412. Read the exact id first (preserves every working case),
-          # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
-          # rev_mismatch for a truly-absent doc — no regression on that path.
-          existing =
-            case Content.get_document(id, type, dataset, opts) do
-              {:ok, d} ->
-                d
+          # A bare id deletes both rows, and a client may hold either one's rev:
+          # the draft's from a drafts/raw read, the published one's from a
+          # published read. Either current rev passes; a stale one is refused
+          # with the draft's rev, as a patch would be (task-12ec0224cff960fe).
+          rows =
+            [DraftId.draft_id(id), DraftId.published_id(id)]
+            |> Enum.flat_map(fn v ->
+              case Content.get_document(v, type, dataset, opts) do
+                {:ok, d} -> [d]
+                _ -> []
+              end
+            end)
 
-              _ ->
-                Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
-                  case Content.get_document(v, type, dataset, opts) do
-                    {:ok, d} -> d
-                    _ -> nil
-                  end
-                end)
-            end
-
-          with :ok <- ensure_rev(existing, expected),
+          with :ok <- ensure_any_rev(rows, expected),
                {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
             {:ok, doc, "delete"}
           end
@@ -2547,6 +2539,12 @@ defmodule Barkpark.Content.Mutations do
     |> Enum.map(&(&1 |> String.split(~r/[.\[]/, parts: 2) |> hd()))
     |> Kernel.++(blocks)
     |> Enum.uniq()
+  end
+
+  defp ensure_any_rev(rows, expected) do
+    if Enum.any?(rows, &(&1.rev == expected)),
+      do: :ok,
+      else: ensure_rev(List.first(rows), expected)
   end
 
   defp ensure_rev(_doc, nil), do: :ok

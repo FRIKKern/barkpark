@@ -156,4 +156,48 @@ defmodule BarkparkWeb.MutateDeleteDraftIdTest do
     assert Jason.decode!(resp.resp_body)["error"]["code"] == "document_referenced"
     assert title("drafts.n7") == "only a draft"
   end
+
+  # task-12ec0224cff960fe: a bare-id delete removes both rows, and a client may
+  # hold either one's rev: the draft's (drafts or raw reads) or the published
+  # one's (published reads). Either current rev passes the fence.
+  describe "a bare-id delete fenced by ifRevisionID over a draft twin" do
+    test "the draft's rev deletes both rows" do
+      draft = published_with_draft!("n8")
+
+      assert mutate([%{"id" => "n8", "type" => "note", "ifRevisionID" => draft.rev}]).status ==
+               200
+
+      assert title("drafts.n8") == nil
+      assert title("n8") == nil
+    end
+
+    test "the published rev deletes both rows" do
+      published_with_draft!("n9")
+      {:ok, published} = Content.get_document("n9", "note", @ds)
+
+      assert mutate([%{"id" => "n9", "type" => "note", "ifRevisionID" => published.rev}]).status ==
+               200
+
+      assert title("drafts.n9") == nil
+      assert title("n9") == nil
+    end
+
+    test "a stale rev is 412 naming the draft row and its rev; nothing is deleted" do
+      draft = published_with_draft!("n10")
+
+      resp = mutate([%{"id" => "n10", "type" => "note", "ifRevisionID" => "stale"}])
+
+      assert resp.status == 412
+
+      assert Jason.decode!(resp.resp_body)["error"]["details"] == %{
+               "index" => 0,
+               "id" => "drafts.n10",
+               "expected" => "stale",
+               "actual" => draft.rev
+             }
+
+      assert title("drafts.n10") == "draft edit"
+      assert title("n10") == "published"
+    end
+  end
 end
