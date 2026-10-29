@@ -9,6 +9,7 @@ defmodule BarkparkWeb.DatasetControllerTest do
   alias Barkpark.Audit.Event
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Dataset
+  alias Barkpark.Tenancy.DatasetDelete.Runs
 
   setup do
     ws = create_workspace!()
@@ -248,6 +249,37 @@ defmodule BarkparkWeb.DatasetControllerTest do
 
       assert %{"error" => %{"code" => "not_found"}} =
                json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 404)
+    end
+
+    defp until_done(key, tries \\ 200) do
+      case :ets.lookup(Runs, key) do
+        [{_, {:done, _}, _, _}] -> :ok
+        _ when tries > 0 -> Process.sleep(50) && until_done(key, tries - 1)
+      end
+    end
+
+    test "another caller's DELETE reads the same run, and an unread receipt never answers for a recreated dataset",
+         %{ws: ws, project: project, tokens: tokens} do
+      key = {project.id, "j10-7"}
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+      assert json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 5_000)
+
+      assert %{"deleted" => true, "documents" => 1} =
+               json_response(delete_dataset(tokens.admin, ws, project, "j10-7"), 200)
+
+      for t <- ~w(post page), do: {:ok, _} = create_document_in!(ws, project, t, %{}, "j10-7")
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+      assert json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
+      until_done(key)
+
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-7")
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 5_000)
+
+      assert %{"deleted" => true, "documents" => 1} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+
+      assert :ets.lookup(Runs, key) == []
     end
   end
 end
