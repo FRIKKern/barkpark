@@ -4,10 +4,13 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
   import Barkpark.TenancyFixtures
   import Ecto.Query
 
-  alias Barkpark.{AccountsFixtures, Audit, Content, Repo, Tenancy, UserPrefs, Webhooks}
+  alias Barkpark.{AccountsFixtures, Audit, Auth, Content, Repo, Tenancy, UserPrefs, Webhooks}
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.{Document, MutationEvent, Revision, SchemaDefinition}
   alias Barkpark.Media.Storage.MediaFile
-  alias Barkpark.Search.Synonyms
+  alias Barkpark.Media.WhereUsed
+  alias Barkpark.Search.{SurfaceConfigs, Synonyms}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.{Dataset, DatasetDelete}
   alias Barkpark.Webhooks.Webhook
 
@@ -122,6 +125,17 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     refute Map.has_key?(receipt.swept, "user_prefs")
     assert %{"open" => true} = UserPrefs.get(user.id, ws.id, "j10-4", "desk")
     assert receipt.swept["scheduled_publishes"] == 1
+  end
+
+  test "a second delete of the same dataset is :not_found and changes nothing",
+       %{ws: ws, project: project, user: user} do
+    dataset = seed(ws, project, "j10-d1", user)
+    assert {:ok, _} = Tenancy.delete_dataset(dataset)
+
+    assert {:error, :not_found} = Tenancy.delete_dataset(dataset)
+
+    assert Repo.aggregate(from(e in Audit.Event, where: e.action == "dataset_deleted"), :count) ==
+             1
   end
 
   test "refuses production and deletes nothing", %{ws: ws, project: project} do
@@ -311,6 +325,84 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
       assert receipt.detached == %{"search_synonyms" => 1}
       assert synonym_rows("j10-s3") == [{ws.id, nil}]
     end
+  end
+
+  describe "what lives past the dataset" do
+    test "a global synonym keyed to a Default-project dataset refuses the delete and survives" do
+      {_default_ws, default_project} = ensure_default_scope!()
+      {:ok, _} = Synonyms.create("docs", "j10-g1", %{"from" => "a", "to" => "b"})
+      default_ds = Tenancy.get_dataset(default_project, "j10-g1")
+
+      assert {:error, {:shared_search, %{"search_synonyms" => 1}}} =
+               Tenancy.delete_dataset(default_ds)
+
+      assert Repo.get(Dataset, default_ds.id)
+      assert synonym_rows("j10-g1") == [{nil, default_ds.id}]
+    end
+
+    test "media another dataset embeds by URL refuses the delete; its own documents do not",
+         %{ws: ws, project: project} do
+      {:ok, shown} = create_media_file_in!(ws, project, %{}, "j10-m1")
+      {:ok, own} = create_media_file_in!(ws, project, %{}, "j10-m1")
+      path = WhereUsed.delivery_path(shown)
+      {:ok, _} = create_document_in!(ws, project, "post", %{"body" => path}, "production")
+
+      {:ok, _} =
+        create_document_in!(
+          ws,
+          project,
+          "post",
+          %{"body" => WhereUsed.delivery_path(own)},
+          "j10-m1"
+        )
+
+      dataset = Tenancy.get_dataset(project, "j10-m1")
+
+      assert {:error, {:media_referenced, [%{media_id: media_id, count: 1}]}} =
+               Tenancy.delete_dataset(dataset)
+
+      assert media_id == shown.id
+      assert Repo.get(MediaFile, shown.id)
+      assert Repo.get(Dataset, dataset.id)
+    end
+
+    test "a token bound to the dataset is revoked; one whose slug lives on elsewhere is kept",
+         %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-t1", user)
+      second = create_project!(ws)
+      _twin = seed(ws, second, "j10-t2", user)
+      shared = seed(ws, project, "j10-t2", user)
+      doomed = bound_token!(ws, "j10-t1")
+      kept = bound_token!(ws, "j10-t2")
+
+      assert {:ok, %{tokens_revoked: 1}} = Tenancy.delete_dataset(dataset)
+      assert {:ok, %{tokens_revoked: 0}} = Tenancy.delete_dataset(shared)
+
+      assert Repo.get(ApiToken, doomed.id).revoked_at
+      refute Repo.get(ApiToken, kept.id).revoked_at
+    end
+
+    test "a cached surface config of the slug is dropped with it", %{ws: ws, project: project} do
+      {:ok, dataset} = Tenancy.get_or_create_dataset(project, "j10-c1")
+
+      {:ok, _} =
+        SurfaceConfigs.upsert("documents", "j10-c1", %{"zeroHitStrategy" => "none"}, ws.id)
+
+      assert %{"zero_hit_strategy" => "none"} = SurfaceConfigs.get("documents", "j10-c1", ws.id)
+
+      assert {:ok, %{swept: %{"search_surface_config" => 1}}} = Tenancy.delete_dataset(dataset)
+
+      assert SurfaceConfigs.get("documents", "j10-c1", ws.id)["zero_hit_strategy"] ==
+               "drop_tokens"
+    end
+  end
+
+  defp bound_token!(ws, dataset) do
+    raw = "ds-bound-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "bound", dataset, ~w(read write))
+    token = token |> Ecto.Changeset.change(dataset_bound: true) |> Repo.update!()
+    {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "member", "api_token")
+    token
   end
 
   test "the delete is appended to the workspace's audit chain",

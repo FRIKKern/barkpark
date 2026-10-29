@@ -13,9 +13,11 @@ defmodule BarkparkWeb.DatasetController do
   | deleted | 200 | — |
   | no such dataset in the project, or not a dataset slug | 404 | `not_found` |
   | `name` is `production` | 409 | `production_dataset_protected` |
+  | global (no-workspace) search rows hang off it | 409 | `dataset_in_shared_search` |
+  | another dataset's document embeds its media | 409 | `dataset_media_referenced` |
 
   The 200 body names the dataset and what left with it:
-  `{deleted: true, dataset: {id, slug, name}, documents: N, media_files: N, swept: {table: N}, detached: {table: N}}`.
+  `{deleted, dataset: {id, slug, name}, documents, media_files, swept: {table: N}, detached: {table: N}, tokens_revoked}`.
   `detached` counts other workspaces' rows that pointed at the dataset and keep
   living with `dataset_id` NULL. The delete is on the workspace's audit chain.
   """
@@ -43,7 +45,8 @@ defmodule BarkparkWeb.DatasetController do
         documents: receipt.documents,
         media_files: receipt.media_files,
         swept: receipt.swept,
-        detached: receipt.detached
+        detached: receipt.detached,
+        tokens_revoked: receipt.tokens_revoked
       })
     else
       falsy when falsy in [nil, false] ->
@@ -62,6 +65,26 @@ defmodule BarkparkWeb.DatasetController do
           409,
           "production_dataset_protected",
           "the production dataset cannot be deleted; delete the workspace to remove it"
+        )
+
+      {:error, {:shared_search, held}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          409,
+          "dataset_in_shared_search",
+          "global search rows every workspace inherits are keyed to this dataset",
+          %{held: held},
+          "Keep the dataset; deleting it would cascade the shared synonyms and search intel."
+        )
+
+      {:error, {:media_referenced, files}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          409,
+          "dataset_media_referenced",
+          "documents outside this dataset embed #{length(files)} of its media files",
+          %{media: files},
+          "Remove those references, then delete the dataset again."
         )
 
       {:error, :not_found} ->

@@ -14,10 +14,10 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   | cascade | `revisions`, `paper_events`, `document_view_days`, `document_popularity` | `Repo.delete(dataset)`: the FKs are `ON DELETE CASCADE`. Revisions can only leave this way; their trigger refuses a direct delete. |
   | string only | `@swept` below | An explicit delete keyed on workspace + project + slug. No FK reaches them. |
 
-  Another workspace's rows are never deleted. Search rows used to be stamped
-  with the Default project's dataset of the same slug whatever their
-  workspace, so before the cascade any row of another workspace that points at
-  this dataset has its `dataset_id` set NULL (`detached` in the receipt).
+  Another workspace's rows are never deleted. Workspace search rows used to be
+  stamped with the Default project's dataset of the same slug, so before the
+  cascade any row of another workspace that points at this dataset has its
+  `dataset_id` set NULL (`detached` in the receipt).
 
   `@retained` tables name the dataset but stay: access trails and credential
   ledgers are evidence, not content. `api_tokens.dataset_id` is set NULL by its
@@ -30,6 +30,19 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   slug. Otherwise its rows stay: an orphan is recoverable, deleting a sibling
   dataset's rows is not.
 
+  Two refusals keep the delete from reaching past the dataset. A global
+  (no-workspace) synonym, crystal, merge pattern or intel event is stamped with
+  the Default project's dataset of its scope, and that stamp is what dedupes the
+  shared layer (`*_null_ws_unique_idx`), so a dataset holding one is refused
+  (`{:shared_search, counts}`) rather than cascading or unkeying it. Media that a
+  document outside the dataset embeds by URL is refused
+  (`{:media_referenced, files}`), the census `Media.WhereUsed` gives the media
+  doors.
+
+  Tokens bound to the dataset's slug are revoked when no other dataset of that
+  slug is left in a workspace they reach, so a recreated name does not wake
+  them (`tokens_revoked`).
+
   The `production` dataset is refused (`{:error, :production_dataset}`): every
   workspace is created with it and the flat routes fall back to it, so it is
   never a throwaway. Deleting all of a workspace is `delete_workspace/1`.
@@ -37,20 +50,25 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   The delete appends a `content_mutation` / `dataset_deleted` row to the
   workspace's audit chain. Everything runs in one transaction. Media blob
   removal and webhook dispatch are deferred until it commits, the same way
-  `delete_workspace/1` does it.
+  `delete_workspace/1` does it; then the workspace's cached search surface
+  config for the slug is dropped.
   """
   import Ecto.Query, warn: false
 
   alias Barkpark.Audit
+  alias Barkpark.Auth
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content
   alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Content.WriteScope
   alias Barkpark.Media
   alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Media.WhereUsed
   alias Barkpark.OwnedTables
   alias Barkpark.Repo
-  alias Barkpark.Tenancy.{Dataset, Project, Workspace}
+  alias Barkpark.Search.SurfaceConfigs
+  alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
 
   @protected_slug "production"
 
@@ -76,6 +94,9 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   }
   @cascade ~w(revisions paper_events document_view_days document_popularity)
   @append_only ~w(revisions)
+
+  @shared_search ~w(search_synonyms search_intel_crystals search_intel_events
+                     search_intel_merge_patterns)
 
   @detachable (@walked ++ Map.keys(@cascade_and_string) ++ @cascade) -- @append_only
 
@@ -106,9 +127,15 @@ defmodule Barkpark.Tenancy.DatasetDelete do
              documents: non_neg_integer(),
              media_files: non_neg_integer(),
              swept: %{String.t() => pos_integer()},
-             detached: %{String.t() => pos_integer()}
+             detached: %{String.t() => pos_integer()},
+             tokens_revoked: non_neg_integer()
            }}
-          | {:error, :production_dataset | :not_found | term()}
+          | {:error,
+             :production_dataset
+             | :not_found
+             | {:shared_search, %{String.t() => pos_integer()}}
+             | {:media_referenced, [map()]}
+             | term()}
   def delete(dataset, opts \\ [])
 
   def delete(%Dataset{slug: @protected_slug}, _opts), do: {:error, :production_dataset}
@@ -136,8 +163,12 @@ defmodule Barkpark.Tenancy.DatasetDelete do
       end)
 
     case result do
-      {:ok, _} -> Media.flush_deferred_media_effects()
-      _ -> Media.clear_deferred_media_effects()
+      {:ok, _} ->
+        Media.flush_deferred_media_effects()
+        SurfaceConfigs.forget(target.workspace.id, target.dataset.slug)
+
+      _ ->
+        Media.clear_deferred_media_effects()
     end
 
     WriteScope.reset_request_memo()
@@ -150,20 +181,24 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)
-    detached = detach_foreign(target)
-    exemptions = sweep_authoring_exemptions(dataset)
 
-    with {:ok, media} <- delete_media(target),
+    with :ok <- refuse_shared_search(target),
+         :ok <- refuse_referenced_media(target),
+         detached = detach_foreign(target),
+         exemptions = sweep_authoring_exemptions(dataset),
+         {:ok, media} <- delete_media(target),
          {:ok, documents} <- delete_documents(target),
          swept =
            target |> sweep_strings(exclusive?) |> Map.merge(sweep_fk_strings(target, exclusive?)),
+         {:ok, tokens} <- revoke_bound_tokens(target),
          {:ok, deleted} <- Repo.delete(dataset, stale_error_field: :id),
          receipt = %{
            dataset: deleted,
            documents: documents,
            media_files: media,
            swept: drop_zero(Map.put(swept, "authoring_exemptions", exemptions)),
-           detached: drop_zero(detached)
+           detached: drop_zero(detached),
+           tokens_revoked: tokens
          },
          {:ok, _event} <- audit(target, receipt) do
       {:ok, receipt}
@@ -171,6 +206,81 @@ defmodule Barkpark.Tenancy.DatasetDelete do
       {:error, %Ecto.Changeset{data: %Dataset{}}} -> {:error, :not_found}
       {:error, _} = err -> err
     end
+  end
+
+  defp refuse_shared_search(%{dataset: ds}) do
+    held =
+      for table <- OwnedTables.present(@shared_search), into: %{} do
+        {table,
+         Repo.aggregate(
+           from(t in table,
+             where: t.dataset_id == type(^ds.id, Ecto.UUID) and is_nil(t.workspace_id)
+           ),
+           :count
+         )}
+      end
+      |> drop_zero()
+
+    if held == %{}, do: :ok, else: {:error, {:shared_search, held}}
+  end
+
+  defp refuse_referenced_media(target) do
+    leaving = Document |> in_dataset(target) |> select([d], d.id)
+
+    referenced =
+      MediaFile
+      |> in_dataset(target)
+      |> Repo.all()
+      |> Enum.flat_map(fn file ->
+        case WhereUsed.referrers_outside(file, leaving) do
+          %{count: 0} ->
+            []
+
+          census ->
+            [%{media_id: file.id, path: file.path, count: census.count, sample: census.sample}]
+        end
+      end)
+
+    if referenced == [], do: :ok, else: {:error, {:media_referenced, referenced}}
+  end
+
+  defp revoke_bound_tokens(%{dataset: ds, workspace: ws}) do
+    seated =
+      from m in Membership,
+        where: m.workspace_id == ^ws.id and m.principal_type == "api_token",
+        select: m.principal_id
+
+    from(t in ApiToken,
+      where:
+        t.dataset_bound and is_nil(t.revoked_at) and t.dataset == ^ds.slug and
+          (t.dataset_id == ^ds.id or t.workspace_id == ^ws.id or t.id in subquery(seated))
+    )
+    |> Repo.all()
+    |> Enum.reject(&slug_still_reachable?(&1, ds))
+    |> Enum.reduce_while({:ok, 0}, fn token, {:ok, n} ->
+      case Auth.revoke_token(token) do
+        {:ok, _} -> {:cont, {:ok, n + 1}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp slug_still_reachable?(%ApiToken{} = token, %Dataset{} = ds) do
+    seats =
+      Repo.all(
+        from m in Membership,
+          where: m.principal_type == "api_token" and m.principal_id == ^token.id,
+          select: m.workspace_id
+      )
+
+    workspaces = Enum.reject([token.workspace_id | seats], &is_nil/1)
+
+    Repo.exists?(
+      from d in Dataset,
+        join: p in Project,
+        on: p.id == d.project_id,
+        where: d.slug == ^ds.slug and d.id != ^ds.id and p.workspace_id in ^workspaces
+    )
   end
 
   defp detach_foreign(%{dataset: ds, workspace: ws}) do
@@ -220,7 +330,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
         "documents" => receipt.documents,
         "media_files" => receipt.media_files,
         "swept" => receipt.swept,
-        "detached" => receipt.detached
+        "detached" => receipt.detached,
+        "tokens_revoked" => receipt.tokens_revoked
       }
     })
   end

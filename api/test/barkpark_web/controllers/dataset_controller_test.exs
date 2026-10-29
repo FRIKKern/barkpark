@@ -121,7 +121,9 @@ defmodule BarkparkWeb.DatasetControllerTest do
        %{ws: ws, project: project, tokens: tokens} do
     {:ok, _} = Tenancy.get_or_create_dataset(project, "production")
 
-    for name <- ~w(production%00 j10-7%00 Production J10-7 producti%C3%B6n %FF j10-7.json) do
+    names = ~w(production%00 j10-7%00 Production J10-7 producti%C3%B6n %FF j10-7.json -j10 _j10)
+
+    for name <- [String.duplicate("a", 64) | names] do
       conn = delete_dataset(tokens.owner, ws, project, name)
 
       assert {name, 404, "not_found"} ==
@@ -129,6 +131,35 @@ defmodule BarkparkWeb.DatasetControllerTest do
     end
 
     assert dataset?(project, "production")
+    assert dataset?(project, "j10-7")
+  end
+
+  test "media another dataset embeds is refused 409 naming the file",
+       %{ws: ws, project: project, tokens: tokens} do
+    {:ok, file} = create_media_file_in!(ws, project, %{}, "j10-7")
+    body = Barkpark.Media.WhereUsed.delivery_path(file)
+    {:ok, _} = create_document_in!(ws, project, "post", %{"body" => body}, "production")
+
+    conn = delete_dataset(tokens.owner, ws, project, "j10-7")
+
+    assert %{"error" => %{"code" => "dataset_media_referenced", "details" => details}} =
+             json_response(conn, 409)
+
+    assert [%{"media_id" => media_id, "count" => 1}] = details["media"]
+    assert media_id == file.id
+    assert dataset?(project, "j10-7")
+  end
+
+  test "a token bound to the deleted dataset is dead when the name comes back",
+       %{ws: ws, project: project, tokens: tokens} do
+    raw = bound_owner!(ws, "j10-7")
+
+    assert %{"tokens_revoked" => 1} =
+             json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+
+    {:ok, _} = Tenancy.get_or_create_dataset(project, "j10-7")
+
+    assert delete_dataset(raw, ws, project, "j10-7").status == 401
     assert dataset?(project, "j10-7")
   end
 
