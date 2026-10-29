@@ -314,6 +314,18 @@ await check("a link that arrives from the server is asked and painted, and nothi
   canvas.remove();
 });
 
+await check("two canvases on one page keep their own titles and marks", async () => {
+  const a = await mount({ titles: (id) => (id === "n-plan" ? "Title A" : null) });
+  const b = await mount({ titles: (id) => (id === "n-plan" ? "Title B" : id === "n-gone" ? { missing: true } : null) });
+  await tick(20);
+  assert.equal(shown(block(a.canvas, "p1")), "See Title A and Gone note end.");
+  assert.equal(shown(block(b.canvas, "p1")), "See Title B and Gone note end.");
+  assert.equal(a.canvas.querySelectorAll("[data-wikilink-missing]").length, 0);
+  assert.equal(b.canvas.querySelectorAll("[data-wikilink-missing]").length, 1);
+  a.canvas.remove();
+  b.canvas.remove();
+});
+
 await check("read mode paints too", async () => {
   const { canvas } = await mount({ editable: false, titles: (id) => (id === "n-plan" ? "Roadmap" : null) });
   await tick(20);
