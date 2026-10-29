@@ -38,7 +38,7 @@ Fit modes:
 - `scale` stretches to `w` x `h`.
 - `min` is `crop` without scaling up: a smaller source is cut to the box's aspect at its own size.
 
-Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits; JPEG drops alpha); `pad` px a side, inside `w`/`h`; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns the result; `invert`; `sat=-100` grayscale, else ignored; `sharp` ignored; `quality` is `q`.
+Also: `dpr` 1–5 multiplies `w`/`h`; `blur` 0–2000 (σ = blur/10 px); `bg` hex (RGB, ARGB, 6 or 8 digits; JPEG drops alpha); `pad` px a side, inside `w`/`h`; `flip` `h`/`v`/`hv`; `or` 0/90/180/270 turns the result; `invert`; `sat=-100` grayscale, else ignored; `sharp` 13–100 sharpens (σ sharp/35); `quality` is `q`.
 
 ## AVIF
 
@@ -59,9 +59,9 @@ A Sanity-shaped image value stores `crop` `{top, bottom, left, right}` and `hots
 - Concurrent first requests for one key render once.
 - A public asset answers `Cache-Control: public, max-age=2592000`, a strong `ETag`, `304` on `If-None-Match`, and `Vary: Accept`. A non-public asset answers `no-store`.
 - `w`, `h` cap at 4096; above 100 they round up to a multiple of 10. An asset keeps at most 100 cached transforms; past that a new one is 429 `transform_variant_limit`. Config: `Barkpark.Media.Transform` (`max_dimension`, `dimension_step`, `max_variants_per_asset`).
-- Access is the original's check (`:original`). A watermark profile on the asset is applied to the transform.
+- Access is the original's check (`:original`). The asset's watermark profile applies.
 
-Errors: 400 `invalid_transform_param` (`details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (the ImageMagick backend on Windows), 404, 403, 429 `transform_variant_limit`.
+Errors: 400 `invalid_transform_param` (`details.param`), 400 `not_transformable` (not png, jpeg, gif or webp; an SVG is served as is unless `fm` is set), 400 `transforms_unsupported` (ImageMagick on Windows), 404, 403, 429 `transform_variant_limit`.
 
 ## Named presets
 

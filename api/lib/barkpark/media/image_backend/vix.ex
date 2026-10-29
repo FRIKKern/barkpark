@@ -305,12 +305,33 @@ defmodule Barkpark.Media.ImageBackend.Vix do
   defp effects(image, plan) do
     p = Transform.padding(plan, Image.width(image), Image.height(image))
 
-    with {:ok, image} <- padded(image, p, Map.get(plan, :bg)),
+    with {:ok, image} <- sharpened(image, Map.get(plan, :sharp)),
+         {:ok, image} <- padded(image, p, Map.get(plan, :bg)),
          {:ok, image} <- flipped(image, Map.get(plan, :flip)),
          {:ok, image} <- turned(image, Map.get(plan, :orient, 0)),
          {:ok, image} <- inverted(image, Map.get(plan, :invert, false)),
          {:ok, image} <- grayed(image, Map.get(plan, :gray, false)) do
       blurred(image, Map.get(plan, :blur))
+    end
+  end
+
+  # An unsharp mask over the edges only (`x1: 0`, `m2: 2`), as fitted to
+  # Sanity's `sharp` (`Transform.sharp_sigma/1`). libvips sharpens in LabS; an
+  # alpha band is set aside and put back.
+  defp sharpened(image, nil), do: {:ok, image}
+
+  defp sharpened(image, sharp) do
+    opts = [sigma: Transform.sharp_sigma(sharp), x1: 0.0, m2: 2.0]
+
+    if Image.has_alpha?(image) do
+      {rgb, alpha} = Image.split_alpha(image)
+
+      with {:ok, sharp_rgb} <- Vix.Vips.Operation.sharpen(rgb, opts),
+           {:ok, sharp_rgb} <- Vix.Vips.Operation.cast(sharp_rgb, Vix.Vips.Image.format(rgb)),
+           do: Image.add_alpha(sharp_rgb, alpha)
+    else
+      with {:ok, out} <- Vix.Vips.Operation.sharpen(image, opts),
+           do: Vix.Vips.Operation.cast(out, Vix.Vips.Image.format(image))
     end
   end
 

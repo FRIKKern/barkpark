@@ -84,8 +84,8 @@ defmodule Barkpark.Media.Transform do
   # The rest of what `@sanity/image-url` sends (task-e1512b7d39b345c2) is read too:
   # `dpr` scales `w`/`h`; `blur`, `bg`, `pad`, `flip`, `or` and `invert` are
   # applied; `sat` is applied at -100 (grayscale) and ignored otherwise; `sharp`
-  # is ignored; `quality` stands in for `q`. A parameter that does not change
-  # the output stays out of the cache key.
+  # sharpens as Sanity's CDN does (`sharpness/1`); `quality` stands in for `q`.
+  # A parameter that does not change the output stays out of the cache key.
   @params ~w(w h fit crop rect fp-x fp-y fm q auto dpr blur bg pad flip or invert sat sharp quality)
 
   # Transform vocabulary a request may carry that Barkpark refuses (400) rather
@@ -113,7 +113,8 @@ defmodule Barkpark.Media.Transform do
           flip: String.t() | nil,
           orient: 0 | 90 | 180 | 270,
           invert: boolean(),
-          gray: boolean()
+          gray: boolean(),
+          sharp: pos_integer() | nil
         }
 
   @doc "Parameter names this module reads from a query string."
@@ -153,7 +154,8 @@ defmodule Barkpark.Media.Transform do
          {:ok, flip} <- flip(params),
          {:ok, orient} <- orientation(params),
          {:ok, invert} <- invert(params),
-         {:ok, gray} <- saturation(params) do
+         {:ok, gray} <- saturation(params),
+         {:ok, sharp} <- sharpness(params) do
       crop = if fp && crop == [], do: ["focalpoint"], else: crop
 
       {:ok,
@@ -173,7 +175,8 @@ defmodule Barkpark.Media.Transform do
          flip: flip,
          orient: orient,
          invert: invert,
-         gray: gray
+         gray: gray,
+         sharp: sharp
        }}
     end
   end
@@ -241,6 +244,7 @@ defmodule Barkpark.Media.Transform do
   defp effect_parts(plan) do
     [
       Map.get(plan, :blur) && "blur=#{plan.blur}",
+      Map.get(plan, :sharp) && "sharp=#{plan.sharp}",
       Map.get(plan, :bg) && "bg=#{format_bg(plan.bg)}",
       # `pad-in`: the padding sits inside `w`/`h` since task-da6a60b6d5e649f8,
       # so a padded URL cached before it renders anew.
@@ -713,6 +717,22 @@ defmodule Barkpark.Media.Transform do
         end
     end
   end
+
+  # `sharp` 1 to 100 (task-f67613e8d778209e). Sanity's CDN leaves the image as
+  # it is up to 12 and sharpens from 13; measured on the e2e-local 640x400
+  # fixture at w=210, an unsharp mask of sigma sharp/35 (`sharp_sigma/1`) comes
+  # within 0.001 RMSE of its output at 15, 20, 25, 35, 50, 75 and 100. A value
+  # Sanity would refuse is ignored here, as `sharp` always was.
+  defp sharpness(params) do
+    case Integer.parse(to_string(Map.get(params, "sharp", ""))) do
+      {n, ""} when n >= 13 and n <= 100 -> {:ok, n}
+      _ -> {:ok, nil}
+    end
+  end
+
+  @doc "The unsharp-mask sigma for a plan's `sharp`."
+  @spec sharp_sigma(pos_integer()) :: float()
+  def sharp_sigma(sharp), do: sharp / 35
 
   # `bg`: hex RGB, ARGB, RRGGBB or AARRGGBB (imgix), as {r, g, b, a}.
   defp background(params) do
