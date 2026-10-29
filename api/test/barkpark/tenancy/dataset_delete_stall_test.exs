@@ -49,7 +49,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     {:ok, _} = Content.upsert_schema(%{"name" => "post", "title" => "Post"}, slug, opts)
 
     1..n
-    |> Enum.chunk_every(250)
+    |> Enum.chunk_every(20)
     |> Enum.each(fn ids ->
       ops =
         for i <- ids,
@@ -119,6 +119,40 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     assert Tenancy.get_dataset(project, "doomed") == nil
     assert length(samples) >= 5
     assert p95(samples) < 200
+  end
+
+  defp edit_until_stopped(opts, parent, edits \\ 0) do
+    receive do
+      :stop -> send(parent, {:edits, edits})
+    after
+      0 ->
+        ops =
+          for i <- 1..120 |> Enum.take_random(3) |> Enum.sort(:desc),
+              do: %{"patch" => %{"id" => "drafts.s#{i}", "set" => %{"title" => "edited"}}}
+
+        Content.apply_mutations(ops, "doomed", opts)
+        edit_until_stopped(opts, parent, edits + 1)
+    end
+  end
+
+  test "edits racing the walk wait for the delete instead of deadlocking it",
+       %{project: project, opts: opts} do
+    seed("doomed", 120, opts)
+    parent = self()
+
+    editor =
+      spawn_link(fn ->
+        :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
+        edit_until_stopped(opts, parent)
+      end)
+
+    Process.sleep(200)
+    result = Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
+    send(editor, :stop)
+    assert_receive {:edits, edits}, 30_000
+
+    assert {:ok, %{documents: 120}} = result
+    assert edits > 0
   end
 
   test "a delete over its time budget rolls back whole and answers a typed error",

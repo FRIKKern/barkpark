@@ -61,8 +61,13 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   lock and every write in the workspace waited for the whole delete
   (task-10608b4831a0e9b8). The transaction may run 30 minutes
   (`:dataset_delete_timeout_ms`); a timeout or database error rolls it back and
-  answers `{:error, {:delete_failed, :timeout | :database}}`. The HTTP door runs
-  it off the request: `Tenancy.DatasetDelete.Runs`.
+  answers `{:error, {:delete_failed, :timeout | :contended | :database}}`. The
+  HTTP door runs it off the request: `Tenancy.DatasetDelete.Runs`.
+
+  The walk first locks the dataset's document rows in id order. An edit racing
+  the delete then waits for it, instead of deadlocking with the walk or moving
+  a rev under its fence. A deadlock in that first lock is tried up
+  to 5 times, then answers `:contended`.
   """
   import Ecto.Query, warn: false
 
@@ -81,6 +86,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
 
   @protected_slug "production"
+  @contended_attempts 5
 
   @project_keyed ~w(access_grants preview_links scheduled_publishes share_links)
   @workspace_keyed ~w(github_sync_conflicts sync_cursors sync_dead_letters
@@ -146,7 +152,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
              | :not_found
              | {:shared_search, %{String.t() => pos_integer()}}
              | {:media_referenced, [map()]}
-             | {:delete_failed, :timeout | :database}
+             | {:delete_failed, :timeout | :contended | :database}
              | term()}
   def delete(dataset, opts \\ [])
 
@@ -155,14 +161,27 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   def delete(%Dataset{} = dataset, opts) do
     with %Project{} = project <- Repo.get(Project, dataset.project_id),
          %Workspace{} = workspace <- Repo.get(Workspace, project.workspace_id) do
-      run(%{
-        dataset: dataset,
-        project: project,
-        workspace: workspace,
-        actor: Keyword.get(opts, :actor)
-      })
+      retry_contended(
+        %{
+          dataset: dataset,
+          project: project,
+          workspace: workspace,
+          actor: Keyword.get(opts, :actor)
+        },
+        @contended_attempts
+      )
     else
       nil -> {:error, :not_found}
+    end
+  end
+
+  defp retry_contended(target, attempts) do
+    case run(target) do
+      {:error, {:delete_failed, :contended}} when attempts > 1 ->
+        retry_contended(target, attempts - 1)
+
+      result ->
+        result
     end
   end
 
@@ -219,12 +238,14 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
   defp failure(%Postgrex.Error{postgres: %{code: :query_canceled}}, _ms), do: :timeout
   defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
+  defp failure(%Postgrex.Error{postgres: %{code: :deadlock_detected}}, _ms), do: :contended
   defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)
 
-    with :ok <- refuse_shared_search(target),
+    with :ok <- lock_documents(target),
+         :ok <- refuse_shared_search(target),
          :ok <- refuse_referenced_media(target),
          detached = detach_foreign(target),
          exemptions = sweep_authoring_exemptions(dataset),
@@ -402,6 +423,17 @@ defmodule Barkpark.Tenancy.DatasetDelete do
         (is_nil(x.dataset_id) and x.dataset == ^ds.slug and x.workspace_id == ^ws.id and
            x.project_id == ^p.id)
     )
+  end
+
+  defp lock_documents(target) do
+    Document
+    |> in_dataset(target)
+    |> order_by([d], asc: d.id)
+    |> lock("FOR UPDATE")
+    |> select([d], d.id)
+    |> Repo.all()
+
+    :ok
   end
 
   defp delete_media(%{workspace: ws} = target) do

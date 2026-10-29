@@ -28,8 +28,8 @@ defmodule BarkparkWeb.DatasetController do
   The delete runs off the request (`Tenancy.DatasetDelete.Runs`). A 202 is
   `{deleting: true, dataset}`; the next DELETE of the name waits again and
   answers the run's 200 or error once. A 503 carries `details.reason`
-  `dataset_delete_timeout`, `_database` or `_interrupted`, and the dataset is
-  untouched. A 404 after a 202 means another caller read the receipt.
+  `dataset_delete_timeout`, `_contended`, `_database` or `_interrupted`, and
+  the dataset is untouched. A 404 after a 202 means another caller read the receipt.
   """
   use BarkparkWeb, :controller
 
