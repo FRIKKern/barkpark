@@ -176,6 +176,8 @@ import { searchEmoji } from "../emoji.js";
 // Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
 import { remoteSelections, setRemoteSelections as rsSet, pointsFromSelection } from "./remote-selections.js";
 import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsInSelection as crInSelection } from "./comment-ranges.js";
+// A document link's words painted live from the host's wikilinkTitle; see ./wikilink-titles.js.
+import { wikilinkTitles, refreshWikilinkTitles, setWikilinkMissing, wikilinkInfo } from "./wikilink-titles.js";
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
@@ -760,7 +762,8 @@ class BpPaperCanvas extends HTMLElement {
     this._bubble = null; // FormatBubble instance (selection format toolbar)
     this._linkPreview = null; // LinkPreview instance (hover card on links and wikilinks)
     this._composeEndEmit = null; // one-shot compositionend listener: an ops emit held back by an open IME composition
-    this._linkPreviewSource = null; // injected async ({ kind, href, target, docId }) => { title, excerpt, href }
+    this._linkPreviewSource = null; // injected async ({ kind, href, target, docId }) => { title, excerpt, href, missing }
+    this._wikilinkTitle = null; // injected async (docId) => title | { missing: true } | null
     this._debounceTimer = null;
     // Baseline captured when a local debounce window opens. Server broadcasts may
     // advance `_blocks` while that draft is waiting; the eventual diff must still
@@ -920,6 +923,7 @@ class BpPaperCanvas extends HTMLElement {
     this._upgradeProperty("mediaPicker");
     this._upgradeProperty("editBlockObject");
     this._upgradeProperty("linkPreviewSource");
+    this._upgradeProperty("wikilinkTitle");
 
     // Default true; only the literal string "false" disables editing. Mount-time
     // read is authoritative — attributeChangedCallback handles later toggles.
@@ -1131,6 +1135,7 @@ class BpPaperCanvas extends HTMLElement {
         // Comments on a span of text: the host's ranges as decorations that follow
         // edits. See ./comment-ranges.js.
         commentRanges(this),
+        wikilinkTitles(this),
         // A hydrated run rests on a caret, not on an AllSelection a first keystroke would
         // replace wholesale. See ./resting-selection.js.
         RestingSelection,
@@ -1508,6 +1513,8 @@ class BpPaperCanvas extends HTMLElement {
         return titles.wikilink || titles.internalLink || t("Internal Link");
       },
       resolve: (info) => (typeof this._linkPreviewSource === "function" ? this._linkPreviewSource(info) : null),
+      known: (info) => wikilinkInfo(this._editor, info),
+      onMissing: (info, missing) => setWikilinkMissing(this._editor, info, missing),
       onOpen: (detail) => {
         const ev = new CustomEvent("bp-canvas-open-link", { detail, bubbles: true, composed: true, cancelable: true });
         const go = this.dispatchEvent(ev);
@@ -3549,6 +3556,17 @@ class BpPaperCanvas extends HTMLElement {
 
   get linkPreviewSource() {
     return this._linkPreviewSource;
+  }
+
+  // ── live document-link titles (1.17.0): (docId) => title | { missing: true } | null ──
+  // Asked once per document id; setting it again (a rename) asks every link again.
+  set wikilinkTitle(fn) {
+    this._wikilinkTitle = typeof fn === "function" ? fn : null;
+    refreshWikilinkTitles(this._editor, !this._wikilinkTitle);
+  }
+
+  get wikilinkTitle() {
+    return this._wikilinkTitle;
   }
 
   // ── P4 `#` tag autocomplete ────────────────────────────────────────────────

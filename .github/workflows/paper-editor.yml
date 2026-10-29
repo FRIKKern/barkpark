@@ -276,6 +276,27 @@ jobs:
 
           exit "$status"
 
+      # The [[ / @ / # picker's footer stays on one line at 280, 390 and 1440 px
+      # (contract 1.17.0). Line boxes are layout, so it is measured here, where
+      # BP_CHROME is already installed; a SKIP fails like the sweep's.
+      - name: Measure the link picker footer in the browser
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/picker-footer.txt"
+          status=0
+          node src/canvas/__picker_footer_render.mjs > "$out" 2>&1 || status=$?
+          cat "$out"
+          if grep -q '^SKIP' "$out"; then
+            echo "::error::the picker footer check found no browser and skipped."
+            exit 1
+          fi
+          lines=$(grep -c '^\(PASS\|FAIL\)  the footer is one line at ' "$out" || true)
+          if [ "$lines" -ne 3 ]; then
+            echo "::error::expected 3 one-line assertions (280, 390, 1440 px); got $lines."
+            exit 1
+          fi
+          exit "$status"
+
       # ── the generic canvas harness, wired at last ────────────────────────────
       #
       # `src/canvas/__harness_generic_run.mjs` proves four things no other gate

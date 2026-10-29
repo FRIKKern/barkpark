@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.16.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.17.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.16.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.17.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkTitle` callback (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-wikilink-missing`), and keeps the picker's footer on one line.
 
 ## The element
 
@@ -66,7 +66,9 @@ before the bundle to opt out and avoid doubled rules. The stylesheet ships a
 `[data-theme="dark"]`), so it renders styled with no host theme.
 
 The `[[`, `@` and `#` picker is appended to `<body>`, outside any theme scope, so it
-carries its own colours. A host themes it by setting `--paper-picker-*` on `:root`
+carries its own colours. It is 280 px wide, never wider than the viewport less 12 px,
+and its key-hint footer stays on one line: a host's longer words for it end in an
+ellipsis (1.17.0). A host themes it by setting `--paper-picker-*` on `:root`
 (1.16.0); each one unset keeps the default (light, or dark under `[data-theme="dark"]`):
 
 | Property | Paints | Light / dark default |
@@ -110,13 +112,13 @@ instance. Barkdown and Studio mount it.
 | `format-bubble` attribute | `"off"` hides the floating format bubble, for a host that draws its own toolbar (Toolbar commands). Observed: setting or clearing it after mount drops or brings back the bubble. With it off, Mod+K and the link card's Edit fire `bp-canvas-link-request` instead |
 | `block-cards` attribute | present: an image block is a card, as Sanity's block object: its file name and a … menu (Edit opens its alt, URL and width; Remove takes the block out, one undo step) over the picture. Absent: the picture alone. CSS only, so setting it after mount works at once (1.11.0). A declared object block (a field vocabulary's `of`, e.g. a callout) is a card too: a 33 px tile with its icon, its preview title, and a … with Edit (its own dialog) and Remove (1.12.0)  From 1.14.0 the link card is Sanity's annotation pill there: it follows the caret (not the pointer), shows above the link, names the annotation by its schema title (`blocks.annotations[].title`; else "Link", or "Internal Link" for a document link), and offers Edit and Remove, plus Open for a document link only |
 | `mention-trigger` attribute | the literal `"off"` (any other value, or none, keeps `@`): `@` stays plain text and only `[[` opens the `wikilinkSource` menu. Absent: `@` opens it too, at the block start or after a space or `(`/`[`, and the query runs to the caret across spaces (multi-word titles). Per element, and read on every keystroke, so setting it after mount works at once (1.16.0) |
-| `data-strings` attribute | on the canvas or an ancestor: a JSON map from the canvas's English words to the host's (`{"Link to page": "Link to note", "No matching pages": "No matching notes"}`); a word it leaves out stays English, and a map that is not JSON is ignored. Read when the canvas connects; one map serves the page. The picker's words are `Link to page` (its label, also the `#` menu's), `Searching…` and `No matching pages` |
+| `data-strings` attribute | on the canvas or an ancestor: a JSON map from the canvas's English words to the host's (`{"Link to page": "Link to note", "No matching pages": "No matching notes"}`); a word it leaves out stays English, and a map that is not JSON is ignored. Read when the canvas connects; one map serves the page. The picker's words are `Link to page` (its label, also the `#` menu's), `Searching…` and `No matching pages`, and its footer's `insert link`, `navigate` and `dismiss` |
 | `data-field-caps` attribute | the type's Expectation as JSON, `{fieldName: max | null}`: a bound field block (one carrying `fieldName`) shows its n/max badge (the blocks bound to that name / the max; `n` alone when null) and an unbind × that emits one `patch-block {fieldName: null}`, as LiveView Beta's Properties row. Absent: field blocks unchanged (1.13.0) |
 | `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
 | `liveRemote` property | `true` (strictly) applies server blocks while the author edits, block by block (Live remote blocks, 1.15.0). Default `false`: deferred until the author releases the editor |
 
-All nine properties (`blocks`, `acknowledgedSaves`, `liveRemote` and the six callbacks) may be
+All ten properties (`blocks`, `acknowledgedSaves`, `liveRemote` and the seven callbacks) may be
 set before the element upgrades; `connectedCallback` reclaims them through the setters.
 
 ### Host callbacks
@@ -128,7 +130,8 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 |---|---|---|
 | `wikilinkSource` | `(query) => [{ title, id, type }]` | the `[[` menu never opens |
 | `tagSource` | `(query) => [name, ...]` (strings) | the `#` menu never opens |
-| `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href?, subtitle?, badge? } \| null` | the hover card shows the address only |
+| `linkPreviewSource` | `({ kind, href, target, docId, alias }) => { title?, excerpt?, href?, subtitle?, badge?, missing? } \| null` | the hover card shows the address only |
+| `wikilinkTitle` | `(docId) => title \| { title?, missing? } \| null` (1.17.0) | a document link shows its stored words |
 | `mediaUploader` | `(file) => url \| { src?, url?, alt? }` | a pasted or dropped image shows `no media uploader is connected` |
 | `mediaPicker` | `({ kind: "insert" \| "replace", current: { src, alt } \| null }) => { src, alt?, width? } \| null` | an Image insert is the empty image block, and images offer no Select |
 | `editBlockObject` | `({ type, title, inline, fields, value, error }) => value \| null` | declared objects are edited in the canvas's own popover |
@@ -144,7 +147,11 @@ throws or rejects reads as no match (1.16.0). A
 are set; for a `wikilink`, `kind`/`target`/`docId`/`alias` are. A returned `href`
 becomes the address `bp-canvas-open-link` reports. For a `wikilink`, a returned
 `subtitle` replaces the card's `[[target]]` line (an empty one hides it) and `badge`
-shows beside the title (the document's type). In edit mode the card's Remove drops
+shows beside the title (the document's type). A wikilink's `missing: true` (1.17.0) says
+its target is gone: the card and the pill hide Open, and every link to that target
+(the same `docId`, or the same `target` when it has none) carries `data-wikilink-missing`
+until an answer object without it says the target is back; `null`, a throw or a
+rejection changes nothing. In edit mode the card's Remove drops
 the whole link (or document link) from its run, keeping the words. `mediaUploader` gets one
 `File` per image (`image/*` only); a result with no `src`/`url` (or a throw) marks
 the image with the error message instead. `mediaPicker` is the host's own image
@@ -155,6 +162,22 @@ answer becomes the image's `src`, and `alt` / `width` when given; an insert and 
 pick are one undo step. The `src` goes through the reader's URL allowlist (`safeUrl`:
 http(s), mailto, tel, relative, `#`); one it refuses (`javascript:`, `data:`,
 protocol-relative), a blank `src`, `null` or a throw leaves the image as it was.
+
+`wikilinkTitle` (1.17.0) is the current title of a document link's target, asked once
+per `docId` in the run (and for each link added later). A link whose words are its
+stored `target` and that has no `alias` (as a `[[` pick writes it) shows the answered
+title in place of its words; an aliased link, or one over the author's own words,
+keeps them. The canvas paints the title and never writes it: the body, every op and
+every save keep the stored words byte-identical, and painting emits nothing. Setting
+the property again (the same function is fine) asks every link again, so a host repaints
+after a rename by re-assigning it; what is painted stays until each answer lands. A
+painted link reads as one unit in edit mode: an arrow steps over it, Backspace at its
+end or Delete at its start removes it whole (one undo step), and a caret that lands
+inside shows the stored words, which is what an edit there changes. `{ missing: true }`
+marks the link as `linkPreviewSource`'s does. A `null`, `""`, other value, throw or
+rejection shows the stored words; an answer to an older assignment is dropped; `null`
+as the property clears every painted title and mark. Find and `state()` read the
+stored words.
 
 `editBlockObject` is the host's own editor for an object the field declares (a
 block under `blocks.of`, an inline object under `blocks.inline`): set, every insert
