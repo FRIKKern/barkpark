@@ -365,7 +365,7 @@ defmodule BarkparkWeb.MediaController do
         true -> serve_transform(conn, lookup, params, ref.size)
       end
     else
-      :error -> not_found(conn, "not a Sanity image asset URL")
+      :error -> sanity_bad_filename(conn, name)
       ignored -> unsupported_transform_params(conn, ignored)
     end
   end
@@ -968,6 +968,21 @@ defmodule BarkparkWeb.MediaController do
     conn
     |> put_resp_content_type("application/json", nil)
     |> send_resp(404, ~s({"statusCode":404,"message":"File not found","error":"Not Found"}))
+  end
+
+  # An image name that is not `<sha1>-<w>x<h>.<ext>` is a 400 on Sanity's CDN,
+  # naming it (task-b8016bba3d81e8ed). A file name that does not parse stays
+  # a 404, as there.
+  defp sanity_bad_filename(conn, name) do
+    message = "Invalid filename: " <> Jason.encode!(name)
+
+    conn
+    |> put_resp_content_type("application/json", "utf-8")
+    |> put_resp_header("cache-control", "private, max-age=3")
+    |> send_resp(
+      400,
+      ~s({"statusCode":400,"error":"Bad Request","message":#{Jason.encode!(message)}})
+    )
   end
 
   defp forbidden(conn) do

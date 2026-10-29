@@ -229,7 +229,7 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
       assert (as(ctx.raw) |> get(url)).status == 200
     end
 
-    test "an unknown asset, another dataset or a malformed name answers 404", ctx do
+    test "an unknown asset or another dataset answers 404, a malformed image name 400", ctx do
       sanity_sha = sha("f")
       upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
 
@@ -238,8 +238,12 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
       assert (as(ctx.raw) |> get(image_url(ctx, sanity_sha, "600x400", "w=10", "staging"))).status ==
                404
 
-      assert (as(ctx.raw) |> get("#{ctx.base}/images/x/production/not-an-asset.jpg")).status ==
-               404
+      bad = as(ctx.raw) |> get("#{ctx.base}/images/x/production/x%22y.png")
+      assert bad.status == 400
+      assert get_resp_header(bad, "cache-control") == ["private, max-age=3"]
+
+      assert bad.resp_body ==
+               ~S({"statusCode":400,"error":"Bad Request","message":"Invalid filename: \"x\\\"y.png\""})
     end
 
     # Sanity's CDN answers exactly these, measured on cdn.sanity.io.
