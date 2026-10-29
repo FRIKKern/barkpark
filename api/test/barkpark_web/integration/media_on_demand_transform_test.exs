@@ -305,7 +305,7 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
             {"w=1000&h=1000&fit=fillmax", {1000, 1000}},
             {"w=100&pad=10&bg=000", {100, 73}},
             {"pad=10&bg=000", {620, 420}},
-            {"w=150&or=90", {100, 150}},
+            {"w=150&or=90", {100, 100}},
             {"w=100&flip=h", {100, 67}},
             {"w=100&invert=true", {100, 67}},
             {"w=100&sat=-100", {100, 67}},

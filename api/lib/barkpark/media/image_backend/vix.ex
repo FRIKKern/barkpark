@@ -309,6 +309,7 @@ defmodule Barkpark.Media.ImageBackend.Vix do
          {:ok, image} <- padded(image, p, Map.get(plan, :bg)),
          {:ok, image} <- flipped(image, Map.get(plan, :flip)),
          {:ok, image} <- turned(image, Map.get(plan, :orient, 0)),
+         {:ok, image} <- turn_cropped(image, Transform.turn_crop?(plan)),
          {:ok, image} <- inverted(image, Map.get(plan, :invert, false)),
          {:ok, image} <- grayed(image, Map.get(plan, :gray, false)) do
       blurred(image, Map.get(plan, :blur))
@@ -355,13 +356,22 @@ defmodule Barkpark.Media.ImageBackend.Vix do
     Vix.Vips.Operation.rot(image, Map.fetch!(angle, deg))
   end
 
+  defp turn_cropped(image, false), do: {:ok, image}
+
+  defp turn_cropped(image, true) do
+    {w, h} = {Image.width(image), Image.height(image)}
+    side = min(w, h)
+    Vix.Vips.Operation.extract_area(image, div(w - side, 2), div(h - side, 2), side, side)
+  end
+
   defp inverted(image, false), do: {:ok, image}
 
   # Colour bands only: an alpha band keeps its transparency.
   defp inverted(image, true) do
     if Image.has_alpha?(image) do
-      with {:ok, {color, alpha}} <- Image.split_alpha(image),
-           {:ok, color} <- Vix.Vips.Operation.invert(color),
+      {color, alpha} = Image.split_alpha(image)
+
+      with {:ok, color} <- Vix.Vips.Operation.invert(color),
            do: Image.add_alpha(color, alpha)
     else
       Vix.Vips.Operation.invert(image)
