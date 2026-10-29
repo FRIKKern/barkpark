@@ -309,6 +309,15 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
       assert get_resp_header(hostile, "content-disposition") ==
                [~s<attachment;filename="a%22%5C%0D%0ASet-Cookie:%20x=1.pdf">]
 
+      encoded = get_url.("?dl=a%22%0D%0ASet-Cookie:%20x=1.pdf")
+      assert get_resp_header(encoded, "set-cookie") == []
+      assert [one] = get_resp_header(encoded, "content-disposition")
+      refute one =~ ~r/[\r\n]/
+
+      # Plug refuses invalid UTF-8 in the query with a 400 before the route
+      # runs (Sanity echoes it: filename="%FF.pdf").
+      assert_error_sent 400, fn -> get_url.("?dl=%FF") end
+
       [long] = disposition.("?dl=" <> String.duplicate("x", 500))
       assert byte_size(long) < 240
     end
