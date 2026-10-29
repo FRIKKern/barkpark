@@ -120,7 +120,7 @@ defmodule Barkpark.Media.TransformTest do
       assert {:error, {:invalid_param, "dpr", _}} = Transform.parse(%{"w" => "10", "dpr" => "9"})
     end
 
-    test "blur, bg, pad, flip, or, invert and sat parse; sharp is ignored; quality stands in for q" do
+    test "blur, bg, pad, flip, or, invert, sat and sharp parse; quality stands in for q" do
       p =
         plan!(%{
           "blur" => "52",
@@ -134,8 +134,13 @@ defmodule Barkpark.Media.TransformTest do
           "quality" => "60"
         })
 
-      assert {p.blur, p.bg, p.pad, p.flip, p.orient, p.invert, p.gray, p.q} ==
-               {50, {255, 0, 0, 255}, 8, "hv", 270, true, true, 60}
+      assert {p.blur, p.bg, p.pad, p.flip, p.orient, p.invert, p.gray, p.q, p.sharp} ==
+               {50, {255, 0, 0, 255}, 8, "hv", 270, true, true, 60, 40}
+
+      # Sanity's CDN leaves the image as it is up to sharp=12; a value it
+      # refuses is ignored, as sharp always was here.
+      for v <- ~w(1 12 0 101 x), do: assert(plan!(%{"sharp" => v}).sharp == nil, v)
+      assert plan!(%{"sharp" => "13"}).sharp == 13
 
       assert plan!(%{"bg" => "8000ff00"}).bg == {0, 255, 0, 128}
       assert plan!(%{"sat" => "40"}).gray == false
@@ -214,6 +219,8 @@ defmodule Barkpark.Media.TransformTest do
       assert Transform.canonical(
                plan!(%{"w" => "100", "fm" => "jpg", "blur" => "10", "flip" => "h"})
              ) =~ ~r/;blur=10;flip=h\z/
+
+      assert Transform.canonical(plan!(%{"w" => "100", "sharp" => "50"})) =~ ~r/;sharp=50\z/
     end
   end
 

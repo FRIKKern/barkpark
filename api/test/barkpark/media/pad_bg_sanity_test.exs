@@ -46,4 +46,20 @@ defmodule Barkpark.Media.PadBgSanityTest do
     jpg = render!(Map.put(params, "fm", "jpg"))
     assert Image.bands(jpg) == 3
   end
+
+  # task-f67613e8d778209e: sharpening sets an alpha band aside and puts it back.
+  test "sharp on an image with alpha keeps the alpha" do
+    png =
+      render!(%{
+        "w" => "300",
+        "h" => "300",
+        "fit" => "fill",
+        "bg" => "80ff0000",
+        "sharp" => "60",
+        "fm" => "png"
+      })
+
+    assert Image.bands(png) == 4
+    assert {:ok, [255, 0, 0, 128]} = Image.get_pixel(png, 1, 1)
+  end
 end

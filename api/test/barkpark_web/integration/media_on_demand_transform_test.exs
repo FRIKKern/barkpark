@@ -320,8 +320,9 @@ defmodule BarkparkWeb.Integration.MediaOnDemandTransformTest do
 
       # dpr is a size: one cached file with the plain width.
       assert get.("w=100&dpr=2").resp_body == get.("w=200").resp_body
-      # sharp is ignored: the same file as without it.
-      assert get.("w=100&sharp=30").resp_body == get.("w=100").resp_body
+      # sharp up to 12 is a no-op, as on Sanity's CDN; from 13 it sharpens.
+      assert get.("w=100&sharp=12").resp_body == get.("w=100").resp_body
+      refute get.("w=100&sharp=60").resp_body == get.("w=100").resp_body
 
       # The left edge was red: flip moves blue there, invert makes it cyan, sat=-100 grey.
       [r, _g, b] = px.(decode(get.("w=100&flip=h").resp_body), 3)
