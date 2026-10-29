@@ -242,6 +242,27 @@ defmodule BarkparkWeb.Integration.SanityImageUrlsTest do
                404
     end
 
+    # Sanity's CDN answers exactly these, measured on cdn.sanity.io.
+    test "a missing image or file answers Sanity's 404 body; other media routes keep theirs",
+         ctx do
+      image = as(ctx.raw) |> get(image_url(ctx, sha("8"), "600x400", "w=10"))
+      assert image.status == 404
+      assert get_resp_header(image, "content-type") == ["application/json; charset=utf-8"]
+
+      assert image.resp_body ==
+               ~s({"statusCode":404,"error":"Not Found","message":"Image not found"})
+
+      file = as(ctx.raw) |> get("#{ctx.base}/files/#{@project_id}/production/#{sha("8")}.pdf")
+      assert file.status == 404
+      assert get_resp_header(file, "content-type") == ["application/json"]
+
+      assert file.resp_body ==
+               ~s({"statusCode":404,"message":"File not found","error":"Not Found"})
+
+      other = as(ctx.raw) |> get("#{ctx.base}/media/files/no/such/file.pdf")
+      assert %{"error" => %{"message" => _}} = json_response(other, 404)
+    end
+
     test "@sanity/image-url's dpr and blur are applied, not refused", ctx do
       sanity_sha = sha("1")
       upload_image(ctx, %{"sourceId" => "image-#{sanity_sha}-600x400-jpg"})
