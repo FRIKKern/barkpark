@@ -19,11 +19,14 @@
  * is the caret position within it (clamped into range). Feeding whole-document
  * text with a block-local offset is a caller bug — keep them in the same frame.
  *
+ * `mention: false` leaves `@` as plain text (the canvas's `mention-trigger="off"`).
+ *
  * @param {string} text
  * @param {number} caretOffset
+ * @param {{mention?: boolean}} [options]
  * @returns {{query: string, from: number, to: number} | null}
  */
-export function parseOpenWikilink(text, caretOffset) {
+export function parseOpenWikilink(text, caretOffset, { mention = true } = {}) {
   if (typeof text !== "string" || typeof caretOffset !== "number") return null;
 
   const off = Math.max(0, Math.min(caretOffset, text.length));
@@ -31,15 +34,16 @@ export function parseOpenWikilink(text, caretOffset) {
 
   // lastIndexOf gives the NEAREST `[[` before the caret — so a closed `[[x]]`
   // earlier in the line never shadows a later open one.
+  const orMention = () => (mention ? parseOpenMention(before, off) : null);
   const open = before.lastIndexOf("[[");
-  if (open === -1) return parseOpenMention(before, off);
+  if (open === -1) return orMention();
 
   // Text between the nearest `[[` and the caret. A `]]` (closed), a second `[[`
   // (the query resets to the newer one), or a newline (the `[[` is not a
   // same-line, unfinished trigger) all mean: no `[[` trigger — an `@` may still be.
   const between = before.slice(open + 2);
   if (between.includes("]]") || between.includes("[[") || between.includes("\n")) {
-    return parseOpenMention(before, off);
+    return orMention();
   }
 
   return { query: between, from: open, to: off, trigger: "[[" };
