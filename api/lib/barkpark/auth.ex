@@ -540,12 +540,17 @@ defmodule Barkpark.Auth do
   `actor` is the principal that asked for the revoke (an `%ApiToken{}` or a
   `%User{}`); the `token_revoked` audit row names it. `nil` records
   `actor_type: "system"`, which is right for sweeps and retire jobs.
-  """
-  @spec revoke_token(ApiToken.t() | binary(), ApiToken.t() | User.t() | nil) ::
-          {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
-  def revoke_token(token, actor \\ nil)
 
-  def revoke_token(%ApiToken{} = token, actor) do
+  `context` is for a caller that revokes as part of a bigger act:
+  `:workspace_id` and `:metadata` join the audit row, and
+  `after_commit: true` skips the socket teardown so the caller sends it with
+  `broadcast_socket_teardown/1` once its transaction commits.
+  """
+  @spec revoke_token(ApiToken.t() | binary(), ApiToken.t() | User.t() | nil, map()) ::
+          {:ok, ApiToken.t()} | {:error, :not_found | Ecto.Changeset.t()}
+  def revoke_token(token, actor \\ nil, context \\ %{})
+
+  def revoke_token(%ApiToken{} = token, actor, context) do
     token
     |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
     |> Repo.update()
@@ -555,18 +560,22 @@ defmodule Barkpark.Auth do
         # is the token id; `owner_user_id` distinguishes a user PAT from a
         # machine/share token for the audit reader.
         Audit.emit(
-          Map.merge(audit_actor(actor), %{
+          actor
+          |> audit_actor()
+          |> Map.merge(Map.take(context, [:workspace_id]))
+          |> Map.merge(%{
             category: "token",
             action: "token_revoked",
             subject: revoked.id,
-            metadata: %{
-              "owner_user_id" => revoked.owner_user_id,
-              "share_scope" => revoked.share_scope
-            }
+            metadata:
+              Map.merge(Map.get(context, :metadata, %{}), %{
+                "owner_user_id" => revoked.owner_user_id,
+                "share_scope" => revoked.share_scope
+              })
           })
         )
 
-        broadcast_socket_teardown(revoked)
+        unless Map.get(context, :after_commit), do: broadcast_socket_teardown(revoked)
 
         ok
 
@@ -575,7 +584,7 @@ defmodule Barkpark.Auth do
     end
   end
 
-  def revoke_token(token_id, actor) when is_binary(token_id) do
+  def revoke_token(token_id, actor, context) when is_binary(token_id) do
     # Guard the UUID cast: the id column is :binary_id, so a non-UUID token_id
     # (e.g. from `DELETE /v1/shares/tokens/garbage`) would raise
     # Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that struct to 400;
@@ -588,7 +597,7 @@ defmodule Barkpark.Auth do
       uuid ->
         case Repo.get(ApiToken, uuid) do
           nil -> {:error, :not_found}
-          token -> revoke_token(token, actor)
+          token -> revoke_token(token, actor, context)
         end
     end
   end

@@ -49,7 +49,7 @@ defmodule Barkpark.Search.Synonyms do
           source: source,
           enabled: Map.get(attrs, "enabled", true)
         }
-        |> put_dataset_id(scope)
+        |> put_dataset_id(scope, workspace_id)
         |> put_workspace_id(workspace_id)
       )
       |> Repo.insert()
@@ -522,17 +522,19 @@ defmodule Barkpark.Search.Synonyms do
     |> Ecto.Changeset.add_error(:from_query, message)
   end
 
-  # W2 dual-write: resolve the synonym's `scope` STRING → its `dataset_id`
-  # (within the seeded Default project — the search surface is single-project
-  # today) and stamp it alongside `scope`. Keeps the new `(surface, dataset_id,
-  # ...)` unique index meaningful; the `scope` string stays as the mirror.
-  # No-ops (leaves attrs unchanged) when the dataset can't be resolved.
-  defp put_dataset_id(attrs, scope) when is_binary(scope) do
+  # W2 dual-write: a GLOBAL synonym (no workspace) resolves its `scope` STRING
+  # → the seeded Default project's `dataset_id`, which keys the
+  # `null_ws_unique_idx`. A workspace synonym is keyed by workspace + scope
+  # (`workspace_unique_idx`) and is not stamped: the Default project's dataset
+  # is not its dataset, and deleting that dataset must not cascade it.
+  defp put_dataset_id(attrs, scope, nil) when is_binary(scope) do
     case Barkpark.Tenancy.default_project_dataset_id(scope) do
       id when is_binary(id) -> Map.put(attrs, :dataset_id, id)
       _ -> attrs
     end
   end
+
+  defp put_dataset_id(attrs, _scope, _workspace_id), do: attrs
 
   # W7 tenancy: stamp the caller's `workspace_id` on the write so the per-tenant
   # partial unique index (`workspace_id IS NOT NULL`) keys the row to its owning

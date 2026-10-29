@@ -193,6 +193,238 @@ defmodule BarkparkWeb.UserPrefControllerTest do
     end
   end
 
+  defp list_op(raw, ws, project, body, status \\ 200) do
+    bearer(raw)
+    |> patch(prefs_path(ws, project, "recents"), Jason.encode!(body))
+    |> json_response(status)
+  end
+
+  defp push_front(id, max \\ 3), do: %{op: "push_front", field: "ids", item: id, max: max}
+
+  describe "PATCH list ops (task-f150278ead8dbfb3)" do
+    test "push_front on an unset key creates the list", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+
+      assert list_op(raw, ws, project, push_front("a")) ==
+               %{
+                 "key" => "recents",
+                 "dataset" => @dataset,
+                 "value" => %{"ids" => ["a"]}
+               }
+    end
+
+    test "push_front moves an id to the front, dedupes, caps, and keeps other keys", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+
+      bearer(raw)
+      |> put(prefs_path(ws, project, "recents"), Jason.encode!(%{value: %{v: 1, ids: ~w(a b c)}}))
+      |> json_response(200)
+
+      assert list_op(raw, ws, project, push_front("c"))["value"] == %{
+               "v" => 1,
+               "ids" => ~w(c a b)
+             }
+
+      assert list_op(raw, ws, project, push_front("d"))["value"]["ids"] == ~w(d c a)
+      assert list_op(raw, ws, project, push_front("e", 2))["value"]["ids"] == ~w(e d)
+    end
+
+    test "every op applied twice answers what it answered once", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      list_op(raw, ws, project, push_front("a"))
+
+      for body <- [
+            push_front("b"),
+            %{op: "add", field: "ids", item: "z"},
+            %{op: "remove", field: "ids", item: "a"}
+          ] do
+        once = list_op(raw, ws, project, body)
+        assert list_op(raw, ws, project, body) == once
+      end
+
+      assert list_op(raw, ws, project, %{op: "add", field: "ids", item: "b"})["value"]["ids"] ==
+               ~w(b z)
+    end
+
+    test "a stored value that is not a list is refused and left alone", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+
+      bearer(raw)
+      |> put(prefs_path(ws, project, "recents"), Jason.encode!(%{value: %{ids: "a"}}))
+      |> json_response(200)
+
+      resp = list_op(raw, ws, project, push_front("b"), 422)
+      assert resp["error"]["code"] == "invalid_pref"
+      assert resp["error"]["message"] == %{"value" => ["ids is not a list"]}
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))[
+               "value"
+             ] == %{"ids" => "a"}
+    end
+
+    test "a malformed op is refused and writes nothing", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+
+      for body <- [
+            %{op: "toggle", field: "ids", item: "a"},
+            %{op: "add", field: "ids"},
+            %{op: "add", field: "ids", item: nil},
+            %{op: "add", field: "", item: "a"},
+            %{op: "push_front", field: "ids", item: "a", max: 0},
+            %{op: "push_front", field: "ids", item: "a", max: "3x"},
+            %{op: "push_front", field: "ids", item: "a", max: -1}
+          ] do
+        assert list_op(raw, ws, project, body, 422)["error"]["code"] == "bad_request"
+      end
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))[
+               "value"
+             ] == nil
+    end
+
+    test "max may be a digit string, as bp sends it", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      for id <- ~w(a b c), do: list_op(raw, ws, project, push_front(id, "2"))
+      assert list_op(raw, ws, project, push_front("d", "2"))["value"]["ids"] == ~w(d c)
+    end
+
+    test "remove on an absent key writes nothing", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+      assert list_op(raw, ws, project, %{op: "remove", field: "ids", item: "a"})["value"] == nil
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))[
+               "value"
+             ] == nil
+    end
+
+    test "an over-long key or dataset is a 422 invalid_pref, as on PUT", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+      long = String.duplicate("k", 201)
+
+      for path <- [
+            prefs_path(ws, project, long),
+            "/w/#{ws.slug}/p/#{project.slug}/v1/prefs/#{long}/recents"
+          ],
+          {method, body} <- [{:put, %{value: %{ids: []}}}, {:patch, push_front("a")}] do
+        resp =
+          bearer(raw)
+          |> dispatch(@endpoint, method, path, Jason.encode!(body))
+          |> json_response(422)
+
+        assert resp["error"]["code"] == "invalid_pref", "#{method} #{path}: #{inspect(resp)}"
+      end
+    end
+
+    test "an item that takes the value past 16 KB is refused and writes nothing", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+      list_op(raw, ws, project, push_front("a"))
+      big = %{op: "add", field: "ids", item: String.duplicate("x", 20_000)}
+
+      assert list_op(raw, ws, project, big, 422)["error"]["code"] == "invalid_pref"
+
+      assert (bearer(raw)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))[
+               "value"
+             ] == %{"ids" => ["a"]}
+    end
+
+    test "one user's PATCH never reaches another user's list", %{ws: ws, project: project} do
+      {raw_a, _} = personal_token!(ws)
+      {raw_b, _} = personal_token!(ws)
+      list_op(raw_b, ws, project, push_front("b"))
+
+      assert list_op(raw_a, ws, project, push_front("a"))["value"] == %{"ids" => ["a"]}
+
+      assert list_op(raw_a, ws, project, %{op: "remove", field: "ids", item: "b"})["value"] == %{
+               "ids" => ["a"]
+             }
+
+      assert (bearer(raw_b)
+              |> get(prefs_path(ws, project, "recents"))
+              |> json_response(200))[
+               "value"
+             ] == %{"ids" => ["b"]}
+    end
+
+    test "a missing field is an empty list; remove on it writes nothing", %{
+      ws: ws,
+      project: project
+    } do
+      {raw, _} = personal_token!(ws)
+
+      bearer(raw)
+      |> put(prefs_path(ws, project, "recents"), Jason.encode!(%{value: %{v: 1}}))
+      |> json_response(200)
+
+      remove = %{op: "remove", field: "ids", item: "a"}
+      assert list_op(raw, ws, project, remove)["value"] == %{"v" => 1}
+
+      assert list_op(raw, ws, project, %{op: "add", field: "ids", item: "a"})["value"] == %{
+               "v" => 1,
+               "ids" => ["a"]
+             }
+    end
+
+    test "after a DELETE, a PATCH starts a fresh list", %{ws: ws, project: project} do
+      {raw, _} = personal_token!(ws)
+
+      bearer(raw)
+      |> put(prefs_path(ws, project, "recents"), Jason.encode!(%{value: %{v: 1, ids: ~w(a b)}}))
+      |> json_response(200)
+
+      bearer(raw) |> delete(prefs_path(ws, project, "recents")) |> json_response(200)
+
+      assert list_op(raw, ws, project, push_front("c"))["value"] == %{"ids" => ["c"]}
+    end
+
+    test "a shared token with no owner is refused", %{ws: ws, project: project} do
+      resp = list_op(shared_token!(ws), ws, project, push_front("a"), 403)
+      assert resp["error"]["code"] == "no_user_identity"
+    end
+
+    test "a session cookie needs x-requested-with on PUT, PATCH and DELETE", %{
+      conn: conn,
+      ws: ws,
+      project: project
+    } do
+      {_user, conn} = account_session!(conn, ws, "member")
+      conn = put_req_header(conn, "content-type", "application/json")
+      path = prefs_path(ws, project, "recents")
+
+      for method <- [:put, :patch, :delete] do
+        body = if method == :put, do: %{value: %{ids: []}}, else: push_front("a")
+
+        assert dispatch(conn, @endpoint, method, path, Jason.encode!(body)).status == 403,
+               "#{method}"
+      end
+
+      assert conn
+             |> put_req_header("x-requested-with", "bp-studio")
+             |> patch(path, Jason.encode!(push_front("a")))
+             |> json_response(200)
+             |> Map.fetch!("value") == %{"ids" => ["a"]}
+    end
+  end
+
   describe "an account session (no bearer)" do
     test "reads and writes its own prefs via the cookie", %{conn: conn, ws: ws, project: project} do
       {_user, conn} = account_session!(conn, ws, "member")

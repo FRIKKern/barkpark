@@ -1339,8 +1339,8 @@ defmodule Barkpark.Content.Lifecycle do
 
   defp exact_delete_revision(%Document{status: "draft", rev: rev}, rev), do: :ok
 
-  defp exact_delete_revision(%Document{status: "draft", rev: actual}, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+  defp exact_delete_revision(%Document{status: "draft", rev: actual, doc_id: id}, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
 
   defp exact_delete_revision(_, _), do: {:error, :not_found}
 
@@ -1405,7 +1405,7 @@ defmodule Barkpark.Content.Lifecycle do
             {:error, :not_found}
 
           %Document{rev: current} ->
-            {:error, {:rev_mismatch, %{expected: doc.rev, actual: current}}}
+            {:error, {:rev_mismatch, %{expected: doc.rev, actual: current, id: doc.doc_id}}}
         end
     end
   end

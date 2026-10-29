@@ -1855,6 +1855,14 @@ defmodule Barkpark.Tenancy do
     Repo.get_by(Dataset, project_id: project_id, slug: slug)
   end
 
+  @doc """
+  Permanently delete a Dataset with its documents, media, schemas, history and
+  prefs, and audit it. Refuses `production` (`{:error, :production_dataset}`).
+  `opts[:actor]` is the `%ApiToken{}` named on the audit rows. Authorisation lives
+  in the HTTP action. What goes and what stays: `Tenancy.DatasetDelete`.
+  """
+  defdelegate delete_dataset(dataset, opts \\ []), to: Barkpark.Tenancy.DatasetDelete, as: :delete
+
   @doc "List all Datasets under a Project (accepts a struct or a project id), the canonical `production` dataset first, then the rest alphabetically."
   @spec list_datasets(Project.t() | binary()) :: [Dataset.t()]
   def list_datasets(%Project{id: project_id}), do: list_datasets(project_id)

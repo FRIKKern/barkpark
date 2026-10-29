@@ -1328,6 +1328,22 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # task-a944250b938671bd. The dataset is the positional <name>, never the
+      # active -d: a delete that fell back to the ambient dataset could remove
+      # the wrong one. `production` answers 409 production_dataset_protected.
+      core_cmd(
+        "dataset.delete",
+        "dataset",
+        "delete",
+        "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
+        "DELETE",
+        "/v1/datasets/:dataset",
+        "scoped_admin",
+        args: [arg("dataset", true, "string", "Dataset slug, e.g. j10-20261029.")],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "data.counts",
         "data",
@@ -3024,6 +3040,25 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
         flags: [
           flag("file", "file", "Body {\"value\": {...}} from a file or - for stdin.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "pref.patch",
+        "pref",
+        "patch",
+        "Edit the list at value[field] of one per-account pref in one locked write, so two tabs or devices never overwrite each other. push_front moves item to the front, dedupes and keeps the first max; add appends item unless present; remove drops it and writes nothing on an absent key. Applying an op twice in a row changes nothing; a replay after other ops re-applies it. 422 invalid_pref when value[field] is not a list.",
+        "PATCH",
+        "/v1/prefs/:dataset/:key",
+        "write",
+        args: [
+          arg("key", true, "string", "Pref name, e.g. recents."),
+          arg("op", true, "string", "push_front | add | remove"),
+          arg("field", true, "string", "Key in value that holds the list, e.g. ids."),
+          arg("item", true, "string", "The list element."),
+          arg("max", false, "int", "push_front only: how many entries to keep.")
         ],
         writes: true,
         default_output: "minimal",

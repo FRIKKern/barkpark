@@ -1454,6 +1454,132 @@ defmodule BarkparkWeb.MutateControllerTest do
     assert parsed["error"]["details"]["expected"] == "wrong-rev"
   end
 
+  # task-38c5c28f0fcef9eb: a batch fails whole on one stale rev, so the 412 names
+  # that mutation's index, the row it compared and that row's current rev.
+  test "a 412 on a batch names the failing mutation, its row and the row's current rev",
+       %{conn: conn} do
+    docs =
+      for n <- 1..3 do
+        {:ok, doc} =
+          Content.create_document("post", %{"_id" => "b412-#{n}", "title" => "v1"}, "test")
+
+        doc
+      end
+
+    [a, b, c] = docs
+
+    patch = fn doc, rev ->
+      %{
+        "patch" => %{
+          "id" => doc.doc_id,
+          "type" => "post",
+          "ifRevisionID" => rev,
+          "set" => %{"title" => "v2"}
+        }
+      }
+    end
+
+    body =
+      Jason.encode!(%{
+        "mutations" => [patch.(a, a.rev), patch.(b, "stale-rev"), patch.(c, c.rev)]
+      })
+
+    resp = conn |> authed() |> post("/v1/data/mutate/test", body)
+
+    assert resp.status == 412
+
+    assert %{"code" => "precondition_failed", "details" => details} =
+             Jason.decode!(resp.resp_body)["error"]
+
+    assert details == %{
+             "index" => 1,
+             "id" => b.doc_id,
+             "expected" => "stale-rev",
+             "actual" => b.rev
+           }
+
+    for doc <- docs do
+      {:ok, now} = Content.get_document(doc.doc_id, "post", "test")
+      assert now.rev == doc.rev
+    end
+  end
+
+  defp mutate_412_details(conn, mutations) do
+    resp =
+      conn |> authed() |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
+
+    assert resp.status == 412
+    Jason.decode!(resp.resp_body)["error"]["details"]
+  end
+
+  test "a 412's index counts every mutation, across delete and non-delete runs", %{conn: conn} do
+    [a, b, c, d] =
+      for n <- 1..4 do
+        {:ok, doc} =
+          Content.create_document("post", %{"_id" => "mix412-#{n}", "title" => "v1"}, "test")
+
+        doc
+      end
+
+    set = fn doc, rev ->
+      %{
+        "patch" => %{
+          "id" => doc.doc_id,
+          "type" => "post",
+          "ifRevisionID" => rev,
+          "set" => %{"title" => "v2"}
+        }
+      }
+    end
+
+    del = fn doc -> %{"delete" => %{"id" => doc.doc_id, "type" => "post"}} end
+
+    assert %{"index" => 3, "id" => "drafts.mix412-4"} =
+             mutate_412_details(conn, [set.(a, a.rev), del.(b), del.(c), set.(d, "stale")])
+
+    assert %{"index" => 1, "id" => "drafts.mix412-1"} =
+             mutate_412_details(conn, [del.(b), set.(a, "stale")])
+
+    for doc <- [a, b, c, d],
+        do: assert({:ok, _} = Content.get_document(doc.doc_id, "post", "test"))
+  end
+
+  test "a 412's id names the row it compared, also when that row is missing", %{conn: conn} do
+    {:ok, draft} =
+      Content.create_document("post", %{"_id" => "id412", "title" => "v1"}, "test")
+
+    create = %{"create" => %{"_type" => "post", "_id" => "id412", "ifRevisionID" => "stale"}}
+
+    assert mutate_412_details(conn, [create]) ==
+             %{"index" => 0, "id" => "drafts.id412", "expected" => "stale", "actual" => draft.rev}
+
+    exact = %{
+      "deleteExactDraft" => %{"id" => "drafts.id412", "type" => "post", "ifRevisionID" => "stale"}
+    }
+
+    assert Map.take(mutate_412_details(conn, [exact]), ~w(id actual)) ==
+             %{"id" => "drafts.id412", "actual" => draft.rev}
+
+    patch = %{
+      "patch" => %{
+        "id" => "id412",
+        "type" => "post",
+        "set" => %{"title" => "v2"},
+        "ifRevisionID" => "stale"
+      }
+    }
+
+    assert mutate_412_details(conn, [patch]) ==
+             %{"index" => 0, "id" => "drafts.id412", "expected" => "stale", "actual" => draft.rev}
+
+    ghost = %{
+      "createOrReplace" => %{"_type" => "post", "_id" => "ghost412", "ifRevisionID" => "r"}
+    }
+
+    assert mutate_412_details(conn, [ghost]) ==
+             %{"index" => 0, "id" => "drafts.ghost412", "expected" => "r", "actual" => nil}
+  end
+
   # Regression: a patch on a PUBLISHED id must target the draft (the row
   # Writer.upsert_document actually writes), not merge from the published row.
   # Reading the published row as merge base silently overwrites the newer draft

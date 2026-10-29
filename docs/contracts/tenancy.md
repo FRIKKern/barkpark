@@ -45,7 +45,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises — ruling + widening: the `Tenancy.Auth` moduledoc.
 
-→ Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`, `:scoped_api`/`:scoped_admin`), 404/403 table: **`docs/auth.md`**. URL shapes (`/w/:ws/p/:proj`, flat alias, Studio canonical): **`docs/api-v1.md` §1a**.
+→ Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`), 404/403 table: **`docs/auth.md`**. URL shapes: **`docs/api-v1.md` §1a**.
 
 ## Data-layer scoping
 
@@ -61,7 +61,7 @@ In multi-tenant installs the content-edge projection uses strict `scope_to_works
 
 ### The dataset string↔id duality (in-progress migration)
 
-Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs are `CASCADE` (deleting a Dataset deletes its content rows).
+Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs `CASCADE`, but a NULL row escapes, so delete a Dataset only via `delete_dataset/2` (`Tenancy.DatasetDelete`; refuses `production`).
 
 `Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (in `api/lib/barkpark/content/write_scope.ex`; not delegated on the `Content` facade):
 

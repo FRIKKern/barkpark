@@ -154,6 +154,17 @@ defmodule Barkpark.Media.WhereUsed do
   def referrers(path) when is_binary(path), do: path |> delivery_path() |> scan(nil)
 
   @doc """
+  The textual census of `file` over documents NOT in `leaving`, a query of the
+  `documents.id`s about to be deleted with it. A dataset delete asks this: the
+  structural half is same-dataset only, so it leaves with the dataset.
+  """
+  def referrers_outside(%MediaFile{} = file, %Ecto.Query{} = leaving),
+    do:
+      scan(delivery_path(file), Map.get(file, :workspace_id), fn query ->
+        where(query, [d], d.id not in subquery(leaving))
+      end)
+
+  @doc """
   True when at least one draft or published document references the blob.
   """
   def referenced?(file_or_path), do: referrers(file_or_path).count > 0
@@ -285,7 +296,7 @@ defmodule Barkpark.Media.WhereUsed do
     %{count: max(c1 + c2 - overlap, length(merged_sample)), sample: merged_sample}
   end
 
-  defp scan(url, workspace_id) do
+  defp scan(url, workspace_id, narrow \\ & &1) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
     # stored `path`), never caller text, but it is still bound as a PARAMETER so
@@ -313,6 +324,7 @@ defmodule Barkpark.Media.WhereUsed do
         }
       )
       |> scope_to_owner_tenant(workspace_id)
+      |> narrow.()
 
     count = Repo.aggregate(query, :count)
     sample = Repo.all(from(q in subquery(query), limit: @sample_limit))

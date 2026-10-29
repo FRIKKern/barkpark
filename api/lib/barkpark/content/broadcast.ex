@@ -163,6 +163,11 @@ defmodule Barkpark.Content.Broadcast do
   `%CallerContext{}` stamps; an absent one (system writes, jobs, legacy
   callers) leaves all three columns NULL — UNMEASURED, never `""`. Nothing a
   request BODY carries reaches this: the context is built from `conn.assigns`.
+
+  A `"create"` with a `prev_rev` is the first `drafts.<id>` forked from a
+  published row: every store and webhook keeps `"create"` (webhook `events`
+  filters match it), and the listen frame alone reads it as an `update` from
+  `prev_rev` (task-1bbff112e31873ff).
   """
   def tap_broadcast(
         result,

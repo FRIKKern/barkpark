@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.UserPrefController do
   @moduledoc """
-  `GET/PUT /w/:ws/p/:proj/v1/prefs/:dataset/:key` — the per-account JSON
+  `GET/PUT/PATCH/DELETE /w/:ws/p/:proj/v1/prefs/:dataset/:key` — the per-account JSON
   key-value store (task-7d2a48dbf7e4bf34). Mounted under `:scoped_api` (any
   member identity, token or session cookie) — membership alone gates it;
   no write-permission check, because the value scoped here is the caller's
@@ -59,6 +59,65 @@ defmodule BarkparkWeb.UserPrefController do
   def update(conn, %{"dataset" => _dataset, "key" => _key}) do
     ErrorResponse.emit_custom(conn, 422, "bad_request", "value must be a JSON object")
   end
+
+  def patch(conn, %{"dataset" => dataset, "key" => key} = params) do
+    with {:ok, user_id} <- resolve_user_id(conn),
+         {:ws, %{id: ws_id}} <- {:ws, conn.assigns[:current_workspace]},
+         {:ok, op} <- list_op(params),
+         {:ok, value} <- UserPrefs.apply_list_op(user_id, ws_id, dataset, key, op) do
+      json(conn, %{key: key, dataset: dataset, value: value})
+    else
+      {:ws, _} ->
+        not_found(conn)
+
+      {:error, :no_user} ->
+        no_user_error(conn)
+
+      {:error, :bad_op} ->
+        ErrorResponse.emit_custom(
+          conn,
+          422,
+          "bad_request",
+          "body must be {op: push_front | add | remove, field: string, item: non-null, max?: positive integer}"
+        )
+
+      {:error, :not_a_list} ->
+        ErrorResponse.emit_fields(conn, 422, %{
+          code: "invalid_pref",
+          message: %{value: ["#{params["field"]} is not a list"]}
+        })
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        ErrorResponse.emit_fields(conn, 422, %{
+          code: "invalid_pref",
+          message: changeset_errors(changeset)
+        })
+    end
+  end
+
+  @list_ops %{"push_front" => :push_front, "add" => :add, "remove" => :remove}
+
+  defp list_op(%{"op" => op, "field" => field, "item" => item} = params)
+       when is_binary(field) and field != "" and not is_nil(item) do
+    case {Map.fetch(@list_ops, op), cap(Map.get(params, "max"))} do
+      {{:ok, op}, {:ok, max}} -> {:ok, {op, field, item, max}}
+      _ -> {:error, :bad_op}
+    end
+  end
+
+  defp list_op(_params), do: {:error, :bad_op}
+
+  defp cap(nil), do: {:ok, nil}
+  defp cap(max) when is_integer(max) and max > 0, do: {:ok, max}
+
+  defp cap(max) when is_binary(max) do
+    case Integer.parse(max) do
+      {max, ""} when max > 0 -> {:ok, max}
+      _ -> :error
+    end
+  end
+
+  defp cap(_max), do: :error
 
   def delete(conn, %{"dataset" => dataset, "key" => key}) do
     with {:ok, user_id} <- resolve_user_id(conn),
