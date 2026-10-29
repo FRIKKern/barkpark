@@ -79,7 +79,7 @@ defmodule Barkpark.Groq.VirtualAsset do
       "size" => file.size,
       "metadata" => metadata
     }
-    |> Map.merge(id_keys(id))
+    |> Map.merge(id_keys(id, file, image?))
     |> Map.merge(location(id, file, dataset, base))
     |> Map.reject(fn {_k, v} -> is_nil(v) end)
   end
@@ -142,9 +142,16 @@ defmodule Barkpark.Groq.VirtualAsset do
     end
   end
 
-  defp id_keys(nil), do: %{}
+  # A file with no Sanity id (no sha1 yet, as rows from before sha1 was
+  # stored) still has the extension Sanity gives every asset: an image's from
+  # its type, else the file name's (task-ee1196ce908b12cf).
+  defp id_keys(nil, file, image?) do
+    name_ext = file_ext(file.original_name || file.filename)
+    ext = if image?, do: image_ext(file.mime_type) || name_ext, else: name_ext
+    %{"extension" => ext}
+  end
 
-  defp id_keys(id) do
+  defp id_keys(id, _file, _image?) do
     {sha1, ext} = id_parts(id)
     %{"assetId" => sha1, "sha1hash" => sha1, "extension" => ext}
   end
