@@ -381,9 +381,7 @@ defmodule BarkparkWeb.MediaController do
 
     case SanityAsset.parse_file(name) do
       {:ok, ref} ->
-        serve_file(put_sanity_name(conn, :file), fn opts ->
-          SanityAsset.find(ref, dataset, opts)
-        end)
+        serve_file(conn, fn opts -> SanityAsset.find(ref, dataset, opts) end)
 
       :error ->
         not_found(conn, "not a Sanity file asset URL")
@@ -413,46 +411,6 @@ defmodule BarkparkWeb.MediaController do
         conn
     end
   end
-
-  defp sanity_disposition(%Plug.Conn{private: %{sanity_name: name}}, file, default) do
-    case name do
-      {:download, ""} -> "attachment;" <> quoted_filename(original_name(file), true)
-      {:download, dl} -> "attachment;" <> quoted_filename(dl, false)
-      :inline -> default <> ";" <> quoted_filename(original_name(file), true)
-    end
-  end
-
-  defp sanity_disposition(_conn, _file, default), do: default
-
-  defp original_name(file), do: file.original_name || file.filename || Path.basename(file.path)
-
-  # Printable ASCII passes except `"`, `\` and `%`; everything else, CR and
-  # LF included, is percent-encoded, which is how Sanity writes a `dl` name.
-  # Sanity keeps a space in the stored name and encodes it in a `dl` one.
-  defp quoted_filename(name, keep_space?) do
-    encoded =
-      name
-      |> String.slice(0, 200)
-      |> URI.encode(fn c ->
-        (c in 0x21..0x7E and c not in [?", ?\\, ?%]) or (keep_space? and c == ?\s)
-      end)
-
-    ~s<filename="#{encoded}">
-  end
-
-  # Sanity's `dl` and file names (task-2900dfa8af0906df). As on Sanity's CDN,
-  # `?dl` and `?dl=` download under the original file name, `?dl=<name>`
-  # under that name, and a file URL without `dl` names the file inline;
-  # `@sanity/image-url`'s `forceDownload` adds `dl`. Only the Sanity routes
-  # set this, so every other media URL keeps its disposition. A download is
-  # never weaker than the default: dangerous types are already `attachment`,
-  # and their type is still collapsed.
-  defp put_sanity_name(%Plug.Conn{query_params: %{"dl" => dl}} = conn, _route)
-       when is_binary(dl),
-       do: put_private(conn, :sanity_name, {:download, dl})
-
-  defp put_sanity_name(conn, :file), do: put_private(conn, :sanity_name, :inline)
-  defp put_sanity_name(conn, :image), do: conn
 
   defp sanity_disposition(%Plug.Conn{private: %{sanity_name: name}}, file, default) do
     case name do
@@ -997,8 +955,9 @@ defmodule BarkparkWeb.MediaController do
   end
 
   # Sanity's CDN 404 on its image and file URLs, byte for byte, measured on
-  # cdn.sanity.io (task-d495181d04dca3d9): a site that reads the body or the type sees what
-  # Sanity sends. Only those two routes; the cache policy is unchanged.
+  # cdn.sanity.io (task-d495181d04dca3d9), so a site that reads the body or
+  # the type sees what Sanity sends. Only those two routes; the cache policy
+  # is unchanged.
   defp sanity_not_found(conn, :image) do
     conn
     |> put_resp_content_type("application/json", "utf-8")
