@@ -70,6 +70,7 @@ defmodule Barkpark.Content.Mutations do
     BoundFieldSync,
     Broadcast,
     CallerContext,
+    DiffMatchPatch,
     DraftId,
     Envelope,
     MutateDoorFences,
@@ -1215,7 +1216,7 @@ defmodule Barkpark.Content.Mutations do
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
               is_map_key(patch, "append") or is_map_key(patch, "prepend") or
-              is_map_key(patch, "insert") do
+              is_map_key(patch, "insert") or is_map_key(patch, "diffMatchPatch") do
     # [bare-id-refusal] task-eeaf3a622b6c74c7 — `id`/`_id` under set/setIfMissing
     # address nothing here; refuse BEFORE the read so the answer does not depend
     # on whether the document exists. See Writer.refuse_bare_id/2.
@@ -2097,6 +2098,7 @@ defmodule Barkpark.Content.Mutations do
     |> ok_then(&apply_array_op(&1, Map.get(patch, "append"), protected, :append))
     |> ok_then(&apply_array_op(&1, Map.get(patch, "prepend"), protected, :prepend))
     |> apply_insert(Map.get(patch, "insert"), protected)
+    |> dmp_ops(Map.get(patch, "diffMatchPatch"), protected)
     |> path_ops(Enum.map(unset_paths, &{&1, nil}), protected, &unset_fun/1, false)
     |> ok_then(&Map.drop(&1, unset_plain -- protected))
   end
@@ -2129,6 +2131,55 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # Sanity's `diffMatchPatch` (task-88240409d3fc3c51): `{"<path>": "<patch_toText>"}`,
+  # applied to the string at each path as `Barkpark.Content.DiffMatchPatch`
+  # describes. A hunk that no longer matches is skipped and a path that holds
+  # no string is left as it is, as on Sanity. A patch text that does not
+  # parse, or work past the module's limits, refuses the batch (422).
+  @max_dmp_paths 32
+
+  defp dmp_ops({:error, _} = error, _fields, _protected), do: error
+  defp dmp_ops(acc, nil, _protected), do: wrap_ok(acc)
+
+  defp dmp_ops(acc, fields, protected) when is_map(fields) do
+    pairs = fields |> Enum.filter(fn {_k, v} -> is_binary(v) end) |> Enum.sort()
+
+    if length(pairs) > @max_dmp_paths do
+      dmp_error("a patch names over #{@max_dmp_paths} diffMatchPatch paths")
+    else
+      case DiffMatchPatch.with_budget(fn ->
+             path_ops(acc, pairs, protected, &dmp_fun/1, false)
+           end) do
+        {:error, {:dmp, message}} -> dmp_error(message)
+        other -> other
+      end
+    end
+  end
+
+  defp dmp_ops(_acc, _fields, _protected),
+    do: dmp_error("diffMatchPatch must be an object of path: patch text")
+
+  defp dmp_fun(patch_text) do
+    fn
+      {:ok, current} when is_binary(current) ->
+        case DiffMatchPatch.apply(patch_text, current) do
+          {:ok, ^current, _applied} -> :keep
+          {:ok, text, _applied} -> {:put, text}
+          {:error, :limit, message} -> {:error, {:dmp, message}}
+          :error -> {:error, {:dmp, "the patch text does not parse as diff-match-patch"}}
+        end
+
+      _ ->
+        :keep
+    end
+  end
+
+  defp dmp_error(message),
+    do:
+      {:error,
+       {:validation_failed, "diffMatchPatch", %{"diffMatchPatch" => [message]},
+        "Send @sanity/diff-match-patch stringifyPatches output; for a larger change send a set instead."}}
+
   defp delta_fun(delta, sign) do
     fn
       {:ok, n} when is_number(n) -> {:put, n + sign * delta}
@@ -2153,6 +2204,7 @@ defmodule Barkpark.Content.Mutations do
         case PatchPath.update(content, segs, create?, make_fun.(value)) do
           {:ok, updated} -> {:cont, {:ok, updated}}
           :unmatched -> {:cont, {:ok, warn_unmatched(path, content)}}
+          {:error, {:dmp, msg}} -> {:halt, {:error, {:dmp, "#{msg} (path #{inspect(path)})"}}}
           {:error, msg} -> {:halt, path_error({:error, "#{msg} (path #{inspect(path)})"})}
         end
       else
@@ -2436,7 +2488,9 @@ defmodule Barkpark.Content.Mutations do
 
   # The top-level fields a patch reads or writes: the keys of set/setIfMissing/inc/dec/
   # append/prepend, the paths it unsets or inserts at (their first segment), and on a
-  # document with a block list, `blocks` too (a bound field writes through it).
+  # document with a block list, `blocks` too (a bound field writes through it). A
+  # `diffMatchPatch` path is not one: it merges into whatever the text is now, so a
+  # change to it since `ifRevisionID` is what it is for.
   defp patch_fields(patch, content) do
     keyed =
       ~w(set setIfMissing inc dec append prepend)
