@@ -66,6 +66,28 @@ const typed = async (editor, text) => {
   }
 };
 
+const pressKey = (editor, key, mods = {}) => {
+  const event = new window.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...mods });
+  editor.view.dom.dispatchEvent(event);
+  return event.defaultPrevented;
+};
+
+const shape = (editor) => {
+  const out = [];
+  editor.state.doc.descendants((node) => {
+    if (!node.isTextblock) return true;
+    let line = "";
+    node.forEach((child) => {
+      if (child.type.name === "hardBreak") line += "⏎";
+      else if (child.marks.some((mark) => mark.type.name === "wikilink")) line += `{${child.text}}`;
+      else line += child.text || "";
+    });
+    out.push(line);
+    return false;
+  });
+  return out;
+};
+
 const pressEnter = (editor) => {
   const event = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
   editor.view.dom.dispatchEvent(event);
@@ -276,6 +298,38 @@ test("a tag source that rejects reads as no match", async () => {
   assert.deepEqual(lines(editor), ["#road", ""]);
   canvas.remove();
 });
+
+const emptyThenHit = async (query) => (query.endsWith("zz") ? [] : [{ title: "Hit", id: "hit", type: "paper" }]);
+
+for (const [label, trigger, opts] of [
+  ["[[", "[[", { source: emptyThenHit }],
+  ["@", "@", { source: emptyThenHit }],
+  ["#", "#", { tags: async (query) => (query.endsWith("zz") ? [] : ["hit"]) }],
+]) {
+  for (const [modLabel, mods] of [["Shift+Enter", { shiftKey: true }], ["Mod+Enter", { metaKey: true }], ["Ctrl+Enter", { ctrlKey: true }], ["Alt+Enter", { altKey: true }]]) {
+    test(`${label} with no match: ${modLabel} stays with the picker, as before; only a bare Enter closes it`, async () => {
+      const { canvas, editor } = await mount(opts);
+      await typed(editor, `${trigger}zz`);
+      assert.ok(openMenu(), "opens, empty");
+      pressKey(editor, "Enter", mods);
+      assert.ok(openMenu(), `${modLabel} keeps the picker`);
+      assert.deepEqual(shape(editor), [`${trigger}zz`], `${modLabel} inserts nothing`);
+      canvas.remove();
+    });
+  }
+  test(`${label}: Escape, Shift+Enter, typing: the break ends the trigger, nothing is lost`, async () => {
+    const { canvas, editor } = await mount(opts);
+    await typed(editor, `${trigger}zz`);
+    pressKey(editor, "Escape");
+    assert.equal(openMenu(), null);
+    pressKey(editor, "Enter", { shiftKey: true });
+    await typed(editor, "qr");
+    assert.equal(openMenu(), null, "no picker across a line break");
+    pressEnter(editor);
+    assert.deepEqual(shape(editor), [`${trigger}zz⏎qr`, ""]);
+    canvas.remove();
+  });
+}
 
 test("data-strings renames the picker's eyebrow and empty row", async () => {
   const strings = { "Link to page": "Link to note", "No matching pages": "No matching notes" };

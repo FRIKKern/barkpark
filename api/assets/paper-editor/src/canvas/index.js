@@ -739,6 +739,15 @@ function focusableControlIn(dom) {
   return null;
 }
 
+// A textblock's text with one char per inline leaf, so offsets are positions: a
+// hard break reads as a newline (it ends a trigger), any other atom as U+FFFC.
+const triggerText = (block) =>
+  block.textBetween(0, block.content.size, undefined, (leaf) =>
+    leaf.type.name === "hardBreak" ? "\n" : "\ufffc");
+
+// Only a bare Enter closes an empty picker; Shift/Mod/Alt+Enter stay with it.
+const hasModifier = (event) => event.shiftKey || event.metaKey || event.ctrlKey || event.altKey;
+
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
     return ["editable", "format-bubble"];
@@ -2826,7 +2835,7 @@ class BpPaperCanvas extends HTMLElement {
           this._wikilink.move(-1);
           return true;
         case "Enter":
-          if (this._wikilink.isEmpty()) {
+          if (this._wikilink.isEmpty() && !hasModifier(event)) {
             this._closeWikilink();
             return false;
           }
@@ -2876,7 +2885,7 @@ class BpPaperCanvas extends HTMLElement {
           this._tag.move(-1);
           return true;
         case "Enter":
-          if (this._tag.isEmpty()) {
+          if (this._tag.isEmpty() && !hasModifier(event)) {
             this._closeTag();
             return false;
           }
@@ -3431,14 +3440,15 @@ class BpPaperCanvas extends HTMLElement {
 
     // Block-LOCAL text + offset must share one coordinate frame. In the canvas
     // doc `$from.parent` is the CURRENT run block's textblock (a paragraph —
-    // including the one nested inside a list item), so its `textContent` pairs
-    // exactly with `parentOffset`. Using getText() here would join EVERY block in
+    // including the one nested inside a list item), so its triggerText (one char per
+    // inline leaf, a hard break as "\n") pairs exactly with `parentOffset`;
+    // textContent drops leaves and drifts after a break. Using getText() here would join EVERY block in
     // the run with "\n\n" and desync from the block-local offset — so a `[[` typed
     // in the 2nd-or-later block would never open. parseOpenWikilink's contract is
     // block-local text. This is what makes the trigger frame-correct in the
     // multi-block canvas exactly as it is in the per-block editor.
     const $from = this._editor.state.selection.$from;
-    const blockLocalText = $from.parent.textContent;
+    const blockLocalText = triggerText($from.parent);
     const caretOffset = $from.parentOffset;
     const hit = parseOpenWikilink(blockLocalText, caretOffset, {
       mention: this.getAttribute("mention-trigger") !== "off",
@@ -3559,10 +3569,10 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor) return false;
 
     // Block-LOCAL text + offset must share one coordinate frame — identical
-    // rationale to _maybeWikilink: `$from.parent.textContent` pairs exactly with
+    // rationale to _maybeWikilink: triggerText($from.parent) pairs exactly with
     // `parentOffset`, so a `#` typed in the 2nd-or-later run block still opens.
     const $from = this._editor.state.selection.$from;
-    const blockLocalText = $from.parent.textContent;
+    const blockLocalText = triggerText($from.parent);
     const caretOffset = $from.parentOffset;
     const hit = parseOpenTag(blockLocalText, caretOffset);
     if (!hit) {

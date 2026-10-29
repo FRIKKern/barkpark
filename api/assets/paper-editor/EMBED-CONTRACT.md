@@ -135,8 +135,9 @@ Optional properties. Each may return its value or a Promise of it; unset (or
 
 The menus drop a result that arrives after a newer query or after close. In the
 `[[`/`@` and `#` menus, Enter picks the highlighted row; once the result for the
-current query has come back empty it closes the menu and breaks the line as usual
-(1.16.0). While that result is still coming, Enter waits with the menu, even if an
+current query has come back empty, a bare Enter closes the menu and breaks the line
+as usual (Shift, Mod or Alt+Enter still stay with the menu), and a line break ends
+the query (1.16.0). While that result is still coming, Enter waits with the menu, even if an
 older query's empty result is on screen. A `wikilinkSource` or `tagSource` that
 throws or rejects reads as no match (1.16.0). A
 `linkPreviewSource` that throws or rejects is ignored. For a `link`, `kind`/`href`
