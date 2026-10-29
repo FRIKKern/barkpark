@@ -1337,9 +1337,9 @@ defmodule Barkpark.Plugins.Capabilities do
         "delete",
         "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
         "DELETE",
-        "/v1/datasets/:name",
+        "/v1/datasets/:dataset",
         "scoped_admin",
-        args: [arg("name", true, "string", "Dataset slug, e.g. j10-20261029.")],
+        args: [arg("dataset", true, "string", "Dataset slug, e.g. j10-20261029.")],
         writes: true,
         default_output: "json",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"

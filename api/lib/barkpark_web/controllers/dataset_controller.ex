@@ -1,19 +1,23 @@
 defmodule BarkparkWeb.DatasetController do
   @moduledoc """
-  `DELETE /w/:ws/p/:proj/v1/datasets/:name` — permanently delete one dataset of
+  `DELETE /w/:ws/p/:proj/v1/datasets/:dataset` — permanently delete one dataset of
   the resolved project (task-a944250b938671bd). `bp dataset delete <name>`.
 
   Mounted on `:scoped_api` + `:scoped_admin`: an unknown workspace is 404, a
-  caller whose seat is not `owner`/`admin` is 403, both before this action runs.
+  caller whose seat is not `owner`/`admin` is 403, and a dataset-bound token
+  naming another dataset is 403 `forbidden_dataset`, all before this action
+  runs. The segment is `:dataset` so that last guard sees it.
 
   | Case | Status | `error.code` |
   |---|---|---|
   | deleted | 200 | — |
-  | no dataset `name` in the project | 404 | `not_found` |
+  | no such dataset in the project, or not a dataset slug | 404 | `not_found` |
   | `name` is `production` | 409 | `production_dataset_protected` |
 
   The 200 body names the dataset and what left with it:
-  `{deleted: true, dataset: {id, slug, name}, documents: N, media_files: N, swept: {table: N}}`.
+  `{deleted: true, dataset: {id, slug, name}, documents: N, media_files: N, swept: {table: N}, detached: {table: N}}`.
+  `detached` counts other workspaces' rows that pointed at the dataset and keep
+  living with `dataset_id` NULL. The delete is on the workspace's audit chain.
   """
   use BarkparkWeb, :controller
 
@@ -26,10 +30,11 @@ defmodule BarkparkWeb.DatasetController do
   # Re-derive its @exclusion_anchors values from
   #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
   # in the same commit: docs/ops/exclusion-anchor-rederive.md
-  def delete(conn, %{"name" => name}) do
-    with %Tenancy.Project{} = project <- conn.assigns[:current_project],
+  def delete(conn, %{"dataset" => name}) do
+    with true <- Tenancy.Dataset.valid_slug?(name),
+         %Tenancy.Project{} = project <- conn.assigns[:current_project],
          %Tenancy.Dataset{} = dataset <- Tenancy.get_dataset(project, name),
-         {:ok, receipt} <- Tenancy.delete_dataset(dataset) do
+         {:ok, receipt} <- Tenancy.delete_dataset(dataset, actor(conn)) do
       if Map.has_key?(receipt.swept, "shares"), do: Barkpark.Sharing.refresh()
 
       json(conn, %{
@@ -37,10 +42,11 @@ defmodule BarkparkWeb.DatasetController do
         dataset: %{id: receipt.dataset.id, slug: receipt.dataset.slug, name: receipt.dataset.name},
         documents: receipt.documents,
         media_files: receipt.media_files,
-        swept: receipt.swept
+        swept: receipt.swept,
+        detached: receipt.detached
       })
     else
-      nil ->
+      falsy when falsy in [nil, false] ->
         ErrorResponse.emit_custom(
           conn,
           404,
@@ -68,6 +74,13 @@ defmodule BarkparkWeb.DatasetController do
 
       {:error, _} = err ->
         err
+    end
+  end
+
+  defp actor(conn) do
+    case conn.assigns[:api_token] do
+      %{id: id} -> [actor_type: "api_token", actor_id: to_string(id)]
+      _ -> []
     end
   end
 end

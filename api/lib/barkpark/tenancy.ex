@@ -1857,10 +1857,11 @@ defmodule Barkpark.Tenancy do
 
   @doc """
   Permanently delete a Dataset with its documents, media, schemas, history and
-  prefs. Refuses `production` (`{:error, :production_dataset}`). Authorisation
-  lives in the HTTP action. What goes and what stays: `Tenancy.DatasetDelete`.
+  prefs, and audit it. Refuses `production` (`{:error, :production_dataset}`).
+  `opts` names the audit actor (`:actor_type`, `:actor_id`). Authorisation lives
+  in the HTTP action. What goes and what stays: `Tenancy.DatasetDelete`.
   """
-  defdelegate delete_dataset(dataset), to: Barkpark.Tenancy.DatasetDelete, as: :delete
+  defdelegate delete_dataset(dataset, opts \\ []), to: Barkpark.Tenancy.DatasetDelete, as: :delete
 
   @doc "List all Datasets under a Project (accepts a struct or a project id), the canonical `production` dataset first, then the rest alphabetically."
   @spec list_datasets(Project.t() | binary()) :: [Dataset.t()]

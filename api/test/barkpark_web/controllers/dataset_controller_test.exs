@@ -3,7 +3,10 @@ defmodule BarkparkWeb.DatasetControllerTest do
 
   import Barkpark.TenancyFixtures
 
+  import Ecto.Query
+
   alias Barkpark.{Auth, Repo, Tenancy}
+  alias Barkpark.Audit.Event
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Dataset
 
@@ -35,6 +38,14 @@ defmodule BarkparkWeb.DatasetControllerTest do
   end
 
   defp dataset?(project, slug), do: Tenancy.get_dataset(project, slug) != nil
+
+  defp bound_owner!(ws, dataset) do
+    raw = "ds-bound-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "ds-bound", dataset, ~w(read write admin))
+    token |> Ecto.Changeset.change(dataset_bound: true) |> Repo.update!()
+    {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "owner", "api_token")
+    raw
+  end
 
   for role <- [:owner, :admin] do
     test "an #{role} deletes the dataset and gets a receipt", %{
@@ -94,6 +105,50 @@ defmodule BarkparkWeb.DatasetControllerTest do
     assert dataset?(project, "j10-7")
   end
 
+  test "a token bound to one dataset cannot delete another", %{ws: ws, project: project} do
+    {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-8")
+    raw = bound_owner!(ws, "j10-8")
+
+    conn = delete_dataset(raw, ws, project, "j10-7")
+
+    assert %{"error" => %{"reason" => "dataset_not_bound"}} = json_response(conn, 403)
+    assert dataset?(project, "j10-7")
+
+    assert %{"deleted" => true} = json_response(delete_dataset(raw, ws, project, "j10-8"), 200)
+  end
+
+  test "a name that cannot be a dataset slug is 404, never a 500",
+       %{ws: ws, project: project, tokens: tokens} do
+    {:ok, _} = Tenancy.get_or_create_dataset(project, "production")
+
+    for name <- ~w(production%00 j10-7%00 Production J10-7 producti%C3%B6n %FF j10-7.json) do
+      conn = delete_dataset(tokens.owner, ws, project, name)
+
+      assert {name, 404, "not_found"} ==
+               {name, conn.status, json_response(conn, 404)["error"]["code"]}
+    end
+
+    assert dataset?(project, "production")
+    assert dataset?(project, "j10-7")
+  end
+
+  test "the delete lands on the workspace audit chain with the token as actor",
+       %{ws: ws, project: project, tokens: tokens} do
+    %{id: id} = Tenancy.get_dataset(project, "j10-7")
+    token = Repo.get_by!(Barkpark.Auth.ApiToken, label: "ds-owner")
+
+    assert json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+
+    assert [event] =
+             Repo.all(
+               from e in Event, where: e.workspace_id == ^ws.id and e.action == "dataset_deleted"
+             )
+
+    assert %{subject: ^id, category: "content_mutation", actor_type: "api_token"} = event
+    assert event.actor_id == to_string(token.id)
+    assert %{"dataset" => "j10-7", "documents" => 1} = event.metadata
+  end
+
   test "GET /v1/capabilities advertises dataset.delete on this route", %{tokens: tokens} do
     manifest =
       scoped_conn()
@@ -108,9 +163,9 @@ defmodule BarkparkWeb.DatasetControllerTest do
              "verb" => "delete",
              "auth_tier" => "scoped_admin",
              "writes" => true,
-             "http" => %{"method" => "DELETE", "path_template" => "/v1/datasets/:name"},
+             "http" => %{"method" => "DELETE", "path_template" => "/v1/datasets/:dataset"},
              "scoped_prefix" => "/w/:workspace_slug/p/:project_slug",
-             "args" => [%{"name" => "name", "required" => true}]
+             "args" => [%{"name" => "dataset", "required" => true}]
            } = cmd
   end
 end

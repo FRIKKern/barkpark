@@ -37,6 +37,12 @@ defmodule Barkpark.Tenancy.Dataset do
 
   @type t :: %__MODULE__{}
 
+  @doc "Whether `slug` could name a dataset: the changeset's format and length."
+  def valid_slug?(slug) when is_binary(slug),
+    do: String.valid?(slug) and byte_size(slug) <= 63 and Regex.match?(@slug_format, slug)
+
+  def valid_slug?(_), do: false
+
   def changeset(dataset, attrs) do
     dataset
     |> cast(attrs, [:slug, :name, :project_id])

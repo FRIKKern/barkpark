@@ -4,10 +4,12 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
   import Barkpark.TenancyFixtures
   import Ecto.Query
 
-  alias Barkpark.{AccountsFixtures, Content, Repo, Tenancy, UserPrefs}
+  alias Barkpark.{AccountsFixtures, Audit, Content, Repo, Tenancy, UserPrefs, Webhooks}
   alias Barkpark.Content.{Document, MutationEvent, Revision, SchemaDefinition}
   alias Barkpark.Media.Storage.MediaFile
+  alias Barkpark.Search.Synonyms
   alias Barkpark.Tenancy.{Dataset, DatasetDelete}
+  alias Barkpark.Webhooks.Webhook
 
   setup do
     ws = create_workspace!()
@@ -157,10 +159,10 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
         SELECT c.table_name FROM information_schema.columns c
         JOIN information_schema.tables t
           ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
-        WHERE c.table_schema = 'public' AND c.column_name IN ('dataset', 'scope')
+        WHERE c.table_schema = 'public' AND c.column_name IN ('dataset', 'scope', 'scope_dataset')
           AND c.table_name NOT IN (
             SELECT table_name FROM information_schema.columns
-            WHERE table_schema = 'public' AND column_name = 'dataset_id'
+            WHERE table_schema = 'public' AND column_name LIKE '%dataset_id'
           )
         GROUP BY c.table_name
         """)
@@ -173,5 +175,180 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
       assert unclassified == [],
              "classify these in Barkpark.Tenancy.DatasetDelete: #{inspect(unclassified)}"
     end
+
+    test "every table with a dataset_id column is in exactly one class" do
+      classes = DatasetDelete.dataset_id_tables()
+      classified = classes |> Map.values() |> List.flatten()
+
+      assert classified == Enum.uniq(classified)
+      assert Enum.sort(classified) == Enum.sort(Map.keys(dataset_id_columns()))
+    end
+
+    test "a cascade alone is trusted only where the FK exists and a NULL dataset_id cannot hide a row" do
+      %{cascade: cascade, cascade_and_string: with_string, walked: walked, not_tenant: not_tenant} =
+        DatasetDelete.dataset_id_tables()
+
+      columns = dataset_id_columns()
+      fks = fk_rules()
+
+      for table <- cascade ++ with_string ++ walked do
+        assert fks[table] == "c", "#{table}: no ON DELETE CASCADE FK to datasets"
+      end
+
+      for table <- not_tenant, do: refute(Map.has_key?(fks, table), "#{table} has an FK")
+
+      for table <- cascade, table not in DatasetDelete.append_only_tables() do
+        %{nullable: nullable, named: named} = columns[table]
+
+        refute nullable and named,
+               "#{table}: its dataset_id may be NULL and it names the dataset by string, " <>
+                 "so the cascade misses rows; move it to cascade_and_string"
+      end
+    end
+  end
+
+  defp dataset_id_columns do
+    %{rows: rows} =
+      Repo.query!("""
+      SELECT c.table_name, bool_or(c.column_name LIKE '%dataset_id' AND c.is_nullable = 'YES'),
+             bool_or(c.column_name IN ('dataset', 'scope', 'scope_dataset'))
+      FROM information_schema.columns c
+      JOIN information_schema.tables t
+        ON t.table_schema = c.table_schema AND t.table_name = c.table_name AND t.table_type = 'BASE TABLE'
+      WHERE c.table_schema = 'public'
+      GROUP BY c.table_name
+      HAVING bool_or(c.column_name LIKE '%dataset_id')
+      """)
+
+    for [table, nullable, named] <- rows,
+        into: %{},
+        do: {table, %{nullable: nullable, named: named}}
+  end
+
+  defp fk_rules do
+    %{rows: rows} =
+      Repo.query!("""
+      SELECT cl.relname, c.confdeltype FROM pg_constraint c
+      JOIN pg_class cl ON cl.oid = c.conrelid
+      JOIN pg_class pl ON pl.oid = c.confrelid
+      WHERE c.contype = 'f' AND pl.relname = 'datasets'
+      """)
+
+    Map.new(rows, fn [table, rule] -> {table, rule} end)
+  end
+
+  defp webhook!(ws, project, slug) do
+    {:ok, hook} =
+      Webhooks.create_webhook(
+        %{"name" => "hook-#{slug}", "url" => "https://example.com/#{slug}", "dataset" => slug},
+        workspace_id: ws.id,
+        project_id: project.id
+      )
+
+    hook
+  end
+
+  defp synonym_rows(scope) do
+    Repo.all(
+      from s in "search_synonyms",
+        where: s.scope == ^scope,
+        select: {type(s.workspace_id, Ecto.UUID), type(s.dataset_id, Ecto.UUID)}
+    )
+  end
+
+  describe "rows a writer leaves without a dataset_id" do
+    test "a webhook leaves with its dataset and stays gone when the name is reused",
+         %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-5", user)
+      _sibling = seed(ws, project, "j10-6", user)
+      doomed = webhook!(ws, project, "j10-5")
+      kept = webhook!(ws, project, "j10-6")
+
+      assert {:ok, receipt} = Tenancy.delete_dataset(dataset)
+
+      assert receipt.swept["webhooks"] == 1
+      refute Repo.get(Webhook, doomed.id)
+      assert Repo.get(Webhook, kept.id)
+
+      {:ok, _} = Tenancy.get_or_create_dataset(project, "j10-5")
+      scope = [workspace_id: ws.id, project_id: project.id]
+      assert Webhooks.active_webhooks_for("j10-5", "create", "post", scope) == []
+    end
+
+    test "a workspace synonym leaves with the workspace's dataset", %{ws: ws, project: project} do
+      {:ok, _} = Synonyms.create("docs", "j10-s1", %{"from" => "a", "to" => "b"}, ws.id)
+      {:ok, dataset} = Tenancy.get_or_create_dataset(project, "j10-s1")
+
+      assert {:ok, %{swept: %{"search_synonyms" => 1}}} = Tenancy.delete_dataset(dataset)
+      assert synonym_rows("j10-s1") == []
+    end
+  end
+
+  describe "another workspace's rows" do
+    test "a workspace synonym is not stamped with the Default project's dataset", %{ws: ws} do
+      {_default_ws, default_project} = ensure_default_scope!()
+
+      {:ok, _} = Synonyms.create("docs", "j10-s2", %{"from" => "a", "to" => "b"}, ws.id)
+      {:ok, _} = Synonyms.create("docs", "j10-s2", %{"from" => "c", "to" => "d"})
+
+      %{id: default_id} = Tenancy.get_dataset(default_project, "j10-s2")
+      assert Enum.sort(synonym_rows("j10-s2")) == Enum.sort([{ws.id, nil}, {nil, default_id}])
+    end
+
+    test "deleting a Default-project dataset detaches, never deletes, another workspace's rows",
+         %{ws: ws} do
+      {_default_ws, default_project} = ensure_default_scope!()
+      {:ok, _} = Synonyms.create("docs", "j10-s3", %{"from" => "a", "to" => "b"}, ws.id)
+      {:ok, default_ds} = Tenancy.get_or_create_dataset(default_project, "j10-s3")
+
+      Repo.update_all(
+        from(s in "search_synonyms", where: s.workspace_id == type(^ws.id, Ecto.UUID)),
+        set: [dataset_id: Ecto.UUID.dump!(default_ds.id)]
+      )
+
+      assert {:ok, receipt} = Tenancy.delete_dataset(default_ds)
+
+      assert receipt.detached == %{"search_synonyms" => 1}
+      assert synonym_rows("j10-s3") == [{ws.id, nil}]
+    end
+  end
+
+  test "the delete is appended to the workspace's audit chain",
+       %{ws: ws, project: project, user: user} do
+    dataset = seed(ws, project, "j10-9", user)
+
+    assert {:ok, _} =
+             Tenancy.delete_dataset(dataset, actor_type: "api_token", actor_id: "token-1")
+
+    assert [event] =
+             Repo.all(
+               from e in Audit.Event,
+                 where: e.workspace_id == ^ws.id and e.action == "dataset_deleted"
+             )
+
+    assert %{category: "content_mutation", subject: subject, actor_id: "token-1"} = event
+    assert subject == dataset.id
+    assert %{"dataset" => "j10-9", "documents" => 2, "media_files" => 1} = event.metadata
+    assert Audit.verify_chain(ws.id) == :ok
+  end
+
+  test "a failure at the last step rolls the whole delete back",
+       %{ws: ws, project: project, user: user} do
+    dataset = seed(ws, project, "j10-10", user)
+    before = census(dataset, ws)
+
+    Repo.query!(
+      "CREATE FUNCTION ds_delete_refuse() RETURNS trigger AS $$ BEGIN RAISE EXCEPTION 'refused'; END $$ LANGUAGE plpgsql"
+    )
+
+    Repo.query!(
+      "CREATE TRIGGER ds_delete_refuse BEFORE DELETE ON datasets FOR EACH ROW EXECUTE FUNCTION ds_delete_refuse()"
+    )
+
+    assert_raise Postgrex.Error, fn -> Tenancy.delete_dataset(dataset) end
+
+    assert Repo.get(Dataset, dataset.id)
+    assert census(dataset, ws) == before
+    refute Repo.exists?(from e in Audit.Event, where: e.action == "dataset_deleted")
   end
 end

@@ -138,21 +138,21 @@ var destroyTargets = map[string]destroyTarget{
 		lookupByRef: true,
 		previewCols: []string{"grantee_email", "capabilities", "workspace_id", "project_id", "dataset", "type", "doc_id", "single_use", "expires_at", "claimed_at", "revoked_at"},
 	},
-	// Irreversible, and its own summary names the blast radius: a revoked
-	// ticket key is indistinguishable from a missing one, so every client
-	// holding it starts 401ing. Resolved through `ticket-key ls`.
 	// Irreversible: the dataset's documents, media, schemas and history go with
 	// it. The name is readable already; the preview's job is the id, so a typo
 	// that names a real neighbour (j10-1 vs j10-11) shows which row dies.
 	"dataset.delete": {
 		kind:        "dataset",
-		argName:     "name",
+		argName:     "dataset",
 		lookupNoun:  "workspace",
 		lookupVerb:  "dataset-ls",
 		lookupKey:   "datasets",
 		lookupMatch: []string{"slug"},
 		previewCols: []string{"slug", "name", "id"},
 	},
+	// Irreversible, and its own summary names the blast radius: a revoked
+	// ticket key is indistinguishable from a missing one, so every client
+	// holding it starts 401ing. Resolved through `ticket-key ls`.
 	"ticket-key.revoke": {
 		kind:        "ticket key",
 		argName:     "id",

@@ -35,8 +35,6 @@ All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/del
 
 Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Scope FKs `CASCADE`, so a raw `Repo.delete(workspace)` skips the blob/CDN purge + lifecycle hooks. In order: (1) `media_files` → `Media.delete_file/2` (blob, CDN, renditions, hooks); (2) `documents` → `Content.delete_document/4` (delete hooks); (3) `Repo.delete(workspace)`, CASCADE prunes the rest; (4) its chats (`chat_sessions.owner_workspace_id`, no FK) + messages; NULL-owned chats stay. No `delete_project/1` yet.
 
-**Dataset delete**: `delete_dataset/1` → `Tenancy.DatasetDelete` (what goes, what stays), behind owner/admin `DELETE /w/:ws/p/:proj/v1/datasets/:name`. Refuses `production`.
-
 ## Roles & enforcement
 
 Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner · admin · member · contributor`, `membership.ex` `@roles`; `contributor` writes drafts, never publishes: `Auth.publish_refused?/2`), distinct from the token's global `permissions[]`. The membership role — not global permissions — decides workspace-admin authority (`Tenancy.Auth.workspace_admin?/2`, true for `owner`/`admin`), so a globally-privileged token added elsewhere lands as `member`, **not** admin there. `create_membership/4` defaults to `member`; only `create_workspace_with_owner/2` (`owner`) and token-mint (`Auth.create_token`) grant higher.
@@ -47,7 +45,7 @@ Roles live on the **membership row** (`workspace_memberships.role` ∈ `owner ·
 
 Action → permission: `:read` ← `read|admin|public-read`; `:write` ← `write|admin`; `:admin` ← `admin`. A nil `permissions` column **denies** (guarded `is_list`), never raises. `Tenancy.Auth`'s read predicates (`membership/2` … `authorize/3`) are **total**: a malformed or absent id **denies**, never raises — ruling + widening: the `Tenancy.Auth` moduledoc.
 
-→ Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`, `:scoped_api`/`:scoped_admin`), 404/403 table: **`docs/auth.md`**. URL shapes (`/w/:ws/p/:proj`, flat alias, Studio canonical): **`docs/api-v1.md` §1a**.
+→ Plug chain (`OptionalToken → ResolveWorkspace → ResolveProject`), 404/403 table: **`docs/auth.md`**. URL shapes: **`docs/api-v1.md` §1a**.
 
 ## Data-layer scoping
 
@@ -63,7 +61,7 @@ In multi-tenant installs the content-edge projection uses strict `scope_to_works
 
 ### The dataset string↔id duality (in-progress migration)
 
-Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs are `CASCADE` (deleting a Dataset deletes its content rows).
+Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs `CASCADE`, but a NULL row escapes, so delete a Dataset only via `delete_dataset/2` (`Tenancy.DatasetDelete`; refuses `production`).
 
 `Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (in `api/lib/barkpark/content/write_scope.ex`; not delegated on the `Content` facade):
 
@@ -80,5 +78,12 @@ The OR clause keeps un-backfilled rows visible via the string path — so a `dat
 ## Tables & constraints
 
 `UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content/scope tables' nullable `workspace_id`/`project_id`/`dataset_id` FKs are also `CASCADE` (17 workspace_id tables); only `audit_events` + `audit_export_sinks` carry `workspace_id` with no FK. The literal column is `dataset` on content tables (`documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
+
+## Canonical homes (link, don't duplicate)
+
+| Fact | Canonical owner |
+|---|---|
+| Auth enforcement: token↔workspace binding, plug chain, 404/403 table, write gate | `docs/auth.md` |
+| HTTP API: scoped/flat URL shapes, hierarchy summary | `docs/api-v1.md` §1a |
 
 > Missing workspace/project delete **verb** (API/CLI exposure): tracked in `docs/decisions/deferred.md`.

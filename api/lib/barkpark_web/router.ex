@@ -4301,7 +4301,7 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
-    delete("/v1/datasets/:name", DatasetController, :delete)
+    delete("/v1/datasets/:dataset", DatasetController, :delete)
   end
 
   # task-6224d34a5a8a6017 — the switcher's three LISTs also take a login session

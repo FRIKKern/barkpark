@@ -69,9 +69,9 @@ const destroyManifestJSON = `{
      "writes":false,"batch":false,"paginated":false,"dry_run":false,
      "default_output":"table"},
     {"id":"dataset.delete","noun":"dataset","verb":"delete","summary":"Delete a dataset.",
-     "http":{"method":"DELETE","path_template":"/v1/datasets/:name"},
+     "http":{"method":"DELETE","path_template":"/v1/datasets/:dataset"},
      "auth_tier":"scoped_admin",
-     "args":[{"name":"name","required":true,"type":"string","summary":"Dataset slug."}],
+     "args":[{"name":"dataset","required":true,"type":"string","summary":"Dataset slug."}],
      "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
      "default_output":"json","scoped_prefix":"/w/:workspace_slug/p/:project_slug"},
     {"id":"ticket-key.ls","noun":"ticket-key","verb":"ls","summary":"List ticket keys.",
@@ -756,6 +756,18 @@ func TestDatasetDeleteIsGatedAndNamed(t *testing.T) {
 
 		if code != exitOK || !h.sent(deletePath) {
 			t.Errorf("exit=%d sent=%v, want the DELETE sent; requests %v", code, h.sent(deletePath), h.seen)
+		}
+	})
+
+	t.Run("the positional name wins over the active --dataset", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		forceNonTTY(t)
+		h.ctx.Dataset = "production"
+
+		code, _, _ := h.runDestroy(globals{yes: true}, "dataset", "delete", "j10-20261029")
+
+		if code != exitOK || !h.sent(deletePath) || h.sent("DELETE /w/acme/p/site/v1/datasets/production") {
+			t.Errorf("exit=%d — the DELETE must name j10-20261029, never the context dataset; requests %v", code, h.seen)
 		}
 	})
 
