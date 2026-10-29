@@ -5023,7 +5023,7 @@ export function reconcileServerEcho(serverBlocks, liveContent) {
 // runToOps's patch pass does, reusing the SAME stable-key change-detection so an
 // own echo is recognized despite live-editor vs projector key-order differences,
 // and an UNRELATED content change is NOT.
-function nodeContentEqual(serverNode, liveNode) {
+export function nodeContentEqual(serverNode, liveNode) {
   if (!serverNode || !liveNode) return false;
   // Kind/type must match first (a paragraph echo onto a heading is external).
   if (serverNode.type !== liveNode.type) return false;

@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.14.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.15.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.14.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.15.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet.
 
 ## The element
 
@@ -95,8 +95,9 @@ instance. Barkdown and Studio mount it.
 | `data-field-caps` attribute | the type's Expectation as JSON, `{fieldName: max | null}`: a bound field block (one carrying `fieldName`) shows its n/max badge (the blocks bound to that name / the max; `n` alone when null) and an unbind × that emits one `patch-block {fieldName: null}`, as LiveView Beta's Properties row. Absent: field blocks unchanged (1.13.0) |
 | `blocks` property | the run, an array of blocks (a non-array is read as `[]`). Before mount it is stashed; after mount it re-seeds the editor outside undo history, drops any in-flight batch and resets the diff baseline |
 | `acknowledgedSaves` property | `true` (strictly) opts into the acknowledged save protocol below. Default `false` |
+| `liveRemote` property | `true` (strictly) applies server blocks while the author edits, block by block (Live remote blocks, 1.15.0). Default `false`: deferred until the author releases the editor |
 
-All eight properties (`blocks`, `acknowledgedSaves` and the six callbacks) may be
+All nine properties (`blocks`, `acknowledgedSaves`, `liveRemote` and the six callbacks) may be
 set before the element upgrades; `connectedCallback` reclaims them through the setters.
 
 ### Host callbacks
@@ -164,6 +165,8 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-canvas-link-request` | with `format-bubble="off"`: Mod+K on a selection, or Edit on the link card. Cancelable; the host opens its own link input and sets the link with `toggleMark("link", { href })` | `{ href }`, the selection's current link or `null` |
 | `bp-canvas-comment-ranges` | an edit moved or dropped a comment range, at most once per animation frame | `commentRanges()` (see Comment ranges) |
 | `bp-canvas-comment-click` | a click inside a comment range | `{ id }`, the innermost range there |
+| `bp-canvas-wikilink-click` | a primary click on a document link, in edit and read mode (1.15.0). **Cancelable**: `preventDefault()` also prevents the click's default | `{ docId, target, alias, metaKey, ctrlKey, shiftKey, altKey }` (`docId`, `target`, `alias` each `string \| null`) |
+| `bp-canvas-remote-held` | with `liveRemote`: `applyServerBlocks` did not apply a block over the author's unsaved typing or removal (1.15.0). Once per block and remote version | `{ blockId, remote }`, the server's block, or `null` when the server removed it |
 
 `ops` is a non-empty array of: `patch-block { id, patch }`, `replace-block { id,
 block }`, `insert-after { afterId, block }`, `append-block { block }`,
@@ -176,6 +179,12 @@ or `null`.
 `bp-canvas-open-link`: if no listener calls `preventDefault()` and `kind` is
 `link`, the canvas opens `href` in a new window (`noopener,noreferrer`). A
 wikilink has no default.
+
+Escape: with no canvas menu open (slash, `[[`, `#`, `:`, the palette), a bare
+Escape keydown bubbles out of the canvas with `defaultPrevented` false, so the
+host can act on it (leave the editor, close a pane). With a menu open the canvas
+closes it and prevents the default (1.15.0; before it, ProseMirror prevented every
+Escape).
 
 `bp-canvas-mount-failed`: the editor is hidden, the run is painted read-only in a
 `.bp-canvas-mount-failed` fallback, the element gets `data-mount-failed="true"`,
@@ -206,16 +215,62 @@ on `applyServerBlocks` echoes to advance its baseline.
 
 | Method | Effect | Returns |
 |---|---|---|
-| `applyServerBlocks(blocks, echoMeta?)` | apply confirmed server blocks. Deferred while the author is focused or composing; recognised as the canvas's own echo when it matches the in-flight or acknowledged snapshot. `echoMeta`: `{ mode?: "own"\|"own-stale", requestId? }` | nothing |
+| `applyServerBlocks(blocks, echoMeta?)` | apply confirmed server blocks. Deferred while the author is focused or composing (with `liveRemote`, applied block by block instead: Live remote blocks); recognised as the canvas's own echo when it matches the in-flight or acknowledged snapshot. Reads unread DOM typing first. `echoMeta`: `{ mode?: "own"\|"own-stale", requestId? }` | nothing |
 | `applyServerBlocksIfIdle(blocks)` | apply now only if nothing is focused, composing, in source mode or pending. Throws `TypeError` on a non-array when it would apply | `true` when applied |
 | `resolveConflictWithServerBlocks(blocks)` | the user's "use latest": drop pending and in-flight state and take `blocks` | nothing |
-| `flushPendingChanges()` | commit node-view inputs and any debounced edit, or the text committed around an open IME composition (or leave source mode) now | `true` when it emitted a batch |
-| `hasPendingChanges()` | debounced, in-flight, queued, an open IME composition, unsaved source text or a pending note | boolean |
+| `flushPendingChanges()` | commit node-view inputs, unread DOM typing and any debounced edit, or the text committed around an open IME composition (or leave source mode) now | `true` when it emitted a batch |
+| `hasPendingChanges()` | reads unread DOM typing first; then debounced, in-flight, queued, an open IME composition, unsaved source text or a pending note | boolean |
 | `recoverySnapshot()` | the live document for a reconnect halt | `{ mode: "rich"\|"markdown", blocks?, raw_source?, raw_editor_document?, serialization_error? }` |
 | `focusBlock(id)` | place the caret in the top-level block `id`; an id not yet in the run is retried on the next external apply within 5s | `true` when placed |
 | `selectBlock(id)` | select the top-level image or object block `id` as a click on its card does (1.12.0); text typed onto a selected card on a `block-cards` canvas is dropped, Backspace/Delete still remove it | `true` when selected |
 | `focusFirstBodyBlock()` | caret into the first unlocked block (editable only) | `true` when placed |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
+
+Unread DOM typing: when a keystroke and a focus change fall in one task,
+ProseMirror's blur leaves the DOM change unread for 20 ms. `flushPendingChanges`,
+`hasPendingChanges` and `applyServerBlocks` read it first (1.15.0), so a flush
+saves it and a server apply cannot overwrite it. Hosts no longer reach into
+`view.domObserver`.
+
+### Save echoes
+
+With `acknowledgedSaves`, an acknowledged batch waits for its echo: the host's
+`applyServerBlocks` call with the saved blocks. Until it arrives, every other
+snapshot is queued behind it (without `liveRemote`, nothing new appears). A host
+that saves somewhere other than Barkpark (a local replica) still echoes: after it
+stores the batch, it hands the stored blocks back with
+`{ mode: "own", requestId }`, the id it bound with `identifyOpsRequest`. The
+stored blocks may hold more than the batch (another writer's merged blocks); the
+canvas takes them as the newest authority. A host that never echoes leaves the
+batch waiting, and the canvas applies no later snapshot (with `liveRemote`, only
+that batch's blocks wait).
+
+### Live remote blocks (1.15.0)
+
+With `liveRemote = true`, `applyServerBlocks` takes the server's blocks into the
+live document while the author edits, in one transaction outside undo history:
+
+```
+remote block the author does not hold     ─► applied now; selection and caret map
+the caret's block, nothing unsaved in it  ─► applied now; the caret stays in it
+a block with unsaved typing, remote differs ─► the author's text stays;
+       bp-canvas-remote-held { blockId, remote }; retried at release
+```
+
+The author holds a block when they changed it since the last saved baseline
+(typed, split, inserted or removed it), when its batch is acknowledged but not
+yet echoed, or when the caret is in it and the snapshot removes it. Text a
+remote writer puts at the caret lands after the caret. The next batch carries the
+author's held blocks against the baseline they typed from, and `conflictBlocks`
+names the snapshot, so a host merging three ways sees both versions.
+
+A held snapshot stays pending. The canvas retries it when the author releases the
+editor, a batch is acknowledged, or a debounce ends with nothing to send: blocks
+no longer held apply then. The next own echo or snapshot replaces it, as without
+`liveRemote`. The whole snapshot waits, as without `liveRemote`, while a batch is
+in flight, an IME composes, source mode is open, a field outside ProseMirror (a
+note, the link row, a node-view input) has focus, or the snapshot reorders blocks
+the author holds.
 
 ### Find and replace
 

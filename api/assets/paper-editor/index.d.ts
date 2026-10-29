@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.14.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.15.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -93,6 +93,21 @@ export interface BpCanvasOpenLinkDetail {
   docId: string | null;
   alias: string | null;
 }
+/** 1.15.0: a click on a document link. */
+export interface BpCanvasWikilinkClickDetail {
+  docId: string | null;
+  target: string | null;
+  alias: string | null;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+}
+/** 1.15.0, liveRemote: a server block held against the author's unsaved typing; null when the server removed it. */
+export interface BpCanvasRemoteHeldDetail {
+  blockId: string;
+  remote: PortableDocBlock | null;
+}
 export interface BpCanvasMountFailedDetail {
   stage: "create" | "seed";
   message: string;
@@ -143,6 +158,10 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-canvas-comment-ranges": CustomEvent<LiveCommentRange[]>;
   /** A click inside a comment range; id is the innermost one. */
   "bp-canvas-comment-click": CustomEvent<{ id: string }>;
+  /** 1.15.0: a click on a document link. Cancelable: preventDefault() also prevents the click's default. */
+  "bp-canvas-wikilink-click": CustomEvent<BpCanvasWikilinkClickDetail>;
+  /** 1.15.0, with liveRemote: a server block the canvas did not apply over unsaved typing. Once per block and version. */
+  "bp-canvas-remote-held": CustomEvent<BpCanvasRemoteHeldDetail>;
 }
 
 /** A mark a toolbar toggles (portable-doc names). */
@@ -248,6 +267,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   blocks: PortableDocBlock[];
   /** true: one batch in flight at a time, each `bp-canvas-ops` carries `seq`, and the host must acknowledge it. */
   acknowledgedSaves: boolean;
+  /** 1.15.0. true: applyServerBlocks applies server blocks while the author edits, keeping blocks with unsaved typing. */
+  liveRemote: boolean;
   wikilinkSource: ((query: string) => MaybePromise<WikilinkSuggestion[]>) | null | undefined;
   tagSource: ((query: string) => MaybePromise<string[]>) | null | undefined;
   linkPreviewSource:
