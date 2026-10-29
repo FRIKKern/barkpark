@@ -10237,6 +10237,64 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/datasets/{name}": {
+      "delete": {
+        "operationId": "dataset.delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
+        "tags": [
+          "dataset"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/v1/webhooks/{dataset}/{id}/deliveries/{event_id}/replay": {
       "post": {
         "operationId": "webhook.replay",
@@ -10760,6 +10818,80 @@
         "summary": "Withdraw a pending invitation before the invited user accepts it.",
         "tags": [
           "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/datasets/{name}": {
+      "delete": {
+        "operationId": "dataset.delete.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
+        "tags": [
+          "dataset"
         ],
         "x-barkpark-scope": "scoped_admin"
       }

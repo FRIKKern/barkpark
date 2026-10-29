@@ -4295,6 +4295,15 @@ defmodule BarkparkWeb.Router do
   # beside the scoped plugin scopes. Sweeps: move this comment only whole,
   # on its own lines. MARK:zone-scoped-mirrors
 
+  # Dataset delete (task-a944250b938671bd): an owner/admin seat removes one
+  # throwaway dataset and everything under it. `production` is refused in the
+  # context. `bp dataset delete <name>` lands here.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    delete("/v1/datasets/:name", DatasetController, :delete)
+  end
+
   # task-6224d34a5a8a6017 — the switcher's three LISTs also take a login session
   # as the bearer (`:require_token_or_login_session`, #22783's gate), so a
   # signed-in editor's studio can list where it may switch to, as the scoped

@@ -25,7 +25,8 @@ const destroyManifestJSON = `{
     {"name": "token", "summary": "Tokens."},
     {"name": "workspace", "summary": "Tenancy."},
     {"name": "access", "summary": "Airdrop grants."},
-    {"name": "ticket-key", "summary": "Ticket keys."}
+    {"name": "ticket-key", "summary": "Ticket keys."},
+    {"name": "dataset", "summary": "Datasets."}
   ],
   "commands": [
     {"id":"token.ls","noun":"token","verb":"ls","summary":"Token inventory.",
@@ -62,6 +63,17 @@ const destroyManifestJSON = `{
      "args":[{"name":"id","required":true,"type":"string","summary":"Grant id."}],
      "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
      "default_output":"minimal"},
+    {"id":"workspace.dataset-ls","noun":"workspace","verb":"dataset-ls","summary":"List datasets.",
+     "http":{"method":"GET","path_template":"/api/workspaces/:workspace_slug/projects/:project_slug/datasets"},
+     "auth_tier":"read","args":[],"flags":[],
+     "writes":false,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"table"},
+    {"id":"dataset.delete","noun":"dataset","verb":"delete","summary":"Delete a dataset.",
+     "http":{"method":"DELETE","path_template":"/v1/datasets/:name"},
+     "auth_tier":"scoped_admin",
+     "args":[{"name":"name","required":true,"type":"string","summary":"Dataset slug."}],
+     "flags":[],"writes":true,"batch":false,"paginated":false,"dry_run":false,
+     "default_output":"json","scoped_prefix":"/w/:workspace_slug/p/:project_slug"},
     {"id":"ticket-key.ls","noun":"ticket-key","verb":"ls","summary":"List ticket keys.",
      "http":{"method":"GET","path_template":"/v1/plugins/tickets/keys"},
      "auth_tier":"admin","args":[],"flags":[],
@@ -114,6 +126,9 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/access/"+testGrantID:
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(testGrantBody))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/workspaces/acme/projects/site/datasets":
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(testDatasetsBody))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/plugins/tickets/keys":
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(testTicketKeysBody))
@@ -708,4 +723,50 @@ func TestCredentialRevokesAreGatedAndNamed(t *testing.T) {
 			}
 		})
 	}
+}
+
+const testDatasetsBody = `{"datasets":[{"id":"7d1f0a52-3c1e-4d0b-9a55-2f4f1c2b9e10","slug":"j10-20261029","name":"j10-20261029"},{"id":"0c9b7d14-8e2a-4f61-b3c7-5a1d2e3f4b6c","slug":"production","name":"Production"}]}`
+
+func TestDatasetDeleteIsGatedAndNamed(t *testing.T) {
+	const deletePath = "DELETE /w/acme/p/site/v1/datasets/j10-20261029"
+	const readPath = "GET /api/workspaces/acme/projects/site/datasets"
+
+	t.Run("non-tty refuses and sends nothing", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		forceNonTTY(t)
+
+		code, _, stderr := h.runDestroy(globals{}, "dataset", "delete", "j10-20261029")
+
+		if code == exitOK || h.sent(deletePath) {
+			t.Errorf("exit=%d sent=%v — an unconfirmed dataset delete must send nothing", code, h.sent(deletePath))
+		}
+		if !strings.Contains(stderr, "--yes") {
+			t.Errorf("refusal never names --yes:\n%s", stderr)
+		}
+		if !h.sent(readPath) || !strings.Contains(stderr, "7d1f0a52-3c1e-4d0b-9a55-2f4f1c2b9e10") {
+			t.Errorf("preview did not name the dataset row; requests %v:\n%s", h.seen, stderr)
+		}
+	})
+
+	t.Run("--yes proceeds", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		forceNonTTY(t)
+
+		code, _, _ := h.runDestroy(globals{yes: true}, "dataset", "delete", "j10-20261029")
+
+		if code != exitOK || !h.sent(deletePath) {
+			t.Errorf("exit=%d sent=%v, want the DELETE sent; requests %v", code, h.sent(deletePath), h.seen)
+		}
+	})
+
+	t.Run("ambient scope refuses even with --yes", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		h.ctx.WorkspaceExplicit = false
+
+		code, _, _ := h.runDestroy(globals{yes: true}, "dataset", "delete", "j10-20261029")
+
+		if code == exitOK || h.sent(deletePath) {
+			t.Errorf("exit=%d sent=%v — a dataset delete must name its workspace", code, h.sent(deletePath))
+		}
+	})
 }
