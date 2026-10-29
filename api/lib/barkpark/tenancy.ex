@@ -1858,7 +1858,7 @@ defmodule Barkpark.Tenancy do
   @doc """
   Permanently delete a Dataset with its documents, media, schemas, history and
   prefs, and audit it. Refuses `production` (`{:error, :production_dataset}`).
-  `opts` names the audit actor (`:actor_type`, `:actor_id`). Authorisation lives
+  `opts[:actor]` is the `%ApiToken{}` named on the audit rows. Authorisation lives
   in the HTTP action. What goes and what stays: `Tenancy.DatasetDelete`.
   """
   defdelegate delete_dataset(dataset, opts \\ []), to: Barkpark.Tenancy.DatasetDelete, as: :delete

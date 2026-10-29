@@ -48,10 +48,11 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   never a throwaway. Deleting all of a workspace is `delete_workspace/1`.
 
   The delete appends a `content_mutation` / `dataset_deleted` row to the
-  workspace's audit chain. Everything runs in one transaction. Media blob
-  removal and webhook dispatch are deferred until it commits, the same way
-  `delete_workspace/1` does it; then the workspace's cached search surface
-  config for the slug is dropped.
+  workspace's audit chain, naming the revoked token ids; each revoke has its
+  own `token_revoked` row on the same chain with the same actor. `opts[:actor]`
+  is the `%ApiToken{}` that asked. Everything runs in one transaction. Media
+  blob removal, webhook dispatch and the revoked tokens' socket teardown wait
+  until it commits, the same way `delete_workspace/1` does it.
   """
   import Ecto.Query, warn: false
 
@@ -67,7 +68,6 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   alias Barkpark.Media.WhereUsed
   alias Barkpark.OwnedTables
   alias Barkpark.Repo
-  alias Barkpark.Search.SurfaceConfigs
   alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
 
   @protected_slug "production"
@@ -128,7 +128,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
              media_files: non_neg_integer(),
              swept: %{String.t() => pos_integer()},
              detached: %{String.t() => pos_integer()},
-             tokens_revoked: non_neg_integer()
+             tokens_revoked: non_neg_integer(),
+             revoked_tokens: [ApiToken.t()]
            }}
           | {:error,
              :production_dataset
@@ -143,7 +144,12 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   def delete(%Dataset{} = dataset, opts) do
     with %Project{} = project <- Repo.get(Project, dataset.project_id),
          %Workspace{} = workspace <- Repo.get(Workspace, project.workspace_id) do
-      run(%{dataset: dataset, project: project, workspace: workspace, actor: opts})
+      run(%{
+        dataset: dataset,
+        project: project,
+        workspace: workspace,
+        actor: Keyword.get(opts, :actor)
+      })
     else
       nil -> {:error, :not_found}
     end
@@ -163,9 +169,9 @@ defmodule Barkpark.Tenancy.DatasetDelete do
       end)
 
     case result do
-      {:ok, _} ->
+      {:ok, receipt} ->
         Media.flush_deferred_media_effects()
-        SurfaceConfigs.forget(target.workspace.id, target.dataset.slug)
+        Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
 
       _ ->
         Media.clear_deferred_media_effects()
@@ -190,7 +196,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
          {:ok, documents} <- delete_documents(target),
          swept =
            target |> sweep_strings(exclusive?) |> Map.merge(sweep_fk_strings(target, exclusive?)),
-         {:ok, tokens} <- revoke_bound_tokens(target),
+         {:ok, revoked} <- revoke_bound_tokens(target),
          {:ok, deleted} <- Repo.delete(dataset, stale_error_field: :id),
          receipt = %{
            dataset: deleted,
@@ -198,7 +204,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
            media_files: media,
            swept: drop_zero(Map.put(swept, "authoring_exemptions", exemptions)),
            detached: drop_zero(detached),
-           tokens_revoked: tokens
+           tokens_revoked: length(revoked),
+           revoked_tokens: revoked
          },
          {:ok, _event} <- audit(target, receipt) do
       {:ok, receipt}
@@ -244,7 +251,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     if referenced == [], do: :ok, else: {:error, {:media_referenced, referenced}}
   end
 
-  defp revoke_bound_tokens(%{dataset: ds, workspace: ws}) do
+  defp revoke_bound_tokens(%{dataset: ds, workspace: ws, actor: actor}) do
     seated =
       from m in Membership,
         where: m.workspace_id == ^ws.id and m.principal_type == "api_token",
@@ -257,9 +264,15 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     )
     |> Repo.all()
     |> Enum.reject(&slug_still_reachable?(&1, ds))
-    |> Enum.reduce_while({:ok, 0}, fn token, {:ok, n} ->
-      case Auth.revoke_token(token) do
-        {:ok, _} -> {:cont, {:ok, n + 1}}
+    |> Enum.reduce_while({:ok, []}, fn token, {:ok, revoked} ->
+      context = %{
+        workspace_id: ws.id,
+        metadata: %{"dataset_deleted" => ds.id, "dataset" => ds.slug},
+        after_commit: true
+      }
+
+      case Auth.revoke_token(token, actor, context) do
+        {:ok, token} -> {:cont, {:ok, [token | revoked]}}
         {:error, _} = err -> {:halt, err}
       end
     end)
@@ -319,8 +332,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
       category: "content_mutation",
       action: "dataset_deleted",
       subject: ds.id,
-      actor_type: Keyword.get(actor, :actor_type),
-      actor_id: Keyword.get(actor, :actor_id),
+      actor_type: if(actor, do: "api_token", else: "system"),
+      actor_id: actor && to_string(actor.id),
       workspace_id: ws.id,
       project_id: p.id,
       metadata: %{
@@ -331,7 +344,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
         "media_files" => receipt.media_files,
         "swept" => receipt.swept,
         "detached" => receipt.detached,
-        "tokens_revoked" => receipt.tokens_revoked
+        "tokens_revoked" => Enum.map(receipt.revoked_tokens, & &1.id)
       }
     })
   end

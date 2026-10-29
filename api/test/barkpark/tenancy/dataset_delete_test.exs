@@ -9,7 +9,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
   alias Barkpark.Content.{Document, MutationEvent, Revision, SchemaDefinition}
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Media.WhereUsed
-  alias Barkpark.Search.{SurfaceConfigs, Synonyms}
+  alias Barkpark.Search.Synonyms
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.{Dataset, DatasetDelete}
   alias Barkpark.Webhooks.Webhook
@@ -382,18 +382,15 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
       refute Repo.get(ApiToken, kept.id).revoked_at
     end
 
-    test "a cached surface config of the slug is dropped with it", %{ws: ws, project: project} do
-      {:ok, dataset} = Tenancy.get_or_create_dataset(project, "j10-c1")
+    test "a revoked token's sockets are told to disconnect after the commit",
+         %{ws: ws, project: project, user: user} do
+      dataset = seed(ws, project, "j10-t3", user)
+      token = bound_token!(ws, "j10-t3")
+      BarkparkWeb.Endpoint.subscribe(BarkparkWeb.UserSocket.disconnect_topic(token.id))
 
-      {:ok, _} =
-        SurfaceConfigs.upsert("documents", "j10-c1", %{"zeroHitStrategy" => "none"}, ws.id)
+      assert {:ok, %{tokens_revoked: 1}} = Tenancy.delete_dataset(dataset)
 
-      assert %{"zero_hit_strategy" => "none"} = SurfaceConfigs.get("documents", "j10-c1", ws.id)
-
-      assert {:ok, %{swept: %{"search_surface_config" => 1}}} = Tenancy.delete_dataset(dataset)
-
-      assert SurfaceConfigs.get("documents", "j10-c1", ws.id)["zero_hit_strategy"] ==
-               "drop_tokens"
+      assert_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
     end
   end
 
@@ -409,8 +406,8 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
        %{ws: ws, project: project, user: user} do
     dataset = seed(ws, project, "j10-9", user)
 
-    assert {:ok, _} =
-             Tenancy.delete_dataset(dataset, actor_type: "api_token", actor_id: "token-1")
+    actor = bound_token!(ws, "j10-9")
+    assert {:ok, _} = Tenancy.delete_dataset(dataset, actor: actor)
 
     assert [event] =
              Repo.all(
@@ -418,15 +415,30 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
                  where: e.workspace_id == ^ws.id and e.action == "dataset_deleted"
              )
 
-    assert %{category: "content_mutation", subject: subject, actor_id: "token-1"} = event
+    actor_id = to_string(actor.id)
+    assert %{category: "content_mutation", subject: subject, actor_id: ^actor_id} = event
     assert subject == dataset.id
-    assert %{"dataset" => "j10-9", "documents" => 2, "media_files" => 1} = event.metadata
+
+    assert %{"dataset" => "j10-9", "documents" => 2, "tokens_revoked" => [^actor_id]} =
+             event.metadata
+
+    assert [revoke] =
+             Repo.all(
+               from e in Audit.Event,
+                 where: e.action == "token_revoked" and e.subject == ^actor_id
+             )
+
+    assert %{workspace_id: workspace_id, actor_type: "api_token", actor_id: ^actor_id} = revoke
+    assert workspace_id == ws.id
+    assert revoke.metadata["dataset_deleted"] == dataset.id
     assert Audit.verify_chain(ws.id) == :ok
   end
 
   test "a failure at the last step rolls the whole delete back",
        %{ws: ws, project: project, user: user} do
     dataset = seed(ws, project, "j10-10", user)
+    token = bound_token!(ws, "j10-10")
+    BarkparkWeb.Endpoint.subscribe(BarkparkWeb.UserSocket.disconnect_topic(token.id))
     before = census(dataset, ws)
 
     Repo.query!(
@@ -442,5 +454,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     assert Repo.get(Dataset, dataset.id)
     assert census(dataset, ws) == before
     refute Repo.exists?(from e in Audit.Event, where: e.action == "dataset_deleted")
+    refute Repo.get(ApiToken, token.id).revoked_at
+    refute_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
   end
 end

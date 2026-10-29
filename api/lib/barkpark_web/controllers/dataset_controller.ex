@@ -20,6 +20,8 @@ defmodule BarkparkWeb.DatasetController do
   `{deleted, dataset: {id, slug, name}, documents, media_files, swept: {table: N}, detached: {table: N}, tokens_revoked}`.
   `detached` counts other workspaces' rows that pointed at the dataset and keep
   living with `dataset_id` NULL. The delete is on the workspace's audit chain.
+  After a 200 the workspace's cached search surface config for the slug is
+  dropped (`SurfaceConfigs.forget/2`), so a recreated name starts untuned.
   """
   use BarkparkWeb, :controller
 
@@ -36,8 +38,9 @@ defmodule BarkparkWeb.DatasetController do
     with true <- Tenancy.Dataset.valid_slug?(name),
          %Tenancy.Project{} = project <- conn.assigns[:current_project],
          %Tenancy.Dataset{} = dataset <- Tenancy.get_dataset(project, name),
-         {:ok, receipt} <- Tenancy.delete_dataset(dataset, actor(conn)) do
+         {:ok, receipt} <- Tenancy.delete_dataset(dataset, actor: conn.assigns[:api_token]) do
       if Map.has_key?(receipt.swept, "shares"), do: Barkpark.Sharing.refresh()
+      Barkpark.Search.SurfaceConfigs.forget(project.workspace_id, name)
 
       json(conn, %{
         deleted: true,
@@ -97,13 +100,6 @@ defmodule BarkparkWeb.DatasetController do
 
       {:error, _} = err ->
         err
-    end
-  end
-
-  defp actor(conn) do
-    case conn.assigns[:api_token] do
-      %{id: id} -> [actor_type: "api_token", actor_id: to_string(id)]
-      _ -> []
     end
   end
 end

@@ -163,6 +163,19 @@ defmodule BarkparkWeb.DatasetControllerTest do
     assert dataset?(project, "j10-7")
   end
 
+  test "a cached surface config of the slug is dropped with the dataset",
+       %{ws: ws, project: project, tokens: tokens} do
+    alias Barkpark.Search.SurfaceConfigs
+
+    {:ok, _} = SurfaceConfigs.upsert("documents", "j10-7", %{"zeroHitStrategy" => "none"}, ws.id)
+    assert %{"zero_hit_strategy" => "none"} = SurfaceConfigs.get("documents", "j10-7", ws.id)
+
+    assert %{"swept" => %{"search_surface_config" => 1}} =
+             json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+
+    assert SurfaceConfigs.get("documents", "j10-7", ws.id)["zero_hit_strategy"] == "drop_tokens"
+  end
+
   test "the delete lands on the workspace audit chain with the token as actor",
        %{ws: ws, project: project, tokens: tokens} do
     %{id: id} = Tenancy.get_dataset(project, "j10-7")
