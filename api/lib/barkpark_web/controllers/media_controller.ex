@@ -370,25 +370,22 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
-  def serve_sanity_image(conn, _params), do: not_found(conn, "not a Sanity image asset URL")
+  def serve_sanity_image(conn, _params), do: sanity_not_found(conn, :image)
 
   @doc """
   Serve a Sanity file URL from the Barkpark media file it maps to. Sanity's
   `dl` makes it a download; other query parameters are ignored.
   """
   def serve_sanity_file(conn, %{"dataset" => dataset, "rest" => [name | _vanity]}) do
-    case SanityAsset.parse_file(name) do
-      {:ok, ref} ->
-        serve_file(put_sanity_name(conn, :file), fn opts ->
-          SanityAsset.find(ref, dataset, opts)
-        end)
+    conn = put_sanity_name(conn, :file)
 
-      :error ->
-        not_found(conn, "not a Sanity file asset URL")
+    case SanityAsset.parse_file(name) do
+      {:ok, ref} -> serve_file(conn, fn opts -> SanityAsset.find(ref, dataset, opts) end)
+      :error -> not_found(conn, "not a Sanity file asset URL")
     end
   end
 
-  def serve_sanity_file(conn, _params), do: not_found(conn, "not a Sanity file asset URL")
+  def serve_sanity_file(conn, _params), do: sanity_not_found(conn, :file)
 
   # Sanity's `dl` and file names (task-2900dfa8af0906df). As on Sanity's CDN,
   # `?dl` and `?dl=` download under the original file name, `?dl=<name>`
@@ -397,12 +394,20 @@ defmodule BarkparkWeb.MediaController do
   # set this, so every other media URL keeps its disposition. A download is
   # never weaker than the default: dangerous types are already `attachment`,
   # and their type is still collapsed.
-  defp put_sanity_name(%Plug.Conn{query_params: %{"dl" => dl}} = conn, _route)
-       when is_binary(dl),
-       do: put_private(conn, :sanity_name, {:download, dl})
+  defp put_sanity_name(conn, route) do
+    conn = put_private(conn, :sanity_route, route)
 
-  defp put_sanity_name(conn, :file), do: put_private(conn, :sanity_name, :inline)
-  defp put_sanity_name(conn, :image), do: conn
+    case {conn.query_params, route} do
+      {%{"dl" => dl}, _route} when is_binary(dl) ->
+        put_private(conn, :sanity_name, {:download, dl})
+
+      {_params, :file} ->
+        put_private(conn, :sanity_name, :inline)
+
+      {_params, :image} ->
+        conn
+    end
+  end
 
   defp sanity_disposition(%Plug.Conn{private: %{sanity_name: name}}, file, default) do
     case name do
@@ -932,6 +937,9 @@ defmodule BarkparkWeb.MediaController do
     |> redirect(external: url)
   end
 
+  defp not_found(%Plug.Conn{private: %{sanity_route: route}} = conn, _message),
+    do: sanity_not_found(conn, route)
+
   defp not_found(conn, message) do
     env =
       {:error, :not_found}
@@ -941,6 +949,21 @@ defmodule BarkparkWeb.MediaController do
     conn
     |> put_status(:not_found)
     |> json(%{error: Map.delete(env, :status)})
+  end
+
+  # Sanity's CDN 404 on its image and file URLs, byte for byte, measured on
+  # cdn.sanity.io (task-d495181d04dca3d9): a site that reads the body or the type sees what
+  # Sanity sends. Only those two routes; the cache policy is unchanged.
+  defp sanity_not_found(conn, :image) do
+    conn
+    |> put_resp_content_type("application/json", "utf-8")
+    |> send_resp(404, ~s({"statusCode":404,"error":"Not Found","message":"Image not found"}))
+  end
+
+  defp sanity_not_found(conn, :file) do
+    conn
+    |> put_resp_content_type("application/json", nil)
+    |> send_resp(404, ~s({"statusCode":404,"message":"File not found","error":"Not Found"}))
   end
 
   defp forbidden(conn) do
