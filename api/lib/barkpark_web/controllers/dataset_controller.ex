@@ -22,6 +22,10 @@ defmodule BarkparkWeb.DatasetController do
 
   action_fallback BarkparkWeb.FallbackController
 
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # Re-derive its @exclusion_anchors values from
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # in the same commit: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"name" => name}) do
     with %Tenancy.Project{} = project <- conn.assigns[:current_project],
          %Tenancy.Dataset{} = dataset <- Tenancy.get_dataset(project, name),

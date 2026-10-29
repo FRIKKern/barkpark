@@ -143,10 +143,10 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
 
   describe "SOURCE PIN: every production call site names its policy" do
     # `git grep`-free so it runs from any checkout: walk api/lib for the call.
-    test "all four lib call sites pass :where_used, and the split is 2 doors / 2 cascade" do
+    test "all five lib call sites pass :where_used, and the split is 2 doors / 3 cascade" do
       sites = call_sites()
 
-      assert length(sites) == 4,
+      assert length(sites) == 5,
              "the media-delete call-site roster moved (found #{length(sites)}): " <>
                "#{inspect(Enum.map(sites, &elem(&1, 0)))}. Re-derive the policy for the " <>
                "new site and update this pin — a call site nobody re-read is exactly " <>
@@ -171,7 +171,8 @@ defmodule Barkpark.Media.DeleteFileWhereUsedPolicyTest do
 
       assert Enum.sort(by_policy[:cascade]) == [
                "api/lib/barkpark/plugins/tickets/attachments.ex",
-               "api/lib/barkpark/tenancy.ex"
+               "api/lib/barkpark/tenancy.ex",
+               "api/lib/barkpark/tenancy/dataset_delete.ex"
              ]
     end
   end

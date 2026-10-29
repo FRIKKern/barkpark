@@ -124,6 +124,8 @@ defmodule Barkpark.Content.LifecycleDoorCensusTest do
       {:system, "Sync worker replays another server's listen stream"},
     "barkpark/tenancy.ex delete_workspace_documents/1 → delete_document" =>
       {:system, "workspace deletion, behind its own admin check"},
+    "barkpark/tenancy/dataset_delete.ex delete_documents/1 → delete_document" =>
+      {:system, "dataset deletion, behind the :scoped_admin owner/admin seat gate"},
     "barkpark/plugins/onixedit/mix_tasks/onix.import.ex handle_withdrawal/3 → delete_document" =>
       {:system, "mix task"},
     "mix/tasks/barkpark.bench.write_path.ex run/1 → run_mode" => {:system, "mix task"},
