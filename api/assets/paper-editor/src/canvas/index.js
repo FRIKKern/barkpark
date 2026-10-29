@@ -77,6 +77,7 @@ import {
   runToTiptap,
   runToOps,
   reconcileServerEcho,
+  nodeContentEqual,
   docToBlocks,
   hasOverlappingOps,
   opsRebaseSafe,
@@ -448,6 +449,46 @@ function mapExternalNode(tr, node, next, position) {
   }
 }
 
+// Replace one top-level node in place, keeping what the caret and local undo
+// steps map through: attribute-only refreshes first, then a mapped text or
+// container diff, and a plain replace only when neither fits.
+function replaceTopNode(tr, node, replacement, position) {
+  if (node.eq(replacement)) return;
+  // Saved carrier metadata can change without changing the text. Refresh
+  // attributes in place: replacing that text maps local undo steps away.
+  const refreshes = attributeRefreshes(node, replacement, position);
+  if (refreshes !== null) {
+    for (const refresh of refreshes) {
+      const target = refresh.replacement;
+      const current = tr.doc.nodeAt(refresh.position);
+      if (target.type.name === "note" &&
+          current.attrs.label === target.attrs.label && current.attrs.lead === target.attrs.lead) {
+        // Preserve local field history only for same-visible metadata.
+        // Remote field edits must map conflicting label/lead steps away.
+        for (const [key, value] of Object.entries(target.attrs)) {
+          if (current.attrs[key] !== value) tr.setNodeAttribute(refresh.position, key, value);
+        }
+      } else {
+        tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
+      }
+    }
+  } else if (canMapExternalNode(node, replacement)) {
+    mapExternalNode(tr, node, replacement, position);
+  } else {
+    tr.replaceWith(position, position + node.nodeSize, replacement);
+  }
+}
+
+// The top-level block ids a save batch touches.
+function opBlockIds(ops) {
+  const ids = new Set();
+  for (const op of ops || []) {
+    if (op && op.id != null) ids.add(op.id);
+    if (op && op.block && op.block.id != null) ids.add(op.block.id);
+  }
+  return [...ids];
+}
+
 // One-shot, id-guarded self-inject of the standalone stylesheet — IDENTICAL
 // contract to ../index.js:ensureStyles (same <link>, same id-guard, same
 // BP_PAPER_EDITOR_NO_INJECT opt-out). Both elements share the one stylesheet, so
@@ -739,6 +780,10 @@ class BpPaperCanvas extends HTMLElement {
     // confirmed external edit never yanks the caret mid-edit. null when none
     // pending; otherwise the confirmed blocks array to setContent on release.
     this._pendingServerBlocks = null;
+    // liveRemote (1.15.0): opt in to taking server blocks while the author edits,
+    // block by block. Held blocks already reported: id -> the remote block's JSON.
+    this._liveRemote = false;
+    this._heldRemote = new Map();
     // Bound listeners for the deferred-apply release (added only while a
     // server echo is queued; removed once applied). Kept as fields so the
     // exact same function identity is removed.
@@ -859,6 +904,7 @@ class BpPaperCanvas extends HTMLElement {
     // the real setter. Mirrors ../index.js.
     this._upgradeProperty("blocks");
     this._upgradeProperty("acknowledgedSaves");
+    this._upgradeProperty("liveRemote");
     this._upgradeProperty("wikilinkSource");
     this._upgradeProperty("tagSource");
     this._upgradeProperty("mediaUploader");
@@ -887,6 +933,8 @@ class BpPaperCanvas extends HTMLElement {
     this._onCompEnd = () => this._afterComposition();
     this._mount.addEventListener("compositionstart", this._onCompStart, true);
     this._mount.addEventListener("compositionend", this._onCompEnd, true);
+    this._onWikilinkClick = (event) => this._wikilinkClicked(event);
+    this._mount.addEventListener("click", this._onWikilinkClick);
     // Leaving the page sends what is committed now, not after the debounce or the composition.
     this._onPageHide = () => this.flushPendingChanges();
     this._pageWindow = this.ownerDocument.defaultView;
@@ -1299,6 +1347,9 @@ class BpPaperCanvas extends HTMLElement {
         // menu is open). When ALL popups are closed every keystroke falls through to
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
+        // ProseMirror prevents the default of every Escape. Hand a bare Escape
+        // to the host instead, unless one of the canvas's menus is open to use it.
+        handleDOMEvents: { keydown: (view, event) => this._escapeForHost(view, event) },
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
         // The canvas's own copy carries the exact fragment, so its paste rebuilds
         // the very nodes copied instead of re-parsing their HTML. See
@@ -1741,6 +1792,7 @@ class BpPaperCanvas extends HTMLElement {
     this.querySelectorAll("[data-bp-type]").forEach((node) => {
       node.dispatchEvent(new CustomEvent("bp-flush-node"));
     });
+    this._readDomTyping();
 
     // Mid-composition, the text committed around the composing run (see _committedDoc).
     const composing = this._compStart != null && !!this._editor.view?.composing;
@@ -1830,6 +1882,52 @@ class BpPaperCanvas extends HTMLElement {
   //
   // Each runs the transaction the canvas's own surfaces run, on the current
   // selection, and answers whether it applied. Unmounted or read-only: false.
+
+  // Typing and a focus change in one task leave the DOM change unread: ProseMirror's
+  // blur queues it and reads it 20 ms later, and a flush or a server apply in that
+  // gap would miss it (task-8c2aa053f0259a05). Read it now. Never mid-composition.
+  _readDomTyping() {
+    const view = this._editor && !this._editor.isDestroyed ? this._editor.view : null;
+    const observer = view && view.domObserver;
+    if (!observer || view.composing) return;
+    try {
+      observer.forceFlush();
+      observer.flush();
+    } catch (_e) {
+      // A view mid-teardown has nothing left to read.
+    }
+  }
+
+  // ProseMirror's keydown prevents the default of every Escape, so a host's own
+  // Escape (leave the editor, close a pane) never saw a free key
+  // (task-4517b978de20b741). True skips ProseMirror's keydown for a bare Escape;
+  // with a canvas menu open, the key goes to _onKeyDown as before.
+  _escapeForHost(view, event) {
+    if (event.key !== "Escape" && event.key !== "Esc") return false;
+    if (event.defaultPrevented || event.isComposing || view.composing) return false;
+    const menuOpen = [this._palette, this._wikilink, this._emoji, this._tag, this._slash]
+      .some((menu) => menu && menu.isOpen());
+    return !menuOpen;
+  }
+
+  // A click on a document link: bp-canvas-wikilink-click (1.15.0), cancelable, so
+  // a host follows it without reading the canvas's DOM (task-bd03e32b9851d047).
+  _wikilinkClicked(event) {
+    if (event.button !== 0) return;
+    const info = LinkPreview.describe(event.target);
+    if (!info || info.kind !== "wikilink" || !this.contains(info.el)) return;
+    const detail = {
+      docId: info.docId,
+      target: info.target || null,
+      alias: info.alias,
+      metaKey: event.metaKey,
+      ctrlKey: event.ctrlKey,
+      shiftKey: event.shiftKey,
+      altKey: event.altKey,
+    };
+    const open = this.dispatchEvent(new CustomEvent("bp-canvas-wikilink-click", { detail, bubbles: true, composed: true, cancelable: true }));
+    if (!open) event.preventDefault();
+  }
 
   // ProseMirror takes a keyboard (or script) selection change on the browser's
   // selectionchange, a task later: a toolbar press in between would act on the old
@@ -1987,6 +2085,7 @@ class BpPaperCanvas extends HTMLElement {
   replaceAll(text) { return this._editor && this._editable ? frReplaceAll(this._editor, text) : { replaced: 0, ...this.findState() }; }
 
   hasPendingChanges() {
+    this._readDomTyping();
     const sourceChanged =
       this._mode === "source" && this._sourceEl &&
       this._sourceEl.value !== this._sourceOriginalMd;
@@ -2407,6 +2506,7 @@ class BpPaperCanvas extends HTMLElement {
       this._awaitingOwnEchoes.push({
         blocks: deepCloneBlocks(current.afterBlocks),
         requestId: current.requestId,
+        ids: opBlockIds(current.ops),
       });
     }
     this._inflightOps = null;
@@ -4515,6 +4615,7 @@ class BpPaperCanvas extends HTMLElement {
 
   applyServerBlocks(blocks, echoMeta = null) {
     if (!this._editor) return;
+    this._readDomTyping();
     const next = Array.isArray(blocks) ? blocks : [];
     const echoMode = echoMeta && typeof echoMeta === "object" ? echoMeta.mode : null;
     const echoRequestId = echoMeta && typeof echoMeta === "object"
@@ -4564,7 +4665,9 @@ class BpPaperCanvas extends HTMLElement {
       : -1;
     if (correlatedAwaitingIndex !== -1) {
       this._awaitingOwnEchoes.splice(0, correlatedAwaitingIndex + 1);
-      if (this._isEditingNow()) {
+      if (this._liveRemote) {
+        this._takeServerBlocks(next);
+      } else if (this._isEditingNow()) {
         this._queueServerBlocks(next);
       } else {
         this._blocks = deepCloneBlocks(next);
@@ -4592,7 +4695,8 @@ class BpPaperCanvas extends HTMLElement {
     // or more emitted snapshots are still awaiting confirmation. Defer it; a
     // later own echo carries the server's newest folded state and supersedes it.
     if (this._inflightOps || this._dirtyWhileInflight || this._awaitingOwnEchoes.length > 0) {
-      this._queueServerBlocks(next);
+      if (this._liveRemote) this._takeServerBlocks(next);
+      else this._queueServerBlocks(next);
       return;
     }
 
@@ -4611,8 +4715,11 @@ class BpPaperCanvas extends HTMLElement {
 
     // EXTERNAL EDIT: the confirmed content differs from the live doc. If the
     // user is mid-edit (focused or IME-composing), defer the visible re-render
-    // until they release; otherwise apply it now.
-    if (this._isEditingNow()) {
+    // until they release; otherwise apply it now. A liveRemote canvas takes it
+    // block by block instead (_takeServerBlocks).
+    if (this._liveRemote) {
+      this._takeServerBlocks(next);
+    } else if (this._isEditingNow()) {
       this._queueServerBlocks(next);
     } else {
       this._blocks = next;
@@ -4792,31 +4899,7 @@ class BpPaperCanvas extends HTMLElement {
           tr.delete(position, position + removed.nodeSize);
         }
         const node = state.doc.child(previousIndex++);
-        if (!node.eq(replacement)) {
-          // Saved carrier metadata can change without changing the text. Refresh
-          // attributes in place: replacing that text maps local undo steps away.
-          const refreshes = attributeRefreshes(node, replacement, position);
-          if (refreshes !== null) {
-            for (const refresh of refreshes) {
-              const target = refresh.replacement;
-              const current = tr.doc.nodeAt(refresh.position);
-              if (target.type.name === "note" &&
-                  current.attrs.label === target.attrs.label && current.attrs.lead === target.attrs.lead) {
-                // Preserve local field history only for same-visible metadata.
-                // Remote field edits must map conflicting label/lead steps away.
-                for (const [key, value] of Object.entries(target.attrs)) {
-                  if (current.attrs[key] !== value) tr.setNodeAttribute(refresh.position, key, value);
-                }
-              } else {
-                tr.setNodeMarkup(refresh.position, target.type, target.attrs, target.marks);
-              }
-            }
-          } else if (canMapExternalNode(node, replacement)) {
-            mapExternalNode(tr, node, replacement, position);
-          } else {
-            tr.replaceWith(position, position + node.nodeSize, replacement);
-          }
-        }
+        replaceTopNode(tr, node, replacement, position);
         position += replacement.nodeSize;
       });
       while (previousIndex < state.doc.childCount) {
@@ -5030,6 +5113,226 @@ class BpPaperCanvas extends HTMLElement {
     this.focusBlock(pending.id);
   }
 
+  // ── liveRemote (1.15.0): server blocks while the author edits ─────────────
+  //
+  //   remote block is not one the author holds  ─► applied now, selection mapped
+  //   caret block, nothing unsaved in it          ─► applied now, caret mapped
+  //   a block with unsaved typing, remote differs ─► live text kept, the remote
+  //       block held and reported (bp-canvas-remote-held); retried at release
+  //
+  // "Holds" means: changed since the baseline, saved but not yet echoed (its
+  // batch is on _awaitingOwnEchoes), or the caret's block when the snapshot
+  // removes it. Held snapshots stay pending; the next own echo or snapshot
+  // supersedes them, as before.
+  _takeServerBlocks(remote) {
+    this._queueServerBlocks(remote);
+    this._flushPendingServerBlocks();
+  }
+
+  // Merge the pending snapshot now. False when it cannot merge here; the
+  // release path then waits, as without liveRemote.
+  _mergePendingServerBlocks() {
+    if (!this._canMergeRemote()) return false;
+    const held = this._mergeRemote(this._pendingServerBlocks);
+    if (held === null) return false;
+    if (held.length) this._reportHeld(held);
+    else this._clearPendingServerBlocks();
+    return true;
+  }
+
+  // Moments the live document cannot take a snapshot block by block: a batch in
+  // flight (its ack installs the emit's snapshot), an IME composition, source
+  // mode, or an input outside ProseMirror (a note, the link row, a node-view
+  // field) that buffers its own text.
+  _canMergeRemote() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || this._mode === "source") return false;
+    if (editor.view.composing || this._compStart != null || this._compEndTimer) return false;
+    if (this._inflightOps || this._dirtyWhileInflight) return false;
+    if (this._bubble?.hasFocus()) return false;
+    if (this.querySelector('.bp-canvas-note [role="textbox"]:focus, .bp-canvas-note[data-note-pending]')) return false;
+    const active = this.ownerDocument.activeElement;
+    return !(active && active !== editor.view.dom && this.contains(active));
+  }
+
+  // Merge `remote` into the live document. Returns the held blocks
+  // ([{ id, remote, unsaved }]) or null when it cannot merge here: a block
+  // without an id or a repeated id, or a reorder across a block the author holds.
+  _mergeRemote(remote) {
+    const editor = this._editor;
+    const { state, view } = editor;
+    const base = this._debounceBaselineBlocks || this._blocks;
+    const remoteIds = remote.map((block) => block && block.id);
+    if (remoteIds.some((id) => id == null) || new Set(remoteIds).size !== remoteIds.length) return null;
+    const live = normalizeCanvasDoc(editor.getJSON()).content || [];
+    const baseNodes = this._rt(base).content || [];
+    const remoteNodes = this._rt(remote).content || [];
+    if (live.length !== state.doc.childCount || baseNodes.length !== base.length ||
+        remoteNodes.length !== remote.length) return null;
+    const same = (a, b) => withObjectOverrides(this._objectOverrides(), () => nodeContentEqual(a, b));
+    const baseAt = new Map(base.map((block, i) => [block.id, i]));
+    const remoteAt = new Map(remoteIds.map((id, i) => [id, i]));
+    const awaiting = new Set(this._awaitingOwnEchoes.flatMap((entry) => entry.ids || []));
+    const caret = this._caretBlockIndexes();
+    const liveIds = live.map((node) => (node.attrs && node.attrs.bpId) ?? null);
+    const held = [];
+    let holds = false;
+
+    const plan = live.map((json, i) => {
+      const id = liveIds[i];
+      const r = id == null || !remoteAt.has(id) ? -1 : remoteAt.get(id);
+      const b = id == null || !baseAt.has(id) ? -1 : baseAt.get(id);
+      const unsaved = b === -1 || !same(baseNodes[b], json);
+      if (unsaved || awaiting.has(id)) {
+        holds = true;
+        const remoteChanged = r === -1
+          ? b !== -1
+          : !same(remoteNodes[r], json) && (b === -1 || !same(remoteNodes[r], baseNodes[b]));
+        if (remoteChanged) held.push({ id, remote: r === -1 ? null : remote[r], unsaved });
+        const baseline = unsaved ? (b !== -1 && r !== -1 ? base[b] : null) : base[b];
+        return { kind: "keep", i, r, baseline };
+      }
+      if (r === -1) {
+        if (!caret.has(i)) return { kind: "drop", i, r };
+        holds = true;
+        held.push({ id, remote: null, unsaved: false });
+        return { kind: "keep", i, r, baseline: base[b] };
+      }
+      return { kind: same(remoteNodes[r], json) ? "keep" : "take", i, r, baseline: remote[r] };
+    });
+
+    const liveIdSet = new Set(liveIds.filter((id) => id != null));
+    const extras = [];
+    remote.forEach((block, r) => {
+      if (liveIdSet.has(block.id) || awaiting.has(block.id)) return;
+      const b = baseAt.has(block.id) ? baseAt.get(block.id) : -1;
+      if (b === -1) {
+        extras.push({ kind: "insert", r, block });
+        return;
+      }
+      // The author removed it and has not saved that yet: stay removed, and keep
+      // it in the baseline so the next batch removes it.
+      holds = true;
+      if (!same(remoteNodes[r], baseNodes[b])) held.push({ id: block.id, remote: block, unsaved: true });
+      extras.push({ kind: "removed", r, block });
+    });
+
+    const survivors = plan.filter((entry) => entry.kind !== "drop");
+    let last = -1;
+    for (const entry of survivors) {
+      if (entry.r === -1) continue;
+      if (entry.r < last) {
+        // A reorder. With nothing to keep, the snapshot is the document.
+        if (holds) return null;
+        this._applyWholeSnapshot(remote);
+        return [];
+      }
+      last = entry.r;
+    }
+
+    const target = [];
+    const baseline = [];
+    let next = 0;
+    const takeExtras = (upTo) => {
+      while (next < extras.length && extras[next].r < upTo) {
+        const extra = extras[next++];
+        if (extra.kind === "insert") target.push(extra);
+        baseline.push(extra.block);
+      }
+    };
+    for (const entry of survivors) {
+      if (entry.r !== -1) takeExtras(entry.r);
+      target.push(entry);
+      if (entry.baseline) baseline.push(entry.baseline);
+    }
+    takeExtras(Infinity);
+
+    const tr = state.tr.setMeta("addToHistory", false).setMeta("preventUpdate", true);
+    let position = 0;
+    let liveIndex = 0;
+    for (const entry of target) {
+      if (entry.kind === "insert") {
+        const node = state.schema.nodeFromJSON(remoteNodes[entry.r]);
+        tr.insert(position, node);
+        position += node.nodeSize;
+        continue;
+      }
+      while (liveIndex < entry.i) {
+        tr.delete(position, position + state.doc.child(liveIndex++).nodeSize);
+      }
+      const node = state.doc.child(liveIndex++);
+      if (entry.kind === "take") {
+        const replacement = state.schema.nodeFromJSON(remoteNodes[entry.r]);
+        replaceTopNode(tr, node, replacement, position);
+        position += replacement.nodeSize;
+      } else {
+        position += node.nodeSize;
+      }
+    }
+    while (liveIndex < state.doc.childCount) {
+      tr.delete(position, position + state.doc.child(liveIndex++).nodeSize);
+    }
+
+    // Text a remote writer put at the caret lands after it: the author's next
+    // key goes where it was going.
+    const { selection } = state;
+    if (tr.docChanged && selection instanceof TextSelection) {
+      tr.setSelection(TextSelection.create(tr.doc, tr.mapping.map(selection.anchor, -1), tr.mapping.map(selection.head, -1)));
+    }
+    this._blocks = deepCloneBlocks(baseline);
+    if (this._debounceBaselineBlocks) this._debounceBaselineBlocks = this._blocks;
+    this._programmaticApply = true;
+    try {
+      if (tr.docChanged) view.dispatch(tr);
+    } finally {
+      this._programmaticApply = false;
+    }
+    this._restSelectionOffAtom();
+    this._consumePendingFocus();
+    return held;
+  }
+
+  _applyWholeSnapshot(remote) {
+    this._blocks = deepCloneBlocks(remote);
+    if (this._debounceBaselineBlocks) this._debounceBaselineBlocks = this._blocks;
+    this._programmaticApply = true;
+    try {
+      this._applyExternalContent(remote);
+    } finally {
+      this._programmaticApply = false;
+    }
+  }
+
+  // Top-level indexes the selection touches, while the author is in the editor.
+  _caretBlockIndexes() {
+    const editor = this._editor;
+    const indexes = new Set();
+    if (!editor || !editor.isFocused) return indexes;
+    const { $from, $to } = editor.state.selection;
+    const from = $from.index(0);
+    const to = Math.max(from, $to.depth === 0 ? $to.index(0) - 1 : $to.index(0));
+    for (let i = from; i <= to; i++) indexes.add(i);
+    return indexes;
+  }
+
+  // bp-canvas-remote-held, once per block and remote version, for blocks held
+  // against the author's unsaved typing (or removal).
+  _reportHeld(held) {
+    const reported = new Map();
+    for (const entry of held) {
+      if (!entry.unsaved) continue;
+      const key = JSON.stringify(entry.remote);
+      reported.set(entry.id, key);
+      if (this._heldRemote.get(entry.id) === key) continue;
+      this.dispatchEvent(new CustomEvent("bp-canvas-remote-held", {
+        detail: { blockId: entry.id, remote: entry.remote == null ? null : deepCloneBlocks([entry.remote])[0] },
+        bubbles: true,
+        composed: true,
+      }));
+    }
+    this._heldRemote = reported;
+  }
+
   // Queue an external-edit re-render to fire once the user stops editing and any
   // local debounce settles. We listen for compositionend (IME release) and the
   // editor's blur; the debounce callback also flushes after a zero-op local diff.
@@ -5063,6 +5366,7 @@ class BpPaperCanvas extends HTMLElement {
   // waits for exit, a live debounce waits for its callback, and an empty queue no-ops.
   _flushPendingServerBlocks() {
     if (!this._pendingServerBlocks) return;
+    if (this._liveRemote && this._mergePendingServerBlocks()) return;
     // Still mid-composition/source mode, or still holding an un-emitted local
     // transaction in the debounce window? Wait for the real release. A blur can
     // be delivered after the server echo armed this listener; applying at that
@@ -5085,6 +5389,7 @@ class BpPaperCanvas extends HTMLElement {
   // Tear down any queued external-edit echo + its release listeners.
   _clearPendingServerBlocks() {
     this._pendingServerBlocks = null;
+    this._heldRemote.clear();
     if (this._onBlurFlush) this.ownerDocument.removeEventListener("focusout", this._onBlurFlush);
     if (this._mount) {
       if (this._onBlurFlush) {
@@ -5224,6 +5529,16 @@ class BpPaperCanvas extends HTMLElement {
   // time emission. Vanilla consumers retain the historical fire-and-echo API.
   set acknowledgedSaves(value) {
     this._acknowledgedSaves = value === true;
+  }
+
+  // `true` (strictly) takes server blocks into the live document while the author
+  // edits (1.15.0, _takeServerBlocks). Default false: deferred until release.
+  set liveRemote(value) {
+    this._liveRemote = value === true;
+  }
+
+  get liveRemote() {
+    return this._liveRemote;
   }
 
   get acknowledgedSaves() {
