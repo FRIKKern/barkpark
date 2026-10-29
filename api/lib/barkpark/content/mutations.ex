@@ -414,7 +414,8 @@ defmodule Barkpark.Content.Mutations do
   defp apply_all(mutations, dataset, opts, caller) do
     {chunks_results, _cache} =
       mutations
-      |> Enum.chunk_by(&delete_mutation?/1)
+      |> Enum.with_index()
+      |> Enum.chunk_by(fn {m, _index} -> delete_mutation?(m) end)
       |> Enum.map_reduce(%{}, fn chunk, cache ->
         apply_chunk(chunk, dataset, opts, caller, cache)
       end)
@@ -454,11 +455,11 @@ defmodule Barkpark.Content.Mutations do
 
   defp publish_opts(_, opts, _), do: opts
 
-  defp apply_chunk([_, _ | _] = chunk, dataset, opts, caller, cache) do
-    if delete_mutation?(hd(chunk)) do
+  defp apply_chunk([{first, _}, _ | _] = chunk, dataset, opts, caller, cache) do
+    if delete_mutation?(first) do
       ids =
         chunk
-        |> Enum.map(fn %{"delete" => %{"id" => id}} -> DraftId.published_id(id) end)
+        |> Enum.map(fn {%{"delete" => %{"id" => id}}, _index} -> DraftId.published_id(id) end)
         |> Enum.uniq()
 
       precomputed = ReferenceIntegrity.referrers_for_ids(ids, dataset, opts)
@@ -474,7 +475,7 @@ defmodule Barkpark.Content.Mutations do
     do: apply_each(chunk, dataset, opts, caller, cache)
 
   defp apply_each(chunk, dataset, opts, caller, cache) do
-    Enum.map_reduce(chunk, cache, fn m, cache ->
+    Enum.map_reduce(chunk, cache, fn {m, index}, cache ->
       case with_exact_id(m, dataset, opts, fn m ->
              apply_one(m, dataset, publish_opts(m, opts, cache))
            end) do
@@ -495,8 +496,23 @@ defmodule Barkpark.Content.Mutations do
           {[], cache}
 
         {:error, reason} ->
-          Repo.rollback(reason)
+          Repo.rollback(name_failing_mutation(reason, m, index))
       end
+    end)
+  end
+
+  # A batch fails whole, so a 412 names the mutation that failed and the row it
+  # compared: the client resends that one, not the batch one by one
+  # (task-38c5c28f0fcef9eb).
+  defp name_failing_mutation({:rev_mismatch, %{} = details}, m, index),
+    do: {:rev_mismatch, details |> Map.put(:index, index) |> Map.put_new(:id, named_id(m))}
+
+  defp name_failing_mutation(reason, _m, _index), do: reason
+
+  defp named_id(m) do
+    Enum.find_value(m, fn
+      {_verb, %{} = op} -> op["id"] || op["_id"] || op["doc_id"]
+      _ -> nil
     end)
   end
 
@@ -2541,8 +2557,8 @@ defmodule Barkpark.Content.Mutations do
 
   defp ensure_rev(%{rev: r}, r), do: :ok
 
-  defp ensure_rev(%{rev: actual}, expected),
-    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+  defp ensure_rev(%{rev: actual, doc_id: id}, expected),
+    do: {:error, {:rev_mismatch, %{expected: expected, actual: actual, id: id}}}
 
   # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create`
   # conflicts only with an existing DRAFT (docs/api-v1.md), so over an id whose

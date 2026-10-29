@@ -1454,6 +1454,56 @@ defmodule BarkparkWeb.MutateControllerTest do
     assert parsed["error"]["details"]["expected"] == "wrong-rev"
   end
 
+  # task-38c5c28f0fcef9eb: a batch fails whole on one stale rev, so the 412 names
+  # that mutation's index, the row it compared and that row's current rev.
+  test "a 412 on a batch names the failing mutation, its row and the row's current rev",
+       %{conn: conn} do
+    docs =
+      for n <- 1..3 do
+        {:ok, doc} =
+          Content.create_document("post", %{"_id" => "b412-#{n}", "title" => "v1"}, "test")
+
+        doc
+      end
+
+    [a, b, c] = docs
+
+    patch = fn doc, rev ->
+      %{
+        "patch" => %{
+          "id" => doc.doc_id,
+          "type" => "post",
+          "ifRevisionID" => rev,
+          "set" => %{"title" => "v2"}
+        }
+      }
+    end
+
+    body =
+      Jason.encode!(%{
+        "mutations" => [patch.(a, a.rev), patch.(b, "stale-rev"), patch.(c, c.rev)]
+      })
+
+    resp = conn |> authed() |> post("/v1/data/mutate/test", body)
+
+    assert resp.status == 412
+
+    assert %{"code" => "precondition_failed", "details" => details} =
+             Jason.decode!(resp.resp_body)["error"]
+
+    assert details == %{
+             "index" => 1,
+             "id" => b.doc_id,
+             "expected" => "stale-rev",
+             "actual" => b.rev
+           }
+
+    for doc <- docs do
+      {:ok, now} = Content.get_document(doc.doc_id, "post", "test")
+      assert now.rev == doc.rev
+    end
+  end
+
   # Regression: a patch on a PUBLISHED id must target the draft (the row
   # Writer.upsert_document actually writes), not merge from the published row.
   # Reading the published row as merge base silently overwrites the newer draft

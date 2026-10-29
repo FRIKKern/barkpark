@@ -762,12 +762,12 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :rev_mismatch}),
     do: %{code: "rev_mismatch", message: "document was modified by another writer", status: 409}
 
-  defp build({:error, {:rev_mismatch, %{expected: expected, actual: actual}}}),
+  defp build({:error, {:rev_mismatch, %{expected: _, actual: _} = details}}),
     do: %{
       status: 412,
       code: "precondition_failed",
       message: "document revision mismatch",
-      details: %{expected: expected, actual: actual}
+      details: Map.take(details, [:expected, :actual, :id, :index])
     }
 
   defp build({:error, :malformed}),
