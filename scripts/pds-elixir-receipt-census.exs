@@ -953,6 +953,9 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # PATCH /v1/prefs/:dataset/:key (task-f150278ead8dbfb3): answers the
+    # `value` the locked update returned, with no `ok: true` literal.
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/prefs/:dataset/:key", "BarkparkWeb.UserPrefController", :patch, :status_only_receipt},
     # The POST form of the GROQ query read (task-cf961ac7f324b6cc). It writes
     # nothing: Sanity's client sends a query too long for a URL as POST. It
     # renders the evaluated result, never an `ok: true` literal.

@@ -65,7 +65,7 @@ defmodule BarkparkWeb.UserPrefController do
          {:ws, %{id: ws_id}} <- {:ws, conn.assigns[:current_workspace]},
          {:ok, op} <- list_op(params),
          {:ok, value} <- UserPrefs.apply_list_op(user_id, ws_id, dataset, key, op) do
-      json(conn, %{ok: true, key: key, dataset: dataset, value: value})
+      json(conn, %{key: key, dataset: dataset, value: value})
     else
       {:ws, _} ->
         not_found(conn)

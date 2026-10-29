@@ -5,8 +5,9 @@ defmodule Barkpark.UserPrefsRaceTest do
   queue there and these tests would pass with the row lock deleted; they run
   `unboxed_run` and tear their rows down themselves.
 
-  A holder connection takes the row first, so every op under test is
-  provably waiting on it before the holder acts and commits.
+  A holder connection takes the row first (locks it, or inserts it and
+  leaves the insert uncommitted), so every op under test is provably
+  waiting on it before the holder acts and commits.
   """
   use Barkpark.DataCase, async: false
 
@@ -19,7 +20,7 @@ defmodule Barkpark.UserPrefsRaceTest do
   test "two concurrent push_front calls both land" do
     with_user(fn user, ws ->
       {:ok, pref} = UserPrefs.put(user.id, ws.id, @dataset, @key, %{"ids" => ["old"]})
-      holder = hold(pref, fn -> :ok end)
+      holder = hold(lock_row(pref), fn -> :ok end)
       pushers = for id <- ["a", "b"], do: push_front_async(user, ws, id)
 
       await_lock_waiters(2)
@@ -32,10 +33,28 @@ defmodule Barkpark.UserPrefsRaceTest do
     end)
   end
 
+  test "two first writes to an unset key both land" do
+    with_user(fn user, ws ->
+      holder = hold(fn -> UserPrefs.put(user.id, ws.id, @dataset, @key, %{}) end, fn -> :ok end)
+      pushers = for id <- ["a", "b"], do: push_front_async(user, ws, id)
+
+      await_lock_waiters(2)
+      release(holder)
+
+      assert [{:ok, _}, {:ok, _}] = Enum.map(pushers, &Task.await(&1, 10_000))
+      assert Enum.sort(UserPrefs.get(user.id, ws.id, @dataset, @key)["ids"]) == ["a", "b"]
+    end)
+  end
+
   test "a push_front waiting on a row that a DELETE removes still lands" do
     with_user(fn user, ws ->
       {:ok, pref} = UserPrefs.put(user.id, ws.id, @dataset, @key, %{"ids" => ["old"]})
-      holder = hold(pref, fn -> Repo.delete_all(from p in UserPref, where: p.id == ^pref.id) end)
+
+      holder =
+        hold(lock_row(pref), fn ->
+          Repo.delete_all(from p in UserPref, where: p.id == ^pref.id)
+        end)
+
       pusher = push_front_async(user, ws, "a")
 
       await_lock_waiters(1)
@@ -66,14 +85,17 @@ defmodule Barkpark.UserPrefsRaceTest do
     end)
   end
 
-  defp hold(pref, on_release) do
+  defp lock_row(pref),
+    do: fn -> Repo.one!(from p in UserPref, where: p.id == ^pref.id, lock: "FOR UPDATE") end
+
+  defp hold(take, on_release) do
     parent = self()
 
     holder =
       Task.async(fn ->
         unboxed(fn ->
           Repo.transaction(fn ->
-            Repo.one!(from p in UserPref, where: p.id == ^pref.id, lock: "FOR UPDATE")
+            take.()
             send(parent, :held)
 
             receive do
