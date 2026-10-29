@@ -53,6 +53,16 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   is the `%ApiToken{}` that asked. Everything runs in one transaction. Media
   blob removal, webhook dispatch and the revoked tokens' socket teardown wait
   until it commits, the same way `delete_workspace/1` does it.
+
+  The audit rows (one per document, the revokes, `dataset_deleted`) are
+  buffered and appended as the transaction's last statement
+  (`Audit.defer_emits/0`), so the workspace's audit-chain lock is held for that
+  append and the commit. Emitted one by one, the first document's row took the
+  lock and every write in the workspace waited for the whole delete
+  (task-10608b4831a0e9b8). The transaction may run 30 minutes
+  (`:dataset_delete_timeout_ms`); a timeout or database error rolls it back and
+  answers `{:error, {:delete_failed, :timeout | :database}}`. The HTTP door runs
+  it off the request: `Tenancy.DatasetDelete.Runs`.
   """
   import Ecto.Query, warn: false
 
@@ -136,6 +146,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
              | :not_found
              | {:shared_search, %{String.t() => pos_integer()}}
              | {:media_referenced, [map()]}
+             | {:delete_failed, :timeout | :database}
              | term()}
   def delete(dataset, opts \\ [])
 
@@ -157,33 +168,58 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
   defp run(target) do
     Media.clear_deferred_media_effects()
+    audit_owner? = Audit.defer_emits() == :owner
+    started = System.monotonic_time(:millisecond)
 
-    result =
-      Broadcast.with_deferred_queue(fn ->
-        Repo.transaction(fn ->
-          case teardown(target) do
-            {:ok, receipt} -> receipt
-            {:error, reason} -> Repo.rollback(reason)
-          end
+    try do
+      result =
+        Broadcast.with_deferred_queue(fn ->
+          Repo.transaction(
+            fn ->
+              case teardown(target) do
+                {:ok, receipt} ->
+                  if audit_owner?, do: Audit.flush_deferred!()
+                  receipt
+
+                {:error, reason} ->
+                  Repo.rollback(reason)
+              end
+            end,
+            timeout: timeout_ms()
+          )
         end)
-      end)
 
-    case result do
-      {:ok, receipt} ->
-        Media.flush_deferred_media_effects()
-        Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
+      case result do
+        {:ok, receipt} ->
+          if audit_owner?, do: Audit.finish_deferred(:committed)
+          Media.flush_deferred_media_effects()
+          Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
 
-      _ ->
+        _ ->
+          Media.clear_deferred_media_effects()
+      end
+
+      result
+    rescue
+      e in [DBConnection.ConnectionError, Postgrex.Error] ->
         Media.clear_deferred_media_effects()
-    end
+        {:error, {:delete_failed, failure(e, System.monotonic_time(:millisecond) - started)}}
 
-    WriteScope.reset_request_memo()
-    result
-  rescue
-    e ->
-      Media.clear_deferred_media_effects()
-      reraise(e, __STACKTRACE__)
+      e ->
+        Media.clear_deferred_media_effects()
+        reraise(e, __STACKTRACE__)
+    after
+      if audit_owner?, do: Audit.finish_deferred(:rolled_back)
+      WriteScope.reset_request_memo()
+    end
   end
+
+  defp timeout_ms,
+    do: Application.get_env(:barkpark, :dataset_delete_timeout_ms, :timer.minutes(30))
+
+  defp failure(%Postgrex.Error{postgres: %{code: :query_canceled}}, _ms), do: :timeout
+  defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
+  defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)

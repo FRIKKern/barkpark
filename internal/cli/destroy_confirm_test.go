@@ -100,6 +100,7 @@ type destroyHarness struct {
 	tokens  string // JSON body served for GET .../v1/tokens
 	members string // JSON body served for GET .../v1/members
 	status  int    // status for the inventory GETs (0 -> 200)
+	deletes []int  // statuses the next DELETEs answer, in order (then 200)
 }
 
 func newDestroyHarness(t *testing.T) *destroyHarness {
@@ -132,6 +133,11 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/plugins/tickets/keys":
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(testTicketKeysBody))
+		case r.Method == http.MethodDelete && len(h.deletes) > 0:
+			code := h.deletes[0]
+			h.deletes = h.deletes[1:]
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"deleting":true,"dataset":"j10-20261029"}`))
 		default:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"revoked":{"id":"ac8ff595-deff-4c51-b251-0d05e8414184"}}`))

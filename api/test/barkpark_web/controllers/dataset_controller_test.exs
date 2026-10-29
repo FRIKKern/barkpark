@@ -212,4 +212,42 @@ defmodule BarkparkWeb.DatasetControllerTest do
              "args" => [%{"name" => "dataset", "required" => true}]
            } = cmd
   end
+
+  describe "a delete that outlives the request (task-10608b4831a0e9b8)" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:barkpark, :dataset_delete_wait_ms)
+      end)
+    end
+
+    defp until_answered(raw, ws, project, name, tries \\ 200) do
+      conn = delete_dataset(raw, ws, project, name)
+
+      if conn.status == 202 and tries > 0 do
+        Process.sleep(50)
+        until_answered(raw, ws, project, name, tries - 1)
+      else
+        conn
+      end
+    end
+
+    test "answers 202 while it runs, then the receipt once, then 404", %{
+      ws: ws,
+      project: project,
+      tokens: tokens
+    } do
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+
+      assert %{"deleting" => true, "dataset" => "j10-7"} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
+
+      assert %{"deleted" => true, "documents" => 1} =
+               json_response(until_answered(tokens.owner, ws, project, "j10-7"), 200)
+
+      refute dataset?(project, "j10-7")
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 404)
+    end
+  end
 end

@@ -783,6 +783,7 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	}
 
 	status, respBody, respCT, err := sendManifestRequest(req)
+	status, respBody, respCT, err = awaitDatasetDelete(out, cmd, req, status, respBody, respCT, err)
 	if err != nil {
 		if !renderErrorEnvelope(out, "request_failed", "request failed: "+err.Error(), "", "") {
 			out.userErr("request failed: %v", err)

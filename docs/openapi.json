@@ -19682,11 +19682,91 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Document"
+                  "properties": {
+                    "dataset": {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "deleted": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "detached": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "documents": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "media_files": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "swept": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "tokens_revoked": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "dataset",
+                    "documents",
+                    "media_files",
+                    "swept",
+                    "detached",
+                    "tokens_revoked"
+                  ],
+                  "type": "object"
                 }
               }
             },
             "description": "Mutation applied."
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dataset": {
+                      "type": "string"
+                    },
+                    "deleting": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleting",
+                    "dataset"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Still deleting. Send the same DELETE again; it answers the receipt once."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19708,6 +19788,16 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The delete stopped (timeout, database error or restart) and rolled back; the dataset is whole."
           }
         },
         "security": [
@@ -21498,11 +21588,91 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Document"
+                  "properties": {
+                    "dataset": {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "deleted": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "detached": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "documents": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "media_files": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "swept": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "tokens_revoked": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "dataset",
+                    "documents",
+                    "media_files",
+                    "swept",
+                    "detached",
+                    "tokens_revoked"
+                  ],
+                  "type": "object"
                 }
               }
             },
             "description": "Mutation applied."
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dataset": {
+                      "type": "string"
+                    },
+                    "deleting": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleting",
+                    "dataset"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Still deleting. Send the same DELETE again; it answers the receipt once."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -21524,6 +21694,16 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The delete stopped (timeout, database error or restart) and rolled back; the dataset is whole."
           }
         },
         "security": [

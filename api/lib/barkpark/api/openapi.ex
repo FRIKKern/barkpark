@@ -381,7 +381,35 @@ defmodule Barkpark.Api.OpenApi do
     |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
   end
 
-  defp responses_for(cmd, template) do
+  defp responses_for(%{"id" => "dataset.delete"} = cmd, template) do
+    cmd
+    |> default_responses(template)
+    |> Map.put("202", %{
+      "description" => "Still deleting. Send the same DELETE again; it answers the receipt once.",
+      "content" => %{
+        "application/json" => %{
+          "schema" => %{
+            "type" => "object",
+            "required" => ["deleting", "dataset"],
+            "properties" => %{
+              "deleting" => %{"type" => "boolean", "enum" => [true]},
+              "dataset" => %{"type" => "string"}
+            }
+          }
+        }
+      }
+    })
+    |> Map.put(
+      "503",
+      err_resp(
+        "The delete stopped (timeout, database error or restart) and rolled back; the dataset is whole."
+      )
+    )
+  end
+
+  defp responses_for(cmd, template), do: default_responses(cmd, template)
+
+  defp default_responses(cmd, template) do
     method = cmd |> get_in(["http", "method"]) |> to_string() |> String.upcase()
     tier = Map.get(cmd, "auth_tier", "admin")
     has_path_param? = path_placeholders(template) != []
@@ -414,6 +442,34 @@ defmodule Barkpark.Api.OpenApi do
         "title" => %{"type" => "string"},
         "liveview_path" => %{"type" => "string"},
         "scoped_liveview_path" => %{"type" => ["string", "null"]}
+      }
+    },
+    "dataset.delete" => %{
+      "type" => "object",
+      "required" => [
+        "deleted",
+        "dataset",
+        "documents",
+        "media_files",
+        "swept",
+        "detached",
+        "tokens_revoked"
+      ],
+      "properties" => %{
+        "deleted" => %{"type" => "boolean", "enum" => [true]},
+        "dataset" => %{
+          "type" => "object",
+          "properties" => %{
+            "id" => %{"type" => "string"},
+            "slug" => %{"type" => "string"},
+            "name" => %{"type" => "string"}
+          }
+        },
+        "documents" => %{"type" => "integer", "minimum" => 0},
+        "media_files" => %{"type" => "integer", "minimum" => 0},
+        "swept" => %{"type" => "object", "additionalProperties" => %{"type" => "integer"}},
+        "detached" => %{"type" => "object", "additionalProperties" => %{"type" => "integer"}},
+        "tokens_revoked" => %{"type" => "integer", "minimum" => 0}
       }
     },
     "auth.reset" => %{

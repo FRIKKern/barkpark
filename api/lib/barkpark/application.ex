@@ -590,6 +590,9 @@ defmodule Barkpark.Application do
         # one computation, and its result for a short TTL. One small ETS
         # table; no connections, no timers.
         Barkpark.SingleFlight,
+        # Dataset deletes that outlive their request (task-10608b4831a0e9b8).
+        # One small ETS table; the runs themselves are TaskSupervisor children.
+        Barkpark.Tenancy.DatasetDelete.Runs,
         # GROQ admission (task-8416309ea42ed7d8): how many queries evaluate at
         # once. Before the Endpoint, so the first query finds it.
         Barkpark.Groq.Slots,

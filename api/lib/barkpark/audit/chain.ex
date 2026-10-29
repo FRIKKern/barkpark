@@ -54,10 +54,12 @@ defmodule Barkpark.Audit.Chain do
 
   @doc "The chained hash for a row given the previous row's hash (or genesis)."
   @spec hash(fields(), String.t() | nil) :: String.t()
-  def hash(fields, prev_hash) do
-    prev = prev_hash || @genesis
+  def hash(fields, prev_hash), do: link(canonical(fields), prev_hash)
 
-    :crypto.hash(:sha256, [prev, "\n", canonical(fields)])
+  @doc "`hash/2` for a row whose `canonical/1` bytes are already built."
+  @spec link(iodata(), String.t() | nil) :: String.t()
+  def link(canonical, prev_hash) do
+    :crypto.hash(:sha256, [prev_hash || @genesis, "\n", canonical])
     |> Base.encode16(case: :lower)
   end
 
