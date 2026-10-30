@@ -15,14 +15,14 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | BARKPARK_CLI_VERSION=1.26.16 sh
 bp instance up --azure --path vm --resource-group <resource group> --host <dns label> --owner <owner upn>
-bp instance up --azure --path containerapps --resource-group <resource group> --owner <owner upn>
+bp instance up --azure --path containerapps --resource-group <resource group> --region norwayeast --owner <owner upn>
 ```
 
-Without `BARKPARK_CLI_VERSION` the installer takes the newest release. `--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. Keep `norwayeast` for Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path A, `--host` is a DNS label or your own host. On Path B, leave it out. `--image <ref>` picks another image than the newest release, and `--from-source <git ref>` builds one.
+Without `BARKPARK_CLI_VERSION` the installer takes the newest release. `--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path B, leave out `--host`. `--image <ref>` picks another image, and `--from-source <git ref>` builds one.
 
 `--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken, not the owner's daily account. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. Add it before `bp org auth-methods <org> sso --yes`. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
 
-up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. A rerun resumes from `.bp-instance-up.json`. The Entra app and owners group sit outside the resource group. `--org` defaults to `pensum`.
+up writes `barkpark.env` with mode 600 and prints no secret. On Path A it also writes `entra-client-secret` with mode 600. On Path B the client secret stays in Key Vault and up writes no such file. A rerun resumes from `.bp-instance-up.json`. The Entra app and owners group sit outside the resource group. `--org` defaults to `pensum`.
 
 ## What up does
 
