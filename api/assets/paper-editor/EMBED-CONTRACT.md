@@ -189,9 +189,9 @@ written as a `[[` pick writes it: the row's `title` as the words and `target`, i
 `docId`. Typing asks when the closing `]]` is typed. A paste asks once per distinct title in
 the pasted text (ignoring case), for at most 20 titles; later titles stay text. Only the paste
 event's own changes are read, so a server apply in the same task is not. A Markdown paste (a
-heading, list, quote, table, fence, rule or inline Markdown link) sends each un-aliased
-`[[Title]]` through the same rule; an aliased `[[Title|words]]` stays the link Markdown writes,
-with no `docId`, and so does every `[[Title]]` when there is no `wikilinkSource`. Anything else leaves the text as it was: no matching row, a throw or a
+heading, list, quote, table, fence, rule or inline Markdown link) sends each `[[Title]]` and
+`[[Title|words]]` through the same rule, as text, so an aliased one stays text as in a plain
+paste. With no `wikilinkSource`, a Markdown paste writes them as links with no `docId`. Anything else leaves the text as it was: no matching row, a throw or a
 rejection, an edit to the brackets before the answer lands, text inside inline code or a
 link (typed or pasted), and no `wikilinkSource`. Text that arrives any other way (`blocks`,
 `applyServerBlocks`, undo) is never asked about. The links of one typing or one paste land

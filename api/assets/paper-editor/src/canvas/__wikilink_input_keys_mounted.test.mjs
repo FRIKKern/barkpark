@@ -421,18 +421,17 @@ for (const [name, text] of [
   canvas.remove();
 });
 
-await check("a Markdown paste keeps marks and aliases, and its links are one undo step", async () => {
+await check("a Markdown paste keeps marks, its aliased [[Title|words]] stays text like a plain paste, and its links are one undo step", async () => {
   const { canvas, editor, asked } = await mount();
   caret(editor, endOf(editor, 0));
   asked.length = 0;
-  paste(editor, "# H\n\n**[[plan]]** and [[Plan|Plan]] and [[]] and [[Plan|the plan]]");
+  paste(editor, "# H\n\n**[[plan]]** and [[]] and [[Plan|the plan]]");
   await tick(20);
   const para = canvas.recoverySnapshot().blocks.find((b) => b.type === "paragraph" && JSON.stringify(b).includes("the plan"));
   assert.deepEqual(para.content[0], { type: "wikilink", target: "Plan", children: [{ type: "strong", children: [{ type: "text", value: "Plan" }] }], docId: "n-plan" });
-  assert.deepEqual(para.content[2], { type: "wikilink", target: "Plan", children: [{ type: "text", value: "Plan" }], alias: "Plan" }, "an alias equal to the title is kept too");
-  assert.deepEqual(para.content[3], { type: "text", value: " and [[]] and " }, "empty brackets stay text");
-  assert.deepEqual(para.content.at(-1), { type: "wikilink", target: "Plan", children: [{ type: "text", value: "the plan" }], alias: "the plan" }, "an alias is the author's own link, left as Markdown wrote it");
-  assert.deepEqual(asked, ["plan"]);
+  assert.deepEqual(para.content[1], { type: "text", value: " and [[]] and [[Plan|the plan]]" });
+  assert.deepEqual(asked.sort(), ["Plan|the plan", "plan"]);
+  assert.equal(links(editor).filter((l) => !l.docId).length, 0, "no link without a docId");
   editor.commands.undo();
   assert.ok(JSON.stringify(canvas.recoverySnapshot().blocks).includes("[[plan]]"), "one undo brings the brackets back");
   canvas.remove();
@@ -485,7 +484,7 @@ await check("the canvas's own copy pasted back, and a Shift paste as plain text,
   canvas.remove();
 });
 
-await check("a paste into a Figure's one block links too; a pasted image file takes the paste, writes no [[Plan]] and asks nothing", async () => {
+await check("a paste into a Figure's one block links too", async () => {
   const frame = document.createElement("div");
   frame.setAttribute("data-paper-container-kind", "figure");
   document.body.appendChild(frame);
@@ -502,18 +501,38 @@ await check("a paste into a Figure's one block links too; a pasted image file ta
   assert.equal(editor.state.doc.child(0).textContent, "Caption Plan [[Nope]]");
   assert.deepEqual(asked.sort(), ["Nope", "Plan"]);
   frame.remove();
-  const { canvas: other, editor: ed, asked: asked2 } = await mount();
-  caret(ed, endOf(ed, 0));
-  asked2.length = 0;
+});
+
+const pasteFiles = (editor, text) => {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   const file = new window.File(["x"], "pic.png", { type: "image/png" });
-  Object.defineProperty(event, "clipboardData", { value: { types: ["Files", "text/plain"], getData: (t) => (t === "text/plain" ? "[[Plan]]" : ""), files: [file] } });
-  assert.equal(ed.view.dom.dispatchEvent(event), false, "the image door took the paste");
+  Object.defineProperty(event, "clipboardData", { value: { types: text ? ["Files", "text/plain"] : ["Files"], getData: (t) => (t === "text/plain" ? text : ""), files: [file] } });
+  editor.view.dom.dispatchEvent(event);
+};
+
+await check("an image file with text is refused and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  const before = JSON.stringify(editor.getJSON());
+  pasteFiles(editor, "[[Plan]]");
   await tick(20);
-  const doc = JSON.stringify(ed.getJSON());
-  assert.equal(doc.includes("[[Plan]]"), false);
-  assert.deepEqual(asked2, []);
-  other.remove();
+  assert.equal(JSON.stringify(editor.getJSON()), before, "nothing went in");
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a files-only paste lands the image and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  pasteFiles(editor, "");
+  await tick(20);
+  const images = [];
+  editor.state.doc.descendants((n) => { if (n.type.name === "bpImage") images.push(n.attrs.alt); });
+  assert.deepEqual(images, ["pic"], "the image went in");
+  assert.deepEqual(asked, []);
+  canvas.remove();
 });
 
 await check("undo and redo across a pasted link replay it without asking again", async () => {
