@@ -103,6 +103,16 @@ services:
       - BARKPARK_OIDC_STRICT_VALIDATION
       # Keep an owner through OIDC group mappings (read in api/config/runtime.exs)
       - BARKPARK_OIDC_KEEP_OWNER
+      # Connect an org to Entra at boot (Sso.OidcBootstrap; main.bicep sets them)
+      - BARKPARK_OIDC_BOOTSTRAP_ORG
+      - BARKPARK_OIDC_BOOTSTRAP_ORG_NAME
+      - BARKPARK_OIDC_BOOTSTRAP_ISSUER
+      - BARKPARK_OIDC_BOOTSTRAP_CLIENT_ID
+      - BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET
+      - BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET_EXPIRES_AT
+      - BARKPARK_OIDC_BOOTSTRAP_TENANT_ID
+      - BARKPARK_OIDC_BOOTSTRAP_OWNER_GROUP
+      - BARKPARK_OIDC_BOOTSTRAP_TRUST_IDP_MFA
       # Sign-in policy on token paste and the Cloud handoff; Cloud handoff
       # switch (both read in api/config/runtime.exs)
       - BARKPARK_SIGN_IN_POLICY_ALL_ROUTES

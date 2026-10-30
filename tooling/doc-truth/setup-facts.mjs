@@ -831,6 +831,7 @@ export const NUMBER_SOURCES = {
   deployMediaDir: { file: "deploy.sh", re: /^MEDIA_DIR="\$APP_DIR\/(\w+)"$/m, fmt: (s) => `/opt/barkpark/${s}` },
   initFileMode: { file: "internal/cli/instance_check_cmd.go", re: /os\.O_EXCL, 0o(\d+)\)/ },
   secretYears: { file: ENTRA_SH, re: /case "\$YEARS" in ([\d|]+)\)/, norm: numbers },
+  entraSecretYears: { file: BICEP, re: /param entraSecretYears int = (\d+)/ },
   secretWaitMinutes: { file: ENTRA_SH, re: /READY_AT=\$\(date -u -d '\+(\d+) minutes'/ },
 };
 
@@ -886,6 +887,7 @@ export const NUMBER_FACTS = [
   [IT, /Log Analytics workspace for app logs \| (\d+) days/, "logRetentionDays"],
   [IT, /The template keeps (\d+) days for the database/, "postgresBackupDays"],
   [IT, /It expires after (\d+ or \d+) years/, "secretYears"],
+  [IT, /The deployment's secret lasts (\d+) year/, "entraSecretYears"],
   [MOVE, /The job installs bp ([\d.]+)/, "bpCliVersion"],
   [MOVE, /The template runs (\d+)\./, "postgresVersion"],
   [MOVE, /A VM from `deploy\.sh` runs (\d+) too/, "deployPgMajor"],

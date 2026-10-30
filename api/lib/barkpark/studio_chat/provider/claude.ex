@@ -852,6 +852,7 @@ defmodule Barkpark.StudioChat.Provider.Claude do
     HETZNER_API_TOKEN HCLOUD_TOKEN
     CONNECTORS_CONNECT_SECRET
     BARKPARK_ADMIN_TOKEN BARKPARK_SEED_ADMIN_TOKEN
+    BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET
   )
 
   @doc "The secret env var names scrubbed from every chat child (charter D3)."

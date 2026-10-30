@@ -51,6 +51,13 @@ param releaseCaptureHmacSecret = env.BARKPARK_RELEASE_CAPTURE_HMAC_SECRET
 param kekPrevious = env.?BARKPARK_KEK_PREVIOUS ?? ''
 param ingestToken = env.?BARKPARK_INGEST_TOKEN ?? ''
 
+// true also creates the Entra app, the owners group and the client secret,
+// and connects entraOrg at the first boot. See docs/setup/ENTRA.md.
+param entraEnabled = false
+param entraOrg = ''
+param entraOrgName = ''
+param entraOwnerUpns = []
+
 // true deploys everything but the app, for a restore into the empty database.
 param restoreMode = false
 

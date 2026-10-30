@@ -967,6 +967,23 @@ if System.get_env("BARKPARK_OIDC_EMAIL_FROM_UPN") in ~w(1 true yes on) do
   config :barkpark, :oidc_email_from_upn, true
 end
 
+# Entra sign-in connected at boot (`Barkpark.Sso.OidcBootstrap`). main.bicep
+# sets these with its Entra option; the client secret comes from Key Vault.
+# Unset by default. An organization that has a connection is never changed.
+if (org = System.get_env("BARKPARK_OIDC_BOOTSTRAP_ORG", "")) != "" do
+  config :barkpark, :oidc_bootstrap, %{
+    org: org,
+    org_name: System.get_env("BARKPARK_OIDC_BOOTSTRAP_ORG_NAME"),
+    issuer: System.get_env("BARKPARK_OIDC_BOOTSTRAP_ISSUER"),
+    client_id: System.get_env("BARKPARK_OIDC_BOOTSTRAP_CLIENT_ID"),
+    client_secret: System.get_env("BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET"),
+    client_secret_expires_at: System.get_env("BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET_EXPIRES_AT"),
+    tenant_id: System.get_env("BARKPARK_OIDC_BOOTSTRAP_TENANT_ID"),
+    owner_group: System.get_env("BARKPARK_OIDC_BOOTSTRAP_OWNER_GROUP"),
+    trust_idp_mfa: System.get_env("BARKPARK_OIDC_BOOTSTRAP_TRUST_IDP_MFA") in ~w(1 true yes on)
+  }
+end
+
 # Keep an owner through OIDC group mappings (`Barkpark.Sso`). When on, a mapping
 # change that maps no group to owner is refused while the org has an owner, and
 # a group sync never lowers a workspace's last owner. Off unless truthy.
