@@ -223,3 +223,16 @@ glass, and the watch reds until it does.
 - pre-state: enforce_admins.enabled=true (inferred from breakglass-watch run 40513463204 at 13:36:10Z, not read by the opener)
 - provenance: RETROSPECTIVE, hand-written on 2026-10-27 from a worktree of origin/main 530ffc129. The glass was opened with a raw gh api call, not scripts/breakglass.sh, so no record was written at the time. scripts/breakglass.sh --open refuses on an already-false pre-state and says to write the record by hand, which this block does. Live state read 2026-10-27 at about 15:10Z: enforce_admins.enabled=false.
 - reason: the owner said "Yes, turn off enforce_admins for now" so the smooth-setup sprint could merge small setup fixes with --admin without waiting for CI. Scope is enforce_admins only; required checks and the rest of the protection object are unchanged. It stays open until the owner decides to restore it with scripts/breakglass.sh --close --record BG-20261027T134000Z-RETRO --reason … --task task-eaad4c8d0cdc98cd. breakglass-watch reds on every run while this record is open, by design.
+
+### BG-20261027T134000Z-RETRO-close
+- event: close
+- closes: BG-20261027T134000Z-RETRO
+- utc: 2026-10-30T13:15:56Z
+- actor: FRIKKern (id 32601161)
+- task: task-eaad4c8d0cdc98cd
+- repo: FRIKKern/barkpark
+- branch: main
+- scope: narrow
+- command: scripts/breakglass.sh --close --record BG-20261027T134000Z-RETRO --reason owner\ restored\ enforce_admins\ on\ 2026-10-30\ after\ the\ smooth-setup\ milestone\;\ the\ coordinator\ re-enabled\ it\ by\ API\ at\ about\ 13:13\ UTC --task task-eaad4c8d0cdc98cd
+- post-state: enforce_admins.enabled=true (read 2026-10-30T13:15:56Z)
+- reason: owner restored enforce_admins on 2026-10-30 after the smooth-setup milestone; the coordinator re-enabled it by API at about 13:13 UTC
