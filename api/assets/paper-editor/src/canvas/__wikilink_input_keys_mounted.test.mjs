@@ -405,6 +405,8 @@ for (const [name, text] of [
   ["a line with a Markdown link", "[[Plan]] see [site](https://example.com) [[Nope]]"],
   ["a quote", "> [[Plan]] [[Nope]]"],
   ["a table", "| a | b |\n|---|---|\n| [[Plan]] | [[Nope]] |"],
+  ["a rule", "[[Plan]]\n\n---\n\n[[Nope]]"],
+  ["a fence", "```\n[[Code]]\n```\n\n[[Plan]] [[Nope]]"],
 ]) await check(`a Markdown paste (${name}) links a known [[Title]] as a pick and leaves an unknown one as brackets`, async () => {
   const { canvas, editor, asked } = await mount();
   caret(editor, endOf(editor, 0));
@@ -415,7 +417,7 @@ for (const [name, text] of [
   assert.ok(body.includes('{"type":"wikilink","target":"Plan","children":[{"type":"text","value":"Plan"}],"docId":"n-plan"}'), body);
   assert.ok(body.includes("[[Nope]]"), body);
   assert.equal(links(editor).filter((l) => !l.docId).length, 0, "no link without a docId");
-  assert.deepEqual(asked.sort(), ["Nope", "Plan"]);
+  assert.deepEqual(asked.sort(), ["Nope", "Plan"], "nothing inside a fence is asked");
   canvas.remove();
 });
 
@@ -481,6 +483,37 @@ await check("the canvas's own copy pasted back, and a Shift paste as plain text,
   await tick(20);
   assert.ok(textOf(editor, "p3").endsWith(" end.Plan [[Nope]] Plan"), textOf(editor, "p3"));
   canvas.remove();
+});
+
+await check("a paste into a Figure's one block links too; a pasted image file takes the paste, writes no [[Plan]] and asks nothing", async () => {
+  const frame = document.createElement("div");
+  frame.setAttribute("data-paper-container-kind", "figure");
+  document.body.appendChild(frame);
+  const canvas = document.createElement("bp-paper-canvas");
+  canvas.blocks = [{ id: "f1", type: "paragraph", content: [{ type: "text", value: "Caption " }] }];
+  const asked = [];
+  canvas.wikilinkSource = (q) => { asked.push(q); return ROWS.filter((r) => r.title.toLowerCase().includes(q.toLowerCase())); };
+  frame.appendChild(canvas);
+  await tick(350);
+  const editor = canvas._editor;
+  caret(editor, endOf(editor, 0));
+  paste(editor, "[[Plan]] [[Nope]]");
+  await tick(20);
+  assert.equal(editor.state.doc.child(0).textContent, "Caption Plan [[Nope]]");
+  assert.deepEqual(asked.sort(), ["Nope", "Plan"]);
+  frame.remove();
+  const { canvas: other, editor: ed, asked: asked2 } = await mount();
+  caret(ed, endOf(ed, 0));
+  asked2.length = 0;
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  const file = new window.File(["x"], "pic.png", { type: "image/png" });
+  Object.defineProperty(event, "clipboardData", { value: { types: ["Files", "text/plain"], getData: (t) => (t === "text/plain" ? "[[Plan]]" : ""), files: [file] } });
+  assert.equal(ed.view.dom.dispatchEvent(event), false, "the image door took the paste");
+  await tick(20);
+  const doc = JSON.stringify(ed.getJSON());
+  assert.equal(doc.includes("[[Plan]]"), false);
+  assert.deepEqual(asked2, []);
+  other.remove();
 });
 
 await check("undo and redo across a pasted link replay it without asking again", async () => {
