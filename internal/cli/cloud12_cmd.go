@@ -1869,7 +1869,7 @@ func runInstance(out *writer, g globals, args []string) int {
 	}
 
 	if len(args) == 0 {
-		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance studio-token --workspace <ws> | bp instance backup | bp instance restore <dir> | bp instance init | bp instance check", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id> | bp instance studio-token --workspace <ws> | bp instance backup | bp instance restore <dir> | bp instance init | bp instance check | bp instance up", exitUsage)
 	}
 
 	switch args[0] {
@@ -1887,6 +1887,8 @@ func runInstance(out *writer, g globals, args []string) int {
 		return runInstanceInit(out, args[1:])
 	case "check":
 		return runInstanceCheck(out, args[1:])
+	case "up":
+		return runInstanceUp(out, g, args[1:])
 	default:
 		return useError(out, "usage", fmt.Sprintf("unknown instance verb %q — try: bp instance credentials <id> or bp instance admin-token <id>", args[0]), exitUsage)
 	}
@@ -2023,6 +2025,13 @@ USAGE
                     [--operator-emails <e,...>] [--breakglass-email <e>]
   bp instance check [--env-file <file>] [--target containerapps|vm]
                     [--skip database,media,url] [--studio-url <url>]
+  bp instance up    --azure --path vm|containerapps --resource-group <rg>
+                    --owner <upn> [--host <dns label or host>]
+                    [--breakglass <email>] [--image <ref> | --from-source <ref>]
+                    [--region <r>] [--org <slug>] [--org-name <n>] [--name <n>]
+                    [--env-file <f>] [--state <f>] [--studio-origin <o>]
+                    [--size <vm size>] [--postgres-sku <sku>]
+                    [--alert-email <e>] [--ssh-key <path>]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
@@ -2073,6 +2082,17 @@ WHAT IT DOES
                BARKPARK_STUDIO_SSO_ORIGINS lets that Studio's single sign-on
                return, and prints its callback and the identity provider's
                redirect URI. init and check need no server.
+  up           take an empty Azure resource group to an instance whose owner
+               signs in with Entra ID, on a VM (deploy.sh) or on Container
+               Apps (main.bicep): checks az, providers and quota, writes and
+               checks barkpark.env, deploys the published image or builds
+               --from-source, waits for /readyz, registers the Entra app and
+               owners group (names carry --name, default the group), connects
+               bp and the organization (--org, default pensum), and prints the
+               sign-in link. .bp-instance-up.json records the finished steps
+               without secrets, so the same command again resumes. --host is
+               a DNS label or your own host on a VM, and your own domain or
+               nothing on Container Apps. See docs/setup/SELF-HOST.md.
 
 FLAGS
   --team <t>   read credentials in an explicit team context (a team slug or id
