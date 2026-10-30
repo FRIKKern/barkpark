@@ -1,4 +1,4 @@
-// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0: a typed or pasted `[[Title]]` becomes
+// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0: a typed `[[Title]]` becomes
 // a document link only when wikilinkSource(Title) returns a row with that exact title (ignoring
 // case); Mod+Enter edits nothing and stays free for the host.
 // Run: node src/canvas/__wikilink_input_keys_mounted.test.mjs   (or: npm test)
@@ -160,29 +160,16 @@ try {
     assert.equal(textOf(editor, "p2"), "Code x[[Plan]]");
   });
 
-  await check("pasted text links every [[Title]] the host knows and leaves the rest", async () => {
+  await check("a paste of [[Plan]], plain, HTML or multi-line, stays text and asks nothing", async () => {
     caret(editor, endOf(editor, 0));
-    paste(editor, " see [[plan]] and [[Nobody]] then [[Ærlig talt]].");
-    await tick(10);
-    const p1 = textOf(editor, "p1");
-    assert.ok(p1.endsWith(" see Plan and [[Nobody]] then Ærlig talt."), p1);
-    assert.ok(asked.includes("Nobody"));
-  });
-
-  await check("pasted HTML holding [[Plan]] links too", async () => {
-    caret(editor, endOf(editor, 0));
+    asked.length = 0;
+    paste(editor, " see [[plan]] and [[Plan]].");
     paste(editor, "", "<p> go [[Plan]] now</p>");
-    await tick(10);
-    assert.ok(textOf(editor, "p1").endsWith("go Plan now"), textOf(editor, "p1"));
-  });
-
-  await check("a multi-line plain paste (the canvas's own soft-break paste) links on every line", async () => {
-    caret(editor, endOf(editor, 0));
     paste(editor, " one [[Plan]]\ntwo [[plan]]");
     await tick(10);
-    const p1 = editor.state.doc.child(0);
-    assert.equal(p1.content.content.some((n) => n.type.name === "hardBreak"), true, "the soft-break path ran");
-    assert.ok(p1.textContent.endsWith(" one Plantwo Plan"), p1.textContent);
+    const p1 = textOf(editor, "p1");
+    assert.ok(p1.endsWith(" see [[plan]] and [[Plan]].go [[Plan]] now one [[Plan]]two [[plan]]"), p1);
+    assert.deepEqual(asked, []);
   });
 
   await check("Mod+Enter on plain text edits nothing, emits nothing, and stays free for the host", async () => {
@@ -314,6 +301,30 @@ await check("an answer that lands after the canvas is gone is dropped", async ()
   await tick(10);
 });
 
+await check("a slow answer is asked for once while other edits land, and one that lands after the canvas turns read-only writes nothing", async () => {
+  const waiting = [];
+  const { canvas, editor, ops, asked } = await mount({ source: () => new Promise((r) => { waiting.push(r); }) });
+  caret(editor, endOf(editor, 0));
+  type(editor, "[[Plan]]");
+  assert.equal(asked.at(-1), "Plan");
+  asked.length = 0;
+  type(editor, " and more");
+  await tick(10);
+  assert.deepEqual(asked, [], "the pending [[Plan]] is not asked again");
+  canvas.flushPendingChanges();
+  await tick(350);
+  ops.length = 0;
+  canvas.setAttribute("editable", "false");
+  await tick(10);
+  waiting.forEach((release) => release(ROWS));
+  await tick(10);
+  assert.equal(textOf(editor, "p1"), "Start [[Plan]] and more");
+  canvas.flushPendingChanges();
+  await tick(350);
+  assert.deepEqual(ops, []);
+  canvas.remove();
+});
+
 await check("[[Plan]] from a seed or the server is never linked or asked", async () => {
   const seeded = [{ id: "p1", type: "paragraph", content: [{ type: "text", value: "Seed [[Plan]]" }] }];
   const { canvas, editor, asked, ops } = await mount({ blocks: seeded });
@@ -324,39 +335,6 @@ await check("[[Plan]] from a seed or the server is never linked or asked", async
   canvas.flushPendingChanges();
   await tick(350);
   assert.deepEqual(ops, []);
-  canvas.remove();
-});
-
-await check("a server apply in the same task as a paste is never asked about", async () => {
-  const { canvas, editor, asked } = await mount();
-  canvas.liveRemote = true;
-  caret(editor, endOf(editor, 0));
-  asked.length = 0;
-  paste(editor, "x");
-  const next = JSON.parse(JSON.stringify(BLOCKS));
-  next[1] = { id: "p2", type: "paragraph", content: [{ type: "text", value: "Server wrote [[Plan]] here." }] };
-  canvas.applyServerBlocks(next);
-  await tick(20);
-  assert.equal(textOf(editor, "p2"), "Server wrote [[Plan]] here.");
-  assert.deepEqual(asked, []);
-  canvas.remove();
-});
-
-await check("a big paste asks once per distinct title, at most MAX_ASKS of them; its links are one undo step", async () => {
-  const { canvas, editor, asked } = await mount();
-  caret(editor, endOf(editor, 0));
-  asked.length = 0;
-  const text = Array.from({ length: 200 }, (_, i) => `[[Plan]] [[N${i}]]`).join(" ");
-  paste(editor, " " + text);
-  await tick(20);
-  assert.equal(asked.filter((q) => q === "Plan").length, 1, "Plan is asked once");
-  assert.equal(asked.length, 20, `${asked.length} asks`);
-  assert.equal(links(editor).filter((l) => l.docId === "n-plan").length, 200, "every [[Plan]] links from that one answer");
-  assert.ok(textOf(editor, "p1").endsWith("Plan [[N199]]"), "titles past the cap stay text");
-  editor.commands.undo();
-  assert.ok(textOf(editor, "p1").endsWith(" " + text), "one undo brings every bracket back");
-  editor.commands.undo();
-  assert.equal(textOf(editor, "p1"), "Start ", "the next undo takes the paste");
   canvas.remove();
 });
 

@@ -11,7 +11,7 @@ below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed or pasted `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line.
 
 ## The element
 
@@ -183,16 +183,14 @@ empty title, any other value, a throw or a rejection shows the stored words; an 
 before the last refresh is dropped; `null` as the property clears every painted title and
 mark. Find and `state()` read the stored words.
 
-A typed or pasted `[[Title]]` becomes a document link (1.17.0) only when `wikilinkSource(Title)`
+A typed `[[Title]]` becomes a document link (1.17.0) only when `wikilinkSource(Title)`
 returns a row whose `title` equals `Title`, ignoring case, and that has an `id`. It is
 written as a `[[` pick writes it: the row's `title` as the words and `target`, its `id` as
-`docId`. Typing asks when the closing `]]` is typed. A paste asks once per distinct title in
-the pasted text (ignoring case), for at most 20 titles; later titles stay text. Only the paste
-event's own changes are read, so a server apply in the same task is not. Anything else leaves the text as it was: no matching row, a throw or a
-rejection, an edit to the brackets before the answer lands, text inside inline code or an
-existing link, and no `wikilinkSource`. Text that arrives any other way (`blocks`,
-`applyServerBlocks`, undo) is never asked about. The links of one typing or one paste land
-together, as one undo step after the text's own, so Mod+Z brings back the brackets.
+`docId`. It asks when the closing `]]` is typed. Anything else leaves the text as it was: no
+matching row, a throw or a rejection, an edit to the brackets before the answer lands, text
+inside inline code or an existing link, and no `wikilinkSource`. Text that arrives any other
+way (a paste, `blocks`, `applyServerBlocks`, undo) is never asked about. The link is its own
+undo step, so Mod+Z brings back the typed brackets.
 
 `editBlockObject` is the host's own editor for an object the field declares (a
 block under `blocks.of`, an inline object under `blocks.inline`): set, every insert
