@@ -78,11 +78,14 @@ free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0)
 # code under test.
 slice() {
   local src="$1" out="$2"
-  local health done_sec
+  local health done_sec hint
   # By section name, not number: the pinned control revision numbers them 11
   # and 12, and the image-based deploy.sh numbers them 8 and 9.
   health="$(awk '/^# ── [0-9]+\. Wait for healthy/{f=1} /^# ── [0-9]+\. TLS/{f=0} f' "$src")"
   done_sec="$(awk '/^# ── Done/{f=1} /^# ── End of body/{f=0} f' "$src")"
+  # The banner calls barkpark_update_hint, defined near the top. The pinned
+  # control revision predates it, so there it is empty and not called.
+  hint="$(awk '/^# barkpark_update_hint BEGIN$/{f=1} f{print} /^# barkpark_update_hint END$/{exit}' "$src")"
 
   # Fail-closed: a renamed section header must red HERE, not quietly test air.
   case "$health" in
@@ -111,6 +114,7 @@ slice() {
     printf 'APP_PORT="${APP_PORT:-4000}"\n'
     printf 'HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}"\n'
     printf 'HEALTH_INTERVAL="${HEALTH_INTERVAL:-1}"\n'
+    printf '%s\n' "$hint"
     printf '%s\n' "$health"
     printf '%s\n' "$done_sec"
   } > "$out"

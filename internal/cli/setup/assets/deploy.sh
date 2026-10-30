@@ -125,6 +125,21 @@ barkpark_image() {
 }
 # barkpark_image END
 
+# barkpark_update_hint BEGIN
+# The closing banner's update line. After a BARKPARK_FROM_SOURCE build the
+# update is another source build, so it prints that command, not a ghcr.io ref.
+# scripts/deploy-image.test.sh runs this block.
+barkpark_update_hint() {
+  if [ -n "${BARKPARK_FROM_SOURCE:-}" ]; then
+    echo "  Image: $BARKPARK_IMAGE, built from $BARKPARK_FROM_SOURCE (in $IMAGE_ENV). To update, build another git ref from your machine:"
+    echo "    $SSH_CMD 'sudo DOMAIN=$DOMAIN BARKPARK_FROM_SOURCE=<git ref> bash -s' < deploy.sh"
+  else
+    echo "  Image: $BARKPARK_IMAGE (in $IMAGE_ENV). To update or roll back, write another ref there and restart:"
+    echo "    echo BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:<version> | sudo tee $IMAGE_ENV && sudo systemctl restart barkpark"
+  fi
+}
+# barkpark_update_hint END
+
 # Barkpark: server setup on one Ubuntu machine.
 #
 # Runs the Barkpark server image under systemd with `docker run`, next to
@@ -851,8 +866,7 @@ if [ -n "${CHECK_LINES:-}" ]; then
 fi
 echo "  Run it again with: sudo bp instance check --target vm --env-file $APP_DIR/.env"
 echo ""
-echo "  Image: $BARKPARK_IMAGE (in $IMAGE_ENV). To update or roll back, write another ref there and restart:"
-echo "    echo BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:<version> | sudo tee $IMAGE_ENV && sudo systemctl restart barkpark"
+barkpark_update_hint
 echo "    See https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm"
 echo ""
 
