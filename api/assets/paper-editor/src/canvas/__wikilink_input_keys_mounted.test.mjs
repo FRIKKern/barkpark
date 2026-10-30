@@ -240,6 +240,16 @@ try {
     assert.equal(ev.defaultPrevented, true);
   });
 
+  await check("a composing Mod+Enter holds nothing back, and the hold is only for a newline", async () => {
+    await tick(5);
+    key(editor, { key: "Enter", metaKey: true, isComposing: true });
+    assert.equal(newline(editor).defaultPrevented, false, "an IME's Enter is the IME's");
+    await tick(5);
+    key(editor, { key: "Enter", metaKey: true });
+    assert.equal(newline(editor, "insertText").defaultPrevented, false, "text input is not held");
+    assert.equal(newline(editor).defaultPrevented, true);
+  });
+
   await check("Enter, Shift+Enter and a stray newline input still work", async () => {
     await tick(5);
     assert.equal(newline(editor).defaultPrevented, false, "no Mod+Enter, no hold");
@@ -314,6 +324,39 @@ await check("[[Plan]] from a seed or the server is never linked or asked", async
   canvas.flushPendingChanges();
   await tick(350);
   assert.deepEqual(ops, []);
+  canvas.remove();
+});
+
+await check("a server apply in the same task as a paste is never asked about", async () => {
+  const { canvas, editor, asked } = await mount();
+  canvas.liveRemote = true;
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x");
+  const next = JSON.parse(JSON.stringify(BLOCKS));
+  next[1] = { id: "p2", type: "paragraph", content: [{ type: "text", value: "Server wrote [[Plan]] here." }] };
+  canvas.applyServerBlocks(next);
+  await tick(20);
+  assert.equal(textOf(editor, "p2"), "Server wrote [[Plan]] here.");
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a big paste asks once per distinct title, at most MAX_ASKS of them; its links are one undo step", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  const text = Array.from({ length: 200 }, (_, i) => `[[Plan]] [[N${i}]]`).join(" ");
+  paste(editor, " " + text);
+  await tick(20);
+  assert.equal(asked.filter((q) => q === "Plan").length, 1, "Plan is asked once");
+  assert.equal(asked.length, 20, `${asked.length} asks`);
+  assert.equal(links(editor).filter((l) => l.docId === "n-plan").length, 200, "every [[Plan]] links from that one answer");
+  assert.ok(textOf(editor, "p1").endsWith("Plan [[N199]]"), "titles past the cap stay text");
+  editor.commands.undo();
+  assert.ok(textOf(editor, "p1").endsWith(" " + text), "one undo brings every bracket back");
+  editor.commands.undo();
+  assert.equal(textOf(editor, "p1"), "Start ", "the next undo takes the paste");
   canvas.remove();
 });
 

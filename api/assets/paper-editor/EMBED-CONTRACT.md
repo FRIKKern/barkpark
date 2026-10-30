@@ -151,7 +151,9 @@ shows beside the title (the document's type). A wikilink's `missing: true` (1.17
 its target is gone: the card and the pill hide Open, and every link to that target
 (the same `docId`, or the same `target` when it has none) carries `data-missing` on its
 words until an answer object without it says the target is back; `null`, a throw or a
-rejection changes nothing. In edit mode the card's Remove drops
+rejection changes nothing. The attribute sits on each text span inside the link (one per run
+of marks), not on `span[data-wikilink]`: select the link with
+`span[data-wikilink]:has([data-missing])`. In edit mode the card's Remove drops
 the whole link (or document link) from its run, keeping the words. `mediaUploader` gets one
 `File` per image (`image/*` only); a result with no `src`/`url` (or a throw) marks
 the image with the error message instead. `mediaPicker` is the host's own image
@@ -185,12 +187,13 @@ mark. Find and `state()` read the stored words.
 A typed or pasted `[[Title]]` becomes a document link (1.17.0) only when `wikilinkSource(Title)`
 returns a row whose `title` equals `Title`, ignoring case, and that has an `id`. It is
 written as a `[[` pick writes it: the row's `title` as the words and `target`, its `id` as
-`docId`. Typing asks when the closing `]]` is typed; a paste asks once for each `[[Title]]` in
-the pasted text. Anything else leaves the text as it was: no matching row, a throw or a
+`docId`. Typing asks when the closing `]]` is typed. A paste asks once per distinct title in
+the pasted text (ignoring case), for at most 20 titles; later titles stay text. Only the paste
+event's own changes are read, so a server apply in the same task is not. Anything else leaves the text as it was: no matching row, a throw or a
 rejection, an edit to the brackets before the answer lands, text inside inline code or an
 existing link, and no `wikilinkSource`. Text that arrives any other way (`blocks`,
-`applyServerBlocks`, undo) is never asked about. The link is its own undo step, so Mod+Z
-brings back the typed brackets.
+`applyServerBlocks`, undo) is never asked about. The links of one typing or one paste land
+together, as one undo step after the text's own, so Mod+Z brings back the brackets.
 
 `editBlockObject` is the host's own editor for an object the field declares (a
 block under `blocks.of`, an inline object under `blocks.inline`): set, every insert

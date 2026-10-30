@@ -5,6 +5,9 @@
 // brackets into a link to that row, written as a picker pick writes it (its title as the words
 // and the target, its id as the docId). Anything else leaves the text as typed. Text that
 // arrives any other way (a seed, a server edit, undo) is never converted.
+//
+// A paste asks once per distinct title (ignoring case), at most MAX_ASKS of them; the rest stay
+// text. Its links land together, as one undo step after the paste's own.
 
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
@@ -58,7 +61,21 @@ const unmarked = (doc, at) => LINKS_AND_CODE.every((name) => {
 const plain = (doc, at) => unmarked(doc, at) &&
   doc.textBetween(at.from, at.to, undefined, () => "\ufffc") === `[[${at.query}]]`;
 
-let nextId = 0;
+export const MAX_ASKS = 20;
+
+const keyOf = (query) => query.toLowerCase();
+
+function capped(found) {
+  const titles = new Set();
+  return found.filter((at) => {
+    const key = keyOf(at.query);
+    if (!titles.has(key) && titles.size >= MAX_ASKS) return false;
+    titles.add(key);
+    return true;
+  });
+}
+
+let nextBatch = 0;
 
 // `host` is the canvas: `_wikilinkSource` is its picker search, `_editable` its mode.
 export function wikilinkInput(host) {
@@ -77,38 +94,52 @@ export function wikilinkInput(host) {
             if (tr.docChanged && pending.length) {
               next = pending.map((at) => ({ ...at, from: tr.mapping.map(at.from, 1), to: tr.mapping.map(at.to, -1) }));
             }
-            if (meta && meta.done != null) next = next.filter((at) => at.id !== meta.done);
+            if (meta && meta.done != null) next = next.filter((at) => at.batch !== meta.done);
             if (!live()) return next;
             const added = (meta && meta.add) || (pasting && tr.docChanged
-              ? changedRanges(tr).flatMap(([from, to]) => closedIn(state.doc, from, to)) : []);
+              ? capped(changedRanges(tr).flatMap(([from, to]) => closedIn(state.doc, from, to))) : []);
             const fresh = added.filter((at) => plain(state.doc, at) && !next.some((p) => p.from === at.from));
-            return fresh.length ? next.concat(fresh.map((at) => ({ ...at, id: nextId++ }))) : next;
+            if (!fresh.length) return next;
+            const batch = nextBatch++;
+            return next.concat(fresh.map((at) => ({ ...at, batch })));
           },
         },
         view: (view) => {
           const asked = new Set();
-          const settle = (id, row) => {
-            const at = wikilinkInputKey.getState(view.state).find((p) => p.id === id);
-            if (!at) return;
+          const answerFor = (query) => new Promise((resolve) => resolve(host._wikilinkSource(query)))
+            .then((list) => matchingRow(list, query), () => null);
+          const settle = (batch, rows) => {
             const { state } = view;
-            const tr = state.tr.setMeta(wikilinkInputKey, { done: id });
-            if (row && live() && plain(state.doc, at)) {
+            const links = wikilinkInputKey.getState(state)
+              .filter((at) => at.batch === batch && rows.get(keyOf(at.query)) && live() && plain(state.doc, at))
+              .sort((a, b) => b.from - a.from);
+            const tr = state.tr.setMeta(wikilinkInputKey, { done: batch });
+            if (links.length) closeHistory(tr);
+            else tr.setMeta("addToHistory", false);
+            for (const at of links) {
+              const row = rows.get(keyOf(at.query));
               const marks = state.doc.nodeAt(at.from).marks.concat(state.schema.marks.wikilink.create({ target: row.title, docId: row.id }));
-              closeHistory(tr).replaceWith(at.from, at.to, state.schema.text(row.title, marks));
-            } else {
-              tr.setMeta("addToHistory", false);
+              tr.replaceWith(at.from, at.to, state.schema.text(row.title, marks));
             }
             view.dispatch(tr);
           };
           const ask = () => {
+            const batches = new Map();
             for (const at of wikilinkInputKey.getState(view.state)) {
-              if (asked.has(at.id)) continue;
-              asked.add(at.id);
-              new Promise((resolve) => resolve(host._wikilinkSource(at.query)))
-                .then((list) => settle(at.id, matchingRow(list, at.query)), () => settle(at.id, null));
+              if (asked.has(at.batch)) continue;
+              if (!batches.has(at.batch)) batches.set(at.batch, new Map());
+              batches.get(at.batch).set(keyOf(at.query), at.query);
+            }
+            for (const [batch, titles] of batches) {
+              asked.add(batch);
+              const keys = [...titles.keys()];
+              Promise.all([...titles.values()].map(answerFor))
+                .then((rows) => settle(batch, new Map(rows.map((row, i) => [keys[i], row]))));
             }
           };
-          return { update: ask };
+          const pasted = () => { pasting = false; };
+          view.dom.addEventListener("paste", pasted);
+          return { update: ask, destroy: () => view.dom.removeEventListener("paste", pasted) };
         },
         props: {
           handleTextInput(view, from, to, text) {
@@ -123,9 +154,10 @@ export function wikilinkInput(host) {
             return true;
           },
           handleDOMEvents: {
+            // True only while the paste event is handled: the plugin view's own paste listener,
+            // added after ProseMirror's, lowers it again.
             paste: () => {
               pasting = true;
-              setTimeout(() => { pasting = false; });
               return false;
             },
           },

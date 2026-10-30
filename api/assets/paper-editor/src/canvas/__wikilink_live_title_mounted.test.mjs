@@ -442,6 +442,7 @@ await check("a deleted target ({ missing: true } from wikilinkResolve) is marked
   await tick(20);
   const gone = linkEl(canvas, "n-gone");
   assert.ok(gone.querySelector("[data-missing]"), gone.outerHTML);
+  assert.equal(canvas.querySelectorAll("span[data-wikilink]:has([data-missing])").length, 1, "the documented selector finds the link");
   assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note end.");
   assert.equal(!!linkEl(canvas, "n-plan").querySelector("[data-missing]"), false);
   canvas._linkPreview.showFor(gone);

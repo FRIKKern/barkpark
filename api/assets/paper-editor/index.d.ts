@@ -238,7 +238,7 @@ export interface LinkPreview {
   subtitle?: string;
   /** 1.9.0, a wikilink's: the document's type, beside the title. */
   badge?: string;
-  /** 1.17.0, a wikilink's: true says the target is gone. Open hides and the link's words carry `data-missing`. */
+  /** 1.17.0, a wikilink's: true says the target is gone. Open hides and the link's text spans carry `data-missing` (select the link with `span[data-wikilink]:has([data-missing])`). */
   missing?: boolean;
 }
 /** 1.17.0: what wikilinkResolve answers for a document id. A title paints un-aliased links; null keeps their words. */
