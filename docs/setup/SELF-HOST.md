@@ -10,7 +10,7 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 
 ## Set up with bp instance up
 
-`bp instance up` runs this guide from an empty resource group to the owner's first sign-in. With `bp` 1.26.13 or newer and `az login` as a user who may create app registrations, run one of these in an empty directory:
+`bp instance up` runs this guide from an empty resource group to the owner's first sign-in. With `bp` 1.26.15 or newer and `az login` as a user who may create app registrations, run one of these in an empty directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
@@ -20,11 +20,11 @@ bp instance up --azure --path containerapps --resource-group <resource group> \
   --owner <owner upn> --breakglass <breakglass email>
 ```
 
-On Path A, `--host` is a DNS label or your own host, as [step 2](#path-a-a-single-vm) says. On Path B, leave it out for the Container Apps address. The published image is the default. `--image <ref>` names another, and `--from-source <git ref>` builds one on the VM or with `az acr build`.
+On Path A, `--host` is a DNS label or your own host, as [step 2](#path-a-a-single-vm) says. On Path B, leave it out. The default is the newest release, pinned. `--image <ref>` names another, and `--from-source <git ref>` builds one on the VM or with `az acr build`.
 
-up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. After a failure the same command resumes from `.bp-instance-up.json`. On `CapacityNotAvailable` up deploys Postgres again as `Standard_B2s`.
+up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. After a failure the same command resumes from `.bp-instance-up.json`. On `CapacityNotAvailable` up deploys Postgres again as `Standard_B2s`. In a group recreated under an old name, up purges what the old instance left soft-deleted.
 
-The Entra app `Barkpark <org> (<host>)` and group `Barkpark <org> owners (<host>)` sit outside the resource group, and all else inside. `--org` defaults to `pensum`. up ends with the sign-in link. Sign in as the owner, create the [break-glass account](ENTRA.md#break-glass-account), then run `bp org auth-methods <org> sso --yes`.
+The Entra app and owners group sit outside the resource group, and all else inside. `--org` defaults to `pensum`. Sign in as the owner, create the [break-glass account](ENTRA.md#break-glass-account), then run `bp org auth-methods <org> sso --yes`.
 
 ## What up does
 

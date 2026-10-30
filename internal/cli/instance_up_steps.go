@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -35,7 +36,9 @@ func instanceUpProviders(st *instanceUpState) []string {
 }
 
 // stepUpPreflight checks the az sign-in on every run. On the first run it
-// also registers the resource providers and checks the VM size and quota.
+// also registers the resource providers, checks the VM size and quota, and
+// purges what an earlier instance in a group of the same name left in
+// soft-delete (instance_up_leftovers.go).
 func stepUpPreflight(u *instanceUp) error {
 	st := u.st
 	var acct struct {
@@ -61,9 +64,11 @@ func stepUpPreflight(u *instanceUp) error {
 		return err
 	}
 	if st.Path == instanceTargetVM {
-		return u.checkVMQuota()
+		if err := u.checkVMQuota(); err != nil {
+			return err
+		}
 	}
-	return nil
+	return u.purgeLeftovers()
 }
 
 // registerProviders registers the providers that are not registered and
@@ -121,30 +126,42 @@ func (u *instanceUp) registerProviders(want []string) error {
 func (u *instanceUp) checkVMQuota() error {
 	st := u.st
 	hint := fmt.Sprintf("Try --region %s --size %s, which small subscriptions can use, or ask for more quota in the portal under Quotas.", instanceUpVMRegion, instanceUpDefaultVM)
-	var skus []struct {
-		Name         string `json:"name"`
-		Family       string `json:"family"`
-		Capabilities []struct {
-			Name  string `json:"name"`
-			Value string `json:"value"`
-		} `json:"capabilities"`
-		Restrictions []struct {
-			ReasonCode string `json:"reasonCode"`
-		} `json:"restrictions"`
+	// The Resource SKUs API filters by region on the server, in about 3
+	// seconds. az vm list-skus filters the size on the client and takes a
+	// minute.
+	var skus struct {
+		Value []struct {
+			Name         string `json:"name"`
+			ResourceType string `json:"resourceType"`
+			Family       string `json:"family"`
+			Capabilities []struct {
+				Name  string `json:"name"`
+				Value string `json:"value"`
+			} `json:"capabilities"`
+			Restrictions []struct {
+				Type       string `json:"type"`
+				ReasonCode string `json:"reasonCode"`
+			} `json:"restrictions"`
+		} `json:"value"`
 	}
-	if err := u.az(&skus, "vm", "list-skus", "--location", st.Region, "--size", st.Size, "--resource-type", "virtualMachines", "--all"); err != nil {
+	skuURL := "https://management.azure.com/subscriptions/" + st.Subscription + "/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=" +
+		url.QueryEscape("location eq '"+st.Region+"'")
+	if err := u.az(&skus, "rest", "--method", "get", "--url", skuURL); err != nil {
 		return err
 	}
 	var family string
 	vcpus := 0
 	found := false
-	for _, s := range skus {
-		if !strings.EqualFold(s.Name, st.Size) {
+	for _, s := range skus.Value {
+		if s.ResourceType != "virtualMachines" || !strings.EqualFold(s.Name, st.Size) {
 			continue
 		}
 		found = true
-		if len(s.Restrictions) > 0 {
-			return fmt.Errorf("%s is not available to this subscription in %s (%s). %s", st.Size, st.Region, s.Restrictions[0].ReasonCode, hint)
+		// A zone restriction leaves the region open to a VM without a zone.
+		for _, r := range s.Restrictions {
+			if r.Type != "Zone" {
+				return fmt.Errorf("%s is not available to this subscription in %s (%s). %s", st.Size, st.Region, r.ReasonCode, hint)
+			}
 		}
 		family = s.Family
 		for _, c := range s.Capabilities {
@@ -530,7 +547,12 @@ func stepUpDeployACA(u *instanceUp) error {
 		image = st.Out.Image
 	}
 	if image == "" && !instanceUpBicepHasImageDefault() {
-		image = instanceUpLatestImage
+		if image, err = u.pinPublishedImage(); err != nil {
+			return err
+		}
+		if err := u.save(); err != nil {
+			return err
+		}
 	}
 	args := []string{"deployment", "group", "create", "-g", st.ResourceGroup, "-n", instanceUpDeployment,
 		"-p", filepath.Join(dir, "main.bicepparam")}
@@ -554,7 +576,7 @@ func stepUpDeployACA(u *instanceUp) error {
 		if sku != "" {
 			a = append(append([]string{}, args...), "-p", "postgresSku="+sku)
 		}
-		return u.az(nil, append(a, "--query", "properties.provisioningState")...)
+		return u.deployRetryingEntra(nil, append(a, "--query", "properties.provisioningState")...)
 	}
 	u.out.errf("        about 8 minutes")
 	err = deploy(st.PostgresSku)
@@ -591,6 +613,27 @@ func stepUpDeployACA(u *instanceUp) error {
 		u.out.errf("        Entra app %s and owners group %s from main.bicep", st.Out.AppID, st.Out.OwnersGroupID)
 	}
 	return nil
+}
+
+// instanceUpEntraLag matches the errors Graph and Resource Manager give while
+// a new managed identity or service principal has not reached every replica:
+// main.bicep makes the secret script's identity an owner of the Entra app in
+// the same deployment that creates the identity.
+var instanceUpEntraLag = regexp.MustCompile(`(?i)Failed to update one or more relationships|Please try again later|PrincipalNotFound|does not exist in the directory`)
+
+// deployRetryingEntra runs an az deployment and runs it again, up to three
+// times a minute apart, while it fails on a principal that Entra has not
+// replicated yet. A deployment is idempotent, so a rerun only adds what is
+// missing.
+func (u *instanceUp) deployRetryingEntra(v any, args ...string) error {
+	var err error
+	for try := 1; ; try++ {
+		if err = u.az(v, args...); err == nil || try > 3 || !instanceUpEntraLag.MatchString(cmdOutput(err)) {
+			return err
+		}
+		u.out.errf("        Entra has not replicated a new identity yet (try %d); deploying again in 60 s", try)
+		instanceUpSleep(60 * time.Second)
+	}
 }
 
 // instanceUpBicepHasImageDefault reports whether the embedded main.bicep gives
@@ -655,7 +698,7 @@ func stepUpEntra(u *instanceUp) error {
 		var outputs map[string]struct {
 			Value any `json:"value"`
 		}
-		if err := u.az(&outputs, "deployment", "group", "create", "-g", st.ResourceGroup, "-n", "barkpark-entra",
+		if err := u.deployRetryingEntra(&outputs, "deployment", "group", "create", "-g", st.ResourceGroup, "-n", "barkpark-entra",
 			"-f", filepath.Join(dir, "entra.bicep"), "-p", "host="+st.host(), "-p", "org="+st.Org,
 			"-p", "appName="+app, "-p", "ownersGroupName="+group, "-p", "ownerUpns="+string(owners), "-p", "addDeployer=false",
 			"--query", "properties.outputs"); err != nil {

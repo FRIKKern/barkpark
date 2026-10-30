@@ -61,8 +61,12 @@ func defaultUpReply(c instanceUpCmd) (string, error) {
 		return `{"id":"sub-1","name":"Test sub","tenantId":"tenant-1","user":{"name":"op@example.com"}}`, nil
 	case strings.HasPrefix(s, "az provider list"):
 		return allProvidersRegistered(), nil
-	case strings.HasPrefix(s, "az vm list-skus"):
-		return `[{"name":"Standard_D2als_v7","family":"standardDALSv7Family","capabilities":[{"name":"vCPUs","value":"2"}],"restrictions":[]}]`, nil
+	case strings.HasPrefix(s, "az rest --method get") && strings.Contains(s, "Microsoft.Compute/skus"):
+		return `{"value":[{"name":"Standard_D2als_v7","resourceType":"disks"},{"name":"Standard_D2als_v7","resourceType":"virtualMachines","family":"standardDALSv7Family","capabilities":[{"name":"vCPUs","value":"2"}],"restrictions":[{"type":"Zone","reasonCode":"NotAvailableForSubscription"}]}]}`, nil
+	case strings.HasPrefix(s, "az keyvault list-deleted"):
+		return "[]", nil
+	case strings.HasPrefix(s, "az rest --method get") && strings.Contains(s, "deletedItems"):
+		return `{"value":[]}`, nil
 	case strings.HasPrefix(s, "az vm list-usage"):
 		return `[{"currentValue":0,"limit":10,"name":{"value":"standardDALSv7Family"}},{"currentValue":2,"limit":10,"name":{"value":"cores"}}]`, nil
 	case strings.HasPrefix(s, "az group show"), strings.HasPrefix(s, "az vm show"), strings.HasPrefix(s, "az acr show"):
@@ -111,6 +115,7 @@ func stubInstanceUp(t *testing.T) *upFake {
 		return nil
 	}
 	stubInstanceProbes(t, allExtensions, nil)
+	stubGHCR(t, "0.2.33")
 	t.Cleanup(func() {
 		instanceUpRun, instanceUpGet, instanceUpSleep, instanceUpSelf, instanceUpConnect = oldRun, oldGet, oldSleep, oldSelf, oldConnect
 	})
