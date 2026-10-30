@@ -65,7 +65,15 @@ defmodule Barkpark.Accounts.UserNotifierTest do
     setup do
       original = Application.get_env(:barkpark, Barkpark.Mailer)
       Application.put_env(:barkpark, Barkpark.Mailer, adapter: DownRelayAdapter)
-      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Mailer, original) end)
+
+      # The failed send is recorded in the node-global `Mailer.last_send/0`,
+      # which `/status.json` folds into the overall status. Each test awaits
+      # the offload task, so the record is written before this runs.
+      on_exit(fn ->
+        Application.put_env(:barkpark, Barkpark.Mailer, original)
+        Barkpark.Mailer.reset_last_send()
+      end)
+
       :ok
     end
 

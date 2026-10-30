@@ -6,7 +6,14 @@ defmodule BarkparkWeb.StatusControllerTest do
 
   @dataset "production"
 
+  # The overall status folds in node-global state that other suites write:
+  # `Mailer.last_send/0` holds the last failed send of any earlier test. Every
+  # test here owns it, so "operational" means this test's inputs, not a
+  # neighbour's leftovers.
   setup do
+    Barkpark.Mailer.reset_last_send()
+    on_exit(&Barkpark.Mailer.reset_last_send/0)
+
     raw = "tok-admin-#{System.unique_integer([:positive])}"
     {:ok, _} = Auth.create_token(raw, "admin", @dataset, ["read", "write", "admin"])
     %{admin: raw}
@@ -262,13 +269,7 @@ defmodule BarkparkWeb.StatusControllerTest do
   describe "mail deliverability component" do
     setup do
       original = Application.get_env(:barkpark, Barkpark.Mailer)
-      Barkpark.Mailer.reset_last_send()
-
-      on_exit(fn ->
-        Application.put_env(:barkpark, Barkpark.Mailer, original)
-        Barkpark.Mailer.reset_last_send()
-      end)
-
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Mailer, original) end)
       :ok
     end
 

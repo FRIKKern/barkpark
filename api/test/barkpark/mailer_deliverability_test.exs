@@ -27,9 +27,17 @@ defmodule Barkpark.MailerDeliverabilityTest do
 
   alias Barkpark.Mailer
 
+  # `deliver_checked/1` also records the outcome in the node-global
+  # `Mailer.last_send/0`, which `/status.json` folds into the overall status.
+  # A failed send left behind turns the next suite's status page "degraded".
   setup do
     original = Application.get_env(:barkpark, Barkpark.Mailer)
-    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Mailer, original) end)
+
+    on_exit(fn ->
+      Application.put_env(:barkpark, Barkpark.Mailer, original)
+      Mailer.reset_last_send()
+    end)
+
     :ok
   end
 
