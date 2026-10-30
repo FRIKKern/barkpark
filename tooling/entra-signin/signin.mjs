@@ -302,8 +302,17 @@ async function main() {
         result.entra_error = "Entra asks the user to consent; grant admin consent for the app";
         outcome = "refused"; step(result.entra_error); await snap("consent"); break;
       }
-      // A plain "Next"/"Yes" interstitial.
-      if (await visible("#idSIButton9")) { step("continue"); await page.click("#idSIButton9"); continue; }
+      // A plain "Next"/"Yes" interstitial. Entra shows #idSIButton9 before the
+      // username or password field finishes its slide-in, so clicking it then
+      // submits an empty form. Wait, and click only if no field has appeared.
+      if (await visible("#idSIButton9")) {
+        await page.waitForTimeout(1000);
+        if (!(await visible("input[name=loginfmt], input[name=passwd], input[name=otc]"))) {
+          step("continue");
+          await page.click("#idSIButton9");
+        }
+        continue;
+      }
 
       await page.waitForTimeout(1500);
       if (Date.now() > deadline - 2000) break;
