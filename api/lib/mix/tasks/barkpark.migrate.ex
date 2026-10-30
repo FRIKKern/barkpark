@@ -21,7 +21,9 @@ defmodule Mix.Tasks.Barkpark.Migrate do
 
   The run happens inside `Barkpark.Release.with_statement_timeout_lifted/2`, so
   every migration connection starts with `statement_timeout = 0` instead of
-  prod's 30 s wall — the same lift `Barkpark.Release.migrate/0` applies. It
+  prod's 30 s wall — the same lift `Barkpark.Release.migrate/0` applies. The
+  same call sets the repo's `:timeout` to `:infinity`, so a migration's
+  `repo().checkout/1` is not cut off at DBConnection's 15 s default. It
   wraps the ecto.migrate call only: the config is loaded first (so the lift
   lands on the runtime config), and the repo's app env is restored when the
   run returns, before anything after it in an alias (`mix test`) starts the
