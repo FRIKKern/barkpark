@@ -2028,7 +2028,7 @@ USAGE
   bp instance up    --azure --path vm|containerapps --resource-group <rg>
                     --owner <upn> [--host <dns label or host>]
                     [--breakglass <email>] [--image <ref> | --from-source <ref>]
-                    [--region <r>] [--org <slug>] [--org-name <n>] [--name <n>]
+                    [--region <r>] [--org <slug>] [--org-name <n>]
                     [--env-file <f>] [--state <f>] [--studio-origin <o>]
                     [--size <vm size>] [--postgres-sku <sku>]
                     [--alert-email <e>] [--ssh-key <path>]
@@ -2087,9 +2087,8 @@ WHAT IT DOES
                Apps (main.bicep): checks az, providers and quota, writes and
                checks barkpark.env, deploys the published image or builds
                --from-source, waits for /readyz, registers the Entra app and
-               owners group (names carry --name, default the group), connects
-               bp and the organization (--org, default pensum), and prints the
-               sign-in link. .bp-instance-up.json records the finished steps
+               owners group, named after --org (default pensum) and the host,
+               connects bp and the organization, and prints the sign-in link. .bp-instance-up.json records the finished steps
                without secrets, so the same command again resumes. --host is
                a DNS label or your own host on a VM, and your own domain or
                nothing on Container Apps. See docs/setup/SELF-HOST.md.

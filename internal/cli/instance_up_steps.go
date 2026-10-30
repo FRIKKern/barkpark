@@ -26,7 +26,8 @@ func instanceUpProviders(st *instanceUpState) []string {
 		return []string{"Microsoft.Compute", "Microsoft.Network"}
 	}
 	p := []string{"Microsoft.App", "Microsoft.DBforPostgreSQL", "Microsoft.KeyVault", "Microsoft.Network",
-		"Microsoft.OperationalInsights", "Microsoft.ManagedIdentity", "Microsoft.Storage", "Microsoft.Insights"}
+		"Microsoft.OperationalInsights", "Microsoft.ManagedIdentity", "Microsoft.Storage", "Microsoft.Insights",
+		"Microsoft.ContainerInstance"}
 	if st.FromSource != "" {
 		p = append(p, "Microsoft.ContainerRegistry")
 	}
@@ -56,10 +57,8 @@ func stepUpPreflight(u *instanceUp) error {
 	if _, done := st.Done["preflight"]; done {
 		return nil
 	}
-	for _, ns := range instanceUpProviders(st) {
-		if err := u.registerProvider(ns); err != nil {
-			return err
-		}
+	if err := u.registerProviders(instanceUpProviders(st)); err != nil {
+		return err
 	}
 	if st.Path == instanceTargetVM {
 		return u.checkVMQuota()
@@ -67,33 +66,54 @@ func stepUpPreflight(u *instanceUp) error {
 	return nil
 }
 
-func (u *instanceUp) registerProvider(ns string) error {
-	state := func() (string, error) {
-		var s string
-		err := u.az(&s, "provider", "show", "-n", ns, "--query", "registrationState")
-		return s, err
+// registerProviders registers the providers that are not registered and
+// waits until all are. One az call reads every state.
+func (u *instanceUp) registerProviders(want []string) error {
+	states := func() (map[string]string, error) {
+		var rows []struct {
+			N string `json:"n"`
+			S string `json:"s"`
+		}
+		if err := u.az(&rows, "provider", "list", "--query", "[].{n:namespace,s:registrationState}"); err != nil {
+			return nil, err
+		}
+		m := map[string]string{}
+		for _, r := range rows {
+			m[strings.ToLower(r.N)] = r.S
+		}
+		return m, nil
 	}
-	s, err := state()
+	missing := func(m map[string]string) []string {
+		var out []string
+		for _, ns := range want {
+			if m[strings.ToLower(ns)] != "Registered" {
+				out = append(out, ns)
+			}
+		}
+		return out
+	}
+	m, err := states()
 	if err != nil {
 		return err
 	}
-	if s == "Registered" {
-		return nil
-	}
-	u.out.errf("        registering %s", ns)
-	if err := u.az(nil, "provider", "register", "--namespace", ns); err != nil {
-		return err
-	}
-	for i := 0; i < 90; i++ {
-		if s, err = state(); err != nil {
+	left := missing(m)
+	for _, ns := range left {
+		u.out.errf("        registering %s", ns)
+		if err := u.az(nil, "provider", "register", "--namespace", ns); err != nil {
 			return err
 		}
-		if s == "Registered" {
-			return nil
-		}
-		instanceUpSleep(10 * time.Second)
 	}
-	return fmt.Errorf("%s is still %s after 15 minutes. Run the command again later", ns, s)
+	for i := 0; len(left) > 0 && i < 90; i++ {
+		instanceUpSleep(10 * time.Second)
+		if m, err = states(); err != nil {
+			return err
+		}
+		left = missing(m)
+	}
+	if len(left) > 0 {
+		return fmt.Errorf("%s not registered after 15 minutes. Run the command again later", strings.Join(left, ", "))
+	}
+	return nil
 }
 
 // checkVMQuota checks that the region offers the size to this subscription
@@ -218,10 +238,12 @@ func stepUpInit(u *instanceUp) error {
 // stepUpCheck runs `bp instance check` on the settings file, without the
 // server probes.
 func stepUpCheck(u *instanceUp) error {
-	return u.checkEnv(map[string]bool{"database": true, "media": true, "url": true})
+	return u.checkEnv(map[string]bool{"database": true, "media": true, "url": true}, false)
 }
 
-func (u *instanceUp) checkEnv(skip map[string]bool) error {
+// checkEnv runs the check; showNotes prints the notes, which before the
+// deploy only say what deploy.sh or main.bicep will set.
+func (u *instanceUp) checkEnv(skip map[string]bool, showNotes bool) error {
 	st := u.st
 	f, err := os.Open(st.EnvFile)
 	if err != nil {
@@ -241,7 +263,9 @@ func (u *instanceUp) checkEnv(skip map[string]bool) error {
 		left = append(left, p.String())
 	}
 	for _, n := range notes {
-		u.out.errf("        note: %s", n.Problem)
+		if showNotes {
+			u.out.errf("        note: %s", n.Problem)
+		}
 	}
 	if len(left) > 0 {
 		return fmt.Errorf("bp instance check found %d problems in %s:\n%s", len(left), st.EnvFile, strings.Join(left, "\n"))
@@ -385,6 +409,9 @@ func stepUpBuildImage(u *instanceUp) error {
 		u.out.errf("        no --from-source; the deploy uses the published image")
 		return nil
 	}
+	if instanceUpHasAzureFile("acr-build.sh") {
+		return u.buildImageWithScript()
+	}
 	acr := st.acrName()
 	if err := u.az(nil, "acr", "show", "-g", st.ResourceGroup, "-n", acr, "--query", "name"); err != nil {
 		if !notFound(err) {
@@ -405,6 +432,53 @@ func stepUpBuildImage(u *instanceUp) error {
 	return nil
 }
 
+// buildImageWithScript deploys acr.bicep and runs acr-build.sh from the
+// embedded deploy/azure. The script prints the image reference last.
+func (u *instanceUp) buildImageWithScript() error {
+	st := u.st
+	dir, err := u.writeAzureFiles()
+	if err != nil {
+		return err
+	}
+	var outputs map[string]struct {
+		Value any `json:"value"`
+	}
+	if err := u.az(&outputs, "deployment", "group", "create", "-g", st.ResourceGroup, "-n", "acr",
+		"-f", filepath.Join(dir, "acr.bicep"), "--query", "properties.outputs"); err != nil {
+		return err
+	}
+	acr, _ := outputs["acrName"].Value.(string)
+	if acr == "" {
+		return fmt.Errorf("acr.bicep gave no acrName")
+	}
+	u.out.errf("        registry %s; acr-build.sh output follows", acr)
+	stdout, err := u.run(instanceUpCmd{name: "bash", args: []string{filepath.Join(dir, "acr-build.sh"), acr, st.FromSource}, streamErr: true})
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	image := strings.TrimSpace(lines[len(lines)-1])
+	if !strings.Contains(image, ".azurecr.io/") {
+		return fmt.Errorf("acr-build.sh printed no image reference")
+	}
+	st.Out.ACR, st.Out.Image = acr, image
+	u.out.errf("        built %s", image)
+	return nil
+}
+
+// instanceUpHasAzureFile reports whether the embedded deploy/azure has name.
+func instanceUpHasAzureFile(name string) bool {
+	_, err := fs.ReadFile(instanceUpAzureFS, "azure/"+name)
+	return err == nil
+}
+
+// instanceUpBicepHasParam reports whether the embedded main.bicep declares
+// the parameter, so up uses a lane's feature only when the template has it.
+func instanceUpBicepHasParam(name string) bool {
+	b, err := fs.ReadFile(instanceUpAzureFS, "azure/main.bicep")
+	return err == nil && regexp.MustCompile(`(?m)^param `+regexp.QuoteMeta(name)+`\s`).Match(b)
+}
+
 // writeAzureFiles writes the embedded deploy/azure next to the settings file,
 // with main.bicepparam reading that settings file.
 func (u *instanceUp) writeAzureFiles() (string, error) {
@@ -417,11 +491,11 @@ func (u *instanceUp) writeAzureFiles() (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
-	err = fs.WalkDir(assets.Azure, "azure", func(p string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(instanceUpAzureFS, "azure", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return err
 		}
-		b, err := assets.Azure.ReadFile(p)
+		b, err := fs.ReadFile(instanceUpAzureFS, p)
 		if err != nil {
 			return err
 		}
@@ -434,7 +508,11 @@ func (u *instanceUp) writeAzureFiles() (string, error) {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}
-		return os.WriteFile(target, b, 0o600)
+		mode := os.FileMode(0o600)
+		if strings.HasSuffix(rel, ".sh") {
+			mode = 0o700
+		}
+		return os.WriteFile(target, b, mode)
 	})
 	return dir, err
 }
@@ -464,6 +542,12 @@ func stepUpDeployACA(u *instanceUp) error {
 	}
 	if st.AlertEmail != "" {
 		args = append(args, "-p", "alertEmail="+st.AlertEmail)
+	}
+	entra := instanceUpBicepHasParam("entraEnabled")
+	if entra {
+		owners, _ := json.Marshal([]string{st.Owner})
+		args = append(args, "-p", "entraEnabled=true", "-p", "entraOrg="+st.Org, "-p", "entraOrgName="+st.OrgName,
+			"-p", "entraOwnerUpns="+string(owners), "-p", "entraAddDeployer=false")
 	}
 	deploy := func(sku string) error {
 		a := args
@@ -497,13 +581,22 @@ func stepUpDeployACA(u *instanceUp) error {
 	}
 	st.Out.Host = host
 	u.out.errf("        Container Apps host %s", host)
+	if entra {
+		str := func(k string) string { v, _ := outputs[k].Value.(string); return v }
+		if str("entraClientId") == "" {
+			return fmt.Errorf("main.bicep ran with entraEnabled=true but gave no entraClientId")
+		}
+		st.Tenant, st.Out.AppID, st.Out.OwnersGroupID = str("entraTenantId"), str("entraClientId"), str("entraOwnersGroupId")
+		st.Out.EntraByBicep = true
+		u.out.errf("        Entra app %s and owners group %s from main.bicep", st.Out.AppID, st.Out.OwnersGroupID)
+	}
 	return nil
 }
 
 // instanceUpBicepHasImageDefault reports whether the embedded main.bicep gives
 // image a default, so a deploy without --image takes the template's version.
 func instanceUpBicepHasImageDefault() bool {
-	b, err := assets.Azure.ReadFile("azure/main.bicep")
+	b, err := fs.ReadFile(instanceUpAzureFS, "azure/main.bicep")
 	return err == nil && regexp.MustCompile(`(?m)^param image string\s*=`).Match(b)
 }
 
@@ -528,10 +621,11 @@ func stepUpReady(u *instanceUp) error {
 	return fmt.Errorf("%s did not answer 200 within 20 minutes; last: %s", url, last)
 }
 
-// entraNames are the app and group names. They carry the instance name, so
-// two instances in one tenant never share an app.
+// entraNames are the app and group names, the defaults of
+// deploy/azure/entra.bicep. They carry the host, so two instances in one
+// tenant never share an app.
 func (st *instanceUpState) entraNames() (app, group string) {
-	return "Barkpark " + st.Name, "Barkpark " + st.Name + " owners"
+	return "Barkpark " + st.Org + " (" + st.host() + ")", "Barkpark " + st.Org + " owners (" + st.host() + ")"
 }
 
 func (st *instanceUpState) secretFile() string {
@@ -545,6 +639,37 @@ var instanceUpEntraLine = regexp.MustCompile(`(?m)^(Tenant id|Client id|Owners g
 // reads.
 func stepUpEntra(u *instanceUp) error {
 	st := u.st
+	if st.Out.EntraByBicep {
+		u.out.errf("        main.bicep made the app %s; the server connects %s at its first boot", st.Out.AppID, st.Org)
+		return nil
+	}
+	app, group := st.entraNames()
+	script := []string{"--host", st.host(), "--org", st.Org, "--secret-file", st.secretFile(), "--add-owner", st.Owner,
+		"--org-name", st.OrgName, "--owners-group", group}
+	if instanceUpHasAzureFile("entra.bicep") {
+		dir, err := u.writeAzureFiles()
+		if err != nil {
+			return err
+		}
+		owners, _ := json.Marshal([]string{st.Owner})
+		var outputs map[string]struct {
+			Value any `json:"value"`
+		}
+		if err := u.az(&outputs, "deployment", "group", "create", "-g", st.ResourceGroup, "-n", "barkpark-entra",
+			"-f", filepath.Join(dir, "entra.bicep"), "-p", "host="+st.host(), "-p", "org="+st.Org,
+			"-p", "appName="+app, "-p", "ownersGroupName="+group, "-p", "ownerUpns="+string(owners), "-p", "addDeployer=false",
+			"--query", "properties.outputs"); err != nil {
+			return err
+		}
+		id, _ := outputs["clientId"].Value.(string)
+		if id == "" {
+			return fmt.Errorf("entra.bicep gave no clientId")
+		}
+		u.out.errf("        entra.bicep made the app %s; entra-app-register.sh adds the client secret", id)
+		script = append(script, "--app-id", id)
+	} else {
+		script = append(script, "--name", app)
+	}
 	tmp, err := os.CreateTemp("", "entra-app-register-*.sh")
 	if err != nil {
 		return err
@@ -555,10 +680,7 @@ func stepUpEntra(u *instanceUp) error {
 		return err
 	}
 	tmp.Close()
-	app, group := st.entraNames()
-	stdout, err := u.run(instanceUpCmd{name: "bash", args: []string{tmp.Name(), "--host", st.host(), "--org", st.Org,
-		"--secret-file", st.secretFile(), "--add-owner", st.Owner, "--org-name", st.OrgName,
-		"--name", app, "--owners-group", group}, stream: true})
+	stdout, err := u.run(instanceUpCmd{name: "bash", args: append([]string{tmp.Name()}, script...), streamErr: true})
 	if err != nil {
 		return err
 	}
@@ -632,6 +754,9 @@ func stepUpConnect(u *instanceUp) error {
 	if err := instanceUpConnect(u.out, u.g, "https://"+st.host(), token); err != nil {
 		return err
 	}
+	if st.Out.EntraByBicep {
+		return nil
+	}
 	if _, err := u.bp(token, nil, "org", "create", st.Org, st.OrgName, "--yes"); err != nil && !alreadyExists(err) {
 		return err
 	}
@@ -667,5 +792,9 @@ func stepUpConnect(u *instanceUp) error {
 
 // stepUpVerify runs bp instance check with the TLS probe of PHX_HOST.
 func stepUpVerify(u *instanceUp) error {
-	return u.checkEnv(map[string]bool{"database": true, "media": true})
+	return u.checkEnv(map[string]bool{"database": true, "media": true}, true)
 }
+
+// instanceUpAzureFS is the embedded deploy/azure, under azure/. Tests
+// replace it to stand for another version of the templates.
+var instanceUpAzureFS fs.FS = assets.Azure

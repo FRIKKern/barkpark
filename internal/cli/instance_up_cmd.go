@@ -19,7 +19,7 @@ package cli
 // creates a second VM or deployment. The state file holds no secret: the
 // secrets stay in the settings file and the Entra secret file, both mode 600.
 // Every az call names the given resource group, apart from the Entra app and
-// group, which carry the instance name.
+// owners group, whose names carry the org and the host.
 //
 // The step functions in instance_up_steps.go call out through instanceUpRun,
 // which tests replace to stub az, ssh and bp.
@@ -61,7 +61,6 @@ type instanceUpState struct {
 	Format        int               `json:"format"`
 	Path          string            `json:"path"`
 	ResourceGroup string            `json:"resource_group"`
-	Name          string            `json:"name"`
 	Region        string            `json:"region"`
 	HostArg       string            `json:"host_arg,omitempty"`
 	Owner         string            `json:"owner"`
@@ -91,17 +90,22 @@ type instanceUpOutputs struct {
 	AppID         string `json:"app_id,omitempty"`
 	OwnersGroupID string `json:"owners_group_id,omitempty"`
 	SecretExpires string `json:"secret_expires,omitempty"`
+	// EntraByBicep is true when main.bicep made the Entra app and the
+	// server connects the organization at its first boot.
+	EntraByBicep bool `json:"entra_by_bicep,omitempty"`
 }
 
 // instanceUpCmd is one external command. env adds KEY=VALUE pairs, the only
 // way a secret reaches a child; argv never carries one. stdin feeds the
-// child. stream copies the child's output to the user's stderr as it runs.
+// child. stream copies the child's output to the user's stderr as it runs;
+// streamErr copies only its stderr, for a child whose stdout bp reads.
 type instanceUpCmd struct {
-	name   string
-	args   []string
-	env    []string
-	stdin  []byte
-	stream bool
+	name      string
+	args      []string
+	env       []string
+	stdin     []byte
+	stream    bool
+	streamErr bool
 }
 
 func (c instanceUpCmd) String() string { return c.name + " " + strings.Join(c.args, " ") }
@@ -117,6 +121,8 @@ var instanceUpRun = func(ctx context.Context, log io.Writer, c instanceUpCmd) (s
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if c.stream {
 		cmd.Stdout = io.MultiWriter(&stdout, log)
+	}
+	if c.stream || c.streamErr {
 		cmd.Stderr = io.MultiWriter(&stderr, log)
 	}
 	if err := cmd.Run(); err != nil {
@@ -179,9 +185,13 @@ var instanceUpSleep = time.Sleep
 var instanceUpSelf = os.Executable
 
 // instanceUpConnect saves the instance as bp's active server, as
-// `bp setup --target connect` does. Tests replace it.
+// `bp setup --target connect` does. Its report goes to stderr, so stdout
+// keeps only up's own result. Tests replace it.
 var instanceUpConnect = func(out *writer, g globals, server, token string) error {
-	if code := runSetup(out, g, []string{"--target", "connect", "--server", server, "--token", token}); code != exitOK {
+	w := newWriter(out.stderr, out.stderr)
+	g.output, g.outputSet = "table", false
+	w.applyGlobals(g)
+	if code := runSetup(w, g, []string{"--target", "connect", "--server", server, "--token", token}); code != exitOK {
 		return fmt.Errorf("bp setup --target connect --server %s exited %d", server, code)
 	}
 	return nil
@@ -206,7 +216,7 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 	const usage = "bp instance up --azure --path vm|containerapps --resource-group <rg> --owner <upn> [--host <dns label or host>] [--breakglass <email>] [--image <ref> | --from-source <git ref>] [--region <r>] [--org <slug>] [--state <file>]"
 	a, err := parseHzArgs(args, []string{
 		"path", "resource-group", "host", "owner", "breakglass", "image", "from-source", "region",
-		"org", "org-name", "name", "env-file", "state", "studio-origin", "size", "postgres-sku",
+		"org", "org-name", "env-file", "state", "studio-origin", "size", "postgres-sku",
 		"alert-email", "ssh-key",
 	}, []string{"azure"}, usage)
 	if err != nil {
@@ -310,7 +320,7 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 		identity bool
 	}{
 		{&st.Path, "path", true}, {&st.ResourceGroup, "resource-group", true}, {&st.HostArg, "host", true},
-		{&st.Org, "org", true}, {&st.Name, "name", true}, {&st.Region, "region", true},
+		{&st.Org, "org", true}, {&st.Region, "region", true},
 		{&st.Owner, "owner", false}, {&st.Breakglass, "breakglass", false}, {&st.Image, "image", false},
 		{&st.FromSource, "from-source", false}, {&st.OrgName, "org-name", false}, {&st.EnvFile, "env-file", true},
 		{&st.StudioOrigin, "studio-origin", false}, {&st.Size, "size", false}, {&st.PostgresSku, "postgres-sku", false},
@@ -351,9 +361,6 @@ func (st *instanceUpState) merge(a *hzArgs) error {
 		if st.Path == instanceTargetContainerApps {
 			st.Region = instanceUpACARegion
 		}
-	}
-	if st.Name == "" {
-		st.Name = st.ResourceGroup
 	}
 	if st.Org == "" {
 		st.Org = "pensum"

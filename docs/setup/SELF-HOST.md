@@ -24,7 +24,7 @@ On Path A, `--host` is a DNS label or your own host, as [step 2](#path-a-a-singl
 
 up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. After a failure the same command resumes from `.bp-instance-up.json`. On `CapacityNotAvailable` up deploys Postgres again as `Standard_B2s`.
 
-The Entra app is `Barkpark <name>` with the group `Barkpark <name> owners`, and `--name` defaults to the resource group. All else stays in the group. `--org` defaults to `pensum`. up ends with the sign-in link. Sign in as the owner, create the [break-glass account](ENTRA.md#break-glass-account), then run `bp org auth-methods <org> sso --yes`.
+The Entra app `Barkpark <org> (<host>)` and group `Barkpark <org> owners (<host>)` sit outside the resource group, and all else inside. `--org` defaults to `pensum`. up ends with the sign-in link. Sign in as the owner, create the [break-glass account](ENTRA.md#break-glass-account), then run `bp org auth-methods <org> sso --yes`.
 
 ## What up does
 

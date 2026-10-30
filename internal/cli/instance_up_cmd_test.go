@@ -59,8 +59,8 @@ func defaultUpReply(c instanceUpCmd) (string, error) {
 	switch {
 	case strings.HasPrefix(s, "az account show"):
 		return `{"id":"sub-1","name":"Test sub","tenantId":"tenant-1","user":{"name":"op@example.com"}}`, nil
-	case strings.HasPrefix(s, "az provider show"):
-		return `"Registered"`, nil
+	case strings.HasPrefix(s, "az provider list"):
+		return allProvidersRegistered(), nil
 	case strings.HasPrefix(s, "az vm list-skus"):
 		return `[{"name":"Standard_D2als_v7","family":"standardDALSv7Family","capabilities":[{"name":"vCPUs","value":"2"}],"restrictions":[]}]`, nil
 	case strings.HasPrefix(s, "az vm list-usage"):
@@ -175,7 +175,7 @@ func TestInstanceUpVMRunsEveryStepThenResumesWithNone(t *testing.T) {
 		}
 	}
 	entra := f.find("--owners-group")
-	for _, want := range []string{"--host " + host, "--org pensum", "--add-owner owner@example.com", "--name Barkpark rg-test", "--owners-group Barkpark rg-test owners"} {
+	for _, want := range []string{"--host " + host, "--org pensum", "--add-owner owner@example.com", "--name Barkpark pensum (" + host + ")", "--owners-group Barkpark pensum owners (" + host + ")"} {
 		if !strings.Contains(entra.String(), want) {
 			t.Errorf("entra call lacks %q: %s", want, entra)
 		}
@@ -403,5 +403,35 @@ func TestShQuote(t *testing.T) {
 		if got := shQuote(in); got != want {
 			t.Errorf("shQuote(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func allProvidersRegistered() string {
+	var rows []string
+	for _, p := range [][]string{instanceUpProviders(&instanceUpState{Path: "vm"}), instanceUpProviders(&instanceUpState{Path: "containerapps", FromSource: "x"})} {
+		for _, ns := range p {
+			rows = append(rows, `{"n":"`+ns+`","s":"Registered"}`)
+		}
+	}
+	return "[" + strings.Join(rows, ",") + "]"
+}
+
+func TestInstanceUpRegistersMissingProviders(t *testing.T) {
+	f := stubInstanceUp(t)
+	listed := 0
+	f.reply = func(c instanceUpCmd) (string, error) {
+		if strings.HasPrefix(c.String(), "az provider list") {
+			listed++
+			if listed == 1 {
+				return `[{"n":"Microsoft.Compute","s":"NotRegistered"},{"n":"Microsoft.Network","s":"Registered"}]`, nil
+			}
+		}
+		return defaultUpReply(c)
+	}
+	if _, stderr, code := runUp(t, vmArgs()...); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if f.has("az provider register --namespace Microsoft.Compute") != 1 || f.has("az provider register --namespace Microsoft.Network") != 0 || listed != 2 {
+		t.Errorf("registered wrong providers (listed %d):\n%s", listed, f.dump())
 	}
 }
