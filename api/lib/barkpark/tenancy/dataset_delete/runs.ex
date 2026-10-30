@@ -16,9 +16,12 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   dataset whole. The next DELETE starts it again.
 
   Node-local ETS, one row per `{project_id, slug}`:
-  `{key, {:running, pid} | {:done, result}, dataset_id, at}`. A finished row
-  is dropped when it is read, when the name now holds another dataset, or an
-  hour after it finished.
+  `{key, {:running, pid} | {:done, result}, dataset_id, at}`. A run is bound to
+  the dataset it started on: a finished row answers the next DELETE of the
+  name with its own receipt, even when the name already holds a new dataset,
+  and a dead run restarts only on the dataset it started on. A repeat DELETE
+  never deletes a dataset its run did not start on. A finished row is dropped
+  when it is read, or an hour after it finished.
   """
   use GenServer
 
@@ -51,20 +54,16 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
     current = dataset && dataset.id
 
     case :ets.lookup(@table, key) do
-      [{^key, {:done, result}, id, _at} = row] when current in [nil, id] ->
+      [{^key, {:done, result}, _id, _at} = row] ->
         if take(row), do: result, else: delete(project_id, slug, dataset, opts, wait_ms)
 
-      [{^key, {:running, pid}, _id, _at} = row] ->
+      [{^key, {:running, pid}, id, _at} = row] ->
         cond do
           Process.alive?(pid) -> wait(key, now() + wait_ms)
-          take(row) -> restart(key, dataset, opts, wait_ms)
-          true -> delete(project_id, slug, dataset, opts, wait_ms)
+          not take(row) -> delete(project_id, slug, dataset, opts, wait_ms)
+          current == id -> restart(key, dataset, opts, wait_ms)
+          true -> {:error, {:delete_failed, :interrupted}}
         end
-
-      [row] ->
-        if take(row),
-          do: restart(key, dataset, opts, wait_ms),
-          else: delete(project_id, slug, dataset, opts, wait_ms)
 
       [] ->
         restart(key, dataset, opts, wait_ms)

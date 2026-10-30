@@ -8,6 +8,7 @@ defmodule BarkparkWeb.DatasetControllerTest do
   alias Barkpark.{Auth, Repo, Tenancy}
   alias Barkpark.Audit.Event
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Content.Document
   alias Barkpark.Tenancy.Dataset
   alias Barkpark.Tenancy.DatasetDelete.Runs
 
@@ -258,7 +259,7 @@ defmodule BarkparkWeb.DatasetControllerTest do
       end
     end
 
-    test "another caller's DELETE reads the same run, and an unread receipt never answers for a recreated dataset",
+    test "another caller's DELETE reads the same run, and a poll after a recreate answers the old run and keeps the new dataset",
          %{ws: ws, project: project, tokens: tokens} do
       key = {project.id, "j10-7"}
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
@@ -269,14 +270,28 @@ defmodule BarkparkWeb.DatasetControllerTest do
                json_response(delete_dataset(tokens.admin, ws, project, "j10-7"), 200)
 
       for t <- ~w(post page), do: {:ok, _} = create_document_in!(ws, project, t, %{}, "j10-7")
+      old = Tenancy.get_dataset(project, "j10-7")
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
       assert json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
       until_done(key)
 
       {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-7")
+      recreated = Tenancy.get_dataset(project, "j10-7")
+      assert recreated.id != old.id
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 5_000)
 
-      assert %{"deleted" => true, "documents" => 1} =
+      assert %{"deleted" => true, "documents" => 2, "dataset" => %{"id" => old_id}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+
+      assert old_id == old.id
+      assert Tenancy.get_dataset(project, "j10-7").id == recreated.id
+
+      assert Repo.aggregate(from(d in Document, where: d.dataset_id == ^recreated.id), :count) ==
+               1
+
+      new_id = recreated.id
+
+      assert %{"documents" => 1, "dataset" => %{"id" => ^new_id}} =
                json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
 
       assert :ets.lookup(Runs, key) == []

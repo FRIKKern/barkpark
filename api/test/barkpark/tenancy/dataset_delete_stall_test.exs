@@ -13,7 +13,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
   import Phoenix.ConnTest
   import Plug.Conn, only: [put_req_header: 3]
 
-  alias Barkpark.{Auth, Content, Repo, Tenancy}
+  alias Barkpark.{Audit, Auth, Content, Repo, Tenancy}
   alias Barkpark.Content.Document
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias Barkpark.Tenancy.Dataset
@@ -80,15 +80,28 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     assert_receive {:started, :running}, 30_000
   end
 
-  defp write_until_done(project, opts, samples \\ []) do
+  defp chain_held?(ws) do
+    Repo.transaction(fn ->
+      Repo.query!("SET LOCAL lock_timeout = '50ms'")
+      Audit.lock_chain!(ws.id)
+    end)
+
+    false
+  rescue
+    e in Postgrex.Error ->
+      if e.postgres.code == :lock_not_available, do: true, else: reraise(e, __STACKTRACE__)
+  end
+
+  defp write_until_done(ws, project, opts, held \\ [], samples \\ []) do
+    held = [chain_held?(ws) | held]
     started = System.monotonic_time(:millisecond)
     {:ok, _} = Content.create_document("post", %{"title" => "w"}, "bystander", opts)
     samples = [System.monotonic_time(:millisecond) - started | samples]
     Process.sleep(20)
 
     case run_delete(project, 0) do
-      :running -> write_until_done(project, opts, samples)
-      result -> {result, samples}
+      :running -> write_until_done(ws, project, opts, held, samples)
+      result -> {result, held, samples}
     end
   end
 
@@ -101,24 +114,26 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
   end
 
   test "a big delete finishes off the request and never stalls writes to another dataset",
-       %{project: project, opts: opts} do
+       %{ws: ws, project: project, opts: opts} do
     seed("doomed", @documents, opts)
     seed("bystander", 1, opts)
 
     started = System.monotonic_time(:millisecond)
     start_run(project)
-    {result, samples} = write_until_done(project, opts)
+    {result, held, samples} = write_until_done(ws, project, opts)
     took = System.monotonic_time(:millisecond) - started
+    held = Enum.count(held, & &1)
 
     IO.puts(
       "delete #{@documents} docs: #{took} ms; #{length(samples)} bystander writes, " <>
-        "p95 #{p95(samples)} ms, max #{Enum.max(samples)} ms"
+        "p95 #{p95(samples)} ms, max #{Enum.max(samples)} ms; audit chain held at " <>
+        "#{held} of #{length(samples)} probes"
     )
 
     assert {:ok, %{documents: @documents}} = result
     assert Tenancy.get_dataset(project, "doomed") == nil
     assert length(samples) >= 5
-    assert p95(samples) < 200
+    assert held / length(samples) < 0.25
   end
 
   defp edit_until_stopped(opts, parent, edits \\ 0) do
@@ -181,7 +196,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
       :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
 
       conn =
-        build_conn()
+        BarkparkWeb.ConnCase.scoped_conn()
         |> put_req_header("authorization", "Bearer #{raw}")
         |> delete("/w/#{ws.slug}/p/#{project.slug}/v1/datasets/doomed")
 
