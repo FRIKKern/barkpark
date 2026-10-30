@@ -140,6 +140,7 @@ defmodule Barkpark.Audit do
   # order, so a row's `occurred_at` can be earlier than the row before it in the
   # chain. The chain orders by `id`; nothing reads `occurred_at` as an order.
   @deferred_key :barkpark_audit_deferred
+  @append_chunk 1_000
   @flushed_key :barkpark_audit_flushed
 
   @doc """
@@ -227,8 +228,24 @@ defmodule Barkpark.Audit do
   end
 
   defp append_batch!(rows) do
-    rows
-    |> Enum.map(& &1.workspace_id)
+    prepared =
+      Enum.map(rows, fn fields ->
+        entry =
+          fields
+          |> Map.merge(%{prev_hash: nil, hash: "pending"})
+          |> Event.insert_changeset()
+          |> Ecto.Changeset.apply_action!(:insert)
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id])
+
+        {fields.workspace_id, Chain.canonical(fields), entry}
+      end)
+
+    # Only the chaining needs the lock: the changesets and canonical bytes
+    # above are built before it, so a big batch holds the lock for the hashing
+    # and the insert, not for its validation.
+    prepared
+    |> Enum.map(&elem(&1, 0))
     |> Enum.uniq()
     |> Enum.map(&lock_key/1)
     |> Enum.uniq()
@@ -236,27 +253,21 @@ defmodule Barkpark.Audit do
     |> Enum.each(&advisory_lock/1)
 
     {entries, _tails} =
-      Enum.map_reduce(rows, %{}, fn fields, tails ->
-        ws = fields.workspace_id
+      Enum.map_reduce(prepared, %{}, fn {ws, canonical, entry}, tails ->
         prev = Map.get_lazy(tails, ws, fn -> last_hash(ws) end)
-        hash = Chain.hash(fields, prev)
-
-        entry =
-          fields
-          |> Map.merge(%{prev_hash: prev, hash: hash})
-          |> Event.insert_changeset()
-          |> Ecto.Changeset.apply_action!(:insert)
-          |> Map.from_struct()
-          |> Map.drop([:__meta__, :id])
-
-        {entry, Map.put(tails, ws, hash)}
+        hash = Chain.link(canonical, prev)
+        {%{entry | prev_hash: prev, hash: hash}, Map.put(tails, ws, hash)}
       end)
 
-    # One multi-row INSERT: Postgres takes `nextval` for each VALUES row in
-    # order, so ids ascend in buffer order and the chain reads back in the
-    # order it was hashed.
-    {_n, events} = Repo.insert_all(Event, entries, returning: true)
-    Enum.sort_by(events, & &1.id)
+    # Multi-row INSERTs in buffer order: Postgres takes `nextval` for each
+    # VALUES row in order, so ids ascend in buffer order and the chain reads
+    # back in the order it was hashed. Chunked because one statement carries at
+    # most 65,535 parameters (11 per row), and a dataset delete buffers a row
+    # per document.
+    entries
+    |> Enum.chunk_every(@append_chunk)
+    |> Enum.flat_map(fn chunk -> elem(Repo.insert_all(Event, chunk, returning: true), 1) end)
+    |> Enum.sort_by(& &1.id)
   end
 
   @doc """

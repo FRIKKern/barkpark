@@ -57,7 +57,13 @@ defmodule Barkpark.Audit.Chain do
   def hash(fields, prev_hash) do
     prev = prev_hash || @genesis
 
-    :crypto.hash(:sha256, [prev, "\n", canonical(fields)])
+    link(canonical(fields), prev)
+  end
+
+  @doc "`hash/2` for a row whose `canonical/1` bytes are already built."
+  @spec link(iodata(), String.t()) :: String.t()
+  def link(canonical, prev_hash) when is_binary(prev_hash) do
+    :crypto.hash(:sha256, [prev_hash, "\n", canonical])
     |> Base.encode16(case: :lower)
   end
 

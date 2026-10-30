@@ -19682,11 +19682,96 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Document"
+                  "properties": {
+                    "dataset": {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "deleted": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "detached": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "documents": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "media_files": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "swept": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "tokens_revoked": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "dataset",
+                    "documents",
+                    "media_files",
+                    "swept",
+                    "detached",
+                    "tokens_revoked"
+                  ],
+                  "type": "object"
                 }
               }
             },
             "description": "Mutation applied."
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dataset": {
+                      "type": "string"
+                    },
+                    "dataset_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "deleting": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleting",
+                    "dataset",
+                    "dataset_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Still deleting. Poll with the same DELETE and ?dataset_id=<dataset_id>; it answers this run's receipt once."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19698,7 +19783,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "production_dataset_protected, dataset_in_shared_search, dataset_media_referenced, or dataset_recreated: an earlier delete of the name finished (its receipt in details.receipt) and the name holds a new dataset."
           },
           "412": {
             "$ref": "#/components/responses/PreconditionFailed"
@@ -19708,6 +19800,16 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The delete stopped (timeout, contended, database error or restart) and rolled back, or too many deletes run on the node (dataset_delete_busy, Retry-After); the dataset is whole."
           }
         },
         "security": [
@@ -19715,7 +19817,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
+        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production. A long delete answers 202 {deleting: true}; the same DELETE again answers the receipt (bp asks again itself).",
         "tags": [
           "dataset"
         ],
@@ -21498,11 +21600,96 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Document"
+                  "properties": {
+                    "dataset": {
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "slug": {
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "deleted": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    },
+                    "detached": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "documents": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "media_files": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "swept": {
+                      "additionalProperties": {
+                        "type": "integer"
+                      },
+                      "type": "object"
+                    },
+                    "tokens_revoked": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "deleted",
+                    "dataset",
+                    "documents",
+                    "media_files",
+                    "swept",
+                    "detached",
+                    "tokens_revoked"
+                  ],
+                  "type": "object"
                 }
               }
             },
             "description": "Mutation applied."
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "dataset": {
+                      "type": "string"
+                    },
+                    "dataset_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "deleting": {
+                      "enum": [
+                        true
+                      ],
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "deleting",
+                    "dataset",
+                    "dataset_id"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Still deleting. Poll with the same DELETE and ?dataset_id=<dataset_id>; it answers this run's receipt once."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -21514,7 +21701,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "production_dataset_protected, dataset_in_shared_search, dataset_media_referenced, or dataset_recreated: an earlier delete of the name finished (its receipt in details.receipt) and the name holds a new dataset."
           },
           "412": {
             "$ref": "#/components/responses/PreconditionFailed"
@@ -21524,6 +21718,16 @@
           },
           "429": {
             "$ref": "#/components/responses/RateLimited"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "The delete stopped (timeout, contended, database error or restart) and rolled back, or too many deletes run on the node (dataset_delete_busy, Retry-After); the dataset is whole."
           }
         },
         "security": [
@@ -21531,7 +21735,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production.",
+        "summary": "Permanently delete a dataset in the active --workspace/--project with its documents, media, schemas, history and prefs. Refuses production. A long delete answers 202 {deleting: true}; the same DELETE again answers the receipt (bp asks again itself).",
         "tags": [
           "dataset"
         ],

@@ -53,6 +53,22 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   is the `%ApiToken{}` that asked. Everything runs in one transaction. Media
   blob removal, webhook dispatch and the revoked tokens' socket teardown wait
   until it commits, the same way `delete_workspace/1` does it.
+
+  The audit rows (one per document, the revokes, `dataset_deleted`) are
+  buffered and appended as the transaction's last statement
+  (`Audit.defer_emits/0`), so the workspace's audit-chain lock is held for that
+  append and the commit. Emitted one by one, the first document's row took the
+  lock and every write in the workspace waited for the whole delete
+  (task-10608b4831a0e9b8). The transaction may run 30 minutes
+  (`:dataset_delete_timeout_ms`); a timeout or database error rolls it back and
+  answers `{:error, {:delete_failed, :timeout | :contended | :database}}`; a
+  step that answers its own error (a hook halt, a rev mismatch) answers it. The
+  HTTP door runs it off the request: `Tenancy.DatasetDelete.Runs`.
+
+  The walk first locks the dataset's document rows in id order. An edit racing
+  the delete then waits for it, instead of deadlocking with the walk or moving
+  a rev under its fence. A deadlock in that first lock is tried up
+  to 5 times, then answers `:contended`.
   """
   import Ecto.Query, warn: false
 
@@ -71,6 +87,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
 
   @protected_slug "production"
+  @contended_attempts 5
 
   @project_keyed ~w(access_grants preview_links scheduled_publishes share_links)
   @workspace_keyed ~w(github_sync_conflicts sync_cursors sync_dead_letters
@@ -136,6 +153,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
              | :not_found
              | {:shared_search, %{String.t() => pos_integer()}}
              | {:media_referenced, [map()]}
+             | {:delete_failed, :timeout | :contended | :database}
              | term()}
   def delete(dataset, opts \\ [])
 
@@ -144,51 +162,91 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   def delete(%Dataset{} = dataset, opts) do
     with %Project{} = project <- Repo.get(Project, dataset.project_id),
          %Workspace{} = workspace <- Repo.get(Workspace, project.workspace_id) do
-      run(%{
-        dataset: dataset,
-        project: project,
-        workspace: workspace,
-        actor: Keyword.get(opts, :actor)
-      })
+      retry_contended(
+        %{
+          dataset: dataset,
+          project: project,
+          workspace: workspace,
+          actor: Keyword.get(opts, :actor)
+        },
+        @contended_attempts
+      )
     else
       nil -> {:error, :not_found}
     end
   end
 
+  defp retry_contended(target, attempts) do
+    case run(target) do
+      {:error, {:delete_failed, :contended}} when attempts > 1 ->
+        retry_contended(target, attempts - 1)
+
+      result ->
+        result
+    end
+  end
+
   defp run(target) do
     Media.clear_deferred_media_effects()
+    audit_owner? = Audit.defer_emits() == :owner
+    started = System.monotonic_time(:millisecond)
 
-    result =
-      Broadcast.with_deferred_queue(fn ->
-        Repo.transaction(fn ->
-          case teardown(target) do
-            {:ok, receipt} -> receipt
-            {:error, reason} -> Repo.rollback(reason)
-          end
+    try do
+      result =
+        Broadcast.with_deferred_queue(fn ->
+          Repo.transaction(
+            fn ->
+              case teardown(target) do
+                {:ok, receipt} ->
+                  if audit_owner?, do: Audit.flush_deferred!()
+                  receipt
+
+                {:error, reason} ->
+                  Repo.rollback(reason)
+              end
+            end,
+            timeout: timeout_ms()
+          )
         end)
-      end)
 
-    case result do
-      {:ok, receipt} ->
-        Media.flush_deferred_media_effects()
-        Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
+      case result do
+        {:ok, receipt} ->
+          if audit_owner?, do: Audit.finish_deferred(:committed)
+          Media.flush_deferred_media_effects()
+          Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
+          result
 
-      _ ->
+        {:error, reason} ->
+          Media.clear_deferred_media_effects()
+          {:error, reason}
+      end
+    rescue
+      e in [DBConnection.ConnectionError, Postgrex.Error] ->
         Media.clear_deferred_media_effects()
-    end
+        {:error, {:delete_failed, failure(e, System.monotonic_time(:millisecond) - started)}}
 
-    WriteScope.reset_request_memo()
-    result
-  rescue
-    e ->
-      Media.clear_deferred_media_effects()
-      reraise(e, __STACKTRACE__)
+      e ->
+        Media.clear_deferred_media_effects()
+        reraise(e, __STACKTRACE__)
+    after
+      if audit_owner?, do: Audit.finish_deferred(:rolled_back)
+      WriteScope.reset_request_memo()
+    end
   end
+
+  defp timeout_ms,
+    do: Application.get_env(:barkpark, :dataset_delete_timeout_ms, :timer.minutes(30))
+
+  defp failure(%Postgrex.Error{postgres: %{code: :query_canceled}}, _ms), do: :timeout
+  defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
+  defp failure(%Postgrex.Error{postgres: %{code: :deadlock_detected}}, _ms), do: :contended
+  defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)
 
-    with :ok <- refuse_shared_search(target),
+    with :ok <- lock_documents(target),
+         :ok <- refuse_shared_search(target),
          :ok <- refuse_referenced_media(target),
          detached = detach_foreign(target),
          exemptions = sweep_authoring_exemptions(dataset),
@@ -366,6 +424,17 @@ defmodule Barkpark.Tenancy.DatasetDelete do
         (is_nil(x.dataset_id) and x.dataset == ^ds.slug and x.workspace_id == ^ws.id and
            x.project_id == ^p.id)
     )
+  end
+
+  defp lock_documents(target) do
+    Document
+    |> in_dataset(target)
+    |> order_by([d], asc: d.id)
+    |> lock("FOR UPDATE")
+    |> select([d], d.id)
+    |> Repo.all()
+
+    :ok
   end
 
   defp delete_media(%{workspace: ws} = target) do

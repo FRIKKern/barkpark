@@ -381,7 +381,43 @@ defmodule Barkpark.Api.OpenApi do
     |> Map.put("429", %{"$ref" => "#/components/responses/RateLimited"})
   end
 
-  defp responses_for(cmd, template) do
+  defp responses_for(%{"id" => "dataset.delete"} = cmd, template) do
+    cmd
+    |> default_responses(template)
+    |> Map.put("202", %{
+      "description" =>
+        "Still deleting. Poll with the same DELETE and ?dataset_id=<dataset_id>; it answers this run's receipt once.",
+      "content" => %{
+        "application/json" => %{
+          "schema" => %{
+            "type" => "object",
+            "required" => ["deleting", "dataset", "dataset_id"],
+            "properties" => %{
+              "deleting" => %{"type" => "boolean", "enum" => [true]},
+              "dataset" => %{"type" => "string"},
+              "dataset_id" => %{"type" => "string", "format" => "uuid"}
+            }
+          }
+        }
+      }
+    })
+    |> Map.put(
+      "409",
+      err_resp(
+        "production_dataset_protected, dataset_in_shared_search, dataset_media_referenced, or dataset_recreated: an earlier delete of the name finished (its receipt in details.receipt) and the name holds a new dataset."
+      )
+    )
+    |> Map.put(
+      "503",
+      err_resp(
+        "The delete stopped (timeout, contended, database error or restart) and rolled back, or too many deletes run on the node (dataset_delete_busy, Retry-After); the dataset is whole."
+      )
+    )
+  end
+
+  defp responses_for(cmd, template), do: default_responses(cmd, template)
+
+  defp default_responses(cmd, template) do
     method = cmd |> get_in(["http", "method"]) |> to_string() |> String.upcase()
     tier = Map.get(cmd, "auth_tier", "admin")
     has_path_param? = path_placeholders(template) != []
@@ -414,6 +450,34 @@ defmodule Barkpark.Api.OpenApi do
         "title" => %{"type" => "string"},
         "liveview_path" => %{"type" => "string"},
         "scoped_liveview_path" => %{"type" => ["string", "null"]}
+      }
+    },
+    "dataset.delete" => %{
+      "type" => "object",
+      "required" => [
+        "deleted",
+        "dataset",
+        "documents",
+        "media_files",
+        "swept",
+        "detached",
+        "tokens_revoked"
+      ],
+      "properties" => %{
+        "deleted" => %{"type" => "boolean", "enum" => [true]},
+        "dataset" => %{
+          "type" => "object",
+          "properties" => %{
+            "id" => %{"type" => "string"},
+            "slug" => %{"type" => "string"},
+            "name" => %{"type" => "string"}
+          }
+        },
+        "documents" => %{"type" => "integer", "minimum" => 0},
+        "media_files" => %{"type" => "integer", "minimum" => 0},
+        "swept" => %{"type" => "object", "additionalProperties" => %{"type" => "integer"}},
+        "detached" => %{"type" => "object", "additionalProperties" => %{"type" => "integer"}},
+        "tokens_revoked" => %{"type" => "integer", "minimum" => 0}
       }
     },
     "auth.reset" => %{

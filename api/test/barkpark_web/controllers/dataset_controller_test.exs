@@ -8,7 +8,9 @@ defmodule BarkparkWeb.DatasetControllerTest do
   alias Barkpark.{Auth, Repo, Tenancy}
   alias Barkpark.Audit.Event
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Content.Document
   alias Barkpark.Tenancy.Dataset
+  alias Barkpark.Tenancy.DatasetDelete.Runs
 
   setup do
     ws = create_workspace!()
@@ -211,5 +213,201 @@ defmodule BarkparkWeb.DatasetControllerTest do
              "scoped_prefix" => "/w/:workspace_slug/p/:project_slug",
              "args" => [%{"name" => "dataset", "required" => true}]
            } = cmd
+  end
+
+  describe "a delete that outlives the request (task-10608b4831a0e9b8)" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:barkpark, :dataset_delete_wait_ms)
+      end)
+    end
+
+    defp until_answered(raw, ws, project, name, tries \\ 200) do
+      conn = delete_dataset(raw, ws, project, name)
+
+      if conn.status == 202 and tries > 0 do
+        Process.sleep(50)
+        until_answered(raw, ws, project, name, tries - 1)
+      else
+        conn
+      end
+    end
+
+    test "answers 202 while it runs, then the receipt once, then 404", %{
+      ws: ws,
+      project: project,
+      tokens: tokens
+    } do
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+
+      assert %{"deleting" => true, "dataset" => "j10-7"} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
+
+      assert %{"deleted" => true, "documents" => 1} =
+               json_response(until_answered(tokens.owner, ws, project, "j10-7"), 200)
+
+      refute dataset?(project, "j10-7")
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 404)
+    end
+
+    defp until_done(key, tries \\ 200) do
+      case :ets.lookup(Runs, key) do
+        [{_, {:done, _}, _, _}] -> :ok
+        _ when tries > 0 -> Process.sleep(50) && until_done(key, tries - 1)
+      end
+    end
+
+    defmodule RefuseDeleteHook do
+      @moduledoc false
+      def lifecycle_hooks, do: %{before_delete: [&__MODULE__.refuse/1]}
+      def refuse(_payload), do: {:halt, "refused"}
+    end
+
+    test "a hook that halts the delete answers 409 halted and the dataset stays",
+         %{ws: ws, project: project, tokens: tokens} = ctx do
+      Barkpark.PluginEnv.with_plugins([RefuseDeleteHook], ctx)
+
+      assert %{"error" => %{"code" => "halted"}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 409)
+
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+      assert :ets.lookup(Runs, {project.id, "j10-7"}) == []
+    end
+
+    test "a dead run nobody read is dropped and the DELETE deletes the dataset",
+         %{ws: ws, project: project, tokens: tokens} do
+      id = Tenancy.get_dataset(project, "j10-7").id
+      dead = spawn(fn -> :ok end)
+      ref = Process.monitor(dead)
+      assert_receive {:DOWN, ^ref, :process, ^dead, _}
+      :ets.insert(Runs, {{project.id, "j10-7"}, {:running, dead}, id, 0})
+
+      assert %{"deleted" => true, "documents" => 1, "dataset" => %{"id" => ^id}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+    end
+
+    test "a poll naming another dataset while a run on this name is live answers 404 and does not join it",
+         %{ws: ws, project: project, tokens: tokens} do
+      live = Tenancy.get_dataset(project, "j10-7").id
+      run = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(run, :kill) end)
+      key = {project.id, "j10-7"}
+      :ets.insert(Runs, {key, {:running, run}, live, 0})
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(
+                 delete_dataset(
+                   tokens.owner,
+                   ws,
+                   project,
+                   "j10-7?dataset_id=#{Ecto.UUID.generate()}"
+                 ),
+                 404
+               )
+
+      assert [{^key, {:running, ^run}, ^live, 0}] = :ets.lookup(Runs, key)
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+      :ets.delete(Runs, key)
+    end
+
+    test "another caller's DELETE reads the same run", %{ws: ws, project: project, tokens: tokens} do
+      id = Tenancy.get_dataset(project, "j10-7").id
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+
+      assert %{"deleting" => true, "dataset_id" => ^id} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
+
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 5_000)
+
+      assert %{"deleted" => true, "documents" => 1} =
+               json_response(delete_dataset(tokens.admin, ws, project, "j10-7"), 200)
+    end
+
+    defp finished_unread(ws, project, tokens, docs) do
+      for t <- Enum.take(~w(post page note), docs),
+          do: {:ok, _} = create_document_in!(ws, project, t, %{}, "j10-7")
+
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
+
+      %{"dataset_id" => id} =
+        json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
+
+      until_done({project.id, "j10-7"})
+      Application.put_env(:barkpark, :dataset_delete_wait_ms, 5_000)
+      id
+    end
+
+    defp documents_in(%Dataset{id: id}),
+      do: Repo.aggregate(from(d in Document, where: d.dataset_id == ^id), :count)
+
+    test "after a recreate, a poll naming its dataset reads its own run and the new dataset stays",
+         %{ws: ws, project: project, tokens: tokens} do
+      Repo.delete!(Tenancy.get_dataset(project, "j10-7"))
+      old = finished_unread(ws, project, tokens, 2)
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-7")
+      recreated = Tenancy.get_dataset(project, "j10-7")
+
+      assert %{"deleted" => true, "documents" => 2, "dataset" => %{"id" => ^old}} =
+               json_response(
+                 delete_dataset(tokens.owner, ws, project, "j10-7?dataset_id=#{old}"),
+                 200
+               )
+
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+      assert Tenancy.get_dataset(project, "j10-7").id == recreated.id
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(
+                 delete_dataset(tokens.owner, ws, project, "j10-7?dataset_id=#{old}"),
+                 404
+               )
+
+      assert documents_in(recreated) == 1
+    end
+
+    test "after a recreate, a DELETE naming the new dataset deletes it and drops the old receipt",
+         %{ws: ws, project: project, tokens: tokens} do
+      Repo.delete!(Tenancy.get_dataset(project, "j10-7"))
+      old = finished_unread(ws, project, tokens, 2)
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-7")
+      new_id = Tenancy.get_dataset(project, "j10-7").id
+
+      assert %{"deleted" => true, "documents" => 1, "dataset" => %{"id" => ^new_id}} =
+               json_response(
+                 delete_dataset(tokens.owner, ws, project, "j10-7?dataset_id=#{new_id}"),
+                 200
+               )
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(
+                 delete_dataset(tokens.owner, ws, project, "j10-7?dataset_id=#{old}"),
+                 404
+               )
+    end
+
+    test "after a recreate, a DELETE naming no dataset answers 409 with the old receipt, then deletes the new one",
+         %{ws: ws, project: project, tokens: tokens} do
+      Repo.delete!(Tenancy.get_dataset(project, "j10-7"))
+      old = finished_unread(ws, project, tokens, 3)
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-7")
+      recreated = Tenancy.get_dataset(project, "j10-7")
+      new_id = recreated.id
+
+      assert %{
+               "error" => %{
+                 "code" => "dataset_recreated",
+                 "details" => %{"receipt" => %{"documents" => 3, "dataset" => %{"id" => ^old}}}
+               }
+             } = json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 409)
+
+      assert documents_in(recreated) == 1
+
+      assert %{"deleted" => true, "documents" => 1, "dataset" => %{"id" => ^new_id}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+
+      assert :ets.lookup(Runs, {project.id, "j10-7"}) == []
+    end
   end
 end

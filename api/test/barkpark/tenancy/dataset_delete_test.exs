@@ -134,8 +134,12 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
 
     assert {:error, :not_found} = Tenancy.delete_dataset(dataset)
 
-    assert Repo.aggregate(from(e in Audit.Event, where: e.action == "dataset_deleted"), :count) ==
-             1
+    assert Repo.aggregate(
+             from(e in Audit.Event,
+               where: e.workspace_id == ^ws.id and e.action == "dataset_deleted"
+             ),
+             :count
+           ) == 1
   end
 
   test "refuses production and deletes nothing", %{ws: ws, project: project} do
@@ -449,12 +453,34 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
       "CREATE TRIGGER ds_delete_refuse BEFORE DELETE ON datasets FOR EACH ROW EXECUTE FUNCTION ds_delete_refuse()"
     )
 
-    assert_raise Postgrex.Error, fn -> Tenancy.delete_dataset(dataset) end
+    assert {:error, {:delete_failed, :database}} = Tenancy.delete_dataset(dataset)
 
     assert Repo.get(Dataset, dataset.id)
     assert census(dataset, ws) == before
-    refute Repo.exists?(from e in Audit.Event, where: e.action == "dataset_deleted")
+
+    refute Repo.exists?(
+             from e in Audit.Event,
+               where: e.workspace_id == ^ws.id and e.action == "dataset_deleted"
+           )
+
     refute Repo.get(ApiToken, token.id).revoked_at
     refute_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
+  end
+
+  defmodule RefuseDeleteHook do
+    @moduledoc false
+    def lifecycle_hooks, do: %{before_delete: [&__MODULE__.refuse/1]}
+    def refuse(_payload), do: {:halt, "refused"}
+  end
+
+  test "a hook that halts a document delete answers its halt and leaves the dataset whole",
+       %{ws: ws, project: project, user: user} = ctx do
+    dataset = seed(ws, project, "j10-11", user)
+    before = census(dataset, ws)
+    Barkpark.PluginEnv.with_plugins([RefuseDeleteHook], ctx)
+
+    assert {:error, {:halted, "refused"}} = Tenancy.delete_dataset(dataset)
+    assert Repo.get(Dataset, dataset.id)
+    assert census(dataset, ws) == before
   end
 end
