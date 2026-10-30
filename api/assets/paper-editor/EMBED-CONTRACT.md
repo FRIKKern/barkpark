@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.18.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.19.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.18.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.19.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu.
 
 ## The element
 
@@ -186,12 +186,16 @@ mark. Find and `state()` read the stored words.
 A typed `[[Title]]` (1.17.0) or a pasted one (1.18.0) becomes a document link only when `wikilinkSource(Title)`
 returns a row whose `title` equals `Title`, ignoring case, and that has an `id`. It is
 written as a `[[` pick writes it: the row's `title` as the words and `target`, its `id` as
-`docId`. Typing asks when the closing `]]` is typed. A paste asks once per distinct title in
+`docId`. `[[Title|words]]` (1.19.0) asks for `Title` alone and, on a match, is written the
+same way with `words` as its `alias` and its words; `[[|words]]` and `[[Title|]]` stay text and
+ask nothing. In either element's `[[` menu, `[[Title|words` searches `Title` alone and a pick
+writes `words` as the link's words and `alias` (empty `words` writes the title, no alias);
+`[[|words` searches nothing, and `@` keeps its whole query. Typing asks when the closing `]]` is typed. A paste asks once per distinct title in
 the pasted text (ignoring case), for at most 20 titles; later titles stay text. Only the paste
 event's own changes are read, so a server apply in the same task is not. A Markdown paste (a
 heading, list, quote, table, fence, rule or inline Markdown link) sends each `[[Title]]` and
-`[[Title|words]]` through the same rule, as text, so an aliased one stays text as in a plain
-paste. With no `wikilinkSource`, a Markdown paste writes them as links with no `docId`. Anything else leaves the text as it was: no matching row, a throw or a
+`[[Title|words]]` through the same rule, as text. With no `wikilinkSource`, a Markdown paste
+writes them as links with no `docId`. Anything else leaves the text as it was: no matching row, a throw or a
 rejection, an edit to the brackets before the answer lands, text inside inline code or a
 link (typed or pasted), and no `wikilinkSource`. Text that arrives any other way (`blocks`,
 `applyServerBlocks`, undo) is never asked about. The links of one typing or one paste land

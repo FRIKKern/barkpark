@@ -1,10 +1,12 @@
-// wikilink-input.js — a typed or pasted `[[Title]]` becomes a document link (contract 1.17.0, paste 1.18.0).
+// wikilink-input.js — a typed or pasted `[[Title]]` becomes a document link (contract 1.17.0, paste 1.18.0,
+// alias 1.19.0).
 //
 // Typing the closing `]]`, or pasting text that holds `[[Title]]`, asks the host's
 // `wikilinkSource(Title)`. Only a row whose title equals Title, ignoring case, turns the
 // brackets into a link to that row, written as a picker pick writes it (its title as the words
 // and the target, its id as the docId). Anything else leaves the text as typed. Text that
-// arrives any other way (a seed, a server edit, undo) is never converted.
+// arrives any other way (a seed, a server edit, undo) is never converted. `[[Title|words]]` asks for
+// Title alone and, on a match, links the row with `words` as its alias.
 //
 // A paste asks once per distinct title (ignoring case), at most MAX_ASKS of them; the rest stay
 // text. Its links land together, as one undo step after the paste's own. A Markdown paste writes
@@ -13,6 +15,7 @@
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import { closeHistory } from "@tiptap/pm/history";
+import { splitAlias } from "../wikilink-trigger.js";
 
 export const wikilinkInputKey = new PluginKey("bpWikilinkInput");
 
@@ -28,6 +31,11 @@ export function matchingRow(list, query) {
     typeof row.id === "string" && row.id) || null;
 }
 
+function bracketed(from, to, inner) {
+  const { query, alias } = splitAlias(inner);
+  return query && alias !== "" ? { from, to, inner, query, alias } : null;
+}
+
 function closedIn(doc, from, to) {
   const found = [];
   doc.nodesBetween(from, to, (node, pos) => {
@@ -36,7 +44,8 @@ function closedIn(doc, from, to) {
     for (const m of text.matchAll(CLOSED)) {
       const start = pos + 1 + m.index;
       const end = start + m[0].length;
-      if (end > from && start < to) found.push({ from: start, to: end, query: m[1] });
+      const at = end > from && start < to && bracketed(start, end, m[1]);
+      if (at) found.push(at);
     }
     return false;
   });
@@ -67,7 +76,7 @@ const unmarked = (doc, at) => LINKS_AND_CODE.every((name) => {
 });
 
 const plain = (doc, at) => unmarked(doc, at) &&
-  doc.textBetween(at.from, at.to, undefined, () => "\ufffc") === `[[${at.query}]]`;
+  doc.textBetween(at.from, at.to, undefined, () => "\ufffc") === `[[${at.inner}]]`;
 
 export const MAX_ASKS = 20;
 
@@ -126,8 +135,9 @@ export function wikilinkInput(host) {
             else tr.setMeta("addToHistory", false);
             for (const at of links) {
               const row = rows.get(keyOf(at.query));
-              const marks = state.doc.nodeAt(at.from).marks.concat(state.schema.marks.wikilink.create({ target: row.title, docId: row.id }));
-              tr.replaceWith(at.from, at.to, state.schema.text(row.title, marks));
+              const attrs = at.alias == null ? { target: row.title, docId: row.id } : { target: row.title, docId: row.id, alias: at.alias };
+              const marks = state.doc.nodeAt(at.from).marks.concat(state.schema.marks.wikilink.create(attrs));
+              tr.replaceWith(at.from, at.to, state.schema.text(at.alias ?? row.title, marks));
             }
             view.dispatch(tr);
           };
@@ -155,10 +165,10 @@ export function wikilinkInput(host) {
             const $from = view.state.doc.resolve(from);
             const before = blockText($from.parent).slice(0, $from.parentOffset);
             const m = CLOSED_AT_END.exec(before + text);
-            if (!m) return false;
             const end = from + text.length;
-            view.dispatch(view.state.tr.insertText(text, from, to)
-              .setMeta(wikilinkInputKey, { add: [{ from: end - m[0].length, to: end, query: m[1] }] }));
+            const at = m && bracketed(end - m[0].length, end, m[1]);
+            if (!at) return false;
+            view.dispatch(view.state.tr.insertText(text, from, to).setMeta(wikilinkInputKey, { add: [at] }));
             return true;
           },
           handleDOMEvents: {

@@ -13,6 +13,7 @@
 import assert from "node:assert/strict";
 import {
   parseOpenWikilink,
+  splitAlias,
   wikilinkReplaceRange,
   parseOpenTag,
   tagReplaceRange,
@@ -292,6 +293,14 @@ check("tag: from is clamped at 0 (never negative)", () => {
 check("tag: non-number caretPos / non-string query degrade safely", () => {
   assert.deepEqual(tagReplaceRange(undefined, "ab"), { from: 0, to: 0 });
   assert.deepEqual(tagReplaceRange(5, null), { from: 4, to: 5 });
+});
+
+check("splitAlias: the title before the first |, and the words after it", () => {
+  assert.deepEqual(splitAlias("Plan"), { query: "Plan", alias: null });
+  assert.deepEqual(splitAlias("Plan|the plan"), { query: "Plan", alias: "the plan" });
+  assert.deepEqual(splitAlias("Plan|a|b"), { query: "Plan", alias: "a|b" });
+  assert.deepEqual(splitAlias("Plan|"), { query: "Plan", alias: "" });
+  assert.deepEqual(splitAlias("|x"), { query: "", alias: "x" });
 });
 
 if (failures > 0) {
