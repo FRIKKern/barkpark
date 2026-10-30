@@ -27,7 +27,7 @@ export function readAnswer(answer) {
 }
 
 // Each run of text carrying one wikilink mark in a textblock that starts at `start`:
-// { from, to, mark, words, marks }.
+// { from, to, mark, words }.
 function blockRuns(block, start, out = []) {
   let run = null;
   block.forEach((child, offset) => {
@@ -36,11 +36,10 @@ function blockRuns(block, start, out = []) {
     if (run && mark && run.mark.eq(mark)) {
       run.to = at + child.nodeSize;
       run.words += child.text;
-      run.marks = run.marks.filter((m) => m.isInSet(child.marks));
       return;
     }
     if (run) out.push(run);
-    run = mark ? { from: at, to: at + child.nodeSize, mark, words: child.text, marks: child.marks } : null;
+    run = mark ? { from: at, to: at + child.nodeSize, mark, words: child.text } : null;
   });
   if (run) out.push(run);
   return out;
@@ -82,7 +81,7 @@ function decorate(doc, known, inside) {
     }
     const title = liveTitle(run, info);
     if (!title || run.from === inside) continue;
-    decorations.push(Decoration.widget(run.to, label(title), { side: -1, marks: run.marks, key: `bp-wl:${title}` }));
+    decorations.push(Decoration.widget(run.to, label(title), { side: -1, key: `bp-wl:${title}` }));
     decorations.push(Decoration.inline(run.from, run.to, { class: "bp-wikilink-stored", style: "display: none" }));
   }
   return DecorationSet.create(doc, decorations);
@@ -108,12 +107,16 @@ function painted(state, pos, edge) {
   return blockRuns($pos.parent, $pos.start()).find((r) => r[edge] === pos && r.from !== st.inside && liveTitle(r, st.known.get(linkKey(r.mark.attrs)))) || null;
 }
 
+// Every Backspace or Delete at the edge counts, with any modifier, and a word step (Alt or Ctrl)
+// steps over the link like a plain arrow: Chrome's word moves and deletes skip the hidden words
+// and would eat or pass the text beside the link instead. Cmd+arrow stays a line move.
 function handleKey(view, event, editable) {
-  if (!editable() || event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return false;
+  if (!editable() || event.isComposing) return false;
   const { state } = view;
   const { selection } = state;
   const step = { ArrowLeft: ["to", "from"], ArrowRight: ["from", "to"] }[event.key];
   if (step) {
+    if (event.metaKey) return false;
     const run = painted(state, selection.head, step[0]);
     if (!run || (!event.shiftKey && !selection.empty)) return false;
     const anchor = event.shiftKey ? selection.anchor : run[step[1]];
@@ -121,7 +124,7 @@ function handleKey(view, event, editable) {
     return true;
   }
   const edge = { Backspace: "to", Delete: "from" }[event.key];
-  if (!edge || event.shiftKey || !selection.empty) return false;
+  if (!edge || !selection.empty) return false;
   const run = painted(state, selection.head, edge);
   if (!run) return false;
   view.dispatch(state.tr.delete(run.from, run.to).scrollIntoView());

@@ -2,24 +2,25 @@
 //
 // Barkever's J05 review saw `esc dismiss` wrap onto a second line at 1440 and 390 px. Line
 // boxes are layout, so this is measured in headless Chromium, not argued from the stylesheet:
-// the real WikilinkMenu, the real styles.css, at 280, 390 and 1440 px (or BP_PICKER_WIDTHS).
+// the committed bundle and stylesheet (the files the job's freshness step proves are built from
+// src), a real <bp-paper-canvas> with `[[pla` typed, at 280, 390 and 1440 px (or BP_PICKER_WIDTHS).
 // Per width: the footer's text sits on one line, the default English words are not clipped,
 // and the menu stays inside the viewport. A host's longer words (data-strings) still keep one line.
 //
 //   Run:  node src/canvas/__picker_footer_render.mjs
 //   Env:  BP_CHROME=/path/to/chrome
+// It needs no node_modules: the narrow-render job runs it without `npm ci`.
 //
 // No Chromium prints SKIP and exits 0, like __narrow_render.mjs; CI installs one and refuses a SKIP.
 
-import { buildSync } from "esbuild";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = join(HERE, "..");
+const ASSETS = join(HERE, "../../../../priv/static/assets");
 const WIDTHS = (process.env.BP_PICKER_WIDTHS || "280,390,1440").split(",").map(Number);
 
 function findChrome() {
@@ -48,17 +49,19 @@ if (!CHROME) {
   process.exit(0);
 }
 
-const css = buildSync({ entryPoints: [join(SRC, "styles.css")], bundle: true, write: false, logLevel: "silent" }).outputFiles[0].text;
-const script = (strings) => buildSync({
-  stdin: {
-    contents: `
-      import { WikilinkMenu } from "./wikilink-menu.js";
-      import { loadStringsFrom } from "./i18n.js";
-      document.body.setAttribute("data-strings", ${JSON.stringify(JSON.stringify(strings))});
-      loadStringsFrom(document.body);
-      const menu = new WikilinkMenu({});
-      menu.open({ left: 8, top: 20, bottom: 40 }, "pla");
-      menu.setResults([{ title: "Plan", id: "n-1", type: "note" }, { title: "Planting season notes", id: "n-2", type: "note" }]);
+const css = readFileSync(join(ASSETS, "bp-paper-editor.css"), "utf8");
+const bundle = join(ASSETS, "bp-paper-editor.bundle.js");
+const probe = `
+  const canvas = document.createElement("bp-paper-canvas");
+  canvas.setAttribute("editable", "");
+  canvas.blocks = [{ id: "p1", type: "paragraph", content: [{ type: "text", value: "See " }] }];
+  canvas.wikilinkSource = () => [{ title: "Plan", id: "n-1", type: "note" }, { title: "Planting season notes", id: "n-2", type: "note" }];
+  document.body.appendChild(canvas);
+  setTimeout(() => {
+    const editor = canvas._editor;
+    editor.commands.focus("end");
+    editor.view.dispatch(editor.state.tr.insertText("[[pla"));
+    setTimeout(() => {
       const el = document.querySelector(".bp-wikilink-menu");
       const foot = el.querySelector(".bp-wikilink-foot");
       const range = document.createRange();
@@ -70,19 +73,18 @@ const script = (strings) => buildSync({
         vw: window.innerWidth, lines, clipped: foot.scrollWidth > foot.clientWidth, need: foot.scrollWidth, room: foot.clientWidth,
         left: Math.round(box.left), right: Math.round(box.right), text: foot.textContent,
       });
-    `,
-    resolveDir: SRC,
-  },
-  bundle: true, format: "iife", write: false, logLevel: "silent",
-}).outputFiles[0].text;
+    }, 300);
+  }, 400);
+`;
 
 const TMP = mkdtempSync(join(tmpdir(), "bp-picker-foot-"));
 function measure(width, strings) {
   const file = join(TMP, "case.html");
-  writeFileSync(file, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>html,body{margin:0}${css}</style></head><body><pre id="__out">pending</pre><script>${script(strings)}</script></body></html>`);
+  const attr = JSON.stringify(strings).replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+  writeFileSync(file, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>html,body{margin:0}${css}</style><script>window.BP_PAPER_EDITOR_NO_INJECT = true;</script></head><body data-strings="${attr}"><pre id="__out">pending</pre><script src="file://${bundle}"></script><script>${probe}</script></body></html>`);
   const dom = execFileSync(CHROME, [
     "--headless", "--disable-gpu", "--no-sandbox", "--hide-scrollbars",
-    `--window-size=${width},900`, "--virtual-time-budget=1500", "--dump-dom", `file://${file}`,
+    `--window-size=${width},900`, "--virtual-time-budget=5000", "--dump-dom", `file://${file}`,
   ], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 16 * 1024 * 1024 });
   const m = dom.match(/RESULT(\{.*?\})<\/pre>/s);
   if (!m) throw new Error("the page produced no RESULT marker");

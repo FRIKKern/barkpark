@@ -194,6 +194,67 @@ try {
     ops.length = 0;
   });
 
+  await check("Backspace and Delete with any modifier at a painted edge remove the whole link, not the text beside it", async () => {
+    const before = canonical(stored(editor));
+    for (const mod of [{ shiftKey: true }, { altKey: true }, { metaKey: true }, { ctrlKey: true }]) {
+      const from = posOf(editor, "Plan");
+      caret(editor, from + 4);
+      assert.equal(key(editor, "Backspace", mod), false, `Backspace ${JSON.stringify(mod)} is the canvas's`);
+      assert.equal(shown(block(canvas, "p1")), "See  and Gone note end.!", JSON.stringify(mod));
+      editor.commands.undo();
+      caret(editor, from);
+      assert.equal(key(editor, "Delete", mod), false, `Delete ${JSON.stringify(mod)} is the canvas's`);
+      assert.equal(shown(block(canvas, "p1")), "See  and Gone note end.!", JSON.stringify(mod));
+      editor.commands.undo();
+    }
+    assert.equal(canonical(stored(editor)), before);
+    canvas.flushPendingChanges();
+    await tick(350);
+    ops.length = 0;
+  });
+
+  await check("a word step crosses a painted link; an arrow over a selection, Cmd+arrow and a composing key stay the browser's", () => {
+    const from = posOf(editor, "Plan");
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from - 3, from + 4)));
+    assert.equal(key(editor, "ArrowLeft"), true, "a plain arrow over a selection collapses it the browser's way");
+    assert.deepEqual([editor.state.selection.from, editor.state.selection.to], [from - 3, from + 4]);
+    for (const mod of [{ altKey: true }, { ctrlKey: true }]) {
+      caret(editor, from + 4);
+      assert.equal(key(editor, "ArrowLeft", mod), false, `a word step ${JSON.stringify(mod)} steps over the link`);
+      assert.equal(editor.state.selection.head, from);
+    }
+    caret(editor, from + 4);
+    assert.equal(key(editor, "ArrowLeft", { metaKey: true }), true, "Cmd+arrow stays the browser's line move");
+    assert.equal(editor.state.selection.head, from + 4);
+    assert.equal(key(editor, "Backspace", { isComposing: true }), true, "an IME owns its keys");
+    assert.equal(shown(block(canvas, "p1")), "See Roadmap 2027 and Gone note end.!");
+  });
+
+  await check("a copy or cut over a painted link carries the stored words; cut, undo, redo, undo is byte-identical", () => {
+    const before = canonical(stored(editor));
+    const from = posOf(editor, "See");
+    const to = posOf(editor, " and ");
+    const clip = (type) => {
+      const data = new Map();
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: { setData: (k, v) => data.set(k, v), getData: (k) => data.get(k) || "", clearData: () => data.clear(), types: [] } });
+      editor.view.dom.dispatchEvent(event);
+      return data;
+    };
+    editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, to)));
+    const copied = clip("copy");
+    assert.equal(copied.get("text/plain"), "See Plan");
+    assert.ok(copied.get("text/html").includes("Plan") && !copied.get("text/html").includes("Roadmap"), copied.get("text/html"));
+    const cut = clip("cut");
+    assert.equal(cut.get("text/plain"), "See Plan");
+    assert.equal(shown(block(canvas, "p1")), " and Gone note end.!");
+    editor.commands.undo();
+    editor.commands.redo();
+    editor.commands.undo();
+    assert.equal(canonical(stored(editor)), before);
+    assert.equal(shown(block(canvas, "p1")), "See Roadmap 2027 and Gone note end.!");
+  });
+
   await check("an unpainted link keeps the browser's keys", () => {
     const from = posOf(editor, "Gone note");
     caret(editor, from + 9);
@@ -330,10 +391,39 @@ await check("two canvases on one page keep their own titles and marks", async ()
   b.canvas.remove();
 });
 
-await check("read mode paints too", async () => {
-  const { canvas } = await mount({ editable: false, titles: (id) => (id === "n-plan" ? "Roadmap" : null) });
+await check("read mode paints too, and a caret inside reveals nothing", async () => {
+  const { canvas, editor } = await mount({ editable: false, titles: (id) => (id === "n-plan" ? "Roadmap" : null) });
   await tick(20);
   assert.equal(shown(block(canvas, "p1")), "See Roadmap and Gone note end.");
+  caret(editor, posOf(editor, "Plan") + 2);
+  assert.equal(shown(block(canvas, "p1")), "See Roadmap and Gone note end.");
+  canvas.remove();
+});
+
+await check("a refresh keeps the painted title until the new answer lands", async () => {
+  const { canvas } = await mount({ titles: (id) => (id === "n-plan" ? "Roadmap" : null) });
+  await tick(20);
+  for (const refresh of [(fn) => { canvas.wikilinkResolve = fn; }, (fn) => { canvas.wikilinkResolve = fn; canvas.refreshWikilinks(); }]) {
+    let release;
+    refresh((id) => (id === "n-plan" ? new Promise((r) => { release = r; }) : null));
+    await tick(20);
+    assert.equal(shown(block(canvas, "p1")), "See Roadmap and Gone note end.", "no flash of the stored words");
+    release({ title: "Roadmap, renamed" });
+    await tick(20);
+    assert.equal(shown(block(canvas, "p1")), "See Roadmap, renamed and Gone note end.");
+    canvas.wikilinkResolve = (id) => (id === "n-plan" ? { title: "Roadmap" } : null);
+    await tick(20);
+  }
+  canvas.remove();
+});
+
+await check("the painted title keeps the link's other marks", async () => {
+  const blocks = [{ id: "p1", type: "paragraph", content: [{ type: "wikilink", target: "Plan", docId: "n-plan", children: [{ type: "text", value: "Plan", marks: ["strong"] }] }] }];
+  const { canvas } = await mount({ blocks, titles: (id) => (id === "n-plan" ? "Roadmap" : null) });
+  await tick(20);
+  const label = canvas.querySelector(".bp-wikilink-label");
+  assert.equal(label.textContent, "Roadmap");
+  assert.equal(!!label.closest("strong"), true, block(canvas, "p1").innerHTML);
   canvas.remove();
 });
 

@@ -171,9 +171,12 @@ in place of its words; an aliased link, or one over the author's own words, keep
 canvas paints the title and never writes it: the body, every op and every save keep the
 stored words byte-identical, and painting emits nothing. After a rename or a delete the host
 calls `refreshWikilinks()` (setting the property again does the same); what is painted stays
-until each answer lands. A painted link reads as one unit in edit mode: an arrow steps over
-it, Backspace at its end or Delete at its start removes it whole (one undo step), and a caret
-that lands inside shows the stored words, which is what an edit there changes.
+until each answer lands. A painted link reads as one unit in edit mode: an arrow (or
+Shift+arrow) steps over it, Backspace at its end or Delete at its start removes it whole with
+any modifier (one undo step; a word or line delete never eats the text beside it), and a caret
+that lands inside shows the stored words, which is what an edit there changes. Read mode never
+shows them. The title keeps the link's other marks (bold, italic), and a copy or cut carries
+the stored words.
 `{ missing: true }` marks the link as `linkPreviewSource`'s does. A bare string, `null`, an
 empty title, any other value, a throw or a rejection shows the stored words; an answer from
 before the last refresh is dropped; `null` as the property clears every painted title and

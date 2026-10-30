@@ -217,6 +217,19 @@ try {
     assert.equal(textOf(editor, "p3"), "Dead Gone end.");
   });
 
+  await check("Mod+Enter inside a link neither splits it nor adds a line", async () => {
+    const before = JSON.stringify(editor.getJSON());
+    let at = 0;
+    editor.state.doc.descendants((n, p) => { if (!at && n.isText && n.marks.some((m) => m.type.name === "wikilink") && n.text === "Plan") at = p + 2; });
+    assert.ok(at);
+    caret(editor, at);
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      key(editor, { key: "Enter", ...mod });
+      newline(editor);
+    }
+    assert.equal(JSON.stringify(editor.getJSON()), before);
+  });
+
   await check("a host that takes Mod+Enter gets it; the browser makes no newline either way", async () => {
     let seen = 0;
     const take = (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { seen += 1; e.preventDefault(); } };
