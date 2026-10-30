@@ -133,6 +133,15 @@ rc=$?
 [ "$rc" = 0 ] && ok "exits 0" || bad "exit $rc: $(cat "$TMP/err")"
 grep -q '"group-other":"owner"' "$TMP/out" && ok "maps the named group" || bad "mapping: $(grep mappings "$TMP/out")"
 
+echo "new app, owners group name with a long Container Apps host"
+rm -f "$TMP/secret"
+long="Barkpark pensum owners (barkpark.icymoss-3e43267c.norwayeast.azurecontainerapps.io)"
+SECRETS=0 run --secret-file "$TMP/secret" --owners-group "$long"
+rc=$?
+[ "$rc" = 0 ] && ok "exits 0" || bad "exit $rc: $(cat "$TMP/err")"
+nick=$(sed -n 's/.*ad group create.*--mail-nickname \([^ ]*\).*/\1/p' "$STUB_LOG" | tail -1)
+[ -n "$nick" ] && [ "${#nick}" -le 64 ] && ok "mail nickname is ${#nick} characters" || bad "mail nickname '$nick'"
+
 echo
 echo "passed $PASS, failed $FAIL"
 [ "$FAIL" = 0 ]
