@@ -268,21 +268,27 @@ func runInstanceUp(out *writer, g globals, args []string) int {
 	}
 	steps := instanceUpSteps(st.Path)
 	for i, s := range steps {
+		// A title names the host once up knows it.
+		title := s.title
+		if h := st.host(); h != "" {
+			title = strings.ReplaceAll(title, "<host>", h)
+		}
 		if at, ok := st.Done[s.name]; ok && s.name != "preflight" {
-			out.errf("[%d/%d] %s: done %s", i+1, len(steps), s.title, at)
+			out.errf("[%d/%d] %s: done %s", i+1, len(steps), title, at)
 			continue
 		}
-		out.errf("[%d/%d] %s", i+1, len(steps), s.title)
+		out.errf("[%d/%d] %s", i+1, len(steps), title)
 		start := time.Now()
 		if err := s.run(u); err != nil {
 			_ = u.save()
-			return useError(out, "failed", fmt.Sprintf("%s: %v\nFix the cause and run the same command again. It resumes at this step from %s.", s.title, err, statePath), exitGeneric)
+			return useError(out, "failed", fmt.Sprintf("%s: %v\nFix the cause and run the same command again. It resumes at this step from %s.", title, err, statePath), exitGeneric)
 		}
 		st.Done[s.name] = time.Now().UTC().Format(time.RFC3339)
 		if err := u.save(); err != nil {
 			return useError(out, "failed", err.Error(), exitGeneric)
 		}
-		out.errf("        %s took %s", s.name, time.Since(start).Round(time.Second))
+		out.errf("        %s took %s, %s to %s UTC", s.name, time.Since(start).Round(time.Second),
+			start.UTC().Format("15:04:05"), time.Now().UTC().Format("15:04:05"))
 	}
 	u.printNext()
 	return exitOK
@@ -304,7 +310,7 @@ func instanceUpSteps(path string) []instanceUpStep {
 		)
 	} else {
 		steps = append(steps,
-			instanceUpStep{"image", "build the image from source in a registry in the group", stepUpBuildImage},
+			instanceUpStep{"image", "choose the image", stepUpBuildImage},
 			instanceUpStep{"deploy", "deploy main.bicep to Container Apps", stepUpDeployACA},
 		)
 	}

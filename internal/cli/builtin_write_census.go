@@ -215,6 +215,21 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"decodes a non-empty result.assetDocId; that id is what the imported documents reference, so an empty " +
 			"or HTML 200 refuses the import before any document is written.",
 	},
+	// ---- instance up: Microsoft Graph and Entra, not Barkpark -------------
+	{
+		File: "internal/cli/instance_up_entra.go", Func: "", Sites: 1,
+		Endpoint: "POST login.microsoftonline.com/:tenant/oauth2/v2.0/token (does Entra accept the new client secret)", Class: humanOnly,
+		Disposition: dispOutOfFence,
+		Why: "a token request to Entra's own endpoint, owned by Microsoft; instanceUpSecretAccepted only reads " +
+			"whether the status is 200 and writes nothing Barkpark keeps.",
+	},
+	{
+		File: "internal/cli/instance_up_entra.go", Func: "entraSecret", Sites: 1,
+		Endpoint: "POST graph.microsoft.com/v1.0/applications/:id/addPassword (the client secret of the app entra.bicep made)", Class: humanOnly,
+		Disposition: dispOutOfFence,
+		Why: "a write to Microsoft Graph, not Barkpark; the step counts the secret as made only when the reply " +
+			"decodes a non-empty secretText, which it writes to the secret file.",
+	},
 	{
 		File: "internal/cli/media_copy.go", Func: "uploadOne", Sites: 1,
 		Endpoint: "POST /v1/media/:dataset/upload (one file of a bp import --media)", Class: machineRendered,

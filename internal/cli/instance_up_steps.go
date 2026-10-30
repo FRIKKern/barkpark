@@ -280,9 +280,16 @@ func (u *instanceUp) checkEnv(skip map[string]bool, showNotes bool) error {
 		left = append(left, p.String())
 	}
 	for _, n := range notes {
-		if showNotes {
-			u.out.errf("        note: %s", n.Problem)
+		if !showNotes {
+			continue
 		}
+		// On Container Apps the general note says how to read the host and
+		// register the app by hand. up has done both, so it names the host.
+		if n.Setting == "PHX_HOST" && st.Path != instanceTargetVM && st.Out.AppID != "" && st.host() != "" {
+			u.out.errf("        note: PHX_HOST is not set in %s. main.bicep set it to %s, the host of the Entra redirect URI.", st.EnvFile, st.host())
+			continue
+		}
+		u.out.errf("        note: %s", n.Problem)
 	}
 	if len(left) > 0 {
 		return fmt.Errorf("bp instance check found %d problems in %s:\n%s", len(left), st.EnvFile, strings.Join(left, "\n"))
@@ -418,16 +425,31 @@ func (st *instanceUpState) acrName() string {
 
 var instanceUpTagChars = regexp.MustCompile(`[^A-Za-z0-9_.-]+`)
 
-// stepUpBuildImage builds the image from --from-source in a registry in the
-// group with az acr build. Without --from-source it does nothing.
+// stepUpBuildImage chooses the image the deploy runs and prints it. With
+// --from-source it builds the image in a registry in the group. With
+// --image it takes that one. Otherwise it pins the published latest to its
+// release version.
 func stepUpBuildImage(u *instanceUp) error {
 	st := u.st
 	if st.FromSource == "" {
-		u.out.errf("        no --from-source; the deploy uses the published image")
+		switch {
+		case st.Image != "":
+			u.out.errf("        using --image %s", st.Image)
+		case instanceUpBicepHasImageDefault():
+			u.out.errf("        using the default image of main.bicep")
+		default:
+			if _, err := u.pinPublishedImage(); err != nil {
+				return err
+			}
+		}
 		return nil
 	}
 	if instanceUpHasAzureFile("acr-build.sh") {
-		return u.buildImageWithScript()
+		if err := u.buildImageWithScript(); err != nil {
+			return err
+		}
+		u.out.errf("        built %s", st.Out.Image)
+		return nil
 	}
 	acr := st.acrName()
 	if err := u.az(nil, "acr", "show", "-g", st.ResourceGroup, "-n", acr, "--query", "name"); err != nil {
@@ -446,6 +468,7 @@ func stepUpBuildImage(u *instanceUp) error {
 	}
 	st.Out.ACR = acr
 	st.Out.Image = acr + ".azurecr.io/" + tag
+	u.out.errf("        built %s", st.Out.Image)
 	return nil
 }
 
@@ -677,9 +700,11 @@ func (st *instanceUpState) secretFile() string {
 
 var instanceUpEntraLine = regexp.MustCompile(`(?m)^(Tenant id|Client id|Owners group id|Secret expires):\s*(\S+)\s*$`)
 
-// stepUpEntra runs the embedded entra-app-register.sh. It writes the client
-// secret to the secret file, mode 600, and prints the ids, which this step
-// reads.
+// stepUpEntra registers the Entra app on the VM path. With the embedded
+// entra.bicep it deploys that and adds the client secret through Microsoft
+// Graph (instance_up_entra.go). Without it, it runs the embedded
+// entra-app-register.sh, which writes the secret file and prints the ids that
+// this step reads. Either way the secret file has mode 600.
 func stepUpEntra(u *instanceUp) error {
 	st := u.st
 	if st.Out.EntraByBicep {
@@ -698,21 +723,31 @@ func stepUpEntra(u *instanceUp) error {
 		var outputs map[string]struct {
 			Value any `json:"value"`
 		}
+		start := time.Now()
 		if err := u.deployRetryingEntra(&outputs, "deployment", "group", "create", "-g", st.ResourceGroup, "-n", "barkpark-entra",
 			"-f", filepath.Join(dir, "entra.bicep"), "-p", "host="+st.host(), "-p", "org="+st.Org,
 			"-p", "appName="+app, "-p", "ownersGroupName="+group, "-p", "ownerUpns="+string(owners), "-p", "addDeployer=false",
 			"--query", "properties.outputs"); err != nil {
 			return err
 		}
-		id, _ := outputs["clientId"].Value.(string)
-		if id == "" {
-			return fmt.Errorf("entra.bicep gave no clientId")
+		out := func(k string) string { s, _ := outputs[k].Value.(string); return s }
+		id, objectID, groupID, tenant := out("clientId"), out("appObjectId"), out("ownersGroupId"), out("tenantId")
+		if id == "" || objectID == "" || groupID == "" || tenant == "" {
+			return fmt.Errorf("entra.bicep gave no clientId, appObjectId, ownersGroupId or tenantId")
 		}
-		u.out.errf("        entra.bicep made the app %s; entra-app-register.sh adds the client secret", id)
-		script = append(script, "--app-id", id)
-	} else {
-		script = append(script, "--name", app)
+		u.sub(start, "entra.bicep made the app %s, its consent and the owners group %s", id, groupID)
+		// entra.bicep did everything entra-app-register.sh does except the
+		// secret, so up adds the secret through Graph and skips the script.
+		expires, err := u.entraSecret(tenant, objectID, id)
+		if err != nil {
+			return err
+		}
+		st.Tenant = tenant
+		st.Out.AppID, st.Out.OwnersGroupID, st.Out.SecretExpires = id, groupID, expires
+		u.out.errf("        app %s (%s), group %s, secret in %s, expires %s", app, id, group, st.secretFile(), expires)
+		return nil
 	}
+	script = append(script, "--name", app)
 	tmp, err := os.CreateTemp("", "entra-app-register-*.sh")
 	if err != nil {
 		return err
