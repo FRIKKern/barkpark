@@ -1,4 +1,4 @@
-<!-- doc-tier: human | canonical-for: self-host-guide | budget: 2500tok -->
+<!-- doc-tier: human | canonical-for: self-host-guide | budget: 2800tok -->
 # Set up a Barkpark instance for Pensum
 
 This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and key rotation are in [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md).
@@ -10,25 +10,35 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 
 ## Set up with bp instance up
 
-`bp instance up` runs this guide from an empty resource group to the owner's first sign-in. With `bp` 1.26.15 or newer and `az login` as a user who may create app registrations, run one of these in an empty directory:
+`bp instance up` runs this guide to the owner's first sign-in. It creates the resource group when it is missing, so an empty or new group works. After `az login` as a user who may create app registrations, run one of these in an empty directory:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
-bp instance up --azure --path vm --resource-group <resource group> --host <dns label> \
-  --owner <owner upn> --breakglass <breakglass email>
-bp instance up --azure --path containerapps --resource-group <resource group> \
-  --owner <owner upn> --breakglass <breakglass email>
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | BARKPARK_CLI_VERSION=1.26.16 sh
+bp instance up --azure --path vm --resource-group <resource group> --host <dns label> --owner <owner upn>
+bp instance up --azure --path containerapps --resource-group <resource group> --owner <owner upn>
 ```
 
-On Path A, `--host` is a DNS label or your own host, as [step 2](#path-a-a-single-vm) says. On Path B, leave it out. The default is the newest release, pinned. `--image <ref>` names another, and `--from-source <git ref>` builds one on the VM or with `az acr build`.
+Without `BARKPARK_CLI_VERSION` the installer takes the newest release. `--region` defaults to `swedencentral` on Path A and `norwayeast` on Path B. Keep `norwayeast` for Path B. On 2026-10-30 Postgres `Standard_B1ms` was `SkuNotAvailable` in `swedencentral` for the test subscription. On Path A, `--host` is a DNS label or your own host. On Path B, leave it out. `--image <ref>` picks another image than the newest release, and `--from-source <git ref>` builds one.
 
-up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. After a failure the same command resumes from `.bp-instance-up.json`. On `CapacityNotAvailable` up deploys Postgres again as `Standard_B2s`. In a group recreated under an old name, up purges what the old instance left soft-deleted.
+`--breakglass <email>` is optional. It takes the mailbox of a local admin account that signs in with a password and TOTP when Entra is broken, not the owner's daily account. Without it, up leaves `BARKPARK_BREAKGLASS_EMAILS` commented out and says how to add it. Add it before `bp org auth-methods <org> sso --yes`. See [ENTRA-ACCESS.md](ENTRA-ACCESS.md#break-glass-account).
 
-The Entra app and owners group sit outside the resource group, and all else inside. `--org` defaults to `pensum`. Sign in as the owner, create the [break-glass account](ENTRA.md#break-glass-account), then run `bp org auth-methods <org> sso --yes`.
+up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. A rerun resumes from `.bp-instance-up.json`. The Entra app and owners group sit outside the resource group. `--org` defaults to `pensum`.
 
 ## What up does
 
-These are the steps up runs, in order.
+up prints each step as `[n/11]` on Path A and `[n/10]` on Path B, then its time with UTC start and end.
+
+1. `preflight` checks az and the subscription, registers providers, checks VM quota and purges an old instance's soft-deleted leftovers.
+2. `group` creates the resource group when it is missing.
+3. `init` writes `barkpark.env`.
+4. `check` runs `bp instance check` without server probes.
+5. `ssh-key` on Path A. `image` on Path B prints the image it chose and builds `--from-source` in a registry.
+6. `vm` on Path A creates the VM and opens 80 and 443. `deploy` on Path B deploys `main.bicep`, Entra app included.
+7. `deploy` on Path A runs `deploy.sh` on the VM.
+8. `ready` waits for `https://<host>/readyz`.
+9. `entra` on Path A deploys `entra.bicep`, adds the client secret through Microsoft Graph and waits until Entra accepts it.
+10. `connect` makes the instance bp's server and connects the organization to Entra.
+11. `verify` checks the settings and the instance URL.
 
 ## Before you start on Azure
 

@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -21,6 +22,30 @@ type upFake struct {
 	reply    func(c instanceUpCmd) (string, error)
 	readyz   int
 	connects []string
+	// graph records the Microsoft Graph requests as "METHOD url".
+	graph []string
+	// graphReply answers one Graph request; nil means graphDefault.
+	graphReply func(method, url string) (int, string)
+	// creds is the app's passwordCredentials JSON in graphDefault.
+	creds string
+	// refusals is how many token requests Entra refuses before it accepts.
+	refusals, tokenTries int
+}
+
+// graphDefault answers the Graph calls of a first run: the app has no
+// secret, and addPassword makes one.
+func (f *upFake) graphDefault(method, url string) (int, string) {
+	switch {
+	case method == "GET" && strings.Contains(url, "/applications/"):
+		creds := f.creds
+		if creds == "" {
+			creds = "[]"
+		}
+		return 200, `{"passwordCredentials":` + creds + `}`
+	case method == "POST" && strings.HasSuffix(url, "/addPassword"):
+		return 200, `{"secretText":"entra-secret-value","endDateTime":"2027-10-30T10:00:00.1234567Z","keyId":"k-1"}`
+	}
+	return 404, `{"error":{"code":"Request_ResourceNotFound","message":"not found"}}`
 }
 
 func (f *upFake) has(sub string) int {
@@ -74,7 +99,9 @@ func defaultUpReply(c instanceUpCmd) (string, error) {
 	case strings.HasPrefix(s, "az vm create"):
 		return `{"publicIpAddress":"20.1.2.3","fqdns":"pensum-cms.swedencentral.cloudapp.azure.com"}`, nil
 	case strings.HasPrefix(s, "az deployment group create") && strings.Contains(s, "entra.bicep"):
-		return `{"clientId":{"value":"app-1"},"ownersGroupId":{"value":"group-1"},"tenantId":{"value":"tenant-1"}}`, nil
+		return `{"clientId":{"value":"app-1"},"appObjectId":{"value":"obj-1"},"ownersGroupId":{"value":"group-1"},"tenantId":{"value":"tenant-1"}}`, nil
+	case strings.HasPrefix(s, "az account get-access-token"):
+		return `{"accessToken":"graph-token-value","expiresOn":"2026-10-30 21:00:00"}`, nil
 	case strings.HasPrefix(s, "bash ") && strings.Contains(s, "acr-build.sh"):
 		ref := c.args[len(c.args)-1]
 		return c.args[len(c.args)-2] + ".azurecr.io/barkpark:" + ref + "\n", nil
@@ -114,10 +141,31 @@ func stubInstanceUp(t *testing.T) *upFake {
 		}
 		return nil
 	}
+	oldGraph, oldAccepted := instanceUpGraphDo, instanceUpSecretAccepted
+	instanceUpGraphDo = func(_ context.Context, method, url, token string, _ []byte) (int, []byte, error) {
+		if token != "graph-token-value" {
+			t.Errorf("Graph %s %s got token %q", method, url, token)
+		}
+		f.graph = append(f.graph, method+" "+url)
+		reply := f.graphReply
+		if reply == nil {
+			reply = f.graphDefault
+		}
+		code, body := reply(method, url)
+		return code, []byte(body), nil
+	}
+	instanceUpSecretAccepted = func(_ context.Context, tenant, clientID, secret string) bool {
+		f.tokenTries++
+		if secret != "entra-secret-value" {
+			t.Errorf("token request with secret %q for %s in %s", secret, clientID, tenant)
+		}
+		return f.tokenTries > f.refusals
+	}
 	stubInstanceProbes(t, allExtensions, nil)
 	stubGHCR(t, "0.2.33")
 	t.Cleanup(func() {
 		instanceUpRun, instanceUpGet, instanceUpSleep, instanceUpSelf, instanceUpConnect = oldRun, oldGet, oldSleep, oldSelf, oldConnect
+		instanceUpGraphDo, instanceUpSecretAccepted = oldGraph, oldAccepted
 	})
 	dir := t.TempDir()
 	wd, _ := os.Getwd()
@@ -187,12 +235,26 @@ func TestInstanceUpVMRunsEveryStepThenResumesWithNone(t *testing.T) {
 			t.Errorf("ssh lacks %q", want)
 		}
 	}
-	entra := f.find("--owners-group")
-	// The embedded deploy/azure has entra.bicep, so the script gets the app it made.
-	for _, want := range []string{"--host " + host, "--org pensum", "--add-owner owner@example.com", "--app-id app-1", "--owners-group Barkpark pensum owners (" + host + ")"} {
-		if !strings.Contains(entra.String(), want) {
-			t.Errorf("entra call lacks %q: %s", want, entra)
-		}
+	// The embedded deploy/azure has entra.bicep, so up adds the secret to the
+	// app it made through Graph and runs no entra-app-register.sh.
+	if f.has("--secret-file") != 0 {
+		t.Errorf("entra-app-register.sh ran after entra.bicep:\n%s", f.dump())
+	}
+	if got := strings.Join(f.graph, "\n"); got != "GET https://graph.microsoft.com/v1.0/applications/obj-1?$select=passwordCredentials\nPOST https://graph.microsoft.com/v1.0/applications/obj-1/addPassword" {
+		t.Errorf("Graph calls:\n%s", got)
+	}
+	if fi, err := os.Stat(instanceUpSecretFile); err != nil || fi.Mode().Perm() != 0o600 {
+		t.Errorf("secret file: %v %v", fi, err)
+	}
+	if f.tokenTries != 3 {
+		t.Errorf("token requests = %d, want 3 accepted in a row", f.tokenTries)
+	}
+	if !strings.Contains(stderr, "wait for https://"+host+"/readyz") || strings.Contains(stderr, "<host>") {
+		t.Errorf("the ready step does not name the host:\n%s", stderr)
+	}
+	if !regexp.MustCompile(`entra took \d+s, \d\d:\d\d:\d\d to \d\d:\d\d:\d\d UTC`).MatchString(stderr) ||
+		!regexp.MustCompile(`\d\d:\d\d:\d\dZ Microsoft Graph made the client secret barkpark-pensum, expires 2027-10-30T10:00:00Z`).MatchString(stderr) {
+		t.Errorf("the entra step lacks its times:\n%s", stderr)
 	}
 	oidc := f.find("org oidc-create")
 	if string(oidc.stdin) != "entra-secret-value" {
@@ -207,7 +269,7 @@ func TestInstanceUpVMRunsEveryStepThenResumesWithNone(t *testing.T) {
 		t.Errorf("trust_idp_mfa not set")
 	}
 	for _, c := range f.calls {
-		if strings.Contains(c.String(), upToken) || strings.Contains(c.String(), "entra-secret-value") {
+		if strings.Contains(c.String(), upToken) || strings.Contains(c.String(), "entra-secret-value") || strings.Contains(c.String(), "graph-token-value") {
 			t.Errorf("a secret is on argv: %s", c)
 		}
 		if c.name == "bp" && !slicesContain(c.env, "BARKPARK_API_TOKEN="+upToken) {
@@ -221,7 +283,7 @@ func TestInstanceUpVMRunsEveryStepThenResumesWithNone(t *testing.T) {
 		t.Errorf("stdout lacks the sign-in link or next steps:\n%s", stdout)
 	}
 	for _, s := range []string{stdout, stderr} {
-		if strings.Contains(s, upToken) || strings.Contains(s, "entra-secret-value") {
+		if strings.Contains(s, upToken) || strings.Contains(s, "entra-secret-value") || strings.Contains(s, "graph-token-value") {
 			t.Errorf("output holds a secret")
 		}
 	}

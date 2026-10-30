@@ -48,6 +48,14 @@ func TestInstanceUpContainerAppsPinsTheLatestRelease(t *testing.T) {
 	if st := readUpState(t); st.Out.Image != "ghcr.io/frikkern/barkpark:0.2.33" {
 		t.Errorf("state image = %q", st.Out.Image)
 	}
+	// The image step names the image it chose, and the verify note names the
+	// host instead of a hand registration.
+	if !strings.Contains(stderr, "[5/10] choose the image\n        ghcr.io/frikkern/barkpark:latest is release 0.2.33") {
+		t.Errorf("image step:\n%s", stderr)
+	}
+	if strings.Contains(stderr, "entra-app-register.sh") || !strings.Contains(stderr, "main.bicep set it to app.norwayeast.azurecontainerapps.io") {
+		t.Errorf("verify note:\n%s", stderr)
+	}
 }
 
 func TestInstanceUpRetriesWhileEntraReplicates(t *testing.T) {

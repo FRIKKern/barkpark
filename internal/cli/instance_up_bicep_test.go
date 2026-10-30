@@ -47,6 +47,9 @@ func TestInstanceUpContainerAppsWithBicepEntraAndACRScript(t *testing.T) {
 	if f.has("az acr build") != 0 || f.has("acr-build.sh crbarkpark1 main") != 1 {
 		t.Errorf("registry build:\n%s", f.dump())
 	}
+	if !strings.Contains(stderr, "built crbarkpark1.azurecr.io/barkpark:sha-0123456789ab") {
+		t.Errorf("the image step does not name the image:\n%s", stderr)
+	}
 	dep := f.find("az deployment group create -g rg-aca -n barkpark ")
 	for _, want := range []string{"image=crbarkpark1.azurecr.io/barkpark:sha-0123456789ab", "acrName=crbarkpark1", "entraEnabled=true", "entraOrg=pensum", `entraOwnerUpns=["owner@example.com"]`, "entraAddDeployer=false"} {
 		if !strings.Contains(dep.String(), want) {
@@ -72,7 +75,7 @@ func TestInstanceUpVMWithEntraBicep(t *testing.T) {
 	laneBTemplates(t)
 	f.reply = func(c instanceUpCmd) (string, error) {
 		if strings.HasPrefix(c.String(), "az deployment group create") && strings.Contains(c.String(), "entra.bicep") {
-			return `{"clientId":{"value":"app-7"},"ownersGroupId":{"value":"group-7"},"tenantId":{"value":"tenant-1"}}`, nil
+			return `{"clientId":{"value":"app-7"},"appObjectId":{"value":"obj-7"},"ownersGroupId":{"value":"group-7"},"tenantId":{"value":"tenant-1"}}`, nil
 		}
 		return defaultUpReply(c)
 	}
@@ -86,12 +89,98 @@ func TestInstanceUpVMWithEntraBicep(t *testing.T) {
 			t.Errorf("entra.bicep deploy lacks %q: %s", want, ent)
 		}
 	}
-	script := f.find("--secret-file")
-	if !strings.Contains(script.String(), "--app-id app-7") || strings.Contains(script.String(), "--name ") {
-		t.Errorf("script call: %s", script)
+	if f.has("entra-app-register") != 0 || f.has("--secret-file") != 0 {
+		t.Errorf("the script ran after entra.bicep:\n%s", f.dump())
 	}
-	if f.has("org oidc-create") != 1 {
+	if len(f.graph) != 2 || !strings.HasSuffix(f.graph[1], "/applications/obj-7/addPassword") {
+		t.Errorf("Graph calls: %v", f.graph)
+	}
+	if f.has("org oidc-create") != 1 || !strings.Contains(f.find("org oidc-create").String(), `{"group-7":"owner"}`) {
 		t.Errorf("the VM path connects the org with bp org")
+	}
+}
+
+// A rerun that has the secret file keeps it and makes no second secret.
+func TestInstanceUpVMKeepsTheSecretFile(t *testing.T) {
+	f := stubInstanceUp(t)
+	f.creds = `[{"displayName":"other","endDateTime":"2028-01-01T00:00:00Z"},{"displayName":"barkpark-pensum","endDateTime":"2027-05-01T08:00:00.5Z"}]`
+	if err := os.WriteFile(instanceUpSecretFile, []byte("kept-secret\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stderr, code := runUp(t, vmArgs()...); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, stderr, f.dump())
+	}
+	for _, g := range f.graph {
+		if strings.Contains(g, "addPassword") {
+			t.Errorf("a second secret was made: %v", f.graph)
+		}
+	}
+	if f.tokenTries != 0 {
+		t.Errorf("waited for a kept secret")
+	}
+	if st := readUpState(t); st.Out.SecretExpires != "2027-05-01T08:00:00Z" {
+		t.Errorf("expiry = %q", st.Out.SecretExpires)
+	}
+	if fi, _ := os.Stat(instanceUpSecretFile); fi.Mode().Perm() != 0o600 {
+		t.Errorf("secret file mode %v", fi.Mode().Perm())
+	}
+	if oidc := f.find("org oidc-create"); string(oidc.stdin) != "kept-secret" {
+		t.Errorf("oidc-create stdin = %q", oidc.stdin)
+	}
+}
+
+// An app with a secret but no secret file stops the step: Entra never shows
+// the secret again.
+func TestInstanceUpVMStopsWhenTheSecretFileIsGone(t *testing.T) {
+	f := stubInstanceUp(t)
+	f.creds = `[{"displayName":"barkpark-pensum","endDateTime":"2027-05-01T08:00:00Z"}]`
+	_, stderr, code := runUp(t, vmArgs()...)
+	if code == exitOK || !strings.Contains(stderr, "Entra never shows a secret again") {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	for _, g := range f.graph {
+		if strings.Contains(g, "addPassword") {
+			t.Errorf("a secret was made: %v", f.graph)
+		}
+	}
+}
+
+// Graph can answer 404 for an app entra.bicep just made. Up asks again until
+// Graph knows it, and waits until Entra accepts the new secret.
+func TestInstanceUpVMWaitsForEntraToReplicate(t *testing.T) {
+	f := stubInstanceUp(t)
+	misses := 0
+	f.graphReply = func(method, url string) (int, string) {
+		if method == "GET" && misses < 2 {
+			misses++
+			return 404, `{"error":{"code":"Request_ResourceNotFound","message":"Resource 'obj-1' does not exist"}}`
+		}
+		return f.graphDefault(method, url)
+	}
+	f.refusals = 2
+	if _, stderr, code := runUp(t, vmArgs()...); code != exitOK {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if len(f.graph) != 4 {
+		t.Errorf("Graph calls: %v", f.graph)
+	}
+	if f.tokenTries != 5 {
+		t.Errorf("token requests = %d, want 2 refused then 3 accepted", f.tokenTries)
+	}
+}
+
+// Without entra.bicep in the assets, up runs entra-app-register.sh.
+func TestInstanceUpVMRunsTheScriptWithoutEntraBicep(t *testing.T) {
+	f := stubInstanceUp(t)
+	old := instanceUpAzureFS
+	instanceUpAzureFS = fstest.MapFS{"azure/main.bicep": {Data: []byte("param image string\n")}}
+	t.Cleanup(func() { instanceUpAzureFS = old })
+	if _, stderr, code := runUp(t, vmArgs()...); code != exitOK {
+		t.Fatalf("exit %d: %s\n%s", code, stderr, f.dump())
+	}
+	script := f.find("--secret-file")
+	if !strings.Contains(script.String(), "--name Barkpark pensum (pensum-cms.swedencentral.cloudapp.azure.com)") || len(f.graph) != 0 {
+		t.Errorf("script call: %s, Graph calls %v", script, f.graph)
 	}
 }
 
