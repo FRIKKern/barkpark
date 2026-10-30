@@ -117,11 +117,17 @@ CLI_TARGETS := bp-darwin-arm64 bp-darwin-amd64 bp-linux-arm64 bp-linux-amd64 bp-
 # curl-installed binary can deploy without a checkout. The canonical script
 # stays at the repo root; sync copies it in before every build, and check is
 # the CI drift guard (cli-release.yml runs it against the committed asset).
-cli-assets-sync: ## Sync deploy.sh into the go:embed asset (internal/cli/setup/assets/)
+cli-assets-sync: ## Sync deploy.sh, entra-app-register.sh and deploy/azure into the go:embed assets (internal/cli/setup/assets/)
 	cp deploy.sh internal/cli/setup/assets/deploy.sh
+	cp scripts/entra-app-register.sh internal/cli/setup/assets/entra-app-register.sh
+	rm -rf internal/cli/setup/assets/azure
+	mkdir -p internal/cli/setup/assets/azure
+	cp -R deploy/azure/. internal/cli/setup/assets/azure/
 
-cli-assets-check: ## Fail when the embedded deploy.sh drifted from the repo-root copy
+cli-assets-check: ## Fail when an embedded asset drifted from the repo copy
 	cmp deploy.sh internal/cli/setup/assets/deploy.sh
+	cmp scripts/entra-app-register.sh internal/cli/setup/assets/entra-app-register.sh
+	diff -r deploy/azure internal/cli/setup/assets/azure
 
 # The deploy templates (templates/<name>/) are go:embedded into the provisioner
 # (internal/provisioner/catalog/templates/) for the dwb-4 content bootstrap.

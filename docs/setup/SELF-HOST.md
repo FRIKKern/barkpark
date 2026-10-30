@@ -8,6 +8,28 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 | [Single VM](#path-a-a-single-vm) | `deploy.sh` runs the server image in Docker on one Ubuntu server, with local PostgreSQL 17 and Caddy for TLS. | `/opt/barkpark/.env` |
 | [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server 17, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
 
+## Set up with bp instance up
+
+`bp instance up` runs this guide from an empty resource group to the owner's first sign-in. With `bp` 1.26.13 or newer and `az login` as a user who may create app registrations, run one of these in an empty directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp instance up --azure --path vm --resource-group <resource group> --host <dns label> \
+  --owner <owner upn> --breakglass <breakglass email>
+bp instance up --azure --path containerapps --resource-group <resource group> \
+  --owner <owner upn> --breakglass <breakglass email>
+```
+
+On Path A, `--host` is a DNS label or your own host, as [step 2](#path-a-a-single-vm) says. On Path B, leave it out for the Container Apps address. The published image is the default. `--image <ref>` names another, and `--from-source <git ref>` builds one on the VM or with `az acr build`.
+
+up writes `barkpark.env` and `entra-client-secret` with mode 600 and prints no secret. After a failure the same command resumes from `.bp-instance-up.json`. On `CapacityNotAvailable` up deploys Postgres again as `Standard_B2s`.
+
+The Entra app `Barkpark <org> (<host>)` and group `Barkpark <org> owners (<host>)` sit outside the resource group, and all else inside. `--org` defaults to `pensum`. up ends with the sign-in link. Sign in as the owner, create the [break-glass account](ENTRA.md#break-glass-account), then run `bp org auth-methods <org> sso --yes`.
+
+## What up does
+
+These are the steps up runs, in order.
+
 ## Before you start on Azure
 
 A new subscription has no resource providers. Run this loop until each line says `Registered`:
@@ -20,7 +42,7 @@ for p in Compute Network Storage App DBforPostgreSQL KeyVault OperationalInsight
 done
 ```
 
-Check sizes and quota with `az vm list-skus --location <region> --size Standard_D2 -o table` and `az vm list-usage --location <region> -o table`.
+Check quota with `az vm list-usage --location <region> -o table`.
 
 ## Decide the host name and the org slug
 
@@ -38,11 +60,9 @@ bp instance init --target <target> --host "<host>" --studio-origin <studio origi
   --breakglass-email <breakglass email>
 ```
 
-`<target>` is `vm` for Path A and `containerapps` for Path B. On Path B, `<host>` is your own domain, or empty for the Container Apps address. Without a separate Studio, `<studio origin>` is `http://localhost:3000` for the [headless sign-in check](../../tooling/entra-signin/README.md).
+`<target>` is `vm` for Path A and `containerapps` for Path B. On Path B, `<host>` is your own domain, or empty for the Container Apps address. Without a separate Studio, `<studio origin>` is `http://localhost:3000` for the [headless sign-in check](../../tooling/entra-signin/README.md). `--breakglass-email` is an admin mailbox, not the owner's daily account.
 
-`--breakglass-email` is a separate admin mailbox, not the owner's daily account.
-
-`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](#pensum-settings). With `--target containerapps` it also writes the keys, a database password and the first admin token, with its id on `BARKPARK_OPERATOR_TOKEN_IDS`. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
+`bp instance init` writes `barkpark.env` with mode 600 and the [Pensum settings](SELF-HOST-SETTINGS.md#pensum-settings). With `--target containerapps` it also writes the keys, a database password and the first admin token, with its id on `BARKPARK_OPERATOR_TOKEN_IDS`. For `--target vm`, `deploy.sh` makes them. It prints each `<...>` value left to fill in. Then check the file:
 
 <!-- run -->
 ```bash
@@ -85,7 +105,7 @@ To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl res
 
 ## Path B: Azure Container Apps
 
-`deploy/azure/main.bicep` puts Postgres on a private network and adds backup and check jobs. Fetch it next to `barkpark.env` and deploy. It takes about 8 minutes. On `CapacityNotAvailable` or `SkuNotAvailable`, add `-p postgresSku=Standard_B2s`:
+`deploy/azure/main.bicep` puts Postgres on a private network and adds backup and check jobs. Fetch it next to `barkpark.env` and deploy, about 8 minutes. On `SkuNotAvailable` or `CapacityNotAvailable`, try another region or `-p postgresSku=Standard_B2s`:
 
 <!-- run -->
 ```bash
@@ -97,7 +117,7 @@ az group create -n "$RG" -l norwayeast
 az deployment group create -g "$RG" -n barkpark -p main.bicepparam -p alertEmail=<alert email> -o none
 ```
 
-`-p entraEnabled=true` also [creates the Entra sign-in](ENTRA.md#create-the-app-with-the-bicep-template). Without `PHX_HOST` in `barkpark.env`, the app gets its Container Apps address. A domain there is `PHX_HOST` from the start and is [bound later](SELF-HOST-UPDATES.md#host-name-on-container-apps). `alertEmail` gets [alerts](SELF-HOST-OPERATIONS.md#container-apps-alerts). Connect once `/readyz` answers, a minute later:
+`-p entraEnabled=true` also [creates the Entra sign-in](ENTRA.md#create-the-app-with-the-bicep-template). Without `PHX_HOST` in `barkpark.env`, the app gets its Container Apps address. A domain there is `PHX_HOST` from the start and is [bound later](SELF-HOST-UPDATES.md#host-name-on-container-apps). `alertEmail` gets [alerts](SELF-HOST-OPERATIONS.md#container-apps-alerts). Connect once `/readyz` answers:
 
 <!-- run -->
 ```bash
@@ -108,55 +128,26 @@ bp setup --target connect --server "$URL" --token "$(sed -n 's/^BARKPARK_SEED_AD
 
 <!-- run hook=jobs --> Run `az containerapp job start -g <resource group> -n barkpark-ops` for `bp instance check` in the network, and the same with `barkpark-backup` for a [backup](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill).
 
-To change a setting, edit `barkpark.env` and deploy again. [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#container-apps) covers updates, jobs, health checks and cost.
+To change a setting, edit `barkpark.env` and deploy again. [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#container-apps) covers updates, health checks and cost.
 
 ### Build the image from source
 
-To build the image without ghcr.io, make a registry and build a git ref in it, in about 10 minutes:
+It needs no ghcr.io:
 
 ```bash
 ACR=$(az deployment group create -g "$RG" -n acr -f acr.bicep --query properties.outputs.acrName.value -o tsv)
 IMAGE=$(bash acr-build.sh "$ACR" <git ref> | tail -1)
 ```
 
-A third argument takes a git URL or local clone. Deploy with `-p image="$IMAGE" acrName="$ACR"`.
+Deploy with `-p image="$IMAGE" acrName="$ACR"`.
 
-## Pensum settings
-
-`bp instance init` writes these for both paths:
-
-```bash
-BARKPARK_SELF_UPDATE_CHECK=off
-BARKPARK_RETIRE_SSE_ON_SIGTERM=1
-BARKPARK_ALWAYS_ALLOWED_ORIGINS=https://<host>,<studio origin>
-BARKPARK_STUDIO_SSO_ORIGINS=<studio origin>
-BARKPARK_PLUGINS=media
-BARKPARK_TMUX_CONSOLE=off
-BARKPARK_CAPABILITIES_OFF=studio_chat,cycle_fleet,epic_fleet
-BARKPARK_OPERATOR_EMAILS=<operator emails>
-BARKPARK_OPERATOR_FAIL_CLOSED=1
-BARKPARK_SIGN_IN_POLICY_ALL_ROUTES=1
-BARKPARK_CLOUD_HANDOFF=off
-BARKPARK_BREAKGLASS_EMAILS=<breakglass email>
-BARKPARK_TOKEN_EXPIRY_WARNINGS=on
-BARKPARK_OIDC_KEEP_OWNER=on
-BARKPARK_OIDC_EMAIL_FROM_UPN=on
-BARKPARK_BOOTSTRAP_OWNER_EMAIL=<owner email>
-```
-
-- [ENTRA.md](ENTRA.md#the-bootstrap-owner) explains the last three.
-- `BARKPARK_BREAKGLASS_EMAILS` lets the [break-glass account](ENTRA.md#break-glass-account) sign in while the org allows only SSO.
-- Leave `BARKPARK_SITE_DEPLOY_APPLY`, `BARKPARK_SELF_UPDATE_APPLY`, `CONNECTORS_CONNECT_SECRET` and `INDX_*` unset.
-
-### Operator access
+## Operator access
 
 Once either operator list is set, operator routes such as `bp org` accept only a token whose owner is on `BARKPARK_OPERATOR_EMAILS` or whose id is on `BARKPARK_OPERATOR_TOKEN_IDS`. `BARKPARK_OPERATOR_FAIL_CLOSED=1` refuses everyone while both lists are empty. The admin token has no owner.
 
-**Mail.** Without `SMTP_HOST`, no sign-in link, reset or invitation mail goes out. SSO and a break-glass account need none.
-
 ## Sign in with Entra ID
 
-Unless `entraEnabled` did it, register and connect the app as [ENTRA.md](ENTRA.md) describes, then turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). A Studio with `STUDIO_SIGN_IN=sso` and `STUDIO_SSO_ORG=<org>` signs editors in through this connection. List its bare origin in `BARKPARK_STUDIO_SSO_ORIGINS` and run `bp instance check --env-file <file> --studio-url <studio url>`. `bp instance studio-token --workspace <ws>` prints its `BARKPARK_TOKEN` line.
+Unless `entraEnabled` did it, connect the app as [ENTRA.md](ENTRA.md) describes. Once a test sign-in works, turn on [Entra MFA as Barkpark MFA](ENTRA.md#entra-mfa-counts-as-barkpark-mfa). A Studio signs editors in as [SELF-HOST-SETTINGS.md](SELF-HOST-SETTINGS.md#studio-sign-in) says.
 
 ## Check the instance
 

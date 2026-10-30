@@ -1,4 +1,5 @@
-// Package assets embeds the repo's deploy.sh so a curl-installed bp (no
+// Package assets embeds the repo's deploy.sh, entra-app-register.sh and
+// deploy/azure so a curl-installed bp (no
 // checkout anywhere near cwd) can still stream the installer over SSH.
 //
 // The CANONICAL script stays at the repo root (`ssh … 'bash -s' < deploy.sh`
@@ -9,7 +10,7 @@
 // Do not edit assets/deploy.sh by hand — edit /deploy.sh and re-sync.
 package assets
 
-import _ "embed"
+import "embed"
 
 // DeployScript is the embedded copy of the repo-root deploy.sh. The deploy
 // executor prefers a checkout's script (operators testing local edits) and
@@ -17,3 +18,15 @@ import _ "embed"
 //
 //go:embed deploy.sh
 var DeployScript []byte
+
+// EntraScript is the embedded copy of scripts/entra-app-register.sh. `bp
+// instance up` runs it to register the Entra app when no Bicep module does.
+//
+//go:embed entra-app-register.sh
+var EntraScript []byte
+
+// Azure holds the embedded copy of deploy/azure: main.bicep, its modules and
+// main.example.bicepparam. `bp instance up --path containerapps` deploys it.
+//
+//go:embed azure
+var Azure embed.FS

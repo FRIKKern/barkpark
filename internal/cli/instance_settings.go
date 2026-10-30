@@ -3,7 +3,7 @@ package cli
 // instance_settings.go holds what `bp instance init` writes and what
 // `bp instance check` reads: the settings a production instance needs, the
 // secrets bp generates, and the recommended settings for a Pensum instance
-// from docs/setup/SELF-HOST.md. Both verbs run on the operator's
+// from docs/setup/SELF-HOST-SETTINGS.md. Both verbs run on the operator's
 // machine and need no server and no capabilities manifest.
 
 import (
@@ -21,7 +21,7 @@ import (
 
 // Doc links printed after each problem. They are repo paths, as elsewhere in bp.
 const (
-	instanceDocRecommended = "docs/setup/SELF-HOST.md#pensum-settings"
+	instanceDocRecommended = "docs/setup/SELF-HOST-SETTINGS.md#pensum-settings"
 	instanceDocKeys        = "docs/setup/SELF-HOST-OPERATIONS.md#rotate-keys"
 	instanceDocDatabase    = "docs/setup/SELF-HOST-OPERATIONS.md#moving-an-instance"
 	instanceDocContainer   = "docs/setup/SELF-HOST.md"
