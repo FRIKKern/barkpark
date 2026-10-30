@@ -27,7 +27,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
 
   setup do
     :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
-    tag = System.unique_integer([:positive])
+    tag = binary_part(Ecto.UUID.generate(), 0, 8)
     {:ok, ws} = Tenancy.create_workspace(%{slug: "dsstall-#{tag}", name: "dsstall #{tag}"})
     {:ok, project} = Tenancy.create_project(ws, %{slug: "dsstall-p-#{tag}", name: "p"})
 
@@ -242,20 +242,42 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     assert edits > 0
   end
 
-  defmodule SlowRefuseDeleteHook do
+  defmodule NestedRollbackDeleteHook do
     @moduledoc false
-    def lifecycle_hooks, do: %{before_delete: [&__MODULE__.refuse/1]}
+    def lifecycle_hooks, do: %{before_delete: [&__MODULE__.swallow/1]}
 
-    def refuse(_payload) do
-      Process.sleep(300)
-      {:halt, "refused late"}
+    def swallow(_payload) do
+      {:error, :nested} = Repo.transaction(fn -> Repo.rollback(:nested) end)
+      :ok
     end
   end
 
-  test "a step that fails after the time budget answers :timeout, whatever it said",
+  defmodule SlowRollbackDeleteHook do
+    @moduledoc false
+    def lifecycle_hooks, do: %{before_delete: [&__MODULE__.swallow/1]}
+
+    def swallow(payload) do
+      Process.sleep(300)
+      NestedRollbackDeleteHook.swallow(payload)
+    end
+  end
+
+  test "a nested write that rolls back without a reason answers :database and leaves the dataset whole",
        %{project: project, opts: opts} = ctx do
     seed("doomed", 3, opts)
-    Barkpark.PluginEnv.with_plugins([SlowRefuseDeleteHook], ctx)
+    Barkpark.PluginEnv.with_plugins([NestedRollbackDeleteHook], ctx)
+
+    assert {:error, {:delete_failed, :database}} =
+             Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
+
+    assert %Dataset{} = dataset = Tenancy.get_dataset(project, "doomed")
+    assert documents(dataset) == 3
+  end
+
+  test "a nested write that rolls back without a reason after the time budget answers :timeout",
+       %{project: project, opts: opts} = ctx do
+    seed("doomed", 3, opts)
+    Barkpark.PluginEnv.with_plugins([SlowRollbackDeleteHook], ctx)
     Application.put_env(:barkpark, :dataset_delete_timeout_ms, 200)
 
     assert {:error, {:delete_failed, :timeout}} =

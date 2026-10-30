@@ -473,13 +473,13 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     def refuse(_payload), do: {:halt, "refused"}
   end
 
-  test "a document delete that answers an error answers a typed error and leaves the dataset whole",
+  test "a hook that halts a document delete answers its halt and leaves the dataset whole",
        %{ws: ws, project: project, user: user} = ctx do
     dataset = seed(ws, project, "j10-11", user)
     before = census(dataset, ws)
     Barkpark.PluginEnv.with_plugins([RefuseDeleteHook], ctx)
 
-    assert {:error, {:delete_failed, :database}} = Tenancy.delete_dataset(dataset)
+    assert {:error, {:halted, "refused"}} = Tenancy.delete_dataset(dataset)
     assert Repo.get(Dataset, dataset.id)
     assert census(dataset, ws) == before
   end

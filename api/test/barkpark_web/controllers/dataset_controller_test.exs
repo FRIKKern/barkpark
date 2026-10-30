@@ -259,6 +259,23 @@ defmodule BarkparkWeb.DatasetControllerTest do
       end
     end
 
+    defmodule RefuseDeleteHook do
+      @moduledoc false
+      def lifecycle_hooks, do: %{before_delete: [&__MODULE__.refuse/1]}
+      def refuse(_payload), do: {:halt, "refused"}
+    end
+
+    test "a hook that halts the delete answers 409 halted and the dataset stays",
+         %{ws: ws, project: project, tokens: tokens} = ctx do
+      Barkpark.PluginEnv.with_plugins([RefuseDeleteHook], ctx)
+
+      assert %{"error" => %{"code" => "halted"}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 409)
+
+      assert documents_in(Tenancy.get_dataset(project, "j10-7")) == 1
+      assert :ets.lookup(Runs, {project.id, "j10-7"}) == []
+    end
+
     test "another caller's DELETE reads the same run", %{ws: ws, project: project, tokens: tokens} do
       id = Tenancy.get_dataset(project, "j10-7").id
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)

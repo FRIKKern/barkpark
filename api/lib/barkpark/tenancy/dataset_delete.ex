@@ -61,7 +61,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   lock and every write in the workspace waited for the whole delete
   (task-10608b4831a0e9b8). The transaction may run 30 minutes
   (`:dataset_delete_timeout_ms`); a timeout or database error rolls it back and
-  answers `{:error, {:delete_failed, :timeout | :contended | :database}}`. The
+  answers `{:error, {:delete_failed, :timeout | :contended | :database}}`; a
+  step that answers its own error (a hook halt, a rev mismatch) answers it. The
   HTTP door runs it off the request: `Tenancy.DatasetDelete.Runs`.
 
   The walk first locks the dataset's document rows in id order. An edit racing
@@ -239,20 +240,12 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   defp failure(%Postgrex.Error{postgres: %{code: :query_canceled}}, _ms), do: :timeout
   defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
   defp failure(%Postgrex.Error{postgres: %{code: :deadlock_detected}}, _ms), do: :contended
-  defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
+  defp failure(_e, ms), do: fault(ms)
 
-  defp rolled_back(reason, ms) do
-    cond do
-      refusal?(reason) -> reason
-      ms >= timeout_ms() -> {:delete_failed, :timeout}
-      true -> {:delete_failed, :database}
-    end
-  end
+  defp rolled_back(:rollback, ms), do: {:delete_failed, fault(ms)}
+  defp rolled_back(reason, _ms), do: reason
 
-  defp refusal?(:not_found), do: true
-  defp refusal?({:shared_search, _held}), do: true
-  defp refusal?({:media_referenced, _files}), do: true
-  defp refusal?(_reason), do: false
+  defp fault(ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)
