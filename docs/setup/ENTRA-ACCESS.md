@@ -23,7 +23,7 @@ Both act at the next sign-in. Barkpark sessions that already exist keep working 
 
 ## Break-glass account
 
-An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. A break-glass account on `BARKPARK_BREAKGLASS_EMAILS` signs in with a password and TOTP, or a passkey, even when the organization allows only SSO. Create it with the operator token in `BARKPARK_TOKEN`:
+An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. A break-glass account on `BARKPARK_BREAKGLASS_EMAILS` signs in with a password and TOTP, or a passkey, even when the organization allows only SSO. Create it with the operator token in `BARKPARK_TOKEN`. Against a remote host, add `--yes` to each command that writes, from `register` on:
 
 1. `bp auth register <email> <password>` creates the account. It stays unconfirmed, because no mail goes out.
 2. Confirm it on the server: `bin/barkpark eval 'Barkpark.Release.confirm_email("<email>")'` in the container, on a VM after `sudo docker exec barkpark`. Seating an unconfirmed account replaces its password.
