@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -38,6 +39,7 @@ func TestInstanceUpContainerAppsWithBicepEntraAndACRScript(t *testing.T) {
 		}
 		return defaultUpReply(c)
 	}
+	stubRedirect(t, 302, "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/authorize?x=1")
 	_, stderr, code := runUp(t, "--azure", "--path", "containerapps", "--resource-group", "rg-aca", "--owner", "owner@example.com", "--from-source", "main")
 	if code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, stderr, f.dump())
@@ -90,5 +92,33 @@ func TestInstanceUpVMWithEntraBicep(t *testing.T) {
 	}
 	if f.has("org oidc-create") != 1 {
 		t.Errorf("the VM path connects the org with bp org")
+	}
+}
+
+func stubRedirect(t *testing.T, code int, loc string) *int {
+	t.Helper()
+	calls := 0
+	old := instanceUpRedirect
+	instanceUpRedirect = func(context.Context, string) (int, string, error) { calls++; return code, loc, nil }
+	t.Cleanup(func() { instanceUpRedirect = old })
+	return &calls
+}
+
+func TestInstanceUpContainerAppsFailsWhenTheImageDidNotConnectTheOrg(t *testing.T) {
+	f := stubInstanceUp(t)
+	laneBTemplates(t)
+	stubRedirect(t, 404, "")
+	f.reply = func(c instanceUpCmd) (string, error) {
+		if strings.HasPrefix(c.String(), "az deployment group show") {
+			return `{"host":{"value":"app.norwayeast.azurecontainerapps.io"},"entraTenantId":{"value":"tenant-1"},"entraClientId":{"value":"app-9"},"entraOwnersGroupId":{"value":"group-9"}}`, nil
+		}
+		return defaultUpReply(c)
+	}
+	_, stderr, code := runUp(t, "--azure", "--path", "containerapps", "--resource-group", "rg-aca", "--owner", "owner@example.com")
+	if code == exitOK || !strings.Contains(stderr, "did not connect pensum at its first boot") || !strings.Contains(stderr, "--from-source main") {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	if st := readUpState(t); st.Done["connect"] != "" || st.Done["deploy"] == "" {
+		t.Errorf("done = %v", st.Done)
 	}
 }
