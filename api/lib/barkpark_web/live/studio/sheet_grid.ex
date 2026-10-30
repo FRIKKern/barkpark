@@ -235,8 +235,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   so they re-mark as changed on every call and silently defeat LiveView's
   equality-based change tracking. Before: ~15ms server cost per presence
   frame (full grid re-render); after: ~0.3ms (only the overlay layer
-  re-renders) — the live lock is the "MEASURE:" test in
-  `studio_live_sheet_presence_test.exs`, budget 10ms. The geometry reuses
+  re-renders). The live lock is the "MEASURE:" test in
+  `studio_live_sheet_presence_test.exs`: a presence frame's reductions on a
+  500-row sheet stay under 1.5x of a 50-row one (it replaced a 10ms
+  wall-clock budget that flaked on shared runners). The geometry reuses
   the frozen-band px math (`Geometry.left_px`/`top_px`), so overlay boxes
   align with the cells by construction; boxes scroll with the content (the
   layer is absolutely positioned inside `.sheet-scroll`) and slide UNDER
