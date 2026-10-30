@@ -255,7 +255,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersTest do
           {"rl_label",
            [
              %{
-               "name" => "title",
+               "name" => "book",
                "type" => "reference",
                "refType" => "rl_title",
                "to" => [%{"type" => "rl_title"}]
@@ -389,7 +389,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersTest do
        %{scope: scope} do
     catalogue_schemas!(scope)
     publish!("rl_title", "rl-t-1", %{}, scope, @ds3)
-    publish!("rl_label", "rl-l-1", %{"title" => "rl-t-1"}, scope, @ds3)
+    publish!("rl_label", "rl-l-1", %{"book" => "rl-t-1"}, scope, @ds3)
     drain()
 
     {:ok, %Document{id: pk}} = Content.get_document("rl-l-1", "rl_label", @ds3, scope)
@@ -406,44 +406,49 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersTest do
     assert lookup =~ "AS MATERIALIZED"
     assert lookup =~ ~r/"type" = ANY\(/
 
-    assert Repo.exists?(from(e in Edge, where: e.from_id == ^pk and e.kind == "title"))
+    assert Repo.exists?(from(e in Edge, where: e.from_id == ^pk and e.kind == "book"))
   end
 
   test "a lookup past its statement_timeout is cancelled once, not retried", %{scope: scope} do
-    Application.put_env(:barkpark, ReprojectLinkersWorker, lookup_timeout_ms: 200)
+    Application.put_env(:barkpark, ReprojectLinkersWorker, lookup_timeout_ms: 20)
     on_exit(fn -> Application.delete_env(:barkpark, ReprojectLinkersWorker) end)
     catalogue_schemas!(scope)
 
-    # A connection outside the test sandbox holds `documents` locked, so the
-    # lookup waits on the lock until its statement_timeout cancels it.
-    me = self()
+    # 20,000 labels with deep content, and no index allowed for the rest of
+    # this sandbox transaction: the `_ref` jsonpath then walks every label,
+    # which takes far longer than the 20 ms lookup timeout.
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    deep = for i <- 1..40, do: %{"k" => i, "o" => %{"p" => [%{"q" => i}, %{"r" => "x"}]}}
 
-    {:ok, conn} =
-      Repo.config()
-      |> Keyword.drop([:pool, :pool_size, :ownership_timeout])
-      |> Postgrex.start_link()
+    for chunk <- Enum.chunk_every(1..20_000, 2_000) do
+      Repo.insert_all(
+        Document,
+        for i <- chunk do
+          %{
+            doc_id: "rl-pad-#{i}",
+            rev: "r#{i}",
+            type: "rl_label",
+            dataset: @ds3,
+            status: "published",
+            content: %{"book" => "rl-t-#{i}", "deep" => deep},
+            workspace_id: scope[:workspace_id],
+            project_id: scope[:project_id],
+            inserted_at: now,
+            updated_at: now
+          }
+        end
+      )
+    end
 
-    locker =
-      spawn(fn ->
-        Postgrex.transaction(conn, fn c ->
-          Postgrex.query!(c, "SET LOCAL lock_timeout = '5s'", [])
-          Postgrex.query!(c, "LOCK TABLE documents IN ACCESS EXCLUSIVE MODE", [])
-          send(me, :locked)
+    for setting <- ~w(enable_bitmapscan enable_indexscan enable_indexonlyscan),
+        do: Repo.query!("SET LOCAL #{setting} = off")
 
-          receive do
-            :release -> :ok
-          end
-        end)
-      end)
-
-    assert_receive :locked, 6_000
+    Repo.query!("SET LOCAL max_parallel_workers_per_gather = 0")
 
     {result, log} =
       ExUnit.CaptureLog.with_log(fn ->
         perform_job(ReprojectLinkersWorker, job_args("rl-t-slow", "rl_title", scope, @ds3))
       end)
-
-    send(locker, :release)
 
     assert result == {:cancel, :statement_timeout}
 
@@ -454,7 +459,7 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersTest do
   test "a backlog of jobs from the old code drains in one attempt each", %{scope: scope} do
     catalogue_schemas!(scope)
     publish!("rl_title", "rl-t-linked", %{}, scope, @ds3)
-    publish!("rl_label", "rl-l-linked", %{"title" => "rl-t-linked"}, scope, @ds3)
+    publish!("rl_label", "rl-l-linked", %{"book" => "rl-t-linked"}, scope, @ds3)
     drain()
 
     # The args the 0.2.32 enqueue wrote, as gyl's queued jobs hold them: one
