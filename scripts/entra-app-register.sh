@@ -271,7 +271,9 @@ say "Admin consent for openid, profile and email is granted"
 GROUP_ID=$(az ad group list --display-name "$GROUP_NAME" --query "[0].id" -o tsv)
 if [ -z "$GROUP_ID" ]; then
   say "Creating security group \"$GROUP_NAME\""
-  NICK=$(printf '%s' "$GROUP_NAME" | tr -cd 'A-Za-z0-9-')
+  # Entra takes at most 64 characters, and a name with a Container Apps host
+  # is longer. The nickname need not be unique for a security group.
+  NICK=$(printf '%s' "$GROUP_NAME" | tr -cd 'A-Za-z0-9-' | cut -c1-64)
   GROUP_ID=$(az ad group create --display-name "$GROUP_NAME" --mail-nickname "$NICK" \
     --query id -o tsv)
 fi
