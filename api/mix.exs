@@ -101,6 +101,9 @@ defmodule Barkpark.MixProject do
       {:jose, "~> 1.11"},
       # SAML 2.0 SP: vetted XML-dsig assertion verification (era-w3-saml).
       {:esaml, "~> 4.6"},
+      # Saxy keeps XML names as binaries: Barkpark.Sso.SamlXmlNames checks a
+      # SAML message's names with it before xmerl parses the message.
+      {:saxy, "~> 1.6"},
       # x509: SAML test-cert generation AND wax's prod attestation-cert
       # validation. `~> 0.8` still resolves to 0.9.x (~> is <1.0.0 for a
       # two-segment req) — no downgrade. No longer `only: :test`: wax needs it
