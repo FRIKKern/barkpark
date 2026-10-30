@@ -69,6 +69,11 @@ func defaultUpReply(c instanceUpCmd) (string, error) {
 		return "", &instanceUpCmdError{cmd: s, err: errors.New("exit status 3"), stderr: "(ResourceGroupNotFound) not found\n(ResourceNotFound) The Resource was not found."}
 	case strings.HasPrefix(s, "az vm create"):
 		return `{"publicIpAddress":"20.1.2.3","fqdns":"pensum-cms.swedencentral.cloudapp.azure.com"}`, nil
+	case strings.HasPrefix(s, "az deployment group create") && strings.Contains(s, "entra.bicep"):
+		return `{"clientId":{"value":"app-1"},"ownersGroupId":{"value":"group-1"},"tenantId":{"value":"tenant-1"}}`, nil
+	case strings.HasPrefix(s, "bash ") && strings.Contains(s, "acr-build.sh"):
+		ref := c.args[len(c.args)-1]
+		return c.args[len(c.args)-2] + ".azurecr.io/barkpark:" + ref + "\n", nil
 	case strings.HasPrefix(s, "az deployment group show"):
 		return `{"host":{"type":"String","value":"barkpark.nicesea.norwayeast.azurecontainerapps.io"},"url":{"type":"String","value":"https://x"}}`, nil
 	case strings.HasPrefix(s, "ssh") && strings.HasSuffix(s, "sudo cat /etc/barkpark/admin-token"):
@@ -175,7 +180,8 @@ func TestInstanceUpVMRunsEveryStepThenResumesWithNone(t *testing.T) {
 		}
 	}
 	entra := f.find("--owners-group")
-	for _, want := range []string{"--host " + host, "--org pensum", "--add-owner owner@example.com", "--name Barkpark pensum (" + host + ")", "--owners-group Barkpark pensum owners (" + host + ")"} {
+	// The embedded deploy/azure has entra.bicep, so the script gets the app it made.
+	for _, want := range []string{"--host " + host, "--org pensum", "--add-owner owner@example.com", "--app-id app-1", "--owners-group Barkpark pensum owners (" + host + ")"} {
 		if !strings.Contains(entra.String(), want) {
 			t.Errorf("entra call lacks %q: %s", want, entra)
 		}
@@ -307,8 +313,13 @@ func TestInstanceUpContainerAppsFallsBackOnPostgresCapacity(t *testing.T) {
 	f := stubInstanceUp(t)
 	f.reply = func(c instanceUpCmd) (string, error) {
 		s := c.String()
-		if strings.HasPrefix(s, "az deployment group create") && !strings.Contains(s, "postgresSku=") {
+		switch {
+		case strings.HasPrefix(s, "az deployment group create") && strings.Contains(s, "acr.bicep"):
+			return `{"acrName":{"value":"crbarkpark1"}}`, nil
+		case strings.HasPrefix(s, "az deployment group create") && strings.Contains(s, "main.bicep") && !strings.Contains(s, "postgresSku="):
 			return "", &instanceUpCmdError{cmd: s, err: errors.New("exit status 1"), stderr: `{"code":"CapacityNotAvailable"}`}
+		case strings.HasPrefix(s, "az deployment group show"):
+			return `{"host":{"value":"barkpark.nicesea.norwayeast.azurecontainerapps.io"},"entraTenantId":{"value":"tenant-1"},"entraClientId":{"value":"app-1"},"entraOwnersGroupId":{"value":"group-1"}}`, nil
 		}
 		return defaultUpReply(c)
 	}
@@ -316,20 +327,19 @@ func TestInstanceUpContainerAppsFallsBackOnPostgresCapacity(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("exit %d: %s\n%s", code, stderr, f.dump())
 	}
-	if f.has("az deployment group create") != 2 || f.has("postgresSku=Standard_B2s") != 1 {
+	if f.has("main.bicep") != 2 || f.has("postgresSku=Standard_B2s") != 1 {
 		t.Errorf("no fallback:\n%s", f.dump())
 	}
 	st := readUpState(t)
-	acr := st.acrName()
-	build := f.find("az acr build")
-	for _, want := range []string{"-r " + acr, "-t barkpark:main", "-f api/Dockerfile", "https://github.com/FRIKKern/barkpark.git#main"} {
-		if !strings.Contains(build.String(), want) {
-			t.Errorf("acr build lacks %q: %s", want, build)
-		}
+	// The embedded deploy/azure has acr.bicep and acr-build.sh, so up builds with them.
+	if f.has("acr-build.sh crbarkpark1 main") != 1 {
+		t.Errorf("no acr-build.sh run:\n%s", f.dump())
 	}
 	dep := f.find("postgresSku=Standard_B2s")
-	if !strings.Contains(dep.String(), "image="+acr+".azurecr.io/barkpark:main") || !strings.Contains(dep.String(), "acrName="+acr) {
-		t.Errorf("deploy lacks the built image: %s", dep)
+	for _, want := range []string{"image=crbarkpark1.azurecr.io/barkpark:main", "acrName=crbarkpark1", "entraEnabled=true"} {
+		if !strings.Contains(dep.String(), want) {
+			t.Errorf("deploy lacks %q: %s", want, dep)
+		}
 	}
 	if st.Out.Host != "barkpark.nicesea.norwayeast.azurecontainerapps.io" || st.Region != "norwayeast" || st.PostgresSku != "Standard_B2s" {
 		t.Errorf("state = %+v", st)
@@ -338,9 +348,9 @@ func TestInstanceUpContainerAppsFallsBackOnPostgresCapacity(t *testing.T) {
 	if err != nil || !strings.Contains(string(param), "loadTextContent('../barkpark.env')") {
 		t.Errorf("main.bicepparam: %v\n%s", err, param)
 	}
-	oidc := f.find("org oidc-create")
-	if !slicesContain(oidc.env, "BARKPARK_API_URL=https://barkpark.nicesea.norwayeast.azurecontainerapps.io") {
-		t.Errorf("oidc env = %v", oidc.env)
+	// main.bicep made the Entra app and the server connects the org, so up runs no bp org commands.
+	if f.has("org oidc-create") != 0 || !st.Out.EntraByBicep || st.Out.AppID != "app-1" {
+		t.Errorf("Entra from main.bicep: state %+v\n%s", st.Out, f.dump())
 	}
 	env, _ := os.ReadFile("barkpark.env")
 	if !strings.Contains(string(env), "# BARKPARK_BREAKGLASS_EMAILS=") {

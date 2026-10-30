@@ -81,6 +81,32 @@ param operatorIpRanges array = []
 @description('The bp CLI release the jobs install. 1.26.2 and newer restore into a newer Postgres major.')
 param bpCliVersion string = '1.26.10'
 
+@description('Create the Entra ID sign-in in this deployment with entra.bicep: the app registration, its service principal, the owners group, admin consent and a client secret in the Key Vault. The app then connects entraOrg at its first boot. Off by default. The deploying user needs the Entra roles in IT-HANDOVER.md.')
+param entraEnabled bool = false
+
+@description('With entraEnabled: the Barkpark organization slug. It is part of the redirect URI.')
+param entraOrg string = ''
+
+@description('With entraEnabled: the organization name Barkpark shows. Defaults to the slug.')
+param entraOrgName string = ''
+
+@description('With entraEnabled: user principal names to add to the owners group.')
+param entraOwnerUpns array = []
+
+@description('With entraEnabled: add the user who runs the deployment to the owners group.')
+param entraAddDeployer bool = true
+
+@description('With entraEnabled: SecurityGroup works without Entra ID P1. ApplicationGroup needs P1. See ENTRA.md#users-in-many-groups.')
+@allowed(['SecurityGroup', 'ApplicationGroup'])
+param entraGroupClaims string = 'SecurityGroup'
+
+@description('With entraEnabled: count Entra MFA as Barkpark MFA (trust_idp_mfa). ENTRA.md#entra-mfa-counts-as-barkpark-mfa says how to check it.')
+param entraTrustIdpMfa bool = true
+
+@description('With entraEnabled: client secret lifetime in years.')
+@allowed([1, 2])
+param entraSecretYears int = 1
+
 @description('Daily backup time for the job barkpark-backup, as a UTC cron expression.')
 param backupCron string = '30 2 * * *'
 
@@ -445,6 +471,132 @@ var extraOrigins = filter(
 )
 var allowedOrigins = join(concat(['https://${host}'], extraOrigins), ',')
 
+// ── Entra ID ────────────────────────────────────────────────────────────────
+
+// With entraEnabled, entra.bicep creates the Entra app for host, and a
+// deployment script adds its client secret straight into the Key Vault. The
+// Graph extension cannot add a password: Entra generates it in the addPassword
+// action, which a declarative resource does not call. The script runs as its
+// own identity, which owns the app and holds Application.ReadWrite.OwnedBy,
+// and writes through Azure Resource Manager, so the vault firewall stays shut.
+// The secret is never in a parameter, an output or a log. A redeploy keeps the
+// secret that is in the vault. The app then reads it like its other secrets,
+// and Barkpark.Sso.OidcBootstrap connects entraOrg at the first boot.
+var keyVaultContributor = 'f25e0fa2-a7c8-4377-a976-54943a77a395'
+var oidcSecretName = 'oidc-client-secret'
+var oidcExpiresName = 'oidc-client-secret-expires-at'
+
+resource entraScriptIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = if (entraEnabled) {
+  name: 'id-barkpark-entra-${nameSuffix}'
+  location: location
+}
+
+module entra 'entra.bicep' = if (entraEnabled) {
+  name: 'entra-${nameSuffix}'
+  params: {
+    host: host
+    org: entraOrg
+    nameSuffix: nameSuffix
+    ownerUpns: entraOwnerUpns
+    addDeployer: entraAddDeployer
+    groupClaims: entraGroupClaims
+    appOwnerPrincipalId: entraScriptIdentity!.properties.principalId
+  }
+}
+
+// Writing a secret through Resource Manager is a Key Vault Contributor action.
+resource entraScriptWritesSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (entraEnabled) {
+  scope: vault
+  name: guid(vault.id, 'id-barkpark-entra-${nameSuffix}', keyVaultContributor)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultContributor)
+    principalId: entraScriptIdentity!.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+var entraSecretScript = '''
+set -eu
+uri="${ARM_URL%/}${VAULT_ID}/secrets"
+api="api-version=2023-07-01"
+if az rest --method get --uri "$uri/$SECRET_NAME?$api" -o none 2>/dev/null; then
+  echo "Key Vault holds $SECRET_NAME already. No new client secret."
+  exit 0
+fi
+umask 077
+dir=$(mktemp -d)
+end=$(date -u -d "+$YEARS years" +%Y-%m-%dT%H:%M:%SZ)
+# A new identity's Graph permission can take some minutes to reach its token.
+for try in $(seq 1 20); do
+  if az ad app credential reset --id "$APP_ID" --append --display-name "$CREDENTIAL_NAME" \
+    --end-date "$end" --query password -o tsv >"$dir/value" 2>"$dir/err"; then
+    break
+  fi
+  rm -f "$dir/value"
+  echo "Graph refused the client secret, try $try: $(grep -m1 ERROR "$dir/err" | cut -c1-200)"
+  sleep 30
+done
+[ -s "$dir/value" ] || { echo "No client secret after 20 tries" >&2; exit 1; }
+jq -n --rawfile v "$dir/value" --argjson exp "$(date -u -d "$end" +%s)" \
+  '{properties: {value: ($v | rtrimstr("\n")), attributes: {exp: $exp}}}' >"$dir/body"
+az rest --method put --uri "$uri/$SECRET_NAME?$api" --body "@$dir/body" -o none
+jq -n --arg v "$end" '{properties: {value: $v}}' >"$dir/body"
+az rest --method put --uri "$uri/$EXPIRES_NAME?$api" --body "@$dir/body" -o none
+rm -rf "$dir"
+echo "Key Vault holds the new client secret as $SECRET_NAME. It expires $end."
+'''
+
+resource entraSecret 'Microsoft.Resources/deploymentScripts@2023-08-01' = if (entraEnabled) {
+  name: 'entra-secret-${nameSuffix}'
+  location: location
+  kind: 'AzureCLI'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: { '${entraScriptIdentity.id}': {} }
+  }
+  properties: {
+    azCliVersion: '2.67.0'
+    scriptContent: entraSecretScript
+    environmentVariables: [
+      { name: 'APP_ID', value: entra!.outputs.clientId }
+      { name: 'VAULT_ID', value: vault.id }
+      { name: 'ARM_URL', value: az.environment().resourceManager }
+      { name: 'SECRET_NAME', value: oidcSecretName }
+      { name: 'EXPIRES_NAME', value: oidcExpiresName }
+      { name: 'CREDENTIAL_NAME', value: 'barkpark-${entraOrg}' }
+      { name: 'YEARS', value: string(entraSecretYears) }
+    ]
+    timeout: 'PT30M'
+    retentionInterval: 'PT1H'
+    cleanupPreference: 'Always'
+  }
+  dependsOn: [
+    entraScriptWritesSecrets
+  ]
+}
+
+// The app reads both from Key Vault. The jobs do not need them.
+var entraSecretNames = entraEnabled ? [oidcSecretName, oidcExpiresName] : []
+var entraSecrets = [
+  for name in entraSecretNames: {
+    name: name
+    keyVaultUrl: 'https://${vault.name}${az.environment().suffixes.keyvaultDns}/secrets/${name}'
+    identity: identity.id
+  }
+]
+
+var entraEnv = entraEnabled ? [
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_ORG', value: entraOrg }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_ORG_NAME', value: empty(entraOrgName) ? entraOrg : entraOrgName }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_ISSUER', value: entra!.outputs.issuer }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_CLIENT_ID', value: entra!.outputs.clientId }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_TENANT_ID', value: entra!.outputs.tenantId }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_OWNER_GROUP', value: entra!.outputs.ownersGroupId }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_TRUST_IDP_MFA', value: entraTrustIdpMfa ? 'on' : 'off' }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET', secretRef: oidcSecretName }
+  { name: 'BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET_EXPIRES_AT', secretRef: oidcExpiresName }
+] : []
+
 var appSecrets = [
   for item in secretItems: {
     name: item.name
@@ -464,10 +616,26 @@ var ownedSettings = concat(map(secretTable, item => item.env), [
   'PHX_SCHEME'
   'BARKPARK_MEDIA_DIR'
   'BARKPARK_ALWAYS_ALLOWED_ORIGINS'
+  'BARKPARK_OIDC_BOOTSTRAP_ORG'
+  'BARKPARK_OIDC_BOOTSTRAP_ORG_NAME'
+  'BARKPARK_OIDC_BOOTSTRAP_ISSUER'
+  'BARKPARK_OIDC_BOOTSTRAP_CLIENT_ID'
+  'BARKPARK_OIDC_BOOTSTRAP_TENANT_ID'
+  'BARKPARK_OIDC_BOOTSTRAP_OWNER_GROUP'
+  'BARKPARK_OIDC_BOOTSTRAP_TRUST_IDP_MFA'
+  'BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET'
+  'BARKPARK_OIDC_BOOTSTRAP_CLIENT_SECRET_EXPIRES_AT'
 ])
 
+// ENTRA.md lists these two settings for an Entra connection. A value in
+// settings wins.
+var entraSettings = entraEnabled ? {
+  BARKPARK_OIDC_KEEP_OWNER: 'on'
+  BARKPARK_OIDC_EMAIL_FROM_UPN: 'on'
+} : {}
+
 var settingsEnv = map(
-  filter(items(settings), kv => !contains(ownedSettings, kv.key)),
+  filter(items(union(entraSettings, settings)), kv => !contains(ownedSettings, kv.key)),
   kv => { name: kv.key, value: string(kv.value) }
 )
 
@@ -517,7 +685,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = if (!restoreMode) {
           identity: identity.id
         }
       ]
-      secrets: appSecrets
+      secrets: concat(appSecrets, entraSecrets)
     }
     template: {
       containers: [
@@ -528,7 +696,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = if (!restoreMode) {
             cpu: json(cpu)
             memory: memory
           }
-          env: appEnv
+          env: concat(appEnv, entraEnv)
           volumeMounts: [
             { volumeName: 'media', mountPath: mediaPath }
           ]
@@ -577,6 +745,7 @@ resource app 'Microsoft.App/containerApps@2025-07-01' = if (!restoreMode) {
     identityPullsImages
     vaultSecrets
     postgresDatabase
+    entraSecret
   ]
 }
 
@@ -749,3 +918,10 @@ output postgresHost string = postgres.properties.fullyQualifiedDomainName
 output storageAccountName string = storage.name
 output keyVaultName string = vault.name
 output identityClientId string = identity.properties.clientId
+// With entraEnabled: the Entra app and the organization's sign-in URL. The
+// client secret is in the Key Vault as oidc-client-secret, never an output.
+output entraTenantId string = entraEnabled ? entra!.outputs.tenantId : ''
+output entraClientId string = entraEnabled ? entra!.outputs.clientId : ''
+output entraOwnersGroupId string = entraEnabled ? entra!.outputs.ownersGroupId : ''
+output entraRedirectUri string = entraEnabled ? entra!.outputs.redirectUri : ''
+output entraSignInUrl string = entraEnabled ? entra!.outputs.signInUrl : ''
