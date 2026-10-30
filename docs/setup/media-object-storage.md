@@ -69,6 +69,10 @@ rclone copy /opt/barkpark/uploads r2:barkpark-media \
   --exclude "_renditions/**"
 ```
 
+`/opt/barkpark/uploads` is the media directory `deploy.sh` mounts into the
+container. A VM still on the older source build keeps it in
+`/opt/barkpark/api/uploads`.
+
 Then set the `BARKPARK_S3_*` env and restart. The disk copies simply become
 the warm cache. Rolling back is the same copy in reverse (or nothing, if the
 cache is still intact).
