@@ -50,9 +50,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
   sweep):
 
     - `studio_live_sheet_presence_test.exs` — `assert ratio < 1.5`, below.
-      Load-proof: BEAM **reductions** (median of 10) of one presence frame on
-      a 500-row sheet over a 50-row one. Flat today (1.0x); any per-row work
-      in the frame scales it with the rows.
+      Load-proof: BEAM **reductions** (median of 10) of a moving and a no-op
+      presence frame on a 500-row sheet over a 50-row one. Flat today (1.0x);
+      any per-row work in the frame scales it with the rows.
     - `sheets/engine_perf_test.exs` — `assert ratio < 8.0` plus a 10_000ms
       absolute bound. Wall-clock, ~8x headroom, widened with a recorded
       rationale at `0027ed383` after the identical false-RED-under-load mode.
@@ -336,33 +336,44 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
   test "MEASURE: a presence frame costs the same on a 500-row sheet as on a 50-row one" do
     small = presence_frame_reductions("sp-bench-50", 50)
     big = presence_frame_reductions("sp-bench-500", 500)
-    ratio = big / max(small, 1)
 
-    IO.puts(
-      "[sheets-presence-bench] presence frame: 50 rows #{small} reductions, " <>
-        "500 rows #{big} reductions (ratio #{Float.round(ratio, 2)}x, n=10 medians)"
-    )
+    for kind <- [:moving, :noop] do
+      ratio = big[kind] / max(small[kind], 1)
 
-    assert ratio < 1.5,
-           "a presence frame does per-row work: 50 rows -> #{small} reductions, " <>
-             "500 rows -> #{big} reductions (ratio #{Float.round(ratio, 2)}x, expected < 1.5x)"
+      IO.puts(
+        "[sheets-presence-bench] #{kind} presence frame: 50 rows #{small[kind]} reductions, " <>
+          "500 rows #{big[kind]} reductions (ratio #{Float.round(ratio, 2)}x, n=10 medians)"
+      )
+
+      assert ratio < 1.5,
+             "a #{kind} presence frame does per-row work: 50 rows -> #{small[kind]} reductions, " <>
+               "500 rows -> #{big[kind]} reductions (ratio #{Float.round(ratio, 2)}x, expected < 1.5x)"
+    end
   end
 
   # Work, not wall time: the BEAM reductions the LiveView process spends on one
   # synthetic peer frame, pushed through the same send_update spine
   # StudioLive's presence_diff handler rides. The :sys.get_state barrier
-  # returns only after the update + re-render + diff. A no-op frame
-  # (identical presences) skips the render, so its cost is the barrier alone
-  # and is subtracted. Reductions do not move with CPU load, so most samples
-  # land on the exact cost. The rest are off in both directions: a message or
-  # a GC inside the window adds, and a reading taken while the process is
-  # still finishing moves work into the next window. The median of 10 is the
-  # exact cost; the minimum read 0.86x and 1.27x on loaded runs.
+  # returns only after the update + re-render + diff. Two frames, both
+  # measured raw: a moving frame (update + overlay re-render) and a no-op
+  # frame (identical presences: update/2 runs, the render is skipped). The
+  # barrier itself is flat in row count, so nothing is subtracted; a
+  # subtraction would cancel per-row work in update/2 out of the result.
   #
-  # Only the overlay layer may re-render on a presence frame, so the cost is
-  # flat in row count (exactly 1.0x today). Any per-row render work grows it
-  # with the rows: a single `@presences` read inside the row comprehension
-  # measures ~9x here, and so does re-deriving the grid on every frame.
+  # Reductions do not move with CPU load, so most samples land on the exact
+  # cost. The rest are off in both directions: a message or a GC inside the
+  # window adds, and a reading taken while the process is still finishing
+  # moves work into the next window. The median of 10 is the exact cost; the
+  # minimum read 0.86x and 1.27x on loaded runs.
+  #
+  # Only the overlay layer may re-render on a presence frame, so both costs
+  # are flat in row count (1.0x today). Any per-row work grows them with the
+  # rows: a `@presences` read inside the row comprehension, re-deriving the
+  # grid on every frame, or an O(cells) scan in update/2 each measure ~4-9x.
+  #
+  # This checks SCALING only. A constant extra cost per frame passes, and so
+  # does a bigger payload: reductions do not charge message copying, so a
+  # frame that pushes the whole cells map still reads 1.0x.
   defp presence_frame_reductions(slug, rows) do
     cells =
       for r <- 1..rows, c <- 1..8, into: %{} do
@@ -401,7 +412,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
     assert peer_cursor(view, "B12") =~ "Bob"
 
-    median(moving) - median(static)
+    %{moving: median(moving), noop: median(static)}
   end
 
   defp median(samples), do: samples |> Enum.sort() |> Enum.at(div(length(samples), 2))
