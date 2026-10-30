@@ -5,11 +5,11 @@ This page comes after setup in [SELF-HOST.md](SELF-HOST.md). The command referen
 
 ## Scheduled backups and the restore drill
 
-Barkpark schedules no backup. On a single VM, run `bp instance backup` from a daily cron job and copy the directory off the host. The database is local and media is in `/opt/barkpark/api/uploads` unless `BARKPARK_MEDIA_DIR` is set:
+Barkpark schedules no backup. On a single VM, run `bp instance backup` from a daily cron job and copy the directory off the host. The database is local and media is in `/opt/barkpark/uploads`:
 
 ```bash
 bp instance backup --database-url "postgresql://barkpark:<password from .env>@localhost/barkpark_prod" \
-  --media-dir /opt/barkpark/api/uploads --out /var/backups/barkpark/$(date +%F)
+  --media-dir /opt/barkpark/uploads --out /var/backups/barkpark/$(date +%F)
 ```
 
 The backup holds no key. Keep a copy of the keys in `/opt/barkpark/.env` in a password manager, apart from the backups.
@@ -57,7 +57,7 @@ The KEK wraps the data keys, not the content, so a rotation re-encrypts no conte
    bin/barkpark rpc 'IO.inspect(Barkpark.Crypto.DataKeys.rewrap_all())'
    ```
 
-   On a single VM, run `sudo /opt/barkpark/api/start.sh mix run -e 'IO.inspect(Barkpark.Crypto.DataKeys.rewrap_all())'`.
+   On a single VM, run the same `bin/barkpark rpc` line after `sudo docker exec barkpark`.
 
    `{:ok, n}` means all `n` data keys use the new KEK. `{:error, {:unwrap_failed, id}}` rolls back the run and names a key neither KEK opens. Stop there and keep both keys.
 4. Remove `BARKPARK_KEK_PREVIOUS` and restart. Keep the old KEK in your password manager until a backup taken after step 3 has been restored once.
@@ -68,7 +68,7 @@ The KEK wraps the data keys, not the content, so a rotation re-encrypts no conte
 
 ## VM size and region
 
-Path A builds Barkpark on the VM, so it needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) shows how to check sizes and quota first.
+A build from source on the VM needs 2 vCPU and 4 GiB. On a VM under 4 GiB with no swap, `deploy.sh` adds a 2 GiB `/swapfile`. A new subscription on 2026-10-27 had a Basv2 quota of 0, `Standard_B1s` was capacity-restricted in Norway East, and `Standard_D2als_v7` in Sweden Central worked. Try Norway East, then Sweden Central. [SELF-HOST.md](SELF-HOST.md#before-you-start-on-azure) shows how to check sizes and quota first.
 
 ## Database TLS
 

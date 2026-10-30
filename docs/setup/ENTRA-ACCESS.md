@@ -26,7 +26,7 @@ Both act at the next sign-in. Barkpark sessions that already exist keep working 
 An instance without outgoing mail cannot send a password reset link, so the owner has no way in while Entra or the connection is broken. A break-glass account on `BARKPARK_BREAKGLASS_EMAILS` signs in with a password and TOTP, or a passkey, even when the organization allows only SSO. Create it with the operator token in `BARKPARK_TOKEN`:
 
 1. `bp auth register <email> <password>` creates the account. It stays unconfirmed, because no mail goes out.
-2. Confirm it on the server: `sudo /opt/barkpark/api/start.sh mix barkpark.user.confirm <email>` on a VM, or `bin/barkpark eval 'Barkpark.Release.confirm_email("<email>")'` in the container. Seating an unconfirmed account replaces its password.
+2. Confirm it on the server: `bin/barkpark eval 'Barkpark.Release.confirm_email("<email>")'` in the container, on a VM after `sudo docker exec barkpark`. Seating an unconfirmed account replaces its password.
 3. `bp auth login <email> <password>` prints a session token. With `BARKPARK_TOKEN` set to it, `bp auth mfa-enroll <password>` prints a TOTP secret. Add it to an authenticator, then run `bp auth mfa-verify <secret> <code> <password>` and keep the recovery codes. An instance older than #24495 refuses the session token here.
 4. `bp workspace member-add <email> --role admin` with the operator token invites the account. Only an owner can give `owner`. With the session token, `bp auth invitation-ls` shows the invitation and `bp auth invitation-accept <id>` takes the seat.
 
