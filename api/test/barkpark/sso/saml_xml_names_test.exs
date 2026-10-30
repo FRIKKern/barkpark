@@ -125,7 +125,7 @@ defmodule Barkpark.Sso.SamlXmlNamesTest do
           atom_growth(fn -> for(_ <- 1..200, do: Saml.parse_untrusted_xml(gen.())) |> hd() end)
 
         IO.puts("#{kind}: 200 unknown values, atom_count grew by #{growth}")
-        assert {:error, _} = result, "#{kind} was not refused"
+        assert match?({:error, _}, result), "#{kind} was not refused"
         assert growth < 10, "#{kind} grew the atom table by #{growth}"
       end
     end
