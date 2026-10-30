@@ -241,4 +241,258 @@ defmodule Barkpark.EdgeProjector.ReprojectLinkersTest do
     # Its own queue, at concurrency 1, so a burst never crowds another queue.
     assert Application.get_env(:barkpark, Oban)[:queues][:edge_linkers] == 1
   end
+
+  # ── gyl, 2026-10-30: 1621 new catalogue titles, each job a 30 s scan ──────
+
+  @ds3 "reproject_linkers_test_3"
+
+  # A catalogue: titles, labels that reference a title, and lines nothing
+  # references. No richText anywhere, so wikilinks cannot link either.
+  defp catalogue_schemas!(scope) do
+    for {name, fields} <- [
+          {"rl_title", []},
+          {"rl_line", [%{"name" => "isbn", "type" => "string"}]},
+          {"rl_label",
+           [
+             %{
+               "name" => "book",
+               "type" => "reference",
+               "refType" => "rl_title",
+               "to" => [%{"type" => "rl_title"}]
+             }
+           ]}
+        ] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => name, "title" => name, "visibility" => "public", "fields" => fields},
+          @ds3,
+          scope
+        )
+    end
+  end
+
+  # The SQL of every statement that reads `documents` while `fun` runs.
+  defp documents_reads(fun) do
+    ref = make_ref()
+    me = self()
+    handler = "rl-docs-#{inspect(ref)}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :repo, :query],
+      fn _event, _measure, meta, _ ->
+        if meta[:source] == "documents" or String.contains?(meta[:query] || "", "\"documents\""),
+          do: send(me, {ref, meta[:query]})
+      end,
+      nil
+    )
+
+    try do
+      result = fun.()
+      {result, collect(ref, [])}
+    after
+      :telemetry.detach(handler)
+    end
+  end
+
+  defp collect(ref, acc) do
+    receive do
+      {^ref, sql} -> collect(ref, [sql | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
+  defp job_args(id, type, scope, ds),
+    do: %{
+      "_id" => id,
+      "type" => type,
+      "dataset" => ds,
+      "dataset_id" => nil,
+      "workspace_id" => scope[:workspace_id],
+      "project_id" => scope[:project_id]
+    }
+
+  describe "linker_plan/2" do
+    test "names the types whose fields can hold a link to the type" do
+      schemas = [
+        %{name: "a", fields: [%{"name" => "r", "type" => "reference", "refType" => "t"}]},
+        %{name: "b", fields: [%{"name" => "r", "type" => "reference", "refType" => "other"}]},
+        %{
+          name: "c",
+          fields: [%{"name" => "r", "type" => "reference", "to" => [%{"type" => "t"}]}]
+        },
+        %{name: "d", fields: [%{"name" => "r", "type" => "reference"}]},
+        %{
+          name: "e",
+          fields: [
+            %{
+              "name" => "r",
+              "type" => "reference",
+              "refType" => "other",
+              "refTypeTolerant" => true
+            }
+          ]
+        },
+        %{
+          name: "f",
+          fields: [
+            %{
+              "name" => "rs",
+              "type" => "arrayOf",
+              "of" => [%{"type" => "reference", "refType" => "t"}]
+            }
+          ]
+        },
+        %{
+          name: "g",
+          fields: [
+            %{
+              "name" => "o",
+              "type" => "object",
+              "fields" => [%{"name" => "r", "type" => "reference", "refType" => "t"}]
+            }
+          ]
+        },
+        %{name: "h", fields: [%{"name" => "body", "type" => "richText"}]},
+        %{name: "i", fields: [%{"name" => "s", "type" => "string"}]}
+      ]
+
+      plan = ReprojectLinkersWorker.linker_plan(schemas, "t")
+      assert Enum.sort(plan.ref_types) == ~w(a c d e f g)
+      assert Enum.sort(plan.ref_fields) == ~w(r rs)
+      assert plan.wikilink_types == ["h"]
+
+      assert ReprojectLinkersWorker.linker_plan(
+               [
+                 %{name: "b", fields: [%{"name" => "r", "type" => "reference", "refType" => "x"}]}
+               ],
+               "t"
+             ) == %{ref_fields: [], ref_types: [], wikilink_types: []}
+    end
+  end
+
+  test "a target nothing can link to ends after the schema read, with no documents read",
+       %{scope: scope} do
+    catalogue_schemas!(scope)
+
+    {result, reads} =
+      documents_reads(fn ->
+        perform_job(ReprojectLinkersWorker, job_args("rl-line-1", "rl_line", scope, @ds3))
+      end)
+
+    assert result == :ok
+    assert reads == []
+  end
+
+  test "the lookup reads only the types that can link, through a materialized match",
+       %{scope: scope} do
+    catalogue_schemas!(scope)
+    publish!("rl_title", "rl-t-1", %{}, scope, @ds3)
+    publish!("rl_label", "rl-l-1", %{"book" => "rl-t-1"}, scope, @ds3)
+    drain()
+
+    {:ok, %Document{id: pk}} = Content.get_document("rl-l-1", "rl_label", @ds3, scope)
+    Repo.delete_all(from(e in Edge, where: e.from_id == ^pk))
+
+    {:ok, title} = Content.get_document("rl-t-1", "rl_title", @ds3, scope)
+    args = Map.put(job_args("rl-t-1", "rl_title", scope, @ds3), "dataset_id", title.dataset_id)
+
+    {result, reads} =
+      documents_reads(fn -> perform_job(ReprojectLinkersWorker, args) end)
+
+    assert result == :ok
+    [lookup | _] = Enum.filter(reads, &String.contains?(&1, "reproject_linker_matches"))
+    assert lookup =~ "AS MATERIALIZED"
+    assert lookup =~ ~r/"type" = ANY\(/
+
+    assert Repo.exists?(from(e in Edge, where: e.from_id == ^pk and e.kind == "book"))
+  end
+
+  test "a lookup past its statement_timeout is cancelled once, not retried", %{scope: scope} do
+    Application.put_env(:barkpark, ReprojectLinkersWorker, lookup_timeout_ms: 20)
+    on_exit(fn -> Application.delete_env(:barkpark, ReprojectLinkersWorker) end)
+    catalogue_schemas!(scope)
+
+    # 20,000 labels with deep content, and no index allowed for the rest of
+    # this sandbox transaction: the `_ref` jsonpath then walks every label,
+    # which takes far longer than the 20 ms lookup timeout.
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    deep = for i <- 1..40, do: %{"k" => i, "o" => %{"p" => [%{"q" => i}, %{"r" => "x"}]}}
+
+    for chunk <- Enum.chunk_every(1..20_000, 2_000) do
+      Repo.insert_all(
+        Document,
+        for i <- chunk do
+          %{
+            doc_id: "rl-pad-#{i}",
+            rev: "r#{i}",
+            type: "rl_label",
+            dataset: @ds3,
+            status: "published",
+            content: %{"book" => "rl-t-#{i}", "deep" => deep},
+            workspace_id: scope[:workspace_id],
+            project_id: scope[:project_id],
+            inserted_at: now,
+            updated_at: now
+          }
+        end
+      )
+    end
+
+    for setting <- ~w(enable_bitmapscan enable_indexscan enable_indexonlyscan),
+        do: Repo.query!("SET LOCAL #{setting} = off")
+
+    Repo.query!("SET LOCAL max_parallel_workers_per_gather = 0")
+
+    {result, log} =
+      ExUnit.CaptureLog.with_log(fn ->
+        perform_job(ReprojectLinkersWorker, job_args("rl-t-slow", "rl_title", scope, @ds3))
+      end)
+
+    assert result == {:cancel, :statement_timeout}
+
+    assert [_] =
+             Regex.scan(~r/linker lookup for rl-t-slow .*cancelled, not retried/, log)
+  end
+
+  test "a backlog of jobs from the old code drains in one attempt each", %{scope: scope} do
+    catalogue_schemas!(scope)
+    publish!("rl_title", "rl-t-linked", %{}, scope, @ds3)
+    publish!("rl_label", "rl-l-linked", %{"book" => "rl-t-linked"}, scope, @ds3)
+    drain()
+
+    # The args the 0.2.32 enqueue wrote, as gyl's queued jobs hold them: one
+    # per new title, and one per new line nothing references.
+    {:ok, title} = Content.get_document("rl-t-linked", "rl_title", @ds3, scope)
+
+    backlog =
+      for(i <- 1..150, do: job_args("rl-t-new-#{i}", "rl_title", scope, @ds3)) ++
+        for(i <- 1..150, do: job_args("rl-line-new-#{i}", "rl_line", scope, @ds3)) ++
+        [job_args("rl-t-linked", "rl_title", scope, @ds3)]
+
+    Enum.each(backlog, fn args ->
+      args
+      |> Map.put("dataset_id", title.dataset_id)
+      |> ReprojectLinkersWorker.new()
+      |> Oban.insert!()
+    end)
+
+    {{elapsed_us, result}, reads} =
+      documents_reads(fn ->
+        :timer.tc(fn -> Oban.drain_queue(queue: :edge_linkers, with_recursion: true) end)
+      end)
+
+    assert %{success: 301, failure: 0, cancelled: 0, discard: 0} = result
+    # Titles: one lookup statement each. Lines: none. The one linker adds its
+    # own read and re-projection, a handful of statements.
+    lookups = Enum.count(reads, &String.contains?(&1, "reproject_linker_matches"))
+    assert lookups == 151
+    assert length(reads) - lookups <= 10
+
+    IO.puts(
+      "reproject backlog: 301 jobs drained in #{div(elapsed_us, 1000)} ms " <>
+        "(#{Float.round(elapsed_us / 301 / 1000, 2)} ms a job)"
+    )
+  end
 end
