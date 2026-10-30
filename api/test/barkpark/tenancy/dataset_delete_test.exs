@@ -223,6 +223,39 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
                  "so the cascade misses rows; move it to cascade_and_string"
       end
     end
+
+    test "every FK into a table the delete removes rows from has an index leading with its column" do
+      classes = DatasetDelete.dataset_id_tables()
+
+      removed =
+        ["datasets" | DatasetDelete.swept_tables()] ++
+          classes.walked ++ classes.cascade ++ classes.cascade_and_string
+
+      %{rows: rows} =
+        Repo.query!(
+          """
+          WITH RECURSIVE removed(rel) AS (
+            SELECT to_regclass(t) FROM unnest($1::text[]) t
+            UNION
+            SELECT c.conrelid FROM pg_constraint c JOIN removed r ON c.confrelid = r.rel
+            WHERE c.contype = 'f' AND c.confdeltype = 'c'
+          )
+          SELECT c.conrelid::regclass::text || '.' || a.attname || ' -> ' || c.confrelid::regclass::text
+          FROM pg_constraint c
+          JOIN removed r ON c.confrelid = r.rel
+          JOIN pg_attribute a ON a.attrelid = c.conrelid AND a.attnum = c.conkey[1]
+          WHERE c.contype = 'f'
+            AND NOT EXISTS (
+              SELECT 1 FROM pg_index i
+              WHERE i.indrelid = c.conrelid AND i.indkey[0] = c.conkey[1] AND i.indisvalid
+            )
+          """,
+          [removed]
+        )
+
+      assert rows == [],
+             "each deleted parent row seq-scans these referencing tables: #{inspect(List.flatten(rows))}"
+    end
   end
 
   defp dataset_id_columns do
