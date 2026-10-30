@@ -1,4 +1,4 @@
-// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0: a typed `[[Title]]` becomes
+// __wikilink_input_keys_mounted.test.mjs — contract 1.17.0 and 1.18.0: a typed or pasted `[[Title]]` becomes
 // a document link only when wikilinkSource(Title) returns a row with that exact title (ignoring
 // case); Mod+Enter edits nothing and stays free for the host.
 // Run: node src/canvas/__wikilink_input_keys_mounted.test.mjs   (or: npm test)
@@ -160,16 +160,29 @@ try {
     assert.equal(textOf(editor, "p2"), "Code x[[Plan]]");
   });
 
-  await check("a paste of [[Plan]], plain, HTML or multi-line, stays text and asks nothing", async () => {
+  await check("pasted text links every [[Title]] the host knows and leaves the rest", async () => {
     caret(editor, endOf(editor, 0));
-    asked.length = 0;
-    paste(editor, " see [[plan]] and [[Plan]].");
-    paste(editor, "", "<p> go [[Plan]] now</p>");
-    paste(editor, " one [[Plan]]\ntwo [[plan]]");
+    paste(editor, " see [[plan]] and [[Nobody]] then [[Ærlig talt]].");
     await tick(10);
     const p1 = textOf(editor, "p1");
-    assert.ok(p1.endsWith(" see [[plan]] and [[Plan]].go [[Plan]] now one [[Plan]]two [[plan]]"), p1);
-    assert.deepEqual(asked, []);
+    assert.ok(p1.endsWith(" see Plan and [[Nobody]] then Ærlig talt."), p1);
+    assert.ok(asked.includes("Nobody"));
+  });
+
+  await check("pasted HTML holding [[Plan]] links too", async () => {
+    caret(editor, endOf(editor, 0));
+    paste(editor, "", "<p> go [[Plan]] now</p>");
+    await tick(10);
+    assert.ok(textOf(editor, "p1").endsWith("go Plan now"), textOf(editor, "p1"));
+  });
+
+  await check("a multi-line plain paste (the canvas's own soft-break paste) links on every line", async () => {
+    caret(editor, endOf(editor, 0));
+    paste(editor, " one [[Plan]]\ntwo [[plan]]");
+    await tick(10);
+    const p1 = editor.state.doc.child(0);
+    assert.equal(p1.content.content.some((n) => n.type.name === "hardBreak"), true, "the soft-break path ran");
+    assert.ok(p1.textContent.endsWith(" one Plantwo Plan"), p1.textContent);
   });
 
   await check("Mod+Enter on plain text edits nothing, emits nothing, and stays free for the host", async () => {
@@ -335,6 +348,207 @@ await check("[[Plan]] from a seed or the server is never linked or asked", async
   canvas.flushPendingChanges();
   await tick(350);
   assert.deepEqual(ops, []);
+  canvas.remove();
+});
+
+await check("a server apply in the same task as a paste is never asked about", async () => {
+  const { canvas, editor, asked } = await mount();
+  canvas.liveRemote = true;
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x");
+  const next = JSON.parse(JSON.stringify(BLOCKS));
+  next[1] = { id: "p2", type: "paragraph", content: [{ type: "text", value: "Server wrote [[Plan]] here." }] };
+  canvas.applyServerBlocks(next);
+  await tick(20);
+  assert.equal(textOf(editor, "p2"), "Server wrote [[Plan]] here.");
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a [[Plan]] in a pasted HTML table cell links; one pasted into inline code stays code and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x", "<table><tr><td>see [[Plan]]</td></tr></table>");
+  await tick(20);
+  const table = canvas.recoverySnapshot().blocks.find((b) => b.type === "table");
+  assert.deepEqual(table.rows[0][0][1], { type: "wikilink", target: "Plan", children: [{ type: "text", value: "Plan" }], docId: "n-plan" });
+  assert.deepEqual(asked, ["Plan"]);
+  let at = 0;
+  editor.state.doc.descendants((n, p) => { if (n.isText && n.marks.some((m) => m.type.name === "code")) at = p + 1; });
+  caret(editor, at);
+  asked.length = 0;
+  paste(editor, "[[Plan]]");
+  await tick(20);
+  assert.equal(textOf(editor, "p2"), "Code x[[Plan]]");
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a paste reads only its own text: a [[Plan]] already in the body elsewhere stays text", async () => {
+  const blocks = [BLOCKS[0], { id: "p9", type: "paragraph", content: [{ type: "text", value: "Seed [[Plan]] here." }] }];
+  const { canvas, editor, asked } = await mount({ blocks });
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x [[Ærlig talt]]");
+  await tick(20);
+  assert.equal(textOf(editor, "p9"), "Seed [[Plan]] here.");
+  assert.deepEqual(asked, ["Ærlig talt"]);
+  assert.equal(textOf(editor, "p1"), "Start x Ærlig talt");
+  canvas.remove();
+});
+
+for (const [name, text] of [
+  ["a list", "- [[Plan]]\n- [[Nope]]"],
+  ["a heading and a paragraph", "# Notes\n\n[[Plan]] and [[Nope]]"],
+  ["a line with a Markdown link", "[[Plan]] see [site](https://example.com) [[Nope]]"],
+  ["a quote", "> [[Plan]] [[Nope]]"],
+  ["a table", "| a | b |\n|---|---|\n| [[Plan]] | [[Nope]] |"],
+  ["a rule", "[[Plan]]\n\n---\n\n[[Nope]]"],
+  ["a fence", "```\n[[Code]]\n```\n\n[[Plan]] [[Nope]]"],
+]) await check(`a Markdown paste (${name}) links a known [[Title]] as a pick and leaves an unknown one as brackets`, async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, text);
+  await tick(20);
+  const body = JSON.stringify(canvas.recoverySnapshot().blocks);
+  assert.ok(body.includes('{"type":"wikilink","target":"Plan","children":[{"type":"text","value":"Plan"}],"docId":"n-plan"}'), body);
+  assert.ok(body.includes("[[Nope]]"), body);
+  assert.equal(links(editor).filter((l) => !l.docId).length, 0, "no link without a docId");
+  assert.deepEqual(asked.sort(), ["Nope", "Plan"], "nothing inside a fence is asked");
+  canvas.remove();
+});
+
+await check("a Markdown paste keeps marks and aliases, and its links are one undo step", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "# H\n\n**[[plan]]** and [[Plan|Plan]] and [[]] and [[Plan|the plan]]");
+  await tick(20);
+  const para = canvas.recoverySnapshot().blocks.find((b) => b.type === "paragraph" && JSON.stringify(b).includes("the plan"));
+  assert.deepEqual(para.content[0], { type: "wikilink", target: "Plan", children: [{ type: "strong", children: [{ type: "text", value: "Plan" }] }], docId: "n-plan" });
+  assert.deepEqual(para.content[2], { type: "wikilink", target: "Plan", children: [{ type: "text", value: "Plan" }], alias: "Plan" }, "an alias equal to the title is kept too");
+  assert.deepEqual(para.content[3], { type: "text", value: " and [[]] and " }, "empty brackets stay text");
+  assert.deepEqual(para.content.at(-1), { type: "wikilink", target: "Plan", children: [{ type: "text", value: "the plan" }], alias: "the plan" }, "an alias is the author's own link, left as Markdown wrote it");
+  assert.deepEqual(asked, ["plan"]);
+  editor.commands.undo();
+  assert.ok(JSON.stringify(canvas.recoverySnapshot().blocks).includes("[[plan]]"), "one undo brings the brackets back");
+  canvas.remove();
+});
+
+await check("with no wikilinkSource a Markdown paste writes [[Title]] as the Markdown converter always has", async () => {
+  const { canvas, editor } = await mount({ source: null });
+  caret(editor, endOf(editor, 0));
+  paste(editor, "- [[Plan]]");
+  await tick(20);
+  assert.ok(JSON.stringify(canvas.recoverySnapshot().blocks).includes('{"type":"wikilink","target":"Plan","children":[{"type":"text","value":"Plan"}]}'));
+  canvas.remove();
+});
+
+await check("a [[Plan]] pasted inside an HTML link stays the link's text and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  paste(editor, "x [[Plan]] y", '<p>x <a href="https://example.com">[[Plan]]</a> y</p>');
+  await tick(20);
+  assert.ok(textOf(editor, "p1").endsWith("x [[Plan]] y"), textOf(editor, "p1"));
+  assert.ok(JSON.stringify(blockOf(editor, "p1")).includes("https://example.com"));
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("the canvas's own copy pasted back, and a Shift paste as plain text, follow the same rule", async () => {
+  const blocks = [{ id: "p1", type: "paragraph", content: [{ type: "text", value: "Seed [[Plan]] [[Nope]]" }] }, BLOCKS[2]];
+  const { canvas, editor, asked } = await mount({ blocks });
+  const from = 1 + "Seed ".length;
+  editor.view.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from, from + "[[Plan]] [[Nope]]".length)));
+  const data = new Map();
+  const copy = new Event("copy", { bubbles: true, cancelable: true });
+  Object.defineProperty(copy, "clipboardData", { value: { setData: (k, v) => data.set(k, v), getData: (k) => data.get(k) || "", clearData: () => data.clear(), types: [] } });
+  editor.view.dom.dispatchEvent(copy);
+  assert.ok(data.get("text/html").includes("data-bp-fragment"), "the copy took the exact-clipboard door");
+  caret(editor, endOf(editor, 1));
+  asked.length = 0;
+  paste(editor, data.get("text/plain"), data.get("text/html"));
+  await tick(20);
+  assert.ok(textOf(editor, "p3").endsWith(" end.Plan [[Nope]]"), textOf(editor, "p3"));
+  assert.equal(textOf(editor, "p1"), "Seed [[Plan]] [[Nope]]", "the copied source stays as it was");
+  assert.deepEqual(asked.sort(), ["Nope", "Plan"]);
+  caret(editor, endOf(editor, 1));
+  editor.view.input.shiftKey = true;
+  paste(editor, " [[plan]]", "<p> <b>[[plan]]</b></p>");
+  editor.view.input.shiftKey = false;
+  await tick(20);
+  assert.ok(textOf(editor, "p3").endsWith(" end.Plan [[Nope]] Plan"), textOf(editor, "p3"));
+  canvas.remove();
+});
+
+await check("a paste into a Figure's one block links too; a pasted image file takes the paste, writes no [[Plan]] and asks nothing", async () => {
+  const frame = document.createElement("div");
+  frame.setAttribute("data-paper-container-kind", "figure");
+  document.body.appendChild(frame);
+  const canvas = document.createElement("bp-paper-canvas");
+  canvas.blocks = [{ id: "f1", type: "paragraph", content: [{ type: "text", value: "Caption " }] }];
+  const asked = [];
+  canvas.wikilinkSource = (q) => { asked.push(q); return ROWS.filter((r) => r.title.toLowerCase().includes(q.toLowerCase())); };
+  frame.appendChild(canvas);
+  await tick(350);
+  const editor = canvas._editor;
+  caret(editor, endOf(editor, 0));
+  paste(editor, "[[Plan]] [[Nope]]");
+  await tick(20);
+  assert.equal(editor.state.doc.child(0).textContent, "Caption Plan [[Nope]]");
+  assert.deepEqual(asked.sort(), ["Nope", "Plan"]);
+  frame.remove();
+  const { canvas: other, editor: ed, asked: asked2 } = await mount();
+  caret(ed, endOf(ed, 0));
+  asked2.length = 0;
+  const event = new Event("paste", { bubbles: true, cancelable: true });
+  const file = new window.File(["x"], "pic.png", { type: "image/png" });
+  Object.defineProperty(event, "clipboardData", { value: { types: ["Files", "text/plain"], getData: (t) => (t === "text/plain" ? "[[Plan]]" : ""), files: [file] } });
+  assert.equal(ed.view.dom.dispatchEvent(event), false, "the image door took the paste");
+  await tick(20);
+  const doc = JSON.stringify(ed.getJSON());
+  assert.equal(doc.includes("[[Plan]]"), false);
+  assert.deepEqual(asked2, []);
+  other.remove();
+});
+
+await check("undo and redo across a pasted link replay it without asking again", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  paste(editor, " go [[Plan]]");
+  await tick(20);
+  asked.length = 0;
+  const seen = [textOf(editor, "p1")];
+  for (const step of ["undo", "undo", "redo", "redo"]) {
+    editor.commands[step]();
+    seen.push(textOf(editor, "p1"));
+  }
+  await tick(20);
+  assert.deepEqual(seen, ["Start  go Plan", "Start  go [[Plan]]", "Start ", "Start  go [[Plan]]", "Start  go Plan"]);
+  assert.deepEqual(asked, []);
+  assert.equal(links(editor).filter((l) => l.docId === "n-plan").length, 1);
+  canvas.remove();
+});
+
+await check("a big paste asks once per distinct title, at most MAX_ASKS of them; its links are one undo step", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  const text = Array.from({ length: 200 }, (_, i) => `[[Plan]] [[N${i}]]`).join(" ");
+  paste(editor, " " + text);
+  await tick(20);
+  assert.equal(asked.filter((q) => q === "Plan").length, 1, "Plan is asked once");
+  assert.equal(asked.length, 20, `${asked.length} asks`);
+  assert.equal(links(editor).filter((l) => l.docId === "n-plan").length, 200, "every [[Plan]] links from that one answer");
+  assert.ok(textOf(editor, "p1").endsWith("Plan [[N199]]"), "titles past the cap stay text");
+  editor.commands.undo();
+  assert.ok(textOf(editor, "p1").endsWith(" " + text), "one undo brings every bracket back");
+  editor.commands.undo();
+  assert.equal(textOf(editor, "p1"), "Start ", "the next undo takes the paste");
   canvas.remove();
 });
 
