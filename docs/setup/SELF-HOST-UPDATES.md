@@ -5,22 +5,23 @@ This page comes after setup in [SELF-HOST.md](SELF-HOST.md), next to [SELF-HOST-
 
 ## Update and roll back a single VM
 
-`/opt/barkpark` is a git checkout of `main`. `GET /status.json` shows the running `commit` and `version`. Take a backup as [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill) describes, and note the commit:
+The `barkpark` service runs the image that `/etc/barkpark/image.env` names. `GET /status.json` shows the running `version` and `commit`. Take a backup as [SELF-HOST-OPERATIONS.md](SELF-HOST-OPERATIONS.md#scheduled-backups-and-the-restore-drill) describes, and note the current line with `sudo cat /etc/barkpark/image.env`.
+
+**Update.** Pull the release, write its tag and restart. The container migrates the database as it starts:
 
 ```bash
-sudo git -C /opt/barkpark rev-parse --short HEAD
+sudo docker pull ghcr.io/frikkern/barkpark:<version>
+echo BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:<version> | sudo tee /etc/barkpark/image.env
+sudo systemctl restart barkpark
 ```
 
-**Update.** Run `sudo git -C /opt/barkpark pull`. The post-merge hook runs `scripts/deploy-rebuild.sh`. It builds in `api/_build_next` while the old code serves, runs the migrations, swaps the build in and restarts. A failed build or migration leaves the old build running. `sudo cat /opt/barkpark/.git/barkpark-deploy-outcome` prints `rebuilt` after a good update. An update took 3 to 19 minutes, with 16 to 27 seconds of failed requests at the restart. When it adds a migration, `/readyz` answers 503 from the pull until the migration has run, because the server counts the new file as pending, on staging for the whole build. A load balancer that routes on `/readyz` sees that as downtime.
+On 2026-10-30, `/readyz` failed for 8 seconds in an update from 0.2.30 to 0.2.31 and for 14 seconds in the rollback.
 
-**Roll back.** Move the checkout back and rebuild:
+**Roll back.** Run the same three lines with the tag you noted. Migrations stay applied. When an update has a migration that changes or removes data, roll back the image and restore the backup taken before the update.
 
-```bash
-sudo git -C /opt/barkpark reset --hard <previous commit>
-sudo make -C /opt/barkpark rebuild
-```
+**From source.** Run `deploy.sh` again with `BARKPARK_FROM_SOURCE=<git ref>`. It builds `barkpark:src-<commit>`, writes it to `image.env` and restarts. A failed build leaves the running container alone.
 
-The rollback took 3 minutes 17 seconds, with 16 seconds of 503. Migrations stay applied. The drill's migration added two columns, and the older code ran with them. When an update has a migration that changes or removes data, roll back the code and restore the backup taken before the update. Do not use `git checkout <commit>`, which detaches the checkout so the next `git pull` fails. After a rollback, `git pull` updates to `main` again. To pin a release, run `sudo git -C /opt/barkpark fetch --tags` and the two commands above with a tag such as `v0.2.29`.
+**A VM from the source build.** A VM set up before 2026-10-30 runs a git checkout in `/opt/barkpark` and keeps working, with `git pull` as its update. One run of the current `deploy.sh` moves it to the image. It keeps `.env`, the database and the admin token, moves `api/uploads` to `/opt/barkpark/uploads` and replaces the service. Do not run `git pull` there after that.
 
 ## Container Apps
 
@@ -64,10 +65,11 @@ An operator token loses operator access when it is rotated, because `BARKPARK_OP
 
 `bp instance admin-token` covers instances that Barkpark Cloud manages. On your own VM or Container App, mint a new admin token on the server. The command adds a token with `read`, `write` and `admin` in the default workspace. It writes the token to a file, mode 600, and the id to the same path with `.id` added. It prints only the id and the path. It refuses to replace an existing file unless you pass `--force`. The audit log records the mint as `admin_token_recovery_mint`.
 
-**On a VM.** The default file is `/etc/barkpark/admin-token`:
+**On a VM.** The default file is `/etc/barkpark/admin-token`. Run the image as root with that directory mounted:
 
 ```bash
-sudo /opt/barkpark/api/start.sh admin-token --label "admin (recovered)"
+sudo bash -c '. /etc/barkpark/image.env; docker run --rm --network host --env-file /opt/barkpark/.env -u 0 \
+  -v /etc/barkpark:/etc/barkpark "$BARKPARK_IMAGE" bin/admin-token --label "admin (recovered)" --file /etc/barkpark/admin-token'
 ```
 
 A `deploy.sh` re-run on a box with no token file runs the same command.
