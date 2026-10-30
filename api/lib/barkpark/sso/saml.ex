@@ -37,6 +37,7 @@ defmodule Barkpark.Sso.Saml do
   alias Barkpark.Repo
   alias Barkpark.Sso.SamlAssertionReplay
   alias Barkpark.Sso.SamlConnection
+  alias Barkpark.Sso.SamlXmlNames
   alias Barkpark.Tenancy.Organization
 
   @doc "Create a per-org SAML connection."
@@ -224,26 +225,43 @@ defmodule Barkpark.Sso.Saml do
   # reports a fatal parse error as an EXIT, which `rescue` does not catch; it
   # becomes an error tuple so the caller refuses (401) instead of crashing the
   # request (500).
+  #
+  # Before xmerl runs, two more refusals. A message over @max_xml_bytes is
+  # refused. `SamlXmlNames.check/1` refuses any element, attribute or namespace
+  # name outside the SAML, dsig, xenc and XML Schema vocabulary, because xmerl
+  # stores those names as atoms.
   @doctype_re ~r/<!DOCTYPE/i
+
+  # A signed Entra or Okta response with a large group claim is tens of KB.
+  @max_xml_bytes 256 * 1024
 
   @doc false
   @spec parse_untrusted_xml(binary()) :: {:ok, tuple()} | {:error, term()}
   def parse_untrusted_xml(xml) when is_binary(xml) do
-    if Regex.match?(@doctype_re, xml) do
-      {:error, :doctype_not_permitted}
-    else
-      {doc, _rest} =
-        :xmerl_scan.string(to_charlist(xml),
-          namespace_conformant: true,
-          allow_entities: false,
-          fetch_fun: fn _uri, _state -> {:error, :external_fetch_not_permitted} end,
-          quiet: true
-        )
+    cond do
+      byte_size(xml) > @max_xml_bytes ->
+        {:error, :xml_too_large}
 
-      {:ok, doc}
+      Regex.match?(@doctype_re, xml) ->
+        {:error, :doctype_not_permitted}
+
+      true ->
+        with :ok <- SamlXmlNames.check(xml), do: scan_xml(xml)
     end
   catch
     :exit, reason -> {:error, {:parse_error, inspect(reason, limit: 20)}}
+  end
+
+  defp scan_xml(xml) do
+    {doc, _rest} =
+      :xmerl_scan.string(to_charlist(xml),
+        namespace_conformant: true,
+        allow_entities: false,
+        fetch_fun: fn _uri, _state -> {:error, :external_fetch_not_permitted} end,
+        quiet: true
+      )
+
+    {:ok, doc}
   end
 
   defp sp_for(conn, slug) do

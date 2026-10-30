@@ -204,15 +204,26 @@ defmodule Barkpark.Sso.SamlTest do
       end
     end
 
-    test "the xmerl layer below the guard never expands an entity and never exits" do
-      # An undeclared entity reference reaches xmerl (no DOCTYPE to refuse);
-      # xmerl answers with an EXIT, which must come back as an error tuple.
-      assert {:error, {:parse_error, _}} = Saml.parse_untrusted_xml("<r>&xxe;</r>")
-      assert {:error, {:parse_error, _}} = Saml.parse_untrusted_xml("<r><unclosed></r>")
+    test "the layers below the guard never expand an entity and never exit" do
+      ns = ~s(xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol")
+
+      # An undeclared entity reference is refused by the name check.
+      assert {:error, {:entity_not_permitted, "xxe"}} =
+               Saml.parse_untrusted_xml("<samlp:Response #{ns}>&xxe;</samlp:Response>")
+
+      assert {:error, {:malformed_xml, _}} =
+               Saml.parse_untrusted_xml("<samlp:Response #{ns}><samlp:Status></samlp:Response>")
+
+      # An undeclared prefix passes the name check and reaches xmerl, which
+      # answers with an EXIT; it must come back as an error tuple.
+      assert {:error, {:parse_error, _}} = Saml.parse_untrusted_xml(~s(<saml:Response ID="1"/>))
     end
 
     test "CONTROL: a DOCTYPE-free document still parses" do
-      assert {:ok, _doc} = Saml.parse_untrusted_xml(~s(<?xml version="1.0"?><r a="1">x</r>))
+      assert {:ok, _doc} =
+               Saml.parse_untrusted_xml(
+                 ~s(<?xml version="1.0"?><samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="1">x</samlp:Response>)
+               )
     end
   end
 

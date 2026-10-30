@@ -454,6 +454,69 @@ defmodule BarkparkWeb.SamlControllerTest do
            |> json_response(401)
   end
 
+  # task-f5fa1c456a7e9877: the parser refuses names outside the SAML
+  # vocabulary before xmerl runs, so an unsigned body full of unknown names
+  # adds no atoms and is refused.
+  describe "a body with thousands of unknown XML names" do
+    defp unknown_names_body(root) do
+      names =
+        for _ <- 1..5000 do
+          tag = "e" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+          attr = "a" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+          ~s(<#{tag} #{attr}="1"/>)
+        end
+
+      ~s(<samlp:#{root} xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" ID="_n1" Version="2.0">) <>
+        Enum.join(names) <> "</samlp:#{root}>"
+    end
+
+    defp atom_growth(fun) do
+      before = :erlang.system_info(:atom_count)
+      result = fun.()
+      {result, :erlang.system_info(:atom_count) - before}
+    end
+
+    test "ACS refuses the SAMLResponse with no atom growth", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem)
+      body = Base.encode64(unknown_names_body("Response"))
+
+      # Warm-up: the first refusal loads code, which adds atoms of its own.
+      post(conn, "/v1/auth/saml/#{@slug}/acs", %{"SAMLResponse" => body})
+
+      {resp, growth} =
+        atom_growth(fn ->
+          post(build_conn(), "/v1/auth/saml/#{@slug}/acs", %{
+            "SAMLResponse" => Base.encode64(unknown_names_body("Response"))
+          })
+        end)
+
+      IO.puts("ACS: 10000 unknown names, atom_count grew by #{growth}")
+      assert json_response(resp, 401)["error"]["code"] == "unauthorized"
+      assert growth < 20
+    end
+
+    test "SLO refuses the SAMLRequest with no atom growth", %{conn: conn} do
+      i = idp()
+      setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
+
+      post(conn, "/v1/auth/saml/#{@slug}/slo", %{
+        "SAMLRequest" => Base.encode64(unknown_names_body("LogoutRequest"))
+      })
+
+      {resp, growth} =
+        atom_growth(fn ->
+          post(build_conn(), "/v1/auth/saml/#{@slug}/slo", %{
+            "SAMLRequest" => Base.encode64(unknown_names_body("LogoutRequest"))
+          })
+        end)
+
+      IO.puts("SLO: 10000 unknown names, atom_count grew by #{growth}")
+      assert json_response(resp, 401)
+      assert growth < 20
+    end
+  end
+
   test "POST SLO with a LIST-valued SAMLRequest is 400, not a 500", %{conn: conn} do
     i = idp()
     setup_conn(i.cert_pem, %{idp_slo_url: "https://idp.example.com/slo"})
