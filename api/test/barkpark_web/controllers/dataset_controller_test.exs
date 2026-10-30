@@ -240,11 +240,16 @@ defmodule BarkparkWeb.DatasetControllerTest do
     } do
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
 
-      assert %{"deleting" => true, "dataset" => "j10-7"} =
+      assert %{"deleting" => true, "dataset" => "j10-7", "steps" => running} =
                json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 202)
 
-      assert %{"deleted" => true, "documents" => 1} =
+      assert is_list(running)
+
+      assert %{"deleted" => true, "documents" => 1, "steps" => steps} =
                json_response(until_answered(tokens.owner, ws, project, "j10-7"), 200)
+
+      assert %{"step" => "broadcast", "ms" => ms} = List.last(steps)
+      assert is_integer(ms)
 
       refute dataset?(project, "j10-7")
 

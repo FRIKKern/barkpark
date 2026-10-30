@@ -19717,6 +19717,25 @@
                       "minimum": 0,
                       "type": "integer"
                     },
+                    "steps": {
+                      "items": {
+                        "properties": {
+                          "ms": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "step": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "step",
+                          "ms"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "swept": {
                       "additionalProperties": {
                         "type": "integer"
@@ -19735,7 +19754,8 @@
                     "media_files",
                     "swept",
                     "detached",
-                    "tokens_revoked"
+                    "tokens_revoked",
+                    "steps"
                   ],
                   "type": "object"
                 }
@@ -21635,6 +21655,25 @@
                       "minimum": 0,
                       "type": "integer"
                     },
+                    "steps": {
+                      "items": {
+                        "properties": {
+                          "ms": {
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "step": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "step",
+                          "ms"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
                     "swept": {
                       "additionalProperties": {
                         "type": "integer"
@@ -21653,7 +21692,8 @@
                     "media_files",
                     "swept",
                     "detached",
-                    "tokens_revoked"
+                    "tokens_revoked",
+                    "steps"
                   ],
                   "type": "object"
                 }

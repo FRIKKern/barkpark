@@ -461,7 +461,8 @@ defmodule Barkpark.Api.OpenApi do
         "media_files",
         "swept",
         "detached",
-        "tokens_revoked"
+        "tokens_revoked",
+        "steps"
       ],
       "properties" => %{
         "deleted" => %{"type" => "boolean", "enum" => [true]},
@@ -477,7 +478,18 @@ defmodule Barkpark.Api.OpenApi do
         "media_files" => %{"type" => "integer", "minimum" => 0},
         "swept" => %{"type" => "object", "additionalProperties" => %{"type" => "integer"}},
         "detached" => %{"type" => "object", "additionalProperties" => %{"type" => "integer"}},
-        "tokens_revoked" => %{"type" => "integer", "minimum" => 0}
+        "tokens_revoked" => %{"type" => "integer", "minimum" => 0},
+        "steps" => %{
+          "type" => "array",
+          "items" => %{
+            "type" => "object",
+            "required" => ["step", "ms"],
+            "properties" => %{
+              "step" => %{"type" => "string"},
+              "ms" => %{"type" => "integer", "minimum" => 0}
+            }
+          }
+        }
       }
     },
     "auth.reset" => %{

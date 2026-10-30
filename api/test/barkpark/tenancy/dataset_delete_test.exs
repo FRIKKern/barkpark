@@ -95,6 +95,13 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     assert receipt.dataset.id == dataset.id
     assert receipt.documents == 2
     assert receipt.media_files == 1
+
+    assert Enum.map(receipt.steps, & &1.step) ==
+             ~w(scope lock refuse_shared_search refuse_media detach exemptions media documents
+                sweep_strings sweep_fk_strings tokens dataset audit_event audit_lock audit_flush
+                commit broadcast)
+
+    assert Enum.all?(receipt.steps, &(is_integer(&1.ms) and &1.ms >= 0))
     assert %{"user_prefs" => 1, "scheduled_publishes" => 1} = receipt.swept
     assert Repo.get(Dataset, dataset.id) == nil
     assert Enum.all?(census(dataset, ws), fn {_, n} -> n == 0 end), inspect(census(dataset, ws))
@@ -453,7 +460,9 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
       "CREATE TRIGGER ds_delete_refuse BEFORE DELETE ON datasets FOR EACH ROW EXECUTE FUNCTION ds_delete_refuse()"
     )
 
-    assert {:error, {:delete_failed, :database}} = Tenancy.delete_dataset(dataset)
+    assert {:error, {:delete_failed, :database, steps}} = Tenancy.delete_dataset(dataset)
+    assert %{step: "dataset"} = List.last(steps)
+    assert Enum.at(steps, -2).step == "tokens"
 
     assert Repo.get(Dataset, dataset.id)
     assert census(dataset, ws) == before

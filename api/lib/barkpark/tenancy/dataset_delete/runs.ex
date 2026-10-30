@@ -6,11 +6,12 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   DELETE ─► delete/5 ─┬─ no run: start one (≤ max_runs per node, else busy), wait ≤ wait_ms
                       ├─ a run is live: wait ≤ wait_ms
                       └─ a finished run nobody read: its result, once
-               result ─► the controller answers it; still running ─► {:running, dataset_id} (202)
+               result ─► the controller answers it; still running ─► {:running, dataset_id, steps} (202)
   ```
 
   A delete of thousands of documents outlives any request budget, so the
-  request waits a few seconds and then answers `{:running, dataset_id}`; the caller repeats
+  request waits a few seconds and then answers `{:running, dataset_id, steps}`
+  (`DatasetDelete.progress/1`, the steps so far); the caller repeats
   the DELETE until it gets the result. The task runs the one transaction, so
   an interrupted run (node restart, killed task) rolls back and leaves the
   dataset whole. Each run holds one pool connection, so at most `max_runs/0`
@@ -24,7 +25,7 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   holds answers `{:error, {:recreated, result}}` and drops it; the next DELETE
   deletes the new dataset. A dead run nobody read is dropped and the DELETE
   starts over as if there were none. A crash in the task leaves the run dead,
-  so its waiter answers `{:error, {:delete_failed, :interrupted}}`. A finished
+  so its waiter answers `{:error, {:delete_failed, :interrupted, []}}`. A finished
   row is dropped when it is read, or an hour after it finished.
   """
   use GenServer
@@ -47,13 +48,13 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   end
 
   @doc """
-  The delete's result, or `{:running, dataset_id}` when it is still going after `wait_ms`.
+  The delete's result, or `{:running, dataset_id, steps}` when it is still going after `wait_ms`.
   `dataset` is what the project's slug names now, `nil` once it is gone.
   `opts[:dataset_id]` is the dataset a poll asks about (the 202 names it).
   `opts[:on_deleted]` (required) runs with the receipt in the task, after the commit.
   """
   @spec delete(binary(), String.t(), Dataset.t() | nil, keyword(), non_neg_integer()) ::
-          term() | {:running, binary()}
+          term() | {:running, binary(), [DatasetDelete.step()]}
   def delete(project_id, slug, dataset, opts, wait_ms) do
     {polled, opts} = Keyword.pop(opts, :dataset_id)
     key = {project_id, slug}
@@ -174,18 +175,18 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   defp wait(key, id, deadline) do
     case :ets.lookup(@table, key) do
       [{^key, {:done, result}, _id, _at} = row] ->
-        if take(row), do: result, else: {:running, id}
+        if take(row), do: result, else: {:running, id, []}
 
       [{^key, {:running, pid}, _id, _at} = row] ->
         cond do
           Process.alive?(pid) == false and take(row) ->
-            {:error, {:delete_failed, :interrupted}}
+            {:error, {:delete_failed, :interrupted, []}}
 
           Process.alive?(pid) == false ->
             wait(key, id, deadline)
 
           now() >= deadline ->
-            {:running, id}
+            {:running, id, DatasetDelete.progress(pid)}
 
           now() < deadline ->
             Process.sleep(@poll_ms)
@@ -193,7 +194,7 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
         end
 
       [] ->
-        {:running, id}
+        {:running, id, []}
     end
   end
 

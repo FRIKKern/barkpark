@@ -79,7 +79,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
       Process.sleep(:infinity)
     end)
 
-    assert_receive {:started, {:running, _id}}, 30_000
+    assert_receive {:started, {:running, _id, _steps}}, 30_000
   end
 
   defp chain_held?(ws) do
@@ -120,7 +120,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     Process.sleep(20)
 
     case run_delete(project, 0) do
-      {:running, _id} -> write_until_done(project, opts, samples)
+      {:running, _id, _steps} -> write_until_done(project, opts, samples)
       result -> {result, samples}
     end
   end
@@ -269,8 +269,10 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     seed("doomed", 3, opts)
     Barkpark.PluginEnv.with_plugins([NestedRollbackDeleteHook], ctx)
 
-    assert {:error, {:delete_failed, :database}} =
+    assert {:error, {:delete_failed, :database, steps}} =
              Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
+
+    assert %{step: "documents"} = List.last(steps)
 
     assert %Dataset{} = dataset = Tenancy.get_dataset(project, "doomed")
     assert documents(dataset) == 3
@@ -282,7 +284,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     Barkpark.PluginEnv.with_plugins([SlowRollbackDeleteHook], ctx)
     Application.put_env(:barkpark, :dataset_delete_timeout_ms, 200)
 
-    assert {:error, {:delete_failed, :timeout}} =
+    assert {:error, {:delete_failed, :timeout, _steps}} =
              Tenancy.delete_dataset(Tenancy.get_dataset(project, "doomed"))
 
     :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
@@ -295,11 +297,32 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     dataset = Tenancy.get_dataset(project, "doomed")
     Application.put_env(:barkpark, :dataset_delete_timeout_ms, 100)
 
-    assert {:error, {:delete_failed, :timeout}} = Tenancy.delete_dataset(dataset)
+    assert {:error, {:delete_failed, :timeout, _steps}} = Tenancy.delete_dataset(dataset)
 
     :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
     assert %Dataset{} = Tenancy.get_dataset(project, "doomed")
     assert documents(dataset) == 100
+  end
+
+  test "a run still going answers the steps it finished and the one it waits in",
+       %{project: project, opts: opts} do
+    seed("doomed", 3, opts)
+    holder = hold_a_document(Tenancy.get_dataset(project, "doomed"))
+    parent = self()
+
+    spawn_link(fn ->
+      :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
+      send(parent, {:caller, run_delete(project, 500)})
+      Process.sleep(:infinity)
+    end)
+
+    assert_receive {:caller, {:running, _id, [%{step: "scope"}, %{step: "lock", ms: ms}]}}, 30_000
+    assert ms >= 250
+    send(holder, :release)
+
+    assert {:ok, %{documents: 3, steps: steps}} = run_delete(project, 300_000)
+    assert %{step: "lock", ms: held} = Enum.at(steps, 1)
+    assert held >= ms
   end
 
   test "a run killed mid-delete answers 503, leaves the dataset whole, and the next DELETE finishes it",
@@ -326,7 +349,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     assert %{
              "error" => %{
                "code" => "storage_unavailable",
-               "details" => %{"reason" => "dataset_delete_interrupted"}
+               "details" => %{"reason" => "dataset_delete_interrupted", "steps" => []}
              }
            } = json_response(conn, 503)
 
@@ -354,8 +377,8 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
       end
 
     Enum.each(callers, &send(&1, :go))
-    assert_receive {:caller, {:running, _}}, 30_000
-    assert_receive {:caller, {:running, _}}, 30_000
+    assert_receive {:caller, {:running, _, _}}, 30_000
+    assert_receive {:caller, {:running, _, _}}, 30_000
 
     spawn_link(fn ->
       :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)

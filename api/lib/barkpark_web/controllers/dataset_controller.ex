@@ -21,14 +21,18 @@ defmodule BarkparkWeb.DatasetController do
   | another dataset's document embeds its media | 409 | `dataset_media_referenced` |
 
   The 200 body names the dataset and what left with it:
-  `{deleted, dataset: {id, slug, name}, documents, media_files, swept: {table: N}, detached: {table: N}, tokens_revoked}`.
+  `{deleted, dataset: {id, slug, name}, documents, media_files, swept: {table: N}, detached: {table: N}, tokens_revoked, steps}`.
   `detached` counts other workspaces' rows that pointed at the dataset and keep
   living with `dataset_id` NULL. The delete is on the workspace's audit chain.
   After the commit the workspace's cached search surface config for the slug is
   dropped (`SurfaceConfigs.forget/2`), so a recreated name starts untuned.
 
+  `steps` is `[{step, ms}]`, every step of the delete in order. The 202 carries
+  the steps so far, its last entry the step running now; a 503's `details.steps`
+  ends with the step it stopped in (empty for `_interrupted`).
+
   The delete runs off the request (`Tenancy.DatasetDelete.Runs`). A 202 is
-  `{deleting: true, dataset, dataset_id}`; a poll is the same DELETE with
+  `{deleting: true, dataset, dataset_id, steps}`; a poll is the same DELETE with
   `?dataset_id=<dataset_id>`, which waits again and answers that run's 200 or
   error once and never deletes another dataset. A 503 carries `details.reason`
   `dataset_delete_timeout`, `_contended`, `_database`, `_interrupted` or
@@ -63,10 +67,10 @@ defmodule BarkparkWeb.DatasetController do
            ) do
       json(conn, receipt_json(receipt))
     else
-      {:running, id} ->
+      {:running, id, steps} ->
         conn
         |> put_status(:accepted)
-        |> json(%{deleting: true, dataset: name, dataset_id: id})
+        |> json(%{deleting: true, dataset: name, dataset_id: id, steps: steps})
 
       {:error, {:recreated, {:ok, receipt}}} ->
         ErrorResponse.emit_custom(
@@ -137,13 +141,13 @@ defmodule BarkparkWeb.DatasetController do
           "`bp workspace dataset-ls` lists the datasets you can delete."
         )
 
-      {:error, {:delete_failed, reason}} ->
+      {:error, {:delete_failed, reason, steps}} ->
         ErrorResponse.emit_custom(
           conn,
           503,
           "storage_unavailable",
           "the dataset delete stopped (#{reason}) and rolled back; the dataset is whole",
-          %{reason: "dataset_delete_#{reason}"},
+          %{reason: "dataset_delete_#{reason}", steps: steps},
           failed_hint(reason)
         )
 
@@ -160,7 +164,8 @@ defmodule BarkparkWeb.DatasetController do
       media_files: receipt.media_files,
       swept: receipt.swept,
       detached: receipt.detached,
-      tokens_revoked: receipt.tokens_revoked
+      tokens_revoked: receipt.tokens_revoked,
+      steps: receipt.steps
     }
   end
 

@@ -61,9 +61,14 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   lock and every write in the workspace waited for the whole delete
   (task-10608b4831a0e9b8). The transaction may run 30 minutes
   (`:dataset_delete_timeout_ms`); a timeout or database error rolls it back and
-  answers `{:error, {:delete_failed, :timeout | :contended | :database}}`; a
+  answers `{:error, {:delete_failed, :timeout | :contended | :database, steps}}`; a
   step that answers its own error (a hook halt, a rev mismatch) answers it. The
   HTTP door runs it off the request: `Tenancy.DatasetDelete.Runs`.
+
+  Every step is timed: the receipt's `steps` and a failure's `steps` list
+  `%{step, ms}` in order, and a failure's last entry is the step it stopped in.
+  `progress/1` reads the same list from a delete still running, its last entry
+  the step it is in so far.
 
   The walk first locks the dataset's document rows in id order. An edit racing
   the delete then waits for it, instead of deadlocking with the walk or moving
@@ -87,6 +92,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   alias Barkpark.Tenancy.{Dataset, Membership, Project, Workspace}
 
   @protected_slug "production"
+  @progress {__MODULE__, :progress}
   @contended_attempts 5
 
   @project_keyed ~w(access_grants preview_links scheduled_publishes share_links)
@@ -153,8 +159,10 @@ defmodule Barkpark.Tenancy.DatasetDelete do
              | :not_found
              | {:shared_search, %{String.t() => pos_integer()}}
              | {:media_referenced, [map()]}
-             | {:delete_failed, :timeout | :contended | :database}
+             | {:delete_failed, :timeout | :contended | :database, [step()]}
              | term()}
+  @type step :: %{step: String.t(), ms: non_neg_integer()}
+
   def delete(dataset, opts \\ [])
 
   def delete(%Dataset{slug: @protected_slug}, _opts), do: {:error, :production_dataset}
@@ -178,7 +186,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
   defp retry_contended(target, attempts) do
     case run(target) do
-      {:error, {:delete_failed, :contended}} when attempts > 1 ->
+      {:error, {:delete_failed, :contended, _steps}} when attempts > 1 ->
         retry_contended(target, attempts - 1)
 
       result ->
@@ -190,6 +198,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     Media.clear_deferred_media_effects()
     audit_owner? = Audit.defer_emits() == :owner
     started = System.monotonic_time(:millisecond)
+    Process.put(@progress, {[], nil})
 
     try do
       result =
@@ -198,7 +207,12 @@ defmodule Barkpark.Tenancy.DatasetDelete do
             fn ->
               case teardown(target) do
                 {:ok, receipt} ->
-                  if audit_owner?, do: Audit.flush_deferred!()
+                  if audit_owner? do
+                    step("audit_lock", fn -> Audit.lock_chain!(target.workspace.id) end)
+                    step("audit_flush", &Audit.flush_deferred!/0)
+                  end
+
+                  begin("commit")
                   receipt
 
                 {:error, reason} ->
@@ -207,10 +221,13 @@ defmodule Barkpark.Tenancy.DatasetDelete do
             end,
             timeout: timeout_ms()
           )
+          |> committed()
         end)
 
       case result do
         {:ok, receipt} ->
+          finish()
+          result = {:ok, Map.put(receipt, :steps, steps())}
           if audit_owner?, do: Audit.finish_deferred(:committed)
           Media.flush_deferred_media_effects()
           Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
@@ -223,7 +240,8 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     rescue
       e in [DBConnection.ConnectionError, Postgrex.Error] ->
         Media.clear_deferred_media_effects()
-        {:error, {:delete_failed, failure(e, System.monotonic_time(:millisecond) - started)}}
+        reason = failure(e, System.monotonic_time(:millisecond) - started)
+        {:error, {:delete_failed, reason, steps()}}
 
       e ->
         Media.clear_deferred_media_effects()
@@ -231,8 +249,55 @@ defmodule Barkpark.Tenancy.DatasetDelete do
     after
       if audit_owner?, do: Audit.finish_deferred(:rolled_back)
       WriteScope.reset_request_memo()
+      Process.delete(@progress)
     end
   end
+
+  @doc "The steps of the delete running in `pid`: done ones, then the one it is in so far."
+  @spec progress(pid()) :: [step()]
+  def progress(pid) do
+    case Process.info(pid, :dictionary) do
+      {:dictionary, dict} -> dict |> List.keyfind(@progress, 0) |> progress_steps()
+      nil -> []
+    end
+  end
+
+  defp progress_steps({@progress, progress}), do: steps(progress)
+  defp progress_steps(nil), do: []
+
+  defp committed({:ok, _receipt} = ok) do
+    finish()
+    begin("broadcast")
+    ok
+  end
+
+  defp committed({:error, _reason} = error), do: error
+
+  defp step(name, fun) do
+    begin(name)
+    result = fun.()
+    finish()
+    result
+  end
+
+  defp begin(name) do
+    {done, nil} = Process.get(@progress)
+    Process.put(@progress, {done, {name, now()}})
+  end
+
+  defp finish do
+    {done, {name, started}} = Process.get(@progress)
+    Process.put(@progress, {[%{step: name, ms: now() - started} | done], nil})
+  end
+
+  defp steps, do: steps(Process.get(@progress))
+
+  defp steps({done, nil}), do: Enum.reverse(done)
+
+  defp steps({done, {name, started}}),
+    do: Enum.reverse(done, [%{step: name, ms: now() - started}])
+
+  defp now, do: System.monotonic_time(:millisecond)
 
   defp timeout_ms,
     do: Application.get_env(:barkpark, :dataset_delete_timeout_ms, :timer.minutes(30))
@@ -243,19 +308,21 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
-    exclusive? = slug_exclusive_in_workspace?(target)
+    exclusive? = step("scope", fn -> slug_exclusive_in_workspace?(target) end)
 
-    with :ok <- lock_documents(target),
-         :ok <- refuse_shared_search(target),
-         :ok <- refuse_referenced_media(target),
-         detached = detach_foreign(target),
-         exemptions = sweep_authoring_exemptions(dataset),
-         {:ok, media} <- delete_media(target),
-         {:ok, documents} <- delete_documents(target),
-         swept =
-           target |> sweep_strings(exclusive?) |> Map.merge(sweep_fk_strings(target, exclusive?)),
-         {:ok, revoked} <- revoke_bound_tokens(target),
-         {:ok, deleted} <- Repo.delete(dataset, stale_error_field: :id),
+    with :ok <- step("lock", fn -> lock_documents(target) end),
+         :ok <- step("refuse_shared_search", fn -> refuse_shared_search(target) end),
+         :ok <- step("refuse_media", fn -> refuse_referenced_media(target) end),
+         detached = step("detach", fn -> detach_foreign(target) end),
+         exemptions = step("exemptions", fn -> sweep_authoring_exemptions(dataset) end),
+         {:ok, media} <- step("media", fn -> delete_media(target) end),
+         {:ok, documents} <- step("documents", fn -> delete_documents(target) end),
+         strings = step("sweep_strings", fn -> sweep_strings(target, exclusive?) end),
+         fk_strings = step("sweep_fk_strings", fn -> sweep_fk_strings(target, exclusive?) end),
+         swept = Map.merge(strings, fk_strings),
+         {:ok, revoked} <- step("tokens", fn -> revoke_bound_tokens(target) end),
+         {:ok, deleted} <-
+           step("dataset", fn -> Repo.delete(dataset, stale_error_field: :id) end),
          receipt = %{
            dataset: deleted,
            documents: documents,
@@ -265,7 +332,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
            tokens_revoked: length(revoked),
            revoked_tokens: revoked
          },
-         {:ok, _event} <- audit(target, receipt) do
+         {:ok, _event} <- step("audit_event", fn -> audit(target, receipt) end) do
       {:ok, receipt}
     else
       {:error, %Ecto.Changeset{data: %Dataset{}}} -> {:error, :not_found}
