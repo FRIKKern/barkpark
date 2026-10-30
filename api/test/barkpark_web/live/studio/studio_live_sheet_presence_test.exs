@@ -41,16 +41,18 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
   ### 2. Wall-clock budget census — the whole Studio/Sheets family
 
-  The MEASURE test below is the only budget in this family whose bound sits
-  within an order of magnitude of the measured value, which is why it is the
-  only one that has ever flaked. Enumerated so the CLASS is closed, not the
-  instance (`grep -rn ':timer.tc\|System.monotonic_time' test/` reproduces
-  the sweep):
+  The MEASURE test below used to be the only budget in this family whose
+  bound sat within an order of magnitude of the measured value, which is why
+  it was the only one that ever flaked (`frame_ms < 10`, min-of-10 wall
+  clock, 12.7ms on a shared runner, task-cbbc484510ada2bc). It now counts
+  reductions. Enumerated so the CLASS is closed, not the instance
+  (`grep -rn ':timer.tc\|System.monotonic_time' test/` reproduces the
+  sweep):
 
-    - `studio_live_sheet_presence_test.exs` — `assert frame_ms < 10`, below.
-      **min-of-10, baseline-subtracted.** The bound is ~3x the true cost and
-      sits BELOW the ~15ms regression it exists to catch. Stabilized at
-      #14414; the estimator rationale is inline at the assertion.
+    - `studio_live_sheet_presence_test.exs` — `assert ratio < 1.5`, below.
+      IMMUNE by construction: BEAM **reductions** of one presence frame on a
+      500-row sheet over a 50-row one. Flat today (1.0x); any per-row work in
+      the frame scales it with the rows.
     - `sheets/engine_perf_test.exs` — `assert ratio < 8.0` plus a 10_000ms
       absolute bound. Wall-clock, ~8x headroom, widened with a recorded
       rationale at `0027ed383` after the identical false-RED-under-load mode.
@@ -69,10 +71,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
       `wait_until` deadline. Not a budget assertion.
 
   No other budget in the family is a coin flip. A NEW timing guard here
-  should count reductions like the chat-transcript one or, if it must use the
-  clock, take the MINIMUM of N — never a single sample, and never a median
-  (the estimator note at the assertion says why the median is the wrong
-  statistic for this particular measurement).
+  should count reductions like the two above or, if it must use the clock,
+  carry two orders of magnitude of headroom — a min-of-N wall-clock bound
+  within 3x of the true cost still flaked on shared runners.
 
   """
   use BarkparkWeb.ConnCase, async: false
@@ -331,25 +332,43 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
 
   # ── render cost (review-phase measurement) ─────────────────────────────────
 
-  test "MEASURE: a presence frame on a 500-row rendered sheet re-renders within budget" do
+  test "MEASURE: a presence frame costs the same on a 500-row sheet as on a 50-row one" do
+    small = presence_frame_reductions("sp-bench-50", 50)
+    big = presence_frame_reductions("sp-bench-500", 500)
+    ratio = big / max(small, 1)
+
+    IO.puts(
+      "[sheets-presence-bench] presence frame: 50 rows #{small} reductions, " <>
+        "500 rows #{big} reductions (ratio #{Float.round(ratio, 2)}x, n=10 minima)"
+    )
+
+    assert ratio < 1.5,
+           "a presence frame does per-row work: 50 rows -> #{small} reductions, " <>
+             "500 rows -> #{big} reductions (ratio #{Float.round(ratio, 2)}x, expected < 1.5x)"
+  end
+
+  # Work, not wall time: the BEAM reductions the LiveView process spends on one
+  # synthetic peer frame, pushed through the same send_update spine
+  # StudioLive's presence_diff handler rides. The :sys.get_state barrier
+  # returns only after the update + re-render + diff. A no-op frame
+  # (identical presences) skips the render, so its cost is the barrier alone
+  # and is subtracted. Reductions do not move with CPU load; a message that
+  # lands inside the window can only add, so the minimum of 10 is the cost.
+  #
+  # Only the overlay layer may re-render on a presence frame, so the cost is
+  # flat in row count (exactly 1.0x today). Any per-row render work grows it
+  # with the rows: a single `@presences` read inside the row comprehension
+  # measures ~9x here.
+  defp presence_frame_reductions(slug, rows) do
     cells =
-      for r <- 1..500, c <- 1..8, into: %{} do
+      for r <- 1..rows, c <- 1..8, into: %{} do
         {"#{<<?A + c - 1>>}#{r}", %{"v" => "r#{r}c#{c}"}}
       end
 
-    create_sheet!("sp-bench", cells)
-    {view, _t, _} = open_as!("sp-bench", "alice-id-001", "Alice")
-    assert render(view) =~ ~s(data-ref="H500")
+    create_sheet!(slug, cells)
+    {view, _t, _} = open_as!(slug, "alice-id-001", "Alice")
+    assert render(view) =~ ~s(data-ref="H#{rows}")
 
-    # Synthetic peer frames pushed straight at the component — the same
-    # send_update spine StudioLive's presence_diff handler rides. The
-    # :sys.get_state barrier and the send_update leave THIS process, so
-    # FIFO ordering guarantees the timed window covers the component
-    # update + re-render + diff, nothing async. The barrier itself copies
-    # the LV state to the test process (~ms on a 4_000-cell sheet), so the
-    # honest per-frame cost is moving MINUS the no-op baseline: a no-op
-    # frame (identical presences) marks no assigns changed and skips the
-    # render outright, leaving pure barrier overhead.
     frame = fn ref ->
       peer = %{
         user_id: "bench-bob",
@@ -361,64 +380,24 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetPresenceTest do
         editing: nil
       }
 
-      {us, _} =
-        :timer.tc(fn ->
-          Phoenix.LiveView.send_update(view.pid, BarkparkWeb.Studio.SheetGrid,
-            id: "sheet-grid-sp-bench",
-            presences: [peer]
-          )
+      {:reductions, before} = Process.info(view.pid, :reductions)
 
-          :sys.get_state(view.pid)
-        end)
+      Phoenix.LiveView.send_update(view.pid, BarkparkWeb.Studio.SheetGrid,
+        id: "sheet-grid-#{slug}",
+        presences: [peer]
+      )
 
-      us
+      :sys.get_state(view.pid)
+      {:reductions, after_} = Process.info(view.pid, :reductions)
+      after_ - before
     end
-
-    # ESTIMATOR: min-of-N, NOT the median.
-    #
-    # Every source of error in this measurement is ONE-SIDED — a sample can be
-    # inflated by a GC pause, a scheduler preemption, or a peer agent hammering
-    # the same box, but nothing can make the server do the work FASTER than it
-    # actually does it. So the minimum of N draws is the maximum-likelihood
-    # estimate of the true cost, and it converges DOWN toward it as N grows.
-    #
-    # The median does not: it sits in the middle of whatever noise the run drew,
-    # and this statistic subtracts TWO independent medians, so the noise on both
-    # samples compounds instead of cancelling. Measured spread of the median
-    # form was ~17ms against a 10ms budget while the true signal is ≤~3ms —
-    # which is how three unrelated PRs (#14072, #14074, #14003) lost the
-    # required Elixir Test check in one 25-minute window on `frame_ms` 10.387.
-    #
-    # The fix is the estimator, not the budget: covering the median's noise
-    # would need ≥25ms, which is ABOVE the ~15ms full-grid-re-render regression
-    # this test exists to catch — i.e. a deleted test. min-of-N keeps `< 10`
-    # meaningful. Verified fail-able: re-reading `@presences` inside the cell
-    # comprehension (the pre-overlay-split shape) puts frame_ms at ~15ms and
-    # this assertion RED under the min estimator.
-    best = fn times -> Enum.min(times) end
 
     [_warmup | moving] = for i <- 0..10, do: frame.("B#{i + 2}")
     [_warmup | static] = for _ <- 0..10, do: frame.("B12")
 
-    moving_ms = best.(moving) / 1000
-    baseline_ms = best.(static) / 1000
-    frame_ms = max(moving_ms - baseline_ms, 0.0)
-
-    # The frames really re-rendered: the last cursor landed on B12.
     assert peer_cursor(view, "B12") =~ "Bob"
 
-    IO.puts(
-      "[sheets-presence-bench] 500-row (10-col) presence frame: " <>
-        "#{Float.round(frame_ms, 2)}ms server cost " <>
-        "(moving #{Float.round(moving_ms, 2)}ms - barrier baseline #{Float.round(baseline_ms, 2)}ms, n=10 minima)"
-    )
-
-    # The 10ms review budget — UNCHANGED. Before the overlay split +
-    # derive_grid persistence this measured ~15ms (a full grid-body re-render
-    # per frame); now only the overlay layer re-renders. The budget still sits
-    # BELOW that regression, which is the whole point: widening it past 15ms to
-    # absorb estimator noise would delete the test.
-    assert frame_ms < 10
+    Enum.min(moving) - Enum.min(static)
   end
 
   # ── bystander read access ──────────────────────────────────────────────────
