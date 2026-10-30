@@ -109,6 +109,20 @@ check "a ref that cannot be fetched fails, names the git call and builds nothing
 out="$(run BARKPARK_FROM_SOURCE=main FAKE_BUILD_FAIL=1)"
 check "a failed build fails the step" 'grep -q "RC=1$" <<<"$out" && [ ! -e "$TMP/etc/image.env" ]'
 
+echo "== update hint =="
+awk '/^# barkpark_update_hint BEGIN$/{on=1} on{print} /^# barkpark_update_hint END$/{exit}' "$ROOT/deploy.sh" > "$TMP/hint.sh"
+grep -q 'barkpark_update_hint()' "$TMP/hint.sh" || { echo "FATAL: barkpark_update_hint not found in deploy.sh"; exit 1; }
+check "the banner calls the update hint" 'grep -qx "barkpark_update_hint" "$ROOT/deploy.sh"'
+hint() {
+  env -u BARKPARK_FROM_SOURCE IMAGE_ENV=/etc/barkpark/image.env SSH_CMD="ssh -i ~/.ssh/barkpark azureuser@203.0.113.7" \
+    DOMAIN=cms.example.com "$@" bash -c 'set -euo pipefail; . "$1"; barkpark_update_hint' _ "$TMP/hint.sh"
+}
+out="$(hint BARKPARK_FROM_SOURCE=main BARKPARK_IMAGE=barkpark:src-0123456789ab)"
+check "after a source build the hint is another source build" 'grep -qxF "    ssh -i ~/.ssh/barkpark azureuser@203.0.113.7 '"'"'sudo DOMAIN=cms.example.com BARKPARK_FROM_SOURCE=<git ref> bash -s'"'"' < deploy.sh" <<<"$out"'
+check "after a source build the hint names the ref and no ghcr.io image" 'grep -q "built from main" <<<"$out" && ! grep -q "ghcr.io" <<<"$out"'
+out="$(hint BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:0.2.30)"
+check "after a pulled image the hint writes a ghcr.io ref to image.env" 'grep -qxF "    echo BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:<version> | sudo tee /etc/barkpark/image.env && sudo systemctl restart barkpark" <<<"$out" && ! grep -q "FROM_SOURCE" <<<"$out"'
+
 echo "== media move and the unit =="
 APP="$TMP/app"
 mkdir -p "$APP/api/uploads/ds"
