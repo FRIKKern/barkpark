@@ -206,7 +206,7 @@ try {
   await check("Mod+Enter on a dead link edits nothing", async () => {
     canvas.wikilinkResolve = (id) => (id === "n-gone" ? { missing: true } : null);
     await tick(10);
-    assert.ok(canvas.querySelector("[data-missing]"));
+    assert.ok(canvas.querySelector("span[data-wikilink][data-missing]"));
     const before = JSON.stringify(editor.getJSON());
     let at = 0;
     editor.state.doc.descendants((n, p) => { if (n.isText && n.text === "Gone") at = p + 2; });

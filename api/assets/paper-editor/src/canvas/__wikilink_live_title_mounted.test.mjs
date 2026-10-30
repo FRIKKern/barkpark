@@ -441,18 +441,61 @@ await check("a deleted target ({ missing: true } from wikilinkResolve) is marked
   const { canvas } = await mount({ titles: (id) => state[id] ?? null });
   await tick(20);
   const gone = linkEl(canvas, "n-gone");
-  assert.ok(gone.querySelector("[data-missing]"), gone.outerHTML);
-  assert.equal(canvas.querySelectorAll("span[data-wikilink]:has([data-missing])").length, 1, "the documented selector finds the link");
+  assert.equal(gone.hasAttribute("data-missing"), true, gone.outerHTML);
+  assert.equal(canvas.querySelectorAll("span[data-wikilink][data-missing]").length, 1, "the documented selector finds the link");
+  assert.equal(canvas.querySelectorAll("[data-missing]:not(span[data-wikilink])").length, 0, "nothing inside it carries the mark");
   assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note end.");
-  assert.equal(!!linkEl(canvas, "n-plan").querySelector("[data-missing]"), false);
+  assert.equal(linkEl(canvas, "n-plan").hasAttribute("data-missing"), false);
   canvas._linkPreview.showFor(gone);
   assert.equal(cardOpen(canvas), false, "the card knows it is gone with no linkPreviewSource");
   canvas._linkPreview.hide();
   state["n-gone"] = "Gone note, back";
   canvas.refreshWikilinks();
   await tick(20);
-  assert.equal(!!linkEl(canvas, "n-gone").querySelector("[data-missing]"), false);
+  assert.equal(linkEl(canvas, "n-gone").hasAttribute("data-missing"), false);
   assert.equal(shown(block(canvas, "p1")), "See Plan and Gone note, back end.");
+  canvas.remove();
+});
+
+await check("a gone link with a bold part: every link span is marked, and typing keeps the mark without an edit of its own", async () => {
+  const blocks = [{ id: "p1", type: "paragraph", content: [{ type: "text", value: "See " }, { type: "wikilink", target: "Gone note", docId: "n-gone", children: [{ type: "text", value: "Gone " }, { type: "text", value: "note", marks: ["strong"] }] }, { type: "text", value: " end." }] }];
+  const { canvas, editor, ops } = await mount({ blocks, titles: (id) => (id === "n-gone" ? { missing: true } : null) });
+  await tick(20);
+  const spans = [...canvas.querySelectorAll("span[data-wikilink]")];
+  assert.ok(spans.length >= 1);
+  assert.equal(spans.every((s) => s.hasAttribute("data-missing")), true, block(canvas, "p1").innerHTML);
+  assert.equal(!!canvas.querySelector("strong span[data-wikilink][data-missing], span[data-wikilink][data-missing] strong"), true, block(canvas, "p1").innerHTML);
+  const before = canonical(stored(editor));
+  editor.view.dispatch(editor.state.tr.insertText("!", posOf(editor, " end.") + 5));
+  await tick(20);
+  assert.equal([...canvas.querySelectorAll("span[data-wikilink]")].every((s) => s.hasAttribute("data-missing")), true, "the mark survives a redraw");
+  assert.equal(canonical(stored(editor)).replace(" end.!", " end."), before, "only the typed character changed");
+  canvas.flushPendingChanges();
+  await tick(350);
+  assert.equal(ops.length > 0, true);
+  assert.equal(JSON.stringify(ops).includes("data-missing"), false);
+  canvas.remove();
+});
+
+await check("a link to a gone target drawn later is marked at once, and marking never makes ProseMirror re-read the page", async () => {
+  const state = {};
+  const { canvas, editor } = await mount({ titles: (id) => state[id] ?? null });
+  await tick(20);
+  const reads = [];
+  const observer = editor.view.domObserver;
+  const handle = observer.handleDOMChange;
+  observer.handleDOMChange = (...args) => { reads.push(args); return handle(...args); };
+  state["n-gone"] = { missing: true };
+  canvas.refreshWikilinks();
+  await tick(50);
+  assert.equal(linkEl(canvas, "n-gone").hasAttribute("data-missing"), true);
+  assert.equal(reads.length, 0, "the attribute is not read back as an edit");
+  const { schema } = editor.state;
+  const wikilink = schema.marks.wikilink.create({ target: "Gone note", docId: "n-gone" });
+  editor.view.dispatch(editor.state.tr.insert(posOf(editor, " here."), schema.text("Gone note", [wikilink])));
+  await tick(20);
+  assert.equal(linkEl(canvas, "n-gone", 1).hasAttribute("data-missing"), true, block(canvas, "p4").innerHTML);
+  observer.handleDOMChange = handle;
   canvas.remove();
 });
 
@@ -472,8 +515,8 @@ for (const cards of [false, true]) {
     for (const part of ["edit", "remove"]) {
       assert.equal(canvas._linkPreview.el.querySelector(`.bp-link-preview__${part}`).style.display, "", `${part} stays`);
     }
-    assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"), "the span is marked");
-    assert.equal(!!linkEl(canvas, "n-plan").querySelector("[data-missing]"), false);
+    assert.ok(linkEl(canvas, "n-gone").hasAttribute("data-missing"), "the span is marked");
+    assert.equal(linkEl(canvas, "n-plan").hasAttribute("data-missing"), false);
     canvas._linkPreview.hide();
     canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
     assert.equal(cardOpen(canvas), false, "known gone: Open is hidden before the answer lands");
@@ -482,7 +525,7 @@ for (const cards of [false, true]) {
     canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
     await tick(10);
     assert.equal(cardOpen(canvas), true, "recreated: Open comes back");
-    assert.equal(!!linkEl(canvas, "n-gone").querySelector("[data-missing]"), false, "and the mark goes");
+    assert.equal(linkEl(canvas, "n-gone").hasAttribute("data-missing"), false, "and the mark goes");
     canvas.flushPendingChanges();
     await tick(350);
     assert.deepEqual(ops, [], "marking is not an edit");
@@ -497,17 +540,17 @@ for (const cards of [false, true]) await check(`an async { missing: true } marks
   canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
   await tick(10);
   assert.equal(cardOpen(canvas), false);
-  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"));
+  assert.ok(linkEl(canvas, "n-gone").hasAttribute("data-missing"));
   canvas._linkPreview.hide();
   answer = Promise.resolve(null);
   canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
   await tick(10);
-  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"), "null says nothing new");
+  assert.ok(linkEl(canvas, "n-gone").hasAttribute("data-missing"), "null says nothing new");
   canvas._linkPreview.hide();
   answer = Promise.reject(new Error("x"));
   canvas._linkPreview.showFor(linkEl(canvas, "n-gone"));
   await tick(10);
-  assert.ok(linkEl(canvas, "n-gone").querySelector("[data-missing]"), "a rejection says nothing new");
+  assert.ok(linkEl(canvas, "n-gone").hasAttribute("data-missing"), "a rejection says nothing new");
   canvas._linkPreview.hide();
   canvas.remove();
 });
@@ -517,8 +560,8 @@ await check("a link with no docId is marked by its target, and only links with t
   canvas._linkPreview.showFor(block(canvas, "p4").querySelector("span[data-wikilink]"));
   await tick(10);
   assert.equal(cardOpen(canvas), false);
-  assert.ok(block(canvas, "p4").querySelector("[data-missing]"));
-  assert.equal(canvas.querySelectorAll("[data-missing]").length, 1, "the docId links with the same target stay unmarked");
+  assert.ok(block(canvas, "p4").querySelector("span[data-wikilink][data-missing]"));
+  assert.equal(canvas.querySelectorAll("span[data-wikilink][data-missing]").length, 1, "the docId links with the same target stay unmarked");
   canvas._linkPreview.hide();
   canvas.remove();
 });

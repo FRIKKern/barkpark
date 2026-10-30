@@ -150,10 +150,9 @@ becomes the address `bp-canvas-open-link` reports. For a `wikilink`, a returned
 shows beside the title (the document's type). A wikilink's `missing: true` (1.17.0) says
 its target is gone: the card and the pill hide Open, and every link to that target
 (the same `docId`, or the same `target` when it has none) carries `data-missing` on its
-words until an answer object without it says the target is back; `null`, a throw or a
-rejection changes nothing. The attribute sits on each text span inside the link (one per run
-of marks), not on `span[data-wikilink]`: select the link with
-`span[data-wikilink]:has([data-missing])`. In edit mode the card's Remove drops
+`span[data-wikilink]` until an answer object without it says the target is back; `null`, a
+throw or a rejection changes nothing. Select it with `span[data-wikilink][data-missing]`; a
+link split by other marks is several such spans, each marked. In edit mode the card's Remove drops
 the whole link (or document link) from its run, keeping the words. `mediaUploader` gets one
 `File` per image (`image/*` only); a result with no `src`/`url` (or a throw) marks
 the image with the error message instead. `mediaPicker` is the host's own image

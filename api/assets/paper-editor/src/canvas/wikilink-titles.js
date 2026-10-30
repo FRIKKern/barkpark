@@ -9,10 +9,11 @@
 // anyway shows the stored words, so what the author edits is what is stored.
 //
 // A target the host says is gone (`{ missing: true }`, from wikilinkResolve or linkPreviewSource)
-// keeps its words and carries `data-missing`, for the host to style.
+// keeps its words, and its `span[data-wikilink]` carries `data-missing`, for the host to style.
 
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
+import { DOMSerializer } from "@tiptap/pm/model";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 
 export const wikilinkTitlesKey = new PluginKey("bpWikilinkTitles");
@@ -75,10 +76,7 @@ function decorate(doc, known, inside) {
   const decorations = [];
   for (const run of linkRuns(doc)) {
     const info = known.get(linkKey(run.mark.attrs));
-    if (info && info.missing) {
-      decorations.push(Decoration.inline(run.from, run.to, { "data-missing": "" }));
-      continue;
-    }
+    if (info && info.missing) continue;
     const title = liveTitle(run, info);
     if (!title || run.from === inside) continue;
     decorations.push(Decoration.widget(run.to, label(title), { side: -1, key: `bp-wl:${title}` }));
@@ -137,6 +135,8 @@ export function wikilinkTitles(host) {
   return Extension.create({
     name: "bpWikilinkTitles",
     addProseMirrorPlugins() {
+      const attrsOf = new WeakMap();
+      const mark = (dom, known) => dom.toggleAttribute("data-missing", !!(known.get(linkKey(attrsOf.get(dom))) || {}).missing);
       return [new Plugin({
         key: wikilinkTitlesKey,
         state: {
@@ -179,11 +179,20 @@ export function wikilinkTitles(host) {
           return {
             update(_view, prevState) {
               const now = wikilinkTitlesKey.getState(view.state);
+              if (now.known !== wikilinkTitlesKey.getState(prevState).known) for (const dom of view.dom.querySelectorAll("span[data-wikilink]")) if (attrsOf.has(dom)) mark(dom, now.known);
               if (view.state.doc !== prevState.doc || now.generation !== wikilinkTitlesKey.getState(prevState).generation) ask();
             },
           };
         },
         props: {
+          markViews: {
+            wikilink: (link, view, inline) => {
+              const { dom, contentDOM } = DOMSerializer.renderSpec(document, link.type.spec.toDOM(link, inline), null, link.attrs);
+              attrsOf.set(dom, link.attrs);
+              mark(dom, wikilinkTitlesKey.getState(view.state).known);
+              return { dom, contentDOM, ignoreMutation: (mutation) => mutation.type === "attributes" && mutation.attributeName === "data-missing" };
+            },
+          },
           decorations(state) {
             return wikilinkTitlesKey.getState(state).decorations;
           },
