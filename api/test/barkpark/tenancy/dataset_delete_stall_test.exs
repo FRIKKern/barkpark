@@ -92,16 +92,34 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
       if e.postgres.code == :lock_not_available, do: true, else: reraise(e, __STACKTRACE__)
   end
 
-  defp write_until_done(ws, project, opts, held \\ [], samples \\ []) do
-    held = [chain_held?(ws) | held]
+  defp probe_chain(ws, parent, held \\ 0, probes \\ 0) do
+    receive do
+      :stop -> send(parent, {:probed, held, probes})
+    after
+      20 ->
+        held = if chain_held?(ws), do: held + 1, else: held
+        probe_chain(ws, parent, held, probes + 1)
+    end
+  end
+
+  defp start_prober(ws) do
+    parent = self()
+
+    spawn_link(fn ->
+      :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
+      probe_chain(ws, parent)
+    end)
+  end
+
+  defp write_until_done(project, opts, samples \\ []) do
     started = System.monotonic_time(:millisecond)
     {:ok, _} = Content.create_document("post", %{"title" => "w"}, "bystander", opts)
     samples = [System.monotonic_time(:millisecond) - started | samples]
     Process.sleep(20)
 
     case run_delete(project, 0) do
-      :running -> write_until_done(ws, project, opts, held, samples)
-      result -> {result, held, samples}
+      :running -> write_until_done(project, opts, samples)
+      result -> {result, samples}
     end
   end
 
@@ -120,20 +138,22 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
 
     started = System.monotonic_time(:millisecond)
     start_run(project)
-    {result, held, samples} = write_until_done(ws, project, opts)
+    prober = start_prober(ws)
+    {result, samples} = write_until_done(project, opts)
+    send(prober, :stop)
+    assert_receive {:probed, held, probes}, 30_000
     took = System.monotonic_time(:millisecond) - started
-    held = Enum.count(held, & &1)
 
     IO.puts(
       "delete #{@documents} docs: #{took} ms; #{length(samples)} bystander writes, " <>
         "p95 #{p95(samples)} ms, max #{Enum.max(samples)} ms; audit chain held at " <>
-        "#{held} of #{length(samples)} probes"
+        "#{held} of #{probes} probes"
     )
 
     assert {:ok, %{documents: @documents}} = result
     assert Tenancy.get_dataset(project, "doomed") == nil
-    assert length(samples) >= 5
-    assert held / length(samples) < 0.25
+    assert probes >= 5
+    assert held / probes < 0.25
   end
 
   defp edit_until_stopped(opts, parent, edits \\ 0) do

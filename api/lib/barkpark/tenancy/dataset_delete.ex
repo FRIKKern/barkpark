@@ -213,12 +213,12 @@ defmodule Barkpark.Tenancy.DatasetDelete do
           if audit_owner?, do: Audit.finish_deferred(:committed)
           Media.flush_deferred_media_effects()
           Enum.each(receipt.revoked_tokens, &Auth.broadcast_socket_teardown/1)
+          result
 
-        _ ->
+        {:error, reason} ->
           Media.clear_deferred_media_effects()
+          {:error, rolled_back(reason, System.monotonic_time(:millisecond) - started)}
       end
-
-      result
     rescue
       e in [DBConnection.ConnectionError, Postgrex.Error] ->
         Media.clear_deferred_media_effects()
@@ -240,6 +240,18 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
   defp failure(%Postgrex.Error{postgres: %{code: :deadlock_detected}}, _ms), do: :contended
   defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
+
+  defp rolled_back(reason, ms) do
+    cond do
+      ms >= timeout_ms() -> {:delete_failed, :timeout}
+      lost_connection?(reason) -> {:delete_failed, :database}
+      true -> reason
+    end
+  end
+
+  defp lost_connection?(:rollback), do: true
+  defp lost_connection?({:connection_unavailable, _}), do: true
+  defp lost_connection?(_reason), do: false
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)
