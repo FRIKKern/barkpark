@@ -13,6 +13,8 @@ defmodule BarkparkWeb.DatasetController do
   | deleted | 200 | — |
   | still deleting after 5 s: send the DELETE again | 202 | — |
   | the delete failed or was cut off and rolled back | 503 | `storage_unavailable` |
+  | too many deletes running on this node (`Retry-After`) | 503 | `storage_unavailable` |
+  | an earlier delete of the name finished and the name holds a new dataset | 409 | `dataset_recreated` |
   | no such dataset in the project, or not a dataset slug | 404 | `not_found` |
   | `name` is `production` | 409 | `production_dataset_protected` |
   | global (no-workspace) search rows hang off it | 409 | `dataset_in_shared_search` |
@@ -26,10 +28,13 @@ defmodule BarkparkWeb.DatasetController do
   dropped (`SurfaceConfigs.forget/2`), so a recreated name starts untuned.
 
   The delete runs off the request (`Tenancy.DatasetDelete.Runs`). A 202 is
-  `{deleting: true, dataset}`; the next DELETE of the name waits again and
-  answers the run's 200 or error once. A 503 carries `details.reason`
-  `dataset_delete_timeout`, `_contended`, `_database` or `_interrupted`, and
-  the dataset is untouched. A 404 after a 202 means another caller read the receipt.
+  `{deleting: true, dataset, dataset_id}`; a poll is the same DELETE with
+  `?dataset_id=<dataset_id>`, which waits again and answers that run's 200 or
+  error once and never deletes another dataset. A 503 carries `details.reason`
+  `dataset_delete_timeout`, `_contended`, `_database`, `_interrupted` or
+  `_busy`, and the dataset is untouched. A 404 after a 202 means another
+  caller read the receipt. A 409 `dataset_recreated` carries the earlier run's
+  receipt in `details.receipt`.
   """
   use BarkparkWeb, :controller
 
@@ -47,22 +52,46 @@ defmodule BarkparkWeb.DatasetController do
     with true <- Tenancy.Dataset.valid_slug?(name),
          %Tenancy.Project{} = project <- conn.assigns[:current_project],
          dataset = Tenancy.get_dataset(project, name),
+         polled = conn.params["dataset_id"],
          {:ok, receipt} <-
-           Runs.delete(project.id, name, dataset, run_opts(conn, project, name), wait_ms()) do
-      json(conn, %{
-        deleted: true,
-        dataset: %{id: receipt.dataset.id, slug: receipt.dataset.slug, name: receipt.dataset.name},
-        documents: receipt.documents,
-        media_files: receipt.media_files,
-        swept: receipt.swept,
-        detached: receipt.detached,
-        tokens_revoked: receipt.tokens_revoked
-      })
+           Runs.delete(
+             project.id,
+             name,
+             dataset,
+             run_opts(conn, project, name, polled),
+             wait_ms()
+           ) do
+      json(conn, receipt_json(receipt))
     else
       :running ->
         conn
         |> put_status(:accepted)
-        |> json(%{deleting: true, dataset: name})
+        |> json(%{
+          deleting: true,
+          dataset: name,
+          dataset_id: conn.params["dataset_id"] || deleting_id(conn, name)
+        })
+
+      {:error, {:recreated, {:ok, receipt}}} ->
+        ErrorResponse.emit_custom(
+          conn,
+          409,
+          "dataset_recreated",
+          "an earlier delete of #{inspect(name)} finished, and the name now holds a new dataset",
+          %{receipt: receipt_json(receipt)},
+          "Nothing was deleted now. A poll sends ?dataset_id=<the 202's dataset_id>; send the DELETE again to delete the new dataset."
+        )
+
+      {:error, :busy} ->
+        conn
+        |> put_resp_header("retry-after", "30")
+        |> ErrorResponse.emit_custom(
+          503,
+          "storage_unavailable",
+          "#{Runs.max_runs()} dataset deletes are already running on this node",
+          %{reason: "dataset_delete_busy"},
+          "Transient: nothing was deleted. Send the DELETE again after Retry-After."
+        )
 
       falsy when falsy in [nil, false] ->
         ErrorResponse.emit_custom(
@@ -127,8 +156,28 @@ defmodule BarkparkWeb.DatasetController do
     end
   end
 
-  defp run_opts(conn, project, name) do
+  defp deleting_id(conn, name) do
+    case Tenancy.get_dataset(conn.assigns.current_project, name) do
+      %Tenancy.Dataset{id: id} -> id
+      nil -> nil
+    end
+  end
+
+  defp receipt_json(receipt) do
+    %{
+      deleted: true,
+      dataset: %{id: receipt.dataset.id, slug: receipt.dataset.slug, name: receipt.dataset.name},
+      documents: receipt.documents,
+      media_files: receipt.media_files,
+      swept: receipt.swept,
+      detached: receipt.detached,
+      tokens_revoked: receipt.tokens_revoked
+    }
+  end
+
+  defp run_opts(conn, project, name, polled) do
     [
+      dataset_id: polled,
       actor: conn.assigns[:api_token],
       on_deleted: fn receipt ->
         if Map.has_key?(receipt.swept, "shares"), do: Barkpark.Sharing.refresh()

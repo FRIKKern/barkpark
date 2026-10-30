@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"encoding/json"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -11,7 +13,9 @@ import (
 // (task-10608b4831a0e9b8). The server answers 202 {deleting: true} after a few
 // seconds and keeps the delete running; the same DELETE asks again and answers
 // the receipt, an error, or 202 once more. `bp dataset delete` repeats it until
-// the answer is not 202, so the command still ends on the receipt.
+// the answer is not 202, so the command still ends on the receipt. The repeat
+// names the dataset the 202 named (?dataset_id=), so it never deletes a
+// dataset that took the name after the first one went.
 
 const defaultDatasetDeletePoll = 2 * time.Second
 
@@ -26,6 +30,9 @@ func awaitDatasetDelete(out *writer, cmd manifest.Command, req *manifestRequest,
 		if !waited {
 			out.errf("bp: the server is still deleting the dataset; asking again every %s", datasetDeletePoll)
 			waited = true
+			poll := *req
+			poll.url = pollURL(req.url, body)
+			req = &poll
 		}
 		time.Sleep(datasetDeletePoll)
 		status, body, ct, err = sendManifestRequest(req)
@@ -34,4 +41,18 @@ func awaitDatasetDelete(out *writer, cmd manifest.Command, req *manifestRequest,
 		out.errf("bp: the dataset is gone, and another DELETE already read its receipt")
 	}
 	return status, body, ct, err
+}
+
+func pollURL(raw string, accepted []byte) string {
+	var deleting struct {
+		DatasetID string `json:"dataset_id"`
+	}
+	u, err := url.Parse(raw)
+	if err != nil || json.Unmarshal(accepted, &deleting) != nil || deleting.DatasetID == "" {
+		return raw
+	}
+	q := u.Query()
+	q.Set("dataset_id", deleting.DatasetID)
+	u.RawQuery = q.Encode()
+	return u.String()
 }

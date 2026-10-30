@@ -27,6 +27,9 @@ func TestDatasetDeleteAsksAgainUntilTheReceipt(t *testing.T) {
 		if code != exitOK || sent != 3 {
 			t.Errorf("exit=%d deletes=%d, want exit 0 after 3 DELETEs; requests %v", code, sent, h.seen)
 		}
+		if want := []string{"", "dataset_id=ds-1", "dataset_id=ds-1"}; strings.Join(h.queries, "|") != strings.Join(want, "|") {
+			t.Errorf("the polls must name the dataset the 202 named: queries %q, want %q", h.queries, want)
+		}
 		if !strings.Contains(stderr, "still deleting") || strings.Contains(stdout, "deleting") {
 			t.Errorf("the wait must be named on stderr and the receipt alone on stdout:\nstdout=%s\nstderr=%s", stdout, stderr)
 		}

@@ -19751,6 +19751,10 @@
                     "dataset": {
                       "type": "string"
                     },
+                    "dataset_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
                     "deleting": {
                       "enum": [
                         true
@@ -19760,13 +19764,14 @@
                   },
                   "required": [
                     "deleting",
-                    "dataset"
+                    "dataset",
+                    "dataset_id"
                   ],
                   "type": "object"
                 }
               }
             },
-            "description": "Still deleting. Send the same DELETE again; it answers the receipt once."
+            "description": "Still deleting. Poll with the same DELETE and ?dataset_id=<dataset_id>; it answers this run's receipt once."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -19778,7 +19783,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "production_dataset_protected, dataset_in_shared_search, dataset_media_referenced, or dataset_recreated: an earlier delete of the name finished (its receipt in details.receipt) and the name holds a new dataset."
           },
           "412": {
             "$ref": "#/components/responses/PreconditionFailed"
@@ -19797,7 +19809,7 @@
                 }
               }
             },
-            "description": "The delete stopped (timeout, database error or restart) and rolled back; the dataset is whole."
+            "description": "The delete stopped (timeout, contended, database error or restart) and rolled back, or too many deletes run on the node (dataset_delete_busy, Retry-After); the dataset is whole."
           }
         },
         "security": [
@@ -21657,6 +21669,10 @@
                     "dataset": {
                       "type": "string"
                     },
+                    "dataset_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
                     "deleting": {
                       "enum": [
                         true
@@ -21666,13 +21682,14 @@
                   },
                   "required": [
                     "deleting",
-                    "dataset"
+                    "dataset",
+                    "dataset_id"
                   ],
                   "type": "object"
                 }
               }
             },
-            "description": "Still deleting. Send the same DELETE again; it answers the receipt once."
+            "description": "Still deleting. Poll with the same DELETE and ?dataset_id=<dataset_id>; it answers this run's receipt once."
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -21684,7 +21701,14 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "$ref": "#/components/responses/Conflict"
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "production_dataset_protected, dataset_in_shared_search, dataset_media_referenced, or dataset_recreated: an earlier delete of the name finished (its receipt in details.receipt) and the name holds a new dataset."
           },
           "412": {
             "$ref": "#/components/responses/PreconditionFailed"
@@ -21703,7 +21727,7 @@
                 }
               }
             },
-            "description": "The delete stopped (timeout, database error or restart) and rolled back; the dataset is whole."
+            "description": "The delete stopped (timeout, contended, database error or restart) and rolled back, or too many deletes run on the node (dataset_delete_busy, Retry-After); the dataset is whole."
           }
         },
         "security": [

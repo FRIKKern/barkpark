@@ -243,15 +243,16 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
   defp rolled_back(reason, ms) do
     cond do
+      refusal?(reason) -> reason
       ms >= timeout_ms() -> {:delete_failed, :timeout}
-      lost_connection?(reason) -> {:delete_failed, :database}
-      true -> reason
+      true -> {:delete_failed, :database}
     end
   end
 
-  defp lost_connection?(:rollback), do: true
-  defp lost_connection?({:connection_unavailable, _}), do: true
-  defp lost_connection?(_reason), do: false
+  defp refusal?(:not_found), do: true
+  defp refusal?({:shared_search, _held}), do: true
+  defp refusal?({:media_referenced, _files}), do: true
+  defp refusal?(_reason), do: false
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)

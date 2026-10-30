@@ -135,4 +135,37 @@ defmodule Barkpark.Audit.DeferredBatchAppendTest do
     assert Audit.verify_chain(ws.id) == :ok
     refute Audit.deferring?()
   end
+
+  test "a deferred append over one insert chunk keeps the chain in order", %{ws: ws} do
+    {:ok, _} =
+      Repo.transaction(fn ->
+        :owner = Audit.defer_emits()
+
+        for i <- 1..2_500,
+            do:
+              {:ok, _} =
+                Audit.emit(%{
+                  category: "auth",
+                  action: "login_succeeded",
+                  workspace_id: ws.id,
+                  subject: "chunk-#{i}"
+                })
+
+        Audit.flush_deferred!()
+      end)
+
+    Audit.finish_deferred(:committed)
+
+    subjects =
+      Repo.all(
+        from(e in Event,
+          where: e.workspace_id == type(^ws.id, Ecto.UUID),
+          order_by: [asc: e.id],
+          select: e.subject
+        )
+      )
+
+    assert subjects == Enum.map(1..2_500, &"chunk-#{&1}")
+    assert Audit.verify_chain(ws.id) == :ok
+  end
 end

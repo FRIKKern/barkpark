@@ -101,6 +101,7 @@ type destroyHarness struct {
 	members string // JSON body served for GET .../v1/members
 	status  int    // status for the inventory GETs (0 -> 200)
 	deletes []int  // statuses the next DELETEs answer, in order (then 200)
+	queries []string
 }
 
 func newDestroyHarness(t *testing.T) *destroyHarness {
@@ -112,6 +113,9 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 	}
 	h.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h.seen = append(h.seen, r.Method+" "+r.URL.Path)
+		if r.Method == http.MethodDelete {
+			h.queries = append(h.queries, r.URL.RawQuery)
+		}
 		status := h.status
 		if status == 0 {
 			status = http.StatusOK
@@ -137,7 +141,7 @@ func newDestroyHarness(t *testing.T) *destroyHarness {
 			code := h.deletes[0]
 			h.deletes = h.deletes[1:]
 			w.WriteHeader(code)
-			_, _ = w.Write([]byte(`{"deleting":true,"dataset":"j10-20261029"}`))
+			_, _ = w.Write([]byte(`{"deleting":true,"dataset":"j10-20261029","dataset_id":"ds-1"}`))
 		default:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"revoked":{"id":"ac8ff595-deff-4c51-b251-0d05e8414184"}}`))

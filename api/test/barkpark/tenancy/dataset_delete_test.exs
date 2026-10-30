@@ -466,4 +466,21 @@ defmodule Barkpark.Tenancy.DatasetDeleteTest do
     refute Repo.get(ApiToken, token.id).revoked_at
     refute_receive %Phoenix.Socket.Broadcast{event: "disconnect"}
   end
+
+  defmodule RefuseDeleteHook do
+    @moduledoc false
+    def lifecycle_hooks, do: %{before_delete: [&__MODULE__.refuse/1]}
+    def refuse(_payload), do: {:halt, "refused"}
+  end
+
+  test "a document delete that answers an error answers a typed error and leaves the dataset whole",
+       %{ws: ws, project: project, user: user} = ctx do
+    dataset = seed(ws, project, "j10-11", user)
+    before = census(dataset, ws)
+    Barkpark.PluginEnv.with_plugins([RefuseDeleteHook], ctx)
+
+    assert {:error, {:delete_failed, :database}} = Tenancy.delete_dataset(dataset)
+    assert Repo.get(Dataset, dataset.id)
+    assert census(dataset, ws) == before
+  end
 end
