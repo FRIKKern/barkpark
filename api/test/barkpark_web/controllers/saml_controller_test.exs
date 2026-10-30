@@ -486,7 +486,7 @@ defmodule BarkparkWeb.SamlControllerTest do
 
       {resp, growth} =
         atom_growth(fn ->
-          post(build_conn(), "/v1/auth/saml/#{@slug}/acs", %{
+          post(scoped_conn(), "/v1/auth/saml/#{@slug}/acs", %{
             "SAMLResponse" => Base.encode64(unknown_names_body("Response"))
           })
         end)
@@ -506,7 +506,7 @@ defmodule BarkparkWeb.SamlControllerTest do
 
       {resp, growth} =
         atom_growth(fn ->
-          post(build_conn(), "/v1/auth/saml/#{@slug}/slo", %{
+          post(scoped_conn(), "/v1/auth/saml/#{@slug}/slo", %{
             "SAMLRequest" => Base.encode64(unknown_names_body("LogoutRequest"))
           })
         end)
