@@ -1,4 +1,4 @@
-# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.19.0)
+# `<bp-paper-editor>` and `<bp-paper-canvas>` — Embed Contract (v1.20.0)
 
 The normative spec of the editor's host seam. `<bp-paper-editor>` and
 `<bp-paper-canvas>` are framework-neutral custom elements: any host (the LiveView
@@ -6,12 +6,12 @@ hook, a React `useEffect`, plain JS) drives them through exactly the surfaces
 below. This documents what `src/index.js` and `src/canvas/index.js` implement;
 `src/contract.js` pins the version.
 
-`BpPaperEditor.CONTRACT_VERSION === "1.19.0"` (also exported as `CONTRACT_VERSION`).
+`BpPaperEditor.CONTRACT_VERSION === "1.20.0"` (also exported as `CONTRACT_VERSION`).
 
 1.1.0 adds the `<bp-paper-canvas>` surface. The `<bp-paper-editor>` surface is
 unchanged from 1.0.0. 1.2.0 adds the canvas's toolbar commands, `state()` and
 `bp-selection-change`. 1.3.0 adds the canvas's `format-bubble` attribute and
-`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu.
+`bp-canvas-link-request`. 1.4.0 adds the `mediaPicker` host callback. 1.5.0 adds the `editBlockObject` host callback. 1.6.0 adds the `insertInline` toolbar command. 1.7.0 adds the `wikilink` toolbar mark (a declared `internalLink`) and `state().wikilink`. 1.8.0 adds comment ranges. 1.9.0 adds `subtitle` and `badge` to `linkPreviewSource` and Remove on the link card. 1.10.0 adds the `undo`/`redo` toolbar commands and `bp-canvas-history`. 1.11.0 adds the `block-cards` attribute. 1.12.0 extends it to declared object blocks and adds `selectBlock(id)`. 1.13.0 adds the `data-field-caps` attribute. 1.14.0 makes `block-cards` draw the link card as Sanity's annotation pill. 1.15.0 adds the `liveRemote` property, `bp-canvas-remote-held` and `bp-canvas-wikilink-click`; for every host, a bare Escape is no longer default-prevented, and the flush, pending and apply methods read typing the DOM holds but ProseMirror has not read yet. 1.16.0 adds the `mention-trigger` attribute, closes an unmatched picker on Enter, and themes the picker with `--paper-picker-*`. 1.17.0 adds the `wikilinkResolve` callback and `refreshWikilinks()` (a document link's live title), lets `linkPreviewSource` answer `{ missing: true }` (marked by `data-missing`), links a typed `[[Title]]` that `wikilinkSource` knows, leaves Mod+Enter to the host, and keeps the picker's footer on one line. 1.18.0 links a pasted `[[Title]]` too. 1.19.0 links `[[Title|words]]` as an alias pick, typed, pasted or picked from the `[[` menu. 1.20.0 makes `flushPendingChanges()` save Markdown source text and keep source mode open, and adds the `sourceMode` getter.
 
 ## The element
 
@@ -293,7 +293,7 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `applyServerBlocks(blocks, echoMeta?)` | apply confirmed server blocks. Deferred while the author is focused or composing (with `liveRemote`, applied block by block instead: Live remote blocks); recognised as the canvas's own echo when it matches the in-flight or acknowledged snapshot. Reads unread DOM typing first. `echoMeta`: `{ mode?: "own"\|"own-stale", requestId? }` | nothing |
 | `applyServerBlocksIfIdle(blocks)` | apply now only if nothing is focused, composing, in source mode or pending. Throws `TypeError` on a non-array when it would apply | `true` when applied |
 | `resolveConflictWithServerBlocks(blocks)` | the user's "use latest": drop pending and in-flight state and take `blocks` | nothing |
-| `flushPendingChanges()` | commit node-view inputs, unread DOM typing and any debounced edit, or the text committed around an open IME composition (or leave source mode) now | `true` when it emitted a batch |
+| `flushPendingChanges()` | commit node-view inputs, unread DOM typing and any debounced edit, or the text committed around an open IME composition, now. In source mode it parses the Markdown and sends the change, and source mode stays open with the textarea, its caret, selection and native undo untouched (1.20.0) | `true` when it emitted a batch |
 | `hasPendingChanges()` | reads unread DOM typing first; then debounced, in-flight, queued, an open IME composition, unsaved source text or a pending note | boolean |
 | `recoverySnapshot()` | the live document for a reconnect halt | `{ mode: "rich"\|"markdown", blocks?, raw_source?, raw_editor_document?, serialization_error? }` |
 | `focusBlock(id)` | place the caret in the top-level block `id`; an id not yet in the run is retried on the next external apply within 5s | `true` when placed |
@@ -301,6 +301,7 @@ on `applyServerBlocks` echoes to advance its baseline.
 | `refreshWikilinks()` | ask `wikilinkResolve` again for every document link, after a rename or a delete (1.17.0) | nothing |
 | `focusFirstBodyBlock()` | caret into the first unlocked block (editable only) | `true` when placed |
 | `toggleSourceMode()` | switch between rich text and Markdown source (editable only; refused inside a Figure) | nothing |
+| `sourceMode` (getter) | whether the Markdown source textarea owns input (1.20.0) | boolean |
 
 Unread DOM typing: when a keystroke and a focus change fall in one task,
 ProseMirror's blur leaves the DOM change unread for 20 ms. `flushPendingChanges`,

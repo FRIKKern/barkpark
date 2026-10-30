@@ -885,9 +885,10 @@ class BpPaperCanvas extends HTMLElement {
     // PATCH (not remove+insert) for an in-place text edit. The NO-EDIT exit short-
     // circuits before any of this (md unchanged → restore untouched, ZERO ops).
     this._sourceBaselineBlocks = null;
-    // The exact markdown shown on ENTER (blocksToMarkdown of the baseline). The
-    // NO-EDIT guard compares the textarea value against THIS string verbatim: equal
-    // → the toggle is provably op-free (no re-parse, no setContent, no caret churn).
+    // The markdown the rich document holds: shown on ENTER (blocksToMarkdown of the
+    // baseline), then the text of the last source commit (_commitSource). The NO-EDIT
+    // guard compares the textarea value against THIS string verbatim: equal → the
+    // flush or toggle is provably op-free (no re-parse, no setContent, no caret churn).
     this._sourceOriginalMd = "";
     // Bound listener for the textarea's own Mod-Shift-m (toggle BACK to rich) +
     // Escape — kept as a field so the exact identity is removed on cleanup.
@@ -1807,8 +1808,10 @@ class BpPaperCanvas extends HTMLElement {
   flushPendingChanges() {
     if (!this._editor || !this._editable) return false;
 
+    // Source mode stays open: the Markdown is committed in place (1.20.0).
     if (this._mode === "source") {
-      return this._exitSourceMode();
+      const md = this._sourceEl.value;
+      return md === this._sourceOriginalMd ? false : this._commitSource(md);
     }
 
     // Node-view controls (code, captions, field inputs, and component editors)
@@ -4509,22 +4512,10 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   // EXIT source mode → back to the rich editor.
-  //   NO EDIT  (textarea value === the stashed original md): restore the rich editor
-  //            UNTOUCHED — no re-parse, no setContent, ZERO ops. The diff baseline and
-  //            caret are exactly as they were before entering.
-  //   EDITED   : parse the markdown back to blocks (L1), REALIGN ids against the LIVE
-  //            baseline (L0) so surviving blocks keep their ids, then:
-  //              (1) apply L1 to the editor via setContent(runToTiptap(L1), FALSE) —
-  //                  the `false` means NO auto-emit (so onUpdate → _emitOps does NOT
-  //                  fire and re-diff from this._blocks/C); and
-  //              (2) dispatch ONLY the source-mode diff = runToOps(L0, L1) ourselves.
-  //            This is the crux: the pre-source edits (L0−C) are ALREADY in flight
-  //            (emitted on enter / by the debounce). Re-running _emitOps would diff
-  //            from C and re-emit L0−C as DUPLICATE structural ops (a re-emitted
-  //            insert-after for an already-inserted id can double-insert). By diffing
-  //            L0→L1 explicitly and suppressing the auto-emit, only the GENUINE source
-  //            edits go out. this._blocks (C) is left alone; the echoes (pre-source +
-  //            source) advance it normally on their own clock.
+  //   NO EDIT  (textarea value === _sourceOriginalMd, the markdown the rich document
+  //            already holds): restore the rich editor UNTOUCHED — no re-parse, no
+  //            setContent, ZERO ops.
+  //   EDITED   : _commitSource(md) — the same commit a source-mode flush runs.
   // Either way the textarea + its listener are torn down and the rich editor reshown.
   _exitSourceMode() {
     let emitted = false;
@@ -4538,52 +4529,9 @@ class BpPaperCanvas extends HTMLElement {
       if (this._mount) this._mount.style.display = "";
       this._mode = "rich";
 
-      if (edited) {
-        // L1 = the blocks after the user edited the markdown: parse it (fresh minted
-        // ids) then REALIGN against L0 (the live-doc baseline) so a surviving block
-        // keeps its id → runToOps emits a PATCH (not remove+insert) for an in-place
-        // edit. L0 = this._sourceBaselineBlocks (captured from the LIVE doc on enter).
-        const L0 = this._sourceBaselineBlocks;
-        // Realign parsed ids onto the baseline, then CLAMP the locked template
-        // prefix (D4's felt half for source mode): a source-mode DELETE / MOVE /
-        // retype of the locked title is reconstructed away so the client view
-        // can't diverge from the server (which vetoes the same op with
-        // {:locked_block, id, op}) — while a same-type CONTENT edit (a retitle)
-        // rides through as the patch-block the server accepts, exactly like a
-        // rich-mode retitle (locks are placement locks, not content locks).
-        // Additive — a template-free run is returned untouched, so a lock-free
-        // paper stays byte-identical (D3).
-        const L1 = clampLockedPrefix(
-          L0,
-          realignBlockIds(L0, markdownToBlocks(md)),
-        );
-        // ONE projection of L1, used for BOTH the editor content and the emitted diff,
-        // so the rich editor and the ops it sends are derived from the exact same doc.
-        const L1Doc = this._rt(L1);
-
-        // (1) Apply L1 to the editor WITHOUT auto-emit (setContent second arg = false).
-        // The rich editor now shows L1; onUpdate does NOT fire, so _emitOps never runs
-        // and never re-diffs from C. addToHistory:false so the source-mode reflow is
-        // not a separate undo step on top of the user's own edits.
-        this._editor
-          .chain()
-          .setContent(L1Doc, { emitUpdate: false })
-          .command(({ tr }) => {
-            tr.setMeta("addToHistory", false);
-            return true;
-          })
-          .run();
-
-        // (2) Feed the new live document through the normal one-in-flight path.
-        // If an earlier rich batch is pending, source changes wait behind it and
-        // are diffed from that batch's acknowledged after-state.
-        // Use the normal one-in-flight path. If a rich batch is still pending,
-        // this marks the source result dirty and emits its incremental delta only
-        // after that earlier batch is acknowledged.
-        emitted = this._emitOps();
-      }
-      // else NO EDIT: the rich editor was never touched — the live doc, the diff
-      // baseline, and the caret are exactly as they were. ZERO ops by construction.
+      if (edited) emitted = this._commitSource(md);
+      // else NO EDIT: the rich editor already holds this markdown — the live doc, the
+      // diff baseline, and the caret stay as they are. ZERO ops by construction.
 
       this._sourceBaselineBlocks = null;
       this._sourceOriginalMd = "";
@@ -4603,6 +4551,42 @@ class BpPaperCanvas extends HTMLElement {
       this._flushPendingServerBlocks();
     }
     return emitted;
+  }
+
+  // COMMIT the source Markdown into the hidden rich editor and send the change,
+  // without touching the textarea (its value, caret, selection and native undo stay).
+  //   L1 = the markdown parsed, ids REALIGNED against L0 (this._sourceBaselineBlocks,
+  //        the live doc captured on ENTER) so a surviving block keeps its id and runToOps
+  //        emits a PATCH for an in-place edit, then the locked template prefix is
+  //        CLAMPED (a source delete, move or retype of a locked block is undone; a
+  //        content edit rides through). Realigning against L0 on every commit,
+  //        not against the previous commit, gives a block back its id when a half-typed
+  //        construct (an unclosed fence) swallowed it in an earlier commit; _emitOps
+  //        sends with preserveNewIds, so that id goes out again.
+  //   (1) setContent(L1) WITHOUT auto-emit and outside history: onUpdate does not
+  //       re-diff from C, and the reflow is not an undo step of its own.
+  //   (2) _emitOps sends L1 through the normal one-in-flight path: if an earlier batch
+  //       is pending, the source result waits and goes as its incremental delta.
+  // _sourceOriginalMd then holds this markdown, so an unchanged textarea is a no-op
+  // for the next flush and for exit.
+  _commitSource(md) {
+    const L0 = this._sourceBaselineBlocks;
+    const L1 = clampLockedPrefix(L0, realignBlockIds(L0, markdownToBlocks(md)));
+    this._editor
+      .chain()
+      .setContent(this._rt(L1), { emitUpdate: false })
+      .command(({ tr }) => {
+        tr.setMeta("addToHistory", false);
+        return true;
+      })
+      .run();
+    this._sourceOriginalMd = md;
+    return this._emitOps();
+  }
+
+  // True while the Markdown source textarea owns input (1.20.0).
+  get sourceMode() {
+    return this._mode === "source";
   }
 
   // Grow the source textarea to fit its content (no internal scroll). Best-effort —

@@ -1,6 +1,6 @@
 // Mounted regression for the edit -> view save boundary. The public flush seam
 // must synchronously emit rich-text input that is still inside the 300 ms debounce,
-// and must commit Markdown source input before the element can be disconnected.
+// and must commit Markdown source input, keeping source mode open (1.20.0).
 
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
@@ -96,15 +96,18 @@ try {
     id: "source-1",
     patch: { content: [{ type: "text", value: "Source mode final text" }] },
   }]], "the source edit emits synchronously with its original block id");
-  assert.equal(source._mode, "rich", "flush commits source text into the live rich document");
-  assert.equal(source.querySelector(".bp-canvas-source"), null, "the source textarea is consumed");
+  assert.equal(source.sourceMode, true, "flush keeps source mode open (1.20.0)");
+  assert.equal(source.querySelector(".bp-canvas-source"), textarea, "the source textarea stays");
   assert.equal(
     source._editor.getJSON().content[0].content[0].text,
     "Source mode final text",
-    "the committed source edit survives in the mounted editor",
+    "the committed source edit is in the mounted editor",
   );
   assert.equal(source.flushPendingChanges(), false, "a repeated source flush is a no-op");
   assert.equal(sourceBatches.length, 1, "a repeated source flush emits no duplicate batch");
+  source.toggleSourceMode();
+  assert.equal(source.sourceMode, false, "the toggle leaves source mode");
+  assert.equal(sourceBatches.length, 1, "leaving after the flush emits no duplicate batch");
 
   legacy._editor.commands.focus("end");
   legacy._editor.view.dispatch(

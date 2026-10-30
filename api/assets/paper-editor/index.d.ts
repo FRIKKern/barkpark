@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.19.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.20.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -318,6 +318,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   /** 1.17.0. Ask wikilinkResolve again for every document link (after a rename or a delete). */
   refreshWikilinks(): void;
   toggleSourceMode(): void;
+  /** true while the Markdown source textarea owns input (1.20.0). */
+  readonly sourceMode: boolean;
   findSet(query: string, opts?: { caseSensitive?: boolean }): FindState;
   findNext(): FindStepState;
   findPrev(): FindStepState;
