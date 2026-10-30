@@ -3,7 +3,7 @@
 // The bundle is an IIFE with no module exports. Loading it (a <script> tag or
 // a side-effect `import "@barkpark/paper-editor"`) registers two custom
 // elements on `customElements`. These declarations type those elements, their
-// events and the window flag. EMBED-CONTRACT.md (v1.16.0) is the normative spec
+// events and the window flag. EMBED-CONTRACT.md (v1.17.0) is the normative spec
 // for both elements; these types follow src/index.js and src/canvas/index.js.
 
 /** A PortableDoc block. The editor reads `id` and `type`; other keys depend on the type. */
@@ -238,7 +238,11 @@ export interface LinkPreview {
   subtitle?: string;
   /** 1.9.0, a wikilink's: the document's type, beside the title. */
   badge?: string;
+  /** 1.17.0, a wikilink's: true says the target is gone. Open hides and the link's `span[data-wikilink]` carries `data-missing`. */
+  missing?: boolean;
 }
+/** 1.17.0: what wikilinkResolve answers for a document id. A title paints un-aliased links; null keeps their words. */
+export type WikilinkResolution = { title?: string; missing?: boolean } | null;
 export type MediaUploadResult = string | { src?: string; url?: string; alt?: string };
 type MaybePromise<T> = T | Promise<T>;
 export interface FindState {
@@ -275,6 +279,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
     | ((info: LinkPreviewRequest) => MaybePromise<LinkPreview | null>)
     | null
     | undefined;
+  /** 1.17.0. A document's current title, painted on its un-aliased links without writing the body; refreshWikilinks() asks again. */
+  wikilinkResolve: ((docId: string) => MaybePromise<WikilinkResolution>) | null | undefined;
   mediaUploader: ((file: File) => MaybePromise<MediaUploadResult>) | null | undefined;
   /** The host's image dialog: an Image insert and an image's Select open it. */
   mediaPicker:
@@ -309,6 +315,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   /** 1.12.0: select the top-level image or object block card `id`, as a click on it does. */
   selectBlock(id: string): boolean;
   focusFirstBodyBlock(): boolean;
+  /** 1.17.0. Ask wikilinkResolve again for every document link (after a rename or a delete). */
+  refreshWikilinks(): void;
   toggleSourceMode(): void;
   findSet(query: string, opts?: { caseSensitive?: boolean }): FindState;
   findNext(): FindStepState;

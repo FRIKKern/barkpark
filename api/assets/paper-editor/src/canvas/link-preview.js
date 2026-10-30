@@ -23,13 +23,17 @@ export class LinkPreview {
   // card. It follows the caret, not the pointer: a caret or a click in a link shows it above
   // the link, labelled with `label(info)` (the annotation's schema title), with Edit and
   // Remove, and Open for a document link only (D06).
-  constructor({ editor, host, editable, resolve, onOpen, onEdit, pill, label, delay = 350, hideDelay = 220 }) {
+  // `known(info)` is what the canvas already knows of a document link's target ({ title?,
+  // missing? }, contract 1.17.0); `onMissing(info, missing)` takes the host's answer on it.
+  constructor({ editor, host, editable, resolve, known, onMissing, onOpen, onEdit, pill, label, delay = 350, hideDelay = 220 }) {
     this._pill = typeof pill === "function" ? pill : () => !!pill;
     this._label = typeof label === "function" ? label : () => t("Link");
     this._editor = editor;
     this._host = host;
     this._editable = typeof editable === "function" ? editable : () => !!editable;
     this._resolve = resolve || (() => null);
+    this._known = known || (() => null);
+    this._onMissing = onMissing || (() => {});
     this._onOpen = onOpen || (() => {});
     this._onEdit = onEdit || (() => {});
     this._delay = delay;
@@ -253,9 +257,10 @@ export class LinkPreview {
     this._info = info;
     const ticket = ++this._ticket;
     const p = this._parts;
+    const known = info.kind === "wikilink" ? this._known(info) : null;
+    this._showOpen(!(known && known.missing));
     if (p.pill) {
       p.label.textContent = this._label(info);
-      p.open.style.display = info.kind === "wikilink" ? "" : "none";
       p.edit.style.display = this._editable() ? "" : "none";
       p.remove.style.display = this._editable() ? "" : "none";
       this._el.dataset.kind = info.kind;
@@ -268,7 +273,11 @@ export class LinkPreview {
       } catch (_e) {
         pending = null;
       }
-      const take = (meta) => { if (ticket === this._ticket && meta && typeof meta.href === "string" && meta.href && this._info) this._info.resolvedHref = meta.href; };
+      const take = (meta) => {
+        if (ticket !== this._ticket) return;
+        this._takeMissing(info, meta);
+        if (meta && typeof meta.href === "string" && meta.href && this._info) this._info.resolvedHref = meta.href;
+      };
       if (pending && typeof pending.then === "function") pending.then(take, () => {});
       else take(pending);
       return true;
@@ -277,8 +286,9 @@ export class LinkPreview {
       p.title.textContent = hostOf(info.href) || t("Link");
       p.addr.textContent = info.href;
     } else {
-      p.title.textContent = info.alias && info.alias !== info.target ? `${info.alias} → ${info.target}` : info.target || t("Wikilink");
-      p.addr.textContent = `[[${info.target}]]`;
+      const target = (known && known.title) || info.target;
+      p.title.textContent = info.alias && info.alias !== info.target ? `${info.alias} → ${target}` : target || t("Wikilink");
+      p.addr.textContent = `[[${target}]]`;
     }
     p.excerpt.textContent = "";
     p.excerpt.style.display = "none";
@@ -310,8 +320,24 @@ export class LinkPreview {
     return true;
   }
 
+  // Open shows for a plain link and for a document link whose target is not gone.
+  _showOpen(show) {
+    const p = this._parts;
+    p.open.style.display = show && (!p.pill || (this._info && this._info.kind === "wikilink")) ? "" : "none";
+  }
+
+  // 1.17.0: `{ missing: true }` says the target is gone (Open hides, the link is marked); any
+  // other answer object says it is there. No answer leaves what the canvas knew.
+  _takeMissing(info, meta) {
+    if (!info || info.kind !== "wikilink" || !meta || typeof meta !== "object") return;
+    const missing = meta.missing === true;
+    this._onMissing(info, missing);
+    if (this._info === info) this._showOpen(!missing);
+  }
+
   _applyMeta(meta) {
     if (!meta || typeof meta !== "object" || !this._el) return;
+    this._takeMissing(this._info, meta);
     const p = this._parts;
     if (typeof meta.title === "string" && meta.title) p.title.textContent = meta.title;
     // 1.9.0: a document's preview, as Sanity's card: its subtitle in place of the

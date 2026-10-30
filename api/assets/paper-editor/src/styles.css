@@ -962,7 +962,7 @@ article code[style*="background:#f3f4f6"] {
   --paper-font-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   position: fixed; z-index: 200;
-  width: 280px;
+  width: 280px; max-width: calc(100vw - 12px); box-sizing: border-box;
   display: flex; flex-direction: column;
   padding: 6px 0 4px;
   background: var(--paper-chrome-bg);
@@ -1035,18 +1035,19 @@ html[data-theme="dark"] .bp-wikilink-menu {
   color: var(--paper-ink-faint); font-size: 12px;
   font-style: italic;
 }
-/* Footer hint bar with <kbd> chips for the keyboard contract. Mirrors
- * .bp-slash-foot / .bp-slash-foot kbd verbatim. */
+/* Footer hint bar with <kbd> chips for the keyboard contract. One line at any
+ * width (1.17.0): a host's longer words end in an ellipsis instead of wrapping. */
 .bp-wikilink-foot {
   border-top: 1px solid var(--paper-rule-soft);
-  margin-top: 4px; padding: 8px 14px 4px;
-  font-size: 10.5px; color: var(--paper-ink-faint); letter-spacing: 0.04em;
+  margin-top: 4px; padding: 8px 12px 4px;
+  font-size: 10.5px; color: var(--paper-ink-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.bp-wikilink-foot-sep { opacity: 0.6; margin: 0 2px; }
+.bp-wikilink-foot-sep { opacity: 0.6; margin: 0 1px; }
 .bp-wikilink-foot kbd {
   font-family: var(--paper-font-mono); font-size: 10px;
   background: var(--paper-bg); border: 1px solid var(--paper-rule);
-  border-radius: 3px; padding: 0 4px; color: var(--paper-ink-soft);
+  border-radius: 3px; padding: 0 3px; color: var(--paper-ink-soft);
   margin: 0 1px;
 }
 
