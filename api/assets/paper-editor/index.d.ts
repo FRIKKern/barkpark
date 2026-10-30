@@ -273,6 +273,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   acknowledgedSaves: boolean;
   /** 1.15.0. true: applyServerBlocks applies server blocks while the author edits, keeping blocks with unsaved typing. */
   liveRemote: boolean;
+  /** 1.20.0. true: flushPendingChanges() in source mode commits the Markdown and keeps source mode open; a server apply reaches a textarea with no unsaved text. */
+  flushKeepsSource: boolean;
   wikilinkSource: ((query: string) => MaybePromise<WikilinkSuggestion[]>) | null | undefined;
   tagSource: ((query: string) => MaybePromise<string[]>) | null | undefined;
   linkPreviewSource:

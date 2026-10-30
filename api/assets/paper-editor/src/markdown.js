@@ -920,7 +920,8 @@ function scanCallout(lines, i, head) {
     const bm = /^>\s?(.*)$/.exec(l);
     if (!bm) break;
     // A nested callout header inside the body ends THIS callout (rare; keep simple).
-    if (/^>\s*\[!\w+\]/.test(l)) break;
+    // The same grammar the dispatcher uses: a `>[!x]y` that is no header stays body.
+    if (matchCalloutHeader(l)) break;
     bodyLines.push(bm[1]);
     j += 1;
   }
@@ -940,7 +941,10 @@ function scanBlockquote(lines, i) {
     const l = lines[j];
     const bm = /^>\s?(.*)$/.exec(l);
     if (!bm) break;
-    if (/^>\s*\[!\w+\]/.test(l)) break; // a callout header starts a new block
+    // A callout header starts a new block. The same grammar the dispatcher uses, so
+    // the first line (never a header here) is always consumed: `>[!e]O` once broke
+    // here at j === i and the parse loop never advanced.
+    if (matchCalloutHeader(l)) break;
     bodyLines.push(bm[1]);
     j += 1;
   }

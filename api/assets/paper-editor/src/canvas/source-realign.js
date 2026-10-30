@@ -11,6 +11,7 @@
 // remove+insert storm) and NO op for an unchanged block.
 
 import { blocksToMarkdown } from "../markdown.js";
+import { idCarriesKind } from "./run-convert.js";
 
 // Structural deep clone of a block array — DOM/Node-API-free. Used to snapshot the
 // source baseline so a later parse + realign never mutates the live this._blocks.
@@ -95,12 +96,16 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
   let baseCursor = 0; // next baseline index to consider as a positional donor
 
   // Nearest unconsumed baseline index AT OR AFTER `from`, optionally requiring a
-  // matching signature and an upper bound. Returns -1 when none. This is the single
+  // matching signature, an upper bound and a kind the donor's id can carry over to
+  // `block` (idCarriesKind: a paragraph a half-typed fence turned into code is a new
+  // block, not a typeless patch the server would merge into the paragraph). Returns
+  // -1 when none. This is the single
   // positional-nearest rule shared by the anchor (duplicate) and non-anchor branches.
-  const nearestDonor = (from, sig, upper) => {
+  const nearestDonor = (from, sig, upper, block) => {
     for (let bi = from; bi < upper; bi++) {
       if (consumed.has(bi)) continue;
       if (sig != null && baseSig[bi] !== sig) continue;
+      if (block && !idCarriesKind(baseline[bi], block)) continue;
       return bi;
     }
     return -1;
@@ -135,7 +140,7 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
         break;
       }
     }
-    const donor = nearestDonor(baseCursor, null, nextAnchorBase);
+    const donor = nearestDonor(baseCursor, null, nextAnchorBase, parsed[k]);
     if (donor !== -1) {
       out[k].id = baseline[donor].id;
       consumed.add(donor);
@@ -179,6 +184,26 @@ export function realignBlockIds(baselineBlocks, parsedBlocks) {
 //     a fresh id — never silent data loss;
 //   • body edits (non-locked blocks)      → preserved unchanged.
 //
+// REALIGN across source commits (1.20.0). A source session commits many times, so
+// a parsed block has two possible donors: the ENTER baseline (enterBlocks) and the
+// LAST commit (lastBlocks). The enter baseline goes first: a block a half-typed
+// construct swallowed in an earlier commit gets its original id back. Then every
+// block still holding a freshly minted id is realigned against the blocks born in
+// this session (in the last commit, not in the enter baseline; the first pass never
+// hands out their ids), so a born block keeps the id it was sent with (a patch-block, not remove +
+// insert on every flush). With one commit (lastBlocks = the enter baseline) the
+// second pass has no donors, so this is realignBlockIds exactly.
+export function realignAcrossCommits(enterBlocks, lastBlocks, parsedBlocks) {
+  const first = realignBlockIds(enterBlocks, parsedBlocks);
+  const enterIds = new Set((enterBlocks || []).map((b) => b.id));
+  const born = first.flatMap((b, i) => (enterIds.has(b.id) ? [] : [i]));
+  if (born.length === 0) return first;
+  const donors = (lastBlocks || []).filter((b) => !enterIds.has(b.id));
+  const again = realignBlockIds(donors, born.map((i) => first[i]));
+  born.forEach((i, k) => { first[i] = again[k]; });
+  return first;
+}
+
 // Additive (D3): a baseline with NO leading locked block returns `realigned`
 // untouched — a template-free paper's source round-trip stays byte-identical.
 export function clampLockedPrefix(baselineBlocks, realignedBlocks) {
