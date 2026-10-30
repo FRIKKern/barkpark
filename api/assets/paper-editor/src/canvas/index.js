@@ -178,7 +178,7 @@ import { remoteSelections, setRemoteSelections as rsSet, pointsFromSelection } f
 import { commentRanges, setCommentRanges as crSet, commentRangesState, commentsInSelection as crInSelection } from "./comment-ranges.js";
 // A document link's words painted live from the host's wikilinkResolve; see ./wikilink-titles.js.
 import { wikilinkTitles, refreshWikilinkTitles, setWikilinkMissing, wikilinkInfo } from "./wikilink-titles.js";
-// A typed [[Title]] that names a known document becomes a link; see ./wikilink-input.js.
+// A typed or pasted [[Title]] that names a known document becomes a link; see ./wikilink-input.js.
 import { wikilinkInput } from "./wikilink-input.js";
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
