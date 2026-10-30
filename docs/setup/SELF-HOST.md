@@ -5,7 +5,7 @@ This guide goes from an Azure subscription to Pensum sign-in. Backups, moves and
 
 | Path | What runs | Where the settings live |
 |---|---|---|
-| [Single VM](#path-a-a-single-vm) | `deploy.sh` builds Barkpark from source on one Ubuntu server, with local PostgreSQL 17 and Caddy for TLS. | `/opt/barkpark/.env` |
+| [Single VM](#path-a-a-single-vm) | `deploy.sh` runs the server image in Docker on one Ubuntu server, with local PostgreSQL 17 and Caddy for TLS. | `/opt/barkpark/.env` |
 | [Container Apps](#path-b-azure-container-apps) | The published image on one replica, PostgreSQL Flexible Server 17, Azure Files for media and Key Vault. | `barkpark.env`, deployed by `main.bicep` |
 
 ## Before you start on Azure
@@ -67,8 +67,8 @@ It exits 1 on any problem. `--skip` leaves out server probes, which `deploy.sh` 
    az vm open-port -g "$RG" -n barkpark --port 80,443 --priority 900
    ```
 
-2. `<ip>` is the `publicIpAddress` from `az vm create`. The host name is `<dns label>.swedencentral.cloudapp.azure.com`, or your own domain with a DNS A record to `<ip>`. Caddy needs it for a certificate.
-3. Copy the file and run `deploy.sh` over ssh. It keeps its own `DATABASE_URL` and keys, and deletes the copy once merged. `accept-new` trusts a new host key once:
+2. `<ip>` is the `publicIpAddress` from `az vm create`. The host name is `<dns label>.swedencentral.cloudapp.azure.com`, or your own domain with a DNS A record to `<ip>`.
+3. Copy the file and run `deploy.sh` over ssh. It keeps its own `DATABASE_URL` and keys and deletes the copy:
 
    <!-- run -->
    ```bash
@@ -78,10 +78,10 @@ It exits 1 on any problem. `--skip` leaves out server probes, which `deploy.sh` 
    ssh "${o[@]}" azureuser@<ip> 'sudo DOMAIN=<host> BARKPARK_ENV_FILE=/tmp/pensum.env bash -s' < deploy.sh
    ```
 
-   `deploy.sh` builds Barkpark in `/opt/barkpark` and merges the file into its `.env` in about 10 minutes. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). Once HTTPS answers it runs `bp instance check` and prints the result.
+   `deploy.sh` runs `ghcr.io/frikkern/barkpark` at the latest release, in about 2 minutes. Add `BARKPARK_IMAGE=<ref>` after `sudo` for another image, or `BARKPARK_FROM_SOURCE=<git ref>` to build `api/Dockerfile` on the VM without ghcr.io, in about 5 minutes. It writes the admin token to `/etc/barkpark/admin-token`, root only, and lists its id on `BARKPARK_OPERATOR_TOKEN_IDS` when the file sets an [operator list](#operator-access). It ends with `bp instance check`.
 4. <!-- run --> In the same shell, run `bp setup --target connect --server https://<host> --token "$(ssh "${o[@]}" azureuser@<ip> sudo cat /etc/barkpark/admin-token)"`. It becomes the active server.
 
-To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. Updates and rollback are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If `curl https://<host>` returns `000` and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
+To change a setting later, edit `/opt/barkpark/.env` and run `sudo systemctl restart barkpark`. Updates and rollback are in [SELF-HOST-UPDATES.md](SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm). If HTTPS fails and the Caddy log shows `NXDOMAIN`, fix DNS and run `sudo systemctl restart caddy`.
 
 ## Path B: Azure Container Apps
 

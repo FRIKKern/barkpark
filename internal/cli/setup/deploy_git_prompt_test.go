@@ -40,8 +40,8 @@ func TestDeployScriptGitNetworkCallsCannotPrompt(t *testing.T) {
 		t.Fatalf("deploy.sh no longer exports GIT_TERMINAL_PROMPT=0 — a git that wants a username will hang the unattended provision")
 	}
 	calls := gitNetworkCalls(script)
-	if len(calls) < 3 {
-		t.Fatalf("positive control: expected at least the 3 known git network calls in deploy.sh (asdf clone, repo pull, repo clone), the scan found %d — the scan is blind", len(calls))
+	if len(calls) < 1 {
+		t.Fatalf("positive control: expected at least the known git network call in deploy.sh (the BARKPARK_FROM_SOURCE fetch), the scan found %d — the scan is blind", len(calls))
 	}
 	for _, c := range calls {
 		if c[1] != "bp_git" {

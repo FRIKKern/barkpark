@@ -79,7 +79,9 @@ free_port() { python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0)
 slice() {
   local src="$1" out="$2"
   local health done_sec
-  health="$(awk '/^# ── 11\. Wait for healthy/{f=1} /^# ── 12\. TLS/{f=0} f' "$src")"
+  # By section name, not number: the pinned control revision numbers them 11
+  # and 12, and the image-based deploy.sh numbers them 8 and 9.
+  health="$(awk '/^# ── [0-9]+\. Wait for healthy/{f=1} /^# ── [0-9]+\. TLS/{f=0} f' "$src")"
   done_sec="$(awk '/^# ── Done/{f=1} /^# ── End of body/{f=0} f' "$src")"
 
   # Fail-closed: a renamed section header must red HERE, not quietly test air.
@@ -104,6 +106,8 @@ slice() {
     printf 'TLS_READY=""\n'
     printf 'ADMIN_TOKEN="bp_admin_HARNESS"\n'
     printf 'ADMIN_TOKEN_FILE="/etc/barkpark/admin-token"\n'
+    printf 'BARKPARK_IMAGE="ghcr.io/frikkern/barkpark:9.9.9"\n'
+    printf 'IMAGE_ENV="/etc/barkpark/image.env"\n'
     printf 'APP_PORT="${APP_PORT:-4000}"\n'
     printf 'HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-3}"\n'
     printf 'HEALTH_INTERVAL="${HEALTH_INTERVAL:-1}"\n'

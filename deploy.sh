@@ -76,31 +76,77 @@ install_caddy_pkg() {
 }
 # install_caddy_pkg END
 
-# Barkpark — Server deployment
+# barkpark_image BEGIN
+# Pick the server image. scripts/deploy-image.test.sh runs this block with a
+# fake docker and git.
+#   BARKPARK_FROM_SOURCE=<git ref>  docker builds api/Dockerfile from that ref
+#                                   of $REPO on this box. ghcr.io is not used.
+#   BARKPARK_IMAGE=<ref>            runs that image.
+#   neither                         keeps the image in $IMAGE_ENV, or on a new
+#                                   box takes the release that :latest names.
+# Sets BARKPARK_IMAGE to a pinned ref that is present on this box.
+barkpark_image() {
+  local latest="ghcr.io/frikkern/barkpark:latest" v sha
+  if [ -n "${BARKPARK_FROM_SOURCE:-}" ]; then
+    echo ">> Image: building api/Dockerfile from $REPO at $BARKPARK_FROM_SOURCE..."
+    # The caller's `||` turns off set -e in here, so each step returns itself.
+    rm -rf "$SRC_DIR" && mkdir -p "$SRC_DIR" && git -C "$SRC_DIR" init -q || return 1
+    cd "$SRC_DIR" && bp_git fetch -q --depth 1 "$REPO" "$BARKPARK_FROM_SOURCE" || return 1
+    git -C "$SRC_DIR" checkout -q FETCH_HEAD || return 1
+    sha="$(git -C "$SRC_DIR" rev-parse HEAD)" || return 1
+    BARKPARK_IMAGE="barkpark:src-${sha:0:12}"
+    if docker image inspect "$BARKPARK_IMAGE" >/dev/null 2>&1; then
+      echo "   $BARKPARK_IMAGE is already built"
+    else
+      DOCKER_BUILDKIT=1 docker build -f "$SRC_DIR/api/Dockerfile" -t "$BARKPARK_IMAGE" \
+        --build-arg BARKPARK_BUILD_COMMIT="$sha" \
+        --build-arg BARKPARK_BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$SRC_DIR" || return 1
+    fi
+  else
+    if [ -z "${BARKPARK_IMAGE:-}" ] && [ -s "$IMAGE_ENV" ]; then
+      BARKPARK_IMAGE="$(sed -n 's/^BARKPARK_IMAGE=//p' "$IMAGE_ENV" | tail -n1)"
+      echo ">> Image: keeping $BARKPARK_IMAGE from $IMAGE_ENV"
+    fi
+    if [ -z "${BARKPARK_IMAGE:-}" ]; then
+      docker pull -q "$latest" >/dev/null || return 1
+      v="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.version"}}' "$latest")"
+      case "$v" in
+        '' | *[!0-9.]*) echo "!! Image: $latest has no release version label; set BARKPARK_IMAGE" >&2; return 1 ;;
+      esac
+      BARKPARK_IMAGE="ghcr.io/frikkern/barkpark:$v"
+    fi
+    echo ">> Image: $BARKPARK_IMAGE"
+    if ! docker image inspect "$BARKPARK_IMAGE" >/dev/null 2>&1; then
+      docker pull -q "$BARKPARK_IMAGE" >/dev/null || return 1
+    fi
+  fi
+  mkdir -p "$(dirname "$IMAGE_ENV")"
+  printf 'BARKPARK_IMAGE=%s\n' "$BARKPARK_IMAGE" > "$IMAGE_ENV"
+}
+# barkpark_image END
+
+# Barkpark: server setup on one Ubuntu machine.
 #
-# Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL 17 directly on the server.
-# Works on both ARM64 (Hetzner cax*) and x86_64 (Hetzner cpx*/ccx*).
+# Runs the Barkpark server image under systemd with `docker run`, next to
+# PostgreSQL 17 on this host and Caddy for TLS. The image is the published
+# release from ghcr.io, BARKPARK_IMAGE, or a local build of a git ref,
+# BARKPARK_FROM_SOURCE. Works on ARM64 and x86_64.
 #
 # Usage:
-#   ssh root@YOUR_VPS_IP 'DOMAIN=example.com bash -s' < deploy.sh
 #   ssh azureuser@YOUR_VM_IP 'sudo DOMAIN=example.com bash -s' < deploy.sh
+#   ssh azureuser@YOUR_VM_IP 'sudo DOMAIN=example.com BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:0.2.31 bash -s' < deploy.sh
+#   ssh azureuser@YOUR_VM_IP 'sudo DOMAIN=example.com BARKPARK_FROM_SOURCE=main bash -s' < deploy.sh
 #
 # Optional settings file (BARKPARK_ENV_FILE): KEY=VALUE lines in a file on the
 # server, merged into /opt/barkpark/.env before the seed and the first start.
 #   scp barkpark.env azureuser@YOUR_VM_IP:/tmp/barkpark.env
 #   ssh azureuser@YOUR_VM_IP 'sudo DOMAIN=example.com BARKPARK_ENV_FILE=/tmp/barkpark.env bash -s' < deploy.sh
 #
-# After setup:
-#   ssh root@YOUR_VPS_IP
-#   cd /opt/barkpark
-#   make rebuild   # after code changes
-#   make logs      # tail service logs
-#   make status    # check health
+# A re-run keeps the keys, the admin token and the image unless a new one is
+# named. On a VM from the older source build it replaces the service with the
+# container and moves api/uploads to /opt/barkpark/uploads.
 
-# Root is required: the script installs packages, writes /etc and runs the
-# service as root. A sudo user runs it as `sudo bash -s`. sudo can keep the
-# caller's HOME, and asdf, hex and rebar install under $HOME, while the
-# service (User=root) and api/start.sh read /root. Pin HOME so both agree.
+# Root is required: the script installs packages and writes /etc.
 if [ "$(id -u)" != 0 ]; then
   echo "ERROR: deploy.sh must run as root. As a sudo user: sudo DOMAIN=... bash -s < deploy.sh" >&2
   exit 2
@@ -108,6 +154,9 @@ fi
 export HOME=/root
 
 APP_DIR="/opt/barkpark"
+MEDIA_DIR="$APP_DIR/uploads"
+SRC_DIR="$APP_DIR/src"
+IMAGE_ENV="/etc/barkpark/image.env"
 REPO="https://github.com/FRIKKern/barkpark.git"
 DB_NAME="barkpark_prod"
 DB_USER="barkpark"
@@ -132,8 +181,8 @@ if [ -z "${DOMAIN:-}" ]; then
   exit 2
 fi
 PHX_SCHEME="${PHX_SCHEME:-https}"
-# The port the service binds to. Written into .env below, which api/start.sh
-# sources — so this single value drives the systemd unit, the firewall, the
+# The port the service binds to. Written into .env below, which the container
+# reads — so this single value drives the systemd unit, the firewall, the
 # health probe and every URL we print. A probe hardcoded to 4000 while the
 # service listens elsewhere fails on a HEALTHY box, which would turn the
 # honest "not answering" banner below into a new lie.
@@ -164,24 +213,23 @@ echo ""
 export DEBIAN_FRONTEND=noninteractive
 
 # ── 1. System packages ──────────────────────────────────────────────────────
+# Docker from Ubuntu's own docker.io package. A build from source also needs
+# git and docker-buildx: api/Dockerfile.dockerignore takes effect only under
+# BuildKit, and without it the root .dockerignore leaves api/ out.
 echo ">> System packages..."
-# --no-install-recommends: without it Ubuntu 22.04 pulled about 300 packages.
-# Only what the build needs: a C toolchain, libssl-dev and libncurses-dev for
-# the Erlang build (asdf/kerl), autoconf for kerl, unzip for the Elixir
-# release zip. No libvips: the :image dep uses vix, which downloads a
-# precompiled NIF with libvips bundled, so the system library goes unused.
+_pkgs="ca-certificates openssl curl ufw docker.io"
+[ -n "${BARKPARK_FROM_SOURCE:-}" ] && _pkgs="$_pkgs git docker-buildx"
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends \
-  build-essential ca-certificates openssl git curl wget unzip \
-  libssl-dev autoconf m4 libncurses-dev \
-  inotify-tools ufw
+# shellcheck disable=SC2086
+apt-get install -y -qq --no-install-recommends $_pkgs
+systemctl enable --now docker >/dev/null 2>&1
 
 # ── 1b. Swap on small VMs ───────────────────────────────────────────────────
 # A clean MIX_ENV=prod `mix compile` of the API peaked at 0.95 GB resident
-# (measured 2026-10-27), and an update compiles next to the running server and
-# Postgres. A VM under 4 GiB with no swap gets a 2 GiB /swapfile so the build
-# is slow instead of killed. The limit is 3500000 kB because a 4 GiB VM reports
-# a little under 4 GiB in MemTotal. A failed swap step warns and goes on.
+# (measured 2026-10-27), and a build from source compiles next to Postgres. A
+# VM under 4 GiB with no swap gets a 2 GiB /swapfile so the build is slow
+# instead of killed. The limit is 3500000 kB because a 4 GiB VM reports a
+# little under 4 GiB in MemTotal. A failed swap step warns and goes on.
 MEM_KB=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo 2>/dev/null || echo 0)
 if [ "${MEM_KB:-0}" -gt 0 ] && [ "$MEM_KB" -lt 3500000 ] && [ -z "$(swapon --noheadings 2>/dev/null)" ]; then
   echo ">> Swap: ${MEM_KB} kB memory and no swap, adding a 2 GiB /swapfile..."
@@ -226,91 +274,30 @@ sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" |
   sudo -u postgres createdb -O "$DB_USER" "$DB_NAME"
 echo "   Database: $DB_NAME (user: $DB_USER)"
 
-# ── 3. ASDF + Erlang + Elixir ───────────────────────────────────────────────
-echo ">> Erlang + Elixir (via ASDF)..."
-if [ ! -d /root/.asdf ]; then
-  bp_git clone https://github.com/asdf-vm/asdf.git /root/.asdf --branch v0.14.0
-  echo '. /root/.asdf/asdf.sh' >> /root/.bashrc
-fi
-export PATH="/root/.asdf/bin:/root/.asdf/shims:$PATH"
-. /root/.asdf/asdf.sh
+# ── 3. Server image ─────────────────────────────────────────────────────────
+barkpark_image || { echo "!! Image: no server image to run; see the lines above" >&2; exit 1; }
 
-asdf plugin list 2>/dev/null | grep -q erlang || asdf plugin add erlang
-asdf plugin list 2>/dev/null | grep -q elixir || asdf plugin add elixir
-
-if ! asdf list erlang 2>/dev/null | grep -q 27; then
-  echo "   Building Erlang 27 (takes 5-10 min on first run)..."
-  asdf install erlang 27.3.4
-  asdf global erlang 27.3.4
-fi
-
-if ! asdf list elixir 2>/dev/null | grep -q 1.18; then
-  asdf install elixir 1.18.4-otp-27
-  asdf global elixir 1.18.4-otp-27
-fi
-
-mix local.hex --force 2>/dev/null
-mix local.rebar --force 2>/dev/null
-echo "   Elixir: $(elixir --version 2>&1 | tail -1)"
-
-# ── 4. Go ────────────────────────────────────────────────────────────────────
-echo ">> Go..."
-if ! command -v go &>/dev/null; then
-  GO_VERSION="1.24.2"
-  case "$ARCH" in
-    aarch64|arm64) GO_ARCH="arm64" ;;
-    *)             GO_ARCH="amd64" ;;
-  esac
-  wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
-  rm -rf /usr/local/go
-  tar -C /usr/local -xzf "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
-  rm "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
-  echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
-fi
-export PATH=$PATH:/usr/local/go/bin
-echo "   $(go version)"
-
-# ── 5. Clone repo ────────────────────────────────────────────────────────────
-echo ">> Cloning repo..."
-if [ -d "$APP_DIR" ]; then
-  cd "$APP_DIR" && bp_git pull
-else
-  bp_git clone "$REPO" "$APP_DIR"
-  cd "$APP_DIR"
-fi
-
-# Enable git hooks (auto-clean stale BEAM cache on pull)
-git config core.hooksPath .githooks
-
-# ── 6. Environment ──────────────────────────────────────────────────────────
+# ── 4. Environment ──────────────────────────────────────────────────────────
+mkdir -p "$APP_DIR"
 FRESH_ENV=""
 if [ ! -f "$APP_DIR/.env" ]; then
   FRESH_ENV=1
   echo ">> Generating .env..."
-  SECRET=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 48)
-  # Cloak + preview + KEK + release-capture HMAC: prod runtime.exs
-  # RAISES at boot if any is unset (Cloak vault key; preview-JWT signer;
-  # field-seal key-encryption-key). Each is independent of SECRET_KEY_BASE and
-  # of each other, so rotating one never invalidates the others.
-  CLOAK=$(mix phx.gen.secret 32 2>/dev/null || openssl rand -base64 32)
-  PREVIEW_JWT=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 32)
-  # BARKPARK_KEK MUST be base64 of EXACTLY 32 bytes (Barkpark.Crypto.LocalKek
-  # Base.decode64 → <<_::256>>). `mix phx.gen.secret 32` emits a TRUNCATED
-  # 32-CHARACTER string (decodes to ~24 bytes), which LocalKek rejects → the app
-  # raises at boot. openssl rand -base64 32 is exactly base64(32 bytes).
-  KEK=$(openssl rand -base64 32)
-  RELEASE_CAPTURE_HMAC=$(openssl rand -base64 32)
+  # Cloak, preview, KEK and release-capture HMAC: prod runtime.exs RAISES at
+  # boot if any is unset. Each is independent of SECRET_KEY_BASE and of each
+  # other, so rotating one never invalidates the others. BARKPARK_KEK MUST be
+  # base64 of EXACTLY 32 bytes (Barkpark.Crypto.LocalKek), which
+  # openssl rand -base64 32 is.
   cat > "$APP_DIR/.env" << ENVEOF
 DATABASE_URL=ecto://$DB_USER:$DB_PASS@localhost/$DB_NAME
-SECRET_KEY_BASE=$SECRET
-BARKPARK_CLOAK_KEY=$CLOAK
-PREVIEW_JWT_SECRET=$PREVIEW_JWT
-BARKPARK_KEK=$KEK
-BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=$RELEASE_CAPTURE_HMAC
+SECRET_KEY_BASE=$(openssl rand -base64 48 | tr -d '\n')
+BARKPARK_CLOAK_KEY=$(openssl rand -base64 32)
+PREVIEW_JWT_SECRET=$(openssl rand -base64 32)
+BARKPARK_KEK=$(openssl rand -base64 32)
+BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=$(openssl rand -base64 32)
 PHX_HOST=$DOMAIN
 PHX_SCHEME=$PHX_SCHEME
 PORT=$APP_PORT
-MIX_ENV=prod
 ENVEOF
 else
   echo "   .env exists, keeping secrets"
@@ -325,20 +312,12 @@ fi
 for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK BARKPARK_RELEASE_CAPTURE_HMAC_SECRET; do
   if ! grep -q "^${_var}=" "$APP_DIR/.env"; then
     echo ">> Adding missing ${_var} to .env"
-    # BARKPARK_KEK needs base64(EXACTLY 32 bytes) — openssl, NOT the truncated
-    # `mix phx.gen.secret` (see the heredoc above). This backfill path is what an
-    # EXISTING install hits on upgrade (e.g. a box with CLOAK+PREVIEW but no KEK),
-    # so a wrong-size KEK here bricks the upgrade at boot.
-    case "$_var" in
-      BARKPARK_KEK) _val=$(openssl rand -base64 32) ;;
-      *) _val=$(mix phx.gen.secret 2>/dev/null || openssl rand -base64 32) ;;
-    esac
-    echo "${_var}=$_val" >> "$APP_DIR/.env"
+    echo "${_var}=$(openssl rand -base64 32)" >> "$APP_DIR/.env"
   fi
 done
 
-# .env holds the keys and the database password. The service runs as root, so
-# root only. Set on every run: a file from an older deploy.sh was 644.
+# .env holds the keys and the database password. Only root and docker read it.
+# Set on every run: a file from an older deploy.sh was 644.
 secure_env() { chown root:root "$APP_DIR/.env" && chmod 600 "$APP_DIR/.env"; }
 secure_env
 
@@ -398,7 +377,7 @@ if [ -n "${BARKPARK_ENV_FILE:-}" ]; then
 fi
 
 # Re-derive the port from the .env that is actually on disk — the file
-# api/start.sh sources, i.e. the same source the service binds to. On an
+# the container reads, i.e. the same source the service binds to. On an
 # EXISTING install we keep the file's secrets (and its PORT), so the value we
 # computed from the environment above may not be what boots. Everything after
 # this line (firewall, health probe, printed URLs) descends from this one read.
@@ -468,19 +447,38 @@ if [ -n "${BARKPARK_CLOUD_URL+x}" ]; then
   fi
 fi
 
-set -a; source "$APP_DIR/.env"; set +a
+# Media lives on the host and is mounted at /app/uploads, where the image
+# writes it as uid 10001. A VM from the older source build kept it in
+# api/uploads of the checkout; move it once.
+if [ -d "$APP_DIR/api/uploads" ] && [ ! -e "$MEDIA_DIR" ]; then
+  echo ">> Moving media from $APP_DIR/api/uploads to $MEDIA_DIR"
+  mv "$APP_DIR/api/uploads" "$MEDIA_DIR"
+fi
+mkdir -p "$MEDIA_DIR"
+chown -R 10001:10001 "$MEDIA_DIR"
+
+# The server runs in the image with the host network, so DATABASE_URL on
+# localhost reaches this host's Postgres and Caddy reaches the port. One run of
+# the image with the .env, used for the seed, the token mint and the service.
+# bp_run <docker run options> -- <command>
+bp_run() {
+  local opts=()
+  while [ "$1" != -- ]; do opts+=("$1"); shift; done
+  shift
+  docker run --rm --network host --env-file "$APP_DIR/.env" -v "$MEDIA_DIR:/app/uploads" "${opts[@]}" "$BARKPARK_IMAGE" "$@"
+}
 
 # Admin token: on the `clean` profile (the default), mint one now so the seed
 # installs it. The `demo` profile, only when asked for by name, seeds the shared
 # dev token instead. Never overrides a caller-set one (bp setup deploy passes
 # its own and prints it on the operator's machine).
 # The token goes to a root-only file, never to stdout, so it stays out of ssh
-# logs and CI output. The file is written before the build, so it survives a
+# logs and CI output. The file is written before the seed, so it survives a
 # failed run. A re-run reuses the token in the file: the seed installs a token
 # only when no unrevoked admin token exists, so a fresh one would not work. A
 # box with an existing .env and no token file already has an admin token the
 # seed will not replace. After the seed, that box gets a new one from the
-# server-side recovery command (start.sh admin-token), into the same file.
+# image's recovery command (bin/admin-token), into the same file.
 SEED_PROFILE="${BARKPARK_SEED_PROFILE:-clean}"
 ADMIN_TOKEN=""
 ADMIN_TOKEN_FILE="${BARKPARK_ADMIN_TOKEN_FILE:-/etc/barkpark/admin-token}"
@@ -501,35 +499,36 @@ if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; the
   fi
 fi
 
-# ── 7. Build Phoenix ────────────────────────────────────────────────────────
-echo ">> Building Phoenix API..."
-cd "$APP_DIR/api"
-export MIX_ENV=prod
-mix deps.get
-mix deps.compile
-mix compile
-mix ecto.migrate
-# The clean seed prints `Admin token id: <id>` when it installs a token. Keep
-# that id next to the token file. The token has no owner user, so once the
-# operator allowlist is armed (BARKPARK_OPERATOR_EMAILS set) or
-# BARKPARK_OPERATOR_FAIL_CLOSED is on, only BARKPARK_OPERATOR_TOKEN_IDS lets it
-# reach the operator routes. Add the id there before the first start, so the
-# install cannot lock its own admin token out of `bp org`.
+# ── 5. Migrate and seed ─────────────────────────────────────────────────────
+# The image's entrypoint migrates and seeds on every start, but only this run
+# carries the admin token. `-e NAME` passes the value from this shell, so the
+# token is not on any command line. The clean seed prints `Admin token id: <id>`
+# when it installs a token. Keep that id next to the token file. The token has
+# no owner user, so once the operator allowlist is armed
+# (BARKPARK_OPERATOR_EMAILS set) or BARKPARK_OPERATOR_FAIL_CLOSED is on, only
+# BARKPARK_OPERATOR_TOKEN_IDS lets it reach the operator routes. Add the id
+# there before the first start, so the install cannot lock its own admin token
+# out of `bp org`.
+echo ">> Migrating and seeding the database with $BARKPARK_IMAGE..."
 SEED_LOG="$(mktemp)"
-mix run priv/repo/seeds.exs | tee "$SEED_LOG"
+bp_run -e BARKPARK_SEED_ADMIN_TOKEN -e BARKPARK_SEED_PROFILE -- \
+  sh -c 'bin/barkpark eval "Barkpark.Release.migrate()" && bin/barkpark eval "Barkpark.Release.seed()"' | tee "$SEED_LOG"
 ADMIN_TOKEN_ID="$(sed -n 's/^Admin token id: *\([A-Za-z0-9-]*\).*/\1/p' "$SEED_LOG" | tail -n1)"
 rm -f "$SEED_LOG"
 # A re-run with no token file: the seed kept the existing admin token, whose
-# value is gone. Mint a new one with the recovery command. It prints only the id
-# and the path. A failure leaves the box running and says what to run by hand.
+# value is gone. Mint a new one with the recovery command, as root in the
+# container so it can write the root-only file. It prints only the id and the
+# path. A failure leaves the box running and says what to run by hand.
 if [ -n "$RECOVERY_MINT" ] && [ -z "$ADMIN_TOKEN_ID" ] && [ ! -e "$ADMIN_TOKEN_FILE" ]; then
   echo ">> No admin token file at $ADMIN_TOKEN_FILE. Minting a new admin token."
-  if _mint_out="$(mix barkpark.admin_token --label "admin (deploy.sh re-run)" --file "$ADMIN_TOKEN_FILE")"; then
+  _tdir="$(dirname "$ADMIN_TOKEN_FILE")"
+  mkdir -p "$_tdir" && chmod 700 "$_tdir"
+  if _mint_out="$(bp_run -u 0 -v "$_tdir:$_tdir" -- bin/admin-token --label "admin (deploy.sh re-run)" --file "$ADMIN_TOKEN_FILE")"; then
     printf '%s\n' "$_mint_out"
     ADMIN_TOKEN_ID="$(printf '%s\n' "$_mint_out" | sed -n 's/^Admin token id: *\([A-Za-z0-9-]*\).*/\1/p' | tail -n1)"
     ADMIN_TOKEN="$(tr -d '[:space:]' < "$ADMIN_TOKEN_FILE")"
   else
-    echo "!! Admin token mint failed. Run it by hand: sudo $APP_DIR/api/start.sh admin-token --label admin" >&2
+    echo "!! Admin token mint failed. Run it by hand: sudo docker exec barkpark bin/admin-token --label admin --file /tmp/admin-token" >&2
   fi
 fi
 ADMIN_TOKEN_ID_FILE="$ADMIN_TOKEN_FILE.id"
@@ -556,33 +555,25 @@ if [ -n "$ADMIN_TOKEN_ID" ]; then
     esac
   fi
 fi
-echo "   Phoenix built"
 
-# ── 8. Build Go TUI ─────────────────────────────────────────────────────────
-echo ">> Building Go TUI..."
-cd "$APP_DIR"
-go mod tidy
-# bin/barkpark is the tracked personal-local launcher script — build the TUI
-# to a different name so go build never collides with it.
-go build -o bin/barkpark-tui ./cmd/barkpark
-echo "   Go TUI built"
-
-# ── 9. Systemd service ──────────────────────────────────────────────────────
+# ── 6. Systemd service ──────────────────────────────────────────────────────
+# One container named barkpark, started by systemd. $IMAGE_ENV holds the image
+# ref, so an update or a rollback is a new line there and a restart. docker
+# pulls a ref that is not on the box when the service starts.
 echo ">> Configuring systemd..."
 cat > /etc/systemd/system/barkpark.service << SVCEOF
 [Unit]
 Description=Barkpark
-After=network.target postgresql.service
-Requires=postgresql.service
+After=network-online.target docker.service postgresql.service
+Requires=docker.service postgresql.service
 
 [Service]
 Type=simple
-User=root
-ExecStart=$APP_DIR/api/start.sh
-# SIGTERM to the BEAM only. It stops its own port programs (memsup, disksup,
-# cpu_sup) in order; signalling the whole cgroup killed them first and logged
-# three errors on every clean stop. Leftovers get SIGKILL after the BEAM exits.
-KillMode=mixed
+EnvironmentFile=$IMAGE_ENV
+ExecStartPre=-/usr/bin/docker rm -f barkpark
+ExecStart=/usr/bin/docker run --rm --name barkpark --network host --env-file $APP_DIR/.env -v $MEDIA_DIR:/app/uploads --log-opt max-size=10m \${BARKPARK_IMAGE}
+ExecStop=/usr/bin/docker stop -t 30 barkpark
+TimeoutStopSec=45
 Restart=on-failure
 RestartSec=5
 
@@ -594,7 +585,7 @@ systemctl daemon-reload
 systemctl enable barkpark
 systemctl restart barkpark
 
-# ── 10. Firewall ─────────────────────────────────────────────────────────────
+# ── 7. Firewall ─────────────────────────────────────────────────────────────
 echo ">> Firewall..."
 ufw allow 22/tcp
 ufw allow 80/tcp
@@ -602,37 +593,16 @@ ufw allow 443/tcp
 ufw allow "$APP_PORT"/tcp
 ufw --force enable
 
-# ── 11. Wait for healthy ────────────────────────────────────────────────────
+# ── 8. Wait for healthy ─────────────────────────────────────────────────────
 # HEALTHY is the measurement this whole script's closing banner descends from.
 # It used to be taken and discarded: 30 failed probes fell through silently and
 # the "Barkpark is running!" banner printed unconditionally, exit 0. Never let
 # the banner outrun the probe again.
 # ---- 429 backoff, INLINED (task-4526610517915589) ---------------------------
-# WHY THE SHARED HELPER scripts/lib/bp-curl.sh IS NOT SOURCED HERE.
-# BOTH copies of this file — the repo-root deploy.sh and the byte-identical
-# go:embedded copy at internal/cli/setup/assets/deploy.sh that the `bp` binary
-# streams into `ssh <host> '<env> bash -s'` (internal/cli/setup/deploy.go, fed
-# from assets.DeployScript) — arrive on the REMOTE over STDIN. The root copy's
-# own documented usage is `ssh root@VPS 'bash -s' < deploy.sh` (line 10). So in
-# both cases $0 is `bash`, BASH_SOURCE names no file, and there is no sibling
-# path to lib/ to source from. The only bp-curl.sh that can exist on the box is
-# whichever one step 1's clone of $REPO happened to bring — a version neither
-# this script nor the binary shipping it ever chose — and a bare `.` on a
-# missing file under `set -euo pipefail` would abort a PROVISIONING run at step
-# 11, a far worse outcome than an unhandled 429 on a localhost boot probe. So
-# the bounded loop is inlined here instead, keeping bp_curl_body's two
-# load-bearing properties: the status is captured BEFORE any branch, and the
-# wait comes FROM THE RESPONSE rather than a hardcoded sleep.
-#
-# SUPERSEDES the guarded `. "$APP_DIR/scripts/lib/bp-curl.sh"` + no-backoff
-# `bp_curl_body() { curl -fsS "$@"; }` degrade shim that PR 17592
-# (task-90059c5c680f6665) put in the ROOT copy only. That arm is deliberately
-# NOT carried forward: its fallback silently ran the probe with NO backoff at
-# all, and it could only ever have reached the shared helper on a box whose
-# $REPO clone happened to carry it. The inline loop is unconditional and has
-# no external dependency, so the two copies can be byte-identical — which is
-# what `make cli-assets-check` and scripts/doctor.sh require. scripts/lib/bp-curl.sh
-# remains canonical for scripts that genuinely run FROM a checkout.
+# deploy.sh arrives over stdin (`bash -s`), and the box has no checkout, so
+# scripts/lib/bp-curl.sh cannot be sourced. The loop keeps bp_curl_body's two
+# properties: the status is captured BEFORE any branch, and the wait comes FROM
+# THE RESPONSE rather than a hardcoded sleep.
 HEALTH_429_ATTEMPTS="${HEALTH_429_ATTEMPTS:-4}"       # tries within ONE probe, first included
 HEALTH_429_MAX_WAIT_S="${HEALTH_429_MAX_WAIT_S:-5}"   # a longer ask is a quota, not a blip
 
@@ -699,7 +669,7 @@ for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
   sleep "$HEALTH_INTERVAL"
 done
 
-# ── 12. TLS (Caddy) ──────────────────────────────────────────────────────────
+# ── 9. TLS (Caddy) ───────────────────────────────────────────────────────────
 # Auto-HTTPS for a real hostname. Skipped when PHX_SCHEME=http or DOMAIN is a
 # bare IP, and NEVER clobbers an existing Caddy install (prod runs its own
 # multi-site Caddy — see docs/ops/PROD_OPS.md). Caddy issues the Let's Encrypt
@@ -764,7 +734,7 @@ if [ -n "$TLS_READY" ] && [ "$HEALTHY" = "1" ]; then
   done
 fi
 
-# ── 13. bp and the full instance check ───────────────────────────────────────
+# ── 10. bp and the full instance check ──────────────────────────────────────
 # Install bp for root with the same installer an operator uses, into
 # /usr/local/bin, which is on sudo's PATH. Then run the full check against the
 # real .env, with the database, media and URL probes. Problems are reported in
@@ -773,7 +743,7 @@ secure_env
 CHECK_STATUS="not run: bp was not installed (see the install-cli lines above)"
 CHECK_LINES=""
 echo ">> Installing bp into /usr/local/bin..."
-if _cli_out="$(BARKPARK_BIN_DIR=/usr/local/bin sh "$APP_DIR/scripts/install-cli.sh" </dev/null 2>&1)"; then
+if _cli_out="$(curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | BARKPARK_BIN_DIR=/usr/local/bin sh 2>&1)"; then
   printf '%s\n' "$_cli_out" | grep -E '^install-cli: installed|WARNING' | sed 's/^/   /' || true
   echo ">> Running bp instance check --target vm --env-file $APP_DIR/.env..."
   _check_rc=0
@@ -871,13 +841,9 @@ fi
 echo "  For a separate Studio, a workspace owner or admin gets its BARKPARK_TOKEN line with:"
 echo "    bp instance studio-token --workspace default"
 echo ""
-echo "  SSH workflow:"
-echo "    $SSH_CMD"
-echo "    sudo -i"
-echo "    cd $APP_DIR"
-echo "    make rebuild   # after code changes"
-echo "    make logs      # tail logs"
-echo "    make status    # service health"
+echo "  On the server ($SSH_CMD):"
+echo "    sudo journalctl -u barkpark -f        # logs"
+echo "    sudo systemctl restart barkpark       # after editing $APP_DIR/.env"
 echo ""
 echo "  Instance check (bp instance check --target vm --env-file $APP_DIR/.env): ${CHECK_STATUS:-not run}"
 if [ -n "${CHECK_LINES:-}" ]; then
@@ -885,8 +851,8 @@ if [ -n "${CHECK_LINES:-}" ]; then
 fi
 echo "  Run it again with: sudo bp instance check --target vm --env-file $APP_DIR/.env"
 echo ""
-echo "  Update (a post-merge hook rebuilds and restarts):"
-echo "    sudo git -C $APP_DIR pull"
+echo "  Image: $BARKPARK_IMAGE (in $IMAGE_ENV). To update or roll back, write another ref there and restart:"
+echo "    echo BARKPARK_IMAGE=ghcr.io/frikkern/barkpark:<version> | sudo tee $IMAGE_ENV && sudo systemctl restart barkpark"
 echo "    See https://github.com/FRIKKern/barkpark/blob/main/docs/setup/SELF-HOST-UPDATES.md#update-and-roll-back-a-single-vm"
 echo ""
 
@@ -902,3 +868,4 @@ fi
 # ── End of body ──────────────────────────────────────────────────────────────
 exit 0
 }
+
