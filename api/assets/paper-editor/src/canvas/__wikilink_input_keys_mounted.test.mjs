@@ -421,18 +421,17 @@ for (const [name, text] of [
   canvas.remove();
 });
 
-await check("a Markdown paste keeps marks and aliases, and its links are one undo step", async () => {
+await check("a Markdown paste keeps marks, its aliased [[Title|words]] stays text like a plain paste, and its links are one undo step", async () => {
   const { canvas, editor, asked } = await mount();
   caret(editor, endOf(editor, 0));
   asked.length = 0;
-  paste(editor, "# H\n\n**[[plan]]** and [[Plan|Plan]] and [[]] and [[Plan|the plan]]");
+  paste(editor, "# H\n\n**[[plan]]** and [[]] and [[Plan|the plan]]");
   await tick(20);
   const para = canvas.recoverySnapshot().blocks.find((b) => b.type === "paragraph" && JSON.stringify(b).includes("the plan"));
   assert.deepEqual(para.content[0], { type: "wikilink", target: "Plan", children: [{ type: "strong", children: [{ type: "text", value: "Plan" }] }], docId: "n-plan" });
-  assert.deepEqual(para.content[2], { type: "wikilink", target: "Plan", children: [{ type: "text", value: "Plan" }], alias: "Plan" }, "an alias equal to the title is kept too");
-  assert.deepEqual(para.content[3], { type: "text", value: " and [[]] and " }, "empty brackets stay text");
-  assert.deepEqual(para.content.at(-1), { type: "wikilink", target: "Plan", children: [{ type: "text", value: "the plan" }], alias: "the plan" }, "an alias is the author's own link, left as Markdown wrote it");
-  assert.deepEqual(asked, ["plan"]);
+  assert.deepEqual(para.content[1], { type: "text", value: " and [[]] and [[Plan|the plan]]" });
+  assert.deepEqual(asked.sort(), ["Plan|the plan", "plan"]);
+  assert.equal(links(editor).filter((l) => !l.docId).length, 0, "no link without a docId");
   editor.commands.undo();
   assert.ok(JSON.stringify(canvas.recoverySnapshot().blocks).includes("[[plan]]"), "one undo brings the brackets back");
   canvas.remove();
