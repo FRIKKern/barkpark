@@ -18,9 +18,16 @@ defmodule Barkpark.StatusKekPreviousComponentTest do
   alias Barkpark.Status
   alias BarkparkWeb.StatusController
 
+  # The overall status also folds in the node-global `Mailer.last_send/0`, which
+  # other suites write. The tests below assert the overall verdict, so they own it.
   setup do
     prev = Application.get_env(:barkpark, Barkpark.Crypto.LocalKek, [])
-    on_exit(fn -> Application.put_env(:barkpark, Barkpark.Crypto.LocalKek, prev) end)
+    Barkpark.Mailer.reset_last_send()
+
+    on_exit(fn ->
+      Application.put_env(:barkpark, Barkpark.Crypto.LocalKek, prev)
+      Barkpark.Mailer.reset_last_send()
+    end)
 
     put_audit = fn audit ->
       Application.put_env(
