@@ -484,7 +484,7 @@ await check("the canvas's own copy pasted back, and a Shift paste as plain text,
   canvas.remove();
 });
 
-await check("a paste into a Figure's one block links too; a pasted image file takes the paste, writes no [[Plan]] and asks nothing", async () => {
+await check("a paste into a Figure's one block links too", async () => {
   const frame = document.createElement("div");
   frame.setAttribute("data-paper-container-kind", "figure");
   document.body.appendChild(frame);
@@ -501,18 +501,38 @@ await check("a paste into a Figure's one block links too; a pasted image file ta
   assert.equal(editor.state.doc.child(0).textContent, "Caption Plan [[Nope]]");
   assert.deepEqual(asked.sort(), ["Nope", "Plan"]);
   frame.remove();
-  const { canvas: other, editor: ed, asked: asked2 } = await mount();
-  caret(ed, endOf(ed, 0));
-  asked2.length = 0;
+});
+
+const pasteFiles = (editor, text) => {
   const event = new Event("paste", { bubbles: true, cancelable: true });
   const file = new window.File(["x"], "pic.png", { type: "image/png" });
-  Object.defineProperty(event, "clipboardData", { value: { types: ["Files", "text/plain"], getData: (t) => (t === "text/plain" ? "[[Plan]]" : ""), files: [file] } });
-  assert.equal(ed.view.dom.dispatchEvent(event), false, "the image door took the paste");
+  Object.defineProperty(event, "clipboardData", { value: { types: text ? ["Files", "text/plain"] : ["Files"], getData: (t) => (t === "text/plain" ? text : ""), files: [file] } });
+  editor.view.dom.dispatchEvent(event);
+};
+
+await check("an image file with text is refused and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  const before = JSON.stringify(editor.getJSON());
+  pasteFiles(editor, "[[Plan]]");
   await tick(20);
-  const doc = JSON.stringify(ed.getJSON());
-  assert.equal(doc.includes("[[Plan]]"), false);
-  assert.deepEqual(asked2, []);
-  other.remove();
+  assert.equal(JSON.stringify(editor.getJSON()), before, "nothing went in");
+  assert.deepEqual(asked, []);
+  canvas.remove();
+});
+
+await check("a files-only paste lands the image and asks nothing", async () => {
+  const { canvas, editor, asked } = await mount();
+  caret(editor, endOf(editor, 0));
+  asked.length = 0;
+  pasteFiles(editor, "");
+  await tick(20);
+  const images = [];
+  editor.state.doc.descendants((n) => { if (n.type.name === "bpImage") images.push(n.attrs.alt); });
+  assert.deepEqual(images, ["pic"], "the image went in");
+  assert.deepEqual(asked, []);
+  canvas.remove();
 });
 
 await check("undo and redo across a pasted link replay it without asking again", async () => {
