@@ -22,12 +22,12 @@ type AdminTokenRotation struct {
 	Raw        []byte `json:"-"`
 	BarkparkID string `json:"barkpark_id"`
 	Rotated    struct {
-		OldTokenID      string   `json:"old_token_id"`
-		NewTokenID      string   `json:"new_token_id"`
-		Label           string   `json:"label"`
-		Workspace       string   `json:"workspace"`
-		SeatsCarried    []string `json:"seats_carried"`
-		OldTokenStatus  *int     `json:"old_token_status"`
+		OldTokenID     string   `json:"old_token_id"`
+		NewTokenID     string   `json:"new_token_id"`
+		Label          string   `json:"label"`
+		Workspace      string   `json:"workspace"`
+		SeatsCarried   []string `json:"seats_carried"`
+		OldTokenStatus *int     `json:"old_token_status"`
 	} `json:"rotated"`
 }
 
