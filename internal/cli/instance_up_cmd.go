@@ -178,6 +178,22 @@ var instanceUpGet = func(ctx context.Context, url string) (int, error) {
 	return resp.StatusCode, nil
 }
 
+// instanceUpRedirect fetches a URL without following a redirect and returns
+// the status and the Location header. Tests replace it.
+var instanceUpRedirect = func(ctx context.Context, url string) (int, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	c := &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Do(req)
+	if err != nil {
+		return 0, "", err
+	}
+	resp.Body.Close()
+	return resp.StatusCode, resp.Header.Get("Location"), nil
+}
+
 // instanceUpSleep waits between polls. Tests replace it.
 var instanceUpSleep = time.Sleep
 

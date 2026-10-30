@@ -755,7 +755,7 @@ func stepUpConnect(u *instanceUp) error {
 		return err
 	}
 	if st.Out.EntraByBicep {
-		return nil
+		return u.checkBootstrapped()
 	}
 	if _, err := u.bp(token, nil, "org", "create", st.Org, st.OrgName, "--yes"); err != nil && !alreadyExists(err) {
 		return err
@@ -788,6 +788,36 @@ func stepUpConnect(u *instanceUp) error {
 	}
 	u.out.errf("        organization %s connected to Entra; group %s maps to owner", st.Org, st.Out.OwnersGroupID)
 	return nil
+}
+
+// checkBootstrapped checks that the server connected the organization at
+// its first boot from main.bicep's settings: the sign-in URL then redirects to
+// Entra. An image without that code answers otherwise, and the owner could
+// never sign in.
+func (u *instanceUp) checkBootstrapped() error {
+	st := u.st
+	url := "https://" + st.host() + "/v1/auth/oidc/" + st.Org + "/start"
+	var code int
+	var loc string
+	var err error
+	for i := 0; i < 12; i++ {
+		ctx, cancel := context.WithTimeout(u.ctx, 20*time.Second)
+		code, loc, err = instanceUpRedirect(ctx, url)
+		cancel()
+		if err == nil && code >= 300 && code < 400 && strings.HasPrefix(loc, "https://login.microsoftonline.com/") {
+			u.out.errf("        the server connected %s to Entra at its first boot", st.Org)
+			return nil
+		}
+		instanceUpSleep(10 * time.Second)
+	}
+	image := st.Image
+	if image == "" {
+		image = st.Out.Image
+	}
+	if image == "" {
+		image = instanceUpLatestImage
+	}
+	return fmt.Errorf("%s does not send the owner to Entra (status %d, err %v), so the server did not connect %s at its first boot. The image %s may predate that. Deploy again with --image <ref> of a release that has it, or --from-source main, with a new --state file and resource group", url, code, err, st.Org, image)
 }
 
 // stepUpVerify runs bp instance check with the TLS probe of PHX_HOST.
