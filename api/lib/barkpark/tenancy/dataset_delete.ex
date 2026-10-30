@@ -218,7 +218,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
 
         {:error, reason} ->
           Media.clear_deferred_media_effects()
-          {:error, rolled_back(reason, System.monotonic_time(:millisecond) - started)}
+          {:error, reason}
       end
     rescue
       e in [DBConnection.ConnectionError, Postgrex.Error] ->
@@ -240,12 +240,7 @@ defmodule Barkpark.Tenancy.DatasetDelete do
   defp failure(%Postgrex.Error{postgres: %{code: :query_canceled}}, _ms), do: :timeout
   defp failure(%DBConnection.ConnectionError{reason: :queue_timeout}, _ms), do: :timeout
   defp failure(%Postgrex.Error{postgres: %{code: :deadlock_detected}}, _ms), do: :contended
-  defp failure(_e, ms), do: fault(ms)
-
-  defp rolled_back(:rollback, ms), do: {:delete_failed, fault(ms)}
-  defp rolled_back(reason, _ms), do: reason
-
-  defp fault(ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
+  defp failure(_e, ms), do: if(ms >= timeout_ms(), do: :timeout, else: :database)
 
   defp teardown(%{dataset: dataset} = target) do
     exclusive? = slug_exclusive_in_workspace?(target)

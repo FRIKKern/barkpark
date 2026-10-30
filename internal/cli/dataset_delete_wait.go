@@ -2,6 +2,8 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/url"
 	"time"
@@ -30,8 +32,12 @@ func awaitDatasetDelete(out *writer, cmd manifest.Command, req *manifestRequest,
 		if !waited {
 			out.errf("bp: the server is still deleting the dataset; asking again every %s", datasetDeletePoll)
 			waited = true
+			at, perr := pollURL(req.url, body)
+			if perr != nil {
+				return status, body, ct, perr
+			}
 			poll := *req
-			poll.url = pollURL(req.url, body)
+			poll.url = at
 			req = &poll
 		}
 		time.Sleep(datasetDeletePoll)
@@ -43,16 +49,22 @@ func awaitDatasetDelete(out *writer, cmd manifest.Command, req *manifestRequest,
 	return status, body, ct, err
 }
 
-func pollURL(raw string, accepted []byte) string {
+func pollURL(raw string, accepted []byte) (string, error) {
 	var deleting struct {
 		DatasetID string `json:"dataset_id"`
 	}
+	if err := json.Unmarshal(accepted, &deleting); err != nil {
+		return "", fmt.Errorf("the server's 202 is not JSON: %w", err)
+	}
+	if deleting.DatasetID == "" {
+		return "", errors.New("the server's 202 names no dataset_id to poll")
+	}
 	u, err := url.Parse(raw)
-	if err != nil || json.Unmarshal(accepted, &deleting) != nil || deleting.DatasetID == "" {
-		return raw
+	if err != nil {
+		return "", err
 	}
 	q := u.Query()
 	q.Set("dataset_id", deleting.DatasetID)
 	u.RawQuery = q.Encode()
-	return u.String()
+	return u.String(), nil
 }

@@ -6,11 +6,11 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   DELETE ─► delete/5 ─┬─ no run: start one (≤ max_runs per node, else busy), wait ≤ wait_ms
                       ├─ a run is live: wait ≤ wait_ms
                       └─ a finished run nobody read: its result, once
-               result ─► the controller answers it; still running ─► :running (202)
+               result ─► the controller answers it; still running ─► {:running, dataset_id} (202)
   ```
 
   A delete of thousands of documents outlives any request budget, so the
-  request waits a few seconds and then answers `:running`; the caller repeats
+  request waits a few seconds and then answers `{:running, dataset_id}`; the caller repeats
   the DELETE until it gets the result. The task runs the one transaction, so
   an interrupted run (node restart, killed task) rolls back and leaves the
   dataset whole. Each run holds one pool connection, so at most `max_runs/0`
@@ -22,8 +22,10 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   and gets that run's result, never a delete of another dataset. A DELETE that
   names no dataset and finds an unread result for a dataset the name no longer
   holds answers `{:error, {:recreated, result}}` and drops it; the next DELETE
-  deletes the new dataset. A dead run restarts only on its own dataset. A
-  finished row is dropped when it is read, or an hour after it finished.
+  deletes the new dataset. A dead run nobody read is dropped and the DELETE
+  starts over as if there were none. A crash in the task leaves the run dead,
+  so its waiter answers `{:error, {:delete_failed, :interrupted}}`. A finished
+  row is dropped when it is read, or an hour after it finished.
   """
   use GenServer
 
@@ -45,13 +47,13 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   end
 
   @doc """
-  The delete's result, or `:running` when it is still going after `wait_ms`.
+  The delete's result, or `{:running, dataset_id}` when it is still going after `wait_ms`.
   `dataset` is what the project's slug names now, `nil` once it is gone.
   `opts[:dataset_id]` is the dataset a poll asks about (the 202 names it).
-  `opts[:on_deleted]` runs with the receipt in the task, after the commit.
+  `opts[:on_deleted]` (required) runs with the receipt in the task, after the commit.
   """
   @spec delete(binary(), String.t(), Dataset.t() | nil, keyword(), non_neg_integer()) ::
-          term() | :running
+          term() | {:running, binary()}
   def delete(project_id, slug, dataset, opts, wait_ms) do
     {polled, opts} = Keyword.pop(opts, :dataset_id)
     key = {project_id, slug}
@@ -69,7 +71,7 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
           polled == id or current in [nil, id] ->
             result
 
-          true ->
+          current not in [nil, id] ->
             {:error, {:recreated, result}}
         end
 
@@ -79,16 +81,13 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
             {:error, :not_found}
 
           Process.alive?(pid) ->
-            wait(key, now() + wait_ms)
+            wait(key, id, now() + wait_ms)
 
-          not take(row) ->
+          take(row) ->
+            fresh(key, dataset, polled, opts, wait_ms)
+
+          not Process.alive?(pid) ->
             delete(project_id, slug, dataset, [dataset_id: polled] ++ opts, wait_ms)
-
-          current == id ->
-            start(key, dataset, opts, wait_ms)
-
-          true ->
-            {:error, {:delete_failed, :interrupted}}
         end
 
       [] ->
@@ -105,7 +104,7 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
 
   defp start(key, dataset, opts, wait_ms) do
     case GenServer.call(__MODULE__, {:start, key, dataset, opts}) do
-      :ok -> wait(key, now() + wait_ms)
+      :ok -> wait(key, dataset.id, now() + wait_ms)
       {:error, :busy} = busy -> busy
     end
   end
@@ -113,15 +112,16 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   @impl true
   def handle_call({:start, key, dataset, opts}, {caller, _tag}, state) do
     sweep()
+    running = live_runs()
 
     cond do
       live?(key) ->
         {:reply, :ok, state}
 
-      live_runs() >= max_runs() ->
+      running >= max_runs() ->
         {:reply, {:error, :busy}, state}
 
-      true ->
+      running < max_runs() ->
         {:ok, pid} =
           Task.Supervisor.start_child(Barkpark.TaskSupervisor, fn ->
             Process.put(:"$callers", [caller])
@@ -145,7 +145,8 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   defp live?(key) do
     case :ets.lookup(@table, key) do
       [{^key, {:running, pid}, _id, _at}] -> Process.alive?(pid)
-      _ -> false
+      [{^key, {:done, _result}, _id, _at}] -> false
+      [] -> false
     end
   end
 
@@ -156,19 +157,8 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
   end
 
   defp run(key, dataset, opts) do
-    {on_deleted, opts} = Keyword.pop(opts, :on_deleted, fn _ -> :ok end)
-
-    result =
-      try do
-        DatasetDelete.delete(dataset, opts)
-      rescue
-        e ->
-          Logger.error(
-            "dataset delete #{dataset.id} crashed: #{Exception.format(:error, e, __STACKTRACE__)}"
-          )
-
-          {:error, {:delete_failed, :database}}
-      end
+    {on_deleted, opts} = Keyword.pop!(opts, :on_deleted)
+    result = DatasetDelete.delete(dataset, opts)
 
     with {:ok, receipt} <- result do
       try do
@@ -181,10 +171,10 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
     :ets.insert(@table, {key, {:done, result}, dataset.id, now()})
   end
 
-  defp wait(key, deadline) do
+  defp wait(key, id, deadline) do
     case :ets.lookup(@table, key) do
       [{^key, {:done, result}, _id, _at} = row] ->
-        if take(row), do: result, else: :running
+        if take(row), do: result, else: {:running, id}
 
       [{^key, {:running, pid}, _id, _at} = row] ->
         cond do
@@ -192,18 +182,18 @@ defmodule Barkpark.Tenancy.DatasetDelete.Runs do
             {:error, {:delete_failed, :interrupted}}
 
           Process.alive?(pid) == false ->
-            wait(key, deadline)
+            wait(key, id, deadline)
 
           now() >= deadline ->
-            :running
+            {:running, id}
 
-          true ->
+          now() < deadline ->
             Process.sleep(@poll_ms)
-            wait(key, deadline)
+            wait(key, id, deadline)
         end
 
       [] ->
-        :running
+        {:running, id}
     end
   end
 

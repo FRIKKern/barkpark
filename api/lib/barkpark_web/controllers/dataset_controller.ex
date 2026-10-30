@@ -63,14 +63,10 @@ defmodule BarkparkWeb.DatasetController do
            ) do
       json(conn, receipt_json(receipt))
     else
-      :running ->
+      {:running, id} ->
         conn
         |> put_status(:accepted)
-        |> json(%{
-          deleting: true,
-          dataset: name,
-          dataset_id: conn.params["dataset_id"] || deleting_id(conn, name)
-        })
+        |> json(%{deleting: true, dataset: name, dataset_id: id})
 
       {:error, {:recreated, {:ok, receipt}}} ->
         ErrorResponse.emit_custom(
@@ -153,13 +149,6 @@ defmodule BarkparkWeb.DatasetController do
 
       {:error, _} = err ->
         err
-    end
-  end
-
-  defp deleting_id(conn, name) do
-    case Tenancy.get_dataset(conn.assigns.current_project, name) do
-      %Tenancy.Dataset{id: id} -> id
-      nil -> nil
     end
   end
 

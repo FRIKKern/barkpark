@@ -276,6 +276,18 @@ defmodule BarkparkWeb.DatasetControllerTest do
       assert :ets.lookup(Runs, {project.id, "j10-7"}) == []
     end
 
+    test "a dead run nobody read is dropped and the DELETE deletes the dataset",
+         %{ws: ws, project: project, tokens: tokens} do
+      id = Tenancy.get_dataset(project, "j10-7").id
+      dead = spawn(fn -> :ok end)
+      ref = Process.monitor(dead)
+      assert_receive {:DOWN, ^ref, :process, ^dead, _}
+      :ets.insert(Runs, {{project.id, "j10-7"}, {:running, dead}, id, 0})
+
+      assert %{"deleted" => true, "documents" => 1, "dataset" => %{"id" => ^id}} =
+               json_response(delete_dataset(tokens.owner, ws, project, "j10-7"), 200)
+    end
+
     test "another caller's DELETE reads the same run", %{ws: ws, project: project, tokens: tokens} do
       id = Tenancy.get_dataset(project, "j10-7").id
       Application.put_env(:barkpark, :dataset_delete_wait_ms, 0)
@@ -329,6 +341,26 @@ defmodule BarkparkWeb.DatasetControllerTest do
                )
 
       assert documents_in(recreated) == 1
+    end
+
+    test "after a recreate, a DELETE naming the new dataset deletes it and drops the old receipt",
+         %{ws: ws, project: project, tokens: tokens} do
+      Repo.delete!(Tenancy.get_dataset(project, "j10-7"))
+      old = finished_unread(ws, project, tokens, 2)
+      {:ok, _} = create_document_in!(ws, project, "post", %{}, "j10-7")
+      new_id = Tenancy.get_dataset(project, "j10-7").id
+
+      assert %{"deleted" => true, "documents" => 1, "dataset" => %{"id" => ^new_id}} =
+               json_response(
+                 delete_dataset(tokens.owner, ws, project, "j10-7?dataset_id=#{new_id}"),
+                 200
+               )
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               json_response(
+                 delete_dataset(tokens.owner, ws, project, "j10-7?dataset_id=#{old}"),
+                 404
+               )
     end
 
     test "after a recreate, a DELETE naming no dataset answers 409 with the old receipt, then deletes the new one",

@@ -23,6 +23,8 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
   @moduletag timeout: 900_000
   @endpoint BarkparkWeb.Endpoint
 
+  @run_opts [on_deleted: &Function.identity/1]
+
   @documents String.to_integer(System.get_env("DATASET_DELETE_STALL_DOCS", "400"))
 
   setup do
@@ -63,7 +65,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     do: Repo.aggregate(from(d in Document, where: d.dataset_id == ^id), :count)
 
   defp run_delete(project, wait_ms) do
-    Runs.delete(project.id, "doomed", Tenancy.get_dataset(project, "doomed"), [], wait_ms)
+    Runs.delete(project.id, "doomed", Tenancy.get_dataset(project, "doomed"), @run_opts, wait_ms)
   end
 
   # The run borrows its caller's connection, so a caller of its own keeps it
@@ -77,7 +79,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
       Process.sleep(:infinity)
     end)
 
-    assert_receive {:started, :running}, 30_000
+    assert_receive {:started, {:running, _id}}, 30_000
   end
 
   defp chain_held?(ws) do
@@ -118,7 +120,7 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     Process.sleep(20)
 
     case run_delete(project, 0) do
-      :running -> write_until_done(project, opts, samples)
+      {:running, _id} -> write_until_done(project, opts, samples)
       result -> {result, samples}
     end
   end
@@ -352,13 +354,18 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
       end
 
     Enum.each(callers, &send(&1, :go))
-    assert_receive {:caller, :running}, 30_000
-    assert_receive {:caller, :running}, 30_000
+    assert_receive {:caller, {:running, _}}, 30_000
+    assert_receive {:caller, {:running, _}}, 30_000
 
     spawn_link(fn ->
       :ok = Sandbox.checkout(Repo, sandbox: false, ownership_timeout: :infinity)
       dataset = Tenancy.get_dataset(project, "doomed")
-      send(parent, {:late, GenServer.call(Runs, {:start, {project.id, "doomed"}, dataset, []})})
+
+      send(
+        parent,
+        {:late, GenServer.call(Runs, {:start, {project.id, "doomed"}, dataset, @run_opts})}
+      )
+
       Process.sleep(:infinity)
     end)
 
@@ -394,6 +401,6 @@ defmodule Barkpark.Tenancy.DatasetDeleteStallTest do
     send(holder, :release)
     assert {:ok, %{documents: 5}} = run_delete(project, 60_000)
     other = Tenancy.get_dataset(project, "other")
-    assert {:ok, %{documents: 3}} = Runs.delete(project.id, "other", other, [], 60_000)
+    assert {:ok, %{documents: 3}} = Runs.delete(project.id, "other", other, @run_opts, 60_000)
   end
 end

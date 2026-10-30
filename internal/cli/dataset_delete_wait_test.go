@@ -35,6 +35,19 @@ func TestDatasetDeleteAsksAgainUntilTheReceipt(t *testing.T) {
 		}
 	})
 
+	t.Run("a 202 that names no dataset is an error, never a poll of whatever holds the name", func(t *testing.T) {
+		h := newDestroyHarness(t)
+		forceNonTTY(t)
+		h.deletes = []int{http.StatusAccepted}
+		h.accepted = `{"deleting":true,"dataset":"j10-20261029"}`
+
+		code, stdout, stderr := h.runDestroy(globals{yes: true}, "dataset", "delete", "j10-20261029")
+
+		if code == exitOK || len(h.queries) != 1 || !strings.Contains(stdout+stderr, "names no dataset_id") {
+			t.Errorf("exit=%d queries=%q stdout=%s stderr=%s, want a failed command after one DELETE naming the missing dataset_id", code, h.queries, stdout, stderr)
+		}
+	})
+
 	t.Run("an error after a 202 is the command's answer", func(t *testing.T) {
 		h := newDestroyHarness(t)
 		forceNonTTY(t)
